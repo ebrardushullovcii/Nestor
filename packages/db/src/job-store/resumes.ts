@@ -7,6 +7,7 @@ import {
   type ResumeLevel,
   type ResumeState,
   type ResumeStatus,
+  type ShortlistedApplication,
   type StoredResume,
   type ResumeChangeResult,
 } from "@nestor/contracts";
@@ -72,6 +73,8 @@ export interface ResumeStore {
   listUnwritten(limit: number): number[];
   /** The list rows' resume status, for the ids on screen. */
   statuses(ids: readonly number[]): Map<number, ResumeStatus>;
+  /** Each job's newest application Apply has not finished, for the ids on screen. */
+  openApplications(ids: readonly number[]): Map<number, ShortlistedApplication>;
   get(jobId: number): StoredResume | null;
 
   /**
@@ -230,6 +233,31 @@ export function createResumeStore(store: JobStore): ResumeStore {
             state: row.state,
             approvedAt: iso(row.approved_at),
             error: row.error,
+          },
+        ]),
+      );
+    },
+
+    openApplications(ids) {
+      const rows = sql(
+        `SELECT a.job_id, a.id, a.state FROM applications a
+         WHERE a.job_id IN (SELECT value FROM json_each(?))
+           AND a.state IN ('queued','running','submitting','uncertain','ready','needs_you')
+           AND a.id = (SELECT max(b.id) FROM applications b WHERE b.job_id = a.job_id)`,
+      ).all(JSON.stringify(ids)) as {
+        job_id: number;
+        id: number;
+        state: string;
+      }[];
+      return new Map(
+        rows.map((row) => [
+          row.job_id,
+          {
+            id: row.id,
+            status:
+              row.state === "ready" || row.state === "needs_you"
+                ? row.state
+                : "applying",
           },
         ]),
       );

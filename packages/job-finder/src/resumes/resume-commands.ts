@@ -86,12 +86,15 @@ export function createResumeCommandReads(
   return {
     list(query) {
       const page = store.listJobs(JobListQuerySchema.parse(query));
-      const statuses = resumes.statuses(page.rows.map((row) => row.id));
+      const ids = page.rows.map((row) => row.id);
+      const statuses = resumes.statuses(ids);
+      const applications = resumes.openApplications(ids);
       return {
         ...page,
         rows: page.rows.map((row) => ({
           ...row,
           resume: statuses.get(row.id) ?? null,
+          application: applications.get(row.id) ?? null,
         })),
       };
     },

@@ -24,38 +24,57 @@ import { ToastProvider } from "@renderer/components/ui/toast";
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
 import { NeedsYouScreen } from "./needs-you-screen";
 import { SourceNeedPane } from "./source-need-pane";
+import { workThrough } from "./work-through";
+import {
+  createJobSitesStore,
+  createSourceAccessStore,
+} from "@nestor/db/job-store";
 import { waitForDisplayedDestination } from "../job-finder/assistant/navigation-display";
 
-it("opens a source's URL and retries its ID without dismissing the sign-in item", async () => {
-  const command = vi.fn(() => Promise.resolve({}));
-  const run = vi.fn(() => Promise.resolve({ search: null, sources: [] }));
+it("opens a site through its Needs you item and checks it again without dismissing it", async () => {
+  const open = vi.fn(() => Promise.resolve(true));
+  const run = vi.fn((name: string) =>
+    Promise.resolve(
+      name === "retry_source"
+        ? { search: { id: "search_1", state: "running" }, sources: [] }
+        : { rows: [], nextCursor: null, total: 0 },
+    ),
+  );
   Object.assign(window.nestor, {
-    browser: { command },
+    needsYou: { run: open },
     jobs: {
       run,
       onChange: (listener: Parameters<JobStore["onChange"]>[0]) =>
         jobs.onChange(listener),
+      onSearchStatus: () => () => undefined,
     },
   });
   render(
     <SourceNeedPane
-      source={{
-        id: 900,
+      check={undefined}
+      host="jobs.example.test"
+      site={{
+        id: 7,
+        kind: "site",
         label: "Example board",
-        url: "https://jobs.example.test/sign-in",
+        taskIds: [7],
+        sources: [{ id: 900, url: "https://jobs.example.test/sign-in" }],
       }}
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Open to sign in" }));
-  expect(command).toHaveBeenCalledWith({
-    type: "open",
-    url: "https://jobs.example.test/sign-in",
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-  await screen.findByText(/This item closes when the site is readable/);
-  expect(run).toHaveBeenCalledWith("retry_source", { id: 900 });
+  expect(open).toHaveBeenCalledWith("open_need", { id: 7 });
+  fireEvent.click(
+    screen.getByRole("button", { name: "I've signed in, check it" }),
+  );
+  await waitFor(() =>
+    expect(run).toHaveBeenCalledWith("retry_source", { id: 900 }),
+  );
   expect(
     screen.getByRole("heading", { name: "Sign in to Example board" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(/This item closes when the site is readable/),
   ).toBeTruthy();
 });
 
@@ -123,6 +142,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  workThrough.reset();
   jobs.close();
   vi.unstubAllGlobals();
 });
@@ -879,4 +899,176 @@ it("a question's row names the company and role waiting on it, with the site bes
   ).toBeTruthy();
   expect(screen.getByText("jobs.example.test")).toBeTruthy();
   expect(screen.queryByText(/https:\/\//u)).toBeNull();
+});
+
+/** Job sites search could not read: two on one host, one elsewhere. */
+function gatedSites() {
+  const sites = createJobSitesStore(jobs);
+  const access = createSourceAccessStore(jobs);
+  const ids = [
+    "https://scale-853.example.test/careers",
+    "https://scale-853.example.test/jobs",
+    "https://orbit.example.test/jobs",
+  ].map((text) => {
+    const id = sites.add({ text }).firstAddedId!;
+    access.request(id, "Open the site and sign in, then Retry.");
+    return id;
+  });
+  return ids;
+}
+
+it("lists application questions first, then one sign-in row per host under one group", async () => {
+  const question = ask(0);
+  gatedSites();
+  show();
+  const list = await screen.findByRole("list", { name: "Things needing you" });
+  await within(list).findByText(question.prompt);
+  const group = await screen.findByRole("button", {
+    name: "2 job sites need you to sign in",
+  });
+  // A question holds up an application, so the sites start folded away.
+  expect(group.getAttribute("aria-expanded")).toBe("false");
+  expect(within(list).queryByText(/^Sign in to /u)).toBeNull();
+  fireEvent.click(group);
+  const scale = await within(list).findByRole("button", {
+    name: /Sign in to .*scale-853\.example\.test · 2 sites/u,
+  });
+  expect(scale.textContent).toContain("Search couldn't read this site");
+  expect(
+    within(list).getByRole("button", { name: /orbit\.example\.test/u }),
+  ).toBeTruthy();
+  expect(list.querySelectorAll("[data-list-row-id]")).toHaveLength(3);
+  // The question row comes before the sites.
+  const order = [...list.querySelectorAll("[data-list-row-id]")].map((row) =>
+    Number(row.getAttribute("data-list-row-id")),
+  );
+  expect(order[0]).toBe(question.id);
+});
+
+it("works through selected items: a question in place, then each site in the browser", async () => {
+  const opened: number[] = [];
+  const run = createNeedsYouCommandRunner(() => applications, {
+    retry: () => Promise.resolve(),
+    open: (id) => {
+      opened.push(id);
+      return Promise.resolve(true);
+    },
+    check: () => Promise.resolve(false),
+  });
+  const jobsRun = vi.fn((name: string) =>
+    Promise.resolve(
+      name === "retry_source"
+        ? { search: { id: "search_1", state: "running" }, sources: [] }
+        : { rows: [], nextCursor: null, total: 0 },
+    ),
+  );
+  const command = vi.fn(() => Promise.resolve({}));
+  Object.assign(window.nestor, {
+    needsYou: { run },
+    browser: { command },
+    jobs: {
+      run: jobsRun,
+      onChange: (listener: Parameters<JobStore["onChange"]>[0]) =>
+        jobs.onChange(listener),
+      onSearchStatus: () => () => undefined,
+    },
+  });
+  const question = ask(0);
+  gatedSites();
+  show();
+  fireEvent.click(
+    await screen.findByRole("checkbox", { name: "Select all 4 items" }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Work through selected" }),
+  );
+  const walk = () =>
+    document.querySelector("[data-needs-walk]")?.textContent ?? "";
+  await waitFor(() => expect(walk()).toContain("1 of 3"));
+  expect(
+    document
+      .querySelector("#list-detail")
+      ?.getAttribute("data-needs-detail-id"),
+  ).toBe(String(question.id));
+  fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+  await waitFor(() => expect(walk()).toContain("2 of 3"));
+  expect(walk()).toContain("Signing in");
+  await waitFor(() => expect(opened).toHaveLength(1));
+  act(() => workThrough.doneWithSite());
+  await waitFor(() => expect(walk()).toContain("3 of 3"));
+  await waitFor(() => expect(opened).toHaveLength(2));
+  expect(jobsRun).toHaveBeenCalledWith("retry_source", expect.anything());
+  // Both scale-853 sources are checked together; its row says so.
+  expect(
+    jobsRun.mock.calls.filter(([name]) => name === "retry_source"),
+  ).toHaveLength(2);
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: /job sites need you to sign in/,
+    }),
+  );
+  expect(await screen.findByText("Checking…")).toBeTruthy();
+  act(() => workThrough.pause());
+  await waitFor(() => expect(walk()).toContain("Paused at 3 of 3"));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  await waitFor(() => expect(opened).toHaveLength(3));
+  act(() => workThrough.doneWithSite());
+  await waitFor(() => expect(walk()).toBe(""));
+  expect(command).toHaveBeenCalledWith({ type: "minimize" });
+});
+
+it("lists filled forms under their own group, and says so when nothing is blocked", async () => {
+  const listApplications = vi.fn(() =>
+    Promise.resolve({
+      rows: [
+        {
+          id: 31,
+          jobId: 8,
+          mode: "prepare_only",
+          title: "Backend Engineer",
+          company: "Lantern Services",
+          location: "Remote",
+          state: "ready",
+          attempt: 1,
+          queuedAt: "2026-10-27T09:00:00.000Z",
+          updatedAt: "2026-10-27T09:05:00.000Z",
+          submittedAt: null,
+          error: null,
+        },
+      ],
+      nextCursor: null,
+    }),
+  );
+  const openApplication = vi.fn(() => Promise.resolve(true));
+  Object.assign(window.nestor, {
+    jobFinder: {
+      listApplications,
+      openApplication,
+      getApplicationDetails: () =>
+        Promise.resolve({ application: { state: "ready" } }),
+    },
+  });
+  show();
+  expect(
+    await screen.findByText(
+      "Nothing is blocked. 1 application is filled in and waiting for your Send.",
+      { exact: false },
+    ),
+  ).toBeTruthy();
+  expect(screen.getByText("Ready for you to send (1)")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Needs you 0" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Review and send" }));
+  await waitFor(() => expect(openApplication).toHaveBeenCalledWith({ id: 31 }));
+  openApplication.mockClear();
+  // A question appears: the form stays listed below, not counted.
+  act(() => {
+    ask(0);
+  });
+  await screen.findByText("What is your notice period?");
+  expect(screen.getByText("Ready for you to send (1)")).toBeTruthy();
+  expect(screen.queryByText(/Nothing is blocked/)).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: /Backend Engineer.*Lantern Services/ }),
+  );
+  await waitFor(() => expect(openApplication).toHaveBeenCalledWith({ id: 31 }));
 });

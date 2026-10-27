@@ -4,7 +4,7 @@ Job Finder searches the sites the person adds. Sites live in the indexed `job_si
 
 ## Entry points
 
-- Guided setup > Job targets > Job sources: the `Job site URLs` textarea accepts several addresses. `Add and turn on` saves them and explains duplicates or invalid entries. Save, Continue and Finish also flush a pending textarea before leaving the step.
+- Guided setup > Job targets > Where to look: the `Job site URLs` textarea accepts several addresses. `Add and turn on` saves them and explains duplicates or invalid entries. Save, Continue and Finish also flush a pending textarea before leaving the step.
 - Profile > Job sources: `Add sources` opens the same textarea. The shared list/detail layout has `Find a source`, All/Enabled/Disabled/Needs attention, selection and Turn on/Turn off. `Previous sources` and `Next sources` page the list. Select a row to edit Source name, Starting page URL and Source notes; edits save on blur. `Include this source in searches` switches just that row. `Remove` removes the site and keeps its saved jobs.
 - Find jobs > the sites button opens `Sites to search`. Only enabled sites appear. All/None, `Find a site`, per-site checkboxes and Previous/Next work across pages. Selecting all except one keeps a compact exclusion, rather than downloading or sending every id.
 - `Open site`, `Check source` and the learned-guidance review remain in the Profile detail pane. Source-debug updates guidance pointers on the site row.

@@ -48,6 +48,11 @@ import {
   subscribeToJobFinderOverlays,
   useJobFinderOverlayOwnership,
 } from "../lib/job-finder-overlay-ownership";
+import {
+  currentWorkItem,
+  useWorkThrough,
+  workThrough,
+} from "../../needs-you/work-through";
 import "./browser-peek.css";
 
 const initialState: DesktopBrowserState = {
@@ -107,6 +112,8 @@ function BrowserBrandMark({
 export function BrowserPeek(props: {
   hasUnresolvedAttention?: boolean;
   onRecordSend?: () => void;
+  /** Opens a sent application's job in Applications. */
+  onOpenApplication?: (jobId: number) => void;
   /**
    * Width the expanded browser's toolbar keeps clear at its leading edge, for
    * the native macOS traffic lights that paint above every overlay. Undefined
@@ -117,6 +124,10 @@ export function BrowserPeek(props: {
   const bridge = window.nestor?.browser;
   const { showToast } = useToast();
   const lastSendNotice = useRef<string | null>(null);
+  const lastSentNotice = useRef<string | null | undefined>(undefined);
+  const { walk } = useWorkThrough();
+  const walkItem = walk && !walk.paused ? currentWorkItem(walk) : null;
+  const signingIn = walkItem?.kind === "site" ? walkItem : null;
   const [addingJob, setAddingJob] = useState(false);
   const [savedJob, setSavedJob] = useState<AddBrowserJobResult | null>(null);
   const [shortlisting, setShortlisting] = useState(false);
@@ -185,6 +196,41 @@ export function BrowserPeek(props: {
         : {}),
     });
   }, [state.unboundSendNotice, showToast, props.onRecordSend, bridge]);
+  // Main closes the sent form's tab and hides the peek when it was the last.
+  useEffect(() => {
+    if (state.revision === 0) return;
+    const notice = state.sentNotice ?? null;
+    // A notice already standing in the first state this window reads is old news.
+    if (lastSentNotice.current === undefined) {
+      lastSentNotice.current = notice?.id ?? null;
+      return;
+    }
+    if (!notice || lastSentNotice.current === notice.id) return;
+    lastSentNotice.current = notice.id;
+    showToast({
+      id: "application-sent",
+      title: `Sent: ${notice.title}${notice.company ? ` at ${notice.company}` : ""}`,
+      description: "Moved to Applied.",
+      duration: 10_000,
+      ...(props.onOpenApplication
+        ? {
+            action: {
+              label: "Open in Applications",
+              onClick: () => {
+                void bridge?.command({ type: "minimize" });
+                props.onOpenApplication?.(notice.jobId);
+              },
+            },
+          }
+        : {}),
+    });
+  }, [
+    state.sentNotice,
+    state.revision,
+    showToast,
+    props.onOpenApplication,
+    bridge,
+  ]);
   const [address, setAddress] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -338,7 +384,6 @@ export function BrowserPeek(props: {
     const root = document.getElementById("root");
     const wasInert = root?.inert ?? false;
     if (root) root.inert = true;
-    if (blank) addressRef.current?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || !isTopmost()) return;
       if (event.key === "Escape") {
@@ -376,6 +421,19 @@ export function BrowserPeek(props: {
       triggerRef.current?.focus();
     };
   }, [shown, blank, isTopmost, minimize, importPanel, menuOpen]);
+  // The address bar takes focus when the person opens an empty browser, not
+  // whenever the page goes blank under them (a sent form's tab closing).
+  const wasShown = useRef(false);
+  useEffect(() => {
+    if (!shown) {
+      if (wasShown.current && signingIn) workThrough.pause();
+      wasShown.current = false;
+      return;
+    }
+    if (wasShown.current) return;
+    wasShown.current = true;
+    if (blank) addressRef.current?.focus();
+  }, [shown, blank, signingIn]);
   useEffect(() => {
     if (!menuOpen) return;
     const close = (event: MouseEvent) => {
@@ -587,7 +645,9 @@ export function BrowserPeek(props: {
                     onKeyDown={(event) => {
                       // Escape restores the current address and leaves the
                       // bar, as in any browser; it must not hide the panel.
+                      // An empty bar has nothing to restore, so Escape hides.
                       if (event.key !== "Escape") return;
+                      if (address === "" && currentAddress === "") return;
                       event.preventDefault();
                       setAddress(currentAddress);
                       event.currentTarget.blur();
@@ -781,6 +841,34 @@ export function BrowserPeek(props: {
                   </button>
                 </div>
               )}
+              {signingIn && walk ? (
+                <div
+                  className="browser-notice is-walk"
+                  role="status"
+                  data-browser-walk
+                >
+                  <span className="browser-notice-text">
+                    <strong>Signing in</strong> · {signingIn.label} ·{" "}
+                    {walk.index + 1} of {walk.items.length}
+                  </span>
+                  <button
+                    type="button"
+                    className="browser-notice-action"
+                    onClick={() => workThrough.doneWithSite()}
+                  >
+                    {walk.index + 1 < walk.items.length
+                      ? "Done, next site"
+                      : "Done"}
+                  </button>
+                  <button
+                    type="button"
+                    className="browser-notice-action"
+                    onClick={() => workThrough.skip()}
+                  >
+                    Skip
+                  </button>
+                </div>
+              ) : null}
               {showNotice && (
                 <div
                   className={`browser-notice ${needsYou && !message ? "is-needs-you" : ""}`}

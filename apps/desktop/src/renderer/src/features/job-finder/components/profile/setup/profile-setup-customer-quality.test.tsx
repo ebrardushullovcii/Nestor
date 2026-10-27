@@ -358,9 +358,6 @@ describe("profile setup customer-quality guidance", () => {
     expect(container?.textContent).toContain(
       "Choose at least one so searches know what to look for.",
     );
-    expect(container?.textContent).toContain(
-      "Enter one place at a time, or separate places with semicolons. Keep a city, region, or country together with commas.",
-    );
     expect(
       container?.querySelector<HTMLInputElement>(
         "#profile-setup-field-search-preferences-locations",
@@ -370,15 +367,49 @@ describe("profile setup customer-quality guidance", () => {
       "#profile-setup-field-search-preferences-work-modes",
     );
     const guidanceId = workModes?.getAttribute("aria-describedby");
-    expect(guidanceId?.split(/\s+/u)).toEqual([
-      "profile-setup-field-search-preferences-work-modes-description",
+    expect(guidanceId).toBe(
       "profile-setup-field-search-preferences-work-modes-guidance",
-    ]);
+    );
     expect(
       container?.querySelector(
         "#profile-setup-field-search-preferences-work-modes-guidance",
       ),
     ).toBeTruthy();
+  });
+
+  it("splits job targets into four short blocks, the optional facts folded away", () => {
+    render(<FormHarness screen="targeting" />);
+
+    const headings = [...(container?.querySelectorAll("h3") ?? [])].map(
+      (heading) => heading.textContent,
+    );
+    expect(headings).toEqual([
+      "What to look for",
+      "Two answers every application asksRequired",
+    ]);
+    // Where to look is its own block (mocked out here), between the two.
+    const blocks = [
+      ...(container?.querySelectorAll("[data-profile-setup-block]") ?? []),
+    ].map((block) => block.getAttribute("data-profile-setup-block"));
+    expect(blocks).toEqual(["look-for", "more-about-you"]);
+    expect(container?.textContent).toContain(
+      "Jobs outside these countries will score low.",
+    );
+    const more = container?.querySelector<HTMLDetailsElement>(
+      "[data-profile-setup-block='more-about-you']",
+    );
+    expect(more?.tagName).toBe("DETAILS");
+    expect(more?.open).toBe(false);
+    expect(more?.querySelector("summary")?.textContent).toContain(
+      "More about you (optional)",
+    );
+    expect(
+      more?.querySelector(
+        "#profile-setup-field-eligibility-willing-to-relocate",
+      ),
+    ).toBeTruthy();
+    // Each block carries one line of help, not a paragraph per field.
+    expect(container?.textContent).not.toContain("Enter one place at a time");
   });
 
   it("presents Extras as one optional, skippable step", () => {

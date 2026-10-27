@@ -16,6 +16,16 @@ import { useToast } from "@renderer/components/ui/toast";
 import { openPreparedApplication } from "@renderer/features/applications/open-application";
 import { AnswerField } from "./answer-field";
 import { SourceNeedPane } from "./source-need-pane";
+import { useWorkThrough } from "./work-through";
+
+/** A site as a person names it: its host, without "www.". */
+function siteHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./u, "");
+  } catch {
+    return url;
+  }
+}
 
 export const describeError = (error: unknown) =>
   error instanceof Error ? error.message : "Could not save this answer.";
@@ -181,6 +191,7 @@ export function TaskPane(props: {
     );
   }
   const task = details?.task;
+  const { checks } = useWorkThrough();
   return (
     <section
       id="list-detail"
@@ -193,7 +204,17 @@ export function TaskPane(props: {
       ) : !task ? (
         <p>This item is no longer waiting for you.</p>
       ) : task.source ? (
-        <SourceNeedPane source={task.source} />
+        <SourceNeedPane
+          check={checks.get(task.id)}
+          host={siteHost(task.source.url)}
+          site={{
+            id: task.id,
+            kind: "site",
+            label: task.source.label,
+            taskIds: [task.id],
+            sources: [{ id: task.source.id, url: task.source.url }],
+          }}
+        />
       ) : (
         <div className="grid gap-5">
           <div className="text-sm text-foreground-soft">

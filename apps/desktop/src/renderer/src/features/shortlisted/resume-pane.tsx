@@ -3,11 +3,12 @@ import {
   RESUME_VIEW_MODE_OPTIONS,
   type ResumeViewMode,
   type ResumeLevel,
+  type ShortlistedApplication,
   type StoredResume,
 } from "@nestor/contracts";
 import { Download, ExternalLink, RotateCcw, Undo2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
@@ -21,6 +22,7 @@ import { useKeptRouteHidden } from "@renderer/features/job-finder/lib/kept-route
 import { ResumeEditor } from "./resume-editor";
 import { ResumePreview } from "./resume-preview";
 import { describeResume, LEVEL_LABEL, LEVELS } from "./resume-format";
+import { openPreparedApplication } from "@renderer/features/applications/open-application";
 import { describeError, type useResume } from "./use-resume";
 
 /**
@@ -29,6 +31,8 @@ import { describeError, type useResume } from "./use-resume";
  */
 export function ResumePane(props: {
   view: ReturnType<typeof useResume>;
+  /** Apply's open work on this job, which replaces Apply while it runs. */
+  application?: ShortlistedApplication | null;
   onApprove: () => void;
   approving: boolean;
   onApply: () => void;
@@ -38,6 +42,7 @@ export function ResumePane(props: {
   const { view } = props;
   const { job, resume, draft } = view;
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<ResumeViewMode>("read");
   const [explicitMode, setExplicitMode] = useState(false);
@@ -269,7 +274,40 @@ export function ResumePane(props: {
               Write again
             </Button>
           ) : null}
-          {approved ? (
+          {props.application?.status === "ready" ? (
+            <Button
+              onClick={() => {
+                const id = props.application?.id;
+                if (id)
+                  void openPreparedApplication(id, showToast).catch(
+                    (error: unknown) =>
+                      showToast({
+                        title: describeError(error),
+                        tone: "warning",
+                      }),
+                  );
+              }}
+              size="toolbar"
+            >
+              Review and send
+            </Button>
+          ) : props.application ? (
+            <Button
+              onClick={() =>
+                void navigate(
+                  props.application?.status === "needs_you"
+                    ? "/job-finder/actions"
+                    : `/job-finder/applications?jobId=${job.id}`,
+                )
+              }
+              size="toolbar"
+              variant="outline"
+            >
+              {props.application.status === "needs_you"
+                ? "Needs you · Open Needs you"
+                : "Applying · Open in Applications"}
+            </Button>
+          ) : approved ? (
             <Button
               disabled={props.applying}
               onClick={props.onApply}

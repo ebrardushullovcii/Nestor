@@ -34,6 +34,17 @@ export const DesktopBrowserStateSchema = z.object({
     .object({ id: z.string().min(1).max(100), tabId: BrowserTabIdSchema })
     .nullable()
     .optional(),
+  /** The person's own Send on a prepared form went through, and its tab closed. */
+  sentNotice: z
+    .object({
+      id: z.string().min(1).max(100),
+      applicationId: z.number().int().positive(),
+      jobId: z.number().int().positive(),
+      company: z.string().max(200),
+      title: z.string().max(300),
+    })
+    .nullable()
+    .optional(),
   phase: z.enum([
     "closed",
     "ready",

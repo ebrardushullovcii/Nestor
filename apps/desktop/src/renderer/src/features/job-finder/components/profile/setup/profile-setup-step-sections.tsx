@@ -1,6 +1,8 @@
 import { ProfileHoursField } from "../profile-hours-field";
 import { SetupSites } from "@renderer/features/job-lists/setup-sites";
 import { useId, useRef, type ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
+import { cn } from "@renderer/lib/cn";
 import { formatProfileSetupReviewValue } from "./profile-setup-screen-helpers";
 import {
   type CandidateProfile,
@@ -462,6 +464,23 @@ export function ProfileSetupEssentialsStep(props: {
   );
 }
 
+/** One block of the Job targets step: a bordered group with its own heading. */
+const SETUP_BLOCK_CLASS =
+  "grid gap-4 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/45 p-4";
+
+function SetupBlockHeading(props: { id: string; title: string; help: string }) {
+  return (
+    <div className="grid gap-1">
+      <h3 className="text-sm font-semibold text-foreground" id={props.id}>
+        {props.title}
+      </h3>
+      <p className="max-w-2xl text-sm leading-6 text-foreground-soft">
+        {props.help}
+      </p>
+    </div>
+  );
+}
+
 /** "United States, Germany" and "United States; Germany" are two countries. */
 export function parseWorkCountriesDraft(value: string): string[] {
   return value
@@ -509,18 +528,29 @@ export function SetupWorkEligibilityQuestions(props: {
   return (
     <section
       aria-labelledby={headingId}
-      className="grid gap-4 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/45 p-4"
+      className={SETUP_BLOCK_CLASS}
       data-profile-setup-work-eligibility
       id="profile-setup-work-eligibility"
     >
       <div className="grid gap-1">
-        <h3 className="text-sm font-semibold text-foreground" id={headingId}>
-          Where you can work
+        <h3
+          className="flex items-center gap-2 text-sm font-semibold text-foreground"
+          id={headingId}
+        >
+          Two answers every application asks
+          <span
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-(length:--text-small) font-medium",
+              answered
+                ? "border-(--surface-panel-border) text-foreground-soft"
+                : "border-(--warning-text)/40 text-(--warning-text)",
+            )}
+          >
+            Required
+          </span>
         </h3>
         <p className="max-w-2xl text-sm leading-6 text-foreground-soft">
-          {answered
-            ? "Application forms ask these two on almost every job. Every application reuses your answers."
-            : "Application forms ask these two on almost every job. Answer once here and every application reuses them; setup finishes once both are answered."}
+          Jobs outside these countries will score low.
         </p>
       </div>
       <div className="grid gap-2">
@@ -530,7 +560,7 @@ export function SetupWorkEligibilityQuestions(props: {
           inputId="profile-setup-field-eligibility-authorized-work-countries"
           label={PROFILE_WORK_CONSTRAINT_COPY.authorizedWorkCountries.label}
           onChange={setCountries}
-          placeholder="Add a country, e.g. Germany"
+          placeholder="Add a country or region, e.g. Germany"
           values={countries}
         />
         {countries.length === 0 && suggestedCountry ? (
@@ -549,10 +579,6 @@ export function SetupWorkEligibilityQuestions(props: {
             </Button>
           </div>
         ) : null}
-        <p className="px-1 text-(length:--text-body) leading-6 text-foreground">
-          {PROFILE_WORK_CONSTRAINT_COPY.authorizedWorkCountries.description} A
-          region such as European Union works too.
-        </p>
       </div>
       <div className="grid gap-2">
         <p
@@ -578,9 +604,6 @@ export function SetupWorkEligibilityQuestions(props: {
           size="field"
           value={sponsorship as "" | "yes" | "no"}
         />
-        <p className="px-1 text-(length:--text-body) leading-6 text-foreground">
-          {PROFILE_WORK_CONSTRAINT_COPY.requiresVisaSponsorship.description}
-        </p>
       </div>
     </section>
   );
@@ -606,7 +629,6 @@ export function ProfileSetupTargetingStep(props: {
   const targetRolesId = "profile-setup-field-search-preferences-target-roles";
   const locationsId = "profile-setup-field-search-preferences-locations";
   const workModesGroupId = "profile-setup-field-search-preferences-work-modes";
-  const workModesDescriptionId = `${workModesGroupId}-description`;
   const workModesGuidanceId = `${workModesGroupId}-guidance`;
   const remoteEligibleId = "profile-setup-field-eligibility-remote-eligible";
   const willingToRelocateId =
@@ -623,32 +645,38 @@ export function ProfileSetupTargetingStep(props: {
     props.registerPendingSourceFlush?.(flush);
   };
 
+  const workModes = props.preferencesForm.watch("workModes") ?? [];
   return (
     <Card className="rounded-(--radius-panel) border-border/40">
       <CardHeader className="gap-2 border-b border-border/30 pb-5">
-        <CardTitle>What to search for</CardTitle>
-        <CardDescription>
-          Roles, places, and ways of working you want. Suggestions come from
-          your resume; change anything that is off.
-        </CardDescription>
+        <CardTitle>Job targets</CardTitle>
       </CardHeader>
       <CardContent className="grid gap-4 pt-6">
-        <ProfileListEditor
-          inputId={targetRolesId}
-          label="Target roles"
-          draftParser={parseProfileLocationDraft}
-          onChange={(values) =>
-            props.preferencesForm.setValue(
-              "targetRoles",
-              joinListInput(values),
-              listFieldOptions,
-            )
-          }
-          placeholder="Add a target role"
-          values={parseListInput(props.preferencesForm.watch("targetRoles"))}
-        />
-        <div className="grid gap-(--gap-content) md:grid-cols-2">
-          <div className="grid gap-2">
+        <section
+          aria-labelledby="profile-setup-look-for-heading"
+          className={SETUP_BLOCK_CLASS}
+          data-profile-setup-block="look-for"
+        >
+          <SetupBlockHeading
+            help="Suggestions come from your resume. Change anything that is off."
+            id="profile-setup-look-for-heading"
+            title="What to look for"
+          />
+          <ProfileListEditor
+            inputId={targetRolesId}
+            label="Target roles"
+            draftParser={parseProfileLocationDraft}
+            onChange={(values) =>
+              props.preferencesForm.setValue(
+                "targetRoles",
+                joinListInput(values),
+                listFieldOptions,
+              )
+            }
+            placeholder="Add a target role"
+            values={parseListInput(props.preferencesForm.watch("targetRoles"))}
+          />
+          <div className="grid gap-(--gap-content) md:grid-cols-2">
             <ProfileListEditor
               label="Related role areas"
               onChange={(values) =>
@@ -658,17 +686,11 @@ export function ProfileSetupTargetingStep(props: {
                   listFieldOptions,
                 )
               }
-              placeholder="Add a related role area"
+              placeholder="e.g. Teaching Assistant"
               values={parseListInput(
                 props.preferencesForm.watch("jobFamilies"),
               )}
             />
-            <p className="px-1 text-(length:--text-body) leading-6 text-foreground">
-              Related titles you&apos;d also consider, e.g. Teaching Assistant,
-              Registered Nurse, or Visual Designer.
-            </p>
-          </div>
-          <div className="grid gap-2">
             <ProfileListEditor
               draftParser={parseProfileLocationDraft}
               inputId={locationsId}
@@ -683,12 +705,75 @@ export function ProfileSetupTargetingStep(props: {
               placeholder="Example: Hamburg; Remote"
               values={parseListInput(props.preferencesForm.watch("locations"))}
             />
-            <p className="px-1 text-(length:--text-body) leading-6 text-foreground">
-              Enter one place at a time, or separate places with semicolons.
-              Keep a city, region, or country together with commas.
-            </p>
           </div>
-        </div>
+          <fieldset
+            aria-describedby={workModesGuidanceId}
+            className="grid gap-(--gap-field)"
+            id={workModesGroupId}
+          >
+            <legend className="text-(length:--text-field-label) font-medium tracking-(--tracking-label) text-muted-foreground">
+              {PROFILE_WORK_CONSTRAINT_COPY.workModes.label}
+            </legend>
+            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {workModeValues.map((workMode) => (
+                <Controller
+                  control={props.preferencesForm.control}
+                  key={workMode}
+                  name="workModes"
+                  render={({ field }) => {
+                    const selectedWorkModes = field.value ?? [];
+                    return (
+                      <CheckboxField
+                        checked={selectedWorkModes.includes(workMode)}
+                        label={formatStatusLabel(workMode)}
+                        onCheckedChange={(checked) =>
+                          field.onChange(
+                            checked
+                              ? [...selectedWorkModes, workMode]
+                              : selectedWorkModes.filter(
+                                  (value) => value !== workMode,
+                                ),
+                          )
+                        }
+                      />
+                    );
+                  }}
+                />
+              ))}
+            </div>
+            {workModes.length === 0 ? (
+              <p
+                className="text-sm leading-6 text-(--warning-text)"
+                id={workModesGuidanceId}
+                role="status"
+              >
+                Choose at least one so searches know what to look for.
+              </p>
+            ) : workModes.includes("remote") &&
+              props.profileForm.watch("eligibility.remoteEligible") === "" ? (
+              <p
+                className="text-sm leading-6 text-foreground-muted"
+                id={workModesGuidanceId}
+              >
+                Remote is what you want; whether you can work remotely is under
+                More about you.
+              </p>
+            ) : null}
+          </fieldset>
+          <ProfileHoursField
+            values={parseListInput(
+              props.preferencesForm.watch("employmentTypes"),
+            )}
+            onChange={(values) =>
+              props.preferencesForm.setValue(
+                "employmentTypes",
+                joinListInput(values),
+                { shouldDirty: true, shouldTouch: true, shouldValidate: true },
+              )
+            }
+          />
+        </section>
+
         <SetupSites registerFlush={registerSiteFlush} />
 
         {/* The resume level is chosen per job on Shortlisted (Original, Light,
@@ -697,151 +782,78 @@ export function ProfileSetupTargetingStep(props: {
           profileForm={props.profileForm}
           suggestedCountry={props.suggestedWorkCountry ?? null}
         />
-        <div className="grid gap-(--gap-content) md:grid-cols-2">
-          <p
-            className="text-sm leading-6 text-foreground-soft md:col-span-2"
-            data-profile-setup-work-details-intro
-          >
-            More work details, all optional. These are facts, not preferences —
-            leave Not set if you don&apos;t know.
-          </p>
-          <div className="grid min-w-0 content-start gap-(--gap-field)">
-            <FieldLabel htmlFor={locationPreferencesId}>
-              {PROFILE_WORK_CONSTRAINT_COPY.preferredRelocationRegions.label}
-            </FieldLabel>
-            <ProfileTextarea
-              aria-describedby={`${locationPreferencesId}-help`}
-              id={locationPreferencesId}
-              placeholder={
-                PROFILE_WORK_CONSTRAINT_COPY.preferredRelocationRegions
-                  .placeholder
-              }
-              rows={4}
-              {...props.profileForm.register(
-                "eligibility.preferredRelocationRegions",
-              )}
-            />
-            <p
-              className="text-(length:--text-body) leading-6 text-foreground"
-              id={`${locationPreferencesId}-help`}
-            >
-              {
-                PROFILE_WORK_CONSTRAINT_COPY.preferredRelocationRegions
-                  .description
-              }
-            </p>
-          </div>
-          <SetupBooleanField
-            control={props.profileForm.control}
-            description={
-              PROFILE_WORK_CONSTRAINT_COPY.remoteEligible.description
-            }
-            id={remoteEligibleId}
-            label={PROFILE_WORK_CONSTRAINT_COPY.remoteEligible.label}
-            name="eligibility.remoteEligible"
-          />
-          <SetupBooleanField
-            control={props.profileForm.control}
-            description={
-              PROFILE_WORK_CONSTRAINT_COPY.willingToRelocate.description
-            }
-            id={willingToRelocateId}
-            label={PROFILE_WORK_CONSTRAINT_COPY.willingToRelocate.label}
-            name="eligibility.willingToRelocate"
-          />
-          <SetupBooleanField
-            control={props.profileForm.control}
-            description={
-              PROFILE_WORK_CONSTRAINT_COPY.willingToTravel.description
-            }
-            id={willingToTravelId}
-            label={PROFILE_WORK_CONSTRAINT_COPY.willingToTravel.label}
-            name="eligibility.willingToTravel"
-          />
-        </div>
-        <fieldset
-          aria-describedby={`${workModesDescriptionId} ${workModesGuidanceId}`}
-          className="grid gap-(--gap-field)"
-          id={workModesGroupId}
-        >
-          <legend className="text-(length:--text-field-label) font-medium tracking-(--tracking-label) text-muted-foreground">
-            {PROFILE_WORK_CONSTRAINT_COPY.workModes.label}
-          </legend>
-          <p
-            className="text-sm leading-6 text-foreground-soft"
-            id={workModesDescriptionId}
-          >
-            {PROFILE_WORK_CONSTRAINT_COPY.workModes.description}
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            {workModeValues.map((workMode) => (
-              <Controller
-                control={props.preferencesForm.control}
-                key={workMode}
-                name="workModes"
-                render={({ field }) => {
-                  const selectedWorkModes = field.value ?? [];
-                  return (
-                    <CheckboxField
-                      checked={selectedWorkModes.includes(workMode)}
-                      label={formatStatusLabel(workMode)}
-                      onCheckedChange={(checked) =>
-                        field.onChange(
-                          checked
-                            ? [...selectedWorkModes, workMode]
-                            : selectedWorkModes.filter(
-                                (value) => value !== workMode,
-                              ),
-                        )
-                      }
-                    />
-                  );
-                }}
-              />
-            ))}
-          </div>
-          {(props.preferencesForm.watch("workModes") ?? []).length === 0 ? (
-            <p
-              className="text-sm leading-6 text-(--warning-text)"
-              id={workModesGuidanceId}
-              role="status"
-            >
-              Choose at least one so searches know what to look for.
-            </p>
-          ) : (props.preferencesForm.watch("workModes") ?? []).includes(
-              "remote",
-            ) &&
-            props.profileForm.watch("eligibility.remoteEligible") === "" ? (
-            <p
-              className="text-sm leading-6 text-foreground-muted"
-              id={workModesGuidanceId}
-            >
-              Remote is your preference; whether you can work remotely is a
-              separate answer you can leave Not set for now.
-            </p>
-          ) : (
-            <p
-              className="text-sm leading-6 text-foreground-muted"
-              id={workModesGuidanceId}
-            >
-              Your preferred setup describes what you want; work details
-              describe what you can accept.
-            </p>
-          )}
-        </fieldset>
 
-        <ProfileHoursField
-          values={parseListInput(
-            props.preferencesForm.watch("employmentTypes"),
-          )}
-          onChange={(values) =>
-            props.preferencesForm.setValue(
-              "employmentTypes",
-              joinListInput(values),
-              { shouldDirty: true, shouldTouch: true, shouldValidate: true },
-            )
-          }
-        />
+        <details
+          className={cn(SETUP_BLOCK_CLASS, "group")}
+          data-profile-setup-block="more-about-you"
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              aria-hidden
+              className="size-4 shrink-0 text-foreground-soft transition-transform group-open:rotate-90"
+            />
+            <span className="grid gap-1">
+              <span className="text-sm font-semibold text-foreground">
+                More about you{" "}
+                <span className="font-normal text-foreground-soft">
+                  (optional)
+                </span>
+              </span>
+              <span
+                className="text-sm leading-6 text-foreground-soft"
+                data-profile-setup-work-details-intro
+              >
+                Relocation, remote work and travel. Leave Not set if you
+                don&apos;t know.
+              </span>
+            </span>
+          </summary>
+          <div className="grid gap-(--gap-content) pt-4 md:grid-cols-2">
+            <div className="grid min-w-0 content-start gap-(--gap-field)">
+              <FieldLabel htmlFor={locationPreferencesId}>
+                {PROFILE_WORK_CONSTRAINT_COPY.preferredRelocationRegions.label}
+              </FieldLabel>
+              <ProfileTextarea
+                id={locationPreferencesId}
+                placeholder={
+                  PROFILE_WORK_CONSTRAINT_COPY.preferredRelocationRegions
+                    .placeholder
+                }
+                rows={3}
+                {...props.profileForm.register(
+                  "eligibility.preferredRelocationRegions",
+                )}
+              />
+            </div>
+            <SetupBooleanField
+              control={props.profileForm.control}
+              description={
+                PROFILE_WORK_CONSTRAINT_COPY.remoteEligible.description
+              }
+              id={remoteEligibleId}
+              label={PROFILE_WORK_CONSTRAINT_COPY.remoteEligible.label}
+              name="eligibility.remoteEligible"
+            />
+            <SetupBooleanField
+              control={props.profileForm.control}
+              description={
+                PROFILE_WORK_CONSTRAINT_COPY.willingToRelocate.description
+              }
+              id={willingToRelocateId}
+              label={PROFILE_WORK_CONSTRAINT_COPY.willingToRelocate.label}
+              name="eligibility.willingToRelocate"
+            />
+            <SetupBooleanField
+              control={props.profileForm.control}
+              description={
+                PROFILE_WORK_CONSTRAINT_COPY.willingToTravel.description
+              }
+              id={willingToTravelId}
+              label={PROFILE_WORK_CONSTRAINT_COPY.willingToTravel.label}
+              name="eligibility.willingToTravel"
+            />
+          </div>
+        </details>
 
         {props.renderFooter({
           nextLabel: "Save and continue to Extras",

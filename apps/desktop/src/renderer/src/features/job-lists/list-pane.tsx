@@ -38,8 +38,14 @@ export function ListDetailLayout(props: {
 }) {
   return (
     <div
-      data-application-list-state={props.applicationState ? JSON.stringify(props.applicationState) : undefined}
-      data-job-list-state={props.state ? JSON.stringify(props.state) : undefined}
+      data-application-list-state={
+        props.applicationState
+          ? JSON.stringify(props.applicationState)
+          : undefined
+      }
+      data-job-list-state={
+        props.state ? JSON.stringify(props.state) : undefined
+      }
       className={cn(
         "grid min-h-0 flex-1 gap-4 xl:h-full xl:grid-rows-[minmax(0,1fr)]",
         props.table ? TABLE_DETAIL_COLUMNS_CLASS : LIST_DETAIL_COLUMNS_CLASS,
@@ -167,6 +173,8 @@ export function ListPane<Row extends { id: number }>(props: {
   /** Shown instead of the toolbar while rows are ticked. */
   bulkActions?: ReactNode;
   empty: ReactNode;
+  /** Below the rows (or the empty message): a group that is not selectable. */
+  footer?: ReactNode;
   /** Singular noun for the rows, e.g. "job". */
   noun?: string;
 }) {
@@ -280,6 +288,7 @@ export function ListPane<Row extends { id: number }>(props: {
             ))}
           </ul>
         )}
+        {hasMore ? null : props.footer}
         {hasMore ? (
           <div
             className="py-4 text-center text-(length:--text-small) text-foreground-muted"

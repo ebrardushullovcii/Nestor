@@ -143,6 +143,17 @@ export interface ApplicationServiceDeps {
     mode: ApplicationAutomationMode;
   }): Promise<ApplicationAutomationMode | null>;
   onError?: (error: unknown) => void;
+  /**
+   * The person's own Send went through and the site confirmed it. Called just
+   * before the form's page (bound under `pageKey`) closes.
+   */
+  onPersonSent?(sent: {
+    applicationId: number;
+    jobId: number;
+    company: string;
+    title: string;
+    pageKey: string;
+  }): void;
 }
 
 export const applicationIdentity = (id: number, attempt: number) => ({
@@ -1497,6 +1508,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     });
     if (applications.resolveUncertainSend(id, receipt)) {
       pressedByPerson.delete(id);
+      notePersonSent(row, identity.resultId);
       await closePage(id, watched.attempt);
     }
   }
@@ -1528,8 +1540,23 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       summary: submissionConfirmationSummary(page.bodyText),
     });
     if (!applications.recordSubmission(id, attempt, receipt)) return false;
+    notePersonSent(row, identity.resultId);
     await closePage(id, attempt);
     return true;
+  }
+
+  function notePersonSent(row: ApplicationRow, pageKey: string): void {
+    try {
+      deps.onPersonSent?.({
+        applicationId: row.id,
+        jobId: row.jobId,
+        company: row.company,
+        title: row.title,
+        pageKey,
+      });
+    } catch {
+      /* A notice is news only; the send is already recorded. */
+    }
   }
 
   function accessKind(

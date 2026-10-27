@@ -19,6 +19,7 @@ import {
 } from "./job-finder/application-authority-service";
 import { getSendGuards } from "./send-guards";
 import { getCandidateAssetLibrary } from "./job-finder/candidate-asset-library-instance";
+import { loadEmbeddedBrowser } from "./browser/load-embedded-browser";
 
 let service: ApplicationService | null = null;
 let ready: Promise<ApplicationService> | null = null;
@@ -209,6 +210,11 @@ export async function startApplicationService(
     isPaused: async () => (await repository.getActivityControl()).paused,
     authorizeSending,
     instructionMode,
+    onPersonSent: ({ pageKey, ...sent }) => {
+      void loadEmbeddedBrowser()
+        .then((browser) => browser.noteSent(pageKey, sent))
+        .catch(() => undefined);
+    },
   });
   await service.start();
   registerServiceStopper(stopApplicationService);

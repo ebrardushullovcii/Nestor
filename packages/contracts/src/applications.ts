@@ -212,6 +212,11 @@ export type RequestNeedsYouResult = z.infer<typeof RequestNeedsYouResultSchema>;
 export const NeedsYouListQuerySchema = z
   .object({
     kind: NeedsYouKindSchema.nullable().default(null),
+    /**
+     * `applications`: items that hold up an application. `sites`: job sites
+     * search could not read until the person signs in. Null lists both.
+     */
+    group: z.enum(["applications", "sites"]).nullable().default(null),
     text: z.string().trim().max(200).default(""),
     after: z.number().int().nonnegative().default(0),
     limit: z.number().int().min(1).max(200).default(50),

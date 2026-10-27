@@ -1,4 +1,8 @@
-import type { ResumeLevel, ResumeStatus } from "@nestor/contracts";
+import type {
+  ResumeLevel,
+  ResumeStatus,
+  ShortlistedApplication,
+} from "@nestor/contracts";
 
 import type { BadgeTone } from "@renderer/features/job-finder/lib/job-finder-types";
 
@@ -52,3 +56,13 @@ export function describeResume(
       return { label: "To review", tone: "neutral", detail: null };
   }
 }
+
+/** What an approved job's row says while Apply works on it. */
+export const APPLICATION_BADGE: Record<
+  ShortlistedApplication["status"],
+  { label: string; tone: BadgeTone }
+> = {
+  applying: { label: "Applying…", tone: "active" },
+  ready: { label: "Ready to send", tone: "positive" },
+  needs_you: { label: "Needs you", tone: "warning" },
+};

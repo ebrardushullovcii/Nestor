@@ -487,6 +487,7 @@ async function setup(
     ),
     listSubmissionOutcomeRecords: vi.fn(() => Promise.resolve([])),
   } as unknown as ApplicationServiceDeps["authorityRepository"];
+  const onPersonSent = vi.fn();
   const deps: ApplicationServiceDeps = {
     jobs,
     applications,
@@ -505,6 +506,7 @@ async function setup(
     authorizeSending,
     ...(concurrency === undefined ? {} : { concurrency }),
     onError,
+    onPersonSent,
   };
   const service = createApplicationService(deps);
   cleanups.push(async () => {
@@ -531,6 +533,7 @@ async function setup(
     authorizeSending,
     onError,
     personPage,
+    onPersonSent,
     deps,
   };
 }
@@ -1643,6 +1646,17 @@ it("records the person's confirmed submission, moves Approved to applied, and cl
     "target_site",
     `application_${row.id}_attempt_1`,
   );
+  // The browser hears it was sent before the page closes, to say so.
+  expect(f.onPersonSent).toHaveBeenCalledExactlyOnceWith({
+    applicationId: row.id,
+    jobId: row.jobId,
+    company: row.company,
+    title: row.title,
+    pageKey: `application_${row.id}_attempt_1`,
+  });
+  expect(f.onPersonSent.mock.invocationCallOrder[0]).toBeLessThan(
+    f.browser.releaseApplicationPageBinding.mock.invocationCallOrder[0]!,
+  );
   expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
     0,
   );
@@ -1680,6 +1694,7 @@ it("the person's own Submit in their window is Uncertain at once, and Applied wh
     0,
   );
   expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
+  expect(f.onPersonSent).not.toHaveBeenCalled();
   // The site confirms it on their page.
   f.browser.readApplicationPageWithPerson.mockResolvedValue(f.personPage);
   await vi.advanceTimersByTimeAsync(2_000);
@@ -1689,6 +1704,9 @@ it("the person's own Submit in their window is Uncertain at once, and Applied wh
   expect(f.browser.releaseApplicationPageBinding).toHaveBeenCalledWith(
     "target_site",
     `application_${row.id}_attempt_1`,
+  );
+  expect(f.onPersonSent).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ applicationId: row.id, jobId: row.jobId }),
   );
 });
 

@@ -40,9 +40,23 @@ export const ResumeStatusSchema = z.object({
 });
 export type ResumeStatus = z.infer<typeof ResumeStatusSchema>;
 
+/**
+ * The job's newest application Apply is still working on: filling it in
+ * (`applying`), filled and waiting for the person's Send (`ready`), or
+ * waiting on the person (`needs_you`).
+ */
+export const ShortlistedApplicationSchema = z.object({
+  id: z.number().int().positive(),
+  status: z.enum(["applying", "ready", "needs_you"]),
+});
+export type ShortlistedApplication = z.infer<
+  typeof ShortlistedApplicationSchema
+>;
+
 /** One Shortlisted row: the job and, once writing has started, its resume. */
 export const ShortlistedRowSchema = JobRowSchema.extend({
   resume: ResumeStatusSchema.nullable(),
+  application: ShortlistedApplicationSchema.nullable(),
 });
 export type ShortlistedRow = z.infer<typeof ShortlistedRowSchema>;
 

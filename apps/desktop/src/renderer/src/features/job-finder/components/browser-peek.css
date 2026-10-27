@@ -509,6 +509,16 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   font-weight: 600;
   white-space: nowrap;
 }
+/* A walk through sign-ins: where it is, then Done and Skip side by side. */
+.browser-notice.is-walk .browser-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+.browser-notice.is-walk .browser-notice-action + .browser-notice-action {
+  background: transparent !important;
+  color: var(--foreground) !important;
+  border: 1px solid var(--control-border);
+}
 
 /* Page area */
 .browser-page-viewport {

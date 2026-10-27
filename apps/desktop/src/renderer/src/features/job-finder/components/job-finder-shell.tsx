@@ -1704,6 +1704,9 @@ export function JobFinderShell({
               onRecordSend={() => {
                 void navigate("/job-finder/applications");
               }}
+              onOpenApplication={(jobId) => {
+                void navigate(`/job-finder/applications?jobId=${jobId}`);
+              }}
               chromeInsetStart={
                 isMac && !windowControlsState.isFullScreen
                   ? MACOS_TRAFFIC_LIGHT_INSET

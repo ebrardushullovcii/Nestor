@@ -118,6 +118,10 @@ export class EmbeddedBrowser {
   private stateListeners = new Set<(state: DesktopBrowserState) => void>();
   private activeTabId: string | null = null;
   private unboundSendNotice: { id: string; tabId: string } | null = null;
+  private sentNotice: NonNullable<DesktopBrowserState["sentNotice"]> | null =
+    null;
+  /** The sent form's tabs; when the last one closes and none are left, the peek hides. */
+  private readonly sentTabs = new Set<string>();
   private readonly personInputAt = new Map<string, number>();
   /**
    * When the person pressed a prepared form's send in their own window, by
@@ -179,6 +183,26 @@ export class EmbeddedBrowser {
     this.unboundSendNotice = { id: randomUUID(), tabId };
     this.emit();
   }
+  /**
+   * The person's own Send went through. Called before the form's tabs close,
+   * so closing the last of them can hide the peek instead of leaving an
+   * empty browser behind.
+   */
+  noteSent(
+    owner: string,
+    sent: Omit<NonNullable<DesktopBrowserState["sentNotice"]>, "id">,
+  ): void {
+    this.sentTabs.clear();
+    for (const id of this.ownedTabs.get(owner) ?? []) this.sentTabs.add(id);
+    this.sentNotice = {
+      id: randomUUID(),
+      ...sent,
+      company: sent.company.slice(0, 200),
+      title: sent.title.slice(0, 300),
+    };
+    this.emit();
+  }
+
   private applicationTabLabels = new Map<
     string,
     { title: string; url: string; baseLabel: string; reference: string }
@@ -631,6 +655,7 @@ export class EmbeddedBrowser {
     return DesktopBrowserStateSchema.parse({
       revision: this.revision,
       unboundSendNotice: this.unboundSendNotice,
+      sentNotice: this.sentNotice,
       phase: this.closing
         ? "closing"
         : this.closed
@@ -1525,6 +1550,12 @@ export class EmbeddedBrowser {
         claim.tabs.delete(page.id);
       if (this.activeTabId === page.id)
         this.activeTabId = [...this.pageMap.keys()].at(-1) ?? null;
+      if (this.sentTabs.delete(page.id) && this.sentTabs.size === 0) {
+        const left = [...this.pageMap.values()].some(
+          (other) => !other.contents.isDestroyed(),
+        );
+        if (!left) this.presentation = "minimized";
+      }
       const holder = page.host === "backstage" ? this.backstage : this.window;
       if (holder && !holder.isDestroyed())
         holder.contentView.removeChildView(view);

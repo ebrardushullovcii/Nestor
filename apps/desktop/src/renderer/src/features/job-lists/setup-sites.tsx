@@ -14,18 +14,21 @@ export function SetupSites(props: {
   return (
     <section
       aria-labelledby="profile-setup-job-sources-heading"
-      className="grid gap-4 rounded-(--radius-field) border border-border/35 p-4"
+      className="grid gap-4 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/45 p-4"
+      data-profile-setup-block="where-to-look"
     >
-      <h3
-        id="profile-setup-job-sources-heading"
-        className="text-sm font-semibold"
-      >
-        Job sources
-      </h3>
-      <p className="text-sm text-foreground-soft">
-        Add the careers pages and job boards you use. Each is turned on for
-        search straight away.
-      </p>
+      <div className="grid gap-1">
+        <h3
+          id="profile-setup-job-sources-heading"
+          className="text-sm font-semibold"
+        >
+          Where to look
+        </h3>
+        <p className="text-sm leading-6 text-foreground-soft">
+          The careers pages and job boards to search. Each is on as soon as you
+          add it.
+        </p>
+      </div>
       <AddSites
         alwaysOpen
         {...(props.registerFlush ? { registerFlush: props.registerFlush } : {})}
