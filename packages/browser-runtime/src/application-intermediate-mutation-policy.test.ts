@@ -108,6 +108,21 @@ describe("intermediate application mutation policy", () => {
     });
   });
 
+  test("Ashby's field save is a save; its submit is not", () => {
+    const ashby = (operationName: string) =>
+      classify({
+        method: "POST",
+        url: `https://apply.example.com/api/non-user-graphql?op=${operationName}`,
+        bodyText: JSON.stringify({
+          operationName,
+          variables: { path: "_systemfield_name", value: "Robin Ashford" },
+          query: `mutation ${operationName}($path: String!, $value: JSON) { x }`,
+        }),
+      }).allowed;
+    expect(ashby("ApiSetFormValue")).toBe(true);
+    expect(ashby("ApiSubmitSingleApplicationFormAction")).toBe(false);
+  });
+
   test("denies requests without authority or outside the exact window", () => {
     expect(classify({ authorized: false }).reason).toBe("not_authorized");
     expect(classify({ window: null }).reason).toBe("window_closed");
