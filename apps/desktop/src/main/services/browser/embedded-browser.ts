@@ -44,6 +44,7 @@ import {
   personFieldEditsInPage,
   PERSON_FIELD_WORLD,
   type PersonFieldCommand,
+  type PersonFieldRead,
 } from "./person-field-edits";
 import { BrowserCdpBridge, type BrowserCdpPage } from "./browser-cdp-bridge";
 import { getEmbeddedBrowserFocusAction } from "./embedded-browser-focus-policy";
@@ -977,21 +978,21 @@ export class EmbeddedBrowser {
   private async personFieldCommand(
     id: string,
     command: PersonFieldCommand,
-  ): Promise<RawApplyPage["controls"]> {
+  ): Promise<PersonFieldRead> {
     const page = this.pageMap.get(id);
     if (
       !page ||
       page.contents.isDestroyed() ||
       !page.contents.executeJavaScriptInIsolatedWorld
     )
-      return [];
+      return { controls: [], credentialsSeen: true };
     const selectors = JSON.stringify(APPLY_PAGE_SELECTORS);
     const selector = JSON.stringify(
       Object.values(APPLY_PAGE_SELECTORS).join(", "),
     );
     const controlsSelector = JSON.stringify(APPLY_PAGE_SELECTORS.controls);
     try {
-      return (await page.contents.executeJavaScriptInIsolatedWorld(
+      const result = (await page.contents.executeJavaScriptInIsolatedWorld(
         PERSON_FIELD_WORLD,
         [
           {
@@ -1004,9 +1005,14 @@ export class EmbeddedBrowser {
         }, ${controlsSelector})`,
           },
         ],
-      )) as RawApplyPage["controls"];
+      )) as PersonFieldRead | undefined;
+      return result &&
+        Array.isArray(result.controls) &&
+        typeof result.credentialsSeen === "boolean"
+        ? result
+        : { controls: [], credentialsSeen: true };
     } catch {
-      return [];
+      return { controls: [], credentialsSeen: true };
     }
   }
 
@@ -1015,14 +1021,22 @@ export class EmbeddedBrowser {
     owner: string,
     raw: RawApplyPage,
   ): Promise<RawApplyPage> {
+    if (!raw.controls?.length) return raw;
+    const controls = raw.controls.map((control) => {
+      const copy = { ...control };
+      delete copy.personAnswer;
+      return copy;
+    });
     const tabs = [...(this.ownedTabs.get(owner) ?? [])].filter(
       (id) => this.pageMap.get(id)?.contents.getURL() === raw.url,
     );
-    if (tabs.length !== 1) return raw;
-    const edits = await this.personFieldCommand(tabs[0]!, { kind: "read" });
+    if (tabs.length !== 1) return { ...raw, controls };
+    const read = await this.personFieldCommand(tabs[0]!, { kind: "read" });
+    const edits = read.controls;
     return {
       ...raw,
-      controls: raw.controls.map((control) => {
+      personAnswersBlocked: read.credentialsSeen,
+      controls: controls.map((control) => {
         if (control.ref && !/^f0c\d+$/u.test(control.ref)) return control;
         const same = edits.filter(
           (edit) =>
@@ -1035,6 +1049,9 @@ export class EmbeddedBrowser {
             edit.groupLabel === control.groupLabel &&
             edit.value === control.value &&
             edit.checked === control.checked &&
+            edit.selectedOptionLabel === control.selectedOptionLabel &&
+            edit.personAnswer?.shownValue ===
+              (control.selectedOptionLabel || control.value) &&
             edit.personAnswer?.pageUrl === raw.url,
         );
         const personAnswer =

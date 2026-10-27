@@ -492,13 +492,9 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       });
     },
     /** Internal caller verified native input on this application's exact field. */
-    rememberPersonAnswer(
-      input: RequestNeedsYouInput,
-      answer: string,
-      kind: CandidateAnswerKind = "other",
-    ): SavedFormAnswer | null {
+    recordPersonAnswer(input: RequestNeedsYouInput, answer: string): boolean {
       const value = RequestNeedsYouInputSchema.parse(input);
-      if (value.kind !== "question") return null;
+      if (value.kind !== "question") return false;
       return store.transaction(() => {
         const application = sql(
           "SELECT attempt,state FROM applications WHERE id=?",
@@ -510,7 +506,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           application.attempt !== value.attempt ||
           !["running", "needs_you", "ready"].includes(application.state)
         )
-          return null;
+          return false;
         const fitted = validateAnswer(
           { input: value.input, options_json: JSON.stringify(value.options) },
           answer,
@@ -520,15 +516,6 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         ).get(value.applicationId, value.fieldKey) as
           | { task_id: number }
           | undefined;
-        const savedId = writeAnswer({
-          key: value.key,
-          scope: value.scope,
-          prompt: value.prompt,
-          input: value.input,
-          options: value.options,
-          answer: fitted,
-          kind,
-        });
         const old = previous ? get(previous.task_id) : undefined;
         if (
           old?.answer === fitted &&
@@ -536,7 +523,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             normalizeFormQuestionPrompt(value.prompt)
         ) {
           changed();
-          return savedAnswer(savedId);
+          return true;
         }
         const inserted =
           sql(`INSERT INTO needs_you(kind,answer_key,country,site_origin,prompt,input,options_json,opened_at,prompt_key,reuse_prompt)
@@ -558,16 +545,8 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             "UPDATE needs_you SET resolved_at=? WHERE id=? AND resolved_at IS NULL AND NOT EXISTS(SELECT 1 FROM application_needs_you WHERE task_id=?)",
           ).run(Date.now(), old.id, old.id);
         resolve(task, fitted);
-        if (value.reusePrompt)
-          resolveMatching(
-            value.key,
-            value.prompt,
-            value.scope.country,
-            value.scope.siteOrigin,
-            fitted,
-          );
         changed();
-        return savedAnswer(savedId);
+        return true;
       });
     },
     details(id: number): NeedsYouDetails | null {

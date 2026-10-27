@@ -50,6 +50,7 @@ export interface RawApplyControl {
     pageUrl: string;
     value: string;
     checked: boolean;
+    shownValue?: string;
     recordedAt: string;
   };
   /** What a file input's own field shows about its upload. */
@@ -162,6 +163,8 @@ export interface RawApplyOpenedTab {
 }
 
 export interface RawApplyPage {
+  /** Sticky credential history for this document; native edits grant no answers here. */
+  personAnswersBlocked?: boolean;
   url: string | null;
   title: string | null;
   bodyText: string;

@@ -2,16 +2,12 @@ import {
   buildApplyFormObservation,
   questionPrompt,
 } from "@nestor/browser-agent";
-import type {
-  RawApplyPage,
-  ApplicationRow,
-  CandidateAnswerKind,
-} from "@nestor/contracts";
+import type { RawApplyPage, ApplicationRow } from "@nestor/contracts";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import type { ApplicationStore } from "@nestor/db/applications";
 import { describeFormQuestion } from "./questions";
 
-/** Only native-attributed field edits become saved verbatim sources, never mere page values. */
+/** Native-attributed edits are local to this application, never reusable answers. */
 export function rememberPersonPageAnswers(input: {
   page: RawApplyPage;
   application: Pick<ApplicationRow, "id" | "attempt">;
@@ -20,8 +16,24 @@ export function rememberPersonPageAnswers(input: {
   earlierQuestions?: readonly { id: string; prompt: string }[];
 }): number {
   const { page, application, job, memory } = input;
+  if (!page.controls?.length) return 0;
   const observed = buildApplyFormObservation(page, new Date().toISOString());
-  if (page.loading || observed.blocker?.requiresPerson) return 0;
+  if (
+    page.loading ||
+    page.personAnswersBlocked ||
+    observed.blocker?.requiresPerson ||
+    page.controls.some(
+      (control) =>
+        control.inputType === "password" ||
+        /\b(?:current-password|new-password|one-time-code|username)\b/iu.test(
+          control.autocomplete,
+        ) ||
+        /^(?:password|confirm password|new password|current password|verification code|one.time code|otp)$/iu.test(
+          control.label.trim(),
+        ),
+    )
+  )
+    return 0;
   let count = 0;
   for (const raw of page.controls) {
     const person = raw.personAnswer;
@@ -30,6 +42,7 @@ export function rememberPersonPageAnswers(input: {
       person.pageUrl !== page.url ||
       person.value !== raw.value ||
       person.checked !== raw.checked ||
+      person.shownValue !== (raw.selectedOptionLabel || raw.value) ||
       /password|one-time-code/iu.test(raw.autocomplete)
     )
       continue;
@@ -41,7 +54,7 @@ export function rememberPersonPageAnswers(input: {
       !control.visible ||
       control.invalid ||
       control.kind === "file" ||
-      control.credentialRole ||
+      control.credentialRole === "password" ||
       control.answerControlType === "multi_choice" ||
       (control.kind === "radio" && !control.checked)
     )
@@ -81,21 +94,8 @@ export function rememberPersonPageAnswers(input: {
           normalizeFormQuestionPrompt(prompt),
       ) ?? [];
     if (previous.length > 1) continue;
-    const kind: CandidateAnswerKind = [
-      "availability",
-      "notice_period",
-      "salary_expectation",
-      "work_authorization",
-      "visa_sponsorship",
-      "relocation",
-      "travel",
-      "self_intro",
-      "career_transition",
-    ].includes(control.questionKind)
-      ? (control.questionKind as CandidateAnswerKind)
-      : "other";
     if (
-      memory.rememberPersonAnswer(
+      memory.recordPersonAnswer(
         {
           ...known,
           applicationId: application.id,
@@ -106,7 +106,6 @@ export function rememberPersonPageAnswers(input: {
           prompt,
         },
         answer,
-        kind,
       )
     )
       count++;

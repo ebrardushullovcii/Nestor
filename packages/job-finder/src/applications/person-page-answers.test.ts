@@ -34,32 +34,36 @@ function setup() {
   const store = openJobStore(":memory:");
   stores.push(store);
   const applications = createApplicationStore(store);
-  const id = store.saveFoundJobs({
+  const ids = store.saveFoundJobs({
     searchId: null,
     jobs: [
-      {
-        title: "Engineer",
-        company: "Synthetic",
-        location: "Remote",
-        workModes: ["remote"],
-        url,
-        sourceId: "synthetic",
-        sourceLabel: "Synthetic",
-        sourceJobId: "1",
-        postedAt: null,
-        salaryText: null,
-        salaryMin: null,
-        salaryMax: null,
-        salaryCurrency: null,
-        seniority: null,
-        employmentType: null,
-        summary: null,
-        description: "Synthetic job",
-        applyUrl: null,
-      } satisfies FoundJob,
+      ...[0, 1].map(
+        (index) =>
+          ({
+            title: "Engineer",
+            company: "Synthetic",
+            location: "Remote",
+            workModes: ["remote"],
+            url: index === 0 ? url : `${url}/other`,
+            sourceId: "synthetic",
+            sourceLabel: "Synthetic",
+            sourceJobId: String(index),
+            postedAt: null,
+            salaryText: null,
+            salaryMin: null,
+            salaryMax: null,
+            salaryCurrency: null,
+            seniority: null,
+            employmentType: null,
+            summary: null,
+            description: "Synthetic job",
+            applyUrl: null,
+          }) satisfies FoundJob,
+      ),
     ],
-  }).added[0]!;
-  approveOriginalResumesForTests(store, [id]);
+  }).added;
+  const id = ids[0]!;
+  approveOriginalResumesForTests(store, ids);
   applications.applyJobs({ selection: { ids: [id] } });
   const row = applications.claimNext()!;
   const raw: RawApplyControl = {
@@ -115,10 +119,21 @@ function setup() {
       memory: applications.needsYou,
       earlierQuestions: [{ id: "start-question", prompt }],
     });
-  return { store, applications, row, raw, page, job, known, read, remember };
+  return {
+    store,
+    applications,
+    row,
+    raw,
+    page,
+    job,
+    known,
+    read,
+    remember,
+    otherId: ids[1]!,
+  };
 }
 
-test("a person's date replaces an older local answer, survives refill, and passes both Send rechecks without a Profile source", async () => {
+test("a person's date replaces the local answer, leaves saved Immediately intact, and passes both Send rechecks", async () => {
   const f = setup();
   const requested = f.applications.needsYou.request({
     ...f.known,
@@ -140,10 +155,12 @@ test("a person's date replaces an older local answer, survives refill, and passe
     pageUrl: url,
     value,
     checked: false,
+    shownValue: value,
     recordedAt: "2026-11-15T10:00:00Z",
   };
   expect(f.remember()).toBe(1);
   expect(f.read().map((answer) => answer.answer)).toEqual([value]);
+  expect(f.applications.needsYou.findAnswer(f.known.key)).toBe("Immediately");
   expect(f.applications.needsYou.forApplication(f.row.id)).toHaveLength(0);
   expect(f.remember()).toBe(1);
   const other = createApplicationStore(f.store);
@@ -153,6 +170,13 @@ test("a person's date replaces an older local answer, survives refill, and passe
     new URL(url).origin,
   );
   expect(saved.map((answer) => answer.answer)).toEqual([value]);
+  f.applications.applyJobs({ selection: { ids: [f.otherId] } });
+  const later = f.applications.claimNext()!;
+  expect(
+    f.applications.needsYou
+      .answersForQuestions(later.id, [f.known], new URL(url).origin)
+      .map((answer) => answer.answer),
+  ).toEqual(["Immediately"]);
   const profile = CandidateProfileSchema.parse({
     id: "synthetic",
     fullName: "Synthetic Applicant",
@@ -217,6 +241,86 @@ test("a person's date replaces an older local answer, survives refill, and passe
   }
 });
 
+test("a salary entered for this application is not offered on another job", () => {
+  const f = setup();
+  f.raw.label = "What are your salary expectations?";
+  f.raw.inputType = "number";
+  f.raw.value = "90000";
+  f.raw.personAnswer = {
+    pageUrl: url,
+    value: "90000",
+    checked: false,
+    shownValue: "90000",
+    recordedAt: "2026-11-15T10:00:00Z",
+  };
+  const salary = {
+    prompt: f.raw.label,
+    kind: "salary_expectation" as const,
+    answerControlType: "text" as const,
+    answerOptions: [],
+    inputConstraints: { type: "number" as const },
+  };
+  const known = {
+    ...describeFormQuestion(salary, f.job),
+    prompt: salary.prompt,
+  };
+  f.applications.needsYou.remember({
+    key: known.key,
+    prompt: known.prompt,
+    input: known.input,
+    options: known.options,
+    answer: "50000",
+    scope: {},
+    kind: "salary_expectation",
+  });
+  expect(f.remember()).toBe(1);
+  expect(
+    f.applications.needsYou
+      .answersForQuestions(f.row.id, [known], new URL(url).origin)
+      .map((answer) => answer.answer),
+  ).toEqual(["90000"]);
+  f.applications.applyJobs({ selection: { ids: [f.otherId] } });
+  const other = f.applications.claimNext()!;
+  expect(
+    f.applications.needsYou
+      .answersForQuestions(other.id, [known], new URL(url).origin)
+      .map((answer) => answer.answer),
+  ).toEqual(["50000"]);
+  expect(f.applications.needsYou.findAnswer(known.key)).toBe("50000");
+});
+
+test.each([
+  "password",
+  "shown password",
+  "one-time code",
+  "credential history",
+  "relabeled option",
+])("%s prevents saving page answers", (shape) => {
+  const f = setup();
+  f.raw.personAnswer = {
+    pageUrl: url,
+    value,
+    checked: false,
+    shownValue: value,
+    recordedAt: "2026-11-15T10:00:00Z",
+  };
+  if (shape === "credential history") f.page.personAnswersBlocked = true;
+  else if (shape === "relabeled option")
+    f.raw.selectedOptionLabel = "Another date";
+  else
+    f.page.controls.push({
+      ...f.raw,
+      index: 1,
+      id: "secret",
+      label: shape === "shown password" ? "Password" : "Security code",
+      inputType: shape === "password" ? "password" : "text",
+      autocomplete: shape === "one-time code" ? "one-time-code" : "",
+      value: "SYNTHETIC_SECRET",
+    });
+  expect(f.remember()).toBe(0);
+  expect(f.read()).toEqual([]);
+});
+
 test.each([
   "site prefill",
   "unknown editor",
@@ -230,6 +334,7 @@ test.each([
       pageUrl: reason === "another page" ? `${url}/other` : url,
       value: reason === "changed value" ? "11/16/2026" : value,
       checked: false,
+      shownValue: value,
       recordedAt: "2026-11-15T10:00:00Z",
     };
   if (reason === "invalid date") f.raw.invalid = true;
@@ -243,6 +348,7 @@ test("a stale attempt cannot save an on-page answer", () => {
     pageUrl: url,
     value,
     checked: false,
+    shownValue: value,
     recordedAt: "2026-11-15T10:00:00Z",
   };
   expect(
