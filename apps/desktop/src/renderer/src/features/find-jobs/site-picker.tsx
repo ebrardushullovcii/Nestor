@@ -13,6 +13,7 @@ import {
 
 import { useSitePage } from "@renderer/features/job-lists/use-site-page";
 import { JOB_FINDER_ROUTE_PATHS } from "@renderer/features/job-finder/lib/job-finder-route-hrefs";
+import { useEffectWhileKeptRouteShown } from "@renderer/features/job-finder/lib/kept-route-visibility";
 
 /**
  * Which sites a search looks at: all of them, or the ones ticked. Only the
@@ -28,6 +29,7 @@ export function SitePicker(props: {
   const [placement, setPlacement] = useState<PopoverPlacement | null>(null);
   const [filter, setFilter] = useState("");
   const open = placement !== null;
+  useEffectWhileKeptRouteShown(() => () => setPlacement(null), []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -107,9 +109,10 @@ export function SitePicker(props: {
           <div className="grid gap-2 text-(length:--text-small) text-foreground-soft">
             <p>Add the job sites you use, and searches look at them.</p>
             <Button
-              onClick={() =>
-                void navigate(JOB_FINDER_ROUTE_PATHS.profileSources)
-              }
+              onClick={() => {
+                setPlacement(null);
+                void navigate(JOB_FINDER_ROUTE_PATHS.profileSources);
+              }}
               size="sm"
               type="button"
               variant="outline"

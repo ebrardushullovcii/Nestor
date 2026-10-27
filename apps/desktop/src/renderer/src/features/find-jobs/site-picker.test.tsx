@@ -1,9 +1,19 @@
 // @vitest-environment jsdom
 
 import type { JobSitePage } from "@nestor/contracts";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import {
+  createKeptRouteVisibility,
+  KeptRouteVisibilityContext,
+} from "@renderer/features/job-finder/lib/kept-route-visibility";
 
 import { SitePicker } from "./site-picker";
 
@@ -13,7 +23,7 @@ function Destination() {
   return <p>Profile opened at {useLocation().search}</p>;
 }
 
-it("takes someone without enabled sites straight to Profile's Job sources", async () => {
+beforeEach(() => {
   const empty: JobSitePage = {
     rows: [],
     total: 0,
@@ -30,18 +40,17 @@ it("takes someone without enabled sites straight to Profile's Job sources", asyn
       },
     },
   });
+});
+
+it("closes the kept site's picker when opening Profile's Job sources", async () => {
   render(
     <MemoryRouter initialEntries={["/job-finder/discovery"]}>
+      <SitePicker
+        value={{ all: true, except: [] }}
+        onChange={() => undefined}
+      />
       <Routes>
-        <Route
-          path="/job-finder/discovery"
-          element={
-            <SitePicker
-              value={{ all: true, except: [] }}
-              onChange={() => undefined}
-            />
-          }
-        />
+        <Route path="/job-finder/discovery" element={null} />
         <Route path="/job-finder/profile" element={<Destination />} />
       </Routes>
     </MemoryRouter>,
@@ -55,4 +64,30 @@ it("takes someone without enabled sites straight to Profile's Job sources", asyn
       "Profile opened at ?section=sources&focus=job-sources",
     ),
   ).toBeTruthy();
+  expect(screen.queryByRole("dialog", { name: "Sites to search" })).toBeNull();
+});
+
+it("closes on any route hide and stays closed when Find jobs is shown again", async () => {
+  const visibility = createKeptRouteVisibility(false);
+  render(
+    <MemoryRouter>
+      <KeptRouteVisibilityContext.Provider value={visibility}>
+        <SitePicker
+          value={{ all: true, except: [] }}
+          onChange={() => undefined}
+        />
+      </KeptRouteVisibilityContext.Provider>
+    </MemoryRouter>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "No sites yet" }));
+  expect(screen.getByRole("dialog", { name: "Sites to search" })).toBeTruthy();
+  act(() => visibility.setHidden(true));
+  expect(screen.queryByRole("dialog", { name: "Sites to search" })).toBeNull();
+  act(() => visibility.setHidden(false));
+  expect(screen.queryByRole("dialog", { name: "Sites to search" })).toBeNull();
+  expect(
+    (await screen.findByRole("button", { name: "No sites yet" })).getAttribute(
+      "aria-expanded",
+    ),
+  ).toBe("false");
 });
