@@ -690,6 +690,9 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     ["answers", "Show Saved answers"],
     ["kind", "Filter by kind"],
     ["clear_filters", "Clear filters"],
+    ["work_through_selected", "Open the first selected waiting item"],
+    ["option_search", "Search this waiting question's offered options"],
+    ["option_choose", "Choose one of this waiting question's offered options"],
   ]),
   ...actions(
     "needs_you",
@@ -741,6 +744,18 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "forget_all",
       "undo",
     ].map((name) => [name, `${name} saved answer`] as const),
+  ),
+  ...actions(
+    "answers",
+    "Saved-answer choice controls",
+    ["get_form_answer", "save_form_answer", "open_in_app"],
+    [
+      ["fallback_add", "Enable and save an explicit fallback choice"],
+      ["fallback_edit", "Change a saved fallback choice"],
+      ["fallback_remove", "Disable and remove a saved fallback choice"],
+      ["option_search", "Search a saved answer's offered options"],
+      ["option_choose", "Choose and save a saved answer's offered option"],
+    ],
   ),
 
   ...fields(

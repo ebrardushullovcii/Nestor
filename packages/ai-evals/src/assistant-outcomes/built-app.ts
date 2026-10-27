@@ -50,6 +50,47 @@ export interface BuiltAppEnvironment {
   doctorPassed: true;
 }
 
+/** Reject a broken case graph before a chat request can change the app. */
+export function validateBatches(batches: readonly BuiltAppBatch[]): void {
+  const known = new Map(ACTION_INVENTORY.map((entry) => [entry.id, entry]));
+  if (known.size !== ACTION_INVENTORY.length)
+    throw Error("Duplicate action IDs in the control inventory");
+  const byId = new Map<string, BuiltAppBatch>();
+  for (const batch of batches) {
+    if (byId.has(batch.id)) throw Error(`Duplicate outcome batch: ${batch.id}`);
+    byId.set(batch.id, batch);
+    if (!batch.actions.length) throw Error(`No actions in ${batch.id}`);
+    const actions = new Set<string>();
+    for (const action of batch.actions) {
+      if (known.get(action.actionId)?.coverage.kind !== "tools")
+        throw Error(`Not a mapped app action: ${action.actionId}`);
+      if (actions.has(action.actionId))
+        throw Error(`Duplicate outcome case: ${batch.id}.${action.actionId}`);
+      actions.add(action.actionId);
+    }
+  }
+  const complete = new Set<string>();
+  function visit(batch: BuiltAppBatch, stack: readonly string[]) {
+    if (stack.includes(batch.id))
+      throw Error(`Cyclic prerequisites: ${[...stack, batch.id].join(" -> ")}`);
+    if (complete.has(batch.id)) return;
+    for (const id of batch.requires ?? []) {
+      const dependency = byId.get(id);
+      if (!dependency) throw Error(`Missing prerequisite ${id}`);
+      visit(dependency, [...stack, batch.id]);
+    }
+    complete.add(batch.id);
+  }
+  for (const batch of batches) visit(batch, []);
+  const earlier = new Set<string>();
+  for (const batch of batches) {
+    for (const id of batch.requires ?? [])
+      if (!earlier.has(id))
+        throw Error(`Prerequisite ${id} must run before ${batch.id}`);
+    earlier.add(batch.id);
+  }
+}
+
 /** Earlier receipts in the same conversation cannot credit a later write. */
 export function currentRequestChanges(
   view: Pick<AssistantConversationView, "messages">,
@@ -156,12 +197,7 @@ export async function runBuiltAppOutcomes(options: {
   ): Promise<BuiltAppEvidence>;
 }) {
   const observations: ObservedAction[] = [...(options.prior ?? [])];
-  // Validate all IDs before asking chat to change any app state.
-  const known = new Map(ACTION_INVENTORY.map((entry) => [entry.id, entry]));
-  for (const batch of options.batches)
-    for (const action of batch.actions)
-      if (known.get(action.actionId)?.coverage.kind !== "tools")
-        throw new Error(`Not a mapped app action: ${action.actionId}`);
+  validateBatches(options.batches);
   const persist = async () => {
     const artifact = {
       version: 1,

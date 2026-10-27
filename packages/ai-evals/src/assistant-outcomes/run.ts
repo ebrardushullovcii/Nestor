@@ -11,7 +11,11 @@ import {
   AssistantChangeReceiptSchema,
 } from "@nestor/contracts";
 import { ACTION_INVENTORY } from "./inventory";
-import { runBuiltAppOutcomes, type BuiltAppBatch } from "./built-app";
+import {
+  runBuiltAppOutcomes,
+  validateBatches,
+  type BuiltAppBatch,
+} from "./built-app";
 import { navigationOutcomeCases, shellOutcomeCases } from "./view-cases";
 import {
   profileFieldOutcomeCases,
@@ -32,6 +36,7 @@ import {
 } from "./profile-operation-cases";
 import { answerOutcomeCases } from "./answer-cases";
 import { needsViewOutcomeCases } from "./needs-view-cases";
+import { answerChoiceOutcomeCases } from "./answer-choice-cases";
 
 interface VerifyContext {
   page: Promise<Page>;
@@ -52,7 +57,7 @@ export function allBatches(
   replicaOrigin = "http://127.0.0.1:1",
 ): BuiltAppBatch[] {
   checkPreferenceFixtures();
-  return [
+  const batches = [
     ...navigationOutcomeCases(),
     ...shellOutcomeCases(),
     ...readOutcomeCases(),
@@ -66,8 +71,11 @@ export function allBatches(
     ...applicationViewOutcomeCases(),
     ...trackerOutcomeCases(),
     ...needsViewOutcomeCases(),
+    ...answerChoiceOutcomeCases(),
     ...answerOutcomeCases(),
   ];
+  validateBatches(batches);
+  return batches;
 }
 
 export function selectBatches(
