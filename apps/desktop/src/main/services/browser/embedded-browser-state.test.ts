@@ -840,6 +840,52 @@ test("a fourth waiting form closes the oldest one; opening a form keeps it live"
   expect(await run("search")).toEqual(["second"]);
 });
 
+test("a waiting page that cannot close never makes a more recent one close", async () => {
+  const { browser, state } = makeBrowser();
+  const forms = [
+    ["first", "search"],
+    ["second", "prepared"],
+    ["third", "working"],
+    ["fourth", "parked"],
+  ] as const;
+  for (const [owner, tab] of forms) state.ownedTabs.set(owner, new Set([tab]));
+  const reclaim = vi.fn<(owner: string) => Promise<boolean>>((owner) =>
+    Promise.resolve(owner !== "first"),
+  );
+  browser.setPreparedFormReclaimer(reclaim);
+  for (const [owner] of forms) {
+    browser.markPreparedForm(owner);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  await browser.reduceWaitingFormMemory();
+  expect(reclaim.mock.calls.map(([owner]) => owner)).toEqual(["first"]);
+});
+
+test("the Speed level's limit sets how many waiting pages stay live", async () => {
+  const { browser, state } = makeBrowser();
+  const forms = [
+    ["first", "search"],
+    ["second", "prepared"],
+    ["third", "working"],
+  ] as const;
+  for (const [owner, tab] of forms) state.ownedTabs.set(owner, new Set([tab]));
+  const reclaim = vi.fn<(owner: string) => Promise<boolean>>(() =>
+    Promise.resolve(true),
+  );
+  browser.setPreparedFormReclaimer(reclaim);
+  for (const [owner] of forms) {
+    browser.markPreparedForm(owner);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  expect(reclaim).not.toHaveBeenCalled();
+  browser.setLiveWaitingPageLimit(1);
+  await browser.reduceWaitingFormMemory();
+  expect(reclaim.mock.calls.map(([owner]) => owner)).toEqual([
+    "first",
+    "second",
+  ]);
+});
+
 test("only idle retained pages freeze; active source loading stays awake", async () => {
   const { browser, state, pages } = makeBrowser();
   state.ownedTabs.set("result", new Set(["prepared"]));

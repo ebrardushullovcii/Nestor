@@ -1,12 +1,15 @@
 import type { WaitingFormMemory } from "@nestor/contracts";
 
-// Opening a closed waiting form refills it without sending, so only the most
-// recently prepared or opened forms stay live; the rest close as soon as they
-// settle. A real board's form uses about 200 MiB working set, so three fit
-// the budget. Both are reclamation targets, not admission gates: waiting
-// forms do not consume working slots.
+// Opening a closed waiting page refills it without sending, so only the most
+// recently prepared or opened pages waiting on the person (Ready or Needs
+// you) stay live; the rest close as soon as they settle. The Speed setting
+// sets how many. A real board's form uses about 200 MiB working set, so the
+// budget is that much per live page. Both are reclamation targets, not
+// admission gates: waiting pages do not consume working slots.
 export const MAX_LIVE_WAITING_FORMS = 3;
-export const WAITING_FORM_MEMORY_BUDGET = 600 * 1024 * 1024;
+export const WAITING_FORM_BUDGET_PER_PAGE = 200 * 1024 * 1024;
+export const WAITING_FORM_MEMORY_BUDGET =
+  MAX_LIVE_WAITING_FORMS * WAITING_FORM_BUDGET_PER_PAGE;
 
 export function measureWaitingFormMemory(input: {
   recordedAt: string;
@@ -16,7 +19,9 @@ export function measureWaitingFormMemory(input: {
     backgroundThrottled: boolean;
   }>;
   processes: Array<{ pid: number; memory: { workingSetSize: number } }>;
+  budgetBytes?: number;
 }): WaitingFormMemory {
+  const budgetBytes = input.budgetBytes ?? WAITING_FORM_MEMORY_BUDGET;
   const bytesByPid = new Map(
     input.processes.map(({ pid, memory }) => [
       pid,
@@ -34,10 +39,10 @@ export function measureWaitingFormMemory(input: {
   );
   return {
     recordedAt: input.recordedAt,
-    budgetBytes: WAITING_FORM_MEMORY_BUDGET,
+    budgetBytes,
     totalBytes,
     measurementComplete: tabs.every((tab) => tab.processBytes !== null),
-    overBudget: totalBytes > WAITING_FORM_MEMORY_BUDGET,
+    overBudget: totalBytes > budgetBytes,
     tabs,
   };
 }
