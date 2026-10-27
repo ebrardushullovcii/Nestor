@@ -123,6 +123,18 @@ const cases: Array<{
     expected: "compatible",
   },
   {
+    name: "a published remote region is not narrowed to the model's incomplete country list",
+    location: "Remote - North America - South America - Europe",
+    body: "Remote - North America - South America - Europe",
+    evidence: [
+      "compatible",
+      "Remote - North America - South America - Europe",
+      "broader_remote",
+      "US,CA,BR",
+    ],
+    expected: "compatible",
+  },
+  {
     name: "an unresolved authorization requirement stays review",
     location: "Worldwide",
     body: "Work remotely worldwide. US work authorization required.",

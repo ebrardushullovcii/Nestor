@@ -74,8 +74,7 @@ export function assessFitWorkLocation(
   const broader =
     quoted &&
     geographic &&
-    ((body.includes(quote) && workScope) ||
-      (!countries.size && location.includes(quote)));
+    ((body.includes(quote) && workScope) || location.includes(quote));
   const physical =
     !(
       kind === "broader_remote" &&
@@ -109,12 +108,7 @@ export function assessFitWorkLocation(
         "This role requires moving to its work country; relocation willingness is not confirmed.",
     };
   if (status === "review") return { status, reason };
-  if (
-    kind === "broader_remote" &&
-    broader &&
-    (!foreign || !location.includes(quote))
-  )
-    return { status, reason };
+  if (kind === "broader_remote" && broader) return { status, reason };
   if (kind === "offered_list" && quoted) {
     const offered = fitCountryCodes(inferredCountries);
     const accepted =
