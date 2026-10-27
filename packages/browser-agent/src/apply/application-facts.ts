@@ -19,6 +19,7 @@ import {
   isProfileUrlSource,
   wantsProfileUrl,
 } from "./profile-url";
+import { currentCountryTimezone } from "./current-timezone";
 import type {
   ApplyAnswer,
   ApplyAnswerSources,
@@ -281,6 +282,13 @@ export function storedFacts(
     "your experience",
   );
   add(profile.timeZone, "profile.timeZone", "your time zone");
+  const currentTimezone = currentCountryTimezone(profile);
+  if (currentTimezone)
+    add(
+      currentTimezone.zone,
+      currentTimezone.sourceId,
+      "the timezone of your current country",
+    );
   add(profile.fullName, "profile.fullName", "your name");
   add(profile.firstName, "profile.firstName", "your first name");
   add(profile.middleName, "profile.middleName", "your middle name");

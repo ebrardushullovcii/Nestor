@@ -7,6 +7,7 @@ import process from "node:process";
 const groups = {
   facts: [
     "packages/browser-agent/src/apply/answer-gate-regressions.test.ts",
+    "packages/browser-agent/src/apply/current-timezone.apply-replay.test.ts",
     "packages/browser-agent/src/apply/answer-source-catalog.test.ts",
     "packages/browser-agent/src/apply/classified-answer-check.test.ts",
     "packages/browser-agent/src/apply/written-answer-grounding.apply-replay.test.ts",
