@@ -8,6 +8,145 @@ import {
   createQuestionClassifier,
 } from "./question-classification";
 
+const formQuestions = [
+  ["First Name", "profile.firstName"],
+  ["Last Name", "profile.lastName"],
+  ["Email", "profile.email"],
+  ["Phone — Country*", "profile.phone"],
+  ["Phone", "profile.phone"],
+  ["LinkedIn Profile", "profile.linkedinUrl"],
+  ["What impressed you about Example Workshop?", "profile.summary"],
+  ["How/when did you start coding?", null],
+  [
+    "Do you have 3+ years of software development experience?",
+    "profile.yearsExperience",
+  ],
+  ["What are your salary expectations?", "answerLibrary.salary"],
+  [
+    "What timezone do you plan to work from?",
+    "profile.currentCountry#timezone",
+  ],
+] as const;
+
+function reportFor(prompts: { question: string }[]) {
+  return {
+    content: "",
+    toolCalls: [
+      {
+        id: "report",
+        type: "function" as const,
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({
+            plainIndexes: prompts.map((_, index) => index),
+            flagged: [],
+            tags: prompts.map((prompt, index) => ({
+              index,
+              kind: "other",
+              country: null,
+              sourceId:
+                formQuestions.find(
+                  ([question]) => question === prompt.question,
+                )?.[1] ?? null,
+            })),
+          }),
+        },
+      },
+    ],
+  };
+}
+
+test.each([
+  "empty arguments",
+  "malformed arguments",
+  "timeout",
+  "provider error",
+])(
+  "one failed %s page read recovers the known fields in smaller bounded reads",
+  async (failure) => {
+    const batches: string[][] = [];
+    const client: LLMClient = {
+      chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
+        const prompts = JSON.parse(messages[1].content) as {
+          question: string;
+        }[];
+        batches.push(prompts.map((prompt) => prompt.question));
+        if (batches.length === 1) {
+          if (failure === "timeout" || failure === "provider error")
+            return Promise.reject(new Error(failure));
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "empty",
+                type: "function",
+                function: {
+                  name: "report_question_kinds",
+                  arguments: failure === "empty arguments" ? "" : '{"tags":[',
+                },
+              },
+            ],
+          });
+        }
+        if (prompts.length > 4)
+          return Promise.resolve({ content: "", toolCalls: [] });
+        return Promise.resolve(reportFor(prompts));
+      }),
+    };
+    const result = await classifyApplicationQuestions({
+      client,
+      sources: [],
+      questions: formQuestions.map(([prompt]) => ({
+        prompt,
+        kind: "text",
+        options: [],
+      })),
+    });
+    expect(batches.map((batch) => batch.length)).toEqual([11, 4, 4, 3]);
+    expect(batches.slice(1).flat()).toEqual(
+      formQuestions.map(([prompt]) => prompt),
+    );
+    for (const [prompt, sourceId] of formQuestions) {
+      expect(result.get(prompt)?.readFailed).toBeUndefined();
+      expect(result.get(prompt)?.answerTags?.sourceId).toBe(sourceId);
+    }
+    // A protocol retry does not supply a missing personal story.
+    expect(
+      result.get("How/when did you start coding?")?.answerTags?.sourceId,
+    ).toBeNull();
+    expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+  },
+);
+
+test("one failed smaller read leaves only its questions unread while the other fields retain their sources", async () => {
+  let calls = 0;
+  const client: LLMClient = {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
+      calls += 1;
+      if (calls <= 2) return Promise.resolve({ content: "", toolCalls: [] });
+      return Promise.resolve(
+        reportFor(JSON.parse(messages[1].content) as { question: string }[]),
+      );
+    }),
+  };
+  const result = await classifyApplicationQuestions({
+    client,
+    sources: [],
+    questions: formQuestions.map(([prompt]) => ({
+      prompt,
+      kind: "text",
+      options: [],
+    })),
+  });
+  expect(
+    [...result]
+      .filter(([, reading]) => reading.readFailed)
+      .map(([prompt]) => prompt),
+  ).toEqual(formQuestions.slice(0, 4).map(([prompt]) => prompt));
+  for (const [prompt, sourceId] of formQuestions.slice(4))
+    expect(result.get(prompt)).toMatchObject({ answerTags: { sourceId } });
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+});
+
 function clientReplying(questions: unknown): LLMClient {
   return {
     chatWithTools: vi.fn(() =>
