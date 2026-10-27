@@ -120,7 +120,13 @@ function reader() {
     // A second, different model reading is valid but has no contact source.
     // It must never replace an identical full-form reading from preparation.
     return Promise.resolve(
-      reply(questions, ++calls === 1),
+      reply(
+        questions,
+        ++calls === 1,
+        messages.some((message) =>
+          String(message.content).includes("Write your answer yourself."),
+        ),
+      ),
     );
   });
   return { chatWithTools };
@@ -180,14 +186,14 @@ test("replica Send keeps unchanged Profile contacts and the full form's reading"
   ]);
 });
 
-test("an uncached reinterpretation reproduces the three contact handovers", async () => {
+test("an uncached reading still resolves plain identity; phone needs its classified source", async () => {
   const f = fixture(),
     client = reader();
   await prepare(f, client);
   const uncached = await sendCheck({ ...f, scope: {} }, client);
   expect(uncached.map((check) => check.supported)).toEqual([
-    false,
-    false,
+    true,
+    true,
     false,
     true,
   ]);
@@ -217,12 +223,14 @@ test.each(["profile", "reference", "instructions"] as const)(
     if (change === "instructions")
       instructions += "\nWrite your answer yourself.";
     const checked = await sendCheck(f, client, instructions);
-    expect(checked.slice(0, 3).every((check) => !check.supported)).toBe(true);
+    expect(checked.slice(0, 3).map((check) => check.supported)).toEqual(
+      change === "profile" ? [false, true, false] : [false, false, false],
+    );
     expect(client.chatWithTools).toHaveBeenCalledTimes(2);
   },
 );
 
-test("the same Profile values cannot override a cached null source", async () => {
+test("plain identity resolves a missing source without authorizing unrelated contacts", async () => {
   const f = fixture();
   const client: LLMClient = {
     chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
@@ -234,6 +242,10 @@ test("the same Profile values cannot override a cached null source", async () =>
   };
   await prepare(f, client);
   const checked = await sendCheck(f, client);
-  expect(checked.slice(0, 3).every((check) => !check.supported)).toBe(true);
+  expect(checked.slice(0, 3).map((check) => check.supported)).toEqual([
+    true,
+    true,
+    false,
+  ]);
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });

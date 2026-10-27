@@ -78,6 +78,73 @@ function decide(
   });
 }
 
+test("plain applicant identity binds to its own exact Profile value when the model omits a source", () => {
+  const sources = source();
+  sources.profile.firstName = "Alex";
+  sources.profile.lastName = "Vanguard";
+  sources.profile.email = "alex@example.test";
+  const tags = { kind: "other", country: null, sourceId: null } as const;
+  for (const [label, value, id] of [
+    ["First Name *", "Alex", "profile.firstName"],
+    ["Last Name *", "Vanguard", "profile.lastName"],
+    ["Full name", "Alex Vanguard", "profile.fullName"],
+    ["Email *", "alex@example.test", "profile.email"],
+  ]) {
+    const field = control(label);
+    expect(decide(sources, field, tags, value)).toMatchObject({
+      kind: "literal",
+      source: { id },
+    });
+    expect(decide(sources, field, tags, "Different value").kind).toBe(
+      "needs_you",
+    );
+    expect(decide(sources, field, null, value).kind).toBe("needs_you");
+    expect(
+      classifyAnswerPermission({
+        sources,
+        control: field,
+        controls: [field],
+        tags,
+        answer: value,
+        pageInstructions: "Professional reference",
+      }).kind,
+    ).toBe("needs_you");
+    expect(
+      decide(sources, field, { ...tags, kind: "own_words" }, value).kind,
+    ).toBe("needs_you");
+  }
+});
+
+test("a missing identity source does not fill a reference, qualified question or ambiguous target", () => {
+  const sources = source();
+  const tags = { kind: "other", country: null, sourceId: null } as const;
+  for (const field of [
+    { ...control("Full name"), groupLabel: "Professional reference" },
+    {
+      ...control("Full name"),
+      hint: "The name of your professional reference",
+    },
+    { ...control("Full name"), placeholder: "Emergency contact" },
+    { ...control("Full name"), groupLabel: "Former legal names" },
+    {
+      ...control("Full name"),
+      hint: "Your name before your most recent change",
+    },
+  ])
+    expect(decide(sources, field, tags, "Alex Vanguard").kind).toBe(
+      "needs_you",
+    );
+  const field = control("Full name");
+  expect(
+    decide(sources, field, tags, "Alex Vanguard", [
+      field,
+      { ...field, ref: "c1" },
+    ]).kind,
+  ).toBe("needs_you");
+  sources.profile.fullName = "";
+  expect(decide(sources, field, tags, "Alex Vanguard").kind).toBe("needs_you");
+});
+
 test.each(["profile.githubUrl", "profile.links.code"])(
   "a requested GitHub username uses the selected account's canonical source: %s",
   (sourceId) => {

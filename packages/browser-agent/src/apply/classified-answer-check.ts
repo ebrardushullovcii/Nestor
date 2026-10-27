@@ -111,7 +111,13 @@ export async function checkClassifiedApplicationAnswers(input: {
   const decisions = input.answers.map(
     (answer, index): ClassifiedAnswerDecision => {
       const control = controls[index];
-      if (!control)
+      // A fallback label parsed from an old card is not evidence that this
+      // exact applicant field still exists on the live form (for example,
+      // Name may now belong to a reference section).
+      if (
+        !control ||
+        (input.formControls && !input.formControls.includes(control))
+      )
         return {
           kind: "needs_you",
           reason: "The question is no longer present.",

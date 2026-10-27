@@ -584,6 +584,32 @@ export function classifyAnswerPermission(input: {
       ? priorCompanyHistory(input.control, input.sources)
       : null;
   let source = catalog.find((row) => row.id === tags.sourceId);
+  // Plain applicant identity has an exact field-to-Profile binding. A model
+  // omitting its source must not turn a known name or email into a handover.
+  // Extra instructions, another person, ambiguity and gated kinds still need
+  // their classified source; this never grants permission to invent a value.
+  if (
+    !source &&
+    tags.kind === "other" &&
+    input.control.kind === "text" &&
+    input.control.credentialRole !== "password" &&
+    !input.controls.some((control) => control.credentialRole === "password") &&
+    !input.control.repeatedQuestion &&
+    !input.control.hint?.trim() &&
+    !fieldNamesAnotherPerson({
+      ...input.control,
+      hint: input.pageInstructions,
+    }) &&
+    (!input.control.placeholder.trim() ||
+      normalizeFormQuestionPrompt(input.control.placeholder) ===
+        normalizeFormQuestionPrompt(input.control.label))
+  )
+    source = catalog.find(
+      (row) =>
+        /^profile\.(?:fullName|firstName|middleName|lastName|email)$/u.test(
+          row.id,
+        ) && knownLiteralField(row, input.control),
+    );
   // A known legal question can be answered directly from an explicit,
   // unconditional profile fact. Neither a model suggestion nor residence
   // supplies this fact. This also survives old prompt-only saved keys.

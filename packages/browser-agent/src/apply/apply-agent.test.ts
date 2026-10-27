@@ -6162,6 +6162,85 @@ test("renumbered handles keep current answers and two equal-worded questions dis
   ]);
 });
 
+test.each(["confirm_before_submit", "autonomous_submit"] as const)(
+  "the Greenhouse replica's plain identity fields fill from Profile in %s even when the model omits their sources",
+  async (mode) => {
+    const identity = [
+      ["First Name *", "Robin", "profile.firstName"],
+      ["Last Name *", "Ashford", "profile.lastName"],
+      ["Email *", "robin@example.test", "profile.email"],
+    ] as const;
+    const source = page({
+      // Same labels, input types and empty groups as /greenhouse-shape/apply/1.
+      controls: identity.map(([label], index) => ({
+        ...nameControl(),
+        index,
+        label,
+        inputType: index === 2 ? "email" : "text",
+        value: "",
+      })),
+    });
+    const input = config(source, {
+      modelQuestionClassification: true,
+      intermediateWritesAuthorized: false,
+    });
+    input.authority.mode = mode;
+    input.authority.submitAuthorized = mode === "autonomous_submit";
+    input.authority.allowedOrigins = ["https://apply.example.test"];
+    input.sources.profile.email = identity[2][1];
+    const finalClick = vi.spyOn(input.hands, "clickAction");
+    const model = repeatingModel("fill_fields", {
+      fields: identity.map(([, text, storedFactId], index) => ({
+        tool: "type",
+        ref: `c${index}`,
+        text,
+        storedFactId,
+      })),
+      finishWhenReady: true,
+    });
+    const client: LLMClient = {
+      chatWithTools: (messages, tools, options) =>
+        tools[0]?.function.name === "report_question_kinds"
+          ? Promise.resolve({
+              toolCalls: [
+                {
+                  id: "reading",
+                  type: "function",
+                  function: {
+                    name: "report_question_kinds",
+                    arguments: JSON.stringify({
+                      plainIndexes: [0, 1, 2],
+                      flagged: [],
+                      tags: identity.map((_, index) => ({
+                        index,
+                        kind: "other",
+                        country: null,
+                        sourceId: null,
+                      })),
+                    }),
+                  },
+                },
+              ],
+            })
+          : model.chatWithTools(messages, tools, options),
+    };
+    const calls = vi.spyOn(client, "chatWithTools");
+    const result = await runApplyAgent(input, client);
+    expect(source.controls.map((control) => control.value)).toEqual(
+      identity.map(([, value]) => value),
+    );
+    expect(result.filled.map((field) => field.answer.sourceId)).toEqual(
+      identity.map(([, , sourceId]) => sourceId),
+    );
+    expect(result.pauses).toEqual([]);
+    expect(result.outcome).toBe(
+      mode === "autonomous_submit" ? "ready_to_send" : "awaiting_your_review",
+    );
+    expect(finalClick).not.toHaveBeenCalled();
+    expect(calls).toHaveBeenCalledTimes(2); // One page read and one form turn.
+  },
+);
+
 test("classification settles before starting a sourced writing check and before any write", async () => {
   const source = page({
     controls: [{ ...nameControl(), label: "Why this role?", value: "" }],
