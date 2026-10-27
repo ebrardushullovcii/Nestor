@@ -695,6 +695,67 @@ describe("reading the choices of lists the page draws itself", () => {
     await page.close();
   });
 
+  test("an option-button press never touches the form's own Submit", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`
+        <form onsubmit="event.preventDefault(); window.sent = true">
+          <label class="_required_x question-title">Are you in an European time zone?</label>
+          <div><button aria-pressed="false" data-option="yes">Yes</button>
+            <button aria-pressed="false" data-option="no">No</button></div>
+          <button>Submit Application</button>
+        </form>
+        <script>
+          for (const option of document.querySelectorAll("[aria-pressed]"))
+            option.addEventListener("click", () => option.setAttribute("aria-pressed", "true"));
+        </script>
+      `);
+      const mechanics = createPlaywrightApplyPageMechanics(page);
+      const { actions } = await readRawApplyPage(page);
+      const ref = (label: string) => {
+        const action = actions.find((entry) => entry.label === label)!;
+        return action.ref ?? `a${action.index}`;
+      };
+      // A ref that went stale and now names Submit is refused untouched.
+      expect(
+        await mechanics.setToggle(ref("Submit Application"), true),
+      ).toMatchObject({ ok: false });
+      expect(
+        await page
+          .locator("button", { hasText: "Submit" })
+          .getAttribute("type"),
+      ).toBeNull();
+      expect(await mechanics.setToggle(ref("Yes"), true)).toMatchObject({
+        ok: true,
+      });
+      expect(await page.evaluate("window.sent")).toBeUndefined();
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a bare picker is required when only its question's title says so", async () => {
+    const page = await browser.newPage();
+    try {
+      // Ashby's location field: no required attribute, no id for its label.
+      await page.setContent(`
+        <div class="field-entry"><label class="_required_f7cvd_91 ashby-application-form-question-title" for="_systemfield_location">What country are you based in?</label>
+          <div><input role="combobox" aria-autocomplete="list" placeholder="Start typing..."></div></div>
+        <div class="field-entry"><label class="ashby-application-form-question-title" for="x">Twitter/X</label>
+          <div><input id="x" type="text"></div></div>
+        <div class="field-entry"><label>Pronouns *</label><div><input type="text"></div></div>
+      `);
+      const { controls } = await readRawApplyPage(page);
+      expect(controls.map((control) => control.required)).toEqual([
+        true,
+        false,
+        true,
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
   test("native activation cannot accept a disabled or rejected toggle", async () => {
     const page = await browser.newPage();
     try {
