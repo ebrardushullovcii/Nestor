@@ -16,6 +16,7 @@ import {
   getPrepareOnlyRequestPermit,
   openPrepareOnlyAttachmentUploadWindow,
   openPrepareOnlyIntermediateMutationWindow,
+  readPrepareOnlyMutationGuardInPage,
   registerPrepareOnlyPreparedValue,
 } from "./playwright-application-flow";
 import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
@@ -517,4 +518,25 @@ describe("Fill in for me sends nothing but the selected resume", () => {
     expect(await page.isChecked("#check")).toBe(true);
     expect(site.hits.map((hit) => hit.path)).not.toContain("/api/save");
   });
+});
+
+test("every request the page guard refuses is on record, with what kind of body it had", async () => {
+  const site = await startSite();
+  site.html("/form", '<input type="file" name="resume">');
+  const page = await fillPage(site, "/form");
+  // No upload window is open: the file post is refused in the page.
+  expect(await postResume(page, "/upload-ok")).toBe(false);
+  const { refusals, blockedAttempts } = await page.evaluate(
+    readPrepareOnlyMutationGuardInPage,
+  );
+  expect(refusals).toEqual([
+    expect.objectContaining({
+      kind: "fetch",
+      method: "POST",
+      url: `${site.baseUrl}/upload-ok`,
+      body: "form_data",
+    }),
+  ]);
+  // Only the record grows: what stops a run is unchanged.
+  expect(blockedAttempts).toEqual([]);
 });

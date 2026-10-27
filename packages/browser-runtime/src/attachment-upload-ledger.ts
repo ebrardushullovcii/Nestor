@@ -425,8 +425,13 @@ export function withAttachmentUploadOutcomes(
   raw: RawApplyPage,
 ): RawApplyPage {
   if (!ledgers.has(page)) return raw;
+  const uploads = [...(given.get(page)?.values() ?? [])].flatMap((file) => {
+    const network = attachmentUploadOutcome(page, file);
+    return network ? [{ fileName: file.name, network }] : [];
+  });
   return {
     ...raw,
+    ...(uploads.length ? { uploads } : {}),
     controls: raw.controls.map((control) => {
       if (!control.upload) return control;
       // The file Nestor gave this control, with its exact identity; an

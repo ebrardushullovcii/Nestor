@@ -977,6 +977,7 @@ async function runMeasuredApplyAgent(
         pendingQuestions.delete(key);
     }
     readyToSend = null;
+    const fileFieldsSeen = new Set<string>();
     for (const control of next.controls) {
       if (control.disabled || (!control.visible && control.kind !== "file"))
         continue;
@@ -1022,8 +1023,10 @@ async function runMeasuredApplyAgent(
       if (control.kind === "file") {
         // Without the step label: a field that stays in the page while later
         // steps show is the same field on every step.
+        const ledgerKey = `${next.url?.split(/[?#]/u)[0] ?? ""}|${questionKey}|${label}`;
+        fileFieldsSeen.add(ledgerKey);
         recordUpload(
-          `${next.url?.split(/[?#]/u)[0] ?? ""}|${questionKey}|${label}`,
+          ledgerKey,
           control,
           next,
           uploadProblems.find((problem) => problem.control.ref === control.ref)
@@ -1114,6 +1117,38 @@ async function runMeasuredApplyAgent(
       }
       if (holdsAnswer(control) && !control.invalid)
         pendingQuestions.delete(pendingQuestionKey(control));
+    }
+    // Some widgets replace the file field with the file's name once the
+    // upload lands (Greenhouse). The field is gone; the server's word on that
+    // same file, which the page still reports, settles it.
+    for (const [key, entry] of uploadLedger) {
+      if (fileFieldsSeen.has(key) || !entry.fileName) continue;
+      const word = next.uploads?.find(
+        (upload) =>
+          upload.fileName.toLowerCase() === entry.fileName.toLowerCase(),
+      )?.network;
+      if (!word) continue;
+      const state = word === "pending" ? "uploading" : word;
+      if (state !== entry.state)
+        uploadLedger.set(key, { ...entry, state, since: now().getTime() });
+      if (state !== "accepted") continue;
+      const recorded = [...attachments]
+        .reverse()
+        .find(
+          (attached) =>
+            attached.controlLabel === entry.label &&
+            attached.fileName === entry.fileName,
+        );
+      observedAttachments.set(key, {
+        ...(recorded ?? {
+          documentId: `observed.${entry.label}`,
+          fileName: entry.fileName,
+          label: entry.label,
+          controlLabel: entry.label,
+          at: next.observedAt,
+        }),
+        fieldKey: key,
+      });
     }
     // However many files the site refused, on this step or an earlier one,
     // the person gets one item for this application. It goes only once each

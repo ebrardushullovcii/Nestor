@@ -388,6 +388,7 @@ export function buildApplyFormObservation(
       title: tab.title,
     })),
     loading: raw.loading,
+    ...(raw.uploads ? { uploads: raw.uploads } : {}),
     validationErrors: raw.validationErrors,
     blocker: detectApplyBlocker({
       bodyText: raw.bodyText,

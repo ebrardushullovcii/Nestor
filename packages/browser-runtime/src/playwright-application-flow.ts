@@ -232,7 +232,7 @@ async function noteUploadLeg(
   page: Page,
   grant: AttachmentUploadWindow,
   request: Request,
-  answer: APIResponse,
+  answer: { status(): number; text(): Promise<string> },
 ): Promise<void> {
   const ok = answer.status() >= 200 && answer.status() < 300;
   const presign = getPrepareOnlyRequestPermit(request)?.uploadLeg === "presign";
@@ -277,6 +277,20 @@ async function shareUploadGrant(
 export interface PrepareOnlyGuardSnapshot {
   installed: boolean;
   blockedAttempts: PrepareOnlyBlockedAttempt[];
+  /**
+   * Every request the in-page guard refused, with what it lacked. For the
+   * record only: `blockedAttempts` alone decides whether a run stops.
+   */
+  refusals?: PrepareOnlyRefusal[];
+}
+
+export interface PrepareOnlyRefusal {
+  kind: "fetch" | "xhr" | "send_beacon";
+  method: string;
+  url: string | null;
+  /** What the body was: a string, form data, a file or other opaque body. */
+  body: "none" | "text" | "form_data" | "opaque";
+  at: string;
 }
 
 const prepareOnlyNetworkGuardStates = new WeakMap<
@@ -490,6 +504,14 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
   const { intermediateMutationsAuthorized } = guardInput;
   interface InternalGuardState extends PrepareOnlyGuardSnapshot {
     preparedValues: string[];
+    refusals: PrepareOnlyRefusal[];
+    /**
+     * True while one guard layer hands a request it allowed to the next
+     * function. A page that wraps fetch after the guard (Ashby's monitoring
+     * does) gets a second guard layer on the next install; the inner one must
+     * not judge, and spend allowances on, what the outer one already let out.
+     */
+    forwarding: boolean;
     intermediateMutationsAuthorized: boolean;
     intermediateMutationWindow: IntermediateMutationWindowSnapshot | null;
     attachmentUploadWindow: AttachmentUploadWindow | null;
@@ -523,6 +545,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
   const state: InternalGuardState = existingState ?? {
     installed: true,
     blockedAttempts: [],
+    refusals: [],
+    forwarding: false,
     preparedValues: [],
     intermediateMutationsAuthorized,
     intermediateMutationWindow: null,
@@ -545,6 +569,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
   };
   state.intermediateMutationsAuthorized = intermediateMutationsAuthorized;
   state.preparedValues ??= [];
+  state.refusals ??= [];
+  state.forwarding ??= false;
   state.finalActionAllowed ??= false;
   state.authorizedFormActionWindow ??= null;
   pageWindow["__nestorPrepareOnlyMutationGuardV1"] = state;
@@ -563,6 +589,39 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       return null;
     }
     return null;
+  };
+  const recordRefusal = (
+    kind: PrepareOnlyRefusal["kind"],
+    method: string,
+    url: string | null,
+    body: unknown,
+  ): void => {
+    state.refusals.push({
+      kind,
+      method: normalizeMethod(method),
+      url,
+      body:
+        body == null
+          ? "none"
+          : typeof body === "string" ||
+              (typeof URLSearchParams !== "undefined" &&
+                body instanceof URLSearchParams)
+            ? "text"
+            : typeof FormData !== "undefined" && body instanceof FormData
+              ? "form_data"
+              : "opaque",
+      at: new Date().toISOString(),
+    });
+    state.refusals = state.refusals.slice(-32);
+  };
+  /** Hands an allowed request on; inner guard layers let it pass. */
+  const forward = <T>(send: () => T): T => {
+    state.forwarding = true;
+    try {
+      return send();
+    } finally {
+      state.forwarding = false;
+    }
   };
   const recordBlockedAttempt = (
     kind: PrepareOnlyBlockedAttempt["kind"],
@@ -1117,6 +1176,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
   ) {
     const originalSendBeacon = navigator.sendBeacon.bind(navigator);
     const guardedSendBeacon: typeof navigator.sendBeacon = (url, data) => {
+      if (state.forwarding) return originalSendBeacon(url, data);
       const beaconUrl = normalizeUrl(url);
       const beaconText =
         typeof data === "string"
@@ -1133,8 +1193,9 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         (typeof FormData !== "undefined" && data instanceof FormData) ||
         (typeof File !== "undefined" && data instanceof File);
       if (isPageOwnedRead("POST", beaconUrl, beaconText, bodyIsFormData)) {
-        return originalSendBeacon(url, data);
+        return forward(() => originalSendBeacon(url, data));
       }
+      recordRefusal("send_beacon", "POST", beaconUrl, data);
       if (carriesPrepared === true) {
         recordBlockedAttempt("send_beacon", "POST", beaconUrl, true);
       }
@@ -1154,6 +1215,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
   ) {
     const originalFetch = window.fetch.bind(window);
     const guardedFetch: typeof window.fetch = (resource, init) => {
+      if (state.forwarding) return originalFetch(resource, init);
       const method = normalizeMethod(
         init?.method ??
           (typeof Request !== "undefined" && resource instanceof Request
@@ -1187,6 +1249,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         const carriesPrepared = bodyOpaque
           ? undefined
           : requestCarriesPreparedValue(url, bodyText);
+        recordRefusal("fetch", method, url, init?.body);
         if (carriesPrepared === true) {
           recordBlockedAttempt("fetch", method, url, true);
         }
@@ -1197,7 +1260,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
           ),
         );
       }
-      return originalFetch(resource, init);
+      return forward(() => originalFetch(resource, init));
     };
     window.fetch = guardedFetch;
     state.fetchWrapper = guardedFetch;
@@ -1236,6 +1299,10 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         this: XMLHttpRequest,
         body?: Document | XMLHttpRequestBodyInit | null,
       ): void {
+        if (state.forwarding) {
+          originalSend.call(this, body ?? null);
+          return;
+        }
         const request = state.xhrMethods.get(this) ?? {
           method: "GET",
           url: null,
@@ -1270,6 +1337,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
           const carriesPrepared = bodyOpaque
             ? undefined
             : requestCarriesPreparedValue(request.url, bodyText);
+          recordRefusal("xhr", request.method, request.url, body);
           if (carriesPrepared === true) {
             recordBlockedAttempt("xhr", request.method, request.url, true);
           }
@@ -1278,7 +1346,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
             "AbortError",
           );
         }
-        originalSend.call(this, body ?? null);
+        forward(() => originalSend.call(this, body ?? null));
       };
     XMLHttpRequest.prototype.open = guardedOpen;
     XMLHttpRequest.prototype.send = guardedSend;
@@ -1458,6 +1526,7 @@ export function readPrepareOnlyMutationGuardInPage(): PrepareOnlyGuardSnapshot {
   return {
     installed: state?.installed === true,
     blockedAttempts: [...(state?.blockedAttempts ?? [])],
+    refusals: [...(state?.refusals ?? [])],
   };
 }
 
@@ -1785,6 +1854,10 @@ export async function ensurePrepareOnlyMutationGuard(
       // click, except the selected resume below. Saves are allowed only
       // under Send for me's own authority.
       const strictFill = !networkGuardState!.intermediateMutationsAuthorized;
+      if (method === "OPTIONS" && !request.postDataBuffer()) {
+        await route.continue();
+        return;
+      }
       if (
         !strictFill &&
         ((PREPARE_ONLY_SAFE_METHODS.has(method) &&
@@ -1919,6 +1992,27 @@ export async function ensurePrepareOnlyMutationGuard(
           );
         } catch {
           // A listener's failure never changes what the fence lets out.
+        }
+        // A file sent with XMLHttpRequest goes out from the browser itself:
+        // the page watches its own upload progress (Greenhouse shows the file
+        // only once that reaches 100%), and an answer fulfilled from here
+        // carries no progress, so the page waited forever. The fence has
+        // already judged this exact request; storage POST policies cannot
+        // ask for a redirect (see storageMetadata).
+        // (Under Fill without saves every document is fetched here too,
+        // so the page cannot reach loopback hosts itself; it keeps the
+        // fulfilled answer.)
+        if (!strictFill && resourceType === "xhr" && attachment.containsFile) {
+          void request
+            .response()
+            .then((response) =>
+              response
+                ? noteUploadLeg(page, grant, request, response)
+                : undefined,
+            )
+            .catch(() => undefined);
+          await route.continue();
+          return;
         }
         let answer: APIResponse | null = null;
         try {
