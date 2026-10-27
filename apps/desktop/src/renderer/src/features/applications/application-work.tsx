@@ -1,5 +1,5 @@
 import type { ApplicationDetails } from "@nestor/contracts";
-import { ExternalLink, Square } from "lucide-react";
+import { ExternalLink, RotateCcw, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@renderer/components/ui/button";
@@ -58,16 +58,54 @@ export function ApplicationWork(props: { jobId: number }) {
   );
 }
 
-/** Open the page Apply prepared, or stop Apply before it sends. */
+/**
+ * Open the page Apply prepared, stop Apply before it sends, or try a run
+ * that failed before sending again.
+ */
 function ApplyActions(props: { details: ApplicationDetails }) {
   const { showToast } = useToast();
-  const [busy, setBusy] = useState<"open" | "stop" | null>(null);
-  const { application } = props.details;
+  const [busy, setBusy] = useState<"open" | "stop" | "retry" | null>(null);
+  const { application, receipt } = props.details;
   const canOpen = ["ready", "needs_you"].includes(application.state);
   const canStop = ["queued", "running", "needs_you", "ready"].includes(
     application.state,
   );
-  if (!canOpen && !canStop) return null;
+  // Only a run that never reached a send: anything the guarded send tried
+  // keeps its receipt, and trying again could send it twice.
+  const canRetry =
+    application.state === "failed" &&
+    receipt === null &&
+    application.submittedAt === null;
+  if (!canOpen && !canStop && !canRetry) return null;
+
+  const retry = async () => {
+    setBusy("retry");
+    try {
+      const result = await window.nestor.jobFinder.applyJobs({
+        selection: { ids: [application.jobId] },
+      });
+      showToast(
+        result.queued > 0
+          ? {
+              title: "Trying again",
+              description:
+                "Apply fills the form in again with your saved answers.",
+            }
+          : {
+              title: "It couldn't start again",
+              description:
+                result.notApproved > 0
+                  ? "This job no longer has an approved resume. Approve one, then apply."
+                  : "It has already moved on.",
+              tone: "warning",
+            },
+      );
+    } catch (error) {
+      showToast({ title: describeError(error), tone: "warning" });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const act = async (kind: "open" | "stop") => {
     setBusy(kind);
@@ -111,6 +149,16 @@ function ApplyActions(props: { details: ApplicationDetails }) {
 
   return (
     <div className="flex flex-wrap gap-2">
+      {canRetry ? (
+        <Button
+          onClick={() => void retry()}
+          pending={busy === "retry"}
+          size="toolbar"
+        >
+          <RotateCcw aria-hidden />
+          Try again
+        </Button>
+      ) : null}
       {canOpen ? (
         <Button
           onClick={() => void act("open")}

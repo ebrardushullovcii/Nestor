@@ -67,7 +67,7 @@ export const WORK_HINT: Record<ApplicationWorkState, string> = {
     "Your saved rule skipped this application. You can still open the job and apply by hand.",
   blocked:
     "The site blocked this browser. Open the job in your browser to continue by hand.",
-  failed: "Apply could not send it.",
+  failed: "Apply couldn’t finish this application. Nothing was sent.",
   uncertain: "Apply could not tell whether it went through. Check the site.",
 };
 
