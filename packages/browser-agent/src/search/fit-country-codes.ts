@@ -9,9 +9,13 @@ const normalized = (value: string) =>
 const known = new Set(ISO_COUNTRY_CODES);
 const labels = new Map<string, string>();
 const loaded = new Set<string>();
+const englishNames = new Intl.DisplayNames(["en"], { type: "region" });
 function load(locale: string) {
   if (loaded.has(locale)) return;
-  const names = new Intl.DisplayNames([locale], { type: "region" });
+  const names =
+    locale === "en"
+      ? englishNames
+      : new Intl.DisplayNames([locale], { type: "region" });
   for (const code of ISO_COUNTRY_CODES) {
     labels.set(normalized(code), code);
     const name = names.of(code);
@@ -57,6 +61,5 @@ export function fitCountryCodes(value: string): Set<string> {
 }
 
 export function fitCountryNames(codes: ReadonlySet<string>): string[] {
-  const names = new Intl.DisplayNames(["en"], { type: "region" });
-  return [...codes].flatMap((code) => [code, names.of(code) ?? code]);
+  return [...codes].flatMap((code) => [code, englishNames.of(code) ?? code]);
 }
