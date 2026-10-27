@@ -8330,23 +8330,108 @@ describe("a run never ends waiting on the person with nothing to answer", () => 
     expect(result.outcome).toBe("prepared");
   });
 
-  test("in Send for me, a finish that names nothing on a complete form is completed: the form goes out", async () => {
-    // Polar: the model finished a complete form with needsPerson and a
-    // summary that names no question. Asked once to name it, it names
-    // nothing again.
+  const polar =
+    "Product Engineering application is fully filled — Full name Robin Ashford — please review before submitting.";
+  const optionalField = (index: number, label: string): RawApplyControl => ({
+    ...nameControl(),
+    index,
+    id: label.toLowerCase(),
+    name: label.toLowerCase(),
+    label,
+    required: false,
+    value: "",
+  });
+
+  test("Polar in Send for me: asked once, the model says the form is complete, and it goes out", async () => {
     const result = await runApplyAgent(
       config(page({ controls: [nameControl()] }), sendForMe),
-      repeatingModel("finish", {
-        reason:
-          "Product Engineering application is fully filled — Full name Robin Ashford — please review before submitting.",
-        needsPerson: true,
-      }),
+      scriptedModel([
+        { name: "finish", args: { reason: polar, needsPerson: true } },
+        { name: "finish", args: { reason: polar, needsPerson: false } },
+      ]),
     );
     expect(result.pauses).toEqual([]);
     expect(result.outcome).toBe("ready_to_send");
     expect(result.readyToSend).toMatchObject({
       actionLabel: "Submit application",
     });
+  });
+
+  test.each([
+    polar,
+    "The person's relocation terms aren't in their profile. Please review before submitting.",
+    "Before sending, can you confirm you agree to relocate to Berlin?",
+    "The site asks the person to sign in before the form can be sent.",
+    "The site sent a verification code to the person's phone; they have to enter it.",
+    "Please verify you are human before submitting.",
+  ])(
+    "in Send for me, needsPerson that still names nothing after the nudge is never sent: %s",
+    async (reason) => {
+      const result = await runApplyAgent(
+        config(page({ controls: [nameControl()] }), sendForMe),
+        repeatingModel("finish", { reason, needsPerson: true }),
+      );
+      expect(result.outcome).toBe("paused");
+      expect(result.readyToSend).toBeNull();
+    },
+  );
+
+  test.each([
+    ["Can you confirm you agree to relocate to Berlin?", "Location"],
+    ["Enter the verification code sent to your phone.", "Phone"],
+  ])(
+    "an item that only contains an optional field's question is still handed over: %s",
+    async (item, label) => {
+      const result = await runApplyAgent(
+        config(
+          page({ controls: [nameControl(), optionalField(1, label)] }),
+          sendForMe,
+        ),
+        repeatingModel("finish", {
+          reason: "One thing needs the person.",
+          needsPerson: true,
+          forPerson: [item],
+        }),
+      );
+      expect(result.outcome).toBe("paused");
+      expect(result.readyToSend).toBeNull();
+      expect(handedOver(result)).toEqual([item]);
+    },
+  );
+
+  test("a solved security check drops only itself: the other item still goes to the person", async () => {
+    const item = "Can you confirm you agree to relocate to Berlin?";
+    const result = await runApplyAgent(
+      config(
+        page({
+          bodyText: "Apply for the role. I am not a robot. Local fake CAPTCHA.",
+          controls: [
+            nameControl(),
+            {
+              ...nameControl(),
+              index: 1,
+              id: "human",
+              name: "human",
+              inputType: "checkbox",
+              role: "checkbox",
+              label: "I am not a robot",
+              required: false,
+              checked: true,
+              value: "yes",
+            },
+          ],
+        }),
+        sendForMe,
+      ),
+      repeatingModel("finish", {
+        reason: "Tick the CAPTCHA and confirm relocation.",
+        needsPerson: true,
+        forPerson: ["Tick the 'I am not a robot' CAPTCHA.", item],
+      }),
+    );
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(handedOver(result)).toEqual([item]);
   });
 
   test.each([

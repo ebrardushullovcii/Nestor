@@ -16,7 +16,7 @@ import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions
 export function createApplySystemPrompt(config: ApplyAgentConfig): string {
   const modeSentence =
     config.authority.mode === "autonomous_submit"
-      ? "When the form is complete, say so with submit_application; Job Finder checks everything again and sends it."
+      ? "When the form is complete, say so with submit_application; Job Finder checks everything again and sends it. The person chose to have it sent: never ask them to look over a complete form, and finish it with needsPerson false."
       : config.authority.mode === "confirm_before_submit"
         ? "Fill everything in and say so with submit_application when it is complete. You do not send it — the person reads it and presses send."
         : "Fill everything in and stop. This application is set to fill in only.";

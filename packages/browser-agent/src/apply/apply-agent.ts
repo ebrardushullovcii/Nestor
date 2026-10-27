@@ -915,6 +915,22 @@ async function runMeasuredApplyAgent(
           : at,
     });
   };
+  // Every visible security check on the page is ticked or answered.
+  const securityChallengeSolved = (
+    observation: ApplyFormObservation,
+  ): boolean => {
+    const challenges = observation.controls.filter(
+      (control) => control.visible && isSecurityChallengeControl(control),
+    );
+    return (
+      challenges.length > 0 &&
+      challenges.every(
+        (control) =>
+          control.checked ||
+          (control.answered && control.value.trim().length > 0),
+      )
+    );
+  };
   const uploadsStillUploading = () =>
     [...uploadLedger.values()].some((entry) => entry.state === "uploading");
 
@@ -1662,7 +1678,10 @@ async function runMeasuredApplyAgent(
           pauses.length === 0 &&
           !deferredPress &&
           !observation.blocker &&
-          !reportedSecurityChallenge(outcome.reason)
+          !(
+            reportedSecurityChallenge(outcome.reason) &&
+            !securityChallengeSolved(observation)
+          )
         ) {
           forPersonNudged = true;
           return {
@@ -1953,27 +1972,19 @@ async function runMeasuredApplyAgent(
         };
         // A challenge the person already solved on this page (its box is
         // ticked) is not waiting on them, whatever the finish text says.
-        const challengeControls = observation.controls.filter(
-          (control) => control.visible && isSecurityChallengeControl(control),
-        );
-        const challengeAlreadySolved =
-          challengeControls.length > 0 &&
-          challengeControls.every(
-            (control) =>
-              control.checked ||
-              (control.answered && control.value.trim().length > 0),
-          );
+        const challengeAlreadySolved = securityChallengeSolved(observation);
         const challengeInReason = reportedSecurityChallenge(outcome.reason);
-        if (
-          challengeAlreadySolved &&
-          observation.blocker === null &&
-          /captcha|not a robot|verify you are (?:a )?human|security check/iu.test(
-            outcome.reason,
-          )
-        ) {
-          // The model is pointing at a check the person already solved, and
-          // nothing else on the page is waiting on them.
-          finish.needsPerson = false;
+        const challengeWords =
+          /captcha|not a robot|verify you are (?:a )?human|security check/iu;
+        if (challengeAlreadySolved && observation.blocker === null) {
+          // The model is pointing at a check the person already solved: only
+          // that check is dropped, and anything else it names still goes to
+          // the person.
+          if (forPerson.length) {
+            forPerson = forPerson.filter((item) => !challengeWords.test(item));
+            finish.needsPerson = forPerson.length > 0;
+          } else if (challengeWords.test(outcome.reason))
+            finish.needsPerson = false;
         }
         const reportedChallenge = challengeAlreadySolved
           ? null
@@ -3617,12 +3628,12 @@ async function runMeasuredApplyAgent(
   }
   /**
    * What a needs-person finish hands over: the page's own blocker, else
-   * each item it names for the person. An item naming unanswered questions
-   * on the page hands those over (none when they are all optional, and
-   * those stay empty); any other item is a question of its own. A finish
-   * that names nothing on a complete, ready form is just completed; on any
-   * other form its reason is the one item. Never a "needs you" with
-   * nothing to do.
+   * every item it names for the person. An item whose whole text is an
+   * unanswered field's question hands over that field; an optional one stays
+   * empty, as optional fields should. Any other item is a question of its
+   * own. A finish that names nothing hands over the required questions its
+   * reason names, else what it quotes, else the reason itself: needsPerson
+   * never turns into a send.
    */
   const needsPersonHandover = (
     said: string,
@@ -3642,27 +3653,20 @@ async function runMeasuredApplyAgent(
         .replace(/[^\p{L}\p{N}]+/gu, " ")
         .trim();
     const controls = page?.controls ?? [];
-    const named = (text: string) => {
-      const wanted = words(text);
-      return controls.filter((control) => {
-        const prompt = words(questionPrompt(control));
-        return (
-          prompt.length > 3 &&
-          wanted.includes(prompt) &&
-          control.visible &&
-          !control.disabled &&
-          !holdsAnswer(control) &&
-          !(
-            control.choiceGroupKey &&
-            controls.some(
-              (sibling) =>
-                sibling.choiceGroupKey === control.choiceGroupKey &&
-                sibling.checked,
-            )
+    const open = controls.filter(
+      (control) =>
+        control.visible &&
+        !control.disabled &&
+        !holdsAnswer(control) &&
+        !(
+          control.choiceGroupKey &&
+          controls.some(
+            (sibling) =>
+              sibling.choiceGroupKey === control.choiceGroupKey &&
+              sibling.checked,
           )
-        );
-      });
-    };
+        ),
+    );
     const askOnPage = (control: (typeof controls)[number]) =>
       pendingQuestions.set(
         pendingQuestionKey(control),
@@ -3690,25 +3694,23 @@ async function runMeasuredApplyAgent(
       });
     if (items.length) {
       for (const item of items) {
-        const onPage = named(item);
-        if (!onPage.length) askText(item);
-        for (const control of onPage) if (control.required) askOnPage(control);
+        // Only the field's whole question: "relocation" is not "Location".
+        const field = open.filter(
+          (control) => words(questionPrompt(control)) === words(item),
+        );
+        if (!field.length) askText(item);
+        for (const control of field) if (control.required) askOnPage(control);
       }
       return collectedQuestionsPause();
     }
-    if (
-      page &&
-      (readyToSend ||
-        (!unresolvedRequiredControls(page).length &&
-          checkFormReadiness(page, uploadOptions).ok))
-    )
-      return null;
-    const onPage = named(said);
-    if (onPage.length) {
-      const required = onPage.filter((control) => control.required);
-      for (const control of required) askOnPage(control);
-      return required.length ? collectedQuestionsPause() : null;
-    }
+    const required = open.filter((control) => {
+      const prompt = words(questionPrompt(control));
+      return (
+        control.required && prompt.length > 3 && words(said).includes(prompt)
+      );
+    });
+    for (const control of required) askOnPage(control);
+    if (required.length) return collectedQuestionsPause();
     // Nothing on the page matches: hand over what the reason quotes (an
     // apostrophe is not a quote), else the reason itself.
     const quoted = [...said.matchAll(/["‘“]([^"’”]{6,200})["’”]/gu)].map(
@@ -3774,12 +3776,12 @@ async function runMeasuredApplyAgent(
     outcome = "stuck";
     reason = `Job Finder stopped on ${config.siteLabel} because it got stuck: ${loop.finish.reason.replace(/\.?$/u, ".")}`;
   } else if (loop.ending === "finished") {
-    // A needs-person finish lands here when its questions are all optional
-    // (those stay empty, as optional fields should) or when it names
-    // nothing for the person on a form that reads complete.
+    // A needs-person finish lands here only when every item it named is an
+    // optional field's whole question: those stay empty, as optional fields
+    // should.
     if (loop.finish?.needsPerson)
       note(
-        `Nothing to hand over; the form reads complete: ${loop.finish.reason.replace(/\.?$/u, ".")}`,
+        `Left optional questions empty: ${loop.finish.reason.replace(/\.?$/u, ".")}`,
       );
     outcome =
       readyToSend && config.authority.mode === "autonomous_submit"
