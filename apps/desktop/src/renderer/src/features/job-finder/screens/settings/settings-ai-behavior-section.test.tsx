@@ -84,11 +84,20 @@ describe("SettingsAiBehaviorSection", () => {
       screen.queryByRole("radiogroup", { name: "How picky a search is" }),
     ).toBeNull();
     expect(screen.queryByTestId("settings-ai-applying")).toBeNull();
+    // When a resume gets written lives in Resume look.
+    expect(
+      screen.queryByRole("switch", { name: "Write resumes when I shortlist" }),
+    ).toBeNull();
 
     const checked = (name: RegExp) =>
       screen.getByRole("radio", { name }).getAttribute("aria-checked");
     expect(checked(/Suggest a little/)).toBe("true");
-    expect(checked(/^Brief/)).toBe("true");
+    // Reply length was cut: the assistant keeps its stored reply style.
+    expect(
+      screen.queryByRole("radiogroup", {
+        name: "How the profile assistant replies",
+      }),
+    ).toBeNull();
     expect(
       screen
         .getByRole("switch", { name: "Count remote jobs as any location" })
@@ -126,7 +135,7 @@ describe("SettingsAiBehaviorSection", () => {
     fireEvent.click(
       screen.getByRole("switch", { name: "Count remote jobs as any location" }),
     );
-    fireEvent.click(screen.getByRole("radio", { name: /Conversational/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Only what I ask/ }));
     expect(onUpdateAiBehavior).toHaveBeenCalledTimes(1);
 
     await act(() => {
@@ -140,8 +149,8 @@ describe("SettingsAiBehaviorSection", () => {
     expect(onUpdateAiBehavior.mock.calls[1]?.[0]).toEqual({
       aiBehavior: {
         profileAssistant: {
-          initiative: "proactive",
-          replyStyle: "conversational",
+          initiative: "answer_only",
+          replyStyle: "brief",
         },
         jobSearch: { remoteCountsAsAnyLocation: false },
       },

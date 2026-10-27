@@ -134,4 +134,28 @@ describe("SettingsApplicationDefaultsSection", () => {
       expect(screen.getByText("Resume look saved.")).toBeTruthy(),
     );
   });
+
+  it("is the one home of when a resume gets written: the switch saves when flipped", async () => {
+    const onUpdateWorkspaceBehavior = vi.fn(() => Promise.resolve(true));
+    render(
+      <SettingsApplicationDefaultsSection
+        availableResumeTemplates={[]}
+        onUpdateApplicationDefaults={vi.fn()}
+        onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
+        settings={parseSettings()}
+      />,
+      { wrapper: MemoryRouter },
+    );
+    const toggle = screen.getByRole("switch", {
+      name: "Write resumes when I shortlist",
+    });
+    const before = toggle.getAttribute("aria-checked") === "true";
+    fireEvent.click(toggle);
+    expect(onUpdateWorkspaceBehavior).toHaveBeenCalledWith({
+      writeResumesOnShortlist: !before,
+    });
+    await waitFor(() =>
+      expect(toggle.getAttribute("aria-checked")).toBe(String(!before)),
+    );
+  });
 });
