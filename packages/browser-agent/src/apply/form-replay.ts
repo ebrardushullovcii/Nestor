@@ -17,6 +17,8 @@ export interface FormReplay {
   answers: readonly FormReplayAnswer[];
   attachments: readonly FormReplayAttachment[];
   path: readonly ApplyFormPathStep[];
+  /** The page the earlier run's form was on. */
+  formUrl?: string | undefined;
 }
 
 export interface FormReplayAnswer {

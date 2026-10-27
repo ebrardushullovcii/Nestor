@@ -667,6 +667,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                   answers: previous.reviewCard.answers,
                   attachments: keptPage ? [] : previous.reviewCard.attachments,
                   path: previous.execution.formPath ?? [],
+                  formUrl: previous.reviewCard.pageUrl ?? undefined,
                 },
               }
             : {}),

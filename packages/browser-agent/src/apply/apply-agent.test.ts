@@ -8939,6 +8939,83 @@ describe("a closed form comes back without the model", () => {
     expect(result.formPath).toEqual(input.replay.path);
   });
 
+  test.each([
+    ["the model asks for it", "model"],
+    ["the earlier run's path has it", "path"],
+  ] as const)(
+    "in Fill in for me, the link to the page the earlier run's form was on is followed (%s)",
+    async (_case, how) => {
+      // Workable: the refill starts on the job page, whose Application tab is
+      // a link to /apply/. Fill follows no other link: it handed it over.
+      const formUrl = "https://apply.example.test/jobs/1/apply/";
+      const overview = page({
+        url: "https://apply.example.test/jobs/1",
+        controls: [],
+        actions: [],
+        links: [
+          {
+            index: 0,
+            label: "Application",
+            href: formUrl,
+            target: "",
+            visible: true,
+            topOffset: 0,
+          },
+        ],
+      });
+      const form = page({ url: formUrl, controls: [field(0, "Full name")] });
+      const source: RawApplyPage = { ...overview };
+      const input = config(source, {
+        intermediateWritesAuthorized: false,
+        application: {
+          ...config(source).application,
+          startingUrl: "https://apply.example.test/jobs/1",
+        },
+      });
+      const writes = liveHands(source, input);
+      const followed: string[] = [];
+      input.hands.followLink = (ref) => {
+        followed.push(ref);
+        Object.assign(source, form, { controls: form.controls, links: [] });
+        return Promise.resolve({ ok: true, url: formUrl });
+      };
+      input.replay = {
+        answers: [stored("Full name", "Robin Ashford")],
+        attachments: [],
+        formUrl,
+        path:
+          how === "path"
+            ? [
+                {
+                  from: screenKey(
+                    buildApplyFormObservation(
+                      overview,
+                      "2026-09-14T10:00:00.000Z",
+                    ),
+                  ),
+                  tool: "follow_link",
+                  label: "Application",
+                  href: formUrl,
+                },
+              ]
+            : [],
+      };
+      const result = await runApplyAgent(
+        input,
+        scriptedModel([
+          { name: "follow_link", args: { ref: "l0" } },
+          { name: "finish", args: { reason: "The form is filled." } },
+        ]),
+      );
+      expect(followed).toHaveLength(1);
+      expect(writes).toEqual(["c0=Robin Ashford"]);
+      expect(result.outcome).toBe("prepared");
+      expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual(
+        [],
+      );
+    },
+  );
+
   test("a field the form no longer has goes to the model, with the rest already back", async () => {
     const source = page({
       controls: [field(0, "Full name"), field(1, "Notice period")],

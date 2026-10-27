@@ -1192,6 +1192,8 @@ it("a refill of a closed form gets what the attempt before left, to bring it bac
         { label: "Resume", fileName: "resume.pdf", field: "Resume" },
       ],
       path: [],
+      // The page the form was on: the refill may go back there.
+      formUrl: "https://replica.test/jobs/0",
     },
   ]);
   preparation.answers = [];
