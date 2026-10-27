@@ -2,6 +2,7 @@ import type { ApplicationAttestationKind } from "@nestor/contracts";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import { questionPrompt } from "./policy-executor";
 import { phoneCountryPicker } from "./phone-answer";
+import { fieldNamesAnotherPerson } from "./github-username";
 import type { LLMClient } from "../agent/contracts";
 import type {
   ApplyAgentConfig,
@@ -55,7 +56,14 @@ export async function checkClassifiedApplicationAnswers(input: {
     const matches = formControls?.filter((control) => {
       const prompt = normalizeFormQuestionPrompt(questionPrompt(control));
       return (
-        control.visible && (prompt === asked || asked.endsWith(` ${prompt}`))
+        control.visible &&
+        (prompt === asked ||
+          (control.groupLabel.trim().length > 0 &&
+            asked.endsWith(` ${prompt}`) &&
+            !fieldNamesAnotherPerson({
+              ...control,
+              groupLabel: answer.question,
+            })))
       );
     });
     const exact = matches?.filter(

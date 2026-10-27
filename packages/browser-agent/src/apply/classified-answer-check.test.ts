@@ -108,6 +108,20 @@ test("send-time grounding binds a retained earlier wizard control without trusti
     (
       await checkClassifiedApplicationAnswers({
         ...input,
+        answers: [
+          {
+            question: "Professional reference — Full name",
+            answer: "Alex Vanguard",
+          },
+        ],
+        formControls: [{ ...field, groupLabel: "", sectionPath: [] }],
+      })
+    )[0]?.supported,
+  ).toBe(false);
+  expect(
+    (
+      await checkClassifiedApplicationAnswers({
+        ...input,
         formControls: [
           {
             ...field,
