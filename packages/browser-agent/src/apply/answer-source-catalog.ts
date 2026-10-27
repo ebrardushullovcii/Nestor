@@ -69,7 +69,10 @@ export function answerSourceCatalog(
     payDisclosed: true,
   }).map((fact) => ({
     id: fact.sourceId,
-    value: fact.value,
+    // The question reader and writer must see the same permitted URL format.
+    value: isProfileUrlSource(fact.sourceId)
+      ? (fullProfileUrl(fact.value) ?? fact.value)
+      : fact.value,
     purpose: fact.sourceKind === "answer_library" ? "saved" : "profile",
     country: null,
     ...(fact.sourceKind === "answer_library"

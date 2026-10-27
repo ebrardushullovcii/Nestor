@@ -4,7 +4,11 @@ import {
   CandidateProfileSchema,
   type ApplyAnswerTags,
 } from "@nestor/contracts";
-import { classifyAnswerPermission } from "./answer-source-catalog";
+import {
+  answerSourceCatalog,
+  classifyAnswerPermission,
+} from "./answer-source-catalog";
+import { runApplyAgent } from "./apply-agent";
 import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
 import { fullProfileUrl } from "./profile-url";
 import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
@@ -23,6 +27,83 @@ import type {
 } from "./types";
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
 const at = "2026-10-26T12:00:00.000Z";
+
+test("LinkedIn Profile reads the same full Profile address at classification, Fill and Send", async () => {
+  const src = sources();
+  src.profile.linkedinUrl = "linkedin.com/in/synthetic-candidate";
+  const expected = "https://linkedin.com/in/synthetic-candidate";
+  const original = JSON.stringify(src.profile);
+  const s = setup(
+    field("LinkedIn Profile", {
+      groupLabel: "LinkedIn Profile",
+      required: true,
+    }),
+    src,
+  );
+  s.page.actions = [
+    { index: 0, label: "Submit Application", visible: true, disabled: false },
+  ];
+  s.config.modelQuestionClassification = true;
+  s.config.runControl = { maxSteps: 3, noProgressStepLimit: 2 };
+  const client: LLMClient = {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages, tools) => {
+      if (tools[0]?.function.name !== "report_question_kinds")
+        return Promise.resolve(
+          call("fill_fields", {
+            fields: [{ tool: "type", ref: "c0", text: expected }],
+            finishWhenReady: true,
+          }),
+        );
+      const payload = JSON.parse(messages.at(-1)!.content) as {
+        sources: { id: string; value: string }[];
+      };
+      const literal = payload.sources.find(
+        (source) =>
+          source.id === "profile.linkedinUrl" && source.value === expected,
+      );
+      return Promise.resolve(
+        call("report_question_kinds", {
+          plainIndexes: [0],
+          flagged: [],
+          tags: [
+            {
+              index: 0,
+              kind: "other",
+              country: null,
+              sourceId: literal?.id ?? null,
+            },
+          ],
+        }),
+      );
+    }),
+  };
+  const finalPress = vi.spyOn(s.config.hands, "clickAction");
+  const result = await runApplyAgent(s.config, client);
+  expect(result.outcome).toBe("prepared");
+  expect(result.pauses).toEqual([]);
+  expect(s.fillText).toHaveBeenCalledExactlyOnceWith("c0", expected);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(finalPress).not.toHaveBeenCalled();
+  expect(
+    answerSourceCatalog(src).find(
+      (source) => source.id === "profile.linkedinUrl",
+    )?.value,
+  ).toBe(expected);
+  const check = (answer: string) =>
+    checkClassifiedApplicationAnswers({
+      client,
+      sources: src,
+      payDisclosed: false,
+      answers: [{ question: "LinkedIn Profile", answer }],
+      formControls: s.observation().controls,
+      formContext: { pageText: s.page.bodyText, fields: [] },
+    });
+  expect((await check(expected))[0]?.supported).toBe(true);
+  expect(
+    (await check("https://linkedin.com/in/a-different-person"))[0]?.supported,
+  ).toBe(false);
+  expect(JSON.stringify(src.profile)).toBe(original);
+});
 
 test.each([
   {
