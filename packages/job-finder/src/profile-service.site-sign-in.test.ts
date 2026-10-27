@@ -7,6 +7,24 @@ import {
 } from "./profile-service.test-support";
 
 describe("a site check that meets a sign-in page", () => {
+  test("keeps the browser session between site checks by default", async () => {
+    const browserRuntime = createAgentBrowserRuntime([]);
+    const closeSession = vi.spyOn(browserRuntime, "closeSession");
+    const harness = createSourceDebugServiceHarness({
+      aiClient: createAgentAiClient(),
+      browserRuntime,
+    });
+    await harness.seeded;
+    const site = harness.jobSites.enabled()[0]!;
+    expect((await harness.service.runSourceDebug(String(site.id))).state).toBe(
+      "completed",
+    );
+    expect((await harness.service.runSourceDebug(String(site.id))).state).toBe(
+      "completed",
+    );
+    expect(closeSession).not.toHaveBeenCalled();
+  });
+
   test("asks for the sign-in in Needs you, and a check that gets through settles it", async () => {
     const sourceAccess = { request: vi.fn(), complete: vi.fn() };
     const blocked = createSourceDebugServiceHarness({

@@ -14,8 +14,6 @@ afterEach(cleanup);
 
 
 const settings = {
-  keepSessionAlive: false,
-  discoveryOnly: true,
   resumeApplicationMode: "original_resume",
 } as JobFinderSettings;
 

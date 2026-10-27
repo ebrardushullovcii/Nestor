@@ -158,9 +158,6 @@ export function createProfileService(options: ProfileServiceOptions) {
     async openRunBrowserSession(source, sessionOptions) {
       await browserRuntime.openSession(source, sessionOptions);
     },
-    async closeRunBrowserSession(source) {
-      await browserRuntime.closeSession(source);
-    },
   };
 
   const { buildBundleFromStoredResume, getCurrentSetupStateContext } =
@@ -637,8 +634,6 @@ export function createProfileService(options: ProfileServiceOptions) {
       const parsed = UpdateWorkspaceBehaviorInputSchema.parse(input);
       const fields = Object.fromEntries(
         Object.entries({
-          keepSessionAlive: parsed.keepSessionAlive,
-          discoveryOnly: parsed.discoveryOnly,
           collapseSideMenuWithAssistant: parsed.collapseSideMenuWithAssistant,
           writeResumesOnShortlist: parsed.writeResumesOnShortlist,
         }).filter(([, value]) => value !== undefined),

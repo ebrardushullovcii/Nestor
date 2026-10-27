@@ -24,7 +24,6 @@ function parseSettings(
     allowAutoSubmitOverride: false,
     fontPreset: "inter_requisite",
     humanReviewRequired: true,
-    keepSessionAlive: false,
     resumeFormat: "pdf",
     resumeTemplateId: "classic_ats",
     ...overrides,

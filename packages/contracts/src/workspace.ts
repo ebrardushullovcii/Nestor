@@ -385,8 +385,6 @@ export const JobFinderSettingsSchema = z.object({
   /** Fill and leave for the person's click, or send for them. */
   applicationAutomationMode: ApplicationApplyModeSchema.optional(),
   salaryDisclosure: ApplicationSalaryDisclosureRuleSchema.optional(),
-  keepSessionAlive: z.boolean(),
-  discoveryOnly: z.boolean().default(false),
   resumeApplicationMode: ResumeApplicationModeSchema.optional(),
   applicationCrm: ApplicationCrmSettingsSchema.default({}).optional(),
   // Optional so a workspace saved before letters existed still loads; every
@@ -440,8 +438,6 @@ export type UpdateApplicationDefaultsInput = z.infer<
 >;
 
 export const UpdateWorkspaceBehaviorInputSchema = z.object({
-  keepSessionAlive: z.boolean().optional(),
-  discoveryOnly: z.boolean().optional(),
   collapseSideMenuWithAssistant: z.boolean().optional(),
   writeResumesOnShortlist: z.boolean().optional(),
 });

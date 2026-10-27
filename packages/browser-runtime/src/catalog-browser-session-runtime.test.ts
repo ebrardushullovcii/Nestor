@@ -19,8 +19,6 @@ const settings: JobFinderSettings = {
   appearanceTheme: "system",
   humanReviewRequired: true,
   allowAutoSubmitOverride: false,
-  keepSessionAlive: true,
-  discoveryOnly: false,
 };
 
 const profile = CandidateProfileSchema.parse({

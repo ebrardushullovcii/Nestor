@@ -424,8 +424,6 @@ function executionInput(): Omit<
       appearanceTheme: "system",
       humanReviewRequired: true,
       allowAutoSubmitOverride: false,
-      keepSessionAlive: false,
-      discoveryOnly: false,
     },
     mode: "prepare_only",
   };

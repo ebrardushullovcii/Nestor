@@ -28,8 +28,6 @@ const SETTINGS_LABELS: Record<string, string> = {
   resumeApplicationMode: "Resume level",
   coverLetter: "Cover letters",
   aiBehavior: "AI behavior",
-  keepSessionAlive: "Keep browser tabs after runs",
-  discoveryOnly: "Search only",
   collapseSideMenuWithAssistant:
     "Collapse the side menu while the assistant is open",
   writeResumesOnShortlist: "Write resumes when I shortlist",
@@ -109,8 +107,6 @@ export const readSettingsTool = defineTool({
         aiBehavior: AiBehaviorPreferenceSchema.parse(
           snapshot.settings.aiBehavior ?? {},
         ),
-        keepSessionAlive: snapshot.settings.keepSessionAlive,
-        discoveryOnly: snapshot.settings.discoveryOnly,
         collapseSideMenuWithAssistant: collapsesSideMenuWithAssistant(
           snapshot.settings,
         ),
@@ -232,10 +228,8 @@ export const updateWorkspaceBehaviorTool = defineTool({
   name: "update_workspace_behavior",
   group: "settings",
   description:
-    "Changes whether browser tabs stay open after runs, whether Job Finder only searches (never prepares applications), whether the left side menu folds to icons while this assistant sidebar is open (Settings > App & device), and whether a resume starts writing as soon as a job is shortlisted (Settings > AI behavior > Resumes). Send only the fields to change.",
+    "Changes whether the left side menu folds to icons while this assistant sidebar is open (Settings > App & device), and whether a resume starts writing as soon as a job is shortlisted (Settings > AI behavior > Resumes). Send only the fields to change.",
   parameters: json.object({
-    keepSessionAlive: json.boolean(),
-    discoveryOnly: json.boolean(),
     collapseSideMenuWithAssistant: json.boolean(
       "On (the default) folds the side menu while the assistant is open.",
     ),

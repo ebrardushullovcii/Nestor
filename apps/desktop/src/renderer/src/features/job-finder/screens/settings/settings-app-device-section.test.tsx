@@ -22,8 +22,6 @@ function settings(
     appearanceTheme: "system",
     humanReviewRequired: true,
     allowAutoSubmitOverride: false,
-    keepSessionAlive: false,
-    discoveryOnly: false,
     ...overrides,
   } as JobFinderSettings;
 }

@@ -112,8 +112,6 @@ describe("contracts base schemas", () => {
         appearanceTheme: "system",
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
-        keepSessionAlive: false,
-        discoveryOnly: false,
         resumeApplicationMode: "original_resume",
       }).resumeApplicationMode,
     ).toBe("original_resume");

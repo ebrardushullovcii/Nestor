@@ -269,8 +269,6 @@ describe("the saved letter preference", () => {
       appearanceTheme: "system",
       humanReviewRequired: true,
       allowAutoSubmitOverride: false,
-      keepSessionAlive: false,
-      discoveryOnly: false,
       coverLetter: {
         tone: "direct",
         length: "short",
@@ -290,8 +288,6 @@ describe("the saved letter preference", () => {
       appearanceTheme: "system",
       humanReviewRequired: true,
       allowAutoSubmitOverride: false,
-      keepSessionAlive: false,
-      discoveryOnly: false,
     });
     expect(
       CoverLetterPreferenceSchema.parse(older.coverLetter ?? {}).tone,

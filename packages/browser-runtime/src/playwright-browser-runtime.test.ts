@@ -428,8 +428,6 @@ function createTestSettings() {
     appearanceTheme: "system" as const,
     humanReviewRequired: true,
     allowAutoSubmitOverride: false,
-    keepSessionAlive: false,
-    discoveryOnly: false,
   };
 }
 

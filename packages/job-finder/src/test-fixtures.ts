@@ -514,8 +514,6 @@ export function createSeed(): TestSeed {
       appearanceTheme: "system",
       humanReviewRequired: true,
       allowAutoSubmitOverride: false,
-      keepSessionAlive: false,
-      discoveryOnly: false,
     },
   };
 }

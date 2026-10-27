@@ -5,7 +5,6 @@ export const JOB_FINDER_SETTINGS_SECTIONS = {
   "ai-behavior": { label: "AI behavior", tone: "default" },
   "application-defaults": { label: "Resume look", tone: "default" },
   "application-authority": { label: "Applying", tone: "default" },
-  "workspace-behavior": { label: "Browser & saved jobs", tone: "default" },
   diagnostics: { label: "Diagnostics", tone: "default" },
   "danger-zone": { label: "Delete everything", tone: "destructive" },
 } as const;

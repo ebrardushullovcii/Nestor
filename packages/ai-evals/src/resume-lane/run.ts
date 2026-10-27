@@ -549,9 +549,7 @@ const SETTINGS = JobFinderSettingsSchema.parse({
   fontPreset: "inter_requisite",
   appearanceTheme: "system",
   humanReviewRequired: true,
-  keepSessionAlive: false,
   allowAutoSubmitOverride: false,
-  discoveryOnly: false,
 });
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;

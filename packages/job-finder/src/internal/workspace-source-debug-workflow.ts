@@ -376,11 +376,9 @@ export async function runSourceDebugWorkflow(
       normalizedTarget,
       instructionArtifacts,
     );
-  let browserSessionOpened = false;
   let browserSetupMs: number | null = null;
   let finalReviewMs: number | null = null;
   let finalizationMs: number | null = null;
-  let shouldKeepBrowserSessionOpen = false;
   let finishedEarlyAfterUsefulDraft = false;
 
   try {
@@ -505,7 +503,6 @@ export async function runSourceDebugWorkflow(
       targetUrl: normalizedTarget.startingUrl,
       targetId: normalizedTarget.id,
     });
-    browserSessionOpened = true;
     browserSetupMs = Date.now() - browserSetupStartedAtMs;
     emitProgress({
       waitReason: "attaching_browser",
@@ -916,7 +913,6 @@ export async function runSourceDebugWorkflow(
           attempt.outcome === "blocked_auth" ||
           attempt.outcome === "blocked_manual_step"
         ) {
-          shouldKeepBrowserSessionOpen = true;
           emitProgress({
             phase,
             waitReason: "manual_prerequisite",
@@ -1008,9 +1004,6 @@ export async function runSourceDebugWorkflow(
     if (run.state === "paused_manual") {
       return run;
     }
-
-    const settings = await ctx.repository.getSettings();
-    shouldKeepBrowserSessionOpen = settings.keepSessionAlive;
 
     const onlyInternalRuntimeFailures =
       attempts.length > 0 &&
@@ -1269,9 +1262,6 @@ export async function runSourceDebugWorkflow(
       throw error;
     }
   } finally {
-    if (browserSessionOpened && !shouldKeepBrowserSessionOpen) {
-      await ctx.closeRunBrowserSession(adapterKind).catch(() => {});
-    }
     clearActiveController();
     ctx.activeSourceDebugExecutionIdRef.current = null;
   }
