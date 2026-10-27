@@ -9181,3 +9181,36 @@ describe("a form's only Apply button is its send only when the form is this appl
       },
     );
 });
+
+test("a custom checkbox the page draws itself is a checkbox, and its answer is its state", async () => {
+  // Workable's consent box: a div with the checkbox role reads as
+  // "contenteditable"; its text was three icons' SVG fallbacks.
+  const consent =
+    "I have read, understand and accept the content of the Privacy Notice.";
+  const result = await runApplyAgent(
+    config(
+      page({
+        controls: [
+          nameControl(),
+          {
+            ...nameControl(),
+            index: 1,
+            id: "consent",
+            name: "",
+            tagName: "contenteditable",
+            inputType: "checkbox",
+            role: "checkbox",
+            label: consent,
+            required: true,
+            checked: true,
+            value: "",
+          },
+        ],
+      }),
+    ),
+    repeatingModel("finish", { reason: "The form is complete." }),
+  );
+  const answer = result.reviewFilled?.find((entry) => entry.label === consent);
+  expect(answer?.answer.value).toBe("Yes");
+  expect(answer?.fieldKey).toContain("field:checkbox:");
+});

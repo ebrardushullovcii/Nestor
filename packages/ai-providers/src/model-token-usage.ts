@@ -15,5 +15,6 @@ export function normalizeModelUsage(usage: ModelUsagePayload): ModelTokenUsage {
       count(usage.prompt_cache_hit_tokens),
     ),
     reasoningTokens: count(usage.completion_tokens_details?.reasoning_tokens),
+    ...(usage.nestor_estimated ? { estimated: usage.nestor_estimated } : {}),
   };
 }

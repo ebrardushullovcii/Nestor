@@ -1,3 +1,5 @@
+import type { ModelTokenUsage } from "@nestor/contracts";
+
 export const modelApiModes = ["responses", "chat_completions"] as const;
 export type ModelApiMode = (typeof modelApiModes)[number];
 
@@ -52,6 +54,8 @@ export type CompatibleTool = {
 };
 
 export type ModelUsagePayload = {
+  total_tokens?: number | undefined;
+  nestor_estimated?: ModelTokenUsage["estimated"];
   prompt_tokens?: number | undefined;
   completion_tokens?: number | undefined;
   prompt_tokens_details?: { cached_tokens?: number | undefined } | undefined;

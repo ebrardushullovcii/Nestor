@@ -1,7 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ModelUsageTotals } from "@nestor/contracts";
-import type { ModelUsagePayload } from "./openai-compatible-transport";
-import { normalizeModelUsage } from "./model-token-usage";
+import type { ModelTokenUsage, ModelUsageTotals } from "@nestor/contracts";
 
 type State = ModelUsageTotals & { reported: number };
 const scopes = new AsyncLocalStorage<State>();
@@ -24,6 +22,7 @@ export function createModelUsageRecorder() {
       outputTokens: state.outputTokens,
       cachedInputTokens: state.cachedInputTokens,
       reasoningTokens: state.reasoningTokens,
+      ...(state.estimated ? { estimated: { ...state.estimated } } : {}),
     }),
   };
 }
@@ -32,18 +31,24 @@ export function recordModelRequestAttempt(): void {
   const state = scopes.getStore();
   if (state) state.calls++;
 }
-export function recordModelRequestUsage(
-  usage: ModelUsagePayload | undefined,
-): void {
+export function recordModelRequestUsage(usage: ModelTokenUsage): void {
   const state = scopes.getStore();
-  if (!state || !usage || typeof usage.prompt_tokens !== "number") return;
-  state.reported++;
-  const normalized = normalizeModelUsage(usage);
+  if (!state) return;
+  if (!usage.estimated) state.reported++;
   for (const key of [
     "inputTokens",
     "outputTokens",
     "cachedInputTokens",
     "reasoningTokens",
   ] as const)
-    state[key] += normalized[key];
+    state[key] += usage[key];
+  if (usage.estimated) {
+    const before = state.estimated;
+    state.estimated = {
+      ...usage.estimated,
+      calls: (before?.calls ?? 0) + usage.estimated.calls,
+      inputTokens: (before?.inputTokens ?? 0) + usage.estimated.inputTokens,
+      outputTokens: (before?.outputTokens ?? 0) + usage.estimated.outputTokens,
+    };
+  }
 }

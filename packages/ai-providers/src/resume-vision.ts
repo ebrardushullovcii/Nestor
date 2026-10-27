@@ -508,6 +508,7 @@ export function createOpenAiCompatibleResumeVisionProvider(
     try {
       const apiMode = validatedOptions.apiMode ?? "chat_completions";
       const payload = await performModelRequest({
+        purpose: "resume_visual_analysis",
         url: buildModelUrl(validatedOptions.baseUrl, apiMode),
         // Same conversation key as the text stages of this import: the
         // gateway routes one import's requests together, and OpenCode Go

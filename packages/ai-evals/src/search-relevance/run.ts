@@ -37,8 +37,22 @@ const zeroUsage = (): ModelTokenUsage => ({
   reasoningTokens: 0,
 });
 const addUsage = (sum: ModelTokenUsage, usage: ModelTokenUsage) => {
-  for (const field of Object.keys(sum) as Array<keyof ModelTokenUsage>)
+  for (const field of [
+    "inputTokens",
+    "outputTokens",
+    "cachedInputTokens",
+    "reasoningTokens",
+  ] as const)
     sum[field] += usage[field];
+  if (usage.estimated) {
+    const before = sum.estimated;
+    sum.estimated = {
+      ...usage.estimated,
+      calls: (before?.calls ?? 0) + usage.estimated.calls,
+      inputTokens: (before?.inputTokens ?? 0) + usage.estimated.inputTokens,
+      outputTokens: (before?.outputTokens ?? 0) + usage.estimated.outputTokens,
+    };
+  }
 };
 export function turnKey(
   [messages, tools, options]: Request,
@@ -127,13 +141,16 @@ export function coverageHonest(
 export function tokenCostSummary(
   boards: readonly { usage: ModelTokenUsage }[],
 ) {
+  const usage = zeroUsage();
+  for (const board of boards) addUsage(usage, board.usage);
   const tokens = boards
     .map(({ usage }) => usage.inputTokens + usage.outputTokens)
     .sort((a, b) => a - b);
   const middle = Math.floor(tokens.length / 2);
   return {
     boards: tokens.length,
-    totalTokens: tokens.reduce((sum, value) => sum + value, 0),
+    totalTokens: usage.inputTokens + usage.outputTokens,
+    ...(usage.estimated ? { estimated: { ...usage.estimated } } : {}),
     medianTokensPerBoard: tokens.length
       ? tokens.length % 2
         ? tokens[middle]!

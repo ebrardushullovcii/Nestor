@@ -1,4 +1,4 @@
-import type { ApplyAgentTiming } from "@nestor/contracts";
+import type { ApplyAgentTiming, ModelTokenUsage } from "@nestor/contracts";
 import type { LLMClient } from "../agent/contracts";
 import type { ApplyPageHands } from "./types";
 
@@ -169,10 +169,40 @@ export function createApplyTiming(now: () => Date) {
         } else timing.auxiliaryModelCalls += 1;
         const usage = timing.tokenUsage!;
         usage.unreportedCalls += 1;
+        let usageEvents = 0;
+        const recordUsage = (current: ModelTokenUsage) => {
+          if (!current.estimated) {
+            usage.unreportedCalls -= 1;
+            usage.reportedCalls += 1;
+          }
+          for (const field of [
+            "inputTokens",
+            "outputTokens",
+            "cachedInputTokens",
+            "reasoningTokens",
+          ] as const)
+            usage[field] += current[field];
+          if (current.estimated) {
+            const before = usage.estimated;
+            usage.estimated = {
+              ...current.estimated,
+              calls: (before?.calls ?? 0) + current.estimated.calls,
+              inputTokens:
+                (before?.inputTokens ?? 0) + current.estimated.inputTokens,
+              outputTokens:
+                (before?.outputTokens ?? 0) + current.estimated.outputTokens,
+            };
+          }
+        };
         try {
           const response = await client.chatWithTools(messages, tools, {
             ...options,
             includeUsage: true,
+            onRequestUsage: (event) => {
+              usageEvents += 1;
+              recordUsage(event);
+              options?.onRequestUsage?.(event);
+            },
             onRequestAttempt: (event) => {
               timing.transportCalls! += 1;
               if (event.attempt > 0) {
@@ -182,17 +212,8 @@ export function createApplyTiming(now: () => Date) {
               options?.onRequestAttempt?.(event);
             },
           });
-          if (response.usage) {
-            usage.unreportedCalls -= 1;
-            usage.reportedCalls += 1;
-            for (const key of [
-              "inputTokens",
-              "outputTokens",
-              "cachedInputTokens",
-              "reasoningTokens",
-            ] as const)
-              usage[key] += response.usage[key];
-          }
+          // Legacy injected clients may only expose usage on their final reply.
+          if (!usageEvents && response.usage) recordUsage(response.usage);
           return response;
         } finally {
           const duration = Math.max(0, now().getTime() - start);
@@ -216,7 +237,12 @@ export function createApplyTiming(now: () => Date) {
           );
       return {
         ...timing,
-        tokenUsage: { ...timing.tokenUsage! },
+        tokenUsage: {
+          ...timing.tokenUsage!,
+          ...(timing.tokenUsage?.estimated
+            ? { estimated: { ...timing.tokenUsage.estimated } }
+            : {}),
+        },
         totalMs: Math.max(0, current - startedAt),
         modelMs:
           timing.modelMs +

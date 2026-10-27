@@ -1,6 +1,7 @@
 import {
   type ModelTokenUsage,
   type ModelRequestAttempt,
+  type ModelRequestUsage,
   AssetGenerationReasonSchema,
   ResumeLanguageTranslationSchema,
   JobRequirementAssessmentSchema,
@@ -769,6 +770,7 @@ export interface JobFinderAiClient {
 }
 
 export interface ChatWithToolsOptions {
+  onRequestUsage?: (usage: ModelRequestUsage) => void;
   onRequestAttempt?: (event: ModelRequestAttempt) => void;
   /** Ask the provider to constrain the answer to valid JSON. */
   jsonOutput?: boolean;
