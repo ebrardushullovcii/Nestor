@@ -322,6 +322,7 @@ export function ProfileScreen(props: {
 
     const requestedDeepLink =
       requestedFocus === "job-sources" ||
+      requestedFocus === "work-eligibility" ||
       requestedFocus === "target-roles" ||
       requestedFocus === "work-modes"
         ? (requestedFocus as ProfileDeepLinkFocus)
@@ -329,7 +330,8 @@ export function ProfileScreen(props: {
     const destinationSection =
       requestedDeepLink === "job-sources"
         ? "sources"
-        : requestedDeepLink === "target-roles" ||
+        : requestedDeepLink === "work-eligibility" ||
+            requestedDeepLink === "target-roles" ||
             requestedDeepLink === "work-modes"
           ? "preferences"
           : parsedSection;

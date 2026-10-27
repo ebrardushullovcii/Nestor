@@ -38,7 +38,9 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 - resume import: desktop ingress -> parser/text/vision branches -> review candidates -> accepted canonical writes
 - discovery: the normal Find jobs engine collects HTTP lists, provider feeds
   and JSON-LD, screens professions in batches, reads full listings, merges
-  sightings, then fits each unscored job once (ADR 0041). `browser-agent` owns
+  sightings, then fits missing or stale judgments in bounded background passes,
+  prioritizing visible jobs. Relevant profile, goals and listing changes retire
+  previous fit inputs; contact edits do not. `browser-agent` owns
   collection policy, prompts and structured outputs; `job-finder` schedules the
   work and persists through the indexed job store in `db`. Fit and resume
   writing share the same complete listing text. Browser navigation fallback

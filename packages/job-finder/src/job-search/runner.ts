@@ -18,6 +18,7 @@ import {
 } from "@nestor/contracts";
 import { abortable, concurrency, errorMessage } from "./async";
 import { createFitQueue } from "./fit-queue";
+import { fitContextFingerprint } from "./fit-input";
 import { createSearchPipeline } from "./pipeline";
 import { sourceWork, type SourceWork } from "./source-work";
 import type {
@@ -55,13 +56,38 @@ export function createJobSearchRunner(
   } | null = null;
   let revision = 0,
     siteDirty = false;
+  let continuation: ReturnType<typeof setTimeout> | null = null;
+  let recoveryQueue: FitQueue | null = null;
+  let visibleIds: readonly number[] = [];
+  const scheduleFit = (delay = 300) => {
+    if (continuation) clearTimeout(continuation);
+    continuation = setTimeout(() => {
+      continuation = null;
+      void runner.scoreUnscored().catch(() => undefined);
+    }, delay);
+    continuation.unref();
+  };
+  deps.store.onChange((change) => {
+    if (change.cause === "profile" || change.cause === "settings") {
+      if (recovery) {
+        const pending = recovery;
+        const continueFit = () => {
+          if (!pending.controller.signal.aborted) scheduleFit();
+        };
+        void pending.result.then(continueFit, continueFit);
+      } else scheduleFit();
+    }
+  });
   const listeners = new Set<(status: JobSearchStatus) => void>();
   let notification: ReturnType<typeof setTimeout> | null = null;
   const status = (): JobSearchStatus => {
     const compact = search
       ? resultRows.compact(search.id)
       : { sources: [], progress: null };
+    const fits = deps.store.fitCounts();
     return {
+      fitChecking: fits.checking,
+      fitRechecking: fits.rechecking,
       search: search ? structuredClone(search) : null,
       ...compact,
       progress: compact.progress
@@ -162,6 +188,7 @@ export function createJobSearchRunner(
         fitError = errorMessage(error);
       },
       settings,
+      () => notify(),
     );
     run.fits = fits;
     run.queueProgress = () => ({
@@ -337,6 +364,31 @@ export function createJobSearchRunner(
       const readSignal = AbortSignal.any([parentSignal, controller.signal]);
       const stopCollection = () =>
         controller.abort(new Error(source.quickStopReason));
+      const recordAccess = (count: number) => {
+        if (
+          !count ||
+          !current(source) ||
+          source.row.state === "needs_you" ||
+          source.row.state === "failed"
+        )
+          return;
+        const signedIn =
+          access.pending(Number(source.target.id)) ||
+          siteRows.get(Number(source.target.id))?.signInState === "signed_in";
+        access.complete(Number(source.target.id));
+        siteRows.record(
+          Number(source.target.id),
+          {
+            lastSearchedAt: new Date().toISOString(),
+            health: "healthy",
+            lane,
+            signInState:
+              lane === "browser" && signedIn ? "signed_in" : "not_required",
+          },
+          false,
+        );
+        siteDirty = true;
+      };
       // HTTP collection has no model of its own. Stop paging, while accepted
       // cards finish their already-running screening/reading/fit on run.signal.
       const timer =
@@ -358,6 +410,7 @@ export function createJobSearchRunner(
             knownUrls: (urls) => deps.store.findKnownUrls(urls),
             onCards: async (cards) => {
               await pipeline.accept(source, cards);
+              recordAccess(cards.length);
               if (source.quickStopReason) stopCollection();
               readSignal.throwIfAborted();
             },
@@ -372,6 +425,7 @@ export function createJobSearchRunner(
         );
         readSignal.throwIfAborted();
         await pipeline.accept(source, inventory.cards);
+        recordAccess(inventory.cards.length);
         if (source.quickStopReason) stopCollection();
         readSignal.throwIfAborted();
         source.accessBlocked = inventory.complete
@@ -493,7 +547,11 @@ export function createJobSearchRunner(
       });
       run.enqueue = enqueue;
       run.setReady(fits);
-      fits.enqueue(deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER));
+      fits.enqueue([
+        ...visibleIds,
+        ...deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
+      ]);
+      fits.prioritize(visibleIds);
       for (;;) {
         await abortable(Promise.all([http.idle(), browser.idle()]), signal);
         await pipeline.drain();
@@ -526,6 +584,7 @@ export function createJobSearchRunner(
           ? `${unreadable} site${unreadable === 1 ? "" : "s"} could not be read. ${blockedSummary}${recovery}`
           : fitError,
       );
+      if (fits.needsAnotherPass) scheduleFit(5000);
     } catch (error) {
       flush();
       finish(
@@ -565,6 +624,19 @@ export function createJobSearchRunner(
         const context = await abortable(
           deps.readContext(),
           run.controller.signal,
+        );
+        context.remoteCountsAsAnyLocation =
+          deps.readRemoteCountsAsAnyLocation?.() ??
+          context.remoteCountsAsAnyLocation ??
+          true;
+        deps.store.syncFitContext(
+          fitContextFingerprint(context, settings.note),
+        );
+        deps.store.restoreAgeHidden(
+          settings.postedWithin === "any"
+            ? null
+            : Date.now() -
+                (settings.postedWithin === "week" ? 7 : 30) * 86_400_000,
         );
         const selected = new Set(
           ("all" in settings.sites
@@ -633,6 +705,8 @@ export function createJobSearchRunner(
       );
     },
     stop() {
+      if (continuation) clearTimeout(continuation);
+      continuation = null;
       recovery?.controller.abort();
       if (!active) return;
       const run = active;
@@ -648,6 +722,11 @@ export function createJobSearchRunner(
         listeners.delete(listener);
       };
     },
+    prioritizeFit(ids) {
+      visibleIds = ids;
+      active?.fits?.prioritize(ids);
+      recoveryQueue?.prioritize(ids);
+    },
     scoreUnscored() {
       if (recovery) return recovery.result;
       const controller = new AbortController();
@@ -660,11 +739,24 @@ export function createJobSearchRunner(
             : null;
           // Use the live queue, so recovery and discovery cannot score a job twice.
           if (run && !run.controller.signal.aborted && liveFits) {
-            const before = liveFits.scored;
-            liveFits.enqueue(
-              deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
+            const current = await abortable(
+              deps.readContext(),
+              controller.signal,
             );
+            current.remoteCountsAsAnyLocation =
+              deps.readRemoteCountsAsAnyLocation?.() ??
+              current.remoteCountsAsAnyLocation ??
+              true;
+            deps.store.syncFitContext(
+              fitContextFingerprint(current, search?.settings.note),
+            );
+            const before = liveFits.scored;
+            liveFits.enqueue([
+              ...visibleIds,
+              ...deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
+            ]);
             await liveFits.drain();
+            if (liveFits.needsAnotherPass) scheduleFit(5000);
             return liveFits.scored - before;
           }
           controller.signal.throwIfAborted();
@@ -672,17 +764,32 @@ export function createJobSearchRunner(
             deps.readContext(),
             controller.signal,
           );
+          context.remoteCountsAsAnyLocation =
+            deps.readRemoteCountsAsAnyLocation?.() ??
+            context.remoteCountsAsAnyLocation ??
+            true;
+          deps.store.syncFitContext(
+            fitContextFingerprint(context, search?.settings.note),
+          );
           const fits = createFitQueue(
             deps,
             context,
             controller.signal,
             concurrency(deps.concurrency?.fit, 6),
-            () => {},
+            () => notify(),
             () => {},
             search?.settings,
+            () => notify(),
           );
-          fits.enqueue(deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER));
+          recoveryQueue = fits;
+          fits.enqueue([
+            ...visibleIds,
+            ...deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
+          ]);
+          fits.prioritize(visibleIds);
           await fits.drain();
+          if (fits.needsAnotherPass && !controller.signal.aborted)
+            scheduleFit(5000);
           return fits.scored;
         })
         .catch((error: unknown) => {
@@ -690,7 +797,9 @@ export function createJobSearchRunner(
           throw error;
         })
         .finally(() => {
+          recoveryQueue = null;
           if (recovery?.controller === controller) recovery = null;
+          notify();
         });
       recovery = { controller, result };
       return result;

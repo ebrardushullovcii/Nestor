@@ -8,6 +8,7 @@ import {
   memo,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -210,6 +211,7 @@ export function ListPane<Row extends { id: number }>(props: {
   loading: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
+  onVisibleRows?: (rows: readonly Row[]) => void;
   activeId: number | null;
   selection: ListSelection;
   selectedCount: number;
@@ -276,6 +278,20 @@ export function ListPane<Row extends { id: number }>(props: {
   // A scroll box with no height has no layout to window by (a test's DOM):
   // every row is drawn, as an unwindowed list does.
   const drawWindow = windowed && virtualizer.scrollRect?.height !== 0;
+  const windowItems = virtualizer.getVirtualItems();
+  const visibleRows = useMemo(
+    () =>
+      drawWindow
+        ? windowItems.flatMap((item) => {
+            const row = rows[item.index];
+            return row ? [row] : [];
+          })
+        : rows,
+    [drawWindow, rows, windowItems],
+  );
+  useEffect(() => {
+    props.onVisibleRows?.(visibleRows);
+  }, [props.onVisibleRows, visibleRows]);
 
   useEffect(() => {
     const node = sentinel.current;

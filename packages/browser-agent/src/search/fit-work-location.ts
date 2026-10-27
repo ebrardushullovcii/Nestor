@@ -83,21 +83,28 @@ export function assessFitWorkLocation(
     ) &&
     (job.workModes.some((mode) => mode === "onsite" || mode === "hybrid") ||
       ((kind === "onsite" || kind === "hybrid") && quoted));
-  const authorized = new Set(
-    [
+  const permissionScopes = [
       ...profile.workEligibility.authorizedWorkCountries,
       ...(profile.workEligibility.limitedWorkPermissions ?? []).map(
         (permission) => permission.country,
       ),
-    ].flatMap((country) => {
+    ];
+  const authorized = new Set(
+    permissionScopes.flatMap((country) => {
       const code = fitCountryCode(country, true);
       return code ? [code] : [];
     }),
   );
-  const permission = intersects(authorized, countries);
-  if (foreign && physical && !permission)
+  // Regions and other textual permission scopes need the model's interpretation.
+  // An ISO lookup cannot turn their compatible verdict into missing permission.
+  const permission = intersects(authorized, countries) || permissionScopes.some((scope) => !fitCountryCode(scope, true));
+  if (
+    (physical || kind === "country_remote") &&
+    countries.size > 0 &&
+    !permission
+  )
     return {
-      status: "blocked",
+      status: "review",
       reason:
         "This role requires on-site or hybrid work without recorded permission there.",
     };

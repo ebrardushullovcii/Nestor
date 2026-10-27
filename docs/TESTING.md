@@ -40,7 +40,7 @@ Other entry points: `pnpm test:correctness`, `pnpm test:performance` (serial, no
 
 ## Fit judging
 
-- The model judges fit (ADR 0041); there is no rule scorer to calibrate. Tests fake `judgeJobFits` or `assessJobFit` and check that the verdict stands. Bumping `MATCH_ASSESSMENT_SCORER_VERSION` retires stored assessments; stored model verdicts are kept and judged again when the profile, goals or listing change.
+- The model judges fit (ADR 0041); there is no rule scorer to calibrate. Tests fake the fit model and check its verdict, with eligibility caps for blocked or unresolved permission. `LISTING_FIT_SCORER_VERSION` retires indexed listing fits; `MATCH_ASSESSMENT_SCORER_VERSION` covers legacy assessments. Stored verdicts remain visible while relevant profile, goals or listing changes are judged again.
 
 ## Benchmarks
 

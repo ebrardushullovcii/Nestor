@@ -417,6 +417,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     currentLocation: "Berlin",
     currentCountry: "Germany",
     yearsExperience: 2,
+    workEligibility: { authorizedWorkCountries: ["Germany"] },
     baseResume: { id: "resume", fileName: "synthetic.txt", uploadedAt: now },
   });
   const job = JobDetailSchema.parse({

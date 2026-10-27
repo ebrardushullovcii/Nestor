@@ -542,7 +542,14 @@ export function evaluateProfileSetupReadiness(
     searchPreferences.workModes,
   );
   const hasWorkEligibilityAnswers =
-    hasMeaningfulStringList(profile.workEligibility.authorizedWorkCountries) &&
+    (hasMeaningfulStringList(profile.workEligibility.authorizedWorkCountries) ||
+      Boolean(
+        profile.workEligibility.limitedWorkPermissions?.some(
+          (permission) =>
+            hasMeaningfulText(permission.country) &&
+            hasMeaningfulText(permission.conditions),
+        ),
+      )) &&
     profile.workEligibility.requiresVisaSponsorship !== null;
   const hasNarrative = hasMeaningfulNarrative(profile);
   // Finishing needs a name, one way to be contacted, and one place to look.

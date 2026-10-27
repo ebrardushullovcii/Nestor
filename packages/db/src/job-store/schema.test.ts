@@ -15,6 +15,7 @@ import { JOB_STORE_ADDED_COLUMNS } from "./schema";
  * new table adds its line here in the same change; a line never changes.
  */
 const RELEASED_COLUMNS: Record<string, string> = {
+  fit_context: "id fingerprint",
   activity_control: "id paused paused_at reason pause_behavior",
   application_details:
     "application_id attempt resume_artifact_json execution_json review_json authority_envelope_id profile_digest access_recheck",
@@ -399,5 +400,47 @@ describe("job store schema", () => {
       { body: "kept", pinned: 0 },
     ]);
     db.close();
+  });
+});
+
+it("migrates only exact legacy age notes to automatic ownership", () => {
+  withFile((file) => {
+    const original = openJobStore(file);
+    const saved = original.saveFoundJobs({
+      searchId: "old",
+      jobs: [foundJob(1), foundJob(2), foundJob(3)],
+    });
+    original.setStage(saved.added, "hidden");
+    original
+      .sql("UPDATE jobs SET hide_owner=NULL,stage_note=? WHERE id=?")
+      .run(
+        "Posted more than 30 days ago; this search kept newer listings. You can show it again.",
+        saved.added[0]!,
+      );
+    original
+      .sql("UPDATE jobs SET hide_owner=NULL,stage_note=? WHERE id=?")
+      .run(
+        "Posted more than 30 days ago; I chose to hide this",
+        saved.added[1]!,
+      );
+    original
+      .sql("UPDATE jobs SET hide_owner=NULL,stage_note=? WHERE id=?")
+      .run(
+        "Closed: this vacancy is no longer accepting applications.",
+        saved.added[2]!,
+      );
+    original.close();
+    const reopened = openJobStore(file);
+    try {
+      expect(reopened.restoreAgeHidden(null)).toBe(1);
+      expect(saved.added.map((id) => reopened.getJob(id)?.stage)).toEqual([
+        "found",
+        "hidden",
+        "hidden",
+      ]);
+      expect(reopened.getJob(saved.added[0]!)?.stageNote).toBeNull();
+    } finally {
+      reopened.close();
+    }
   });
 });

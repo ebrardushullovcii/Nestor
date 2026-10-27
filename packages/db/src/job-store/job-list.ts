@@ -83,8 +83,7 @@ function sharedFilterSql(filter: JobFilter) {
 export function toFilterSql(filter: JobFilter): FilterSql {
   const { clauses, params } = sharedFilterSql(filter);
   if (filter.minFit !== null) {
-    // Jobs not scored yet stay visible, so they show up the moment they are found.
-    clauses.push("(j.fit_score >= ? OR j.fit_score = -1)");
+    clauses.push("j.fit_score >= ?");
     params.push(filter.minFit);
   }
   if (filter.workModes.length > 0) {
@@ -101,30 +100,19 @@ export function toFilterSql(filter: JobFilter): FilterSql {
 
 /**
  * The filter as disjoint index ranges, one WHERE each: one stored work-mode
- * mask, then scored at or above the fit floor or not scored yet. A page
+ * mask, then assessed at or above the fit floor. A page
  * merges the ranges in sort order and a count adds them up, so neither reads
  * the jobs the filter leaves out, however many there are (schema.ts indexes
- * jobs_by_fit and jobs_by_mode_*). Without `splitFloor` the floor stays one
- * check on the jobs read in another order than fit (jobPageSql).
+ * jobs_by_fit and jobs_by_mode_*).
  */
-export function toFilterRanges(
-  filter: JobFilter,
-  splitFloor = true,
-): FilterSql[] {
+export function toFilterRanges(filter: JobFilter): FilterSql[] {
   const shared = sharedFilterSql(filter);
   const modes: ([string, SQLInputValue] | null)[] =
     filter.workModes.length > 0
       ? masksWithAny(filter.workModes).map((mask) => ["j.work_modes = ?", mask])
       : [null];
   const fits: ([string, SQLInputValue] | null)[] =
-    filter.minFit === null
-      ? [null]
-      : splitFloor
-        ? [
-            ["j.fit_score >= ?", filter.minFit],
-            ["j.fit_score = ?", -1],
-          ]
-        : [["(j.fit_score >= ? OR j.fit_score = -1)", filter.minFit]];
+    filter.minFit === null ? [null] : [["j.fit_score >= ?", filter.minFit]];
   return modes.flatMap((mode) =>
     fits.map((fit) => {
       const extra = [mode, fit].filter((part) => part !== null);
@@ -245,7 +233,7 @@ export function jobPageSql(query: JobListQuery, matches: number): Sql {
   const after = readCursor(query.cursor, columns.length);
   const floorApart = query.minFit !== null && query.sort !== "best_fit";
   const sortMatches = floorApart && matches <= JOB_TOTAL_CAP;
-  const arms = toFilterRanges(query, !floorApart || sortMatches).map(
+  const arms = toFilterRanges(query).map(
     (range) => ({
       sql: `SELECT ${ROW_COLUMNS} FROM jobs j WHERE ${range.where}${
         after
@@ -349,13 +337,14 @@ type DetailRecord = RowRecord & {
   salary_currency: string | null;
   facts_json: string;
   fit_json: string | null;
+  fit_stale: number;
 };
 
 export function getJob(sql: Statements, id: number): JobDetail | null {
   const record = sql(
     `SELECT ${ROW_COLUMNS}, j.url, j.apply_url, j.seen_at, d.description, d.summary,
        d.seniority, d.employment_type, d.salary_min, d.salary_max,
-       d.salary_currency, d.facts_json, d.fit_json
+       d.salary_currency, d.facts_json, d.fit_json, j.fit_stale
      FROM jobs j JOIN job_details d ON d.job_id = j.id WHERE j.id = ?`,
   ).get(id) as DetailRecord | undefined;
   if (!record) return null;
@@ -391,6 +380,7 @@ export function getJob(sql: Statements, id: number): JobDetail | null {
       : null,
     facts: JobListingFactsSchema.parse(JSON.parse(record.facts_json)),
     fit: record.fit_json ? (JSON.parse(record.fit_json) as JobFit) : null,
+    fitStale: Boolean(record.fit_stale),
     sightings: sightings.map((s) => ({
       sourceId: s.source_id,
       sourceLabel: s.source_label,

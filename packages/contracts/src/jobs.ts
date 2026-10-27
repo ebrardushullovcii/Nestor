@@ -9,7 +9,8 @@ import { JOB_FIT_BANDS } from "./plain-values";
  * in one indexed column, so each screen lists and counts its own stage:
  *
  * - `found`: a search found it and nobody has decided yet (Find jobs)
- * - `hidden`: the person hid it; searches never bring it back
+ * - `hidden`: the person hid it, or retention/closure did; only age-owned
+ *   hides can return automatically when the date range includes them
  * - `shortlisted`: picked; its resume is being written or reviewed
  * - `resume`: its resume is approved and Apply can take it
  * - `applied`: the application went out (Applications)
@@ -61,7 +62,7 @@ export const JobFilterSchema = z
     stage: JobStageSchema,
     /** Only jobs this search found first. */
     searchId: z.string().min(1).max(200).nullable().default(null),
-    /** Only jobs scored at least this fit, plus jobs not scored yet. */
+    /** Only assessed jobs scored at least this fit. */
     minFit: z.number().int().min(0).max(100).nullable().default(null),
     /** Words that must appear in the title, company or location. */
     text: z.string().max(200).default(""),
@@ -128,6 +129,18 @@ export type JobListPage = z.infer<typeof JobListPageSchema>;
 export const JOB_TOTAL_CAP = 1000;
 
 export const JobFitSchema = z.object({
+  inputFingerprint: z.string().optional(),
+  limit: z
+    .object({
+      kind: z.enum([
+        "eligibility",
+        "eligibility_unconfirmed",
+        "preferences",
+        "role",
+      ]),
+      countries: z.array(z.string()),
+    })
+    .optional(),
   score: z.number().int().min(0).max(100),
   summary: z.string(),
   reasons: z.array(z.string()),
@@ -186,6 +199,7 @@ export const JobDetailSchema = JobRowSchema.extend({
     .nullable(),
   facts: JobListingFactsSchema,
   fit: JobFitSchema.nullable(),
+  fitStale: z.boolean().optional(),
   sightings: z.array(JobSightingSchema),
 });
 export type JobDetail = z.infer<typeof JobDetailSchema>;
@@ -273,6 +287,7 @@ export interface FoundJob {
   facts?: JobListingFactsInput;
   /** Set when the search decided not to keep it: saved hidden, with this reason. */
   hiddenReason?: string;
+  hideOwner?: "person" | "age_retention" | "closed_listing";
 }
 
 export interface SaveFoundJobsResult {
@@ -282,6 +297,8 @@ export interface SaveFoundJobsResult {
   hidden: number[];
   /** Jobs already saved that this batch saw again. Their stage is kept. */
   merged: number[];
+  /** Merged jobs whose first discovery predates this search. */
+  alreadySaved?: number[];
   /** The saved job for each input job, in input order. */
   ids: number[];
 }
@@ -338,6 +355,7 @@ export const JobSearchRecordSchema = z.object({
   added: z.number().int().nonnegative(),
   /** Listings that were jobs already saved. */
   merged: z.number().int().nonnegative(),
+  alreadySaved: z.number().int().nonnegative().optional(),
   scored: z.number().int().nonnegative(),
   error: z.string().nullable(),
 });
@@ -406,9 +424,25 @@ export type JobSearchProgress = z.infer<typeof JobSearchProgressSchema>;
 
 /** A bounded active sample; the paged site-results command owns the complete list. */
 export const JobSearchStatusSchema = z.object({
+  fitChecking: z.number().int().nonnegative().optional(),
+  fitRechecking: z.number().int().nonnegative().optional(),
   search: JobSearchRecordSchema.nullable(),
   sources: z.array(JobSearchSourceStateSchema).max(3),
   progress: JobSearchProgressSchema.nullable(),
   sourceRevision: z.number().int().nonnegative(),
 });
 export type JobSearchStatus = z.infer<typeof JobSearchStatusSchema>;
+
+export const JobFitSummarySchema = z.object({
+  workCountries: z.array(z.string()).optional(),
+  total: z.number().int().nonnegative(),
+  checking: z.number().int().nonnegative(),
+  limits: z.array(
+    z.object({
+      kind: JobFitSchema.shape.limit.unwrap().shape.kind,
+      countries: z.array(z.string()),
+      count: z.number().int().positive(),
+    }),
+  ),
+});
+export type JobFitSummary = z.infer<typeof JobFitSummarySchema>;

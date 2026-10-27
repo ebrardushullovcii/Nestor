@@ -8,7 +8,8 @@ import {
   type TriageStage,
 } from "@nestor/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { emptyFitReason, useEmptyFitSummary } from "./empty-fit";
 
 import { Button } from "@renderer/components/ui/button";
 import {
@@ -116,6 +117,7 @@ const rememberedMoves: { current: { moveId: number; label: string }[] } = {
  * click or a key, one at a time or all at once, and Undo any move.
  */
 export function FindJobsScreen() {
+  const navigate = useNavigate();
   const { showToast } = useToast();
   const status = useSearchStatus();
   const [stage, setStage] = useState<TriageStage>(remembered.stage);
@@ -157,6 +159,13 @@ export function FindJobsScreen() {
         .run("count_jobs", filter)
         .then((result) => result.total),
   });
+  const prioritizeVisible = useCallback((rows: readonly JobRow[]) => {
+    if (stage === "found" && rows.length) {
+      void window.nestor.jobs
+        .run("prioritize_fit", { ids: rows.slice(0, 200).map((row) => row.id) })
+        .catch(() => undefined);
+    }
+  }, [stage]);
   const actions = TRIAGE_ACTIONS[stage];
 
   // A job asked for by link stays open even when it is not on the first page.
@@ -409,6 +418,15 @@ export function FindJobsScreen() {
   }));
 
   const running = status.search?.state === "running";
+  const emptyFit =
+    stage === "found" &&
+    floor !== null &&
+    !text.trim() &&
+    !list.loading &&
+    list.total === 0 &&
+    counts.found > 0;
+  const fitSummary = useEmptyFitSummary(emptyFit, floor, list.rows);
+  const fitReason = emptyFitReason(fitSummary, floor);
   const filtered = text.trim() !== "" || (stage === "found" && floor !== null);
   const lastMove = undoStack.current.at(-1) ?? null;
   // Jobs that left Found (here, in the chat or on another screen) mean the
@@ -436,9 +454,9 @@ export function FindJobsScreen() {
       : filtered && list.total === 0
         ? [
             text.trim() === "" && stage === "found" && floor !== null
-              ? `No jobs at fit ${floor}+ left`
+              ? `No found jobs at fit ${floor}+`
               : `No ${STAGE_LABEL[stage].toLowerCase()} jobs match`,
-            null,
+            emptyFit ? fitReason.detail : null,
           ]
         : [
             stage === "shortlisted" ? "Nothing shortlisted" : "Nothing hidden",
@@ -451,6 +469,19 @@ export function FindJobsScreen() {
       <p className="font-medium text-foreground">{emptyMessage[0]}</p>
       {emptyMessage[1] ? <p>{emptyMessage[1]}</p> : null}
       <div className="flex flex-wrap justify-center gap-2">
+        {emptyFit && fitReason.eligibility ? (
+          <Button
+            onClick={() => {
+              void navigate(
+                "/job-finder/profile?section=preferences&focus=work-eligibility",
+              );
+            }}
+            size="sm"
+            type="button"
+          >
+            Check where you can work
+          </Button>
+        ) : null}
         {filtered && list.total === 0 && counts[stage] > 0 ? (
           <Button
             onClick={() => {
@@ -461,8 +492,7 @@ export function FindJobsScreen() {
             type="button"
             variant="outline"
           >
-            Show all{" "}
-            {plural(counts[stage], `${STAGE_LABEL[stage].toLowerCase()} job`)}
+            Show all {counts[stage]}
           </Button>
         ) : null}
         {lastMove ? (
@@ -499,6 +529,17 @@ export function FindJobsScreen() {
         options={tabOptions}
         value={stage}
       />
+      {(status.fitRechecking ?? 0) > 0 ? (
+        <p role="status" className="text-xs text-foreground-muted">
+          Re-checking fit for {status.fitRechecking} jobs
+        </p>
+      ) : null}
+      {(status.fitChecking ?? 0) - (status.fitRechecking ?? 0) > 0 ? (
+        <p role="status" className="text-xs text-foreground-muted">
+          Checking fit for{" "}
+          {(status.fitChecking ?? 0) - (status.fitRechecking ?? 0)} more…
+        </p>
+      ) : null}
       <ListDetailLayout
         state={{
           stage,
@@ -521,6 +562,7 @@ export function FindJobsScreen() {
         }
         list={
           <ListPane
+            onVisibleRows={prioritizeVisible}
             activeId={activeId}
             counting={counting}
             bulkActions={

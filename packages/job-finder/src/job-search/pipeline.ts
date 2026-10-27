@@ -24,7 +24,12 @@ export function createSearchPipeline(input: {
   sources: Map<string, SourceWork>;
   write(source: SourceWork): void;
   settled(source: SourceWork): void;
-  count(increments: { found?: number; added?: number; merged?: number }): void;
+  count(increments: {
+    found?: number;
+    added?: number;
+    merged?: number;
+    alreadySaved?: number;
+  }): void;
   needsAccess(source: SourceWork, reason: string): void;
   failed(source: SourceWork, reason: string): void;
   browser(
@@ -33,6 +38,13 @@ export function createSearchPipeline(input: {
   ): void;
 }) {
   const { deps, signal, context, settings, sources } = input;
+  const previouslySaved = new Set<number>();
+  const countPreviouslySaved = (ids: readonly number[]) => {
+    const before = previouslySaved.size;
+    for (const id of ids) previouslySaved.add(id);
+    if (previouslySaved.size > before)
+      input.count({ alreadySaved: previouslySaved.size - before });
+  };
   const cutoff =
     settings.postedWithin === "any"
       ? null
@@ -46,9 +58,12 @@ export function createSearchPipeline(input: {
       Date.parse(job.postedAt) < cutoff
         ? {
             ...job,
+            hideOwner: "age_retention" as const,
             hiddenReason: `Posted more than ${settings.postedWithin === "week" ? 7 : 30} days ago; this search kept newer listings. You can show it again.`,
           }
-        : job,
+        : job.hiddenReason?.startsWith("Closed:")
+          ? { ...job, hideOwner: "closed_listing" as const }
+          : job,
     );
     const saved = deps.store.saveFoundJobs({
       searchId: input.searchId,
@@ -64,6 +79,7 @@ export function createSearchPipeline(input: {
       added: saved.added.length,
       merged: saved.merged.length,
     });
+    countPreviouslySaved(saved.alreadySaved ?? []);
     // Only where each job was seen and its stage note: reading whole
     // listings back here cost a 900-site search half a second of main.
     const savedIds = [...saved.added, ...saved.hidden, ...saved.merged];
@@ -268,6 +284,12 @@ export function createSearchPipeline(input: {
           source.urls.add(card.url);
           fresh.push(card);
         }
+        countPreviouslySaved(
+          deps.store.knownJobsBeforeSearch(
+            fresh.map((card) => card.url),
+            input.searchId,
+          ),
+        );
         const closed = fresh
           .filter((card) => card.closed)
           .map((card) => card.url);

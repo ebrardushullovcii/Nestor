@@ -1,4 +1,5 @@
 import { createScaleRouter } from "./scale/router.mjs";
+import { handlePermitFit } from "./sites/permit-fit.mjs";
 import http from "node:http";
 import { appendFileSync, readFileSync } from "node:fs";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
@@ -445,6 +446,7 @@ const server = http.createServer(async (req, res) => {
     req.headers.cookie || "",
   );
   try {
+    if (handlePermitFit(req, res, url, { send })) return;
     if (await scale.handle(req, res, url)) return;
     if (await handleHandoverOptions(req, res, url, { send, readPost, logPost }))
       return;

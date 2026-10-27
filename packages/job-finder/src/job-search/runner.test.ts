@@ -1,5 +1,6 @@
 import {
   CandidateProfileSchema,
+  JobSearchSettingsSchema,
   jobSiteTarget,
   JobDiscoveryTargetSchema,
   JobSearchPreferencesSchema,
@@ -18,6 +19,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import type { JobSearchEngine } from "./engine";
 import { createJobSearchRunner } from "./runner";
+import { createFitQueue } from "./fit-queue";
 import type { JobSearchContext, JobSearchRunner } from "./types";
 
 const stores: JobStore[] = [];
@@ -249,6 +251,7 @@ test("a background search merges all sightings before fitting; repeat reads and 
     "Requirements: SQL and distributed systems.",
   );
   expect(store.getJob(judged.id)?.fitScore).toBe(82);
+  expect(runner.status().search?.alreadySaved).toBe(0);
   await runner.start({ postedWithin: "any" });
   await finished(runner);
   expect(engine.readListings.mock.calls[1]![0].cards).toEqual([]);
@@ -258,6 +261,7 @@ test("a background search merges all sightings before fitting; repeat reads and 
       .list({})
       .rows.every((source) => source.seen === 2),
   ).toBe(true);
+  expect(runner.status().search?.alreadySaved).toBe(1);
 });
 
 test("a retention choice keeps full older listings without fit spend; Any can score them later", async () => {
@@ -271,10 +275,10 @@ test("a retention choice keeps full older listings without fit spend; Any can sc
   expect(detail.fitScore).toBeNull();
   expect(engine.fitJobs).not.toHaveBeenCalled();
   expect(runner.status().search?.scored).toBe(0);
-  store.moveJobs({ selection: { ids: [row.id] }, to: "found" });
-  expect(store.getJob(row.id)?.stage).toBe("found");
   await runner.start({ postedWithin: "any" });
   await finished(runner);
+  expect(store.getJob(row.id)?.stage).toBe("found");
+  expect(store.getJob(row.id)?.stageNote).toBeNull();
   expect(store.getJob(row.id)?.fitScore).toBe(82);
 });
 
@@ -877,4 +881,146 @@ test("Quick bounds HTTP collection without cancelling an accepted listing read",
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("material profile changes refresh found jobs on a repeat with no new jobs; phone edits reuse fit", async () => {
+  const { runner, context, engine, store } = setup();
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  const before = store.listJobs({ stage: "found" }).rows[0]!;
+  const fingerprint = store.getJob(before.id)?.fit?.inputFingerprint;
+  expect(fingerprint).toBeTruthy();
+  context.profile.phone = "+49 555 1234";
+  await runner.scoreUnscored();
+  expect(engine.fitJobs).toHaveBeenCalledTimes(1);
+  context.profile.workEligibility.authorizedWorkCountries = ["Germany"];
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(runner.status().search?.added).toBe(0);
+  expect(engine.fitJobs).toHaveBeenCalledTimes(2);
+  expect(store.getJob(before.id)?.fit?.inputFingerprint).not.toBe(fingerprint);
+});
+
+test("rapid eligibility edits fence superseded results and preserve the old score", async () => {
+  const { runner, context, engine, store } = setup();
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  const row = store.listJobs({ stage: "found" }).rows[0]!;
+  const pending = deferred<JobFitUpdate[]>();
+  engine.fitJobs.mockImplementationOnce(() => pending.promise);
+  context.profile.workEligibility.authorizedWorkCountries = ["Germany"];
+  const run = runner.scoreUnscored();
+  await vi.waitFor(() => expect(engine.fitJobs).toHaveBeenCalledTimes(2));
+  expect(runner.status().fitRechecking).toBe(1);
+  expect(store.getJob(row.id)?.fitScore).toBe(82);
+  context.profile.workEligibility.authorizedWorkCountries = ["Canada"];
+  pending.resolve([
+    { id: row.id, score: 99, summary: "Superseded", reasons: [], gaps: [] },
+  ]);
+  await run;
+  expect(store.getJob(row.id)?.fitScore).toBe(82);
+  expect(store.getJob(row.id)?.fitStale).toBe(true);
+  await runner.scoreUnscored();
+  expect(engine.fitJobs).toHaveBeenCalledTimes(3);
+  expect(store.getJob(row.id)?.fitStale).toBe(false);
+});
+
+test("a bounded pass prioritizes visible jobs and leaves later work persisted", async () => {
+  const { runner, context, engine, store } = setup();
+  context.sources = [];
+  const ids = store.saveFoundJobs({
+    searchId: "seed",
+    jobs: Array.from({ length: 120 }, (_, n) => ({
+      ...found(card("seed")),
+      title: `Backend Engineer ${n}`,
+      sourceJobId: String(n),
+      url: `https://seed.example/${n}`,
+      description: "Complete listing requirements. ".repeat(500),
+    })),
+  }).added;
+  runner.prioritizeFit([ids.at(-1)!]);
+  await runner.scoreUnscored();
+  expect(engine.fitJobs.mock.calls[0]?.[0].jobs[0]?.id).toBe(ids.at(-1));
+  const scored = engine.fitJobs.mock.calls.flatMap(
+    ([input]) => input.jobs,
+  ).length;
+  expect(scored).toBeGreaterThan(0);
+  expect(scored).toBeLessThan(ids.length);
+  expect(store.unscoredJobIds(200)).toHaveLength(ids.length - scored);
+});
+
+test("quick-stopped validated cards record successful access, while later auth evidence wins", async () => {
+  const { runner, engine, store, context } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://partial.example/source" });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  engine.collectSource.mockImplementation(async ({ target, onCards }) => {
+    await onCards?.(numberedCards(target.id, 400, "Backend Engineer"));
+    return { cards: [], complete: false, pagesRead: 1, notes: [] };
+  });
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(sites.get(1)).toMatchObject({ health: "healthy", lane: "http" });
+  expect(sites.get(1)?.lastSearchedAt).toBeTruthy();
+  expect(createSearchSourcesStore(store).list({}).rows[0]?.message).toContain(
+    "partial",
+  );
+  engine.collectSource.mockImplementation(() => Promise.resolve({
+    cards: [],
+    complete: false,
+    needsYou: true,
+    pagesRead: 1,
+    notes: [],
+  }));
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(sites.get(1)?.health).toBe("needs_sign_in");
+});
+
+test("reported token usage stops the pass before another estimated batch starts", async () => {
+  const { context, engine, store } = setup();
+  const ids = store.saveFoundJobs({
+    searchId: "seed",
+    jobs: Array.from({ length: 120 }, (_, n) => ({
+      ...found(card("seed")),
+      title: `Backend Engineer ${n}`,
+      sourceJobId: String(n),
+      url: `https://seed.example/usage-${n}`,
+      description: "Complete listing.",
+    })),
+  }).added;
+  engine.fitJobs.mockImplementation(({ jobs, onUsage }) => {
+    onUsage?.({
+      inputTokens: 49_000,
+      outputTokens: 500,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+    });
+    return Promise.resolve(
+      jobs.map(({ id }) => ({
+        id,
+        score: 80,
+        summary: "Fit",
+        reasons: [],
+        gaps: [],
+      })),
+    );
+  });
+  const controller = new AbortController();
+  const queue = createFitQueue(
+    { store, engine, readContext: () => Promise.resolve(context) },
+    context,
+    controller.signal,
+    1,
+    () => {},
+    () => {},
+    JobSearchSettingsSchema.parse({ postedWithin: "any" }),
+  );
+  queue.enqueue(ids);
+  await queue.drain();
+  expect(engine.fitJobs).toHaveBeenCalledTimes(1);
+  expect(queue.scored).toBe(48);
+  expect(queue.needsAnotherPass).toBe(true);
+  expect(store.unscoredJobIds(200)).toHaveLength(72);
+  controller.abort();
 });

@@ -516,6 +516,8 @@ export function SetupWorkEligibilityQuestions(props: {
   );
   const sponsorship =
     props.profileForm.watch("eligibility.requiresVisaSponsorship") ?? "";
+  const limitedPermissions =
+    props.profileForm.watch("eligibility.limitedWorkPermissions") ?? [];
   const setCountries = (values: readonly string[]) =>
     props.profileForm.setValue(
       "eligibility.authorizedWorkCountries",
@@ -523,7 +525,13 @@ export function SetupWorkEligibilityQuestions(props: {
       { shouldDirty: true, shouldTouch: true, shouldValidate: true },
     );
   const suggestedCountry = props.suggestedCountry?.trim() || null;
-  const answered = countries.length > 0 && sponsorship !== "";
+  const answered =
+    (countries.length > 0 ||
+      limitedPermissions.some(
+        (permission) =>
+          permission.country.trim() && permission.conditions.trim(),
+      )) &&
+    sponsorship !== "";
 
   return (
     <section
@@ -550,7 +558,8 @@ export function SetupWorkEligibilityQuestions(props: {
           </span>
         </h3>
         <p className="max-w-2xl text-sm leading-6 text-foreground-soft">
-          Jobs outside these countries will score low.
+          Job Finder checks each job against these countries and any limited
+          permissions.
         </p>
       </div>
       <div className="grid gap-2">
@@ -563,7 +572,9 @@ export function SetupWorkEligibilityQuestions(props: {
           placeholder="Add a country or region, e.g. Germany"
           values={countries}
         />
-        {countries.length === 0 && suggestedCountry ? (
+        {countries.length === 0 &&
+        limitedPermissions.length === 0 &&
+        suggestedCountry ? (
           <div className="flex flex-wrap items-center gap-2 px-1">
             <span className="text-sm text-foreground-soft">
               Where you live:
@@ -577,6 +588,20 @@ export function SetupWorkEligibilityQuestions(props: {
             >
               I can work in {suggestedCountry}
             </Button>
+          </div>
+        ) : null}
+        {limitedPermissions.length ? (
+          <div className="grid gap-2 text-sm text-foreground-soft">
+            <p className="font-medium">Limited work permission</p>
+            {limitedPermissions.map((permission, index) => (
+              <p key={index}>
+                {permission.country}: {permission.conditions}
+              </p>
+            ))}
+            <p>
+              These conditions count as your answer. Each job is checked against
+              them; this does not grant unrestricted permission.
+            </p>
           </div>
         ) : null}
       </div>

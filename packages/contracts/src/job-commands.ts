@@ -18,6 +18,7 @@ import {
   type JobChange,
   type JobDetail,
   type JobListPage,
+  type JobFitSummary,
   type JobSearchStatus,
   type JobStageCounts,
   type MoveJobsResult,
@@ -54,6 +55,18 @@ export const JOB_COMMANDS = {
     description:
       "Exactly how many jobs match a filter (stage, text, fit floor, work modes), with no cap: list_jobs stops counting at 1,000. Use it before a bulk move of every match.",
     input: JobFilterSchema,
+  },
+  fit_summary: {
+    effect: "read",
+    description:
+      "Reasons found jobs fall below a fit floor. Read only for an empty filtered list.",
+    input: z.object({ minFit: z.number().int().min(0).max(100) }).strict(),
+  },
+  prioritize_fit: {
+    effect: "local_write",
+    description:
+      "Prioritize fit checks for the jobs currently visible in Find jobs.",
+    input: z.object({ ids: z.array(JobIdSchema).max(200) }).strict(),
   },
   get_job: {
     effect: "read",
@@ -165,6 +178,8 @@ export type JobCommandInput<K extends JobCommandName> = z.input<
 export interface JobCommandOutputs extends ProfileCommandOutputs {
   list_jobs: JobListPage;
   count_jobs: { total: number };
+  fit_summary: JobFitSummary;
+  prioritize_fit: null;
   get_job: JobDetail | null;
   stage_counts: JobStageCounts;
   move_jobs: MoveJobsResult;

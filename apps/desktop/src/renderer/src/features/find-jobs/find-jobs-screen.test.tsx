@@ -74,6 +74,15 @@ beforeEach(() => {
     jobs: [job(1), job(2), job(3)],
   }));
   countGate = Promise.resolve();
+  store.setFit(
+    ids.map((id) => ({
+      id,
+      score: 80,
+      summary: "Assessed fit",
+      reasons: [],
+      gaps: [],
+    })),
+  );
   const run = (name: string, input: JobListQueryInput & { id?: number }) => {
     if (name === "list_jobs") return Promise.resolve(store.listJobs(input));
     if (name === "count_jobs")

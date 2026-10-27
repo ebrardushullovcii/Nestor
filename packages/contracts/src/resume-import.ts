@@ -500,8 +500,8 @@ export const resumeImportTargetSectionValues = [
   "proof_point",
   "answer_bank",
   "application_identity",
-  // Only ever produced from a sentence the resume states outright ("EU
-  // citizen", "no visa sponsorship required"); the model stages never emit it.
+  // Only from explicit statements, including conditional permits; never inferred
+  // from residence, work history or education.
   "work_eligibility",
 ] as const;
 export const ResumeImportTargetSectionSchema = z.enum(

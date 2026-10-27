@@ -104,7 +104,7 @@ export function FindJobsToolbar(props: {
           size="toolbar"
           title={
             props.fitFloor.floor === null
-              ? "Show only good fits (and jobs still being scored)"
+              ? "Show only assessed jobs at a good fit"
               : "Show every fit"
           }
           type="button"

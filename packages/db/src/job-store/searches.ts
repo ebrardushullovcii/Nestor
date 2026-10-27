@@ -11,7 +11,13 @@ import type { Statements } from "./statements";
 
 type SearchCounts = Pick<
   JobSearchRecord,
-  "sourcesTotal" | "sourcesDone" | "found" | "added" | "merged" | "scored"
+  | "sourcesTotal"
+  | "sourcesDone"
+  | "found"
+  | "added"
+  | "merged"
+  | "alreadySaved"
+  | "scored"
 >;
 
 export interface JobSearches {
@@ -38,6 +44,7 @@ type SearchRecord = {
   found: number;
   added: number;
   merged: number;
+  already_saved: number;
   scored: number;
   error: string | null;
 };
@@ -55,6 +62,7 @@ function toSearch(record: SearchRecord | undefined): JobSearchRecord | null {
     found: record.found,
     added: record.added,
     merged: record.merged,
+    alreadySaved: record.already_saved,
     scored: record.scored,
     error: record.error,
   };
@@ -83,7 +91,7 @@ export function createSearches(sql: Statements): JobSearches {
     count(id, increments) {
       sql(
         `UPDATE searches SET sources_total = sources_total + ?, sources_done = sources_done + ?, found = found + ?,
-           added = added + ?, merged = merged + ?, scored = scored + ?
+           added = added + ?, merged = merged + ?, already_saved = already_saved + ?, scored = scored + ?
          WHERE id = ?`,
       ).run(
         increments.sourcesTotal ?? 0,
@@ -91,6 +99,7 @@ export function createSearches(sql: Statements): JobSearches {
         increments.found ?? 0,
         increments.added ?? 0,
         increments.merged ?? 0,
+        increments.alreadySaved ?? 0,
         increments.scored ?? 0,
         id,
       );

@@ -59,6 +59,76 @@ const job = JobDetailSchema.parse({
 });
 
 test.each([
+  ["20 hours per week", "compatible", 92],
+  ["40 hours per week", "blocked", 39],
+  ["Hours to be agreed", "review", 64],
+] as const)(
+  "conditional permission follows the model's reading of %s",
+  async (hours, status, expected) => {
+    const student = CandidateProfileSchema.parse({
+      ...profile,
+      currentCountry: "Germany",
+      currentLocation: "Berlin",
+      workEligibility: {
+        limitedWorkPermissions: [
+          {
+            country: "Germany",
+            conditions:
+              "Study permit: up to 20 hours weekly until 2027-09. Full-time work later needs sponsorship.",
+            requiresFutureSponsorship: true,
+          },
+        ],
+      },
+    });
+    const [fit] = await fitJobs({
+      profile: student,
+      jobs: [
+        {
+          ...job,
+          location: "Berlin, Germany",
+          workModes: ["onsite"],
+          description: `Software development. ${hours}.`,
+        },
+      ],
+      goals: { targetRoles: ["Software Engineer"], locations: ["Berlin"] },
+      client: {
+        chatWithTools: (messages) => {
+          expect(messages[0]?.content).toContain(
+            "Compare limitedWorkPermissions conditions",
+          );
+          expect(messages[1]?.content).toContain(
+            "up to 20 hours weekly until 2027-09",
+          );
+          return Promise.resolve({
+            content: JSON.stringify({
+              fits: [
+                {
+                  id: 1,
+                  s: 92,
+                  why: "Matching software work",
+                  r: ["strong", "Exact work"],
+                  p: ["aligned", "Hours"],
+                  c: ["strong", "Skills"],
+                  e: [status, hours, "onsite", "DE"],
+                },
+              ],
+            }),
+          });
+        },
+      },
+    });
+    expect(fit?.score).toBe(expected);
+    expect(fit?.limit?.kind).toBe(
+      status === "compatible"
+        ? undefined
+        : status === "blocked"
+          ? "eligibility"
+          : "eligibility_unconfirmed",
+    );
+  },
+);
+
+test.each([
   ["US-only residence contradicts your country", "blocked", 99, 39],
   ["Required work authorization is not known", "review", 99, 64],
   ["Worldwide remote includes your country", "compatible", 99, 99],
@@ -261,8 +331,8 @@ test.each([
       "A hybrid work model of 3 days in the office. Relocation assistance is available.",
     quote: "hybrid work model of 3 days in the office",
     kind: "hybrid",
-    score: 39,
-    assessment: "conflict",
+    score: 64,
+    assessment: "unknown",
   },
 ])(
   "a model's compatible verdict cannot bypass the location guard: $location",
@@ -294,3 +364,17 @@ test.each([
     expect(fit?.preferences?.assessment).toBe(assessment);
   },
 );
+
+test("regional authorization stays with the model rather than an ISO country lookup", async () => {
+  const [fit] = await fitJobs({
+    profile: CandidateProfileSchema.parse({ ...profile, currentCountry: "Germany", currentLocation: "Berlin",
+      workEligibility: { authorizedWorkCountries: ["European Union"] } }),
+    jobs: [{ ...job, location: "Berlin, Germany", workModes: ["onsite"], description: "Work onsite in Berlin, Germany. Current work authorization required." }],
+    goals: { targetRoles: ["Software Engineer"], locations: ["Berlin"] },
+    client: { chatWithTools: () => Promise.resolve({ content: JSON.stringify({ fits: [{
+      id: 1, s: 90, why: "Relevant work and authorized location", r: ["strong", "Relevant work"], p: ["aligned", "EU authorization covers this job"], c: ["strong", "Direct evidence"],
+      e: ["compatible", "Work onsite in Berlin", "onsite", "DE"],
+    }] }) }) },
+  });
+  expect(fit?.score).toBe(90);
+});

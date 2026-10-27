@@ -61,15 +61,15 @@ export function writeMove(
   const recorded =
     "ids" in selection
       ? sql(
-          `INSERT OR IGNORE INTO job_move_items (move_id, job_id, from_stage, from_stage_at, from_stage_note)
-           SELECT ?, j.id, j.stage, j.stage_at, j.stage_note FROM jobs j
+          `INSERT OR IGNORE INTO job_move_items (move_id, job_id, from_stage, from_stage_at, from_stage_note, from_hide_owner)
+           SELECT ?, j.id, j.stage, j.stage_at, j.stage_note, j.hide_owner FROM jobs j
            WHERE j.id IN (SELECT value FROM json_each(?)) AND j.stage IN (${fromList})`,
         ).run(moveId, JSON.stringify(selection.ids), ...from)
       : (() => {
           const filter = toFilterSql(selection.filter);
           return sql(
-            `INSERT INTO job_move_items (move_id, job_id, from_stage, from_stage_at, from_stage_note)
-             SELECT ?, j.id, j.stage, j.stage_at, j.stage_note FROM jobs j
+            `INSERT INTO job_move_items (move_id, job_id, from_stage, from_stage_at, from_stage_note, from_hide_owner)
+             SELECT ?, j.id, j.stage, j.stage_at, j.stage_note, j.hide_owner FROM jobs j
              WHERE ${filter.where} AND j.stage IN (${fromList})
                AND j.id NOT IN (SELECT value FROM json_each(?))`,
           ).run(
@@ -86,9 +86,9 @@ export function writeMove(
   }
   const stages = [...new Set<JobStage>([...readFromStages(sql, moveId), to])];
   sql(
-    `UPDATE jobs SET stage = ?, stage_at = ?, stage_note = NULL
+    `UPDATE jobs SET stage = ?, stage_at = ?, stage_note = NULL, hide_owner = CASE WHEN ? = 'hidden' THEN 'person' ELSE NULL END
      WHERE id IN (SELECT job_id FROM job_move_items WHERE move_id = ?)`,
-  ).run(to, now, moveId);
+  ).run(to, now, to, moveId);
   // Shortlisted again, a resume approved before it went back starts over at
   // review instead of reading as approved in To review.
   if (to === "shortlisted")
@@ -131,7 +131,8 @@ export function writeUndo(sql: Statements, moveId: number): MoveOutcome {
     `UPDATE jobs SET
        stage = (SELECT from_stage FROM job_move_items WHERE move_id = ?1 AND job_id = jobs.id),
        stage_at = (SELECT from_stage_at FROM job_move_items WHERE move_id = ?1 AND job_id = jobs.id),
-       stage_note = (SELECT from_stage_note FROM job_move_items WHERE move_id = ?1 AND job_id = jobs.id)
+       stage_note = (SELECT from_stage_note FROM job_move_items WHERE move_id = ?1 AND job_id = jobs.id),
+       hide_owner = (SELECT from_hide_owner FROM job_move_items WHERE move_id = ?1 AND job_id = jobs.id)
      WHERE id IN (
        SELECT j.id FROM job_moves m
        JOIN job_move_items i ON i.move_id = m.id
@@ -165,9 +166,9 @@ export function writeStage(
     ).all(json, to) as { stage: JobStage }[]
   ).map((row) => row.stage);
   const result = sql(
-    `UPDATE jobs SET stage = ?, stage_at = ?, stage_note = NULL
+    `UPDATE jobs SET stage = ?, stage_at = ?, stage_note = NULL, hide_owner = CASE WHEN ? = 'hidden' THEN 'person' ELSE NULL END
      WHERE id IN (SELECT value FROM json_each(?)) AND stage <> ?`,
-  ).run(to, now, json, to);
+  ).run(to, now, to, json, to);
   const moved = Number(result.changes);
   return {
     moveId: null,

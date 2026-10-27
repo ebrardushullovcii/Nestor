@@ -1144,6 +1144,18 @@ describe("contracts profile setup schemas", () => {
     expect(withAnswers({ requiresVisaSponsorship: false })).toBe(false);
     expect(
       withAnswers({
+        limitedWorkPermissions: [
+          {
+            country: "Germany",
+            conditions: "Up to 20 hours weekly",
+            requiresFutureSponsorship: true,
+          },
+        ],
+        requiresVisaSponsorship: false,
+      }),
+    ).toBe(true);
+    expect(
+      withAnswers({
         authorizedWorkCountries: ["Germany"],
         requiresVisaSponsorship: false,
       }),

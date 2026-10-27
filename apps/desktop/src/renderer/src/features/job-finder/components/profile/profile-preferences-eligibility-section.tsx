@@ -96,7 +96,10 @@ export function ProfilePreferencesEligibilitySection(props: {
   const preferredApplicationLinksId =
     "profile-setup-field-application-identity-preferred-links";
   return (
-    <section className="grid content-start gap-(--gap-card)">
+    <section
+      id="profile-work-eligibility"
+      className="grid content-start gap-(--gap-card) scroll-mt-4"
+    >
       <ProfileSectionHeader
         eyebrow="Preferences"
         title="Work eligibility"

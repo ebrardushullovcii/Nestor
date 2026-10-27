@@ -50,4 +50,5 @@ export interface JobSearchRunner {
   onStatus(listener: (status: JobSearchStatus) => void): () => void;
   /** Retries unscored found/shortlisted jobs, without re-scoring existing fits. */
   scoreUnscored(): Promise<number>;
+  prioritizeFit(ids: readonly number[]): void;
 }

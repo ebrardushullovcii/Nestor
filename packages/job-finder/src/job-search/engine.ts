@@ -1,4 +1,7 @@
-import type { JobFinderAiClient } from "@nestor/ai-providers";
+import {
+  modelConversationKeys,
+  type JobFinderAiClient,
+} from "@nestor/ai-providers";
 import { createHash } from "node:crypto";
 import {
   collectSource,
@@ -65,6 +68,7 @@ export interface JobSearchEngine {
     signal: AbortSignal;
   }): Promise<ReadListingResult>;
   fitJobs(input: {
+    onUsage?: (usage: ModelTokenUsage) => void;
     request?: string;
     jobs: readonly JobDetail[];
     context: JobSearchContext;
@@ -262,9 +266,20 @@ export function createListingSearchEngine(deps: {
       readListings({ client, onUsage, ...input, readPage }),
     fitJobs: (input) =>
       fitJobs({
-        client,
-        onUsage,
+        client: {
+          chatWithTools: (messages, tools, options) =>
+            client.chatWithTools(messages, tools, {
+              ...options,
+              conversationKey: modelConversationKeys.fitJudging(
+                input.context.profile,
+              ),
+            }),
+        },
         ...input,
+        onUsage: (usage, stage) => {
+          onUsage(usage, stage);
+          input.onUsage?.(usage);
+        },
         profile: input.context.profile,
         ...(input.context.countryOptionFallbacks?.length
           ? { countryOptionFallbacks: input.context.countryOptionFallbacks }
