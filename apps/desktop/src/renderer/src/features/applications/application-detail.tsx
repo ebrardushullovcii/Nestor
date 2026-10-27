@@ -33,6 +33,23 @@ import { describeError, useApplication } from "./use-application";
 
 type AddKind = "reply" | "interview" | "reminder" | "note";
 
+interface ApplicationDraft {
+  kind: AddKind;
+  title: string;
+  body: string;
+  due: string;
+  place: string;
+  tag: string;
+}
+const EMPTY_DRAFT: ApplicationDraft = {
+  kind: "reply",
+  title: "",
+  body: "",
+  due: "",
+  place: "",
+  tag: "",
+};
+
 const ADD_LABEL: Record<AddKind, string> = {
   reply: "Reply",
   interview: "Interview",
@@ -114,14 +131,19 @@ export function ApplicationDetail(props: { jobId: number | null }) {
   const { showToast } = useToast();
   const setStatus = useSetStatus();
   const showChange = useTrackerChangeToast();
-  const [kind, setKind] = useState<AddKind>("reply");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [due, setDue] = useState("");
-  const [place, setPlace] = useState("");
-  const [tag, setTag] = useState("");
+  const [drafts, setDrafts] = useState<Record<number, ApplicationDraft>>({});
+  const { kind, title, body, due, place, tag } =
+    props.jobId === null ? EMPTY_DRAFT : (drafts[props.jobId] ?? EMPTY_DRAFT);
+  const editDraft = (patch: Partial<ApplicationDraft>) => {
+    const id = props.jobId;
+    if (id === null) return;
+    setDrafts((current) => ({
+      ...current,
+      [id]: { ...(current[id] ?? EMPTY_DRAFT), ...patch },
+    }));
+  };
 
-  if (!application) {
+  if (!application || application.job.id !== props.jobId) {
     return (
       <section
         className="grid min-h-0 place-items-center p-8 text-sm text-foreground-soft"
@@ -166,10 +188,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
       `${ADD_LABEL[kind]} added`,
     );
     if (ok) {
-      setTitle("");
-      setBody("");
-      setDue("");
-      setPlace("");
+      editDraft({ title: "", body: "", due: "", place: "" });
     }
   };
 
@@ -185,7 +204,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
         }),
       `Tagged ${value}`,
     );
-    if (ok) setTag("");
+    if (ok) editDraft({ tag: "" });
   };
 
   return (
@@ -284,7 +303,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
         <SegmentedControl<AddKind>
           className="self-start"
           label="What to add"
-          onValueChange={setKind}
+          onValueChange={(kind) => editDraft({ kind })}
           options={(Object.keys(ADD_LABEL) as AddKind[]).map((value) => ({
             value,
             label: ADD_LABEL[value],
@@ -293,7 +312,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
         />
         <Input
           aria-label={`${ADD_LABEL[kind]} title`}
-          onChange={(event) => setTitle(event.target.value)}
+          onChange={(event) => editDraft({ title: event.target.value })}
           placeholder={TITLE_HINT[kind]}
           value={title}
         />
@@ -302,7 +321,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
             <Input
               aria-label="When"
               className="w-56"
-              onChange={(event) => setDue(event.target.value)}
+              onChange={(event) => editDraft({ due: event.target.value })}
               type="datetime-local"
               value={due}
             />
@@ -310,7 +329,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
               <Input
                 aria-label="Where or meeting link"
                 className="min-w-0 flex-1"
-                onChange={(event) => setPlace(event.target.value)}
+                onChange={(event) => editDraft({ place: event.target.value })}
                 placeholder="Where, or the meeting link"
                 value={place}
               />
@@ -320,7 +339,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
         {kind === "reply" || kind === "note" ? (
           <Textarea
             aria-label="Details"
-            onChange={(event) => setBody(event.target.value)}
+            onChange={(event) => editDraft({ body: event.target.value })}
             placeholder="Details (optional)"
             rows={2}
             value={body}
@@ -366,7 +385,7 @@ export function ApplicationDetail(props: { jobId: number | null }) {
           <Input
             aria-label="Add a tag"
             className="h-7 w-32 text-xs"
-            onChange={(event) => setTag(event.target.value)}
+            onChange={(event) => editDraft({ tag: event.target.value })}
             placeholder="Add a tag"
             value={tag}
           />
