@@ -3,6 +3,7 @@ import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
 import { concreteClaimsSupported } from "./concrete-answer-claims";
+import { buildApplyFormObservation } from "./page-hands";
 import type { ApplyFormControl } from "./types";
 
 test("motivation cannot turn a posting requirement into an applicant fact", () => {
@@ -397,4 +398,175 @@ test("a preapproved routine declaration remains a sourced answer, while a gated 
       })
     )[0]?.supported,
   ).toBe(false);
+});
+
+test.each([
+  {
+    name: "the person's Yes",
+    answer: "Yes",
+    selected: "Yes",
+    saved: true,
+    source: "saved",
+    country: "Kosovo",
+    supported: true,
+  },
+  {
+    name: "the person's Yes without an inferred source",
+    answer: "Yes",
+    selected: "Yes",
+    saved: true,
+    source: null,
+    country: "United States",
+    supported: true,
+  },
+  {
+    name: "the person's No overrides a location derivation",
+    answer: "No",
+    selected: "No",
+    saved: true,
+    source: null,
+    country: "Kosovo",
+    supported: true,
+  },
+  {
+    name: "the same Profile timezone source as Fill",
+    answer: "Yes",
+    selected: "Yes",
+    saved: false,
+    source: "profile.currentCountry#timezone",
+    country: "Kosovo",
+    supported: true,
+  },
+  {
+    name: "an uncertain Profile timezone",
+    answer: "Yes",
+    selected: "Yes",
+    saved: false,
+    source: "profile.currentCountry#timezone",
+    country: "United States",
+    supported: false,
+  },
+  {
+    name: "a card value different from the selected choice",
+    answer: "Yes",
+    selected: "No",
+    saved: true,
+    source: "saved",
+    country: "Kosovo",
+    supported: false,
+  },
+  {
+    name: "a saved answer to a different question",
+    answer: "Yes",
+    selected: "Yes",
+    saved: true,
+    source: "saved",
+    country: "Kosovo",
+    savedQuestion: "Do you require visa sponsorship?",
+    supported: false,
+  },
+])("pre-send Yes/No rechecks preserve $name", async (entry) => {
+  const question = "Are you in an European time zone?";
+  // Ashby's Yes/No: two option buttons and its hidden box.
+  const formControls = buildApplyFormObservation(
+    {
+      url: "https://jobs.example.test/acme/1/application",
+      title: "Apply",
+      bodyText: question,
+      controls: [
+        {
+          index: 0,
+          tagName: "input",
+          inputType: "checkbox",
+          role: "",
+          id: "",
+          name: "tz",
+          label: question,
+          groupLabel: "",
+          placeholder: "",
+          autocomplete: "",
+          required: true,
+          invalid: false,
+          validationMessage: "",
+          disabled: false,
+          readOnly: false,
+          visible: false,
+          value: "on",
+          checked: true,
+          multiple: false,
+          options: [],
+          selectedOptionLabel: "",
+        },
+      ],
+      actions: [
+        {
+          index: 0,
+          label: "Yes",
+          visible: true,
+          disabled: false,
+          section: question,
+          pressed: entry.selected === "Yes",
+          sectionRequired: true,
+        },
+        {
+          index: 1,
+          label: "No",
+          visible: true,
+          disabled: false,
+          section: question,
+          pressed: entry.selected === "No",
+          sectionRequired: true,
+        },
+      ],
+      links: [],
+      headings: [],
+      clickables: [],
+      openedTabs: [],
+      loading: false,
+      validationErrors: [],
+      stepLabel: null,
+    },
+    "2026-10-27T07:30:00.000Z",
+  ).controls;
+  const saved = {
+    id: "application_application:146",
+    kind: "other" as const,
+    label: question,
+    question: entry.savedQuestion ?? question,
+    answer: entry.answer,
+    roleFamilies: [],
+    proofEntryIds: [],
+  };
+  const sourceId = `answerLibrary.${saved.id}`;
+  const client = reader(
+    formControls.map((_control, index) => ({
+      index,
+      kind: "other",
+      country: null,
+      sourceId: entry.source === "saved" ? sourceId : entry.source,
+    })),
+  );
+  // Both pre-send checks must see the same choice and unchanged human answer.
+  for (let recheck = 0; recheck < 2; recheck += 1) {
+    const checks = await checkClassifiedApplicationAnswers({
+      client,
+      sources: {
+        ...sources,
+        profile: {
+          ...sources.profile,
+          currentCountry: entry.country,
+          currentLocation: entry.country,
+        },
+        reusableAnswers: entry.saved ? [saved] : [],
+      },
+      answers: [{ question, answer: entry.answer }],
+      formContext: { pageText: question, fields: [] },
+      formControls,
+      payDisclosed: false,
+    });
+    expect(checks).toEqual([
+      expect.objectContaining({ supported: entry.supported }),
+    ]);
+  }
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });

@@ -42,6 +42,18 @@ export async function checkClassifiedApplicationAnswers(input: {
       (control) => questionPrompt(control) === answer.question,
     );
     if (current?.length === 1 && current[0]) return current[0];
+    // A choice is asked by several fields (a Yes/No pair, radio options,
+    // and sometimes a hidden box behind them): the answer is the option the
+    // page shows chosen, which is what preparation checked.
+    const said = answer.answer.trim().toLowerCase();
+    const chosen = current?.find(
+      (control) =>
+        control.visible &&
+        (control.kind === "radio" || control.kind === "checkbox") &&
+        control.checked &&
+        (control.label || control.value).trim().toLowerCase() === said,
+    );
+    if (chosen) return chosen;
     const parts = answer.question.split(/\s+—\s+/u);
     return {
       ref: `preflight${index}`,
