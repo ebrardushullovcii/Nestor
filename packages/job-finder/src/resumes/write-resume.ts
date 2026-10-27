@@ -198,13 +198,56 @@ export async function writeResume(
     tailoringStrength: tailoringMode,
     ...(signal ? { signal } : {}),
   };
-  const sanitize = (draft: ResumeDraft, sourceSkills?: readonly string[]) =>
-    sanitizeResumeDraft({
+  const roleIds = new Set(profile.experiences.map((record) => record.id));
+  const sanitize = (draft: ResumeDraft, sourceSkills?: readonly string[]) => {
+    const clean = sanitizeResumeDraft({
       draft,
       job,
       profile,
       ...(sourceSkills ? { sourceSkills } : {}),
     });
+    return {
+      ...clean,
+      sections: clean.sections.map((section) =>
+        section.kind !== "experience" || !roleIds.size
+          ? section
+          : {
+              ...section,
+              included: true,
+              ...(!section.included
+                ? {
+                    text: null,
+                    bullets: section.bullets.map((bullet) => ({
+                      ...bullet,
+                      included: false,
+                    })),
+                  }
+                : {}),
+              entries: section.entries.map((entry) =>
+                entry.profileRecordId && roleIds.has(entry.profileRecordId)
+                  ? {
+                      ...entry,
+                      included: true,
+                      // A model omission becomes a short canonical role, never
+                      // a gap. Keep hidden claims hidden when restoring it.
+                      ...(!section.included || !entry.included
+                        ? {
+                            summary: null,
+                            bullets: entry.bullets.map((bullet) => ({
+                              ...bullet,
+                              included: false,
+                            })),
+                          }
+                        : {}),
+                    }
+                  : section.included
+                    ? entry
+                    : { ...entry, included: false },
+              ),
+            },
+      ),
+    };
+  };
 
   const baseDraft = assemble(
     completeTailoredResumeDraft(

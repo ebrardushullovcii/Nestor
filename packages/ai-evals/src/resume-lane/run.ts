@@ -366,6 +366,11 @@ export function scoreCase(
       source,
       listing: listing.description,
       title: listing.title,
+      expectedExperienceIds: profile.experiences
+        .filter((record) => !record.isDraft)
+        .map((record) => record.id),
+      originalUnchanged:
+        entry.level === "original" && !entry.draft && !entry.error,
     });
     return { entry, facts, stretches: assessment.stretches, shape };
   });
@@ -573,17 +578,17 @@ export function formatResumeLaneReport(
     "",
     `${results.length} resumes from ${new Set(results.map((r) => r.caseId)).size} cases, ${new Date().toISOString().slice(0, 10)}.`,
     "",
-    `As named: 0 invented facts at every level, and Original unchanged; Light keeps the headline and edits at most ${pct(LIGHT_MAX_EDIT)} of words; Tailored edits more than Light; Aggressive edits at least as much as Tailored and leads with the role.`,
+    `As named: 0 invented facts and a non-empty work history when the source has roles, and Original unchanged; Light keeps the headline and edits at most ${pct(LIGHT_MAX_EDIT)} of words; Tailored edits more than Light; Aggressive edits at least as much as Tailored and leads with the role.`,
     "",
-    "| Level | Resumes | Invented facts | Stretches | As named | Flags left | Median edit size | Truthful tool coverage | Median s | Median calls | Median tokens in/out |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Level | Resumes | Work roles visible/source | Invented facts | Stretches | As named | Flags left | Median edit size | Truthful tool coverage | Median s | Median calls | Median tokens in/out |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const level of RESUME_LEVELS) {
     const rows = results.filter((result) => result.level === level);
     const mid = (pick: (row: ResumeLaneResult) => number) =>
       median(rows.map(pick));
     lines.push(
-      `| ${level} | ${rows.length} | ${rows.reduce((sum, row) => sum + row.inventedFacts.length, 0)} | ${rows.reduce((sum, row) => sum + row.stretches.length, 0)} | ${rows.filter((row) => !row.levelProblem).length}/${rows.length} | ${rows.reduce((sum, row) => sum + row.flagsLeft.length, 0)} | ${pct(mid((row) => row.shape.editSize))} | ${pct(mid((row) => row.shape.truthfulKeywordCoverage))} | ${mid((row) => row.seconds).toFixed(1)} | ${mid((row) => row.modelCalls)} | ${Math.round(mid((row) => row.promptTokens))}/${Math.round(mid((row) => row.completionTokens))} |`,
+      `| ${level} | ${rows.length} | ${rows.reduce((sum, row) => sum + (row.shape.workHistory?.visible ?? 0), 0)}/${rows.reduce((sum, row) => sum + (row.shape.workHistory?.expected ?? 0), 0)} | ${rows.reduce((sum, row) => sum + row.inventedFacts.length, 0)} | ${rows.reduce((sum, row) => sum + row.stretches.length, 0)} | ${rows.filter((row) => !row.levelProblem).length}/${rows.length} | ${rows.reduce((sum, row) => sum + row.flagsLeft.length, 0)} | ${pct(mid((row) => row.shape.editSize))} | ${pct(mid((row) => row.shape.truthfulKeywordCoverage))} | ${mid((row) => row.seconds).toFixed(1)} | ${mid((row) => row.modelCalls)} | ${Math.round(mid((row) => row.promptTokens))}/${Math.round(mid((row) => row.completionTokens))} |`,
     );
   }
   const written = results.filter((row) => row.level !== "original");
