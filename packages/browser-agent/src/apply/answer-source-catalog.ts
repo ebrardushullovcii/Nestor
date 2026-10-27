@@ -915,16 +915,17 @@ export function classifyAnswerPermission(input: {
     return { kind: "literal", source };
   if (tags.kind === "work_auth" || tags.kind === "sponsorship") {
     if (
-      tags.kind === "work_auth" &&
       !exactSaved &&
-      /\b(?:restrictions?|limitations?|sponsor(?:ship|ing|ed)?|without)\b/iu.test(
-        [
-          ...(input.control.sectionPath ?? []),
-          input.control.groupLabel,
-          input.control.label,
-          input.control.hint ?? "",
-        ].join(" "),
-      )
+      (tags.hasAdditionalConditions === true ||
+        (tags.kind === "work_auth" &&
+          /\b(?:restrictions?|limitations?|sponsor(?:ship|ing|ed)?|without)\b/iu.test(
+            [
+              ...(input.control.sectionPath ?? []),
+              input.control.groupLabel,
+              input.control.label,
+              input.control.hint ?? "",
+            ].join(" "),
+          )))
     )
       return deny(
         "Authorization alone does not establish the question's additional restrictions or sponsorship conditions.",
@@ -939,6 +940,7 @@ export function classifyAnswerPermission(input: {
         exactSaved &&
         tags.kind === "work_auth" &&
         knownLegalQuestion &&
+        tags.hasAdditionalConditions !== true &&
         !/\b(?:restrictions?|limitations?|sponsor(?:ship)?|without)\b/iu.test(
           input.control.kind === "radio"
             ? (input.control.sectionPath?.at(-1) ?? input.control.groupLabel)

@@ -29,6 +29,8 @@ export const ApplyAnswerTagsSchema = z
       .refine((value) => countries.has(value), "Use an ISO country code")
       .nullable(),
     sourceId: z.string().trim().min(1).max(2000).nullable(),
+    /** Country authorization alone does not answer additional legal conditions. */
+    hasAdditionalConditions: z.boolean().optional(),
     declarationPurpose: z
       .enum(["consent", "acknowledgement", "personal_fact"])
       .nullable()

@@ -28,6 +28,50 @@ const formQuestions = [
   ],
 ] as const;
 
+test("the question reader preserves an additional-conditions reading", async () => {
+  const client: LLMClient = {
+    chatWithTools: () =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: "legal",
+            type: "function",
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({
+                plainIndexes: [0],
+                flagged: [],
+                tags: [
+                  {
+                    index: 0,
+                    kind: "work_auth",
+                    country: "DE",
+                    sourceId: null,
+                    hasAdditionalConditions: true,
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+  };
+  const readings = await classifyApplicationQuestions({
+    client,
+    questions: [
+      {
+        prompt:
+          "Dürfen Sie dauerhaft und uneingeschränkt in Deutschland arbeiten?",
+        kind: "radio",
+        options: ["Ja", "Nein"],
+      },
+    ],
+  });
+  expect(
+    readings.values().next().value?.answerTags?.hasAdditionalConditions,
+  ).toBe(true);
+});
+
 function reportFor(prompts: { question: string }[]) {
   return {
     content: "",

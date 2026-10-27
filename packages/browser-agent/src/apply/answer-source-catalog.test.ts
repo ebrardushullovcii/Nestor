@@ -126,6 +126,25 @@ test("an unknown age has a no-source check rather than a rejected Profile value"
   ).toMatchObject({ kind: "needs_you", check: "source_lookup" });
 });
 
+test("the classified meaning retains additional legal conditions in another language", () => {
+  const sources = source();
+  sources.posting.location = "Germany";
+  expect(
+    decide(
+      sources,
+      control(
+        "Dürfen Sie dauerhaft und uneingeschränkt in Deutschland arbeiten?",
+      ),
+      {
+        kind: "work_auth",
+        country: "DE",
+        sourceId: "profile.workEligibility.authorizedWorkCountries.0",
+        hasAdditionalConditions: true,
+      },
+    ).kind,
+  ).toBe("needs_you");
+});
+
 test("a host semantic match preserves reference, own-words, country and history guards", () => {
   const sources = source();
   const field = {
