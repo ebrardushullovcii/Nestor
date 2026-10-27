@@ -20,6 +20,7 @@ import {
   wantsProfileUrl,
 } from "./profile-url";
 import { currentCountryTimezone } from "./current-timezone";
+import { phoneCountryPicker } from "./phone-answer";
 import type {
   ApplyAnswer,
   ApplyAnswerSources,
@@ -38,6 +39,7 @@ export function applicantContactGroup(control: ApplyFormControl): boolean {
   const group = normalizeFormQuestionPrompt(control.groupLabel);
   return (
     !group ||
+    group === normalizeFormQuestionPrompt(control.label) ||
     [
       "personal information",
       "contact information",
@@ -290,6 +292,8 @@ export function storedFacts(
       "the timezone of your current country",
     );
   add(profile.fullName, "profile.fullName", "your name");
+  add(profile.headline, "profile.headline", "your headline");
+  add(profile.summary, "profile.summary", "your summary");
   add(profile.firstName, "profile.firstName", "your first name");
   add(profile.middleName, "profile.middleName", "your middle name");
   add(profile.lastName, "profile.lastName", "your last name");
@@ -473,8 +477,10 @@ export function savedAnswerForQuestion(
     candidate.choiceGroupKey
       ? `choice:${candidate.choiceGroupKey}`
       : candidate.ref;
+  const phonePicker = phoneCountryPicker(control, controls ?? []);
   const visible = (controls ?? []).filter(
-    (candidate) => candidate.visible && !candidate.disabled,
+    (candidate) =>
+      candidate.visible && !candidate.disabled && candidate !== phonePicker,
   );
   if (
     controls &&

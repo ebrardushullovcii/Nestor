@@ -29,6 +29,21 @@ export function phoneAnswerMatches(
   if (expected === actual) return true;
   // An explicit international answer cannot be interpreted as national digits.
   if (answer.trim().startsWith("+") || !control.scopeKey) return false;
+  const picker = phoneCountryPicker(control, controls);
+  if (!picker) return false;
+  const codes = [
+    ...picker.selectedOptionLabel.matchAll(/\+([1-9]\d{0,2})(?!\d)/gu),
+  ];
+  return codes.length === 1 && `${codes[0]?.[1]}${actual}` === expected;
+}
+
+/** Only the selected calling-code companion of one number in this form/group. */
+export function phoneCountryPicker(
+  control: ApplyFormControl,
+  controls: readonly ApplyFormControl[],
+): ApplyFormControl | null {
+  if (!control.scopeKey || (!control.telInput && !phoneLabel(control.label)))
+    return null;
   const peers = controls.filter(
     (candidate) =>
       candidate.visible &&
@@ -42,7 +57,7 @@ export function phoneAnswerMatches(
       candidate.telInput ||
       (candidate.kind === "text" && phoneLabel(candidate.label)),
   );
-  if (phones.length !== 1 || phones[0]?.ref !== control.ref) return false;
+  if (phones.length !== 1 || phones[0]?.ref !== control.ref) return null;
   const pickers = peers.filter(
     (candidate) =>
       (candidate.kind === "combobox" || candidate.kind === "select") &&
@@ -60,9 +75,9 @@ export function phoneAnswerMatches(
         ].includes(normalizeFormQuestionPrompt(candidate.label))),
   );
   const picker = pickers[0];
-  if (pickers.length !== 1 || !picker || picker.invalid) return false;
+  if (pickers.length !== 1 || !picker || picker.invalid) return null;
   const codes = [
     ...picker.selectedOptionLabel.matchAll(/\+([1-9]\d{0,2})(?!\d)/gu),
   ];
-  return codes.length === 1 && `${codes[0]?.[1]}${actual}` === expected;
+  return codes.length === 1 ? picker : null;
 }

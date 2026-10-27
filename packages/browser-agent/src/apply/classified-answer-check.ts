@@ -1,5 +1,6 @@
 import type { ApplicationAttestationKind } from "@nestor/contracts";
 import { questionPrompt } from "./policy-executor";
+import { phoneCountryPicker } from "./phone-answer";
 import type { LLMClient } from "../agent/contracts";
 import type {
   ApplyAgentConfig,
@@ -39,9 +40,14 @@ export async function checkClassifiedApplicationAnswers(input: {
 }): Promise<WrittenAnswerCheck[]> {
   const controls: ApplyFormControl[] = input.answers.map((answer, index) => {
     const current = input.formControls?.filter(
-      (control) => questionPrompt(control) === answer.question,
+      (control) =>
+        control.visible && questionPrompt(control) === answer.question,
     );
     if (current?.length === 1 && current[0]) return current[0];
+    const numbers = current?.filter(
+      (control) => control.telInput && phoneCountryPicker(control, current),
+    );
+    if (numbers?.length === 1 && numbers[0]) return numbers[0];
     // A choice is asked by several fields (a Yes/No pair, radio options,
     // and sometimes a hidden box behind them): the answer is the option the
     // page shows chosen, which is what preparation checked.
