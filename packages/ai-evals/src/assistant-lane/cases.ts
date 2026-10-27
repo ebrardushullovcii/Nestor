@@ -111,7 +111,9 @@ function expect(condition: boolean, failure: string): string[] {
 const OUTCOME_CASES: AssistantLaneCase[] = [
   {
     id: "jobs.ready_resume",
-    inputTokenBudget: 14_000,
+    // The named job may need list_jobs followed by get_resume; allow three
+    // bounded model steps while the simple shortlist list stays below 14k.
+    inputTokenBudget: 22_000,
     title: "A shortlisted job with an unapproved draft is ready to review",
     inventory: [],
     scripted: true,
@@ -123,7 +125,10 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
       },
     ],
     check: (o) => [
-      ...expect(usedTool(o, "list_jobs"), "did not read resume state"),
+      ...expect(
+        usedTool(o, "list_jobs", "get_resume", "list_shortlisted"),
+        "did not read resume state",
+      ),
       ...expect(
         /(?:ready|waiting|awaiting|written|awaits)[\s\S]*review|review[\s\S]*(?:ready|waiting|awaiting)/iu.test(
           o.replyText,

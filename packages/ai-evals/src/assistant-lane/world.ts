@@ -1,4 +1,8 @@
-import { assistantJobListPage } from "@nestor/job-finder/resumes";
+import {
+  assistantJobListPage,
+  createResumeCommandReads,
+  createResumeCommandRunner,
+} from "@nestor/job-finder/resumes";
 import { createApplicationStore } from "@nestor/db/applications";
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
 import {
@@ -12,6 +16,7 @@ import {
 import { createStubBrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   JOB_COMMANDS,
+  RESUME_COMMANDS,
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
   ProfileSetupStateSchema,
@@ -23,6 +28,7 @@ import {
   type AssistantMessage,
   type CandidateProfile,
   type JobCommandOutputs,
+  type ResumeCommandOutputs,
   type JobCommandName,
   type JobSearchPreferences,
   type SavedJob,
@@ -310,6 +316,10 @@ function recordingPorts(
   repository: JobFinderRepository,
 ): AssistantHostPorts {
   const runJobCommand = createJobCommandRunner({ store });
+  const runResumeCommand = createResumeCommandRunner(
+    () => Promise.reject(new Error("Writing is not part of this eval world.")),
+    () => Promise.resolve(createResumeCommandReads(store, () => [])),
+  );
   const tracker = createTrackerStore(store);
   return {
     savePageJobs: (input) => Promise.resolve(savePageJobs(store, input)),
@@ -354,6 +364,7 @@ function recordingPorts(
     commands: [
       ...assistantCommandTools<typeof JOB_COMMANDS, JobCommandOutputs>(
         JOB_COMMANDS,
+        RESUME_COMMANDS,
         (name, input) => {
           if (name === "start_search") {
             recorder.searches.push(JSON.stringify(input).slice(0, 400));
@@ -373,6 +384,11 @@ function recordingPorts(
           },
         },
       ),
+      ...assistantCommandTools<typeof RESUME_COMMANDS, ResumeCommandOutputs>(
+        RESUME_COMMANDS,
+        runResumeCommand,
+        { group: "resume" },
+      ).filter((tool) => tool.effect === "read"),
       ...needsYouCommandTools(needsYou),
     ],
     checkSource: () => Promise.resolve(),
