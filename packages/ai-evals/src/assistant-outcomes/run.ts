@@ -31,6 +31,7 @@ import {
   declarationOutcomeCases,
 } from "./profile-operation-cases";
 import { answerOutcomeCases } from "./answer-cases";
+import { needsViewOutcomeCases } from "./needs-view-cases";
 
 interface VerifyContext {
   page: Promise<Page>;
@@ -64,6 +65,7 @@ export function allBatches(
     ...siteOutcomeCases(replicaOrigin),
     ...applicationViewOutcomeCases(),
     ...trackerOutcomeCases(),
+    ...needsViewOutcomeCases(),
     ...answerOutcomeCases(),
   ];
 }
