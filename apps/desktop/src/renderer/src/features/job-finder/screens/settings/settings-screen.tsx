@@ -67,14 +67,23 @@ const sectionIcons: Record<JobFinderSettingsSection, typeof MonitorSmartphone> =
   };
 const settingsSections = JOB_FINDER_SETTINGS_SECTION_IDS.map((section) => {
   const id = settingsSectionElementId(section);
+  const entry = JOB_FINDER_SETTINGS_SECTIONS[section];
+  const within: JobFinderSettingsSection | undefined =
+    "within" in entry ? entry.within : undefined;
   return {
-    ...JOB_FINDER_SETTINGS_SECTIONS[section],
+    ...entry,
     id,
     headingId: `${id}-heading`,
     href: `#${id}`,
     icon: sectionIcons[section],
+    // The tab that shows this section as current.
+    tabId: within ? settingsSectionElementId(within) : id,
   };
 });
+// One tab per home; a section within another has none of its own.
+const settingsTabs = settingsSections.filter(
+  (section) => section.tabId === section.id,
+);
 
 // The sticky section subnav sits over the page scroller. Its wrapped height is
 // layout-dependent (it wraps at native zoom levels and narrow windows), so its
@@ -182,7 +191,7 @@ export function SettingsScreen(props: {
   // navigation. The active section is tracked so the nav can say where the
   // reader is.
   const [activeSectionId, setActiveSectionId] = useState<string>(
-    settingsSections[0]!.id,
+    settingsTabs[0]!.id,
   );
   const location = useLocation();
   const { dirtySections, registry } = useSettingsDirtySections();
@@ -202,7 +211,7 @@ export function SettingsScreen(props: {
           document.getElementById(section.id)?.contains(target) === true),
     );
     if (owningSection && focusSettingsSection(targetId)) {
-      setActiveSectionId(owningSection.id);
+      setActiveSectionId(owningSection.tabId);
     }
   }, [location.hash, location.key]);
 
@@ -234,7 +243,10 @@ export function SettingsScreen(props: {
         }
 
         if (mostVisibleId) {
-          setActiveSectionId(mostVisibleId);
+          setActiveSectionId(
+            settingsSections.find((section) => section.id === mostVisibleId)
+              ?.tabId ?? mostVisibleId,
+          );
         }
       },
       { threshold: [0, 0.25, 0.5, 0.75, 1] },
@@ -402,7 +414,7 @@ export function SettingsScreen(props: {
           onScroll={(event) => paintSubnavEdges(event.currentTarget)}
           ref={subnavRowRef}
         >
-          {settingsSections.map((section) => {
+          {settingsTabs.map((section) => {
             const isActive = section.id === activeSectionId;
             const isDestructive = section.tone === "destructive";
 
@@ -451,24 +463,8 @@ export function SettingsScreen(props: {
 
       <SettingsDirtySectionsProvider registry={registry}>
         <section
-          aria-labelledby="settings-app-device-heading"
-          className="scroll-mt-(--settings-subnav-offset) min-w-0"
-          id="settings-app-device"
-          tabIndex={-1}
-        >
-          <h2 className="sr-only" id="settings-app-device-heading">
-            App & device
-          </h2>
-          <SettingsAppDeviceSection
-            onUpdateAppearanceTheme={onUpdateAppearanceTheme}
-            onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
-            settings={settings}
-          />
-        </section>
-
-        <section
           aria-labelledby="settings-ai-behavior-heading"
-          className={SETTINGS_LATER_SECTION_CLASS}
+          className="scroll-mt-(--settings-subnav-offset) min-w-0"
           id="settings-ai-behavior"
           tabIndex={-1}
         >
@@ -532,6 +528,22 @@ export function SettingsScreen(props: {
               settings={settings}
             />
           </SettingsApplyModeSection>
+        </section>
+
+        <section
+          aria-labelledby="settings-app-device-heading"
+          className={SETTINGS_LATER_SECTION_CLASS}
+          id="settings-app-device"
+          tabIndex={-1}
+        >
+          <h2 className="sr-only" id="settings-app-device-heading">
+            App & device
+          </h2>
+          <SettingsAppDeviceSection
+            onUpdateAppearanceTheme={onUpdateAppearanceTheme}
+            onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
+            settings={settings}
+          />
         </section>
 
         <section

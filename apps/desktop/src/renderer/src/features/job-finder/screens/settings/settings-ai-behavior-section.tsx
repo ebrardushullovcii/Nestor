@@ -8,7 +8,6 @@ import {
   type AiProfileAssistantBehavior,
   type JobFinderSettings,
   type ProfileAssistantInitiative,
-  type ProfileAssistantReplyStyle,
   type UpdateAiBehaviorInput,
   type UpdateWorkspaceBehaviorInput,
 } from "@nestor/contracts";
@@ -56,20 +55,6 @@ const initiativeOptions: readonly ChoiceCardOption<ProfileAssistantInitiative>[]
       id: "proactive",
       label: "Proactive",
       detail: "Also points out gaps and offers fixes.",
-    },
-  ];
-
-const replyStyleOptions: readonly ChoiceCardOption<ProfileAssistantReplyStyle>[] =
-  [
-    {
-      id: "brief",
-      label: "Brief",
-      detail: "One or two sentences.",
-    },
-    {
-      id: "conversational",
-      label: "Conversational",
-      detail: "Explains its reasoning.",
     },
   ];
 
@@ -197,8 +182,8 @@ export function SettingsAiBehaviorSection({
             {SETTINGS_AI_BEHAVIOR_LABEL}
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-            How it talks, how locations count when it searches, and when a
-            resume gets written.
+            How much the assistant suggests, how locations count when it
+            searches, and when a resume gets written.
           </p>
         </div>
         <SettingsSectionSaveControl
@@ -218,8 +203,6 @@ export function SettingsAiBehaviorSection({
           title="Assistant"
           description="The assistant in the side chat."
         />
-        {/* Two separate choices, each under its own name. Side by side they
-          read as one row of five cards. */}
         <ChoiceField label="Suggestions">
           <ChoiceCards
             aria-label="How much the assistant suggests"
@@ -227,15 +210,6 @@ export function SettingsAiBehaviorSection({
             onChange={(initiative) => editAssistant({ initiative })}
             options={initiativeOptions}
             value={draft.profileAssistant.initiative}
-          />
-        </ChoiceField>
-        <ChoiceField label="Reply length">
-          <ChoiceCards
-            aria-label="How the profile assistant replies"
-            columns={3}
-            onChange={(replyStyle) => editAssistant({ replyStyle })}
-            options={replyStyleOptions}
-            value={draft.profileAssistant.replyStyle}
           />
         </ChoiceField>
       </article>
