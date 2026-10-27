@@ -68,6 +68,9 @@ type Task = {
   source_id?: number | null;
   source_label?: string | null;
   source_url?: string | null;
+  waiting_company?: string | null;
+  waiting_title?: string | null;
+  waiting_count?: number | null;
   blocked_url?: string | null;
 };
 
@@ -169,6 +172,15 @@ function toTask(row: Task): NeedsYouTask {
             id: row.source_id,
             label: row.source_label,
             url: row.source_url,
+          },
+        }
+      : {}),
+    ...(row.waiting_count && row.waiting_title != null
+      ? {
+          waitingFor: {
+            company: row.waiting_company ?? "",
+            title: row.waiting_title,
+            count: row.waiting_count,
           },
         }
       : {}),
@@ -1115,8 +1127,16 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       const { after, limit, kind, text } = NeedsYouListQuerySchema.parse(input);
       const { where, params } = selectionFilter("tasks", text, kind);
       const records = sql(
-        `SELECT t.*, s.id AS source_id, s.label AS source_label, s.url AS source_url
+        `SELECT t.*, s.id AS source_id, s.label AS source_label, s.url AS source_url,
+           w.company AS waiting_company, w.title AS waiting_title,
+           (SELECT count(DISTINCT a.id) FROM application_needs_you n
+             JOIN applications a ON a.id = n.application_id
+             WHERE n.task_id = t.id AND n.attempt = a.attempt AND a.state = 'needs_you') AS waiting_count
          FROM (SELECT * FROM needs_you WHERE ${where} AND id > ? ORDER BY id LIMIT ?) t
+         LEFT JOIN jobs w ON w.id = (SELECT a.job_id FROM application_needs_you n
+           JOIN applications a ON a.id = n.application_id
+           WHERE n.task_id = t.id AND n.attempt = a.attempt AND a.state = 'needs_you'
+           ORDER BY a.id LIMIT 1)
          LEFT JOIN source_needs_you n ON n.task_id = t.id
          LEFT JOIN job_sites s ON s.id = n.source_id ORDER BY t.id`,
       ).all(...params, after, limit + 1) as Task[];

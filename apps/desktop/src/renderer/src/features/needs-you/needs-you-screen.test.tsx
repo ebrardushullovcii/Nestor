@@ -846,3 +846,37 @@ it("opens on one kind of item from a link, and shows everything again on request
   fireEvent.click(screen.getByRole("button", { name: "Show everything" }));
   await screen.findByRole("button", { name: /^What is your notice/ });
 });
+
+it("a question's row names the company and role waiting on it, with the site beside", async () => {
+  // Two applications wait on the same question; a third has its own.
+  const row = claimed[0]!;
+  applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "notice",
+    key: "notice",
+    scope: { siteOrigin: "https://www.jobs.example.test" },
+    prompt: "What is your notice period?",
+    kind: "question",
+    input: "text",
+    options: [],
+  });
+  const second = claimed[1]!;
+  applications.needsYou.request({
+    applicationId: second.id,
+    attempt: second.attempt,
+    fieldKey: "notice",
+    key: "notice",
+    scope: { siteOrigin: "https://www.jobs.example.test" },
+    prompt: "What is your notice period?",
+    kind: "question",
+    input: "text",
+    options: [],
+  });
+  show();
+  expect(
+    await screen.findByText(/^Employer \d · Engineer \d and 1 more$/u),
+  ).toBeTruthy();
+  expect(screen.getByText("jobs.example.test")).toBeTruthy();
+  expect(screen.queryByText(/https:\/\//u)).toBeNull();
+});
