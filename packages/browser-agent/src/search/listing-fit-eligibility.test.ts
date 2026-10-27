@@ -60,7 +60,7 @@ const job = JobDetailSchema.parse({
 
 test.each([
   ["US-only residence contradicts your country", "blocked", 99, 39],
-  ["Required work authorization is not known", "review", 99, 84],
+  ["Required work authorization is not known", "review", 99, 64],
   ["Worldwide remote includes your country", "compatible", 99, 99],
   ["Europe hiring includes your country", "compatible", 90, 90],
   ["EU-only hiring excludes your country", "blocked", 90, 39],
@@ -78,7 +78,12 @@ test.each([
               r: ["strong", "Requested work"],
               p: ["aligned", "Remote work"],
               c: ["strong", "Direct evidence"],
-              e: [status, reason],
+              e: [
+                status,
+                status === "compatible" ? "Worldwide remote" : reason,
+                status === "compatible" ? "broader_remote" : "unknown",
+                status === "blocked" ? "US" : "",
+              ],
             },
           ],
         }),
@@ -87,7 +92,15 @@ test.each([
   const [fit] = await fitJobs({
     client,
     profile,
-    jobs: [job],
+    jobs: [
+      status === "compatible"
+        ? {
+            ...job,
+            location: "Remote, Worldwide",
+            description: "Worldwide remote. Build TypeScript products.",
+          }
+        : job,
+    ],
     goals: { targetRoles: ["Software Engineer"], locations: ["Europe"] },
   });
   expect(fit?.score).toBe(expected);
@@ -118,7 +131,12 @@ test("fit gets explicit residence and saved country-list rules, without changing
             r: ["strong", "Requested work"],
             p: ["aligned", "Your saved rule matches"],
             c: ["strong", "Direct evidence"],
-            e: ["compatible", "Your saved country-list rule applies"],
+            e: [
+              "compatible",
+              "Albania, Serbia and Montenegro",
+              "offered_list",
+              "AL,RS,ME",
+            ],
           },
         ],
       }),
@@ -127,7 +145,13 @@ test("fit gets explicit residence and saved country-list rules, without changing
   await fitJobs({
     client: { chatWithTools },
     profile,
-    jobs: [job],
+    jobs: [
+      {
+        ...job,
+        location: "Remote",
+        description: "Offered country choices: Albania, Serbia and Montenegro.",
+      },
+    ],
     countryOptionFallbacks: [rule],
     goals: { targetRoles: [], locations: [] },
   });
@@ -150,9 +174,7 @@ test("fit gets explicit residence and saved country-list rules, without changing
     "Kosovo",
   ]);
   expect(data.countryOptionFallbacks).toEqual([rule]);
-  expect(messages[0].content).toContain(
-    "Neither choice offered is a conflict",
-  );
+  expect(messages[0].content).toContain("Neither choice offered is a conflict");
   expect(messages[0].content).toContain("never Strong");
 });
 
@@ -179,6 +201,55 @@ test("a response with no eligibility verdict cannot silently become Strong", asy
         }),
     },
   });
-  expect(fit?.score).toBe(JOB_FIT_BANDS.strong - 1);
+  expect(fit?.score).toBe(JOB_FIT_BANDS.good - 1);
   expect(fit?.preferences?.assessment).toBe("unknown");
 });
+
+test.each([
+  {
+    location: "United States",
+    description: "Build production software.",
+    quote: "United States",
+    kind: "unknown",
+    score: 64,
+    assessment: "unknown",
+  },
+  {
+    location: "San Francisco",
+    description:
+      "A hybrid work model of 3 days in the office. Relocation assistance is available.",
+    quote: "hybrid work model of 3 days in the office",
+    kind: "hybrid",
+    score: 39,
+    assessment: "conflict",
+  },
+])(
+  "a model's compatible verdict cannot bypass the location guard: $location",
+  async ({ location, description, quote, kind, score, assessment }) => {
+    const [fit] = await fitJobs({
+      profile,
+      jobs: [{ ...job, location, description, workModes: [] }],
+      goals: { targetRoles: ["Software Engineer"], locations: ["Europe"] },
+      client: {
+        chatWithTools: () =>
+          Promise.resolve({
+            content: JSON.stringify({
+              fits: [
+                {
+                  id: job.id,
+                  s: 99,
+                  why: "Matching skills",
+                  r: ["strong", "Work"],
+                  p: ["aligned", "Remote"],
+                  c: ["strong", "Evidence"],
+                  e: ["compatible", quote, kind, "US"],
+                },
+              ],
+            }),
+          }),
+      },
+    });
+    expect(fit?.score).toBe(score);
+    expect(fit?.preferences?.assessment).toBe(assessment);
+  },
+);

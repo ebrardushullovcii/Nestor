@@ -333,6 +333,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     headline: "Data analyst",
     summary: null,
     currentLocation: "Berlin",
+    currentCountry: "Germany",
     yearsExperience: 2,
     baseResume: { id: "resume", fileName: "synthetic.txt", uploadedAt: now },
   });
@@ -397,7 +398,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
                 verdict.preferences.explanation,
               ],
               c: [verdict.coverage.assessment, verdict.coverage.explanation],
-              e: ["compatible", "Your location matches."],
+              e: ["compatible", "Berlin", "unknown", "DE"],
             },
           ],
         }),
@@ -437,7 +438,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     r: [verdict.role.assessment, verdict.role.explanation],
     p: [verdict.preferences.assessment, verdict.preferences.explanation],
     c: [verdict.coverage.assessment, verdict.coverage.explanation],
-    e: ["compatible", "Your location matches."],
+    e: ["compatible", "Berlin", "unknown", "DE"],
   };
   const requests: number[][] = [];
   const retryClient = {
