@@ -481,9 +481,11 @@ export function createApplicationStore(store: JobStore) {
     },
 
     /**
-     * Open lost its page: refill it. A Ready form comes back for review and
-     * never revives permission to send; a form waiting on a file keeps the
-     * mode the person chose.
+     * Open lost its page: refill it. The refill itself never sends. A Ready
+     * form comes back for review and never revives permission to send; a
+     * form still waiting on the person (a file, a question, a sign-in) keeps
+     * the mode the person chose for every later run, and its items stay
+     * theirs until the refill asks them again.
      */
     reprepareForReview(
       id: number,
@@ -492,12 +494,13 @@ export function createApplicationStore(store: JobStore) {
     ): boolean {
       return store.transaction(() => {
         const row = sql(`UPDATE applications SET state='queued',
+          review_refill=1,
           mode=CASE WHEN state='ready' THEN 'confirm_before_submit' ELSE mode END,
           queued_at=?, updated_at=?, error=?
           WHERE id=? AND attempt=? AND (state='ready' OR (state='needs_you' AND EXISTS (
             SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
             WHERE n.application_id=applications.id AND n.attempt=applications.attempt
-              AND t.kind='question' AND t.input='file' AND t.resolved_at IS NULL
+              AND t.resolved_at IS NULL
           ))) AND submitted_at IS NULL RETURNING job_id`).get(
           Date.now(),
           Date.now(),
@@ -508,6 +511,13 @@ export function createApplicationStore(store: JobStore) {
         if (row) changed([row.job_id]);
         return !!row;
       });
+    },
+
+    /** True while this application's run is a refill Open asked for. */
+    isReviewRefill(id: number): boolean {
+      return !!sql(
+        "SELECT 1 FROM applications WHERE id = ? AND review_refill = 1",
+      ).get(id);
     },
 
     /** The state is written before the existing guarded send can be armed. */

@@ -742,7 +742,8 @@ it("keeps Send for me through an upload repair and drops the upload item when th
   expect(await f.service.open(row.id)).toBe(true);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   expect(f.applications.getApplication(row.id)?.mode).toBe("autonomous_submit");
-  expect(f.authorizeSending).toHaveBeenCalledTimes(2);
+  // The refill Open asked for never sends, so it asks for no send.
+  expect(f.authorizeSending).toHaveBeenCalledTimes(1);
   f.releases.shift()!(
     ApplyExecutionResultSchema.parse({
       ...ready(),
@@ -1008,6 +1009,110 @@ it("opens a restored Ready form without preparing or authorizing a send again", 
   expect(f.applications.getApplication(row.id)?.state).toBe("ready");
   expect(f.execute).toHaveBeenCalledTimes(1);
   expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("brings back a form waiting on a question after a restart, still waiting with the same item", async () => {
+  const f = await setup(1);
+  const waitingOnQuestion = () =>
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "office",
+          prompt: "Which office would you work from?",
+          kind: "other",
+          answerControlType: "text",
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(waitingOnQuestion());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const task = f.applications.needsYou.list().rows[0]!;
+  f.service.stop();
+  const restarted = createApplicationService(f.deps);
+  cleanups.unshift(() => restarted.stop());
+  await restarted.start();
+  const row = f.applications.listApplications().rows[0]!;
+  expect(row.state).toBe("needs_you");
+  expect(f.applications.needsYou.list().rows.map((item) => item.id)).toEqual([
+    task.id,
+  ]);
+  // The restart closed the page: Open refills the form.
+  f.browser.focusApplicationPageBinding.mockResolvedValue(false);
+  expect(await restarted.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.shift()!(waitingOnQuestion());
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
+  );
+  expect(f.applications.needsYou.list().rows.map((item) => item.id)).toEqual([
+    task.id,
+  ]);
+  expect(f.applications.getApplication(row.id)?.mode).toBe(row.mode);
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("in Send for me, Open's refill never sends, and the answer that clears the item still sends", async () => {
+  const f = await setup(1);
+  f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit", {
+    conversationId: "send-waiting-on-question",
+    mode: "autonomous_submit",
+  });
+  const waitingOnQuestion = () =>
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "office",
+          prompt: "Which office would you work from?",
+          kind: "other",
+          answerControlType: "text",
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(waitingOnQuestion());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const row = f.applications.listApplications().rows[0]!;
+  expect(f.authorizeSending).toHaveBeenCalledTimes(1);
+  // A restart in the middle of the refill keeps it a refill.
+  expect(await f.service.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.service.stop();
+  const restarted = createApplicationService(f.deps);
+  cleanups.unshift(() => restarted.stop());
+  await restarted.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
+  expect(f.execute.mock.calls[2]![1]).toMatchObject({
+    submitAuthorized: false,
+    applyAutomationMode: "confirm_before_submit",
+  });
+  f.releases.splice(0, 2).forEach((release) => release(waitingOnQuestion()));
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
+  );
+  expect(f.authorizeSending).toHaveBeenCalledTimes(1);
+  expect(f.applications.getApplication(row.id)?.mode).toBe("autonomous_submit");
+  // The person's answer starts a run in the mode they chose.
+  const task = f.applications.needsYou.list().rows[0]!;
+  f.applications.needsYou.answer({
+    id: task.id,
+    answer: "Berlin",
+    remember: false,
+  });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(4));
+  // It asks for permission to send again, as Send for me does.
+  expect(f.authorizeSending).toHaveBeenCalledTimes(2);
 });
 
 it("refills a lost Ready form through the bounded queue and never revives its send instruction", async () => {
