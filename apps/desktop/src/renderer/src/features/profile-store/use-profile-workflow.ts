@@ -54,7 +54,7 @@ export function useProfileWorkflow(
     if (result.siteInstructions) setSiteInstructions(result.siteInstructions);
   }, []);
 
-  const refresh = useCallback(async () => {
+  const readOnce = useCallback(async () => {
     const read = ++reads.current;
     try {
       const result = await window.nestor.profileWorkflow.run({ type: "read" });
@@ -67,6 +67,26 @@ export function useProfileWorkflow(
         );
     }
   }, [apply]);
+
+  // One read at a time: changes that arrive while a read runs are covered by
+  // a single read after it, however many there were, so an import's burst of
+  // notifications costs two reads rather than one each.
+  const reading = useRef<Promise<void> | null>(null);
+  const readAgain = useRef(false);
+  const refresh = useCallback((): Promise<void> => {
+    if (reading.current) {
+      readAgain.current = true;
+      return reading.current;
+    }
+    reading.current = (async () => {
+      do {
+        readAgain.current = false;
+        await readOnce();
+      } while (readAgain.current && live.current);
+      reading.current = null;
+    })();
+    return reading.current;
+  }, [readOnce]);
 
   useEffect(() => {
     live.current = true;

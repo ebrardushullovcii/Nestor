@@ -8056,3 +8056,115 @@ test("a browser refusal hands over before any model call or browser action", asy
   expect(result.modelTurns).toBe(0);
   expect(result.readyToSend).toBeNull();
 });
+
+describe("Ashby's Yes/No buttons are a question, not the form's buttons", () => {
+  const question = "Are you over the age of 18?";
+  const yesNo = (pressed: "yes" | "no" | null) =>
+    page({
+      url: "https://jobs.example.test/acme/1/application",
+      controls: [nameControl()],
+      actions: [
+        {
+          index: 0,
+          label: "Yes",
+          visible: true,
+          disabled: false,
+          section: question,
+          pressed: pressed === "yes",
+        },
+        {
+          index: 1,
+          label: "No",
+          visible: true,
+          disabled: false,
+          section: question,
+          pressed: pressed === "no",
+        },
+        {
+          index: 2,
+          label: "Submit Application",
+          visible: true,
+          disabled: false,
+        },
+      ],
+    });
+
+  test("the page reads them as one choice under the question, by their own handles", () => {
+    const observation = buildApplyFormObservation(
+      yesNo("yes"),
+      "2026-09-14T10:00:00.000Z",
+    );
+    expect(observation.actions.map((action) => action.label)).toEqual([
+      "Submit Application",
+    ]);
+    const choices = observation.controls.filter(
+      (control) => control.kind === "radio",
+    );
+    expect(
+      choices.map((control) => [
+        control.ref,
+        control.label,
+        control.groupLabel,
+        control.checked,
+      ]),
+    ).toEqual([
+      ["a0", "Yes", question, true],
+      ["a1", "No", question, false],
+    ]);
+    expect(choices[0]?.options).toEqual(["Yes", "No"]);
+    expect(choices.every((control) => control.answered)).toBe(true);
+  });
+
+  test("in Fill a saved answer presses the matching option, and nothing is handed over", async () => {
+    const source = yesNo(null);
+    const pressed: Array<[string, boolean]> = [];
+    const input = config(source, { intermediateWritesAuthorized: false });
+    input.hands.setToggle = (ref, checked) => {
+      pressed.push([ref, checked]);
+      for (const action of source.actions)
+        if (action.pressed !== undefined)
+          action.pressed = (action.ref ?? `a${action.index}`) === ref;
+      return Promise.resolve({ ok: true, observedValue: "pressed" });
+    };
+    input.sources.reusableAnswers = [
+      {
+        id: "adult",
+        kind: "other",
+        label: question,
+        question,
+        answer: "Yes",
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "set_checkbox", args: { ref: "a0", checked: true } },
+        { name: "finish", args: { reason: "The form is ready" } },
+      ]),
+    );
+    expect(pressed).toEqual([["a0", true]]);
+    expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
+  });
+
+  test("without an answer the person gets the question with Yes and No to pick", async () => {
+    const source = yesNo(null);
+    source.actions = source.actions
+      .slice(0, 2)
+      .map((action) => ({ ...action, section: `${question} *` }));
+    const input = config(source, { intermediateWritesAuthorized: false });
+    const result = await runApplyAgent(
+      input,
+      repeatingModel("finish", {
+        reason: "The age question needs the person.",
+        needsPerson: true,
+      }),
+    );
+    const asked = result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .find((entry) => entry.prompt.startsWith(question));
+    expect(asked?.answerControlType).toBe("single_choice");
+    expect(asked?.answerOptions).toEqual(["Yes", "No"]);
+  });
+});

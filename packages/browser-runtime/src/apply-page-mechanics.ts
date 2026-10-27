@@ -3,6 +3,7 @@ import { choosePageOption } from "./choose-page-option";
 import type {
   ApplyBlockedAttempt,
   RawApplyClickable,
+  RawApplyPlacement,
   RawApplyHeading,
   RawApplyOpenedTab,
   ApplyNavigationResult,
@@ -157,12 +158,14 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
   try {
     const [
       controls,
-      actions,
+      unplacedActions,
       links,
-      clickables,
+      unplacedClickables,
       headings,
       bodyText,
       validationErrors,
+      actionPlacements,
+      clickablePlacements,
     ] = await Promise.all([
       frame
         .locator(APPLY_CONTROL_SELECTOR)
@@ -443,6 +446,9 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             return {
               ref: `${prefix}a${index}`,
               index,
+              ...(element.hasAttribute("aria-pressed")
+                ? { pressed: element.getAttribute("aria-pressed") === "true" }
+                : {}),
               label:
                 element.getAttribute("aria-label")?.trim() ||
                 input?.value.trim() ||
@@ -563,7 +569,24 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             .slice(0, 12),
         )
         .catch(() => [] as string[]),
+      // Where each sits is extra: a frame that will not say still reads.
+      frame
+        .locator(APPLY_ACTION_SELECTOR)
+        .evaluateAll(readApplyPlacements)
+        .catch(() => [] as RawApplyPlacement[]),
+      frame
+        .locator(APPLY_CLICKABLE_SELECTOR)
+        .evaluateAll(readApplyPlacements)
+        .catch(() => [] as RawApplyPlacement[]),
     ]);
+    const actions = unplacedActions.map((action) => ({
+      ...action,
+      ...actionPlacements[action.index],
+    }));
+    const clickables = unplacedClickables.map((clickable) => ({
+      ...clickable,
+      ...clickablePlacements[clickable.index],
+    }));
     return {
       controls,
       actions,
@@ -624,6 +647,71 @@ export const APPLY_PAGE_SELECTORS = {
   clickables: APPLY_CLICKABLE_SELECTOR,
 };
 
+/**
+ * Where each element sits: the part of the page holding it and whether that
+ * part is a form. Self-contained: Playwright serializes it into each frame.
+ * `collectApplyDocumentSnapshot` keeps the same reading for the top page.
+ */
+export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
+  return elements.map((element) => {
+    const words = (node: Element | null | undefined): string =>
+      (node?.textContent ?? "").replace(/\s+/gu, " ").trim();
+    const legends: string[] = [];
+    for (
+      let set = element.closest("fieldset");
+      set;
+      set = set.parentElement?.closest("fieldset") ?? null
+    ) {
+      const legend = words(set.querySelector(":scope > legend"));
+      if (legend && !legends.includes(legend)) legends.unshift(legend);
+    }
+    let section = legends.join(" — ");
+    if (!section) {
+      const part = element.closest(
+        "dialog, [role='dialog'], [role='alertdialog'], [role='region'], [role='group'], section, aside, form",
+      );
+      section = part
+        ? part.getAttribute("aria-label")?.trim() ||
+          words(
+            document.getElementById(
+              part.getAttribute("aria-labelledby")?.split(/\s+/u)[0] ?? "",
+            ),
+          ) ||
+          words(part.querySelector("h1, h2, h3, h4, legend"))
+        : "";
+    }
+    // The words beside it: the nearest box whose own text, without its
+    // buttons and fields, says something short.
+    for (
+      let box = element.parentElement, depth = 0;
+      !section && box && box !== document.body && depth < 5;
+      box = box.parentElement, depth += 1
+    ) {
+      const clone = box.cloneNode(true) as Element;
+      clone
+        .querySelectorAll("button, a, input, select, textarea, [role='button']")
+        .forEach((node) => node.remove());
+      const nearby = words(clone);
+      if (nearby.length > 300) break;
+      section = nearby;
+    }
+    let inForm = Boolean(
+      element.closest("form, fieldset, [role='form'], [role='group']"),
+    );
+    for (
+      let box = element.parentElement, depth = 0;
+      !inForm && box && box !== document.body && depth < 4;
+      box = box.parentElement, depth += 1
+    )
+      inForm = Boolean(
+        box.querySelector(
+          "input:not([type='hidden']):not([type='button']):not([type='submit']), select, textarea",
+        ),
+      );
+    return { section: section.slice(0, 200), inForm };
+  });
+}
+
 /** Pure DOM snapshot, also usable after the person detaches the automation connection. */
 export function collectApplyDocumentSnapshot(
   elements: Element[],
@@ -638,6 +726,65 @@ export function collectApplyDocumentSnapshot(
     } catch {
       return fallback;
     }
+  };
+  // The same reading as `readApplyPlacements`; this function is serialized
+  // on its own and cannot call it.
+  const placement = (element: Element): RawApplyPlacement => {
+    const words = (node: Element | null | undefined): string =>
+      (node?.textContent ?? "").replace(/\s+/gu, " ").trim();
+    const legends: string[] = [];
+    for (
+      let set = element.closest("fieldset");
+      set;
+      set = set.parentElement?.closest("fieldset") ?? null
+    ) {
+      const legend = words(set.querySelector(":scope > legend"));
+      if (legend && !legends.includes(legend)) legends.unshift(legend);
+    }
+    let section = legends.join(" — ");
+    if (!section) {
+      const part = element.closest(
+        "dialog, [role='dialog'], [role='alertdialog'], [role='region'], [role='group'], section, aside, form",
+      );
+      section = part
+        ? part.getAttribute("aria-label")?.trim() ||
+          words(
+            document.getElementById(
+              part.getAttribute("aria-labelledby")?.split(/\s+/u)[0] ?? "",
+            ),
+          ) ||
+          words(part.querySelector("h1, h2, h3, h4, legend"))
+        : "";
+    }
+    // The words beside it: the nearest box whose own text, without its
+    // buttons and fields, says something short.
+    for (
+      let box = element.parentElement, depth = 0;
+      !section && box && box !== document.body && depth < 5;
+      box = box.parentElement, depth += 1
+    ) {
+      const clone = box.cloneNode(true) as Element;
+      clone
+        .querySelectorAll("button, a, input, select, textarea, [role='button']")
+        .forEach((node) => node.remove());
+      const nearby = words(clone);
+      if (nearby.length > 300) break;
+      section = nearby;
+    }
+    let inForm = Boolean(
+      element.closest("form, fieldset, [role='form'], [role='group']"),
+    );
+    for (
+      let box = element.parentElement, depth = 0;
+      !inForm && box && box !== document.body && depth < 4;
+      box = box.parentElement, depth += 1
+    )
+      inForm = Boolean(
+        box.querySelector(
+          "input:not([type='hidden']):not([type='button']):not([type='submit']), select, textarea",
+        ),
+      );
+    return { section: section.slice(0, 200), inForm };
   };
   const controls = ((elements: Element[]): RawApplyControl[] => {
     const labelText = (element: Element | null): string => {
@@ -932,6 +1079,10 @@ export function collectApplyDocumentSnapshot(
       const style = window.getComputedStyle(html);
       return {
         index,
+        ...placement(element),
+        ...(element.hasAttribute("aria-pressed")
+          ? { pressed: element.getAttribute("aria-pressed") === "true" }
+          : {}),
         label:
           element.getAttribute("aria-label")?.trim() ||
           input?.value.trim() ||
@@ -1040,6 +1191,7 @@ export function collectApplyDocumentSnapshot(
             {
               index,
               label,
+              ...placement(element),
               role: element.getAttribute("role")?.toLowerCase() ?? "",
               tagName: element.tagName.toLowerCase(),
               visible:
@@ -1562,6 +1714,44 @@ function locatorRootForRef(
   return frame ? { root: frame, index: Number.parseInt(framed[2], 10) } : null;
 }
 
+/**
+ * Sets a toggle button (`aria-pressed`) that answers a question, such as a
+ * Yes or No. One already in the wanted state is left alone: pressing it
+ * again would clear the answer. A button with no type inside a form would
+ * also submit that form; it is made a plain button first, so the press only
+ * answers. Anything the page itself sends on the press still meets the fence.
+ */
+async function pressToggleButton(
+  locator: Locator,
+  checked: boolean,
+): Promise<ApplyWriteResult> {
+  const pressed = () =>
+    locator.evaluate(
+      (element) => element.getAttribute("aria-pressed") === "true",
+    );
+  try {
+    if ((await pressed()) !== checked) {
+      await locator.evaluate((element) => {
+        if (
+          element instanceof HTMLButtonElement &&
+          element.form &&
+          !element.hasAttribute("type")
+        )
+          element.type = "button";
+      });
+      await locator.click({ timeout: 5_000 });
+    }
+    return (await pressed()) === checked
+      ? { ok: true, observedValue: checked ? "pressed" : "not pressed" }
+      : { ok: false, error: "The option did not take the press." };
+  } catch (error) {
+    return {
+      ok: false,
+      error: describeWriteFailure(error, "The option would not change."),
+    };
+  }
+}
+
 function controlLocator(page: Page, ref: string): Locator | null {
   const target = locatorRootForRef(page, ref, "c");
   return target
@@ -1762,6 +1952,8 @@ export function createPlaywrightApplyPageMechanics(
       }
     },
     setToggle: async (ref, checked): Promise<ApplyWriteResult> => {
+      const toggle = actionLocator(page, ref);
+      if (toggle) return pressToggleButton(toggle, checked);
       const locator = controlLocator(page, ref);
       if (!locator) {
         return { ok: false, error: `No control named ${ref} on this page.` };

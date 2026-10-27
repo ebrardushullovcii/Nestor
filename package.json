@@ -32,7 +32,8 @@
     "test:smoke": "vitest run --dir packages/contracts/src",
     "test:correctness": "vitest run --maxWorkers=4 --minWorkers=4",
     "test:coverage": "vitest run --coverage --maxWorkers=4 --minWorkers=4",
-    "search:eval": "node packages/ai-evals/scripts/run-search-relevance.mjs"
+    "search:eval": "node packages/ai-evals/scripts/run-search-relevance.mjs",
+    "perf": "node .claude/skills/verify-nestor/bin/lib/perf.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",

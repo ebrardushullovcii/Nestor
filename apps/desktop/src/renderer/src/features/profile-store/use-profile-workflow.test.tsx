@@ -107,3 +107,36 @@ test("leaving while the file picker is open cancels it; an import already readin
   second.unmount();
   expect(readingCancel).not.toHaveBeenCalled();
 });
+
+test("a burst of changes while a read runs costs one more read, not one each", async () => {
+  const listeners: ((change: { cause: string }) => void)[] = [];
+  const pendingReads: (() => void)[] = [];
+  const run = vi.fn(
+    () =>
+      new Promise<ProfileWorkflowResult>((resolve) => {
+        pendingReads.push(() => resolve(result("essentials")));
+      }),
+  );
+  install({ run });
+  Object.assign(window.nestor.jobs, {
+    onChange: (listener: (typeof listeners)[number]) => {
+      listeners.push(listener);
+      return () => undefined;
+    },
+  });
+  renderHook(() => useProfileWorkflow());
+  expect(run).toHaveBeenCalledOnce();
+
+  for (let i = 0; i < 10; i += 1) listeners[0]?.({ cause: "profile_activity" });
+  expect(run).toHaveBeenCalledOnce();
+  await act(() => {
+    pendingReads.shift()?.();
+    return Promise.resolve();
+  });
+  await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+  await act(() => {
+    pendingReads.shift()?.();
+    return Promise.resolve();
+  });
+  expect(run).toHaveBeenCalledTimes(2);
+});

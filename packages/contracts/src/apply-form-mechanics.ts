@@ -68,7 +68,18 @@ export interface RawApplyUpload {
   network?: "accepted" | "rejected" | "pending" | "unconfirmed";
 }
 
-export interface RawApplyAction {
+/**
+ * Where an action or clickable sits on the page, read from the page itself:
+ * the name of the part holding it (its fieldset legends, the label of the
+ * dialog, region or section around it, or else the words beside it), and
+ * whether that part is a form with fields. Nothing here says what to press.
+ */
+export interface RawApplyPlacement {
+  section?: string;
+  inForm?: boolean;
+}
+
+export interface RawApplyAction extends RawApplyPlacement {
   ref?: string;
   index: number;
   label: string;
@@ -78,6 +89,8 @@ export interface RawApplyAction {
   formAction?: string;
   /** HTTP method of the form this action would submit, if any. */
   formMethod?: string;
+  /** A toggle button's `aria-pressed` state; absent on ordinary buttons. */
+  pressed?: boolean;
 }
 
 /**
@@ -109,7 +122,7 @@ export interface RawApplyLink {
  * widgets. A harness that can only press `<button>` cannot use the web, so
  * everything clickable is reported and the model decides what it is.
  */
-export interface RawApplyClickable {
+export interface RawApplyClickable extends RawApplyPlacement {
   ref?: string;
   index: number;
   /** The element's visible text, trimmed and bounded. */
