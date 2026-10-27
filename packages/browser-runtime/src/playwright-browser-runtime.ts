@@ -1341,6 +1341,21 @@ export function createDiscoveryPageAbortBinding(signal?: AbortSignal): {
  */
 const PERSON_HANDOFF_WINDOW_MS = 12 * 60 * 60 * 1000;
 
+/** The person pressed this form's Send; a page it cannot read counts too. */
+async function sendPressedOn(page: Page): Promise<boolean> {
+  return page
+    .evaluate(
+      () =>
+        typeof (
+          window as unknown as Record<
+            string,
+            { sendPressedAt?: number } | undefined
+          >
+        )["__nestorPrepareOnlyMutationGuardV1"]?.sendPressedAt === "number",
+    )
+    .catch(() => true);
+}
+
 export function createBrowserAgentRuntime(
   options: BrowserAgentRuntimeOptions,
 ): BrowserSessionRuntime {
@@ -2542,8 +2557,12 @@ export function createBrowserAgentRuntime(
         !page ||
         page.isClosed() ||
         pagesInUse.has(page) ||
-        preparedPagesWithPerson.has(key) ||
-        !canDiscard()
+        !canDiscard() ||
+        // A Ready form is handed to the person for their own Send as soon as
+        // it is filled, which alone does not keep its page: Open hands it
+        // over again. The person on the page keeps it (canDiscard), and so
+        // does a Send they pressed, until Job Finder has read what it did.
+        (preparedPagesWithPerson.has(key) && (await sendPressedOn(page)))
       )
         return false;
       // A form the caller can refill (Ready or Needs you, filled or not)
@@ -2555,12 +2574,12 @@ export function createBrowserAgentRuntime(
           !recovery.refillable ||
           !canDiscard() ||
           page.isClosed() ||
-          pagesInUse.has(page) ||
-          preparedPagesWithPerson.has(key)
+          pagesInUse.has(page)
         )
           return false;
         formRecovery.delete(key);
         recoveryUnavailable.delete(key);
+        preparedPagesWithPerson.delete(key);
         preparedApplicationPages.delete(key);
         markedPreparedApplicationKeys.delete(key);
         await page.close({ runBeforeUnload: false });
@@ -2601,10 +2620,7 @@ export function createBrowserAgentRuntime(
           return closeForRefill();
         }
         const pageIsFree = () =>
-          canDiscard() &&
-          !page.isClosed() &&
-          !pagesInUse.has(page) &&
-          !preparedPagesWithPerson.has(key);
+          canDiscard() && !page.isClosed() && !pagesInUse.has(page);
         if (!pageIsFree()) return false;
         if (
           JSON.stringify(await capturePreparedForm(page).catch(() => null)) !==
@@ -2620,6 +2636,7 @@ export function createBrowserAgentRuntime(
         if (!pageIsFree()) return false;
         recovery.snapshot = snapshot;
         preparedApplicationPages.delete(key);
+        preparedPagesWithPerson.delete(key);
         await page.close({ runBeforeUnload: false });
         return true;
       } finally {
