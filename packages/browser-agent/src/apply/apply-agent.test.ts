@@ -432,6 +432,35 @@ function scriptedModel(
   };
 }
 
+test.each([false,true])("Fill completes four proven local steps after a finish, including an earlier premature Next: %s", async premature => {
+  const source=page({stepLabel:"Step 1 of 4",actions:[{index:0,label:"Next",visible:true,disabled:false,inForm:true,submitsForm:false}]});
+  let step=1,turns=0;
+  const input=config(source,{pressesFormButtons:false,intermediateWritesAuthorized:false});
+  const press=vi.fn(() => {
+    step++;
+    source.stepLabel=`Step ${step} of 4`;
+    if(step===4) source.actions=[{index:0,label:"Send application",visible:true,disabled:false,inForm:true,submitsForm:true}];
+    return Promise.resolve({ok:true as const,observedValue:"clicked"});
+  });
+  input.hands.clickWithoutWrites=press;
+  const normalClick=vi.spyOn(input.hands,"clickElement");
+  const result=await runApplyAgent(input,{
+    chatWithTools:(messages,definitions) => {
+      const check=supportedChecks(messages,definitions);
+      if(check) return check;
+      turns++;
+      source.loading=premature && turns===1;
+      return Promise.resolve({toolCalls:[{id:`step_${turns}`,type:"function" as const,function:{name:source.loading?"click":"finish",arguments:JSON.stringify(source.loading?{ref:"a0"}:{reason:"This step is filled."})}}]});
+    },
+  });
+  expect(result.outcome).toBe("prepared");
+  expect(result.pauses).toEqual([]);
+  expect(press).toHaveBeenCalledTimes(3);
+  expect(normalClick).not.toHaveBeenCalled();
+  expect(step).toBe(4);
+  expect(result.formPath).toHaveLength(3);
+});
+
 test("a completed form returns an obstructed final button to the model in fill-only mode", async () => {
   const source = page();
   const input = config(source);
