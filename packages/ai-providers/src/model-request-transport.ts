@@ -287,7 +287,6 @@ function foldChatCompletionsChunk(
   if (!isRecord(chunk)) {
     return;
   }
-  rejectIncompleteOutput(chunk, "chat_completions");
   // With `stream_options.include_usage` the usage arrives on a final chunk
   // whose choices are empty.
   if (isRecord(chunk.usage)) {
@@ -614,7 +613,11 @@ async function readStreamedPayload(
       // releasing either text or tool calls (ADR 0020).
       throw new ModelStreamIncompleteError("no completion marker arrived");
     }
-    return buildChatPayloadFromStream(chat);
+    const payload = buildChatPayloadFromStream(chat);
+    // A truncated Chat answer may send usage after its finish_reason chunk.
+    // Reject the answer only after the terminal usage has been collected.
+    rejectIncompleteOutput(payload, "chat_completions");
+    return payload;
   }
 
   if (responses.completed) {
@@ -833,7 +836,10 @@ async function performModelRequestAttempts(
     recordModelRequestAttempt();
     input.onStreamEvent?.({ type: "attempt_started", attempt });
     const usage = createModelRequestUsage(input, attempt);
+    console.info("[AI request]", JSON.stringify(usage.metadata));
     let outcome: ModelRequestUsage["outcome"] = "failed";
+    let httpStatus: number | undefined;
+    let failureKind: ModelRequestUsage["failureKind"];
 
     const attemptController = new AbortController();
     let abortReason: "idle" | "total" | "caller" | null = null;
@@ -865,6 +871,7 @@ async function performModelRequestAttempts(
         body: requestBody,
         signal: attemptController.signal,
       });
+      httpStatus = response.status;
       armIdle();
 
       if (!response.ok) {
@@ -914,6 +921,7 @@ async function performModelRequestAttempts(
         rawPayload = rawBody ? JSON.parse(rawBody) : null;
       } catch {
         rawPayload = null;
+        usage.observeText(rawBody);
       }
       usage.observe(rawPayload);
       if (!isRecord(rawPayload)) {
@@ -933,6 +941,7 @@ async function performModelRequestAttempts(
     } catch (error) {
       if (abortReason === "caller" || input.signal?.aborted) {
         outcome = "cancelled";
+        failureKind = "cancelled";
         throw createAbortError();
       }
       const normalized: unknown =
@@ -942,6 +951,16 @@ async function performModelRequestAttempts(
             ? new ModelRequestTimeoutError("idle", idleTimeoutMs)
             : error;
       lastError = normalized;
+      failureKind =
+        normalized instanceof ModelRequestHttpError
+          ? "http_status"
+          : normalized instanceof ModelRequestTimeoutError
+            ? "timeout"
+            : normalized instanceof ModelStreamIncompleteError
+              ? "incomplete_stream"
+              : httpStatus === undefined && isNetworkError(normalized)
+                ? "network"
+                : "other";
 
       const retry = classifyRetry(normalized);
       if (!retry || attempt === maxAttempts - 1) {
@@ -972,9 +991,15 @@ async function performModelRequestAttempts(
       }
       input.signal?.removeEventListener("abort", onCallerAbort);
       const { event } = usage.finish(outcome);
+      if (httpStatus !== undefined) event.httpStatus = httpStatus;
+      if (failureKind !== undefined) event.failureKind = failureKind;
       recordModelRequestUsage(event);
-      input.onUsage?.(event);
       console.info("[AI usage]", JSON.stringify(event));
+      try {
+        input.onUsage?.(event);
+      } catch {
+        /* Usage observers cannot change a model result or start another request. */
+      }
     }
   }
 

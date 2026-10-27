@@ -18,11 +18,22 @@ export const ModelTokenUsageSchema = z.object({
 });
 export type ModelTokenUsage = z.infer<typeof ModelTokenUsageSchema>;
 export interface ModelRequestUsage extends ModelTokenUsage {
+  requestId: string;
+  startedAt: string;
+  finishedAt: string;
   provider: string;
   model: string;
   purpose: string;
   attempt: number;
   outcome: "completed" | "failed" | "cancelled";
+  httpStatus?: number;
+  failureKind?:
+    | "network"
+    | "http_status"
+    | "timeout"
+    | "incomplete_stream"
+    | "other"
+    | "cancelled";
 }
 export interface ModelRequestAttempt {
   attempt: number;

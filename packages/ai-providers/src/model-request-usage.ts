@@ -1,9 +1,9 @@
 import type { ModelRequestUsage } from "@nestor/contracts";
+import { randomUUID } from "node:crypto";
 import type {
   ModelApiMode,
   ModelUsagePayload,
 } from "./openai-compatible-transport";
-import { normalizeModelPayload } from "./openai-compatible-transport";
 import { normalizeModelUsage } from "./model-token-usage";
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -41,6 +41,14 @@ export function createModelRequestUsage(
     "utf8",
   );
   let usage: ModelUsagePayload = {};
+  const metadata = {
+    requestId: randomUUID(),
+    startedAt: new Date().toISOString(),
+    provider,
+    model: typeof input.body.model === "string" ? input.body.model : "unknown",
+    purpose: input.purpose ?? "unspecified",
+    attempt,
+  };
   let deltaBytes = 0;
   let outputBytes = 0;
   const items = new Map<string | number, number>();
@@ -55,31 +63,54 @@ export function createModelRequestUsage(
   const observe = (payload: unknown) => {
     if (!record(payload)) return;
     const response = record(payload.response) ? payload.response : payload;
-    const normalized = normalizeModelPayload(response, input.apiMode);
-    if (normalized.usage) {
-      const next = normalized.usage;
+    // Read counters without parsing output: a malformed or truncated answer
+    // can still carry valid, billable provider usage.
+    if (record(response.usage)) {
+      const next = response.usage;
+      const promptDetails = record(next.prompt_tokens_details)
+        ? next.prompt_tokens_details
+        : record(next.input_tokens_details)
+          ? next.input_tokens_details
+          : {};
+      const completionDetails = record(next.completion_tokens_details)
+        ? next.completion_tokens_details
+        : record(next.output_tokens_details)
+          ? next.output_tokens_details
+          : {};
+      const hit = count(next.prompt_cache_hit_tokens),
+        miss = count(next.prompt_cache_miss_tokens);
       usage = {
         ...usage,
-        ...next,
-        prompt_tokens: count(next.prompt_tokens) ?? usage.prompt_tokens,
+        total_tokens: count(next.total_tokens) ?? usage.total_tokens,
+        prompt_tokens:
+          count(next.prompt_tokens ?? next.input_tokens) ??
+          (hit !== undefined && miss !== undefined
+            ? count(hit + miss)
+            : undefined) ??
+          usage.prompt_tokens,
         completion_tokens:
-          count(next.completion_tokens) ?? usage.completion_tokens,
-        ...(next.prompt_tokens_details || usage.prompt_tokens_details
+          count(next.completion_tokens ?? next.output_tokens) ??
+          usage.completion_tokens,
+        ...(next.prompt_tokens_details ||
+        next.input_tokens_details ||
+        usage.prompt_tokens_details
           ? {
               prompt_tokens_details: {
                 cached_tokens:
-                  count(next.prompt_tokens_details?.cached_tokens) ??
+                  count(promptDetails.cached_tokens) ??
                   usage.prompt_tokens_details?.cached_tokens,
               },
             }
           : {}),
         prompt_cache_hit_tokens:
           count(next.prompt_cache_hit_tokens) ?? usage.prompt_cache_hit_tokens,
-        ...(next.completion_tokens_details || usage.completion_tokens_details
+        ...(next.completion_tokens_details ||
+        next.output_tokens_details ||
+        usage.completion_tokens_details
           ? {
               completion_tokens_details: {
                 reasoning_tokens:
-                  count(next.completion_tokens_details?.reasoning_tokens) ??
+                  count(completionDetails.reasoning_tokens) ??
                   usage.completion_tokens_details?.reasoning_tokens,
               },
             }
@@ -104,11 +135,17 @@ export function createModelRequestUsage(
             deltaBytes += bytes(call.function.arguments);
         }
     }
-    const message = normalized.choices?.[0]?.message;
+    const first = choices[0];
+    const message =
+      record(first) && record(first.message) ? first.message : null;
     let snapshotBytes =
       bytes(message?.content) + bytes(message?.reasoning_content);
-    for (const call of message?.tool_calls ?? [])
-      snapshotBytes += bytes(call.function.arguments);
+    if (Array.isArray(message?.tool_calls))
+      for (const call of message.tool_calls) {
+        if (record(call) && record(call.function))
+          snapshotBytes += bytes(call.function.arguments);
+      }
+    snapshotBytes = Math.max(snapshotBytes, bytes(response.output_text));
     if (Array.isArray(response.output))
       snapshotBytes = response.output.reduce<number>(
         (sum, item: unknown) => sum + (record(item) ? itemBytes(item) : 0),
@@ -132,6 +169,10 @@ export function createModelRequestUsage(
   };
   return {
     observe,
+    metadata,
+    observeText: (text: string) => {
+      outputBytes = Math.max(outputBytes, bytes(text));
+    },
     finish(outcome: ModelRequestUsage["outcome"]): {
       payload: ModelUsagePayload;
       event: ModelRequestUsage;
@@ -157,11 +198,8 @@ export function createModelRequestUsage(
         payload,
         event: {
           ...normalizeModelUsage(payload),
-          provider,
-          model:
-            typeof input.body.model === "string" ? input.body.model : "unknown",
-          purpose: input.purpose ?? "unspecified",
-          attempt,
+          ...metadata,
+          finishedAt: new Date().toISOString(),
           outcome,
         },
       };
