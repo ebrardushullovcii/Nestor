@@ -205,7 +205,11 @@ export function createJobSearchRunner(
       )
         return;
       source.counted = true;
-      if (source.row.state !== "needs_you" && source.row.state !== "failed")
+      if (
+        source.row.state !== "needs_you" &&
+        source.row.state !== "failed" &&
+        source.row.state !== "stopped"
+      )
         source.row.state = "done";
       source.row.phase = null;
       source.row.message =
@@ -261,7 +265,11 @@ export function createJobSearchRunner(
     ) => {
       if (!current(source)) return;
       source.row.lane = "browser";
-      if (source.row.state !== "failed" && source.row.state !== "needs_you") {
+      if (
+        source.row.state !== "failed" &&
+        source.row.state !== "needs_you" &&
+        source.row.state !== "stopped"
+      ) {
         source.row.phase = "browser";
         source.row.state = "waiting";
       }
@@ -271,7 +279,8 @@ export function createJobSearchRunner(
           if (!current(source)) return;
           if (
             source.row.state !== "failed" &&
-            source.row.state !== "needs_you"
+            source.row.state !== "needs_you" &&
+            source.row.state !== "stopped"
           ) {
             source.row.state = "searching";
             source.row.phase = "browser";
@@ -318,77 +327,108 @@ export function createJobSearchRunner(
     const collect = async (
       source: SourceWork,
       lane: "http" | "browser",
-      readSignal: AbortSignal,
+      parentSignal: AbortSignal,
     ) => {
-      const inventory = await abortable(
-        deps.engine.collectSource({
-          target: source.target,
-          lane,
-          context,
-          settings,
-          signal: readSignal,
-          knownUrls: (urls) => deps.store.findKnownUrls(urls),
-          onCards: (cards) => pipeline.accept(source, cards),
-          message: (message) => {
-            if (current(source)) {
-              source.row.message = message;
-              write(source);
-            }
-          },
-        }),
-        readSignal,
-      );
-      readSignal.throwIfAborted();
-      await pipeline.accept(source, inventory.cards);
-      readSignal.throwIfAborted();
-      source.accessBlocked = inventory.complete
-        ? false
-        : source.accessBlocked || Boolean(inventory.accessBlocked);
-      source.notes = inventory.notes;
-      source.row.lane = inventory.lane ?? lane;
-      if (lane === "http" && inventory.requiresBrowser) {
-        browserTask(source, async (browserSignal) => {
-          await collect(source, "browser", browserSignal);
-        });
-        return;
+      const controller = new AbortController();
+      const readSignal = AbortSignal.any([parentSignal, controller.signal]);
+      const stopCollection = () =>
+        controller.abort(new Error(source.quickStopReason));
+      // HTTP collection has no model of its own. Stop paging, while accepted
+      // cards finish their already-running screening/reading/fit on run.signal.
+      const timer =
+        settings.depth === "quick" && lane === "http"
+          ? setTimeout(() => {
+              source.quickStopReason ??=
+                "Quick search reached its three-minute collection limit for this site. Coverage is partial; use Thorough to search further.";
+              stopCollection();
+            }, 180000)
+          : null;
+      try {
+        const inventory = await abortable(
+          deps.engine.collectSource({
+            target: source.target,
+            lane,
+            context,
+            settings,
+            signal: readSignal,
+            knownUrls: (urls) => deps.store.findKnownUrls(urls),
+            onCards: async (cards) => {
+              await pipeline.accept(source, cards);
+              if (source.quickStopReason) stopCollection();
+              readSignal.throwIfAborted();
+            },
+            message: (message) => {
+              if (current(source)) {
+                source.row.message = message;
+                write(source);
+              }
+            },
+          }),
+          readSignal,
+        );
+        readSignal.throwIfAborted();
+        await pipeline.accept(source, inventory.cards);
+        if (source.quickStopReason) stopCollection();
+        readSignal.throwIfAborted();
+        source.accessBlocked = inventory.complete
+          ? false
+          : source.accessBlocked || Boolean(inventory.accessBlocked);
+        source.notes = inventory.notes;
+        source.row.lane = inventory.lane ?? lane;
+        if (lane === "http" && inventory.requiresBrowser) {
+          browserTask(source, async (browserSignal) => {
+            await collect(source, "browser", browserSignal);
+          });
+          return;
+        }
+        source.collected = true;
+        if (inventory.needsYou)
+          needsAccess(
+            source,
+            "Open this site and finish sign-in or verification, then Retry.",
+          );
+        else if (!inventory.complete)
+          failedSource(
+            source,
+            inventory.cards.length
+              ? "Some listings could not be read completely."
+              : "No listings found; this site could not be read completely.",
+          );
+        else if (
+          source.row.state !== "needs_you" &&
+          source.row.state !== "failed"
+        ) {
+          const signedIn =
+            access.pending(Number(source.target.id)) ||
+            siteRows.get(Number(source.target.id))?.signInState === "signed_in";
+          access.complete(Number(source.target.id));
+          siteRows.record(
+            Number(source.target.id),
+            {
+              lastSearchedAt: new Date().toISOString(),
+              health: "healthy",
+              lane: inventory.lane ?? lane,
+              signInState:
+                lane === "browser" && signedIn ? "signed_in" : "not_required",
+              ...(inventory.provider ? { provider: inventory.provider } : {}),
+            },
+            false,
+          );
+          siteDirty = true;
+        }
+        write(source);
+        markDone(source);
+      } catch (error) {
+        if (!current(source) || !source.quickStopReason) throw error;
+        source.collected = true;
+        source.notes.push(source.quickStopReason);
+        if (source.row.state !== "needs_you" && source.row.state !== "failed")
+          source.row.state = "stopped";
+        write(source);
+        markDone(source);
+      } finally {
+        if (timer) clearTimeout(timer);
       }
-      source.collected = true;
-      if (inventory.needsYou)
-        needsAccess(
-          source,
-          "Open this site and finish sign-in or verification, then Retry.",
-        );
-      else if (!inventory.complete)
-        failedSource(
-          source,
-          inventory.cards.length
-            ? "Some listings could not be read completely."
-            : "No listings found; this site could not be read completely.",
-        );
-      else if (
-        source.row.state !== "needs_you" &&
-        source.row.state !== "failed"
-      ) {
-        const signedIn =
-          access.pending(Number(source.target.id)) ||
-          siteRows.get(Number(source.target.id))?.signInState === "signed_in";
-        access.complete(Number(source.target.id));
-        siteRows.record(
-          Number(source.target.id),
-          {
-            lastSearchedAt: new Date().toISOString(),
-            health: "healthy",
-            lane: inventory.lane ?? lane,
-            signInState:
-              lane === "browser" && signedIn ? "signed_in" : "not_required",
-            ...(inventory.provider ? { provider: inventory.provider } : {}),
-          },
-          false,
-        );
-        siteDirty = true;
-      }
-      write(source);
-      markDone(source);
     };
     const enqueue = (target: JobDiscoveryTarget, force: boolean) => {
       if (signal.aborted) return;

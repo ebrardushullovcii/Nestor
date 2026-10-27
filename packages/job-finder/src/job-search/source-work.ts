@@ -5,6 +5,9 @@ export interface SourceWork {
   row: JobSearchSourceRow;
   urls: Set<string>;
   processed: number;
+  screened: number;
+  unrelatedRun: number;
+  quickStopReason?: string;
   collected: boolean;
   accessBlocked: boolean;
   counted: boolean;
@@ -15,6 +18,8 @@ export function sourceWork(target: JobDiscoveryTarget): SourceWork {
     target,
     urls: new Set(),
     processed: 0,
+    screened: 0,
+    unrelatedRun: 0,
     collected: false,
     accessBlocked: false,
     counted: false,

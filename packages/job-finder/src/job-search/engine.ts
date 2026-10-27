@@ -39,7 +39,7 @@ export interface JobSearchEngine {
     input: SearchInput & {
       target: JobDiscoveryTarget;
       lane: "http" | "browser";
-      onCards?(cards: ListingCard[]): Promise<void>;
+      onCards?: (cards: ListingCard[]) => Promise<void>;
       message(text: string): void;
       knownUrls(urls: readonly string[]): readonly string[];
     },

@@ -660,3 +660,181 @@ test("a source timeout explains retry without creating a sign-in ticket", async 
     0,
   );
 });
+
+function numberedCards(
+  sourceId: string,
+  count: number,
+  title = "Nurse",
+  offset = 0,
+) {
+  return Array.from({ length: count }, (_, index) => ({
+    ...card(sourceId, title),
+    url: `https://${sourceId}.example/jobs/${offset + index}`,
+    cardFingerprint: `${sourceId}:${title}:${offset + index}`,
+  }));
+}
+
+test.each(["pages", "one large inventory"])(
+  "Quick stops an unrelated board after screening 100 cards: %s",
+  async (kind) => {
+    const { runner, engine, context, store } = setup();
+    context.sources = context.sources.slice(0, 1);
+    let pages = 0;
+    engine.collectSource.mockImplementation(
+      async ({ target, signal, onCards }) => {
+        if (kind === "one large inventory")
+          return {
+            cards: numberedCards(target.id, 1274),
+            complete: true,
+            pagesRead: 1,
+            notes: [],
+          };
+        const cards: ListingCard[] = [];
+        for (let page = 0; page < 51; page++) {
+          signal.throwIfAborted();
+          pages++;
+          const next = numberedCards(target.id, 25, "Nurse", page * 25);
+          cards.push(...next);
+          await onCards?.(next);
+        }
+        return { cards, complete: true, pagesRead: pages, notes: [] };
+      },
+    );
+    await runner.start({ depth: "quick" });
+    const status = await finished(runner);
+    expect(status.search).toMatchObject({
+      state: "done",
+      sourcesDone: 1,
+      found: 0,
+    });
+    expect(engine.collectSource).toHaveBeenCalledTimes(1);
+    expect(
+      engine.screenCards.mock.calls.flatMap(([input]) => input.cards),
+    ).toHaveLength(100);
+    const source = createSearchSourcesStore(store).list({}).rows[0]!;
+    expect(source).toMatchObject({
+      state: "stopped",
+      cards: 100,
+      unrelated: 100,
+    });
+    expect(source.message).toContain("100 consecutive unrelated");
+    expect(source.message).toContain("Coverage is partial");
+    expect(engine.fitJobs).not.toHaveBeenCalled();
+    if (kind === "pages") expect(pages).toBe(4);
+  },
+);
+
+test("related work resets the unrelated run; Quick does not stop a mixed board early", async () => {
+  const { runner, engine, context, store } = setup();
+  context.sources = context.sources.slice(0, 1);
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [
+        ...numberedCards(target.id, 99),
+        ...numberedCards(target.id, 1, "Backend Engineer", 99),
+        ...numberedCards(target.id, 99, "Nurse", 100),
+        ...numberedCards(target.id, 1, "Backend Engineer", 199),
+        ...numberedCards(target.id, 50, "Nurse", 200),
+      ],
+      complete: true,
+      pagesRead: 5,
+      notes: [],
+    }),
+  );
+  await runner.start({ depth: "quick", postedWithin: "any" });
+  await finished(runner);
+  expect(createSearchSourcesStore(store).list({}).rows[0]).toMatchObject({
+    state: "done",
+    cards: 250,
+    related: 2,
+    unrelated: 248,
+  });
+  expect(engine.fitJobs).toHaveBeenCalled();
+});
+
+test("Thorough can reach a related listing after 1274 unrelated cards", async () => {
+  const { runner, engine, context, store } = setup();
+  context.sources = context.sources.slice(0, 1);
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [
+        ...numberedCards(target.id, 1274),
+        ...numberedCards(target.id, 1, "Backend Engineer", 1274),
+      ],
+      complete: true,
+      pagesRead: 51,
+      notes: [],
+    }),
+  );
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await finished(runner);
+  expect(createSearchSourcesStore(store).list({}).rows[0]).toMatchObject({
+    state: "done",
+    cards: 1275,
+    related: 1,
+    unrelated: 1274,
+  });
+  expect(engine.fitJobs).toHaveBeenCalled();
+});
+
+test("Quick reports its card cap as partial even on a productive board", async () => {
+  const { runner, engine, context, store } = setup();
+  context.sources = context.sources.slice(0, 1);
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: numberedCards(target.id, 400, "Backend Engineer"),
+      complete: true,
+      pagesRead: 1,
+      notes: [],
+    }),
+  );
+  await runner.start({ depth: "quick", postedWithin: "any" });
+  await finished(runner);
+  expect(createSearchSourcesStore(store).list({}).rows[0]).toMatchObject({
+    state: "stopped",
+    cards: 300,
+    related: 300,
+  });
+  expect(createSearchSourcesStore(store).list({}).rows[0]?.message).toContain(
+    "300-listing limit",
+  );
+});
+
+test("Quick bounds HTTP collection without cancelling an accepted listing read", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const { runner, engine, context, store } = setup();
+    context.sources = context.sources.slice(0, 1);
+    let collectionSignal: AbortSignal | undefined;
+    let readSignal: AbortSignal | undefined;
+    const pending =
+      deferred<Awaited<ReturnType<JobSearchEngine["readListings"]>>>();
+    engine.readListings.mockImplementation(({ signal }) => {
+      readSignal = signal;
+      return pending.promise;
+    });
+    engine.collectSource.mockImplementation(
+      async ({ target, onCards, signal }) => {
+        collectionSignal = signal;
+        await onCards?.([card(target.id)]);
+        return new Promise(() => {});
+      },
+    );
+    await runner.start({ depth: "quick", postedWithin: "any" });
+    await vi.advanceTimersByTimeAsync(180001);
+    expect(collectionSignal?.aborted).toBe(true);
+    expect(readSignal?.aborted).toBe(false);
+    expect(engine.collectSource).toHaveBeenCalledTimes(1);
+    pending.resolve({
+      jobs: [found(card(context.sources[0]!.id))],
+      failures: [],
+    });
+    await vi.runAllTimersAsync();
+    expect(runner.status().search).toMatchObject({ state: "done", scored: 1 });
+    expect(createSearchSourcesStore(store).list({}).rows[0]?.message).toContain(
+      "three-minute collection limit",
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});

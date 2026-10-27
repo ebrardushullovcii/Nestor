@@ -8,20 +8,37 @@ export function createCardWaves(
 ) {
   const pending: ListingCard[] = [];
   const space: (() => void)[] = [];
+  const checkpoints: { target: number; resolve(): void }[] = [];
+  let queued = 0,
+    consumed = 0,
+    flushing = 0;
   let active: Promise<void> | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let draining = false,
     error: Error | null = null;
+  const checkError = () => {
+    if (error) throw error;
+  };
+  const releaseCheckpoints = () => {
+    for (let index = checkpoints.length - 1; index >= 0; index--) {
+      const checkpoint = checkpoints[index]!;
+      if (checkpoint.target <= consumed || error || signal.aborted) {
+        checkpoints.splice(index, 1);
+        checkpoint.resolve();
+      }
+    }
+  };
   const pump = () => {
     if (signal.aborted || error) {
       pending.length = 0;
       if (timer) clearTimeout(timer);
       timer = null;
       for (const resolve of space.splice(0)) resolve();
+      releaseCheckpoints();
       return;
     }
     if (active || pending.length === 0) return;
-    if (!draining && pending.length < 400) {
+    if (!draining && !flushing && pending.length < 400) {
       timer ??= setTimeout(() => {
         timer = null;
         launch();
@@ -41,7 +58,9 @@ export function createCardWaves(
         error = reason instanceof Error ? reason : new Error(String(reason));
       })
       .finally(() => {
+        consumed += batch.length;
         active = null;
+        releaseCheckpoints();
         pump();
       });
   };
@@ -57,7 +76,26 @@ export function createCardWaves(
             signal,
           );
         pending.push(...cards.slice(index, index + 400));
+        queued += Math.min(400, cards.length - index);
         pump();
+      }
+    },
+    /** Flush only the cards already accepted, then resume pooling small pages. */
+    async checkpoint() {
+      signal.throwIfAborted();
+      checkError();
+      if (consumed >= queued) return;
+      const target = queued;
+      flushing++;
+      try {
+        const completed = new Promise<void>((resolve) =>
+          checkpoints.push({ target, resolve }),
+        );
+        pump();
+        await abortable(completed, signal);
+        checkError();
+      } finally {
+        flushing--;
       }
     },
     async drain() {

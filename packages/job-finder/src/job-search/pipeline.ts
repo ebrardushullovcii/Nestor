@@ -8,6 +8,9 @@ import type { SourceWork } from "./source-work";
 import type { createFitQueue } from "./fit-queue";
 import { createCardWaves } from "./card-waves";
 
+const QUICK_REVIEW_INTERVAL = 100;
+const QUICK_CARD_LIMIT = 300;
+
 /** Screening stays serialized so waves share one cached profession decision. Fit runs alongside it. */
 export function createSearchPipeline(input: {
   deps: JobSearchRunnerDeps;
@@ -125,7 +128,11 @@ export function createSearchPipeline(input: {
     const touched = new Set(cards.map((card) => card.sourceId));
     for (const id of touched) {
       const source = sources.get(id)!;
-      if (source.row.state !== "needs_you" && source.row.state !== "failed") {
+      if (
+        source.row.state !== "needs_you" &&
+        source.row.state !== "failed" &&
+        source.row.state !== "stopped"
+      ) {
         source.row.state = "searching";
         source.row.phase = "screening";
       }
@@ -151,14 +158,21 @@ export function createSearchPipeline(input: {
     const failedSources = new Map<string, string>();
     for (const card of cards) {
       const source = sources.get(card.sourceId)!;
-      if (related.has(`${card.sourceId}\n${card.url}`)) source.row.related++;
-      else {
+      source.screened++;
+      if (related.has(`${card.sourceId}\n${card.url}`)) {
+        source.row.related++;
+        source.unrelatedRun = 0;
+      } else {
         source.processed++;
         if (failed.has(card.url)) {
           source.row.failedReads++;
           failedSources.set(card.sourceId, failed.get(card.url)!);
         } else if (rejected.has(card.url)) source.row.unrelated++;
         else source.row.seen++;
+        source.unrelatedRun =
+          rejected.has(card.url) && !failed.has(card.url)
+            ? source.unrelatedRun + 1
+            : 0;
       }
     }
     for (const [id, reason] of failedSources)
@@ -168,7 +182,11 @@ export function createSearchPipeline(input: {
       );
     for (const id of touched) {
       const source = sources.get(id)!;
-      if (source.row.state !== "needs_you" && source.row.state !== "failed")
+      if (
+        source.row.state !== "needs_you" &&
+        source.row.state !== "failed" &&
+        source.row.state !== "stopped"
+      )
         source.row.phase = "reading";
       input.write(source);
       input.settled(source);
@@ -238,18 +256,37 @@ export function createSearchPipeline(input: {
   });
   return {
     async accept(source: SourceWork, cards: readonly ListingCard[]) {
-      const closed = cards
-        .filter((card) => card.closed)
-        .map((card) => card.url);
-      if (closed.length) deps.store.closeFoundUrls(closed);
-      const fresh = cards.filter((card) => {
-        if (source.urls.has(card.url)) return false;
-        source.urls.add(card.url);
-        return true;
-      });
-      source.row.cards += fresh.length;
-      input.write(source);
-      await waves.push(fresh);
+      const quick = settings.depth === "quick";
+      const chunk = quick ? QUICK_REVIEW_INTERVAL : 400;
+      for (let offset = 0; offset < cards.length; offset += chunk) {
+        if (source.quickStopReason) return;
+        const fresh: ListingCard[] = [];
+        for (const card of cards.slice(offset, offset + chunk)) {
+          if (source.urls.has(card.url)) continue;
+          if (quick && source.row.cards + fresh.length >= QUICK_CARD_LIMIT)
+            break;
+          source.urls.add(card.url);
+          fresh.push(card);
+        }
+        const closed = fresh
+          .filter((card) => card.closed)
+          .map((card) => card.url);
+        if (closed.length) deps.store.closeFoundUrls(closed);
+        source.row.cards += fresh.length;
+        input.write(source);
+        await waves.push(fresh);
+        if (
+          quick &&
+          source.row.cards - source.screened >= QUICK_REVIEW_INTERVAL
+        )
+          await waves.checkpoint();
+        if (quick && source.unrelatedRun >= QUICK_REVIEW_INTERVAL)
+          source.quickStopReason =
+            "Quick search stopped after 100 consecutive unrelated listings. Coverage is partial; use Thorough to search further.";
+        else if (quick && source.row.cards >= QUICK_CARD_LIMIT)
+          source.quickStopReason =
+            "Quick search reached its 300-listing limit for this site. Coverage is partial; use Thorough to search further.";
+      }
     },
     drain: () => waves.drain(),
   };
