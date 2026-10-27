@@ -49,6 +49,8 @@ export async function seedPerfWorkspace(input: {
   shortlistResumes?: "written" | "unwritten";
   /** A synthetic resume PDF Apply attaches, already in the data folder. */
   resumeFile?: string;
+  /** Jobs hidden from the start, for an Apply batch to skip. */
+  hiddenApplyCount?: number;
 }): Promise<Record<string, number | number[]>> {
   const store = openJobStore(input.file);
   const started = performance.now();
@@ -65,6 +67,7 @@ export async function seedPerfWorkspace(input: {
         summary: "Builds calm tools for busy teams.",
         currentLocation: "Lisbon, Portugal",
         email: "riley.okafor@example.test",
+        phone: "+1 555 010 0100",
         skills: ["TypeScript", "React", "Accessibility"],
         ...(input.resumeFile
           ? {
@@ -231,11 +234,40 @@ export async function seedPerfWorkspace(input: {
       store.setStage(saved.ids, "resume");
       applyIds.push(...saved.ids);
     }
+    const hiddenApplyIds: number[] = [];
+    if (input.hiddenApplyCount) {
+      const saved = store.saveFoundJobs({
+        searchId: null,
+        jobs: Array.from({ length: input.hiddenApplyCount }, (_, i) => ({
+          title: `Hidden replica role ${i + 1}`,
+          company: `Hidden Co ${i + 1}`,
+          location: "Remote",
+          workModes: ["remote"] as const,
+          url: `https://hidden${i + 1}.example.test/jobs/${i + 1}`,
+          applyUrl: null,
+          sourceId: "replica",
+          sourceLabel: "hidden.example.test",
+          sourceJobId: `hidden-${i + 1}`,
+          postedAt: "2026-10-20T08:00:00.000Z",
+          salaryText: null,
+          salaryMin: null,
+          salaryMax: null,
+          salaryCurrency: null,
+          seniority: null,
+          employmentType: "Full-time",
+          summary: "A hidden job an Apply batch must skip.",
+          description: description(i),
+        })),
+      });
+      store.moveJobs({ selection: { ids: saved.ids }, to: "hidden" });
+      hiddenApplyIds.push(...saved.ids);
+    }
 
     return {
       jobs: ids.length,
       sites: siteUrls.length,
       applyIds,
+      hiddenApplyIds,
       hidden: hidden.length,
       shortlisted: shortlisted.length,
       approved: approved.length,

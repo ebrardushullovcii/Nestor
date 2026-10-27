@@ -87,7 +87,12 @@ Options:
             app), then in plain Chromium, measured the same way
   --shortlist-resumes  written (default, as in a real hunt) or unwritten,
             which keeps the resume writer busy throughout a load run
-  --memory-detail  with --load: heap snapshots of main and the app's window
+  --rounds N  Apply rounds back to back in one session (--per-round jobs
+            each, default 30: forms the profile completes, half filled and
+            half sent, Needs-you forms, missing pages and hidden jobs), then
+            --idle seconds (default 600): Task Manager memory and pages
+            before, at the peak and after each round, against the Speed cap
+  --memory-detail  with --load or --observe: heap snapshots of main and the app's window
             before the work, at its end and after, summarized by
             constructor, and IPC traffic per channel. Snapshots pause the
             app for seconds; the run's timings are not comparable
@@ -105,6 +110,10 @@ Options:
             trace of every process (trace.json, open in Perfetto)
   --out       folder for perf-<time>.json (default ~/Projects/nestor-agent-work/perf)
   --keep      keep the seeded data folders (printed) for a later look
+  --data <dir>  measure launch and screens on a copy of this data folder
+            (a hunt-shaped copy) instead of a seeded one. The folder is only
+            read; the copy is deleted afterwards unless --keep. Report
+            timings only: never commit or share anything from it
   --seed-into <dir>  only seed that (empty) data folder with the first size and
             stop; launch it yourself with NESTOR_USER_DATA_DIR=<dir>
   --help      this text
@@ -141,6 +150,10 @@ function parseArgs(argv) {
     else if (arg === "--for") options.observeFor = Number(value());
     else if (arg === "--urls") options.urls = path.resolve(value());
     else if (arg === "--memory-detail") options.memoryDetail = true;
+    else if (arg === "--rounds") options.rounds = Number(value());
+    else if (arg === "--per-round") options.perRound = Number(value());
+    else if (arg === "--idle") options.idle = Number(value());
+    else if (arg === "--data") options.data = path.resolve(value());
     else if (arg === "--shortlist-resumes") options.shortlistResumes = value();
     else if (arg === "--cpu-profile") options.cpuProfile = true;
     else if (arg === "--seed-into") options.seedInto = path.resolve(value());
@@ -195,6 +208,19 @@ async function seed(dataDir, jobs, sites, extra = {}) {
   } finally {
     await server.close();
   }
+}
+
+/** Copies a data folder for --data, leaving out caches and locks. */
+function copyDataFolder(from, to) {
+  const started = performance.now();
+  cpSync(from, to, {
+    recursive: true,
+    filter: (source) =>
+      !/[\\/](?:Code Cache|Main Code Cache|GPUCache|Dawn\w*Cache|Cache|Crashpad|SingletonLock|lockfile)(?:$|[\\/])/u.test(
+        source.slice(from.length),
+      ),
+  });
+  return { copied: from, seedMs: Math.round(performance.now() - started) };
 }
 
 function appCopy() {
@@ -348,10 +374,12 @@ const memory = (app) =>
   });
 
 async function measureLaunches(dataDir, runs, { cpuProfileDir } = {}) {
-  // What a first start after an update lacks: compiled code and GPU caches.
+  // What a first start after an update lacks: compiled code (the window's
+  // and main's) and GPU caches.
   const clearCaches = () => {
     for (const dir of [
       "Code Cache",
+      "Main Code Cache",
       "GPUCache",
       "DawnGraphiteCache",
       "DawnWebGPUCache",
@@ -774,13 +802,38 @@ if (options.seedInto) {
   );
   process.exit(0);
 }
+if (options.rounds) {
+  const load = await import("./perf-load.mjs");
+  mkdirSync(options.out, { recursive: true });
+  const at = new Date().toISOString();
+  const result = await load.measureApplyRounds({
+    rounds: options.rounds,
+    perRound: options.perRound ?? 30,
+    idleSeconds: options.idle ?? 600,
+    seed,
+    appCopy,
+    launch,
+  });
+  console.log(load.printApplyRounds(result));
+  const file = path.join(
+    options.out,
+    `perf-rounds-${at.replace(/[:.]/g, "-")}.json`,
+  );
+  writeFileSync(file, JSON.stringify({ at, result }, null, 2));
+  console.log(`\nfull results: ${file}`);
+  process.exit(0);
+}
 if (options.load || options.chromium || options.observe) {
   const load = await import("./perf-load.mjs");
   mkdirSync(options.out, { recursive: true });
   const at = new Date().toISOString();
   const results = [];
   if (options.observe) {
-    results.push(await load.observe(options.observe, options.observeFor));
+    results.push(
+      await load.observe(options.observe, options.observeFor, {
+        heap: options.memoryDetail,
+      }),
+    );
     console.log(load.printObserved(results[0]));
   }
   if (options.load) {
@@ -852,11 +905,20 @@ const report = {
   loadAverage: os.loadavg(),
   sizes: [],
 };
-for (const [index, jobs] of options.sizes.entries()) {
-  const sites = options.sites?.[index] ?? (jobs > 1000 ? 900 : 30);
+// --data measures a copy of an existing data folder instead of a seeded one;
+// the original is only read.
+const runs = options.data
+  ? [{ jobs: "copy", sites: "copy" }]
+  : options.sizes.map((jobs, index) => ({
+      jobs,
+      sites: options.sites?.[index] ?? (jobs > 1000 ? 900 : 30),
+    }));
+for (const { jobs, sites } of runs) {
   const dataDir = mkdtempSync(path.join(tempRoot, `nestor-perf-${jobs}-`));
   try {
-    const result = { seed: await seed(dataDir, jobs, sites) };
+    const result = options.data
+      ? { seed: copyDataFolder(options.data, dataDir) }
+      : { seed: await seed(dataDir, jobs, sites) };
     const cpuProfileDir = options.cpuProfile
       ? mkdtempSync(path.join(options.out, `cpu-${jobs}-`))
       : undefined;

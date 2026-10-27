@@ -8,7 +8,7 @@
 const NEXT = /^(?:save and continue|continue|next)\b/iu;
 const SUBMIT = /^submit\b/iu;
 // Label words to stored-fact ids, for fields a person's profile answers.
-const FACT_FOR_LABEL = [
+export const FACT_FOR_LABEL = [
   [/first name|given name/iu, /firstName$/u],
   [/last name|family name|surname/iu, /lastName$/u],
   [/full name|^name\b|your name/iu, /fullName$/u],
@@ -27,9 +27,12 @@ function lastPageView(messages) {
 function catalog(messages) {
   const facts = new Map();
   for (const message of messages) {
+    // The facts come as a sentence and then their JSON.
+    const content = String(message.content ?? "");
+    if (!content.includes("storedFactCatalog")) continue;
     let data;
     try {
-      data = JSON.parse(message.content ?? "");
+      data = JSON.parse(content.slice(content.indexOf("{")));
     } catch {
       continue;
     }
@@ -75,6 +78,16 @@ export function decideApplyAction(messages) {
   if (!view) return { name: "observe", args: {} };
   const page = parseView(view);
   const facts = catalog(messages);
+  // After submit_application Job Finder either sent the form or stopped it
+  // for the person; either way this run is over.
+  const lastCall = messages
+    .findLast((m) => m.role === "assistant" && m.tool_calls?.length)
+    ?.tool_calls?.at(-1)?.function.name;
+  if (lastCall === "submit_application")
+    return {
+      name: "finish",
+      args: { reason: "The form is complete; Job Finder has the send." },
+    };
   const documentId = messages
     .map((m) => m.content ?? "")
     .join("\n")
@@ -105,7 +118,9 @@ export function decideApplyAction(messages) {
       else if (field.required) leftForPerson.push(field);
       continue;
     }
-    if (field.kind === "checkbox" && field.declaration) {
+    // A required box is ticked like a person would; Job Finder's own gate
+    // decides whether it may be.
+    if (field.kind === "checkbox" && (field.declaration || field.required)) {
       entries.push({ tool: "set_checkbox", ref: field.ref, checked: true });
       continue;
     }
@@ -126,11 +141,16 @@ export function decideApplyAction(messages) {
     else if (field.required) leftForPerson.push(field);
   }
 
+  // A page with no form at all (a missing job): nothing to apply on.
+  if (page.fields.length === 0 && !page.next && !page.submit)
+    return {
+      name: "finish",
+      args: { reason: "This page has no application form.", stuck: true },
+    };
   if (entries.length > 0 && triesHere < 2) {
     const args = { fields: entries };
     if (leftForPerson.length === 0) {
       if (page.next && !page.submit) args.thenContinue = page.next.ref;
-      else if (page.submit) args.finishWhenReady = true;
     }
     return { name: "fill_fields", args };
   }
@@ -147,6 +167,10 @@ export function decideApplyAction(messages) {
       name: "click",
       args: { ref: page.next.ref, reason: "Go to the next step." },
     };
+  // Complete: say so with the form's own send button. Job Finder presses it
+  // only when the person allowed sending; otherwise it stops, ready.
+  if (page.submit)
+    return { name: "submit_application", args: { ref: page.submit.ref } };
   return {
     name: "finish",
     args: { reason: "The form is filled in and ready for the person to send." },

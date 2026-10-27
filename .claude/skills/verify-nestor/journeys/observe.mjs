@@ -3,7 +3,10 @@
 // process, and how smooth the open screen is. It never clicks anything.
 // `perf --observe <label>` runs it and prints the summary.
 //
-// Run: bin/drive run .claude/skills/verify-nestor/journeys/observe.mjs [seconds]
+// Run: bin/drive run .claude/skills/verify-nestor/journeys/observe.mjs [seconds] [heap]
+// With "heap" it also saves V8 heap snapshots of main and the app's window
+// before, two minutes into the work and after, summarized by constructor.
+// Each pauses the app for a few seconds.
 // It stops after [seconds] (default 900), or a minute after the search and
 // Apply work it saw running have both stopped. The full timeline is saved as
 // observe-<time>.json in the evidence folder.
@@ -11,8 +14,11 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import {
   countPages,
+  mainHeapSnapshot,
   p95,
   processTreeMemory,
+  rendererHeapSnapshot,
+  snapshotSummary,
   sampleApp,
   summarizeSamples,
   workState,
@@ -22,6 +28,26 @@ const RELEASE_MS = 60_000;
 
 export default async function journey(ctx) {
   const seconds = Number(ctx.args[0] ?? 900);
+  const heap = ctx.args[1] === "heap";
+  const heaps = {};
+  const snapshot = async (name) => {
+    if (!heap || heaps[name]) return;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const mainFile = path.join(
+      ctx.evidenceDir,
+      `heap-main-${name}-${stamp}.heapsnapshot`,
+    );
+    const windowFile = path.join(
+      ctx.evidenceDir,
+      `heap-window-${name}-${stamp}.heapsnapshot`,
+    );
+    await mainHeapSnapshot(ctx.app, mainFile);
+    await rendererHeapSnapshot(page, windowFile);
+    heaps[name] = {
+      main: await snapshotSummary(mainFile),
+      window: await snapshotSummary(windowFile),
+    };
+  };
   const page = await ctx.page;
   await page.evaluate(() => {
     const perf = (window.__observe = { long: [], events: [] });
@@ -37,6 +63,7 @@ export default async function journey(ctx) {
   });
   await countPages(ctx.app);
   const idle = await sampleApp(ctx.app);
+  await snapshot("before");
   // Task Manager's figure for the whole app, read apart: Windows takes a few
   // seconds per reading.
   const pid = ctx.app.process().pid;
@@ -48,6 +75,7 @@ export default async function journey(ctx) {
   const startedAt = Date.now();
   const samples = [];
   let sawWork = false;
+  let sawWorkAt = null;
   let doneAt = null;
   let state = "";
   for (let tick = 0; Date.now() - startedAt < seconds * 1000; tick += 1) {
@@ -61,7 +89,9 @@ export default async function journey(ctx) {
       const running = search.running || apply.running;
       if (running) {
         sawWork = true;
+        sawWorkAt ??= Date.now();
         doneAt = null;
+        if (Date.now() - sawWorkAt > 120_000) await snapshot("during");
       } else if (sawWork && doneAt === null) doneAt = Date.now();
       if (doneAt !== null && Date.now() - doneAt > RELEASE_MS) break;
     }
@@ -69,6 +99,7 @@ export default async function journey(ctx) {
   }
   reading = false;
   await treeReader;
+  await snapshot("after");
   const screen = await page.evaluate(() => ({
     events: window.__observe.events.map((e) => e.dur),
     long: window.__observe.long.map((e) => e.dur),
@@ -91,6 +122,7 @@ export default async function journey(ctx) {
       afterMB: tree.at(-1).privateWorkingSetMB,
     },
     idleMB: idle.workingSetMB,
+    ...(heap ? { heaps } : {}),
     ...summary,
     interactions: screen.events.length,
     interactionP95Ms: p95(screen.events),
