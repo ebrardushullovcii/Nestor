@@ -21,6 +21,7 @@ export const ApplyAnswerTagsSchema = z
       "other",
       "motivation",
       "factual_summary",
+      "residence_country",
     ]),
     country: z
       .string()

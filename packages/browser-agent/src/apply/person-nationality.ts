@@ -6,13 +6,19 @@ export function requiresSavedNationalityAnswer(question: string): boolean {
 }
 
 export function nationalityQuestionIdentity(question: string): string | null {
+  const normalized = question.normalize("NFKD").replace(/\p{M}/gu, "");
   if (
     /\b(?:passport(?:\s+(?:issuing|issuance))?\s+country|country\s+(?:of|issuing)\s+(?:your\s+)?passport)\b/iu.test(
       question,
     )
   )
     return "passport_country";
-  if (/\b(?:citizenship|nationality)\b/iu.test(question)) return "citizenship";
+  if (
+    /\b(?:citizenship|nationality|staatsangehorigkeit|nationalite|nacionalidad|nacionalidade|citoyennete|cidadania|ciudadania)\b/iu.test(
+      normalized,
+    )
+  )
+    return "citizenship";
   if (/\bcountry\s+of\s+birth\b/iu.test(question)) return "birth_country";
   return null;
 }

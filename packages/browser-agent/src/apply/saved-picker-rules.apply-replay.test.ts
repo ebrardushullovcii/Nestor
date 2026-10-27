@@ -1,4 +1,7 @@
-import { CandidateProfileSchema } from "@nestor/contracts";
+import {
+  CandidateProfileSchema,
+  type ApplyAnswerTags,
+} from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { buildApplyFormObservation } from "./page-hands";
@@ -32,6 +35,7 @@ function fixture(
   options: string[],
   groupLabel = "",
   withRule = true,
+  answerKind: ApplyAnswerTags["kind"] = "other",
 ) {
   const page = buildApplyFormObservation(
     {
@@ -127,7 +131,7 @@ function fixture(
     siteLabel: "Synthetic employer",
   } as unknown as ApplyAgentConfig;
   const tags = {
-    kind: "other" as const,
+    kind: answerKind,
     country: null,
     sourceId: "profile.currentCountry",
   };
@@ -185,6 +189,37 @@ function fixture(
     });
   return { page, field, config, chooseOption, fill, send };
 }
+
+test("a typed residence question uses its saved country fallback and rechecks it at Send", async () => {
+  const f = fixture(
+    "País de residencia",
+    ["Albania", "Serbia"],
+    "",
+    true,
+    "residence_country",
+  );
+  expect((await f.fill()).kind).toBe("filled");
+  expect(f.field.value).toBe("Albania");
+  expect((await f.send("Albania"))[0]?.supported).toBe(true);
+});
+
+test("a residence tag cannot turn a saved passport rule into a residence fallback", async () => {
+  const f = fixture(
+    "País de residencia",
+    ["Albania", "Serbia"],
+    "",
+    true,
+    "residence_country",
+  );
+  f.config.sources.reusableAnswers = [
+    { ...saved, question: "Passport country", label: "Passport country" },
+  ];
+  expect((await f.fill()).kind).not.toBe("filled");
+  expect(f.chooseOption.mock.calls.some((call) => call[1] === "Albania")).toBe(
+    false,
+  );
+  expect((await f.send("Albania"))[0]?.supported).toBe(false);
+});
 
 test.each([
   "Country of residence",

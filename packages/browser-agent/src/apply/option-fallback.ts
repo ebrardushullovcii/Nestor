@@ -219,6 +219,7 @@ export function savedPickerRule(
             const parts = saved.question.split(/\s+[—–]\s+/u);
             return isExplicitResidenceCountryControl({
               ...control,
+              answerTags: null,
               label: parts.at(-1) ?? "",
               groupLabel: parts.slice(0, -1).join(" — "),
             });

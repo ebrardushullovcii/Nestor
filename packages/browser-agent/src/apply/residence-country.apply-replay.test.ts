@@ -1,8 +1,13 @@
-import { CandidateProfileSchema } from "@nestor/contracts";
+import {
+  CandidateProfileSchema,
+  type ApplyAnswerTags,
+} from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import { buildApplyFormObservation } from "./page-hands";
 import { createApplyGuardState, executeApplyProposal } from "./policy-executor";
 import type { ApplyAgentConfig } from "./types";
+import type { LLMClient } from "../agent/contracts";
+import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
 
 const now = () => new Date("2026-10-26T00:00:00.000Z");
 
@@ -12,6 +17,7 @@ async function replay(
   groupLabel = "",
   sourceId: string | null = "profile.currentCountry",
   options = ["Germany", "France"],
+  answerKind: ApplyAnswerTags["kind"] = "other",
 ) {
   const observation = buildApplyFormObservation(
     {
@@ -129,15 +135,92 @@ async function replay(
               {
                 asksAboutPay: false,
                 declarationKind: null,
-                answerTags: { kind: "other" as const, country: null, sourceId },
+                answerTags: { kind: answerKind, country: null, sourceId },
               },
             ],
           ]),
         ),
     },
   );
-  return { outcome, write, checkWrittenAnswer };
+  const client: LLMClient = {
+    chatWithTools: () =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: "read",
+            type: "function",
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({
+                plainIndexes: [0],
+                flagged: [],
+                tags: [{ index: 0, kind: answerKind, country: null, sourceId }],
+              }),
+            },
+          },
+        ],
+      }),
+  };
+  const send = (answer = "Germany") =>
+    checkClassifiedApplicationAnswers({
+      client,
+      sources: config.sources,
+      payDisclosed: false,
+      answers: [
+        { question: [groupLabel, label].filter(Boolean).join(" — "), answer },
+      ],
+      formControls: observation.controls,
+      formContext: { pageText: "Application questions", fields: [] },
+    });
+  return { outcome, write, checkWrittenAnswer, send };
 }
+
+test.each([
+  "Where do you currently live?",
+  "País de residencia",
+  "Land Ihres derzeitigen Wohnsitzes",
+  "Pays de résidence",
+  "País de residência",
+])(
+  "a typed residence-country question fills and rechecks in any language: %s",
+  async (label) => {
+    const result = await replay(
+      label,
+      "text",
+      "",
+      "profile.currentCountry",
+      undefined,
+      "residence_country",
+    );
+    expect(result.outcome.kind).toBe("filled");
+    expect(result.write).toHaveBeenCalledOnce();
+    expect(result.checkWrittenAnswer).not.toHaveBeenCalled();
+    expect((await result.send())[0]?.supported).toBe(true);
+    expect((await result.send("France"))[0]?.supported).toBe(false);
+  },
+);
+
+test.each([
+  ["País de residencia", "", null],
+  ["País de residencia", "Professional reference", "profile.currentCountry"],
+  ["Passport country", "", "profile.currentCountry"],
+  ["Nationalité", "", "profile.currentCountry"],
+  ["Nacionalidad", "", "profile.currentCountry"],
+])(
+  "a residence tag never supplies a missing or different personal fact: %s / %s",
+  async (label, group, sourceId) => {
+    const result = await replay(
+      label,
+      "text",
+      group,
+      sourceId,
+      undefined,
+      "residence_country",
+    );
+    expect(result.write).not.toHaveBeenCalled();
+    expect((await result.send())[0]?.supported).toBe(false);
+  },
+);
 
 test.each([
   ["What country are you based in?", "text"],
