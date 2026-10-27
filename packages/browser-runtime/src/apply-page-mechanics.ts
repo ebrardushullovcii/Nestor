@@ -1802,7 +1802,7 @@ function controlLocator(page: Page, ref: string): Locator | null {
     : null;
 }
 
-function actionLocator(page: Page, ref: string): Locator | null {
+export function actionLocator(page: Page, ref: string): Locator | null {
   const target = locatorRootForRef(page, ref, "a");
   return target
     ? target.root.locator(APPLY_ACTION_SELECTOR).nth(target.index)
