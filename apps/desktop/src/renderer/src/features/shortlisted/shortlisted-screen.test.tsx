@@ -15,6 +15,7 @@ import {
   openJobStore,
   type JobStore,
 } from "@nestor/db/job-store";
+import { createApplicationStore } from "@nestor/db/applications";
 import { createResumeCommandReads } from "@nestor/job-finder/resumes";
 import {
   cleanup,
@@ -230,4 +231,42 @@ it("opens the next job when the open one leaves the tab, and nothing when the ta
       }),
     ).toBeNull(),
   );
+});
+
+it("applies the jobs on this page of Approved, next to all and the ticked ones", async () => {
+  // A page holds fifty: with fifty-five approved, this page is fewer than all.
+  ({ added: ids } = store.saveFoundJobs({
+    searchId: null,
+    jobs: Array.from({ length: 52 }, (_, index) => job(index + 4)),
+  }));
+  const every = store
+    .sql("SELECT id FROM jobs ORDER BY id")
+    .all()
+    .map((row) => (row as { id: number }).id);
+  store.setStage(every, "shortlisted");
+  approveOriginalResumesForTests(store, every);
+  const applications = createApplicationStore(store);
+  const applyJobs = vi.fn(
+    (input: Parameters<typeof applications.applyJobs>[0]) =>
+      Promise.resolve(applications.applyJobs(input)),
+  );
+  Object.assign(window.nestor, { jobFinder: { applyJobs } });
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <ShortlistedScreen />
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Approved 55" }));
+  expect(
+    await screen.findByRole("button", { name: "Apply to all 55 jobs" }),
+  ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Apply to the 50 jobs on this page" }),
+  );
+  await screen.findByText("Applying to 50 jobs");
+  const sent = applyJobs.mock.calls[0]![0];
+  expect(sent).toMatchObject({ bulk: true });
+  expect("ids" in sent.selection && sent.selection.ids).toHaveLength(50);
 });
