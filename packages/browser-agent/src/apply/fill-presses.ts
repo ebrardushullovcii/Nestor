@@ -48,11 +48,12 @@ const FIELD_PART_ROLES = new Set([
 
 /**
  * Whether Fill in for me may open this address itself: only the application
- * form it was started on, or the page it is on. Any other link (a
- * "Continue", a step) is the person's, like any other button.
+ * form it was started on, the page it is on, or the page an earlier run of
+ * this application filled its form on or followed a link to. Any other link
+ * (a "Continue", a step) is the person's, like any other button.
  */
 export function fillMayOpen(
-  config: Pick<ApplyAgentConfig, "application">,
+  config: Pick<ApplyAgentConfig, "application" | "replay">,
   currentUrl: string | null,
   href: string,
 ): boolean {
@@ -69,7 +70,15 @@ export function fillMayOpen(
   return (
     target !== null &&
     (target === address(currentUrl) ||
-      target === address(config.application.startingUrl))
+      target === address(config.application.startingUrl) ||
+      // The page an earlier run of this application filled the form on, and
+      // the way it went there (a job page's Application tab): a refill
+      // goes back to restore it.
+      target === address(config.replay?.formUrl) ||
+      (config.replay?.path ?? []).some(
+        (step) =>
+          step.tool !== "click" && step.href && target === address(step.href),
+      ))
   );
 }
 
@@ -119,7 +128,7 @@ function pressables(observation: ApplyFormObservation): Pressable[] {
  * button on the same banner: the one that keeps the least.
  */
 export function fillPressFor(input: {
-  config: Pick<ApplyAgentConfig, "application">;
+  config: Pick<ApplyAgentConfig, "application" | "replay">;
   observation: ApplyFormObservation;
   ref: string;
   state: FillPressState;
