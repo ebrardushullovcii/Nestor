@@ -6,6 +6,7 @@ import type {
   JobSearchSettingsInput,
   JobSearchStatus,
   SourceInstructionArtifact,
+  SavedOptionFallback,
 } from "@nestor/contracts";
 import type { JobStore } from "@nestor/db/job-store";
 
@@ -17,6 +18,7 @@ export interface JobSearchContext {
   sources: readonly JobDiscoveryTarget[];
   sourceInstructionArtifacts: readonly SourceInstructionArtifact[];
   remoteCountsAsAnyLocation?: boolean;
+  countryOptionFallbacks?: readonly SavedOptionFallback[];
 }
 
 export interface JobSearchRunnerDeps {
