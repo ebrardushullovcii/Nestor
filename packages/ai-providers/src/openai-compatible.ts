@@ -358,6 +358,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
       // Streaming, idle and total deadlines, and retries live in
       // model-request-transport; `timeoutMs` is the total budget.
       const payload = await performModelRequest({
+        purpose: operation,
         url: buildModelUrl(validatedOptions.baseUrl, apiMode),
         headers: buildModelRequestHeaders({
           apiKey: validatedOptions.apiKey,
@@ -828,6 +829,11 @@ export function createOpenAiCompatibleJobFinderAiClient(
         const apiMode = validatedOptions.apiMode ?? "chat_completions";
         const streamingEnabled = resilience.streaming !== false;
         const payload = await performModelRequest({
+          purpose: [
+            options?.reasoningTask ?? "chat",
+            ...tools.map((tool) => tool.function.name),
+          ].join(":"),
+          onUsage: options?.onRequestUsage,
           url: buildModelUrl(validatedOptions.baseUrl, apiMode),
           headers: buildModelRequestHeaders({
             apiKey: validatedOptions.apiKey,

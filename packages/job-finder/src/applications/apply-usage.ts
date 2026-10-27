@@ -47,5 +47,20 @@ export function accumulateApplyUsage(
     cachedInputTokens: before.cachedInputTokens + current.cachedInputTokens,
     reasoningTokens: before.reasoningTokens + current.reasoningTokens,
     preparationAttempts: before.preparationAttempts + 1,
+    ...(before.estimated || current.estimated
+      ? {
+          estimated: {
+            calls:
+              (before.estimated?.calls ?? 0) + (current.estimated?.calls ?? 0),
+            inputTokens:
+              (before.estimated?.inputTokens ?? 0) +
+              (current.estimated?.inputTokens ?? 0),
+            outputTokens:
+              (before.estimated?.outputTokens ?? 0) +
+              (current.estimated?.outputTokens ?? 0),
+            method: "utf8_bytes_div_4_visible_only" as const,
+          },
+        }
+      : {}),
   };
 }

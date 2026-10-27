@@ -5,8 +5,25 @@ export const ModelTokenUsageSchema = z.object({
   outputTokens: z.number().int().nonnegative(),
   cachedInputTokens: z.number().int().nonnegative(),
   reasoningTokens: z.number().int().nonnegative(),
+  // Separate from provider totals above. Absent on older or fully reported usage.
+  estimated: z
+    .object({
+      calls: z.number().int().nonnegative().default(0),
+      inputTokens: z.number().int().nonnegative().default(0),
+      outputTokens: z.number().int().nonnegative().default(0),
+      // Hidden reasoning, cache hits and provider billing cannot be inferred.
+      method: z.literal("utf8_bytes_div_4_visible_only"),
+    })
+    .optional(),
 });
 export type ModelTokenUsage = z.infer<typeof ModelTokenUsageSchema>;
+export interface ModelRequestUsage extends ModelTokenUsage {
+  provider: string;
+  model: string;
+  purpose: string;
+  attempt: number;
+  outcome: "completed" | "failed" | "cancelled";
+}
 export interface ModelRequestAttempt {
   attempt: number;
   maxAttempts: number;

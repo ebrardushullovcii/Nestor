@@ -52,6 +52,7 @@ export type CompatibleTool = {
 };
 
 export type ModelUsagePayload = {
+  nestor_estimated?: import("@nestor/contracts").ModelTokenUsage["estimated"];
   prompt_tokens?: number | undefined;
   completion_tokens?: number | undefined;
   prompt_tokens_details?: { cached_tokens?: number | undefined } | undefined;

@@ -769,6 +769,9 @@ export interface JobFinderAiClient {
 }
 
 export interface ChatWithToolsOptions {
+  onRequestUsage?: (
+    usage: import("@nestor/contracts").ModelRequestUsage,
+  ) => void;
   onRequestAttempt?: (event: ModelRequestAttempt) => void;
   /** Ask the provider to constrain the answer to valid JSON. */
   jsonOutput?: boolean;

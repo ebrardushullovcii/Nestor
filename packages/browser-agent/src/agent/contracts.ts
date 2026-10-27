@@ -26,6 +26,7 @@ export interface LLMClient {
       reasoningTask?: BrowserAgentReasoningTask
       includeUsage?: boolean
       onRequestAttempt?: (event: ModelRequestAttempt) => void
+      onRequestUsage?: (usage: import('@nestor/contracts').ModelRequestUsage) => void
       jsonOutput?: boolean
       jsonSchema?: { name: string; schema: Record<string, unknown> }
     }

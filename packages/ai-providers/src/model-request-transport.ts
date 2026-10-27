@@ -32,8 +32,9 @@ import {
   type ResponsesPayload,
   normalizeModelPayload,
 } from "./openai-compatible-transport";
+import type { ModelRequestUsage } from "@nestor/contracts";
+import { createModelRequestUsage } from "./model-request-usage";
 import {
-  hasModelUsageScope,
   recordModelRequestAttempt,
   recordModelRequestUsage,
 } from "./model-usage-scope";
@@ -95,6 +96,8 @@ export interface PerformModelRequestInput extends ModelRequestResilienceOptions 
   headers: Record<string, string>;
   body: Record<string, unknown>;
   apiMode: ModelApiMode;
+  purpose?: string | undefined;
+  onUsage?: ((usage: ModelRequestUsage) => void) | undefined;
   /** Most the caller waits across every attempt. */
   totalTimeoutMs: number;
   signal?: AbortSignal | undefined;
@@ -411,6 +414,7 @@ async function readStreamedPayload(
   onActivity: () => void,
   signal: AbortSignal,
   emit?: (event: ModelStreamEvent) => void,
+  observeUsage?: (payload: unknown) => void,
 ): Promise<ChatCompletionsPayload> {
   const body = response.body;
   if (!body) {
@@ -451,6 +455,7 @@ async function readStreamedPayload(
     } catch {
       return;
     }
+    observeUsage?.(parsed);
     const errorMessage = readErrorMessage(parsed);
     if (errorMessage && isRecord(parsed) && parsed.type !== "response.failed") {
       throw new Error(errorMessage);
@@ -765,9 +770,7 @@ export async function performModelRequest(
     );
   }
   try {
-    const payload = await performModelRequestAttempts(input);
-    recordModelRequestUsage(payload.usage);
-    return payload;
+    return await performModelRequestAttempts(input);
   } catch (error) {
     if (
       error instanceof ModelRequestHttpError &&
@@ -802,7 +805,7 @@ async function performModelRequestAttempts(
       ? {
           ...input.body,
           stream: true,
-          ...(hasModelUsageScope() && input.apiMode === "chat_completions"
+          ...(input.apiMode === "chat_completions"
             ? { stream_options: { include_usage: true } }
             : {}),
         }
@@ -829,6 +832,8 @@ async function performModelRequestAttempts(
     input.onEvent?.({ type: "attempt_started", attempt, maxAttempts });
     recordModelRequestAttempt();
     input.onStreamEvent?.({ type: "attempt_started", attempt });
+    const usage = createModelRequestUsage(input, attempt);
+    let outcome: ModelRequestUsage["outcome"] = "failed";
 
     const attemptController = new AbortController();
     let abortReason: "idle" | "total" | "caller" | null = null;
@@ -874,6 +879,7 @@ async function performModelRequestAttempts(
         } catch {
           parsed = null;
         }
+        usage.observe(parsed);
         throw new ModelRequestHttpError(
           readErrorMessage(parsed) ??
             `Model request failed with status ${response.status}`,
@@ -886,13 +892,16 @@ async function performModelRequestAttempts(
         response.headers.get("content-type") ?? ""
       ).toLowerCase();
       if (streaming && contentType.includes("text/event-stream")) {
-        return await readStreamedPayload(
+        const payload = await readStreamedPayload(
           response,
           input.apiMode,
           armIdle,
           attemptController.signal,
           input.onStreamEvent,
+          usage.observe,
         );
+        outcome = "completed";
+        return { ...payload, usage: usage.finish(outcome).payload };
       }
 
       const rawBody = await readTextWithActivity(
@@ -906,6 +915,7 @@ async function performModelRequestAttempts(
       } catch {
         rawPayload = null;
       }
+      usage.observe(rawPayload);
       if (!isRecord(rawPayload)) {
         throw new Error("Model returned a non-JSON response");
       }
@@ -914,12 +924,15 @@ async function performModelRequestAttempts(
         throw new Error(payloadError);
       }
       rejectIncompleteOutput(rawPayload, input.apiMode);
-      return normalizeModelPayload(
+      const payload = normalizeModelPayload(
         rawPayload as ChatCompletionsPayload | ResponsesPayload,
         input.apiMode,
       );
+      outcome = "completed";
+      return { ...payload, usage: usage.finish(outcome).payload };
     } catch (error) {
       if (abortReason === "caller" || input.signal?.aborted) {
+        outcome = "cancelled";
         throw createAbortError();
       }
       const normalized: unknown =
@@ -958,6 +971,10 @@ async function performModelRequestAttempts(
         clearTimeout(idleTimer);
       }
       input.signal?.removeEventListener("abort", onCallerAbort);
+      const { event } = usage.finish(outcome);
+      recordModelRequestUsage(event);
+      input.onUsage?.(event);
+      console.info("[AI usage]", JSON.stringify(event));
     }
   }
 
