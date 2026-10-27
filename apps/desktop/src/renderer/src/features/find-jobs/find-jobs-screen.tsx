@@ -23,13 +23,13 @@ import {
   ListPane,
   NO_SELECTION,
   STAGE_LABEL,
-  countSelected,
   plural,
   selectAll,
   toSelectionInput,
   toggleSelection,
   useJobList,
   useListKeys,
+  useSelectAllCount,
   type ListSelection,
 } from "@renderer/features/job-lists";
 
@@ -70,17 +70,40 @@ let remembered: {
   stage: TriageStage;
   sortByStage: Record<TriageStage, JobSort>;
   text: string;
-  fitFloor: number | null;
-  floorTouched: boolean;
   activeId: number | null;
 } = {
   stage: "found",
   sortByStage: { found: "best_fit", shortlisted: "recent", hidden: "recent" },
   text: "",
-  fitFloor: null,
-  floorTouched: false,
   activeId: null,
 };
+
+/**
+ * The fit floor the person chose ("Any fit" is null), kept across restarts.
+ * Untouched, the floor follows the last search's pickiness; a search with
+ * another pickiness puts it back to that.
+ */
+interface FloorChoice {
+  fitFloor: number | null;
+  floorTouched: boolean;
+}
+const FLOOR_KEY = "nestor.find-jobs.fit-floor";
+
+function readFloor(): FloorChoice {
+  try {
+    const saved = JSON.parse(
+      window.localStorage.getItem(FLOOR_KEY) ?? "null",
+    ) as Partial<FloorChoice> | null;
+    if (
+      typeof saved?.floorTouched === "boolean" &&
+      (saved.fitFloor === null || typeof saved.fitFloor === "number")
+    )
+      return { fitFloor: saved.fitFloor, floorTouched: saved.floorTouched };
+  } catch {
+    // An unreadable choice falls back to the search's own floor.
+  }
+  return { fitFloor: null, floorTouched: false };
+}
 
 /** Recent moves for Undo, kept across the same remount. */
 const rememberedMoves: { current: { moveId: number; label: string }[] } = {
@@ -99,9 +122,14 @@ export function FindJobsScreen() {
   const [sortByStage, setSortByStage] = useState(remembered.sortByStage);
   const [text, setText] = useState(remembered.text);
   const lastPicky = status.search?.settings.picky ?? "balanced";
-  const [fitFloor, setFitFloor] = useState(remembered.fitFloor);
-  const [floorTouched, setFloorTouched] = useState(remembered.floorTouched);
+  const [{ fitFloor, floorTouched }, setFloorChoice] =
+    useState<FloorChoice>(readFloor);
   const floor = floorTouched ? fitFloor : PICKY_MIN_FIT[lastPicky];
+  const chooseFloor = useCallback((fitFloor: number | null) => {
+    setFloorChoice({ fitFloor, floorTouched: true });
+  }, []);
+  const lastPickyRef = useRef(lastPicky);
+  lastPickyRef.current = lastPicky;
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const [activeId, setActiveId] = useState(remembered.activeId);
   const [searchParams] = useSearchParams();
@@ -119,7 +147,16 @@ export function FindJobsScreen() {
     minFit: stage === "found" ? floor : null,
   };
   const list = useJobList({ ...filter, sort });
-  const selectedCount = countSelected(selection, list.total);
+  const { selectedCount, counting, totalCapped } = useSelectAllCount({
+    key: JSON.stringify(filter),
+    selection,
+    total: list.total,
+    totalCapped: list.totalCapped,
+    count: () =>
+      window.nestor.jobs
+        .run("count_jobs", filter)
+        .then((result) => result.total),
+  });
   const actions = TRIAGE_ACTIONS[stage];
 
   // A job asked for by link stays open even when it is not on the first page.
@@ -166,10 +203,7 @@ export function FindJobsScreen() {
         (view.minFit !== undefined && view.minFit !== floor);
       setStage(targetStage);
       if (view.text !== undefined) setText(view.text);
-      if (view.minFit !== undefined) {
-        setFitFloor(view.minFit);
-        setFloorTouched(true);
-      }
+      if (view.minFit !== undefined) chooseFloor(view.minFit);
       if (view.sort)
         setSortByStage((current) => ({
           ...current,
@@ -194,8 +228,14 @@ export function FindJobsScreen() {
   }, [linkedJob, navigationKey]);
 
   useEffect(() => {
-    remembered = { stage, sortByStage, text, fitFloor, floorTouched, activeId };
-  }, [activeId, fitFloor, floorTouched, sortByStage, stage, text]);
+    remembered = { stage, sortByStage, text, activeId };
+  }, [activeId, sortByStage, stage, text]);
+  useEffect(() => {
+    window.localStorage.setItem(
+      FLOOR_KEY,
+      JSON.stringify({ fitFloor, floorTouched }),
+    );
+  }, [fitFloor, floorTouched]);
 
   const latest = useRef({ list, selection, activeId, filter, stage });
   latest.current = { list, selection, activeId, filter, stage };
@@ -312,7 +352,9 @@ export function FindJobsScreen() {
     try {
       await window.nestor.jobs.run("start_search", settings);
       setStage("found");
-      setFloorTouched(false);
+      // A search that changes how picky it is brings its own fit floor.
+      if (settings.picky !== lastPickyRef.current)
+        setFloorChoice({ fitFloor: null, floorTouched: false });
     } catch (error) {
       setSearchError(describe(error));
     } finally {
@@ -413,8 +455,7 @@ export function FindJobsScreen() {
           <Button
             onClick={() => {
               setText("");
-              setFloorTouched(true);
-              setFitFloor(null);
+              chooseFloor(null);
             }}
             size="sm"
             type="button"
@@ -481,17 +522,23 @@ export function FindJobsScreen() {
         list={
           <ListPane
             activeId={activeId}
+            counting={counting}
             bulkActions={
               <>
                 {actions.map((action, index) => (
                   <Button
+                    disabled={counting}
                     key={action.to}
                     onClick={() => void move(action)}
                     size="sm"
                     type="button"
                     variant={index === 0 ? "primary" : "outline"}
                   >
-                    {action.label}
+                    {counting
+                      ? action.label
+                      : action.bulk(
+                          `${selectedCount.toLocaleString()}${totalCapped && selection.all ? "+" : ""}`,
+                        )}
                   </Button>
                 ))}
                 <Button
@@ -513,10 +560,10 @@ export function FindJobsScreen() {
             onSelectAll={() => setSelection(selectAll())}
             renderRow={(row, state) => (
               <FindJobsRow
+                {...state}
                 onActivate={activate}
                 onToggle={toggle}
                 row={row}
-                state={state}
               />
             )}
             rows={list.rows}
@@ -529,8 +576,8 @@ export function FindJobsScreen() {
                     ? {
                         floor,
                         below:
-                          floor !== null && !list.totalCapped
-                            ? Math.max(0, counts.found - list.total)
+                          floor !== null && list.belowFloor
+                            ? `${list.belowFloor.toLocaleString()}${list.belowFloorCapped ? "+" : ""}`
                             : null,
                       }
                     : null
@@ -539,21 +586,20 @@ export function FindJobsScreen() {
                   setSortByStage((current) => ({ ...current, [stage]: next }))
                 }
                 onText={setText}
-                onToggleFloor={() => {
-                  setFloorTouched(true);
-                  setFitFloor(
+                onToggleFloor={() =>
+                  chooseFloor(
                     floor === null
                       ? (PICKY_MIN_FIT[lastPicky] ?? PICKY_MIN_FIT.balanced)
                       : null,
-                  );
-                }}
+                  )
+                }
                 sort={sort}
                 sorts={SORTS[stage]}
                 text={text}
               />
             }
             total={list.total}
-            totalCapped={list.totalCapped}
+            totalCapped={totalCapped}
           />
         }
       />

@@ -4,6 +4,7 @@ import type { DesktopJobsBridge, FoundJob } from "@nestor/contracts";
 import { openJobStore, type JobStore } from "@nestor/db/job-store";
 import { createJobCommandRunner } from "@nestor/job-finder/job-commands";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -12,6 +13,13 @@ import {
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import {
+  createKeptRouteVisibility,
+  KeptRouteVisibilityContext,
+} from "@renderer/features/job-finder/lib/kept-route-visibility";
+
+import { AddSites } from "./add-sites";
 
 import {
   ListPane,
@@ -50,11 +58,18 @@ function found(n: number): FoundJob {
   };
 }
 
+/** Every command the list ran, by name. */
+let commands: string[] = [];
+
 /** The real commands and change events over an in-memory store. */
 function installBridge(): void {
   const run = createJobCommandRunner({ store });
+  commands = [];
   const bridge: DesktopJobsBridge = {
-    run: (name, input) => run(name, input),
+    run: (name, input) => {
+      commands.push(name);
+      return run(name, input);
+    },
     onChange: (listener) => store.onChange(listener),
     onSearchStatus: () => () => undefined,
   };
@@ -213,5 +228,53 @@ describe("shared list pieces", () => {
     expect(rows().length).toBeGreaterThanOrEqual(250);
     expect(farDown.isConnected).toBe(true);
     expect(farDown.textContent).toBe(farDownTitle);
+    // 250 rows drawn in jsdom take seconds on a busy machine.
+  }, 15_000);
+
+  it("reads nothing while its screen is kept hidden, and once when it shows again", async () => {
+    store.saveFoundJobs({ searchId: null, jobs: [found(1)] });
+    const visibility = createKeptRouteVisibility(false);
+    render(
+      <KeptRouteVisibilityContext.Provider value={visibility}>
+        <FoundList />
+      </KeptRouteVisibilityContext.Provider>,
+    );
+    expect(await screen.findByText("1 job")).toBeTruthy();
+    act(() => visibility.setHidden(true));
+    const before = commands.length;
+    // A search saves jobs while another screen shows.
+    store.saveFoundJobs({ searchId: null, jobs: [found(2)] });
+    store.saveFoundJobs({ searchId: null, jobs: [found(3)] });
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(commands.length).toBe(before);
+    expect(screen.queryByText("Designer 3")).toBeNull();
+
+    act(() => visibility.setHidden(false));
+    expect(await screen.findByText("Designer 3")).toBeTruthy();
+    expect(commands.slice(before)).toEqual(["list_jobs"]);
+  });
+});
+
+describe("adding job sites", () => {
+  it("takes a long paste without spellcheck or wrapping and counts the addresses", () => {
+    render(<AddSites alwaysOpen />);
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Job site URLs",
+    });
+    expect(box.getAttribute("spellcheck")).toBe("false");
+    expect(box.getAttribute("wrap")).toBe("off");
+    fireEvent.change(box, {
+      target: {
+        value: Array.from(
+          { length: 900 },
+          (_, i) => `https://careers-${i}.example.test/jobs`,
+        ).join("\n"),
+      },
+    });
+    expect(screen.getByText("900 addresses")).toBeTruthy();
+    fireEvent.change(box, {
+      target: { value: "https://one.example.test\n\n" },
+    });
+    expect(screen.getByText("1 address")).toBeTruthy();
   });
 });

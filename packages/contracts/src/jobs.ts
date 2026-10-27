@@ -114,6 +114,12 @@ export const JobListPageSchema = z.object({
   /** Jobs matching the filter. Beyond the stage alone, counted up to `JOB_TOTAL_CAP`. */
   total: z.number().int().nonnegative(),
   totalCapped: z.boolean(),
+  /**
+   * With a fit floor: scored jobs under it that the rest of the filter keeps,
+   * counted up to `JOB_TOTAL_CAP`. Null without a floor.
+   */
+  belowFloor: z.number().int().nonnegative().nullable(),
+  belowFloorCapped: z.boolean(),
   counts: JobStageCountsSchema,
 });
 export type JobListPage = z.infer<typeof JobListPageSchema>;

@@ -240,6 +240,52 @@ describe("Applications", () => {
     expect(displayed).not.toHaveProperty("columns");
   });
 
+  it("gives the board the whole width, folds empty stages and opens a card's details as a sheet", async () => {
+    window.localStorage.setItem(
+      "nestor.applications.view",
+      JSON.stringify({ layout: "board" }),
+    );
+    render(
+      <MemoryRouter>
+        <ToastProvider>
+          <ApplicationsScreen />
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+    const board = await screen.findByRole("region", {
+      name: "Applications by stage",
+    });
+    const heardBack = await within(board).findByRole("region", {
+      name: "Heard back, 0",
+    });
+    // An empty stage is a thin rail that still names itself and takes drops.
+    await waitFor(() =>
+      expect(heardBack.hasAttribute("data-board-rail")).toBe(true),
+    );
+    expect(heardBack.textContent).toBe("Heard back0");
+    const applied = within(board).getByRole("region", { name: "Applied, 1" });
+    expect(applied.hasAttribute("data-board-rail")).toBe(false);
+    // No details pane beside the board until a card is clicked.
+    expect(
+      screen.queryByRole("dialog", { name: "Application details" }),
+    ).toBeNull();
+    fireEvent.click(
+      await within(applied).findByRole("button", { name: /^Northfield 1/ }),
+    );
+    const sheet = await screen.findByRole("dialog", {
+      name: "Application details",
+    });
+    await within(sheet).findByRole("region", {
+      name: "Application to Northfield 1",
+    });
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Application details" }),
+      ).toBeNull(),
+    );
+  });
+
   it("moves a sent application on, and Undo takes it back", async () => {
     const list = renderScreen();
     fireEvent.click(

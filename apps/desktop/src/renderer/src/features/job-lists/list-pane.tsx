@@ -165,6 +165,8 @@ export function ListPane<Row extends { id: number }>(props: {
   activeId: number | null;
   selection: ListSelection;
   selectedCount: number;
+  /** "Select all" on a capped list while its exact count is read. */
+  counting?: boolean;
   onSelectAll: () => void;
   onClearSelection: () => void;
   renderRow: (row: Row, state: ListRowState) => ReactNode;
@@ -248,8 +250,11 @@ export function ListPane<Row extends { id: number }>(props: {
             className="flex min-w-0 flex-1 items-center gap-2"
             data-selection-bar
           >
-            <span className="shrink-0 text-(length:--text-small) font-medium text-foreground">
-              {selectedText} selected
+            <span
+              aria-live="polite"
+              className="shrink-0 text-(length:--text-small) font-medium tabular-nums text-foreground"
+            >
+              {props.counting ? "Counting…" : `${selectedText} selected`}
             </span>
             <div className="ml-auto flex items-center gap-2">
               {props.bulkActions}

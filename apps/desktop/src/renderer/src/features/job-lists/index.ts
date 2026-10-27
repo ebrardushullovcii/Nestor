@@ -28,6 +28,7 @@ export {
   type StoreListState,
 } from "./use-store-list";
 export { useJobList, type JobListFilter } from "./use-job-list";
+export { useSelectAllCount } from "./use-select-all-count";
 export { useJobDetail } from "./use-job-detail";
 export { useListKeys, type ListKeys } from "./use-list-keys";
 export {

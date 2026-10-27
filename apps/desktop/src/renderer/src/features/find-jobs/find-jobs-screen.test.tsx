@@ -2,6 +2,7 @@
 
 import {
   JobSearchSettingsSchema,
+  MoveJobsInputSchema,
   type JobSearchStatus,
   type FoundJob,
   type JobListQueryInput,
@@ -11,7 +12,14 @@ import {
   openJobStore,
   type JobStore,
 } from "@nestor/db/job-store";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -22,6 +30,8 @@ import { FindJobsScreen } from "./find-jobs-screen";
 let store: JobStore;
 let ids: number[];
 let searchStatus: JobSearchStatus;
+/** Holds `count_jobs` until a test lets it answer. */
+let countGate: Promise<void>;
 
 function job(n: number): FoundJob {
   return {
@@ -63,8 +73,13 @@ beforeEach(() => {
     searchId: null,
     jobs: [job(1), job(2), job(3)],
   }));
+  countGate = Promise.resolve();
   const run = (name: string, input: JobListQueryInput & { id?: number }) => {
     if (name === "list_jobs") return Promise.resolve(store.listJobs(input));
+    if (name === "count_jobs")
+      return countGate.then(() => ({ total: store.countJobs(input) }));
+    if (name === "move_jobs")
+      return Promise.resolve(store.moveJobs(MoveJobsInputSchema.parse(input)));
     if (name === "stage_counts") return Promise.resolve(store.stageCounts());
     if (name === "get_job") return Promise.resolve(store.getJob(input.id!));
     if (name === "search_status") return Promise.resolve(searchStatus);
@@ -95,6 +110,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   store.close();
   vi.unstubAllGlobals();
 });
@@ -231,4 +247,83 @@ it("sends an all-sign-in-blocked search to Needs you rather than failed-site URL
   expect(screen.getByText(/1 site needs you/)).toBeTruthy();
   expect(screen.queryByText("Some sites could not be read")).toBeNull();
   expect(screen.queryByText(/nothing new/i)).toBeNull();
+});
+
+function renderScreen() {
+  return render(
+    <MemoryRouter>
+      <ToastProvider>
+        <FindJobsScreen />
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+}
+
+it("counts every match before select all acts on a list counted past 1,000", async () => {
+  store.saveFoundJobs({
+    searchId: null,
+    jobs: Array.from({ length: 1005 }, (_, i) => job(i + 10)),
+  });
+  let answer = () => undefined as void;
+  countGate = new Promise<void>((resolve) => {
+    answer = resolve;
+  });
+  renderScreen();
+  // The search's fit floor filters the list, so its count stops at 1,000.
+  fireEvent.click(
+    await screen.findByRole("checkbox", { name: "Select all 1,000+ jobs" }),
+  );
+  const list = screen.getByRole("region", { name: "Found jobs" });
+  expect(await within(list).findByText("Counting…")).toBeTruthy();
+  expect(
+    within(list).getByRole<HTMLButtonElement>("button", { name: "Hide" })
+      .disabled,
+  ).toBe(true);
+  answer();
+  expect(await within(list).findByText("1,008 selected")).toBeTruthy();
+  fireEvent.click(within(list).getByRole("button", { name: "Hide 1,008" }));
+  await waitFor(() => expect(store.stageCounts().hidden).toBe(1008));
+});
+
+it("keeps the fit floor choice across a restart and counts below it with the text filter", async () => {
+  store.setFit(
+    ids.map((id, i) => ({
+      id,
+      score: [90, 20, 30][i]!,
+      summary: "",
+      reasons: [],
+      gaps: [],
+    })),
+  );
+  const first = renderScreen();
+  const floor = await screen.findByRole("button", {
+    name: "Fit 65+ · 2 below",
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter jobs" }), {
+    target: { value: "Analyst 2" },
+  });
+  // Only the matching job counts: the floor hides one of them.
+  await screen.findByRole("button", { name: "Fit 65+ · 1 below" });
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter jobs" }), {
+    target: { value: "Analyst 1" },
+  });
+  // Nothing under the floor: no count at all.
+  await screen.findByRole("button", { name: "Fit 65+" });
+  expect(floor.isConnected).toBe(true);
+  fireEvent.click(floor);
+  const list = screen.getByRole("region", { name: "Found jobs" });
+  await within(list).findByRole("button", { name: "Any fit" });
+  fireEvent.change(screen.getByRole("textbox", { name: "Filter jobs" }), {
+    target: { value: "" },
+  });
+  first.unmount();
+
+  renderScreen();
+  expect(
+    await within(screen.getByRole("region", { name: "Found jobs" })).findByRole(
+      "button",
+      { name: "Any fit" },
+    ),
+  ).toBeTruthy();
+  expect(await screen.findByText("Supply Chain Analyst 2")).toBeTruthy();
 });

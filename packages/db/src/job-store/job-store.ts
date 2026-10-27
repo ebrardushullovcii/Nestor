@@ -1,8 +1,10 @@
 import {
+  JobFilterSchema,
   JobListQuerySchema,
   type FoundJob,
   type JobChange,
   type JobDetail,
+  type JobFilterInput,
   type JobFitUpdate,
   type JobListPage,
   type JobListQueryInput,
@@ -19,7 +21,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { normalizeUrl, writeFoundJobs } from "./found-jobs";
-import { getJob, listJobs, readStageCounts } from "./job-list";
+import { countJobs, getJob, listJobs, readStageCounts } from "./job-list";
 import {
   CHANGE_ID_LIMIT,
   writeMove,
@@ -86,6 +88,8 @@ export interface JobStore {
   rememberSeenCards(cards: readonly SeenListingCard[]): void;
 
   listJobs(query: JobListQueryInput): JobListPage;
+  /** Every job a filter matches, with no cap. */
+  countJobs(filter: JobFilterInput): number;
   getJob(id: number): JobDetail | null;
   /**
    * Where each saved job was first seen and why it sits in its stage, without
@@ -381,6 +385,7 @@ export function openJobStore(filePath: string): JobStore {
     searches,
 
     listJobs: (query) => listJobs(sql, JobListQuerySchema.parse(query)),
+    countJobs: (filter) => countJobs(sql, JobFilterSchema.parse(filter)),
     getJob: (id) => getJob(sql, id),
     stageCounts: () => readStageCounts(sql),
 

@@ -11,7 +11,12 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApplicationStore } from "./applications";
-import { jobCountSql, jobPageSql, toWorkModeMask } from "./job-list";
+import {
+  belowFloorSql,
+  jobCountSql,
+  jobPageSql,
+  toWorkModeMask,
+} from "./job-list";
 import { openJobStore, type JobStore } from "./job-store";
 
 function found(n: number, overrides: Partial<FoundJob> = {}): FoundJob {
@@ -410,6 +415,49 @@ describe("job store", () => {
       total: 1000,
       totalCapped: true,
     });
+    // Select all asks for the exact number past the cap.
+    expect(store.countJobs({ stage: "found", text: "frontend" })).toBe(1005);
+    expect(store.countJobs({ stage: "found" })).toBe(1005);
+    expect(store.countJobs({ stage: "hidden", text: "frontend" })).toBe(0);
+  });
+
+  it("counts the scored jobs under a fit floor with the rest of the filter", () => {
+    const store = open();
+    const { added } = store.saveFoundJobs({
+      searchId: null,
+      jobs: Array.from({ length: 12 }, (_, i) =>
+        found(i + 1, i < 6 ? {} : { title: `Data Analyst ${i + 1}` }),
+      ),
+    });
+    // Scores 10, 20, … 110 capped at 100; the last two stay unscored.
+    store.setFit(
+      added.slice(0, 10).map((id, i) => ({
+        id,
+        score: Math.min(100, (i + 1) * 10),
+        summary: "",
+        reasons: [],
+        gaps: [],
+      })),
+    );
+    expect(store.listJobs({ stage: "found" })).toMatchObject({
+      belowFloor: null,
+      belowFloorCapped: false,
+    });
+    // 10–50 sit under 60; unscored jobs are not below it.
+    expect(store.listJobs({ stage: "found", minFit: 60 }).belowFloor).toBe(5);
+    // The text filter applies: only the engineers (10–60) count.
+    expect(
+      store.listJobs({ stage: "found", minFit: 60, text: "engineer" })
+        .belowFloor,
+    ).toBe(5);
+    expect(
+      store.listJobs({ stage: "found", minFit: 60, text: "analyst" })
+        .belowFloor,
+    ).toBe(0);
+    expect(
+      store.listJobs({ stage: "found", minFit: 60, workModes: ["remote"] })
+        .belowFloor,
+    ).toBe(3);
   });
 
   it("pages a fit floor and work modes in every order, below and past the count cap", () => {
@@ -515,6 +563,7 @@ describe("job store", () => {
         for (const detail of [
           ...plan(jobPageSql(query, 0)),
           ...plan(jobCountSql(query)),
+          ...(filter.minFit === undefined ? [] : plan(belowFloorSql(query)!)),
         ].filter((line) => line.includes(" USING "))) {
           // Each range reads only jobs it keeps: the filter is in the index search.
           expect(detail, label).toMatch(
