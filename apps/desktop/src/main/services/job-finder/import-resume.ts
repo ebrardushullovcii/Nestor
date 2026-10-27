@@ -231,7 +231,11 @@ async function importResumeFile(
     assertResumeFileOpens(sourcePath, fileName),
     options.signal,
   );
-  await untilStopped(copyFile(sourcePath, targetPath), options.signal);
+  // The copy is awaited whole, never abandoned: a stop that returned while
+  // it still wrote would leave the file behind a reset that cleared the
+  // folder. Copies finish quickly; the stop is honoured right after.
+  await copyFile(sourcePath, targetPath);
+  options.signal?.throwIfAborted();
   const sourceSha256 = createHash("sha256")
     .update(await untilStopped(readFile(targetPath), options.signal))
     .digest("hex");

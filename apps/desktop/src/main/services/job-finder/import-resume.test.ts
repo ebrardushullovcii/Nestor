@@ -673,3 +673,46 @@ test("a reset stops an import whose document read never finishes, at once", asyn
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("a reset waits for a resume copy that is still writing, so no file lands after it", async () => {
+  const { importResumeFromSourcePath, stopDesktopResumeImports } =
+    await import("./import-resume");
+  const { directory, filePath } = await createTempResumeFile();
+  const runResumeImport = vi.fn();
+  let finishCopy!: () => void;
+  mockMkdir.mockResolvedValue(undefined);
+  mockCopyFile.mockReturnValue(
+    new Promise<void>((resolve) => {
+      finishCopy = resolve;
+    }),
+  );
+  mockGetJobFinderDocumentsDirectory.mockReturnValue(
+    path.join(directory, "documents"),
+  );
+  mockStartJobFinderRuntime.mockResolvedValue({
+    profileService: { runResumeImport },
+    repository: {},
+  });
+  try {
+    const importing = importResumeFromSourcePath(filePath, {
+      useVision: false,
+    });
+    void importing.catch(() => undefined);
+    await vi.waitFor(() => expect(mockCopyFile).toHaveBeenCalled());
+
+    let stopped = false;
+    const stopping = stopDesktopResumeImports().then(() => {
+      stopped = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(stopped).toBe(false);
+
+    finishCopy();
+    await stopping;
+    await expect(importing).rejects.toThrow();
+    expect(mockExtractResumeDocument).not.toHaveBeenCalled();
+    expect(runResumeImport).not.toHaveBeenCalled();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
