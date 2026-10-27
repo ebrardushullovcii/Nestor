@@ -46,7 +46,6 @@ const groups = {
     "packages/ai-providers/src/model-usage-scope.test.ts",
     "packages/job-finder/src/applications/apply-usage.test.ts",
     "packages/contracts/src/apply-usage-stored-json.test.ts",
-    "packages/browser-runtime/src/application-preparation-scheduler.test.ts",
     "packages/browser-agent/src/apply/apply-timing.test.ts",
     "packages/browser-agent/src/apply/question-classification.test.ts",
     "packages/browser-agent/src/apply/answer-gate-regressions.test.ts",

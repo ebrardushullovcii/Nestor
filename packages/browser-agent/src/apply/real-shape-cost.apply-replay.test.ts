@@ -138,15 +138,20 @@ test("an Ashby-sized form fills known facts and hands unknown facts over once", 
         control.value = value;
         return Promise.resolve({ ok: true, observedValue: value });
       },
-      navigate: () => Promise.resolve({ ok: true }),
-      goBack: () => Promise.resolve({ ok: true }),
-      clickElement: () => Promise.resolve({ ok: true }),
-      clickAction: () => Promise.resolve({ ok: true }),
-      followLink: () => Promise.resolve({ ok: true }),
-      chooseOption: () => Promise.resolve({ ok: true }),
-      setToggle: () => Promise.resolve({ ok: true }),
-      uploadFile: () => Promise.resolve({ ok: true }),
-      scroll: () => Promise.resolve({ ok: true }),
+      navigate: (url) => Promise.resolve({ ok: true, url }),
+      goBack: () => Promise.resolve({ ok: true, url: raw.url! }),
+      clickElement: () =>
+        Promise.resolve({ ok: true, observedValue: "clicked" }),
+      clickAction: () =>
+        Promise.resolve({ ok: true, observedValue: "clicked" }),
+      followLink: () => Promise.resolve({ ok: true, url: raw.url! }),
+      chooseOption: (_ref, option) =>
+        Promise.resolve({ ok: true, observedValue: option }),
+      setToggle: (_ref, checked) =>
+        Promise.resolve({ ok: true, observedValue: String(checked) }),
+      uploadFile: (_ref, file) =>
+        Promise.resolve({ ok: true, observedValue: file.name }),
+      scroll: () => Promise.resolve({ ok: true, observedValue: "scrolled" }),
       wait: () => Promise.resolve(),
       readText: () => Promise.resolve(body),
     },
