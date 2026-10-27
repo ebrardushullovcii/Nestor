@@ -5,6 +5,7 @@ import {
 } from "./answer-source-catalog";
 import { createApplyTiming } from "./apply-timing";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
+import { localStepAdvanced, localStepPreflight } from "./local-step-preflight";
 import { asksListingDiscovery } from "./listing-discovery-answer";
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import { resumeFormFileNames } from "@nestor/contracts";
@@ -1830,6 +1831,39 @@ async function runMeasuredApplyAgent(
           observation = await pageTools.observe();
           syncObservation(observation);
         }
+        // Finishing a filled local step is not finishing the wizard. A
+        // premature Next handoff may now be safe after the remaining fills.
+        const localAdvance =
+          !pressesFormButtons(runConfig) &&
+          config.hands.clickWithoutWrites &&
+          !deferredPress?.formSend &&
+          pendingQuestions.size === 0 &&
+          !outcome.stuck
+            ? observation.actions.find((action) =>
+                localStepPreflight(observation, action.ref),
+              )
+            : undefined;
+        if (
+          localAdvance &&
+          (outcome.forPerson ?? []).every(
+            (item) =>
+              item === localAdvance.ref ||
+              normalizeSignal(item) === normalizeSignal(localAdvance.label),
+          )
+        ) {
+          const advanced = await runProposal(
+            { tool: "click", ref: localAdvance.ref },
+            checkOne,
+          );
+          if (advanced.kind === "moved") {
+            deferredPress = null;
+            needsPersonFinishPending = false;
+            forPerson = [];
+            return outcomeToLoop(advanced);
+          }
+          if (advanced.kind === "refused") return outcomeToLoop(advanced);
+          if (advanced.kind === "paused") return outcomeToLoop(advanced);
+        }
         const namedQuestions = forPerson.length;
         const checkedFields = new Map<string, string>();
         forPerson = forPerson.filter((item) => {
@@ -2448,6 +2482,13 @@ async function runMeasuredApplyAgent(
           reason: outcome.question?.note ?? outcome.note,
         });
     }
+    if (
+      outcome.kind === "moved" &&
+      before &&
+      localStepAdvanced(before, outcome.observation) &&
+      !deferredPress?.formSend
+    )
+      deferredPress = null;
     // The path between screens, for a later restore: what was pressed or
     // followed, by what it said, from which screen.
     if (
@@ -3970,6 +4011,33 @@ async function runMeasuredApplyAgent(
           data: {},
         };
       if (current?.blocker) return null;
+      // Empty optional wizard screens need no answer or model decision.
+      // Re-observe each local advance through the ordinary executor fence.
+      while (
+        current &&
+        !pressesFormButtons(runConfig) &&
+        config.hands.clickWithoutWrites &&
+        pendingQuestions.size === 0 &&
+        !deferredPress?.formSend &&
+        current.controls.every(
+          (control) => !control.visible || control.disabled || control.readOnly,
+        )
+      ) {
+        const emptyStep = current;
+        const advance = emptyStep.actions.find((action) =>
+          localStepPreflight(emptyStep, action.ref),
+        );
+        if (!advance) break;
+        const outcome = await runProposal(
+          { tool: "click", ref: advance.ref }, checkOne,
+        );
+        const reported = await outcomeToLoop(outcome, { withPage: false });
+        if (reported.kind === "finish") return reported.finish;
+        if (reported.kind === "stop")
+          return {reason: reported.reason, needsPerson: true, stuck: false, data: {}};
+        if (outcome.kind !== "moved") break;
+        current = pageTools.state.observation;
+      }
       // A saved picker rule is applied as soon as its question is on the
       // page; the picker itself says whether the choices are there.
       for (const control of current?.controls ?? []) {

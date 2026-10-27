@@ -1390,6 +1390,28 @@ export function createBrowserAgentRuntime(
   // A person can prepare several Ask-before-sending forms or open unrelated
   // tabs. Keep every final action bound to its exact preparation identity.
   const preparedApplicationPages = new Map<string, Page>();
+  // Bridge preparation to its already-ready continuation without giving the
+  // site to a new form between them. Abandonment/Stop cannot retain a lease.
+  const executionHandoffs = new Map<string, { lease: ApplicationPreparationLease; detach: () => void }>();
+  function takeExecutionHandoff(key: string): ApplicationPreparationLease | null {
+    const held = executionHandoffs.get(key);
+    if (!held) return null;
+    executionHandoffs.delete(key);
+    held.detach();
+    return held.lease;
+  }
+  function handoffExecution(key: string, lease: ApplicationPreparationLease, signal?: AbortSignal): void {
+    takeExecutionHandoff(key)?.release();
+    const release = () => takeExecutionHandoff(key)?.release();
+    const timeout = setTimeout(release, 5_000);
+    timeout.unref();
+    executionHandoffs.set(key, { lease, detach: () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", release);
+    } });
+    signal?.addEventListener("abort", release, { once: true });
+    if (signal?.aborted) release();
+  }
   // Every prepared page carries its own binding key (a window variable and
   // the tab's sessionStorage, which survives same-origin navigation). A
   // takeover or pause drops the automation connection, and every Page handle
@@ -1434,6 +1456,17 @@ export function createBrowserAgentRuntime(
   >();
   const recoveryUnavailable = new Set<string>();
   const recoveringForms = new Map<string, Promise<void>>();
+
+  async function saveReviewedPreparedForm(key: string, page: Page): Promise<void> {
+    const recovery = formRecovery.get(key);
+    if (!preparedFormStore || !recovery?.saved || page.isClosed()) return;
+    const snapshot = await capturePreparedForm(page).catch(() => null);
+    const attachments = snapshot && describePreparedFormAttachments(snapshot, recovery.attachments);
+    if (!snapshot || !attachments) return;
+    recovery.snapshot = snapshot;
+    recovery.saved = {...recovery.saved, snapshot, attachments, reason: null, savedAt: new Date().toISOString()};
+    await preparedFormStore.save(recovery.saved);
+  }
 
   async function loadSavedForm(key: string): Promise<PreparedApplicationForm | null> {
     const saved = await preparedFormStore?.get(key) ?? null;
@@ -1555,7 +1588,7 @@ export function createBrowserAgentRuntime(
           if (!page) {
             if (failure !== "reopen_failed") await invalidateSavedForm(key, failure);
             throw new Error(
-              "The saved form could not be refilled exactly. Prepare the application again before sending.",
+              `The saved form could not be refilled exactly (${failure}). ${failure === "reopen_failed" ? "Try opening it again." : "Prepare the application again before sending."}`,
             );
           }
           if (formRecovery.get(key) !== recovery) {
@@ -1601,6 +1634,7 @@ export function createBrowserAgentRuntime(
 
   /** Forgets a finished application's page and closes its exact retained tab. */
   async function releaseApplicationPage(key: string): Promise<void> {
+    takeExecutionHandoff(key)?.release();
     await preparedFormStore?.delete(key);
     // Completing an evicted application must not reopen it just to close it.
     if (!formRecovery.get(key)?.snapshot)
@@ -2648,13 +2682,15 @@ export function createBrowserAgentRuntime(
     async focusApplicationPageBinding(_source, pageBindingKey) {
       try {
         await rebindPreparedApplicationPage(pageBindingKey);
-      } catch {
+      } catch (error) {
         // Use the existing lost-page recovery in the workspace instead of
         // leaving a changed form marked ready behind a button that loops.
+        // A transient failure keeps its snapshot and its cause; Open must
+        // not silently turn a no-model reopen into another preparation.
+        if (formRecovery.get(pageBindingKey)?.snapshot) throw error;
         formRecovery.delete(pageBindingKey);
         markedPreparedApplicationKeys.delete(pageBindingKey);
         preparedPagesWithPerson.delete(pageBindingKey);
-        recoveryUnavailable.delete(pageBindingKey);
         return false;
       }
       return focusPreparedApplicationPage(
@@ -2754,6 +2790,7 @@ export function createBrowserAgentRuntime(
         preparedApplicationPages,
         pageBindingKey,
       );
+      await saveReviewedPreparedForm(pageBindingKey, page);
       await openPrepareOnlyFinalActionWindow(page, PERSON_HANDOFF_WINDOW_MS);
       preparedPagesWithPerson.add(pageBindingKey);
     },
@@ -2810,7 +2847,7 @@ export function createBrowserAgentRuntime(
       const releasePageUse = usePage(page);
       let lease: ApplicationPreparationLease | null = null;
       try {
-        lease = await applicationPreparationScheduler.acquire(page.url(), signal);
+        lease = takeExecutionHandoff(pageBindingKey) ?? await applicationPreparationScheduler.acquire(page.url(), signal, "continuation");
         for (let attempt = 0; attempt < 3; attempt += 1) {
           if (page.isClosed())
             throw new Error("The prepared application page was closed.");
@@ -2824,7 +2861,11 @@ export function createBrowserAgentRuntime(
             );
         }
         signal?.throwIfAborted();
-        return await operation();
+        const result = await operation();
+        // The final Ready check can tick approved declarations after the
+        // preparer saved its checkpoint. Persist the actual reviewed form.
+        await saveReviewedPreparedForm(pageBindingKey, page);
+        return result;
       } finally {
         releasePageUse();
         lease?.release();
@@ -2873,10 +2914,14 @@ export function createBrowserAgentRuntime(
           input.startingUrl ??
           input.job.applicationUrl ??
           input.job.canonicalUrl;
+        if (input.applicationPageBindingKey) takeExecutionHandoff(input.applicationPageBindingKey)?.release();
+        const queuedAt = Date.now();
         const preparationLease = await applicationPreparationScheduler.acquire(
           requestedUrl,
           options?.signal,
         );
+        console.info(`[apply] timing application=${input.applicationPageBindingKey ?? "unbound"} stage=preparation_queue startedAt=${new Date(queuedAt).toISOString()} completedAt=${new Date().toISOString()} durationMs=${Date.now() - queuedAt}`);
+        let handedOff = false;
         try {
         const executionStartedAtMs = Date.now();
         const startedAt = new Date(executionStartedAtMs).toISOString();
@@ -3419,7 +3464,7 @@ export function createBrowserAgentRuntime(
           )
             await applicationPageForVisuals.close().catch(() => undefined);
         }
-        return ApplyExecutionResultSchema.parse({
+        const result = ApplyExecutionResultSchema.parse({
           ...executionResult,
           checkpoints: executionResult.checkpoints.map((checkpoint, index) =>
             index === lastCheckpointIndex
@@ -3434,8 +3479,13 @@ export function createBrowserAgentRuntime(
           visualCheckpoints: visualDiagnostics.visualCheckpoints,
           executionTimings,
         });
+        if (result.state === "ready" && input.submitAuthorized && input.applicationPageBindingKey) {
+          handedOff = true;
+          handoffExecution(input.applicationPageBindingKey, preparationLease, options?.signal);
+        }
+        return result;
         } finally {
-          preparationLease.release();
+          if (!handedOff) preparationLease.release();
         }
       })();
     },

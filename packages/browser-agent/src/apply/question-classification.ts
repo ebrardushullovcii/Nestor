@@ -37,6 +37,18 @@ export interface ApplyQuestionClassification {
 
 const DECLARATION_KINDS = ApplicationAttestationKindSchema.options;
 
+const FILE_STATUS =
+  /^(?:no file (?:chosen|selected)|upload(?:ing|ed)?(?:\.{3}|…)?|attached|attachment (?:ready|uploaded)|file (?:uploaded|attached)(?: successfully)?)[.!]?$/iu;
+
+function questionMeaningHint(control: ApplyFormControl): string {
+  const hint = control.hint?.trim() ?? "";
+  if (control.kind !== "file") return hint;
+  const fileName = control.value.split(/[\\/]/u).at(-1);
+  // Only complete status/value echoes. An instruction containing a filename
+  // or a status word still changes the reading.
+  return FILE_STATUS.test(hint) || (fileName && hint === fileName) ? "" : hint;
+}
+
 interface QuestionReadInput {
   client: LLMClient;
   questions: ReadonlyArray<{
@@ -125,9 +137,14 @@ function questionReadInstructions(
     /* Legacy step keys carry no instructions. */
   }
   const fieldData = new Set<string>();
+  const hasFile = controls.some((control) => control.kind === "file");
   const instructions = new Set<string>();
   for (const control of controls) {
-    for (const instruction of [control.label, control.groupLabel, control.hint])
+    for (const instruction of [
+      control.label,
+      control.groupLabel,
+      questionMeaningHint(control),
+    ])
       for (const line of instruction?.split(/\r?\n/u) ?? [])
         if (line.trim()) instructions.add(line.trim());
     for (const value of [
@@ -145,6 +162,7 @@ function questionReadInstructions(
       const value = line.trim();
       return (
         value &&
+        !(hasFile && FILE_STATUS.test(value) && !instructions.has(value)) &&
         (!fieldData.has(value) ||
           instructions.has(value) ||
           requiresOwnWords(value))
@@ -424,7 +442,7 @@ export function questionClassificationKey(
     control.groupLabel,
     control.kind,
     options,
-    control.hint ?? "",
+    questionMeaningHint(control),
     control.placeholder,
     control.urlInput ?? false,
     control.sectionPath ?? [],
@@ -449,7 +467,7 @@ function classifiableQuestions(controls: readonly ApplyFormControl[]) {
                 identity: questionClassificationKey(control, controls),
                 prompt: questionPrompt(control),
                 kind: control.urlInput ? "url" : control.kind,
-                hint: control.hint ?? "",
+                hint: questionMeaningHint(control),
                 placeholder: control.placeholder,
                 options: [...control.options],
                 required: control.required,

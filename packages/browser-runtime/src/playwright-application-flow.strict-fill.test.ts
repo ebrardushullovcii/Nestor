@@ -20,6 +20,10 @@ import {
   registerPrepareOnlyPreparedValue,
 } from "./playwright-application-flow";
 import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
+import {
+  capturePreparedForm,
+  restorePreparedForm,
+} from "./prepared-form-recovery";
 
 /**
  * Fill in for me sends nothing without the person's own click, except the
@@ -138,6 +142,114 @@ const resume = {
   mimeType: "application/pdf",
   bytes: new TextEncoder().encode("%PDF-1.4 synthetic resume bytes"),
 };
+
+test.each([
+  ["native submit", "document.querySelector('form').submit()"],
+  ["requestSubmit", "document.querySelector('form').requestSubmit()"],
+  [
+    "fetch POST",
+    "fetch('/api/submit',{method:'POST',body:'name=Robin'}).catch(()=>{})",
+  ],
+  [
+    "XHR POST",
+    "const x=new XMLHttpRequest();x.open('POST','/api/submit');x.send('name=Robin')",
+  ],
+  ["answer GET", "location.href='/api/submit?name=Robin'"],
+  [
+    "delayed save",
+    "setTimeout(()=>fetch('/api/draft',{method:'POST',body:'name=Robin'}).catch(()=>{}),400)",
+  ],
+])(
+  "a local step contains deceptive %s and cannot borrow a later field window",
+  async (_name, handler) => {
+    const site = await startSite();
+    site.html(
+      "/form",
+      `<form action="/api/submit" method="post"><ol><li aria-current="step">Contact</li><li>Review</li></ol>
+    <input name="name" value="Robin" required><button type="button" onclick="${handler}">Next</button></form>`,
+    );
+    const page = await fillPage(site, "/form");
+    // Start in the ordinary authorized field-save policy: the local press
+    // must close this, and stay closed even when a later field asks to save.
+    await ensurePrepareOnlyMutationGuard(page, true, [], true);
+    await registerPrepareOnlyPreparedValue(page, "Robin");
+    await openPrepareOnlyIntermediateMutationWindow(page);
+    const session = createPlaywrightApplyPageSession({ page });
+    const before = await session.readPage();
+    const action = before.actions.find((item) => item.label === "Next")!;
+    await session.clickWithoutWrites!({
+      ref: action.ref ?? `a${action.index}`,
+      label: action.label,
+      url: before.url!,
+      stepLabel: before.stepLabel,
+    });
+    await ensurePrepareOnlyMutationGuard(page, true, [], true);
+    await openPrepareOnlyIntermediateMutationWindow(page);
+    await page.waitForTimeout(600);
+    expect(writes(site)).toEqual([]);
+    expect(site.hits.some((hit) => hit.query.includes("Robin"))).toBe(false);
+    // Chromium can replace a document with its blocked-navigation error page.
+    // That is contained and cannot count as advancing the wizard.
+    if (_name === "answer GET") expect(page.url()).not.toContain("?name=Robin");
+    else {
+      expect(page.url()).toBe(`${site.baseUrl}/form`);
+      expect((await session.readPage()).stepLabel).toContain("Step 1 of 2");
+    }
+  },
+);
+
+test("a valid local DOM step advances without opening a write or final window", async () => {
+  const site = await startSite();
+  site.html(
+    "/form",
+    `<form><ol><li id="one" aria-current="step">Contact</li><li id="two">Review</li></ol>
+    <input name="name" value="Robin" required><button type="button" onclick="one.removeAttribute('aria-current');two.setAttribute('aria-current','step')">Next</button></form>`,
+  );
+  const page = await fillPage(site, "/form");
+  const session = createPlaywrightApplyPageSession({ page });
+  const before = await session.readPage();
+  const action = before.actions[0]!;
+  expect(
+    await session.clickWithoutWrites!({
+      ref: action.ref ?? `a${action.index}`,
+      label: action.label,
+      url: before.url!,
+      stepLabel: before.stepLabel,
+    }),
+  ).toMatchObject({ ok: true });
+  expect((await session.readPage()).stepLabel).toContain("Step 2 of 2");
+  expect(writes(site)).toEqual([]);
+});
+
+test("a saved /apply form restores fields and files under the strict guard with one exact runtime GET", async () => {
+  const site = await startSite();
+  site.html(
+    "/apply/form",
+    `<form action="/api/submit" method="post"><label>Name<input name="name"></label><label>Resume<input name="resume" type="file"></label><button>Send</button></form>`,
+  );
+  const context = await browser!.newContext();
+  contexts.push(context);
+  const page = await context.newPage();
+  await page.goto(`${site.baseUrl}/apply/form`);
+  await page.locator("input[name=name]").fill("Robin");
+  await page.locator("input[type=file]").setInputFiles({
+    name: resume.name,
+    mimeType: resume.mimeType,
+    buffer: Buffer.from(resume.bytes),
+  });
+  const snapshot = (await capturePreparedForm(page))!;
+  expect(snapshot).not.toBeNull();
+  await page.close();
+  const restored = await restorePreparedForm({
+    context,
+    snapshot,
+    files: [{ name: resume.name, load: () => Promise.resolve(resume.bytes) }],
+    guard: (reopened) => ensurePrepareOnlyMutationGuard(reopened, false),
+  });
+  expect(restored).not.toBeNull();
+  expect(await capturePreparedForm(restored!)).toEqual(snapshot);
+  expect(writes(site)).toEqual([]);
+});
 
 /** Posts the selected resume the way an upload script does. */
 const postResume = (page: Awaited<ReturnType<typeof fillPage>>, url: string) =>

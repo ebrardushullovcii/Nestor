@@ -12,6 +12,7 @@ export interface SourceWork {
   accessBlocked: boolean;
   counted: boolean;
   notes: string[];
+  completeAccess?: () => void;
 }
 export function sourceWork(target: JobDiscoveryTarget): SourceWork {
   return {

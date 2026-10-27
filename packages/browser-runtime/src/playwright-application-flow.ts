@@ -320,6 +320,7 @@ const prepareOnlyNetworkGuardStates = new WeakMap<
     /** Answers read for an open upload window's `issued` strings. */
     pendingUploadReads: Set<Promise<void>>;
     intermediateMutationsAuthorized: boolean;
+    localPressReadOnly?: boolean;
     attachmentUploadsAuthorized: boolean;
     attachmentUploadWindow: AttachmentUploadWindow | null;
     intermediateMutationAllowedOrigins: string[];
@@ -1928,6 +1929,8 @@ export async function ensurePrepareOnlyMutationGuard(
   attachmentUploadsAuthorized = false,
 ): Promise<PrepareOnlyGuardSnapshot> {
   let networkGuardState = prepareOnlyNetworkGuardStates.get(page);
+  if (networkGuardState?.localPressReadOnly)
+    intermediateMutationsAuthorized = false;
   if (!networkGuardState) {
     networkGuardState = {
       blockedAttempts: [],
@@ -2045,6 +2048,13 @@ export async function ensurePrepareOnlyMutationGuard(
         await route.abort("blockedbyclient");
       };
 
+      if (
+        networkGuardState!.localPressReadOnly &&
+        !PREPARE_ONLY_SAFE_METHODS.has(method)
+      ) {
+        await denyRequest();
+        return;
+      }
       // The site's own passive bot check (Cloudflare's, on its origin)
       // runs from page load, any method, and carries none of the answers.
       if (
@@ -2504,6 +2514,9 @@ async function setPrepareOnlyIntermediateMutationWindow(
 export async function openPrepareOnlyIntermediateMutationWindow(
   page: Page,
 ): Promise<void> {
+  // A delayed handler from a local press must not borrow a later field-save
+  // window. Keep this document read-only until the person explicitly sends.
+  if (prepareOnlyNetworkGuardStates.get(page)?.localPressReadOnly) return;
   let expectedOrigin: string;
   try {
     expectedOrigin = new URL(page.url()).origin;
@@ -2546,6 +2559,25 @@ export async function openPrepareOnlyIntermediateMutationWindow(
     expiresAtMs: Date.now() + INTERMEDIATE_MUTATION_WINDOW_DURATION_MS,
     remainingRequests: INTERMEDIATE_MUTATION_WINDOW_MAX_REQUESTS,
   });
+}
+
+/** Narrows the existing guard permanently for local control presses. */
+export async function fencePrepareOnlyLocalPress(page: Page): Promise<void> {
+  const state = prepareOnlyNetworkGuardStates.get(page);
+  if (!state) throw new Error("Prepare-only guard is not installed");
+  await closePrepareOnlyAttachmentUploadWindow(page);
+  await closePrepareOnlyIntermediateMutationWindow(page);
+  await closePrepareOnlyAuthorizedFormActionWindow(page);
+  await closePrepareOnlyFinalActionWindow(page);
+  state.localPressReadOnly = true;
+  state.runNavigations.clear();
+  state.pickerChoices.clear();
+  await ensurePrepareOnlyMutationGuard(
+    page,
+    false,
+    state.intermediateMutationAllowedOrigins,
+    state.attachmentUploadsAuthorized,
+  );
 }
 
 export async function closePrepareOnlyIntermediateMutationWindow(

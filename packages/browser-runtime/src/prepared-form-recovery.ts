@@ -1,5 +1,6 @@
 import type { BrowserContext, Page } from "playwright";
 import { createHash } from "node:crypto";
+import { allowPrepareOnlyRunNavigation } from "./playwright-application-flow";
 import {
   PreparedFormSnapshotSchema,
   type PreparedFormAttachment,
@@ -79,14 +80,22 @@ export async function capturePreparedForm(
         const shadow = element.shadowRoot;
         return Boolean(
           shadow &&
-            (shadow.querySelector(
-              `${selector},[contenteditable],[role=textbox],[role=combobox],[role=spinbutton],[role=slider]`,
-            ) ||
-              hidesFields(shadow)),
+          (shadow.querySelector(
+            `${selector},[contenteditable],[role=textbox],[role=combobox],[role=spinbutton],[role=slider]`,
+          ) ||
+            hidesFields(shadow)),
         );
       });
     if (hidesFields(document)) return null;
-    const native = new Set(["INPUT", "TEXTAREA", "SELECT", "BUTTON", "FIELDSET", "OUTPUT", "OBJECT"]);
+    const native = new Set([
+      "INPUT",
+      "TEXTAREA",
+      "SELECT",
+      "BUTTON",
+      "FIELDSET",
+      "OUTPUT",
+      "OBJECT",
+    ]);
     if (
       [...document.forms].some((form) =>
         [...form.elements].some((element) => !native.has(element.tagName)),
@@ -100,8 +109,7 @@ export async function capturePreparedForm(
       area = area.parentElement;
     if (
       [...(area ?? document.documentElement).querySelectorAll("*")].some(
-        (element) =>
-          element.localName.includes("-") && !element.shadowRoot,
+        (element) => element.localName.includes("-") && !element.shadowRoot,
       )
     )
       return null;
@@ -236,6 +244,9 @@ export async function restorePreparedForm(input: {
       }),
     ]);
     await input.guard(page);
+    // This exact initial GET is ours, even when its path contains /apply.
+    // Redirects remain guarded, and no later page navigation inherits it.
+    allowPrepareOnlyRunNavigation(page, input.snapshot.url);
     await page.goto(input.snapshot.url, {
       waitUntil: "domcontentloaded",
       timeout: 15_000,

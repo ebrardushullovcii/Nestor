@@ -95,6 +95,14 @@ test("a native form navigation is tied to that form's exact destination", () => 
   ).toBe(false);
 });
 
+test("a JS POST to the selected native form action supplies final response evidence", () => {
+  const input = {...request(null), url: `${origin}/forms/application/100`, nativeAction: {origin, safePath: "/forms/application/100"}};
+  expect(isFinalSubmissionRequest(input)).toBe(true);
+  expect(isFinalSubmissionRequest({...input, url: `${origin}/forms/application/101`})).toBe(false);
+  expect(isFinalSubmissionRequest({...input, nativeAction: null})).toBe(false);
+  expect(isFinalSubmissionRequest({...input, method: "GET"})).toBe(false);
+});
+
 test("a confirmation-page transition supplies state evidence without guessing a receipt number", () => {
   expect(
     employerPageConfirmsSubmission(

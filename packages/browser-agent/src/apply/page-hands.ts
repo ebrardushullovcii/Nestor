@@ -350,7 +350,9 @@ export function buildApplyFormObservation(
     disabled: rawAction.disabled,
     ...(rawAction.formAction ? { formAction: rawAction.formAction } : {}),
     ...(rawAction.formMethod ? { formMethod: rawAction.formMethod } : {}),
-    ...(rawAction.submitsForm ? { submitsForm: true } : {}),
+    ...(rawAction.submitsForm !== undefined
+      ? { submitsForm: rawAction.submitsForm }
+      : {}),
     ...placementOf(rawAction),
   }));
 
@@ -455,6 +457,9 @@ export function createApplyPageHands(
       ),
     navigate: (url) => mechanics.navigate(url),
     clickElement: (ref) => mechanics.clickElement(ref),
+    ...(mechanics.clickWithoutWrites
+      ? { clickWithoutWrites: mechanics.clickWithoutWrites }
+      : {}),
     pressKey: (ref, key) => mechanics.pressKey(ref, key),
     scroll: (direction) => mechanics.scroll(direction),
     wait: (milliseconds) => mechanics.wait(milliseconds),

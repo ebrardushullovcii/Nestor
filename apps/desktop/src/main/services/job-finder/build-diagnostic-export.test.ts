@@ -22,6 +22,7 @@ const facts: JobFinderDiagnosticFacts = {
   applications: { ready: 1, submitted: 2 },
   unresolvedActions: 1,
   approvedResumes: 2,
+  originalResumeReady: true,
   siteChecks: 1,
   latestResumeImport: { durationMs: 456, ready: true },
   agentReady: true,
@@ -29,6 +30,23 @@ const facts: JobFinderDiagnosticFacts = {
 };
 
 describe("buildJobFinderDiagnosticExport", () => {
+  it("original readiness is independent of import review status", () => {
+    expect(
+      buildJobFinderDiagnosticExport({
+        build,
+        facts: {
+          ...facts,
+          latestResumeImport: { durationMs: 10, ready: false },
+        },
+      }).capabilities.originalResumeReady,
+    ).toBe(true);
+    expect(
+      buildJobFinderDiagnosticExport({
+        build,
+        facts: { ...facts, originalResumeReady: false },
+      }).capabilities.originalResumeReady,
+    ).toBe(false);
+  });
   it("exports counts and readiness with a truthful manifest", () => {
     const diagnostic = buildJobFinderDiagnosticExport({
       facts,
@@ -59,9 +77,7 @@ describe("buildJobFinderDiagnosticExport", () => {
   });
 
   it("warns about each AI provider that is not ready", () => {
-    expect(
-      buildJobFinderDiagnosticExport({ facts, build }).warnings,
-    ).toEqual([
+    expect(buildJobFinderDiagnosticExport({ facts, build }).warnings).toEqual([
       {
         category: "provider_availability",
         code: "vision_not_ready",

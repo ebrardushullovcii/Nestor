@@ -12,6 +12,7 @@ import type {
   CoverLetterPreference,
   AiApplyingBehavior,
   ApplyNavigationResult,
+  ApplyRawPageHands,
   ApplyServiceWorkerFinding,
   ApplyWriteResult,
   ApplicationAttestationKind,
@@ -279,6 +280,7 @@ export interface ApplyPageHands {
   observe: () => Promise<ApplyFormObservation>;
   navigate: (url: string) => Promise<ApplyNavigationResult>;
   clickElement: (ref: string) => Promise<ApplyWriteResult>;
+  clickWithoutWrites?: ApplyRawPageHands["clickWithoutWrites"];
   /** Presses a keyboard key on one element, or on the active page. */
   pressKey?: (
     ref: string | undefined,

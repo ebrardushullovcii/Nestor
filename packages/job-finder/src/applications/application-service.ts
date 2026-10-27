@@ -4,6 +4,11 @@ import { accumulateApplyUsage } from "./apply-usage";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import {
+  loadOriginalResumeBytes,
+  approvedJobResumeIdentity,
+  loadApprovedJobResumeBytes,
+} from "./resume-artifacts";
+import {
   buildApplyFormObservation,
   canContinueApplicationAfterAccess,
   checkClassifiedApplicationAnswers,
@@ -311,7 +316,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
 
   async function modeFor(
     row: ApplicationRow,
-    settings: JobFinderSettings,
   ): Promise<ApplicationAutomationMode | null> {
     // The person pressed Open to look: that refill never sends.
     if (applications.isReviewRefill(row.id)) return "confirm_before_submit";
@@ -327,10 +331,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         ? "confirm_before_submit"
         : requested;
     }
-    return row.mode === "autonomous_submit" &&
-      settings.applicationAutomationMode === "autonomous_submit"
-      ? "autonomous_submit"
-      : "confirm_before_submit";
+    return row.mode;
   }
 
   async function run(row: ApplicationRow, signal: AbortSignal): Promise<void> {
@@ -375,7 +376,16 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       throw new Error(
         "Your approved resume file is unavailable. Import or export it again.",
       );
-    const bytes = await readFile(filePath);
+    const exportIdentity = approved.pdfPath
+      ? approvedJobResumeIdentity(approved)
+      : null;
+    const bytes = exportIdentity
+      ? await loadApprovedJobResumeBytes(
+          approved,
+          exportIdentity,
+          approved.pdfSha256!.toLowerCase(),
+        )
+      : await loadOriginalResumeBytes(profile.baseResume);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     const artifact = ApplicationResumeArtifactSchema.parse({
       id: `resume_${row.jobId}_${sha256}`,
@@ -383,7 +393,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       source: approved.pdfPath === null ? "original_upload" : "tailored_export",
       sourceDocumentId:
         approved.pdfPath === null ? profile.baseResume.id : null,
-      exportArtifactId: null,
+      exportArtifactId: exportIdentity,
       fileName: basename(filePath),
       filePath,
       sha256,
@@ -404,8 +414,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return;
     applications.recordOrigin(row.id, new URL(job.applyUrl ?? job.url).origin);
     applications.recordOrigin(row.id, new URL(job.url).origin);
-    // The saved setting can narrow the mode captured at Apply, never widen it.
-    const mode = await modeFor(row, settings);
+    // Apply captures the default. Only task-local authority can narrow it later.
+    const mode = await modeFor(row);
     if (!mode)
       throw new Error("The instruction for this application was withdrawn.");
     const sends = mode === "autonomous_submit";
@@ -577,7 +587,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             return false;
         }
         const latest = await deps.readInputs();
-        const latestMode = await modeFor(row, latest.settings);
+        const latestMode = await modeFor(row);
         const resume = resumes.get(row.jobId);
         return (
           latestMode !== null &&
@@ -978,20 +988,26 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     personClicked = false,
   ): Promise<void> {
     const identity = applicationIdentity(row.id, row.attempt);
-    const operation = () =>
-      withApplicationAuthorityGate(
+    const queuedAt = Date.now();
+    const timing = (stage: string, startedAt: number) =>
+      console.info(
+        `[apply] timing application=${identity.resultId} stage=${stage} startedAt=${new Date(startedAt).toISOString()} completedAt=${new Date().toISOString()} durationMs=${Date.now() - startedAt}`,
+      );
+    const operation = () => {
+      timing("send_queue", queuedAt);
+      const preflightAt = Date.now();
+      return withApplicationAuthorityGate(
         deps.authorityRepository,
         signal,
         async () => {
           const { settings, profile } = await deps.readInputs();
           if (
             !current(row) ||
-            (!personClicked &&
-              (await modeFor(row, settings)) !== "autonomous_submit")
+            (!personClicked && (await modeFor(row)) !== "autonomous_submit")
           ) {
             await leaveForPerson(
               row,
-              "The Apply setting changed. The filled form is ready for your review.",
+              "The permission for this application changed. The filled form is ready for your review.",
             );
             return;
           }
@@ -1287,11 +1303,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                   BrowserSessionRuntime["executeExactlyOneFinalAction"]
                 >
               >[1],
-            ) =>
-              browser.executeExactlyOneFinalAction!(source, {
+            ) => {
+              timing("send_preflight", preflightAt);
+              const receiptAt = Date.now();
+              return browser.executeExactlyOneFinalAction!(source, {
                 ...input,
                 veto: async (facts) => {
-                  const { settings: latest, profile: latestProfile } =
+                  const { profile: latestProfile } =
                     await deps.readInputs();
                   const app = applications.getApplication(row.id);
                   const approved = resumes.get(row.jobId);
@@ -1306,12 +1324,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       latestProfile.baseResume.storagePath) ===
                       artifact.filePath &&
                     (personClicked ||
-                      (await modeFor(row, latest)) === "autonomous_submit") &&
+                      (await modeFor(row)) === "autonomous_submit") &&
                     factsUnchanged(latestProfile) &&
                     (await input.veto(facts))
                   );
                 },
-              }),
+              }).finally(() => timing("send_receipt", receiptAt));
+            },
           };
           const outcome = await submitPreparedApplication({
             repository: deps.authorityRepository,
@@ -1347,6 +1366,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             );
         },
       );
+    };
     if (browser.withApplicationPageExecution)
       await browser.withApplicationPageExecution(
         "target_site",

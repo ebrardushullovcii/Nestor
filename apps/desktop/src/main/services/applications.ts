@@ -73,12 +73,12 @@ export async function startApplicationService(
         const instruction = applications.instructionFor(input.application.id);
         if (
           !input.personClicked &&
-          (instruction
-            ? (await instructionMode({
+          (input.application.mode !== "autonomous_submit" ||
+            (instruction &&
+              (await instructionMode({
                 ...instruction,
                 jobId: input.job.id,
-              })) !== "autonomous_submit"
-            : settings.applicationAutomationMode !== "autonomous_submit")
+              })) !== "autonomous_submit"))
         )
           return null;
         const active =

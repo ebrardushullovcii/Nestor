@@ -1,8 +1,15 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import type { PreparedApplicationFormStore } from "@nestor/browser-runtime";
 import type { JobFinderRepository } from "@nestor/db";
-import { createPreparedFormsStore, type JobStore } from "@nestor/db/job-store";
+import {
+  createPreparedFormsStore,
+  createResumeStore,
+  type JobStore,
+} from "@nestor/db/job-store";
+import {
+  loadOriginalResumeBytes,
+  loadApprovedJobResumeBytes,
+} from "@nestor/job-finder/applications";
 import type { CandidateAssetLibrary } from "./candidate-asset-library";
 
 /**
@@ -35,11 +42,14 @@ export function createPreparedApplicationFormStore(
           profile.baseResume.sha256 !== file.sha256
         )
           throw new Error("Resume unavailable");
-        bytes = await readFile(profile.baseResume.storagePath);
+        bytes = await loadOriginalResumeBytes(profile.baseResume);
       } else {
-        // Applications attach their resume from the job store, never an
-        // old export.
-        throw new Error("Resume unavailable");
+        const match = /^job_resume:([1-9]\d*):/u.exec(file.id);
+        const resume = match
+          ? createResumeStore(store).get(Number(match[1]))
+          : null;
+        if (!resume) throw new Error("Resume unavailable");
+        bytes = await loadApprovedJobResumeBytes(resume, file.id, file.sha256);
       }
       if (createHash("sha256").update(bytes).digest("hex") !== file.sha256)
         throw new Error("Attachment changed");

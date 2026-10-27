@@ -211,6 +211,10 @@ export function createJobSearchRunner(
         source.row.state !== "stopped"
       )
         source.row.state = "done";
+      // Inventory alone is not proof of access: the selected details must
+      // also have finished, without an access or read failure.
+      if (source.row.state === "done" && source.row.failedReads === 0)
+        source.completeAccess?.();
       source.row.phase = null;
       source.row.message =
         `${source.row.cards} listings; ${source.row.related} new related; ${source.row.unrelated} unrelated; ${source.row.seen} already seen.` +
@@ -398,23 +402,26 @@ export function createJobSearchRunner(
           source.row.state !== "needs_you" &&
           source.row.state !== "failed"
         ) {
-          const signedIn =
-            access.pending(Number(source.target.id)) ||
-            siteRows.get(Number(source.target.id))?.signInState === "signed_in";
-          access.complete(Number(source.target.id));
-          siteRows.record(
-            Number(source.target.id),
-            {
-              lastSearchedAt: new Date().toISOString(),
-              health: "healthy",
-              lane: inventory.lane ?? lane,
-              signInState:
-                lane === "browser" && signedIn ? "signed_in" : "not_required",
-              ...(inventory.provider ? { provider: inventory.provider } : {}),
-            },
-            false,
-          );
-          siteDirty = true;
+          source.completeAccess = () => {
+            const signedIn =
+              access.pending(Number(source.target.id)) ||
+              siteRows.get(Number(source.target.id))?.signInState ===
+                "signed_in";
+            access.complete(Number(source.target.id));
+            siteRows.record(
+              Number(source.target.id),
+              {
+                lastSearchedAt: new Date().toISOString(),
+                health: "healthy",
+                lane: inventory.lane ?? lane,
+                signInState:
+                  lane === "browser" && signedIn ? "signed_in" : "not_required",
+                ...(inventory.provider ? { provider: inventory.provider } : {}),
+              },
+              false,
+            );
+            siteDirty = true;
+          };
         }
         write(source);
         markDone(source);

@@ -159,6 +159,46 @@ function finished(runner: JobSearchRunner): Promise<JobSearchStatus> {
     });
   });
 }
+
+test.each([false, true])(
+  "source retry keeps its ticket until detail reads finish (blocked=%s)",
+  async (blocked) => {
+    const { runner, engine, store, context } = setup();
+    const sites = createJobSitesStore(store),
+      access = createSourceAccessStore(store);
+    sites.add({ text: "https://locked.example/jobs" });
+    context.sources = sites.enabled().map(jobSiteTarget);
+    access.request(1, "Sign in");
+    const pending =
+      deferred<Awaited<ReturnType<JobSearchEngine["readListings"]>>>();
+    engine.collectSource.mockResolvedValue({
+      cards: [card("1")],
+      pagesRead: 1,
+      complete: true,
+      notes: [],
+    });
+    engine.readListings.mockImplementation(() => pending.promise);
+    await runner.retrySource(1);
+    await vi.waitFor(() => expect(engine.readListings).toHaveBeenCalled());
+    expect(access.pending(1)).toBe(true);
+    pending.resolve(
+      blocked
+        ? {
+            jobs: [],
+            failures: [
+              {
+                url: card("1").url,
+                reason: "Verification required",
+                needsYou: true,
+              },
+            ],
+          }
+        : { jobs: [found(card("1"))], failures: [] },
+    );
+    await finished(runner);
+    expect(access.pending(1)).toBe(blocked);
+  },
+);
 afterEach(() => {
   for (const runner of runners.splice(0)) runner.stop();
   for (const store of stores.splice(0)) store.close();

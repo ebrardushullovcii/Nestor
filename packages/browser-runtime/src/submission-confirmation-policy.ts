@@ -56,6 +56,14 @@ export function isFinalSubmissionRequest(input: {
       ) && /\b(?:applications?|applicants?|candidates?|job)\b/u.test(name)
     );
   }
+  // JS-enhanced native forms often fetch their own declared action. The
+  // exact destination still binds the response to the selected final form.
+  if (
+    input.method === "POST" &&
+    input.nativeAction?.origin === url.origin &&
+    input.nativeAction.safePath === url.pathname
+  )
+    return true;
   // An opaque endpoint or collection create may be an autosave. Only an
   // explicit terminal action can provide response evidence for a JS form.
   return /\/(?:submit|apply|finish|complete|send)(?:[-_](?:application|confirmed))?\/?$/iu.test(

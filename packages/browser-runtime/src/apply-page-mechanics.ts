@@ -36,6 +36,7 @@ import {
 
 import {
   closePrepareOnlyAuthorizedFormActionWindow,
+  fencePrepareOnlyLocalPress,
   closePrepareOnlyIntermediateMutationWindow,
   ensurePrepareOnlyMutationGuard,
   getBlockedPrepareOnlyAttempts,
@@ -224,9 +225,18 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 break;
               block = ancestor;
             }
+            const staticBlock = block?.cloneNode(true) as Element | undefined;
+            // Live feedback is page state, not the field's wording. It stays
+            // in the page text so new instructions there are still observed.
+            staticBlock
+              ?.querySelectorAll("[role='status'], [aria-live]")
+              .forEach((node) => node.remove());
             const hint =
               described ||
-              labelText(block).replace(label, "").replace(/\s+/gu, " ").trim();
+              labelText(staticBlock ?? null)
+                .replace(label, "")
+                .replace(/\s+/gu, " ")
+                .trim();
             return hint.length <= 300 ? hint : "";
           };
           const roots = Array.from(
@@ -1048,9 +1058,17 @@ export function collectApplyDocumentSnapshot(
           break;
         block = ancestor;
       }
+      const staticBlock = block?.cloneNode(true) as Element | undefined;
+      // Keep live feedback in page text, separate from the question's hint.
+      staticBlock
+        ?.querySelectorAll("[role='status'], [aria-live]")
+        .forEach((node) => node.remove());
       const hint =
         described ||
-        labelText(block).replace(label, "").replace(/\s+/gu, " ").trim();
+        labelText(staticBlock ?? null)
+          .replace(label, "")
+          .replace(/\s+/gu, " ")
+          .trim();
       return hint.length <= 300 ? hint : "";
     };
     const isVisible = (element: HTMLElement): boolean => {
@@ -2742,6 +2760,62 @@ export function createPlaywrightApplyPageSession(input: {
 
   return {
     ...mechanics,
+    clickWithoutWrites: async (expected) => {
+      const fresh = await mechanics.readPage();
+      const action = fresh.actions.find(
+        (item) => (item.ref ?? `a${item.index}`) === expected.ref,
+      );
+      if (
+        fresh.url !== expected.url ||
+        fresh.stepLabel !== expected.stepLabel ||
+        !action ||
+        action.label !== expected.label ||
+        !action.visible ||
+        action.disabled ||
+        action.submitsForm !== false
+      )
+        return {
+          ok: false,
+          error: "The exact step control changed. Check the page again.",
+        };
+      const locator = actionLocator(page, expected.ref);
+      if (!locator)
+        return { ok: false, error: "The step control is unavailable." };
+      const valid = await locator.evaluate((element) => {
+        const button =
+          element instanceof HTMLButtonElement ||
+          element instanceof HTMLInputElement
+            ? element
+            : null;
+        return (
+          !!button &&
+          button.type === "button" &&
+          !!button.form &&
+          [...button.form.elements].every((field) => {
+            const control = field as HTMLInputElement;
+            return (
+              !control.willValidate ||
+              control.getClientRects().length === 0 ||
+              control.validity.valid
+            );
+          })
+        );
+      });
+      if (!valid)
+        return {
+          ok: false,
+          error:
+            "This step's fields or control are not valid for a local press.",
+        };
+      const worker = await input.sentinel?.check("local_control_press");
+      if (worker)
+        return {
+          ok: false,
+          error: "This page needs the person before it can advance.",
+        };
+      await fencePrepareOnlyLocalPress(page);
+      return mechanics.clickElement(expected.ref);
+    },
     setToggle: async (ref, checked) => {
       // A radio or checkbox sends its value ("PT") and its page shows a label
       // ("Portugal"): the guard has to know both before it is activated.

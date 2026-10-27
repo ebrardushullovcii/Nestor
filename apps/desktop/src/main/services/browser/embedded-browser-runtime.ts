@@ -187,18 +187,20 @@ export function withEmbeddedBrowserActivity(
     ...runtime,
     ...(runtime.readRenderedPage
       ? {
-          readRenderedPage: (url: string, options?: { signal?: AbortSignal }) =>
+          readRenderedPage: (url, options) =>
             browser.runAutomation(
               "Reading job listing",
               undefined,
               (signal, _update, claimPage, claimedTabs) =>
                 runtime.readRenderedPage!(url, {
+                  ...options,
                   signal: options?.signal
                     ? AbortSignal.any([signal, options.signal])
                     : signal,
                   onPage: async (page) => {
                     claimPage(page);
                     await claimedTabs();
+                    await options?.onPage?.(page);
                   },
                 }),
             ),
