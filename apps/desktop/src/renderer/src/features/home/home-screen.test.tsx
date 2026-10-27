@@ -15,6 +15,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -104,6 +105,37 @@ function renderHome() {
 }
 
 describe("Home", () => {
+  it.each([
+    [199, 1, "99.5%", "0.5%"],
+    [19_999, 1, ">99.9%", "<0.1%"],
+    [0, 1, "0%", "100%"],
+  ] as const)(
+    "shows the share of %i waiting and %i heard back without rounding a part to all or none",
+    async (waiting, heard, waitingPercent, heardPercent) => {
+      const summary = createHomeStore(store).summary({ utcOffsetMinutes: 0 });
+      window.nestor.home.summary = () =>
+        Promise.resolve({
+          ...summary,
+          recent: { ...summary.recent, applied: waiting, interview: heard },
+        });
+      renderHome();
+      const stats = await screen.findByRole("group", { name: "This week" });
+      expect(
+        within(stats).getByText(heardPercent, { exact: true }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("row", {
+          name: `Waiting ${waiting.toLocaleString()} ${waitingPercent}`,
+        }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("row", {
+          name: `Assessment or interview ${heard.toLocaleString()} ${heardPercent}`,
+        }),
+      ).toBeTruthy();
+    },
+  );
+
   it("puts what is waiting first and follows the store as it changes", async () => {
     const tracker = createTrackerStore(store);
     const reminder = tracker.addEvent({

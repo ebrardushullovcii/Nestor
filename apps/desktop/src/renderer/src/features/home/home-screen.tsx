@@ -10,6 +10,7 @@ import { plural } from "@renderer/features/job-lists";
 import { cn } from "@renderer/lib/cn";
 
 import { ActivityChart, StandingBar } from "./home-charts";
+import { formatHomePercent } from "./home-percent";
 import { markFirstScreenShown } from "@renderer/features/job-finder/lib/after-first-screen";
 
 import { useHomeSummary } from "./use-home-summary";
@@ -270,7 +271,7 @@ export function HomeScreen() {
           value={
             sentRecently === 0
               ? "–"
-              : `${Math.round((heardBack / sentRecently) * 100)}%`
+              : formatHomePercent(heardBack, sentRecently)
           }
         />
         <StatTile

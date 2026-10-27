@@ -2,6 +2,7 @@ import type { HomeActivityDay, TrackerStatus } from "@nestor/contracts";
 import { useState } from "react";
 
 import { cn } from "@renderer/lib/cn";
+import { formatHomePercent } from "./home-percent";
 
 const dayLabel = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -246,8 +247,6 @@ export function StandingBar(props: { recent: Record<TrackerStatus, number> }) {
     ),
   }));
   const total = groups.reduce((sum, group) => sum + group.count, 0);
-  const percent = (count: number) =>
-    total === 0 ? 0 : Math.round((count / total) * 100);
 
   return (
     <figure className="grid min-w-0 content-start gap-3">
@@ -308,7 +307,7 @@ export function StandingBar(props: { recent: Record<TrackerStatus, number> }) {
                     {group.count.toLocaleString()}
                   </td>
                   <td className="w-14 py-1.5 text-right tabular-nums text-foreground-muted">
-                    {percent(group.count)}%
+                    {formatHomePercent(group.count, total)}
                   </td>
                 </tr>
               ))}
