@@ -66,6 +66,8 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
     column: "review_refill",
     definition: "INTEGER NOT NULL DEFAULT 0",
   },
+  // Empty means Standard (speedLevelOf), as in a file that never had it.
+  { table: "profile_settings", column: "speed_level", definition: "TEXT" },
 ];
 
 const JOBS = `

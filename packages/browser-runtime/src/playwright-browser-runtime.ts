@@ -653,6 +653,8 @@ export interface BrowserAgentRuntimeOptions {
     workingTabCount?(): number;
     hasAutomationTabCapacity?(reservedTabs?: number): boolean;
   };
+  /** Forms prepared at once, read at each start: the Speed setting. */
+  applicationConcurrency?: () => number;
   headless?: boolean;
   maxJobsPerRun?: number;
   chromeExecutablePath?: string;
@@ -1350,10 +1352,12 @@ export function createBrowserAgentRuntime(
   let browserPromise: Promise<Browser> | null = null;
   let launchedChromeProcess: ChildProcess | null = null;
   let ownsChromeProcess = false;
+  const envConcurrency =
+    process.env.NESTOR_APPLICATION_PREPARATION_CONCURRENCY;
   const applicationPreparationScheduler = createApplicationPreparationScheduler(
-    applicationPreparationConcurrency(
-      process.env.NESTOR_APPLICATION_PREPARATION_CONCURRENCY,
-    ),
+    envConcurrency === undefined && options.applicationConcurrency
+      ? options.applicationConcurrency
+      : applicationPreparationConcurrency(envConcurrency),
   );
   const usesEmbeddedBrowserHost = Boolean(options.browserHost);
   const applicationSitePacing = createApplicationSitePacing(

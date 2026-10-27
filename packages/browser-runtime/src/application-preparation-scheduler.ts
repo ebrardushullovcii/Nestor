@@ -1,10 +1,15 @@
 import { isIP } from "node:net";
 
+// The Speed setting's Maximum level; Standard is 4.
+export const MAX_APPLICATION_PREPARATIONS = 8;
+
 export function applicationPreparationConcurrency(
   value: string | undefined,
 ): number {
   const requested = Number(value ?? 4);
-  return Number.isInteger(requested) ? Math.max(1, Math.min(4, requested)) : 4;
+  return Number.isInteger(requested)
+    ? Math.max(1, Math.min(MAX_APPLICATION_PREPARATIONS, requested))
+    : 4;
 }
 
 /** A shared browser can prepare several forms, but only one on each site. */
@@ -50,9 +55,13 @@ export interface ApplicationPreparationScheduler {
 }
 
 export function createApplicationPreparationScheduler(
-  maxActive = 2,
+  maxActive: number | (() => number) = 2,
 ): ApplicationPreparationScheduler {
-  const capacity = applicationPreparationConcurrency(String(maxActive));
+  // Read at each grant, so a Speed change applies to the next form.
+  const capacity = () =>
+    applicationPreparationConcurrency(
+      String(typeof maxActive === "function" ? maxActive() : maxActive),
+    );
   type Request = {
     key: string;
     signal?: AbortSignal;
@@ -78,7 +87,7 @@ export function createApplicationPreparationScheduler(
         nextWake = Math.min(nextWake, until);
         continue;
       }
-      if (!request.active && running >= capacity) continue;
+      if (!request.active && running >= capacity()) continue;
       if (
         [...requests].some(
           (other) =>

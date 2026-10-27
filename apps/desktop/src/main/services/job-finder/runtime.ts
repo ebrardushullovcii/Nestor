@@ -70,6 +70,7 @@ import {
   recoverPendingJobFinderWorkspaceReset,
 } from "./reset-workspace";
 import { getCandidateAssetLibrary } from "./candidate-asset-library-instance";
+import { currentSpeedLimits } from "./speed-level";
 import {
   createSessionListingHtmlFetcher,
   withBrowserSignInRetry,
@@ -200,6 +201,19 @@ export function createDesktopResumeVisionProvider(
   return createResumeVisionProviderFromEnvironment(env);
 }
 
+let stopFollowingSpeed: (() => void) | null = null;
+
+/** Keeps the browser's live waiting pages at the Speed level's number. */
+function followSpeedLevel(embedded: ReturnType<typeof getEmbeddedBrowser>) {
+  const apply = () =>
+    embedded.setLiveWaitingPageLimit(currentSpeedLimits().waitingPages);
+  apply();
+  stopFollowingSpeed?.();
+  stopFollowingSpeed = getJobStore().onChange((change) => {
+    if (change.cause === "settings") apply();
+  });
+}
+
 export function createDesktopBrowserRuntime(
   input: {
     env?: NodeJS.ProcessEnv;
@@ -229,7 +243,9 @@ export function createDesktopBrowserRuntime(
       (desktopTestApiEnabled && env.NESTOR_BROWSER_HOST !== "embedded")
         ? null
         : getEmbeddedBrowser();
+    if (embedded) followSpeedLevel(embedded);
     const baseRuntime = createBrowserAgentRuntime({
+      applicationConcurrency: () => currentSpeedLimits().applyAtOnce,
       ...(input.preparedFormStore
         ? { preparedFormStore: input.preparedFormStore }
         : {}),
@@ -409,9 +425,11 @@ async function createJobFinderRuntime(
         readRemoteCountsAsAnyLocation: () =>
           searchPreferencesStore.settings.read().aiBehavior?.jobSearch
             .remoteCountsAsAnyLocation ?? true,
+        browserPages: () => currentSpeedLimits().searchPages,
         engine: createListingSearchEngine({
           browserRuntime,
           aiClient,
+          browserPages: () => currentSpeedLimits().searchPages,
         }),
         readContext: async () => {
           const [
@@ -478,6 +496,7 @@ async function createJobFinderRuntime(
   });
   const applicationService = await startApplicationService({
     repository,
+    concurrency: () => currentSpeedLimits().applyAtOnce,
     browser: browserRuntime,
     aiClient,
     documentManager,

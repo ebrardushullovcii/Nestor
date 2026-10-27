@@ -27,7 +27,11 @@ let resolveReady: ((service: ApplicationService) => void) | null = null;
 export async function startApplicationService(
   deps: Pick<
     ApplicationServiceDeps,
-    "browser" | "aiClient" | "documentManager" | "isHoldingCurrent"
+    | "browser"
+    | "aiClient"
+    | "documentManager"
+    | "isHoldingCurrent"
+    | "concurrency"
   > & {
     repository: JobFinderRepository;
   },

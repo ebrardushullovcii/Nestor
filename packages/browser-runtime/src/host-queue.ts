@@ -1,5 +1,17 @@
-/** Fair, bounded concurrency per host. Waiting and server cooldowns occupy no active slot. */
-export function createHostQueue(options: { limit: number; perHost: number }) {
+/**
+ * Fair, bounded concurrency per host. Waiting and server cooldowns occupy no
+ * active slot. A limit given as a function is read each time work could
+ * start, so a setting change applies to the next start.
+ */
+export function createHostQueue(options: {
+  limit: number | (() => number);
+  perHost: number;
+}) {
+  const limit = () =>
+    Math.max(
+      1,
+      typeof options.limit === "function" ? options.limit() : options.limit,
+    );
   type Entry = {
     start(): void;
     signal: AbortSignal;
@@ -21,7 +33,7 @@ export function createHostQueue(options: { limit: number; perHost: number }) {
     let earliest = Infinity;
     for (
       let checked = 0;
-      active < options.limit && checked < keys.length;
+      active < limit() && checked < keys.length;
       checked++
     ) {
       const key = keys[(turn + checked) % keys.length]!;
@@ -29,7 +41,7 @@ export function createHostQueue(options: { limit: number; perHost: number }) {
       while (
         host.entries.length &&
         host.active < options.perHost &&
-        active < options.limit
+        active < limit()
       ) {
         if (host.until > Date.now()) {
           earliest = Math.min(earliest, host.until);

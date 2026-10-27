@@ -636,6 +636,7 @@ export function createProfileService(options: ProfileServiceOptions) {
         Object.entries({
           collapseSideMenuWithAssistant: parsed.collapseSideMenuWithAssistant,
           writeResumesOnShortlist: parsed.writeResumesOnShortlist,
+          speedLevel: parsed.speedLevel,
         }).filter(([, value]) => value !== undefined),
       );
       await repository.commitSettingsUpdate((current) =>

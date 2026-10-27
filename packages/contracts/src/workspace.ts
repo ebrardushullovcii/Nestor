@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SpeedLevelSchema } from "./speed";
 
 import {
   AiProviderKindSchema,
@@ -380,6 +381,8 @@ export const JobFinderSettingsSchema = z.object({
    * Absent means on: read it through `writesResumesOnShortlist`.
    */
   writeResumesOnShortlist: z.boolean().optional(),
+  /** Pages and applications at once; absent means Standard (speedLevelOf). */
+  speedLevel: SpeedLevelSchema.optional(),
   humanReviewRequired: z.boolean(),
   allowAutoSubmitOverride: z.boolean(),
   /** Fill and leave for the person's click, or send for them. */
@@ -440,6 +443,7 @@ export type UpdateApplicationDefaultsInput = z.infer<
 export const UpdateWorkspaceBehaviorInputSchema = z.object({
   collapseSideMenuWithAssistant: z.boolean().optional(),
   writeResumesOnShortlist: z.boolean().optional(),
+  speedLevel: SpeedLevelSchema.optional(),
 });
 export type UpdateWorkspaceBehaviorInput = z.infer<
   typeof UpdateWorkspaceBehaviorInputSchema

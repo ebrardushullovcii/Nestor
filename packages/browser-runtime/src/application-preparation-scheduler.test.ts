@@ -9,8 +9,9 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 test.each([
   [undefined, 4],
-  ["16", 4],
-  ["99", 4],
+  ["8", 8],
+  ["16", 8],
+  ["99", 8],
   ["1", 1],
   ["0", 1],
   ["bad", 4],
