@@ -1,5 +1,6 @@
 import reviewFixture from "./stored-json/application-review-card.full.json";
 import { SubmissionOutcomeRecordSchema } from "@nestor/contracts";
+import meanings from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-question-meanings.json";
 import type {
   FoundJob,
   JobChange,
@@ -262,6 +263,333 @@ it("skipping retires only this application's questions and keeps a shared questi
   expect(applications.needsYou.forApplication(a.id)).toEqual([]);
   expect(applications.needsYou.list().total).toBe(1);
   expect(applications.needsYou.forApplication(b.id)).toHaveLength(1);
+});
+
+it.each(meanings.cases)(
+  "remembered question replay: $saved -> $asked",
+  (entry) => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+    const row = applications.claimNext()!,
+      memory = applications.needsYou;
+    memory.remember({
+      key: "source-question",
+      prompt: entry.saved,
+      answer: entry.answer,
+      input: "text",
+      options: [],
+      scope: {},
+    });
+    const lookup = {
+      key: "target-question",
+      prompt: entry.asked,
+      reusePrompt: true,
+      kind: "other" as const,
+    };
+    expect(
+      memory
+        .answersForQuestions(row.id, [lookup], "https://jobs.example.test")
+        .map((match) => match.answer),
+    ).toEqual(entry.matches ? [entry.answer] : []);
+    const outcome = memory.request(
+      question(row.id, row.attempt, {
+        key: lookup.key,
+        fieldKey: lookup.key,
+        prompt: entry.asked,
+        input: "text",
+        reusePrompt: true,
+        scope: {},
+      }),
+    );
+    expect(outcome.status).toBe(entry.matches ? "answered" : "needs_you");
+    expect(memory.list().total).toBe(entry.matches ? 0 : 1);
+  },
+);
+
+it("one remembered monitoring answer resolves reworded questions in parallel applications", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const first = applications.claimNext()!,
+    second = applications.claimNext()!,
+    memory = applications.needsYou;
+  const sample = meanings.cases[1]!;
+  const a = memory.request(
+    question(first.id, first.attempt, {
+      key: "monitoring-a",
+      fieldKey: "monitoring-a",
+      prompt: sample.saved,
+      input: "text",
+      reusePrompt: true,
+      scope: {},
+    }),
+  );
+  const b = memory.request(
+    question(second.id, second.attempt, {
+      key: "monitoring-b",
+      fieldKey: "monitoring-b",
+      prompt: sample.asked,
+      input: "text",
+      reusePrompt: true,
+      scope: {},
+    }),
+  );
+  if (a.status !== "needs_you" || b.status !== "needs_you")
+    throw Error("Expected one shared handover");
+  expect(a.task.id).toBe(b.task.id);
+  expect(memory.list().total).toBe(1);
+  expect(
+    memory.answer({ id: a.task.id, answer: sample.answer, remember: true }),
+  ).toEqual({ resolved: true, queued: 2 });
+  expect(memory.list().total).toBe(0);
+});
+
+it("conflicting saved meanings and duplicate current targets never pick the latest answer", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!,
+    memory = applications.needsYou;
+  const sample = meanings.cases[3]!;
+  memory.remember({
+    key: "notice-a",
+    prompt: sample.saved,
+    answer: "30 days",
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  const lookup = {
+    key: "notice-target",
+    prompt: sample.asked,
+    reusePrompt: true,
+  };
+  expect(
+    memory.answersForQuestions(
+      row.id,
+      [
+        lookup,
+        {
+          ...lookup,
+          key: "second-target",
+          prompt: "How much notice do you need to give?",
+        },
+      ],
+      "https://jobs.example.test",
+    ),
+  ).toEqual([]);
+  memory.remember({
+    key: "notice-b",
+    prompt: "How much notice do you need to give?",
+    answer: "60 days",
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  expect(
+    memory.answersForQuestions(row.id, [lookup], "https://jobs.example.test"),
+  ).toEqual([]);
+  expect(
+    memory.request(
+      question(row.id, row.attempt, {
+        key: lookup.key,
+        fieldKey: lookup.key,
+        prompt: sample.asked,
+        input: "text",
+        reusePrompt: true,
+        scope: {},
+      }),
+    ).status,
+  ).toBe("needs_you");
+});
+
+it.each(meanings.cases.slice(0, 4))(
+  "restart remembers reworded $saved without requeueing an uncertain send",
+  (entry) => {
+    const folder = mkdtempSync(
+      path.join(tmpdir(), "nestor-remembered-question-"),
+    );
+    folders.push(folder);
+    const file = path.join(folder, "jobs.sqlite");
+    const { jobs, applications } = open(file);
+    applications.applyJobs({ selection: { ids: add(jobs, 3) } });
+    const [first, exact, uncertain] = [
+      applications.claimNext()!,
+      applications.claimNext()!,
+      applications.claimNext()!,
+    ];
+    const memory = applications.needsYou;
+    memory.remember({
+      key: "source",
+      prompt: entry.saved,
+      answer: entry.answer,
+      input: "text",
+      options: [],
+      scope: {},
+    });
+    for (const [row, prompt] of [
+      [first, entry.asked],
+      [exact, entry.saved],
+      [uncertain, entry.asked],
+    ] as const)
+      expect(
+        memory.request(
+          question(row.id, row.attempt, {
+            key: `target-${row.id}`,
+            fieldKey: "target",
+            prompt,
+            input: "text",
+            reusePrompt: true,
+            scope: {},
+          }),
+          { reuseAnswers: false },
+        ).status,
+      ).toBe("needs_you");
+    jobs
+      .sql("UPDATE applications SET state='uncertain' WHERE id=?")
+      .run(uncertain.id);
+    jobs.close();
+    const reopened = open(file).applications;
+    expect(reopened.needsYou.reconcileSavedQuestions()).toBe(1);
+    expect(reopened.getApplication(first.id)?.state).toBe("queued");
+    expect(reopened.getApplication(exact.id)?.state).toBe("needs_you");
+    expect(reopened.getApplication(uncertain.id)?.state).toBe("uncertain");
+    expect(reopened.needsYou.reconcileSavedQuestions()).toBe(0);
+    const resumed = reopened.claimNext()!;
+    expect(resumed.id).toBe(first.id);
+    expect(
+      reopened.needsYou.request(
+        question(resumed.id, resumed.attempt, {
+          key: `target-${resumed.id}`,
+          fieldKey: "target",
+          prompt: entry.asked,
+          input: "text",
+          reusePrompt: true,
+          scope: {},
+        }),
+      ),
+    ).toEqual({ status: "answered", answer: entry.answer });
+  },
+);
+
+it("restart keeps conflicting meanings, duplicate targets and unoffered answers in Needs you", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 3) } });
+  const [conflict, duplicate, choice] = [
+    applications.claimNext()!,
+    applications.claimNext()!,
+    applications.claimNext()!,
+  ];
+  const memory = applications.needsYou;
+  memory.remember({
+    key: "notice-30",
+    prompt: "What is your notice period?",
+    answer: "30 days",
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  memory.remember({
+    key: "notice-60",
+    prompt: "Required notice period",
+    answer: "60 days",
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  for (const [row, fieldKey, input, options] of [
+    [conflict, "a", "text", []],
+    [duplicate, "b", "text", []],
+    [duplicate, "c", "text", []],
+    [choice, "d", "choice", ["60 days", "90 days"]],
+  ] as const)
+    memory.request(
+      question(row.id, row.attempt, {
+        key: fieldKey,
+        fieldKey,
+        prompt: "How much notice do you need to give?",
+        input,
+        options: [...options],
+        reusePrompt: true,
+        scope: {},
+      }),
+      { reuseAnswers: false },
+    );
+  expect(memory.reconcileSavedQuestions()).toBe(0);
+  expect(applications.getApplication(conflict.id)?.state).toBe("needs_you");
+  memory.forgetAnswers({
+    ids: [memory.getAnswerByKey({ key: "notice-60" })!.id],
+  });
+  expect(memory.reconcileSavedQuestions()).toBe(1);
+  expect(applications.getApplication(duplicate.id)?.state).toBe("needs_you");
+  expect(applications.getApplication(choice.id)?.state).toBe("needs_you");
+});
+
+it.each(["", "I am still deciding"])(
+  "remembered answers and restart preserve the person's unfinished draft: %s",
+  (draft) => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+    const row = applications.claimNext()!;
+    const memory = applications.needsYou;
+    const waiting = memory.request(
+      question(row.id, row.attempt, {
+        key: "notice-current",
+        fieldKey: "notice-current",
+        prompt: "How much notice do you need to give?",
+        input: "text",
+        reusePrompt: true,
+        scope: {},
+      }),
+    );
+    if (waiting.status !== "needs_you") throw new Error("Expected handover");
+    memory.saveDraft({
+      id: waiting.task.id,
+      answer: draft,
+      remember: false,
+      revision: 0,
+    });
+    memory.remember({
+      key: "notice-saved",
+      prompt: "What is your notice period?",
+      answer: "Immediately",
+      input: "text",
+      options: [],
+      scope: {},
+    });
+    expect(memory.reconcileSavedQuestions()).toBe(0);
+    expect(memory.details(waiting.task.id)?.draft?.answer).toBe(draft);
+    expect(applications.getApplication(row.id)?.state).toBe("needs_you");
+  },
+);
+
+it("saving a reworded answer never resolves two distinct questions on the same application", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!;
+  for (const [index, prompt] of [
+    "How much notice do you need to give?",
+    "Required notice period",
+  ].entries())
+    applications.needsYou.request(
+      question(row.id, row.attempt, {
+        key: `notice-${index}`,
+        fieldKey: `notice-${index}`,
+        prompt,
+        input: "text",
+        reusePrompt: true,
+        scope: {},
+      }),
+      { reuseAnswers: false },
+    );
+  applications.needsYou.remember({
+    key: "notice-saved",
+    prompt: "What is your notice period?",
+    answer: "Immediately",
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  expect(applications.needsYou.list().total).toBe(2);
+  expect(applications.getApplication(row.id)?.state).toBe("needs_you");
 });
 
 it("persists guarded answer Undo without retracting answers that released applications", () => {

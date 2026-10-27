@@ -1,0 +1,130 @@
+{
+  "cases": [
+    {
+      "saved": "What are your salary expectations?",
+      "asked": "What are your annual pay expectations (please specify in EUR)",
+      "answer": "65000 EUR per year",
+      "matches": true
+    },
+    {
+      "saved": "What is your favourite monitoring product and why?",
+      "asked": "What monitoring/observability product do you love or hate, and why?",
+      "answer": "My own saved opinion about Example Metrics.",
+      "matches": true
+    },
+    {
+      "saved": "Have you previously worked or consulted for GitLab?",
+      "asked": "Have you previously worked at or consulted for GitLab?*",
+      "answer": "No",
+      "matches": true
+    },
+    {
+      "saved": "What is your notice period?",
+      "asked": "Notice  Period",
+      "answer": "30 days",
+      "matches": true
+    },
+    {
+      "saved": "What is your minimum acceptable salary?",
+      "asked": "What are your annual pay expectations (please specify in EUR)",
+      "answer": "5000 EUR per month",
+      "matches": false
+    },
+    {
+      "saved": "What are your salary expectations?",
+      "asked": "What is your current salary?",
+      "answer": "65000 EUR per year",
+      "matches": false
+    },
+    {
+      "saved": "What are your salary expectations?",
+      "asked": "Expected annual salary in USD",
+      "answer": "65000 EUR per year",
+      "matches": false
+    },
+    {
+      "saved": "What are your salary expectations?",
+      "asked": "Expected annual salary in EUR",
+      "answer": "5000 EUR per month",
+      "matches": false
+    },
+    {
+      "saved": "What are your salary expectations?",
+      "asked": "Expected annual salary in EUR",
+      "answer": "65000",
+      "matches": false
+    },
+    {
+      "saved": "Have you previously worked or consulted for GitLab?",
+      "asked": "Have you ever worked for Other Workshop?",
+      "answer": "No",
+      "matches": false
+    },
+    {
+      "saved": "Have you previously worked or consulted for GitLab?",
+      "asked": "Are you authorized to work for GitLab?",
+      "answer": "No",
+      "matches": false
+    },
+    {
+      "saved": "What is your favourite monitoring product and why?",
+      "asked": "How many years have you used monitoring products?",
+      "answer": "My own saved opinion.",
+      "matches": false
+    },
+    {
+      "saved": "Country of residence",
+      "asked": "Passport Country",
+      "answer": "Germany",
+      "matches": false
+    },
+    {
+      "saved": "What is your notice period?",
+      "asked": "Notice period (repeated question on step 2)",
+      "answer": "30 days",
+      "matches": false
+    },
+    {
+      "saved": "Expected salary (€)",
+      "asked": "Expected salary ($)",
+      "answer": "65000",
+      "matches": false
+    },
+    {
+      "saved": "Expected salary",
+      "asked": "Expected salary (€)",
+      "answer": "65000 USD per year",
+      "matches": false
+    },
+    {
+      "saved": "Expected annual salary (EUR)",
+      "asked": "Expected annual salary (EUR)",
+      "answer": "5000 EUR per month",
+      "matches": false
+    },
+    {
+      "saved": "Have you previously worked for Example Company?",
+      "asked": "Have you ever been employed at Example Company?",
+      "answer": "No",
+      "matches": true
+    },
+    {
+      "saved": "Have you previously worked for GitLab?",
+      "asked": "Have you ever worked for any company?",
+      "answer": "No",
+      "matches": false
+    },
+    {
+      "saved": "What is your notice period?",
+      "asked": "When could you start after giving notice?",
+      "answer": "30 days",
+      "matches": true
+    },
+    {
+      "saved": "What are your salary expectations?",
+      "asked": "What is your notice period and expected salary?",
+      "answer": "65000 EUR per year",
+      "matches": false
+    }
+  ]
+}

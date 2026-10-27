@@ -24,6 +24,117 @@ import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
 const at = "2026-10-26T12:00:00.000Z";
 
 test.each([
+  {
+    saved: "What are your salary expectations?",
+    asked: "Monthly net pay expectations (EUR)",
+    answer: "At least 4700 EUR net per month",
+    tag: "salary" as const,
+    expected: true,
+    placeholder: "",
+  },
+  {
+    saved: "What is your notice period?",
+    asked: "How much notice do you need to give?",
+    answer: "Immediately",
+    tag: "other" as const,
+    expected: true,
+    placeholder: "",
+  },
+  {
+    saved: "What are your salary expectations?",
+    asked: "Monthly gross pay expectations (EUR)",
+    answer: "4700 EUR net per month",
+    tag: "salary" as const,
+    expected: false,
+    placeholder: "",
+  },
+  {
+    saved: "Notice period",
+    asked: "Notice period",
+    answer: "30 days",
+    tag: "other" as const,
+    expected: false,
+    placeholder: "Months",
+  },
+])(
+  "a reworded saved answer is grounded at Fill and Send: $asked / $answer",
+  async (entry) => {
+    const src = sources();
+    src.reusableAnswers = [
+      {
+        id: "person-answer",
+        kind: entry.tag === "salary" ? "salary_expectation" : "notice_period",
+        label: entry.saved,
+        question: entry.saved,
+        answer: entry.answer,
+        roleFamilies: [],
+        proofEntryIds: [],
+        applicationScope: {
+          applicationRecordId: "application_1",
+          resultId: null,
+          location: null,
+        },
+      },
+    ];
+    const s = setup(
+      field(entry.asked, { placeholder: entry.placeholder }),
+      src,
+    );
+    s.config.application.applicationRecordId = "application_1";
+    const outcome = await executeApplyProposal(
+      { tool: "type", ref: "c0", text: entry.answer },
+      s.observation().signature,
+      {
+        config: s.config,
+        now: () => new Date(at),
+        guardState: createApplyGuardState(),
+        classifyQuestions: readTags({
+          kind: entry.tag,
+          sourceId: "answerLibrary.person-answer",
+          country: null,
+        }),
+        checkWrittenAnswer: () =>
+          Promise.reject(
+            new Error(
+              "An unchanged remembered answer needs no generated claim check.",
+            ),
+          ),
+      },
+    );
+    expect(outcome.kind === "filled").toBe(entry.expected);
+    expect(s.fillText.mock.calls.length).toBe(entry.expected ? 1 : 0);
+    const client: LLMClient = {
+      chatWithTools: () =>
+        Promise.resolve(
+          call("report_question_kinds", {
+            plainIndexes: [0],
+            flagged: [],
+            tags: [
+              {
+                index: 0,
+                kind: entry.tag,
+                sourceId: "answerLibrary.person-answer",
+                country: null,
+              },
+            ],
+          }),
+        ),
+    };
+    const checks = await checkClassifiedApplicationAnswers({
+      client,
+      sources: src,
+      payDisclosed: false,
+      application: s.config.application,
+      answers: [{ question: entry.asked, answer: entry.answer }],
+      formControls: s.observation().controls,
+      formContext: { pageText: s.page.bodyText, fields: [] },
+    });
+    expect(checks[0]?.supported).toBe(entry.expected);
+    expect(src.reusableAnswers[0]?.question).toBe(entry.saved);
+  },
+);
+
+test.each([
   { employer: "Other Workshop", expected: "No" },
   { employer: "Example", expected: "Yes" },
   { employer: "Example Ltd.", expected: "Yes" },

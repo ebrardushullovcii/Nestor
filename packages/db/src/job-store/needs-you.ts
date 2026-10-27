@@ -9,6 +9,7 @@ import {
   type SavedFormAnswerKey,
   type CandidateAnswerKind,
   normalizeFormQuestionPrompt,
+  savedQuestionMatches,
   cleanFormQuestionPrompt,
   RememberFormAnswerInputSchema,
   type RememberFormAnswerInput,
@@ -67,6 +68,41 @@ type Task = {
   source_url?: string | null;
   blocked_url?: string | null;
 };
+
+type SavedLookup = {
+  option_fallback_json: string | null;
+  id: number;
+  prompt: string;
+  answer: string;
+  answer_key: string;
+  country: string;
+  site_origin: string;
+  kind: CandidateAnswerKind;
+  input: string;
+  options_json: string;
+  role_families_json: string;
+  proof_entry_ids_json: string;
+};
+
+/** Conflicting answers to one meaning are a person decision, never a latest-row guess. */
+function uniquePromptAnswer<T extends { prompt: string; answer: string }>(
+  rows: readonly T[],
+  prompt: string,
+): T | null {
+  const matching = rows.filter((row) =>
+    savedQuestionMatches(row.prompt, prompt, row.answer),
+  );
+  if (new Set(matching.map((row) => row.answer.trim())).size !== 1) return null;
+  return (
+    matching.find(
+      (row) =>
+        normalizeFormQuestionPrompt(row.prompt) ===
+        normalizeFormQuestionPrompt(prompt),
+    ) ??
+    matching[0] ??
+    null
+  );
+}
 
 function sameFormat(
   input: string,
@@ -325,6 +361,43 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     );
     return result.id;
   }
+  function uniqueWaitingTarget(
+    task: Task,
+    prompt: string,
+    answer: string,
+  ): boolean {
+    const targets =
+      sql(`SELECT n.application_id,n.field_key,n.task_id,t.prompt FROM application_needs_you n
+      JOIN needs_you t ON t.id=n.task_id JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
+      WHERE a.state='needs_you' AND t.resolved_at IS NULL AND t.reuse_prompt=1 AND n.application_id IN
+        (SELECT application_id FROM application_needs_you WHERE task_id=?)`).all(
+        task.id,
+      ) as {
+        application_id: number;
+        field_key: string;
+        task_id: number;
+        prompt: string;
+      }[];
+    for (const applicationId of new Set(
+      targets.map((target) => target.application_id),
+    )) {
+      const sameApplication = targets.filter(
+        (target) => target.application_id === applicationId,
+      );
+      const exact = sameApplication.filter(
+        (target) =>
+          normalizeFormQuestionPrompt(target.prompt) ===
+          normalizeFormQuestionPrompt(prompt),
+      );
+      const matches = exact.length
+        ? exact
+        : sameApplication.filter((target) =>
+            savedQuestionMatches(prompt, target.prompt, answer),
+          );
+      if (matches.length !== 1 || matches[0]?.task_id !== task.id) return false;
+    }
+    return true;
+  }
   function resolveMatching(
     key: string,
     prompt: string,
@@ -332,17 +405,39 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     origin: string,
     answer: string,
   ): number {
-    const waiting =
-      sql(`SELECT * FROM needs_you WHERE kind='question' AND resolved_at IS NULL AND answer_key=? AND country=? AND site_origin=?
-      UNION SELECT * FROM needs_you WHERE kind='question' AND resolved_at IS NULL AND reuse_prompt=1 AND prompt_key=? AND country=? AND site_origin=?`).all(
-        key,
-        country,
-        origin,
-        prompt,
-        country,
-        origin,
-      ) as Task[];
-    return waiting.reduce((queued, task) => queued + resolve(task, answer), 0);
+    const waiting = sql(
+      `SELECT * FROM needs_you WHERE kind='question' AND resolved_at IS NULL AND country=? AND site_origin=?`,
+    ).all(country, origin) as Task[];
+    return waiting.reduce((queued, task) => {
+      if (sql("SELECT 1 FROM needs_you_drafts WHERE task_id=?").get(task.id))
+        return queued;
+      if (
+        task.answer_key !== key &&
+        !(
+          task.reuse_prompt === 1 &&
+          savedQuestionMatches(prompt, task.prompt, answer)
+        )
+      )
+        return queued;
+      if (
+        task.reuse_prompt === 1 &&
+        (!uniqueWaitingTarget(task, prompt, answer) ||
+          !uniquePromptAnswer(
+            sql(
+              "SELECT * FROM form_answers WHERE country=? AND site_origin=? AND needs_confirmation=0",
+            ).all(country, origin) as SavedLookup[],
+            task.prompt,
+          ))
+      )
+        return queued;
+      let fitted: string;
+      try {
+        fitted = validateAnswer(task, answer);
+      } catch {
+        return queued;
+      }
+      return queued + resolve(task, fitted);
+    }, 0);
   }
 
   return {
@@ -387,7 +482,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         if (!value.needsConfirmation)
           resolveMatching(
             value.key,
-            normalizeFormQuestionPrompt(value.prompt),
+            value.prompt,
             value.scope.country,
             value.scope.siteOrigin,
             value.answer,
@@ -523,13 +618,14 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       const value = SaveFormAnswerInputSchema.parse(input);
       return store.transaction(() => {
         const previous = sql(
-          "SELECT input,options_json,answer_key,prompt_key,country,site_origin,option_fallback_json FROM form_answers WHERE id = ?",
+          "SELECT input,options_json,answer_key,prompt,prompt_key,country,site_origin,option_fallback_json FROM form_answers WHERE id = ?",
         ).get(value.id) as
           | (Pick<
               Task,
               | "input"
               | "options_json"
               | "answer_key"
+              | "prompt"
               | "prompt_key"
               | "country"
               | "site_origin"
@@ -552,7 +648,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         );
         resolveMatching(
           previous.answer_key,
-          previous.prompt_key,
+          previous.prompt,
           previous.country,
           previous.site_origin,
           answer,
@@ -602,55 +698,61 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       siteOrigin: string,
     ): FormAnswerMatch[] {
       const origin = FormAnswerScopeSchema.parse({ siteOrigin }).siteOrigin;
+      const savedRows = sql(
+        `SELECT * FROM form_answers WHERE needs_confirmation=0 AND country='' AND site_origin IN ('',?) ORDER BY (site_origin=?) DESC,updated_at DESC,id DESC`,
+      ).all(origin, origin) as SavedLookup[];
+      const localRows = sql(
+        `SELECT DISTINCT t.id,t.prompt,t.answer,t.answer_key,t.reuse_prompt FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id WHERE n.application_id=? AND t.kind='question' ORDER BY t.id DESC`,
+      ).all(applicationId) as Array<{
+        id: number;
+        prompt: string;
+        answer: string | null;
+        answer_key: string;
+        reuse_prompt: number;
+      }>;
       return questions.flatMap<FormAnswerMatch>((question) => {
-        const key = question.reusePrompt
-          ? normalizeFormQuestionPrompt(question.prompt)
-          : question.key;
+        const relevantLocal = localRows.filter((row) =>
+          question.reusePrompt
+            ? row.reuse_prompt === 1 &&
+              savedQuestionMatches(
+                row.prompt,
+                question.prompt,
+                row.answer ?? "",
+              )
+            : row.answer_key === question.key,
+        );
+        const exactLocal = relevantLocal.find((row) =>
+          question.reusePrompt
+            ? normalizeFormQuestionPrompt(row.prompt) ===
+              normalizeFormQuestionPrompt(question.prompt)
+            : row.answer_key === question.key,
+        );
         const local =
-          sql(`SELECT t.id,t.prompt,t.answer FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
-          WHERE n.application_id=? AND t.kind='question' AND ${question.reusePrompt ? "t.reuse_prompt=1 AND t.prompt_key=?" : "t.answer_key=?"}
-          ORDER BY t.id DESC LIMIT 1`).get(applicationId, key) as
-            | { id: number; prompt: string; answer: string | null }
-            | undefined;
-        if (local?.answer === null) return [];
-        if (question.reusePrompt && question.kind === "work_authorization") {
-          const alternatives =
-            sql(`SELECT count(DISTINCT lower(trim(answer))) AS n
-            FROM form_answers WHERE prompt_key=? AND needs_confirmation=0
-              AND country='' AND site_origin IN ('',?)`).get(key, origin) as {
-              n: number;
-            };
-          if (alternatives.n > 1) return [];
-        }
-        let saved =
-          sql(`SELECT id,prompt,answer,kind,role_families_json,proof_entry_ids_json,option_fallback_json FROM form_answers WHERE ${question.reusePrompt ? "prompt_key" : "answer_key"}=? AND needs_confirmation=0 AND country='' AND site_origin IN ('',?)
-          ORDER BY (site_origin=?) DESC,updated_at DESC,id DESC LIMIT 1`).get(
-            key,
-            origin,
-            origin,
-          ) as
-            | {
-                id: number;
-                prompt: string;
-                answer: string;
-                kind: CandidateAnswerKind;
-                option_fallback_json: string | null;
-                role_families_json: string;
-                proof_entry_ids_json: string;
-              }
-            | undefined;
-        if (!saved && question.kind && question.kind !== "other") {
-          saved =
-            sql(`SELECT id,prompt,answer,kind,role_families_json,proof_entry_ids_json,option_fallback_json FROM form_answers
-            WHERE kind=? AND country='' AND site_origin IN ('',?) AND needs_confirmation=0
-            ORDER BY (site_origin=?) DESC,updated_at DESC,id DESC LIMIT 1`).get(
-              question.kind,
-              origin,
-              origin,
-            ) as typeof saved;
-        }
+          exactLocal ??
+          uniquePromptAnswer(
+            relevantLocal.filter(
+              (row): row is typeof row & { answer: string } =>
+                row.answer !== null,
+            ),
+            question.prompt,
+          );
         if (
-          local &&
+          relevantLocal.some((row) => row.answer === null) ||
+          (relevantLocal.length && !local)
+        )
+          return [];
+        let eligible = savedRows.filter((row) =>
+          question.reusePrompt
+            ? savedQuestionMatches(row.prompt, question.prompt, row.answer)
+            : row.answer_key === question.key,
+        );
+        if (eligible.some((row) => row.site_origin === origin))
+          eligible = eligible.filter((row) => row.site_origin === origin);
+        const saved = question.reusePrompt
+          ? uniquePromptAnswer(eligible, question.prompt)
+          : eligible[0];
+        if (
+          local?.answer != null &&
           (!saved?.option_fallback_json || saved.answer !== local.answer)
         )
           return [
@@ -662,27 +764,82 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               local: true,
             },
           ];
-        return saved
-          ? [
-              {
-                id: `saved:${saved.id}`,
-                key: question.key,
-                prompt: saved.prompt,
-                answer: saved.answer,
-                local: false,
-                optionFallback: saved.option_fallback_json
-                  ? SavedOptionFallbackSchema.parse(
-                      JSON.parse(saved.option_fallback_json) as unknown,
-                    )
-                  : null,
-                kind: saved.kind,
-                roleFamilies: JSON.parse(saved.role_families_json) as string[],
-                proofEntryIds: JSON.parse(
-                  saved.proof_entry_ids_json,
-                ) as string[],
-              },
-            ]
-          : [];
+        if (!saved) return [];
+        if (question.reusePrompt) {
+          const exactTargets = questions.filter(
+            (target) =>
+              normalizeFormQuestionPrompt(target.prompt) ===
+              normalizeFormQuestionPrompt(saved.prompt),
+          );
+          const targets = exactTargets.length
+            ? exactTargets
+            : questions.filter(
+                (target) =>
+                  target.reusePrompt &&
+                  savedQuestionMatches(
+                    saved.prompt,
+                    target.prompt,
+                    saved.answer,
+                  ),
+              );
+          if (targets.length !== 1 || targets[0] !== question) return [];
+        }
+        return [
+          {
+            id: `saved:${saved.id}`,
+            key: question.key,
+            prompt: saved.prompt,
+            answer: saved.answer,
+            local: false,
+            optionFallback: saved.option_fallback_json
+              ? SavedOptionFallbackSchema.parse(
+                  JSON.parse(saved.option_fallback_json) as unknown,
+                )
+              : null,
+            kind: saved.kind,
+            roleFamilies: JSON.parse(saved.role_families_json) as string[],
+            proofEntryIds: JSON.parse(saved.proof_entry_ids_json) as string[],
+          },
+        ];
+      });
+    },
+    /** Reuse human answers for older reworded handovers, without overriding an exact refusal. */
+    reconcileSavedQuestions(): number {
+      return store.transaction(() => {
+        const waiting = sql(`SELECT DISTINCT t.* FROM needs_you t
+          JOIN application_needs_you n ON n.task_id=t.id
+          JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
+          WHERE t.kind='question' AND t.reuse_prompt=1 AND t.resolved_at IS NULL AND a.state='needs_you'`).all() as Task[];
+        let queued = 0;
+        for (const task of waiting) {
+          if (
+            sql("SELECT 1 FROM needs_you_drafts WHERE task_id=?").get(task.id)
+          )
+            continue;
+          const saved = uniquePromptAnswer(
+            sql(`SELECT * FROM form_answers
+            WHERE needs_confirmation=0 AND country=? AND site_origin=? ORDER BY updated_at DESC,id DESC`).all(
+              task.country,
+              task.site_origin,
+            ) as SavedLookup[],
+            task.prompt,
+          );
+          if (
+            !saved ||
+            normalizeFormQuestionPrompt(saved.prompt) ===
+              normalizeFormQuestionPrompt(task.prompt)
+          )
+            continue;
+          if (!uniqueWaitingTarget(task, saved.prompt, saved.answer)) continue;
+          let answer: string;
+          try {
+            answer = validateAnswer(task, saved.answer);
+          } catch {
+            continue;
+          }
+          queued += resolve(task, answer);
+        }
+        return queued;
       });
     },
     findAnswer: (key: string, scope: Partial<FormAnswerScope> = {}) =>
@@ -729,15 +886,15 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             return { status: "answered", answer: previous.answer };
           }
           const saved = value.reusePrompt
-            ? (sql(
-                "SELECT answer,input,options_json FROM form_answers WHERE prompt_key=? AND country=? AND site_origin=? AND needs_confirmation=0 ORDER BY updated_at DESC,id DESC LIMIT 1",
-              ).get(
-                normalizeFormQuestionPrompt(value.prompt),
-                value.scope.country,
-                value.scope.siteOrigin,
-              ) as
-                | { answer: string; input: string; options_json: string }
-                | undefined)
+            ? uniquePromptAnswer(
+                sql(
+                  `SELECT * FROM form_answers WHERE country=? AND site_origin=? AND needs_confirmation=0 ORDER BY updated_at DESC,id DESC`,
+                ).all(
+                  value.scope.country,
+                  value.scope.siteOrigin,
+                ) as SavedLookup[],
+                value.prompt,
+              )
             : findAnswerRecord(value.key, value.scope);
           if (saved) {
             if (
@@ -747,7 +904,18 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               throw new Error(
                 "A shared question key must use the same answer format.",
               );
-            return { status: "answered", answer: saved.answer };
+            try {
+              const answer = validateAnswer(
+                {
+                  input: value.input,
+                  options_json: JSON.stringify(value.options),
+                },
+                saved.answer,
+              );
+              return { status: "answered", answer };
+            } catch {
+              /* A remembered answer must still fit this form's own choices. */
+            }
           }
         }
 
@@ -766,6 +934,28 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               AND resolved_at IS NULL AND NOT EXISTS (SELECT 1 FROM source_needs_you s WHERE s.task_id=t.id)
               ORDER BY id LIMIT 1`).get(value.scope.siteOrigin)
         ) as Task | undefined;
+        if (
+          !task &&
+          value.kind === "question" &&
+          value.reusePrompt &&
+          options.reuseAnswers !== false
+        ) {
+          const alternatives = sql(
+            `SELECT * FROM needs_you t WHERE kind='question' AND reuse_prompt=1 AND resolved_at IS NULL AND country=? AND site_origin=?
+              AND NOT EXISTS (SELECT 1 FROM application_needs_you n WHERE n.task_id=t.id AND n.application_id=? AND n.attempt=? AND n.field_key<>?) ORDER BY id`,
+          ).all(
+            value.scope.country,
+            value.scope.siteOrigin,
+            value.applicationId,
+            value.attempt,
+            value.fieldKey,
+          ) as Task[];
+          task = alternatives.find(
+            (candidate) =>
+              savedQuestionMatches(candidate.prompt, value.prompt) &&
+              sameFormat(candidate.input, candidate.options_json, value),
+          );
+        }
         // Keep one site card as sign-in advances to a challenge or MFA. An
         // older waiting page must not turn its MFA card back into sign-in.
         const priority = { question: 0, sign_in: 1, captcha: 2, mfa: 3 };
@@ -877,7 +1067,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         if (value.remember && task.reuse_prompt === 1)
           queued += resolveMatching(
             task.answer_key,
-            task.prompt_key,
+            task.prompt,
             task.country,
             task.site_origin,
             answer,

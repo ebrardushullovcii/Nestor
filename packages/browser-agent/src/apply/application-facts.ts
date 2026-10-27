@@ -1,6 +1,7 @@
 import {
   normalizeFormQuestionPrompt,
   preserveTechnologyTokens,
+  savedQuestionMatches,
   type CandidateReusableAnswer,
 } from "@nestor/contracts";
 
@@ -428,40 +429,68 @@ export function savedAnswerForQuestion(
       : [candidate.groupLabel, candidate.label]
           .filter((part) => part.trim())
           .join(" — "));
-  const target = normalizeFormQuestionPrompt(
-    preserveTechnologyTokens(prompt(control)),
+  const key = (value: string) =>
+    normalizeFormQuestionPrompt(preserveTechnologyTokens(value));
+  const rawPrompt = prompt(control);
+  const context = `${control.placeholder} ${control.hint ?? ""}`;
+  const target = key(rawPrompt);
+  const usable = reusableAnswers.filter((saved) => !saved.needsConfirmation);
+  const unique = (matches: CandidateReusableAnswer[]) => {
+    const local = matches.filter((saved) =>
+      saved.id.startsWith("application_"),
+    );
+    const answers = local.length ? local : matches;
+    return new Set(answers.map((saved) => saved.answer.trim())).size === 1
+      ? (answers[0] ?? null)
+      : null;
+  };
+  const group = (candidate: ApplyFormControl) =>
+    (candidate.kind === "radio" ||
+      candidate.answerControlType === "multi_choice") &&
+    candidate.choiceGroupKey
+      ? `choice:${candidate.choiceGroupKey}`
+      : candidate.ref;
+  const visible = (controls ?? []).filter(
+    (candidate) => candidate.visible && !candidate.disabled,
   );
-  const matches = reusableAnswers.filter(
-    (saved) =>
-      !saved.needsConfirmation &&
-      normalizeFormQuestionPrompt(preserveTechnologyTokens(saved.question)) ===
-        target,
-  );
-  const local = matches.filter((saved) => saved.id.startsWith("application_"));
-  const answers = local.length ? local : matches;
-  if (new Set(answers.map((saved) => saved.answer.trim())).size !== 1)
+  if (
+    controls &&
+    new Set(
+      visible
+        .filter((candidate) => key(prompt(candidate)) === target)
+        .map(group),
+    ).size !== 1
+  )
     return null;
-  if (controls) {
-    const current = controls.filter(
-      (candidate) =>
-        candidate.visible &&
-        !candidate.disabled &&
-        normalizeFormQuestionPrompt(
-          preserveTechnologyTokens(prompt(candidate)),
-        ) === target,
+  const exact = usable.filter(
+    (saved) =>
+      key(saved.question) === target &&
+      savedQuestionMatches(saved.question, rawPrompt, saved.answer, context),
+  );
+  if (exact.length || control.repeatedQuestion) return unique(exact);
+  const semantic = usable.filter((saved) => {
+    if (!savedQuestionMatches(saved.question, rawPrompt, saved.answer, context))
+      return false;
+    if (!controls) return !control.groupLabel.trim();
+    const direct = visible.filter(
+      (candidate) => key(prompt(candidate)) === key(saved.question),
     );
-    const groups = new Set(
-      current.map((candidate) =>
-        (candidate.kind === "radio" ||
-          candidate.answerControlType === "multi_choice") &&
-        candidate.choiceGroupKey
-          ? `radio:${candidate.choiceGroupKey}`
-          : candidate.ref,
-      ),
-    );
-    if (groups.size !== 1) return null;
-  }
-  return answers[0] ?? null;
+    const targets = direct.length
+      ? direct
+      : visible.filter(
+          (candidate) =>
+            !candidate.repeatedQuestion &&
+            savedQuestionMatches(
+              saved.question,
+              prompt(candidate),
+              saved.answer,
+              `${candidate.placeholder} ${candidate.hint ?? ""}`,
+            ),
+        );
+    const groups = new Set(targets.map(group));
+    return groups.size === 1 && groups.has(group(control));
+  });
+  return unique(semantic);
 }
 
 /** An explicit answer on the retained application is the person's decision. */

@@ -17,6 +17,7 @@ const groups = {
     "packages/browser-agent/src/apply/policy-executor.test.ts",
     "packages/browser-runtime/src/choose-page-option.apply-replay.test.ts",
     "packages/contracts/src/technology-text.test.ts",
+    "packages/contracts/src/form-question-meaning.test.ts",
   ],
   uploads: [
     "packages/browser-runtime/src/application-attachment-upload.apply-replay.test.ts",
