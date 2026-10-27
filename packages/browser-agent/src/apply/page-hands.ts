@@ -215,6 +215,7 @@ export function buildApplyFormObservation(
     > = {
       ref: rawControl.ref ?? `c${rawControl.index}`,
       kind,
+      ...(inputType === "url" ? { urlInput: true } : {}),
       ...(inputType === "month" || inputType === "date"
         ? { dateInputType: inputType }
         : {}),

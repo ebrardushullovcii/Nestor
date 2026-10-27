@@ -83,6 +83,7 @@ import { matchOption } from "./option-match";
 import { savedPickerRule } from "./option-fallback";
 import { compactApplyPageHistory } from "./page-history";
 import { applicationModelFactsMessage } from "./model-facts";
+import { formatProfileUrlAnswer } from "./profile-url";
 import { createQuestionOccurrences } from "./question-occurrences";
 import {
   nationalityQuestionIdentity,
@@ -744,7 +745,11 @@ async function runMeasuredApplyAgent(
       readings?.get(questionPrompt(control));
     if (classifyQuestions && !reading?.answerTags) return null;
     for (const source of answerSourceCatalog(runConfig.sources)) {
-      const value = proposed ?? source.value;
+      const value = formatProfileUrlAnswer(
+        control,
+        proposed ?? source.value,
+        reading?.answerTags?.sourceId ?? source.id,
+      );
       if (!value.trim()) continue;
       const permission = classifyAnswerPermission({
         control: {

@@ -13,6 +13,12 @@ import {
   fieldNamesAnotherPerson,
 } from "./github-username";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
+import {
+  formatProfileUrlAnswer,
+  fullProfileUrl,
+  isProfileUrlSource,
+  wantsProfileUrl,
+} from "./profile-url";
 import type {
   ApplyAnswer,
   ApplyAnswerSources,
@@ -386,7 +392,14 @@ export function storedFactFor(input: {
   }).find(
     (candidate) =>
       (!factId || candidate.sourceId === factId) &&
-      candidate.value === wanted &&
+      (!isProfileUrlSource(candidate.sourceId) ||
+        !wantsProfileUrl(input.control) ||
+        fullProfileUrl(candidate.value) !== null) &&
+      formatProfileUrlAnswer(
+        input.control,
+        candidate.value,
+        candidate.sourceId,
+      ) === formatProfileUrlAnswer(input.control, wanted, candidate.sourceId) &&
       // A bare username is no answer to a field that asks for the address.
       (wantsUsername || !candidate.sourceId.endsWith("#username")),
   );
@@ -401,7 +414,7 @@ export function storedFactFor(input: {
     return null;
   }
   return {
-    value: wanted,
+    value: formatProfileUrlAnswer(input.control, wanted, fact.sourceId),
     kind: input.control.questionKind,
     sourceKind: fact.sourceKind,
     sourceId: fact.sourceId,

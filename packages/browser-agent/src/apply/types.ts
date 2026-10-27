@@ -55,6 +55,8 @@ export interface ApplyFormControl {
   kind: ApplyControlKind;
   /** Native date precision, retained so month inputs receive YYYY-MM. */
   dateInputType?: "date" | "month";
+  /** Native URL inputs require a complete address even when the label is generic. */
+  urlInput?: boolean;
   inputConstraints?: {
     type: "number" | "date" | "month";
     min?: string;

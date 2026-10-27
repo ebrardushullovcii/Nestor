@@ -393,6 +393,7 @@ export function questionClassificationKey(
     options,
     control.hint ?? "",
     control.placeholder,
+    control.urlInput ?? false,
   ]);
 }
 
@@ -412,7 +413,7 @@ function classifiableQuestions(controls: readonly ApplyFormControl[]) {
               {
                 identity: questionClassificationKey(control, controls),
                 prompt: questionPrompt(control),
-                kind: control.kind,
+                kind: control.urlInput ? "url" : control.kind,
                 hint: control.hint ?? "",
                 placeholder: control.placeholder,
                 options: [...control.options],

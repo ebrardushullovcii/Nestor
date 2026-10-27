@@ -17,6 +17,11 @@ import {
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
 import {
+  fullProfileUrl,
+  isProfileUrlSource,
+  wantsProfileUrl,
+} from "./profile-url";
+import {
   countriesIn,
   countryTerms,
   isPlainMotivationIntent,
@@ -279,8 +284,7 @@ function knownLiteralField(
   }
   const profileLink = /^profile\.([a-zA-Z]+)Url$/u.exec(source.id);
   if (profileLink) {
-    if (source.id === "profile.githubUrl" && fieldNamesAnotherPerson(control))
-      return false;
+    if (fieldNamesAnotherPerson(control)) return false;
     if (source.id === "profile.githubUrl" && asksGithubUsername(control))
       return false;
     const field = normalizeFormQuestionPrompt(profileLink[1] ?? "");
@@ -341,6 +345,10 @@ function literalValueMatches(
   control: ApplyFormControl,
   answer: string,
 ): boolean {
+  if (isProfileUrlSource(source.id) && wantsProfileUrl(control)) {
+    const expected = fullProfileUrl(source.value);
+    return expected !== null && answer.trim() === expected;
+  }
   if (source.id === "profile.workEligibility.noticePeriodDays") {
     const units = [
       ...`${control.label} ${control.placeholder} ${control.options.join(" ")}`.matchAll(
