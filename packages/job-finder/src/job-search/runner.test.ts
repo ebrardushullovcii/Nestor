@@ -979,6 +979,43 @@ test("quick-stopped validated cards record successful access, while later auth e
   expect(sites.get(1)?.health).toBe("needs_sign_in");
 });
 
+test.each([false, true])(
+  "quick-stop health does not close an access ticket before detail reads (blocked=%s)",
+  async (blocked) => {
+    const { runner, engine, store, context } = setup();
+    const sites = createJobSitesStore(store);
+    const access = createSourceAccessStore(store);
+    sites.add({ text: "https://partial.example/source" });
+    context.sources = sites.enabled().map(jobSiteTarget);
+    access.request(1, "Sign in");
+    const gate = deferred<void>();
+    engine.collectSource.mockImplementation(async ({ target, onCards }) => {
+      await onCards?.(numberedCards(target.id, 400, "Backend Engineer"));
+      return { cards: [], complete: false, pagesRead: 1, notes: [] };
+    });
+    engine.readListings.mockImplementation(async ({ cards }) => {
+      await gate.promise;
+      return blocked
+        ? {
+            jobs: [],
+            failures: cards.map(({ url }) => ({
+              url,
+              reason: "Verification required",
+              needsYou: true,
+            })),
+          }
+        : { jobs: cards.map(found), failures: [] };
+    });
+    await runner.start({ postedWithin: "any" });
+    await vi.waitFor(() => expect(sites.get(1)?.health).toBe("healthy"));
+    expect(access.pending(1)).toBe(true);
+    gate.resolve(undefined);
+    await finished(runner);
+    expect(access.pending(1)).toBe(blocked);
+    expect(sites.get(1)?.health).toBe(blocked ? "needs_sign_in" : "healthy");
+  },
+);
+
 test("reported token usage stops the pass before another estimated batch starts", async () => {
   const { context, engine, store } = setup();
   const ids = store.saveFoundJobs({

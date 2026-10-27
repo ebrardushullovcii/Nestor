@@ -240,7 +240,11 @@ export function createJobSearchRunner(
         source.row.state = "done";
       // Inventory alone is not proof of access: the selected details must
       // also have finished, without an access or read failure.
-      if (source.row.state === "done" && source.row.failedReads === 0)
+      if (
+        (source.row.state === "done" ||
+          (source.row.state === "stopped" && source.quickStopReason)) &&
+        source.row.failedReads === 0
+      )
         source.completeAccess?.();
       source.row.phase = null;
       source.row.message =
@@ -375,7 +379,9 @@ export function createJobSearchRunner(
         const signedIn =
           access.pending(Number(source.target.id)) ||
           siteRows.get(Number(source.target.id))?.signInState === "signed_in";
-        access.complete(Number(source.target.id));
+        source.completeAccess ??= () => {
+          access.complete(Number(source.target.id));
+        };
         siteRows.record(
           Number(source.target.id),
           {
