@@ -294,6 +294,25 @@ export function detectApplyBlocker(input: {
 }): ApplyBlocker | null {
   const text = normalizeSignal(input.bodyText);
 
+  // A refusal is terminal for this browser; an automatic interstitial is not.
+  if (
+    !input.controls.some(
+      (control) => control.visible && !isSecurityChallengeControl(control),
+    ) &&
+    /\b(?:access denied|you have been blocked|your (?:browser|request|ip(?: address)?) (?:has been|is) blocked|this browser is (?:blocked|not supported)|automated (?:access|requests|browsers) (?:are |is )?(?:blocked|not allowed))\b/u.test(
+      text,
+    )
+  ) {
+    return {
+      code: "browser_blocked",
+      requiresPerson: true,
+      summary: "The site refused this browser.",
+      detail:
+        "This application is blocked. Open the job in your browser to apply by hand. Job Finder will not retry or try to get around the block.",
+      nextActionLabel: "Open in my browser",
+    };
+  }
+
   if (
     contains(text, AUTOMATIC_CHECK_SIGNALS) &&
     !contains(text, ["captcha", "i am not a robot", "verify you are human"])

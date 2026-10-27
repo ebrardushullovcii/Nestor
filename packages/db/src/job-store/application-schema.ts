@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS application_origins (
 CREATE INDEX IF NOT EXISTS application_origins_by_site ON application_origins(origin, application_id);
 
 CREATE TABLE IF NOT EXISTS needs_you (
+  blocked_url TEXT,
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT NOT NULL CHECK (kind IN ('question', 'sign_in', 'captcha', 'mfa')),
   answer_key TEXT NOT NULL,

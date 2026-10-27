@@ -52,7 +52,11 @@ const groups = {
     "packages/browser-agent/src/apply/apply-agent.stored-facts.test.ts",
     "packages/browser-runtime/src/application-preparation-scheduler.test.ts",
   ],
-  blocked: ["packages/browser-agent/src/apply/blockers.test.ts"],
+  blocked: [
+    "packages/browser-agent/src/apply/blockers.test.ts",
+    "packages/job-finder/src/applications/application-service.test.ts",
+    "apps/desktop/src/renderer/src/features/needs-you/needs-you-screen.test.tsx",
+  ],
 };
 
 const help = `Usage: pnpm apply:eval [--group <name[,name...]>] [--output <directory>] [--list]

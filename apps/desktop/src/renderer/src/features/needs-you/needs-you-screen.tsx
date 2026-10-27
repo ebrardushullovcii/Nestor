@@ -428,7 +428,9 @@ export function NeedsYouScreen() {
                     ? row.needsConfirmation
                       ? "Review saved answer"
                       : row.preview
-                    : KIND[row.kind]
+                    : row.blockedUrl
+                      ? "Blocked"
+                      : KIND[row.kind]
                 }
                 onActivate={activate}
                 onToggle={toggle}

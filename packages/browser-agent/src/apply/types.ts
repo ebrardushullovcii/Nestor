@@ -154,6 +154,7 @@ export interface ApplyStepPosition {
 }
 
 export type ApplyBlockerCode =
+  | "browser_blocked"
   | "site_login_required"
   | "account_creation_required"
   | "security_challenge"

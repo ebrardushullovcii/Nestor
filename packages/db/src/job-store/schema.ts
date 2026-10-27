@@ -60,6 +60,7 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
     definition: "TEXT CHECK (disposition IN ('skipped', 'blocked'))",
   },
   { table: "form_answers", column: "option_fallback_json", definition: "TEXT" },
+  { table: "needs_you", column: "blocked_url", definition: "TEXT" },
 ];
 
 const JOBS = `

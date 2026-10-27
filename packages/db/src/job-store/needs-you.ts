@@ -65,6 +65,7 @@ type Task = {
   source_id?: number | null;
   source_label?: string | null;
   source_url?: string | null;
+  blocked_url?: string | null;
 };
 
 function sameFormat(
@@ -91,6 +92,7 @@ function toTask(row: Task): NeedsYouTask {
     input: row.input,
     options,
     openedAt: toIso(row.opened_at),
+    ...(row.blocked_url ? { blockedUrl: row.blocked_url } : {}),
     ...(row.source_id != null
       ? {
           source: {
@@ -398,7 +400,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       const task = get(id);
       if (!task || task.resolved_at !== null) return null;
       const applications =
-        sql(`SELECT DISTINCT a.id, a.job_id AS jobId, j.title, j.company, j.location, a.state
+        sql(`SELECT DISTINCT a.id, a.job_id AS jobId, j.title, j.company, j.location, COALESCE(a.disposition,a.state) AS state
         FROM application_needs_you n JOIN applications a ON a.id = n.application_id JOIN jobs j ON j.id = a.job_id
         WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you' ORDER BY a.id LIMIT 50`).all(
           id,
@@ -804,6 +806,14 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           task = get(Number(created.lastInsertRowid))!;
         }
         link(value, task.id);
+        if (value.blockedUrl) {
+          sql("UPDATE needs_you SET blocked_url=?,prompt=? WHERE id=?").run(
+            value.blockedUrl,
+            value.prompt,
+            task.id,
+          );
+          task = get(task.id)!;
+        }
         sql(
           "UPDATE applications SET state = 'needs_you', updated_at = ? WHERE id = ?",
         ).run(Date.now(), value.applicationId);
@@ -885,11 +895,23 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       ).map(toTask);
     },
 
+    blockedSite(origin: string): NeedsYouTask | null {
+      const row = sql(
+        "SELECT * FROM needs_you WHERE site_origin=? AND blocked_url IS NOT NULL AND resolved_at IS NULL ORDER BY id LIMIT 1",
+      ).get(origin) as Task | undefined;
+      return row ? toTask(row) : null;
+    },
+
     /** Verify each bound application; a shared cookie is never proof for another page. */
     completeAccess(id: number, verifiedApplicationId: number): boolean {
       return store.transaction(() => {
         const task = get(id);
-        if (!task || task.kind === "question" || task.resolved_at !== null)
+        if (
+          !task ||
+          task.kind === "question" ||
+          task.blocked_url ||
+          task.resolved_at !== null
+        )
           return false;
         const linked =
           sql(`SELECT 1 FROM application_needs_you n JOIN applications a ON a.id=n.application_id

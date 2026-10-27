@@ -46,6 +46,7 @@ export const applicationWorkStates = [
   "submitted",
   "stopped",
   "skipped",
+  "blocked",
   "failed",
   "uncertain",
 ] as const;
@@ -155,6 +156,7 @@ export const NeedsYouTaskSchema = z.object({
   options: z.array(z.string()),
   openedAt: IsoDateTimeSchema,
   source: SourceAccessReferenceSchema.optional(),
+  blockedUrl: optionalStoredField(z.string().url().nullable(), null),
 });
 export type NeedsYouTask = z.infer<typeof NeedsYouTaskSchema>;
 

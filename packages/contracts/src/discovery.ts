@@ -1991,6 +1991,7 @@ export const applicationBlockerCodeValues = [
   "missing_consent",
   "external_redirect",
   "site_login_required",
+  "browser_blocked",
   // Technical failure raised only at the application goto boundary: the
   // dedicated browser never opened the employer page, so nothing was prepared.
   "application_page_unreachable",

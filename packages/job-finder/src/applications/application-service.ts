@@ -294,6 +294,26 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       !approved.approvedAt
     )
       throw new Error("Approve this job's resume before applying.");
+    const knownBlock = applications.needsYou.blockedSite(
+      new URL(job.applyUrl ?? job.url).origin,
+    );
+    if (knownBlock) {
+      applications.needsYou.request({
+        applicationId: row.id,
+        attempt: row.attempt,
+        fieldKey: "site_access",
+        kind: "sign_in",
+        key: knownBlock.key,
+        scope: knownBlock.scope,
+        prompt: knownBlock.prompt,
+        input: "text",
+        options: [],
+        blockedUrl: knownBlock.blockedUrl,
+      });
+      applications.block(row.id, row.attempt, knownBlock.prompt);
+      await closePage(row.id, row.attempt);
+      return;
+    }
     const {
       profile: savedProfile,
       settings,
@@ -672,6 +692,28 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       );
     if (await deps.isHoldingCurrent()) {
       applications.continuePreparation(row.id, row.attempt);
+      return;
+    }
+    const blockedAgent = agent as ApplyAgentResult | null;
+    const refusedBrowser = blockedAgent?.pauses.find(
+      (pause) => pause.blocker?.code === "browser_blocked",
+    );
+    if (refusedBrowser) {
+      const origin = new URL(blockedAgent?.finalUrl ?? target).origin;
+      applications.needsYou.request({
+        applicationId: row.id,
+        attempt: row.attempt,
+        fieldKey: "site_access",
+        kind: "sign_in",
+        key: `access:${origin}`,
+        scope: { siteOrigin: origin },
+        prompt: refusedBrowser.summary,
+        input: "text",
+        options: [],
+        blockedUrl: job.url,
+      });
+      applications.block(row.id, row.attempt, refusedBrowser.summary);
+      await closePage(row.id, row.attempt);
       return;
     }
     await checkApplicationAccess(row);
@@ -1170,6 +1212,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   }
 
   async function checkApplicationAccess(row: ApplicationRow): Promise<void> {
+    if (row.state === "blocked") return;
     const access = applications.needsYou.accessForApplication(row.id);
     if (!access.length) return;
     const key = applicationIdentity(row.id, row.attempt).resultId;

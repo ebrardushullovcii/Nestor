@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import blockedReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/blocked-site.json";
 
 import {
   canContinueApplicationAfterAccess,
@@ -33,6 +34,26 @@ function checkbox(checked: boolean): ApplyFormControl {
 }
 
 describe("detectApplyBlocker", () => {
+  test.each(blockedReplay.refusals)(
+    "refusal replay stops without attempting a challenge: %s",
+    (bodyText) => {
+      expect(
+        detectApplyBlocker({ bodyText, controls: [], actions: [] }),
+      ).toMatchObject({ code: "browser_blocked", requiresPerson: true });
+    },
+  );
+  test.each(blockedReplay.notRefusals)(
+    "ordinary check or posting text is not a browser refusal: %s",
+    (bodyText) => {
+      // A posting has answerable controls; the first two cases are interstitials.
+      const controls = bodyText.startsWith("We build")
+        ? [{ ...checkbox(false), label: "Full name", groupLabel: "" }]
+        : [];
+      expect(
+        detectApplyBlocker({ bodyText, controls, actions: [] })?.code,
+      ).not.toBe("browser_blocked");
+    },
+  );
   test("a site checking the browser by itself is a wait, not a stop", () => {
     const blocker = detectApplyBlocker({
       bodyText:
