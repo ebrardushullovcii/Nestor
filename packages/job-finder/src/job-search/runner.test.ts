@@ -990,7 +990,9 @@ test.each([false, true])(
     access.request(1, "Sign in");
     const gate = deferred<void>();
     engine.collectSource.mockImplementation(async ({ target, onCards }) => {
-      await onCards?.(numberedCards(target.id, 400, "Backend Engineer"));
+      const cards = numberedCards(target.id, 400, "Backend Engineer");
+      await onCards?.(cards.slice(0, 1));
+      await onCards?.(cards.slice(1));
       return { cards: [], complete: false, pagesRead: 1, notes: [] };
     });
     engine.readListings.mockImplementation(async ({ cards }) => {
