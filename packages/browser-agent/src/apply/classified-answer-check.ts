@@ -48,7 +48,9 @@ export async function checkClassifiedApplicationAnswers(input: {
         other.visible && questionPrompt(other) === questionPrompt(control),
     );
     return !control.visible && !hasVisibleTwin
-      ? { ...control, visible: true }
+      // Wizard fieldsets are often disabled off-screen. This is a read-only
+      // grounding view, not permission to write into those controls.
+      ? { ...control, visible: true, disabled: false }
       : control;
   });
   const controls: ApplyFormControl[] = input.answers.map((answer, index) => {

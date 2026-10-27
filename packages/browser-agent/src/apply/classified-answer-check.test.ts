@@ -68,7 +68,7 @@ test("send-time grounding binds a retained earlier wizard control without trusti
     sectionPath: ["Application", "Contact details"],
     placeholder: "",
     required: true,
-    disabled: false,
+    disabled: true,
     readOnly: false,
     visible: false,
     value: "Alex Vanguard",
