@@ -1,5 +1,7 @@
 import type { JobSearchPreferences } from "./discovery";
 
+export type JobSearchCampaignMode = "precision" | "scale";
+
 /** Search facts only; resume, application and persistence settings stay out. */
 type OtherSearchGoals = Pick<
   JobSearchPreferences,
