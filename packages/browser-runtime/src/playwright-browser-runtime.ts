@@ -2546,9 +2546,30 @@ export function createBrowserAgentRuntime(
         !canDiscard()
       )
         return false;
+      // A form the caller can refill (Ready or Needs you, filled or not)
+      // loses nothing when its page closes: Open or a continue fills it again
+      // from what the caller kept. Used whenever the exact snapshot below
+      // cannot be made or checked; only a page nobody is using right now.
+      const closeForRefill = async (): Promise<boolean> => {
+        if (
+          !recovery.refillable ||
+          !canDiscard() ||
+          page.isClosed() ||
+          pagesInUse.has(page) ||
+          preparedPagesWithPerson.has(key)
+        )
+          return false;
+        formRecovery.delete(key);
+        recoveryUnavailable.delete(key);
+        preparedApplicationPages.delete(key);
+        markedPreparedApplicationKeys.delete(key);
+        await page.close({ runBeforeUnload: false });
+        return true;
+      };
+      if (recoveryUnavailable.has(key)) return closeForRefill();
       let duplicate: Page | null = null;
       try {
-        const snapshot = await capturePreparedForm(page);
+        const snapshot = await capturePreparedForm(page).catch(() => null);
         // A form saved for restarts must carry its files' identities, or it
         // would come back unable to attach them; keep the live page instead.
         const attachments = snapshot && describePreparedFormAttachments(snapshot, recovery.attachments);
@@ -2563,17 +2584,8 @@ export function createBrowserAgentRuntime(
             ),
           )
         ) {
-          // No exact snapshot here (a custom widget, a Needs-you form): the
-          // caller brings it back by refilling from what it kept. Close only
-          // a page nobody is using right now.
-          if (recovery.refillable && canDiscard() && !pagesInUse.has(page) && !preparedPagesWithPerson.has(key)) {
-            formRecovery.delete(key);
-            recoveryUnavailable.delete(key);
-            preparedApplicationPages.delete(key);
-            markedPreparedApplicationKeys.delete(key);
-            await page.close({ runBeforeUnload: false });
-            return true;
-          }
+          // No exact snapshot here (a custom widget, a frame).
+          if (await closeForRefill()) return true;
           recoveryUnavailable.add(key);
           return false;
         }
@@ -2585,20 +2597,20 @@ export function createBrowserAgentRuntime(
         });
         if (!duplicate) {
           // A temporary navigation or capacity failure does not establish
-          // that this form can never be restored. Keep it for a later try.
-          return false;
+          // that this form can never be restored exactly; a refill still can.
+          return closeForRefill();
         }
         const pageIsFree = () =>
           canDiscard() &&
           !page.isClosed() &&
           !pagesInUse.has(page) &&
           !preparedPagesWithPerson.has(key);
+        if (!pageIsFree()) return false;
         if (
-          !pageIsFree() ||
-          JSON.stringify(await capturePreparedForm(page)) !==
-            JSON.stringify(snapshot)
+          JSON.stringify(await capturePreparedForm(page).catch(() => null)) !==
+          JSON.stringify(snapshot)
         )
-          return false;
+          return closeForRefill();
         if (recovery.saved && preparedFormStore) {
           recovery.saved = {...recovery.saved, snapshot, attachments: attachments ?? [], reason: null, savedAt: new Date().toISOString()};
           await preparedFormStore.save(recovery.saved);
