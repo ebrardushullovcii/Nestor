@@ -105,7 +105,15 @@ export interface ApplyFormControl {
   answered: boolean;
 }
 
-export interface ApplyFormAction {
+/** Where an action or clickable sits on the page; see `RawApplyPlacement`. */
+export interface ApplyPlacement {
+  /** The part of the page holding it: legend, dialog or section name, or nearby words. */
+  section?: string;
+  /** Inside a form, a fieldset or a group of fields. */
+  inForm?: boolean;
+}
+
+export interface ApplyFormAction extends ApplyPlacement {
   ref: string;
   label: string;
   kind: ApplyActionKind;
@@ -171,7 +179,7 @@ export interface ApplyBlocker {
 }
 
 /** Anything clickable that is not a control, a button, or a link. */
-export interface ApplyClickable {
+export interface ApplyClickable extends ApplyPlacement {
   ref: string;
   label: string;
   role: string;

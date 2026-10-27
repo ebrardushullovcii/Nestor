@@ -2,6 +2,7 @@ import type {
   ApplyRawPageHands,
   RawApplyControl,
   RawApplyPage,
+  RawApplyPlacement,
 } from "@nestor/contracts";
 
 import {
@@ -22,6 +23,7 @@ import type {
   ApplyLinkDestination,
   ApplyPageHands,
   ApplyPageLink,
+  ApplyPlacement,
   ApplyStepPosition,
 } from "./types";
 
@@ -126,10 +128,75 @@ function hashSignature(parts: readonly string[]): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+function placementOf(raw: RawApplyPlacement): ApplyPlacement {
+  return {
+    ...(raw.section?.trim() ? { section: raw.section.trim() } : {}),
+    ...(raw.inForm ? { inForm: true } : {}),
+  };
+}
+
+/**
+ * Toggle buttons that answer one question read as that question's choices.
+ * Ashby's Yes/No is two `aria-pressed` buttons inside the question's field:
+ * as buttons, Fill handed them to the person; as a radio group named after
+ * the question, they go through the answer path like any other choice. The
+ * control keeps the button's own handle, so pressing it is the same press.
+ */
+function withToggleChoices(raw: RawApplyPage): RawApplyPage {
+  const groups = new Map<string, RawApplyPage["actions"]>();
+  for (const action of raw.actions) {
+    const question = action.section?.trim();
+    if (action.pressed === undefined || !question) continue;
+    groups.set(question, [...(groups.get(question) ?? []), action]);
+  }
+  const toggles = [...groups].filter(([, group]) => group.length >= 2);
+  if (!toggles.length) return raw;
+  const taken = new Set(toggles.flatMap(([, group]) => group));
+  return {
+    ...raw,
+    actions: raw.actions.filter((action) => !taken.has(action)),
+    controls: [
+      ...raw.controls,
+      ...toggles.flatMap(([question, group]) =>
+        group.map(
+          (action): RawApplyControl => ({
+            ref: action.ref ?? `a${action.index}`,
+            index: -1 - action.index,
+            tagName: "button",
+            inputType: "radio",
+            role: "radio",
+            id: "",
+            name: `pressed:${question}`,
+            scopeKey: "pressed",
+            label: action.label.trim(),
+            groupLabel: question,
+            placeholder: "",
+            autocomplete: "",
+            // Only the question's own marker says so; the page has no
+            // required attribute on a button.
+            required: /\*\s*$/u.test(question),
+            invalid: false,
+            validationMessage: "",
+            disabled: action.disabled,
+            readOnly: false,
+            visible: action.visible,
+            value: action.label.trim(),
+            checked: action.pressed === true,
+            multiple: false,
+            options: [],
+            selectedOptionLabel: "",
+          }),
+        ),
+      ),
+    ],
+  };
+}
+
 export function buildApplyFormObservation(
-  raw: RawApplyPage,
+  page: RawApplyPage,
   observedAt: string,
 ): ApplyFormObservation {
+  const raw = withToggleChoices(page);
   const controls: ApplyFormControl[] = raw.controls.map((rawControl) => {
     const kind = toControlKind(rawControl);
     const inputType = rawControl.inputType.toLowerCase();
@@ -246,6 +313,7 @@ export function buildApplyFormObservation(
     disabled: rawAction.disabled,
     ...(rawAction.formAction ? { formAction: rawAction.formAction } : {}),
     ...(rawAction.formMethod ? { formMethod: rawAction.formMethod } : {}),
+    ...placementOf(rawAction),
   }));
 
   const links: ApplyPageLink[] = raw.links.map((rawLink) => {
@@ -312,6 +380,7 @@ export function buildApplyFormObservation(
       role: clickable.role,
       tagName: clickable.tagName,
       visible: clickable.visible,
+      ...placementOf(clickable),
     })),
     openedTabs: raw.openedTabs.map((tab) => ({
       index: tab.index,
