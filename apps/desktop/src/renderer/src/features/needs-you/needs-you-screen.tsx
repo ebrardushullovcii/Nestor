@@ -54,6 +54,26 @@ const KIND_FILTER_LABEL: Record<NeedsYouKind, string> = {
   mfa: "Verification codes",
 };
 
+/** The company and role waiting on a task, and how many more wait too. */
+function waitingLabel(waiting: {
+  company: string;
+  title: string;
+  count: number;
+}) {
+  const label = [waiting.company, waiting.title].filter(Boolean).join(" · ");
+  return waiting.count > 1 ? `${label} and ${waiting.count - 1} more` : label;
+}
+
+/** A site as a person names it: its host, without "www.". */
+function siteName(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).hostname.replace(/^www\./u, "");
+  } catch {
+    return url;
+  }
+}
+
 export function NeedsYouScreen() {
   const { showToast } = useToast();
   const [tab, setTab] = useState<"tasks" | "saved">("tasks");
@@ -417,11 +437,18 @@ export function NeedsYouScreen() {
                 title={row.prompt}
                 meta={
                   "source" in row && row.source
-                    ? `${row.source.label} · ${row.source.url}`
-                    : [row.scope.country, row.scope.siteOrigin]
-                        .filter(Boolean)
-                        .join(" · ") ||
-                      ("preview" in row ? "Reusable answer" : "Application")
+                    ? row.source.label
+                    : "waitingFor" in row && row.waitingFor
+                      ? waitingLabel(row.waitingFor)
+                      : [row.scope.country, row.scope.siteOrigin]
+                          .filter(Boolean)
+                          .join(" · ") ||
+                        ("preview" in row ? "Reusable answer" : "Application")
+                }
+                trailing={
+                  "preview" in row
+                    ? undefined
+                    : siteName(row.source?.url ?? row.scope.siteOrigin)
                 }
                 status={
                   "preview" in row
