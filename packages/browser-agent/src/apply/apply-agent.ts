@@ -2417,13 +2417,21 @@ async function runMeasuredApplyAgent(
         },
       },
     );
-    if (control && outcome.kind === "suggestion" && outcome.question) {
+    if (control && outcome.kind === "suggestion") {
+      note(outcome.note);
       const value =
         proposal.tool === "type"
           ? proposal.text
           : proposal.tool === "select"
             ? proposal.option
-            : undefined;
+            : proposal.tool === "set_checkbox"
+              ? control.kind === "radio" ||
+                control.answerControlType === "multi_choice"
+                ? control.label || control.value
+                : proposal.checked
+                  ? "Yes"
+                  : "No"
+              : undefined;
       const sourceId =
         ("storedFactId" in proposal ? proposal.storedFactId : undefined) ??
         (value !== undefined
@@ -2436,8 +2444,8 @@ async function runMeasuredApplyAgent(
           question: questionPrompt(control),
           value,
           sourceId,
-          check: outcome.question.askReason?.check ?? "answer_permission",
-          reason: outcome.question.note ?? outcome.note,
+          check: outcome.question?.askReason?.check ?? "answer_permission",
+          reason: outcome.question?.note ?? outcome.note,
         });
     }
     // The path between screens, for a later restore: what was pressed or

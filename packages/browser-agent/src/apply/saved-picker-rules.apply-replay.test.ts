@@ -198,7 +198,10 @@ test("a typed residence question uses its saved country fallback and rechecks it
     true,
     "residence_country",
   );
-  expect((await f.fill()).kind).toBe("filled");
+  const filled = await f.fill();
+  expect(filled, filled.kind === "suggestion" ? filled.note : "").toMatchObject(
+    { kind: "filled" },
+  );
   expect(f.field.value).toBe("Albania");
   expect((await f.send("Albania"))[0]?.supported).toBe(true);
 });

@@ -1128,6 +1128,24 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               checks?.[index]?.supported ? [] : [{ question, index }],
             );
             if (rejected.length) {
+              const repeatedAnswer = rejected.find(
+                ({ index }) =>
+                  applications.needsYou.answersForQuestions(
+                    row.id,
+                    [queries[index]!],
+                    origin,
+                  ).length > 0,
+              );
+              if (repeatedAnswer) {
+                applications.submissionRefused(
+                  row.id,
+                  row.attempt,
+                  `Job Finder stopped because your saved answer to "${repeatedAnswer.question.prompt}" could not be verified before sending: ${checks?.[repeatedAnswer.index]?.reason ?? "The answer check was unavailable."} Your earlier answers are kept.`,
+                );
+                applications.stop(row.id);
+                await closePage(row.id, row.attempt);
+                return;
+              }
               applications.discardReviewAnswers(
                 row.id,
                 row.attempt,
@@ -1157,6 +1175,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     kind: "question",
                     key: known.key,
                     scope: {},
+                    askReason: {
+                      kind: "source_rejected",
+                      check: "send_answer_grounding",
+                      detail: (
+                        checks?.[index]?.reason ??
+                        "The send-time answer check could not verify this value."
+                      ).slice(0, 4000),
+                    },
                     prompt: question.prompt,
                     input: known.input,
                     options: known.options,

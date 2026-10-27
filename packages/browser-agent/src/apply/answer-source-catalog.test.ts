@@ -78,6 +78,54 @@ function decide(
   });
 }
 
+test("a nested scalar history fact remains literal when classified as a factual account", () => {
+  const sources = source();
+  sources.profile = CandidateProfileSchema.parse({
+    ...sources.profile,
+    experiences: [
+      {
+        id: "role",
+        companyName: "Signal Systems",
+        title: "Staff Frontend Engineer",
+        startDate: "2014-01",
+        isCurrent: true,
+      },
+    ],
+  });
+  const field = {
+    ...control("Job title"),
+    groupLabel: "Work history (optional) — Work history 1",
+    sectionPath: ["Application", "Work history (optional)", "Work history 1"],
+    rowScopeKey: "form0:row1",
+  };
+  const tags = {
+    kind: "factual_summary",
+    country: null,
+    sourceId: "profile.experiences.role.title",
+  } as const;
+  expect(decide(sources, field, tags, "Staff Frontend Engineer").kind).toBe(
+    "literal",
+  );
+  expect(
+    decide(
+      sources,
+      { ...field, groupLabel: "Professional reference" },
+      tags,
+      "Staff Frontend Engineer",
+    ).kind,
+  ).toBe("needs_you");
+});
+
+test("an unknown age has a no-source check rather than a rejected Profile value", () => {
+  expect(
+    decide(source(), control("Are you over 18?"), {
+      kind: "other",
+      country: null,
+      sourceId: null,
+    }),
+  ).toMatchObject({ kind: "needs_you", check: "source_lookup" });
+});
+
 test("a host semantic match preserves reference, own-words, country and history guards", () => {
   const sources = source();
   const field = {

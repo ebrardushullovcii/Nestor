@@ -522,7 +522,7 @@ export type ClassifiedAnswerDecision =
       source: ClassifiedAnswerSource | null;
       evidencePolicy?: "factual_summary";
     }
-  | { kind: "needs_you"; reason: string };
+  | { kind: "needs_you"; reason: string; check?: string };
 /** An affirmative allow list. Tags or a positive checker verdict alone grant nothing. */
 export function classifyAnswerPermission(input: {
   control: ApplyFormControl;
@@ -536,10 +536,16 @@ export function classifyAnswerPermission(input: {
   now?: Date;
   /** Supplied only by the host after the independent answer check. */
   matchedSourceId?: string | undefined;
+  /** A proposed catalog reference; it grants no semantic-match permission. */
+  candidateSourceId?: string | undefined;
 }): ClassifiedAnswerDecision {
-  const deny = (reason: string): ClassifiedAnswerDecision => ({
+  const deny = (
+    reason: string,
+    check = "answer_permission",
+  ): ClassifiedAnswerDecision => ({
     kind: "needs_you",
     reason,
+    check,
   });
   const tags = input.tags;
   if (input.control.credentialRole)
@@ -547,6 +553,7 @@ export function classifyAnswerPermission(input: {
   if (!tags)
     return deny(
       "This question has not been classified safely. Please supply your answer.",
+      "question_classification",
     );
   const identity = (control: ApplyFormControl) =>
     normalizeFormQuestionPrompt(
@@ -592,7 +599,9 @@ export function classifyAnswerPermission(input: {
       ? priorCompanyHistory(input.control, input.sources)
       : null;
   let source = catalog.find(
-    (row) => row.id === (input.matchedSourceId ?? tags.sourceId),
+    (row) =>
+      row.id ===
+      (input.matchedSourceId ?? input.candidateSourceId ?? tags.sourceId),
   );
   // Plain applicant identity has an exact field-to-Profile binding. A model
   // omitting its source must not turn a known name or email into a handover.
@@ -761,6 +770,7 @@ export function classifyAnswerPermission(input: {
   if (!source)
     return deny(
       "There is no matching verbatim source for this question. Please supply your answer.",
+      "source_lookup",
     );
   const saved =
     savedAnswerForQuestion(
@@ -904,6 +914,22 @@ export function classifyAnswerPermission(input: {
   if (source.purpose === "authority" && tags.kind === "other")
     return { kind: "literal", source };
   if (tags.kind === "work_auth" || tags.kind === "sponsorship") {
+    if (
+      tags.kind === "work_auth" &&
+      !exactSaved &&
+      /\b(?:restrictions?|limitations?|sponsor(?:ship|ing|ed)?|without)\b/iu.test(
+        [
+          ...(input.control.sectionPath ?? []),
+          input.control.groupLabel,
+          input.control.label,
+          input.control.hint ?? "",
+        ].join(" "),
+      )
+    )
+      return deny(
+        "Authorization alone does not establish the question's additional restrictions or sponsorship conditions.",
+        "permit_conditions",
+      );
     if (!target || tags.country !== target || source.country !== target)
       return deny(
         "The work-permission country is unknown or does not match the source. Please answer for this job's country.",
@@ -979,8 +1005,10 @@ export function classifyAnswerPermission(input: {
       : deny(
           "This residence-country answer must use your recorded current country.",
         );
+  const literalQuestion =
+    tags.kind === "other" || tags.kind === "factual_summary";
   if (
-    tags.kind === "other" &&
+    literalQuestion &&
     source.purpose === "profile" &&
     !historyRecordMatches(source, input, catalog)
   ) {
@@ -1007,7 +1035,7 @@ export function classifyAnswerPermission(input: {
       "The employer, title and dates must come from the same profile record. Please answer this entry.",
     );
   if (
-    tags.kind === "other" &&
+    literalQuestion &&
     source.purpose === "profile" &&
     literalValueMatches(
       source,

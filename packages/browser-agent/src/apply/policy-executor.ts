@@ -672,6 +672,7 @@ export function buildPendingQuestion(input: {
   siblings?: readonly ApplyFormControl[];
   /** Why stored answers did not settle it, said beside the question. */
   reason?: string | null;
+  askReason?: ApplicationAttemptQuestion["askReason"];
 }): ApplicationAttemptQuestion {
   const { control, suggestion } = input;
   const note = input.reason?.trim() || null;
@@ -689,17 +690,19 @@ export function buildPendingQuestion(input: {
       : control.options;
   return {
     id: questionIdFor(control, input.jobId, input.siblings ?? []),
-    askReason: note
-      ? {
-          kind: "source_rejected",
-          check: "answer_permission",
-          detail: note.slice(0, 4000),
-        }
-      : {
-          kind: "no_source",
-          detail:
-            "No applicable saved answer or Profile fact answered this question.",
-        },
+    askReason:
+      input.askReason ??
+      (note
+        ? {
+            kind: "source_rejected",
+            check: "answer_permission",
+            detail: note.slice(0, 4000),
+          }
+        : {
+            kind: "no_source",
+            detail:
+              "No applicable saved answer or Profile fact answered this question.",
+          }),
     prompt: questionPrompt(control),
     ...(control.repeatedQuestion ? { repeatedAtDifferentStep: true } : {}),
     kind: control.questionKind,
@@ -831,6 +834,7 @@ type AnswerDecision =
       reason: string;
       suggestion: ApplyAnswer | null;
       permission: boolean;
+      askReason?: ApplicationAttemptQuestion["askReason"];
     };
 
 function savedSuggestion(
@@ -973,10 +977,8 @@ async function decideAnswer(input: {
     const permission = classifyAnswerPermission({
       control,
       controls: input.controls,
-      tags:
-        control.answerTags && input.storedFactId
-          ? { ...control.answerTags, sourceId: input.storedFactId }
-          : control.answerTags,
+      tags: control.answerTags,
+      candidateSourceId: input.storedFactId,
       matchedSourceId: config.matchedAnswers?.get(
         semanticAnswerKey(control, value),
       ),
@@ -991,6 +993,14 @@ async function decideAnswer(input: {
       return {
         kind: "leave",
         reason: permission.reason,
+        askReason: {
+          kind:
+            permission.check === "source_lookup"
+              ? "no_source"
+              : "source_rejected",
+          check: permission.check ?? "answer_permission",
+          detail: permission.reason.slice(0, 4000),
+        },
         suggestion: null,
         permission: true,
       };
@@ -1316,6 +1326,7 @@ function leaveUnansweredForPerson(input: {
   at: string;
   reason: string;
   suggestion: ApplyAnswer | null;
+  askReason?: ApplicationAttemptQuestion["askReason"];
 }): ApplyExecutionOutcome {
   const { control, observation, config, at, suggestion } = input;
   const reason = eligibilityReviewReason(control, config, input.reason);
@@ -1335,6 +1346,7 @@ function leaveUnansweredForPerson(input: {
             suggestion,
             siblings: observation.controls,
             reason,
+            ...(input.askReason ? { askReason: input.askReason } : {}),
           })
         : null,
     controlRef: control.ref,
@@ -1390,6 +1402,9 @@ function notEntered(input: {
     at: input.at,
     reason: input.decision.reason,
     suggestion: input.decision.suggestion,
+    ...(input.decision.askReason
+      ? { askReason: input.decision.askReason }
+      : {}),
   };
   return input.decision.permission || !input.deps.checkWrittenAnswer
     ? leaveUnansweredForPerson(args)

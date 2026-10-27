@@ -451,9 +451,10 @@ it("a picker choice the person answered in Needs you is not refused again on the
   expect(preparation.pickerTries).toEqual([[], []]);
 });
 
-it.each([false, true])(
-  "re-asks only with a refused write, otherwise stops the repeated key (write attempted: %s)",
-  async (attempted) => {
+it.each([null, "answer_permission", "text_retention"] as const)(
+  "re-asks only with a refused write, otherwise stops the repeated key (check: %s)",
+  async (check) => {
+    const attempted = check === "text_retention";
     const f = await setup(1);
     const unanswered = ApplyExecutionResultSchema.parse({
       ...ready(),
@@ -484,6 +485,12 @@ it.each([false, true])(
     });
     await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
     const next = structuredClone(unanswered);
+    if (check === "answer_permission")
+      next.questions[0]!.askReason = {
+        kind: "source_rejected",
+        check,
+        detail: "A candidate was rejected without a page write.",
+      };
     if (attempted)
       next.questions[0]!.askReason = {
         kind: "page_refused",
