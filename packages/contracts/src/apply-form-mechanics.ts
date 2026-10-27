@@ -268,6 +268,13 @@ export interface ApplyRawPageHands {
   navigate: (url: string) => Promise<ApplyNavigationResult>;
   /** Presses anything on the page, whatever it is made of. */
   clickElement: (ref: string) => Promise<ApplyWriteResult>;
+  /** Exact local press under a persistent read-only fence; no send window. */
+  clickWithoutWrites?: (input: {
+    ref: string;
+    label: string;
+    url: string;
+    stepLabel: string | null;
+  }) => Promise<ApplyWriteResult>;
   /** Presses a keyboard key on one element, or on the active page. */
   pressKey: (ref: string | undefined, key: string) => Promise<ApplyWriteResult>;
   /** Moves the page, so content that loads on scroll can be seen. */

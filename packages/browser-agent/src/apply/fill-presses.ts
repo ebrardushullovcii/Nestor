@@ -9,9 +9,9 @@ import type {
 /**
  * What Fill in for me presses on its own.
  *
- * Fill never presses the form's own buttons (Next, Continue, Save, Submit):
- * any of them could send the application, and nothing tells which. It does
- * press what only ever helps it fill: parts of a field, a link back to the
+ * Local non-final steps use local-step-preflight and a stricter read-only
+ * runtime mechanic. All other form buttons stay with the person. Fill also
+ * presses what helps it fill: parts of a field, a link back to the
  * form, a cookie banner's dismissal, the button that opens the form before
  * anything is filled, and an "Add another" row inside the form. Whatever any
  * press makes the page send still meets the network fence, which lets out

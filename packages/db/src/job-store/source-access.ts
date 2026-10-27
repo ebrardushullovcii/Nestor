@@ -86,7 +86,7 @@ export function createSourceAccessStore(store: JobStore) {
         return id;
       });
     },
-    /** Call only after this site's retry actually reads a complete inventory. */
+    /** Call only after inventory and all required detail reads succeed. */
     complete(sourceId: number): boolean {
       return store.transaction(() => {
         const result =

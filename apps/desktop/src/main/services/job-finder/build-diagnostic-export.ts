@@ -15,6 +15,7 @@ export interface JobFinderDiagnosticFacts {
   applications: Partial<Record<string, number>>;
   unresolvedActions: number;
   approvedResumes: number;
+  originalResumeReady: boolean;
   siteChecks: number;
   latestResumeImport: { durationMs: number | null; ready: boolean } | null;
   agentReady: boolean;
@@ -80,7 +81,7 @@ export function buildJobFinderDiagnosticExport(input: {
       agentReady: facts.agentReady,
       visionReady: facts.visionReady,
       browserReady: facts.browserStatus === "ready",
-      originalResumeReady: facts.latestResumeImport?.ready ?? false,
+      originalResumeReady: facts.originalResumeReady,
       tailoredResumeCount: facts.approvedResumes,
       prepareOnlyApplicationCount: facts.applications.ready ?? 0,
       finalSubmissionAuthorized: false,

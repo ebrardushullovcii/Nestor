@@ -297,6 +297,42 @@ function controls(label = "Pay", options = ["Annual"], required = false) {
   ).controls;
 }
 
+test("value echoes and upload status changes keep the reading; changed instructions do not", async () => {
+  const client = clientReplying([
+    { index: 0, asksAboutPay: false, declarationKind: null },
+  ]);
+  const classify = createQuestionClassifier({ client });
+  const fields = controls("Resume", []);
+  fields[0].kind = "file";
+  fields[0].hint = "No file selected";
+  await classify(
+    fields,
+    JSON.stringify({ instructions: "Resume\nPDF only\nNo file selected" }),
+  );
+  fields[0].value = "C:\\fakepath\\synthetic.pdf";
+  fields[0].hint = "synthetic.pdf";
+  await classify(
+    fields,
+    JSON.stringify({
+      instructions: "Resume\nPDF only\nsynthetic.pdf\nUploaded",
+    }),
+  );
+  expect(
+    classify.settled(
+      fields,
+      JSON.stringify({
+        instructions: "Resume\nPDF only\nsynthetic.pdf\nAttached",
+      }),
+    ),
+  ).toBeDefined();
+  expect(client.chatWithTools).toHaveBeenCalledOnce();
+  await classify(
+    fields,
+    JSON.stringify({ instructions: "Resume\nPDF only\nWrite your own words" }),
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
 test("shares one classification for concurrent decisions and changed values on the same step", async () => {
   const client = clientReplying([
     { index: 0, asksAboutPay: true, declarationKind: null },

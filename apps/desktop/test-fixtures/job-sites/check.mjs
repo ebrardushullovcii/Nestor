@@ -112,7 +112,7 @@ try {
       if (site === "gatekeeper")
         assert.ok(
           (await request(href)).body.includes(
-            `content="8;url=/gatekeeper/jobs/${id}"`,
+            `location.replace('/gatekeeper/jobs/${id}')`,
           ),
         );
       const job = (await request(`/${site}/jobs/${id}`)).body;

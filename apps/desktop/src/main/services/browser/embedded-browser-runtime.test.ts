@@ -5,6 +5,7 @@ import {
 } from "@nestor/browser-runtime";
 import { DiscoveryRunResultSchema } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
+import type { Page } from "playwright";
 
 import type { EmbeddedBrowser } from "./embedded-browser";
 import {
@@ -14,6 +15,36 @@ import {
 import { describeApplicationPreparationProgress } from "@nestor/job-finder";
 
 describe("withEmbeddedBrowserActivity", () => {
+  test("rendered reads preserve readiness and page callbacks through the activity adapter", async () => {
+    const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
+    const ready = vi.fn(() => true),
+      onPage = vi.fn();
+    const owned = {} as Page;
+    const readRenderedPage = vi.fn<
+      NonNullable<BrowserSessionRuntime["readRenderedPage"]>
+    >(async (_url, options) => {
+      await options?.onPage?.(owned);
+      expect(options?.ready).toBe(ready);
+      return { html: "details", finalUrl: "https://site.test/jobs/1" };
+    });
+    const claimPage = vi.fn(),
+      claimedTabs = vi.fn();
+    const browser: Pick<EmbeddedBrowser, "runAutomation"> = {
+      runAutomation: (_label, _owner, work) =>
+        work(new AbortController().signal, vi.fn(), claimPage, claimedTabs),
+    };
+    const wrapped = withEmbeddedBrowserActivity(
+      { ...base, readRenderedPage },
+      browser as unknown as EmbeddedBrowser,
+    );
+    await wrapped.readRenderedPage!("https://site.test/jobs/1", {
+      ready,
+      onPage,
+    });
+    expect(onPage).toHaveBeenCalledWith(owned);
+    expect(claimPage).toHaveBeenCalledWith(owned);
+    expect(claimedTabs).toHaveBeenCalledOnce();
+  });
   test("a person-held native form remains live when its automation Page detaches", async () => {
     const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
     const hasApplicationPageBinding = vi.fn(() => Promise.resolve(false));

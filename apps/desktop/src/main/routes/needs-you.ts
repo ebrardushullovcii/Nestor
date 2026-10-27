@@ -3,12 +3,33 @@ import {
   NEEDS_YOU_RUN_CHANNEL,
   type NeedsYouCommandName,
   type NeedsYouCommandOutput,
+  type NeedsYouTask,
 } from "@nestor/contracts";
 import type { IpcMain } from "electron";
 import { shell } from "electron";
 import { getApplicationStore } from "../services/job-finder/application-store";
 import { loadEmbeddedBrowser } from "../services/browser/load-embedded-browser";
 import { runJobCommand } from "../services/job-commands";
+import { getJobStore } from "../services/job-store";
+import { createSourceHandoffs } from "../services/job-finder/source-handoffs";
+import { registerServiceStopper } from "../services/service-stoppers";
+
+let sourceHandoffs: Promise<ReturnType<typeof createSourceHandoffs>> | null =
+  null;
+async function openSource(task: NeedsYouTask) {
+  sourceHandoffs ??= (async () => {
+    const handoffs = createSourceHandoffs({
+      browser: await loadEmbeddedBrowser(),
+      task: (id) => getApplicationStore().needsYou.details(id)?.task ?? null,
+    });
+    registerServiceStopper(getJobStore().onChange(handoffs.reconcile));
+    return handoffs;
+  })().catch((error) => {
+    sourceHandoffs = null;
+    throw error;
+  });
+  return (await sourceHandoffs).open(task);
+}
 
 /**
  * Apply's service starts with the Job Finder runtime; both load on first
@@ -42,13 +63,7 @@ const run = createNeedsYouCommandRunner(getApplicationStore, {
       limit: 1,
     }).rows[0];
     if (task?.id === id && task.source) {
-      await (
-        await loadEmbeddedBrowser()
-      ).command({
-        type: "open",
-        url: task.source.url,
-      });
-      return true;
+      return openSource(task);
     }
     const service = await applicationService();
     for (const application of getApplicationStore().needsYou.details(id)

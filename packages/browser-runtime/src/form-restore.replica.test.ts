@@ -11,6 +11,7 @@ import { CandidateProfileSchema } from "@nestor/contracts";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
+import { readRenderedPageHtml } from "./rendered-page-reader";
 import {
   allowPrepareOnlyRunNavigation,
   closePrepareOnlyFinalActionWindow,
@@ -66,6 +67,32 @@ const posts = (): string[] => {
     return [];
   }
 };
+
+test("Gatekeeper remembers verification and all six detail reads reach content", async () => {
+  const context = await browser!.newContext();
+  try {
+    const before = posts().length;
+    for (let id = 1; id <= 6; id++) {
+      const read = await readRenderedPageHtml(
+        context,
+        `${base}/gatekeeper/security/${id}`,
+        {
+          ready: (html) => html.includes("About the role"),
+        },
+      );
+      expect(read.finalUrl).toBe(`${base}/gatekeeper/jobs/${id}`);
+      expect(read.html).toContain("What you will do");
+    }
+    expect(
+      (await context.cookies()).some(
+        (cookie) => cookie.name === "fixture_gatekeeper_verified",
+      ),
+    ).toBe(true);
+    expect(posts()).toHaveLength(before);
+  } finally {
+    await context.close();
+  }
+}, 30_000);
 
 /** A model that, if it is ever asked, is counted and gives up. */
 function countingModel() {

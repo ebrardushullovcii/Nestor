@@ -314,6 +314,72 @@ test("a person's empty history row and a filled agent row cannot be removed", as
 
 describe("apply policy executor", () => {
   test.each([
+    "advanced",
+    "unchanged",
+    "ambiguous",
+    "invalid",
+    "blocked",
+  ] as const)("Fill advances only a proven local step: %s", async (result) => {
+    const page = rawPage({
+      stepLabel: result === "ambiguous" ? "Contact" : "Step 1 of 4",
+      controls: [
+        rawControl({
+          index: 0,
+          label: "First Name",
+          value: "Robin",
+          required: true,
+          invalid: result === "invalid",
+        }),
+        rawControl({index: 1, label: "Email", inputType: "email", value: "robin@example.test", required: true}),
+      ],
+      actions: [
+        {
+          index: 0,
+          label: "Next",
+          visible: true,
+          disabled: false,
+          inForm: true,
+          submitsForm: false,
+        },
+      ],
+    });
+    const press = vi.fn(() => {
+      if (result === "advanced") page.stepLabel = "Step 2 of 4";
+      return Promise.resolve({ ok: true as const, observedValue: "clicked" });
+    });
+    const { config } = configFor(page, {
+      hands: { clickWithoutWrites: press },
+    });
+    const current = observationOf(page);
+    if (result === "blocked")
+      current.blocker = {
+        code: "security_challenge",
+        requiresPerson: true,
+        summary: "Verify",
+        detail: "Human check",
+        nextActionLabel: "Verify",
+      };
+    config.hands.observe = () =>
+      Promise.resolve(result === "blocked" ? current : observationOf(page));
+    const outcome = await executeApplyProposal(
+      { tool: "click", ref: "a0" },
+      current.signature,
+      {
+        config: {
+          ...config,
+          pressesFormButtons: false,
+          intermediateWritesAuthorized: true,
+        },
+        now,
+        guardState: createApplyGuardState(),
+      },
+    );
+    expect(outcome.kind).toBe(result === "advanced" ? "moved" : "paused");
+    expect(press).toHaveBeenCalledTimes(
+      ["advanced", "unchanged"].includes(result) ? 1 : 0,
+    );
+  });
+  test.each([
     "What is your go-to tool?",
     "What is your top skill?",
     "What is your preferred tool?",

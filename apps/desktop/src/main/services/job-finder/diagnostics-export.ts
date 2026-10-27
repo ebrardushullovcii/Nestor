@@ -1,4 +1,5 @@
 import { app } from "electron";
+import { loadOriginalResumeBytes } from "@nestor/job-finder/applications";
 import { createJobSitesStore, createResumeStore } from "@nestor/db/job-store";
 
 import { getEmbeddedBrowser } from "../browser/embedded-browser";
@@ -23,6 +24,13 @@ export async function buildDiagnosticsFileExport() {
     ]);
   const stages = store.stageCounts();
   const needsYou = getApplicationStore().needsYou.list({ limit: 1 }).counts;
+  const originalResumeReady = await runtime.repository
+    .getProfile()
+    .then((profile) => loadOriginalResumeBytes(profile.baseResume))
+    .then(
+      () => true,
+      () => false,
+    );
   const content = buildJobFinderDiagnosticExport({
     facts: {
       profileSetupStatus: setup.status,
@@ -34,6 +42,7 @@ export async function buildDiagnosticsFileExport() {
       unresolvedActions:
         needsYou.question + needsYou.sign_in + needsYou.captcha + needsYou.mfa,
       approvedResumes: createResumeStore(store).approvedJobIds().length,
+      originalResumeReady,
       siteChecks: siteChecks.length,
       latestResumeImport: latestImport
         ? {

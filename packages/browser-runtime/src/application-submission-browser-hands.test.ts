@@ -200,6 +200,25 @@ describe("source-generic application browser hands", () => {
     });
   });
 
+  test("a JS-enhanced native form confirms its one POST to the exact action", async () => {
+    const {page,server} = await createPage(`<form action='/submit-confirmed'><button type=submit>Send application</button></form><script>
+      document.querySelector('form').onsubmit = async event => {
+        event.preventDefault();
+        const response = await fetch(event.target.action, {method:'POST',body:'synthetic=yes'});
+        document.body.innerHTML = await response.text();
+      };
+    </script>`);
+    const observation = await observeApplicationForm(page);
+    const result = await executeExactlyOneFinalAction(page, {
+      expectedObservation: observation.identity, expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page), allowedOrigins: [expectedOrigin(page)],
+      confirmationTimeoutMs: 1000, veto: () => true,
+    });
+    expect(result.outcome).toBe("submitted");
+    expect(result.facts.requestsAfterClick).toEqual([expect.objectContaining({method:"POST",path:"/submit-confirmed",status:200,finalSubmit:true})]);
+    expect(server.requests.filter(request => request === "POST /submit-confirmed")).toHaveLength(1);
+  });
+
   test("rejects a rerendered observation before any click", async () => {
     const { page } = await createPage(
       "<form><button id=send type=submit>Send application</button></form>",

@@ -213,6 +213,173 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup();
 });
 
+it.each(["queued", "filling", "final_veto"] as const)(
+  "Send keeps its queued mode when the default changes at %s",
+  async (phase) => {
+    const f = await setup(1);
+    const guards = createSendGuards(f.jobs);
+    f.deps.authorityRepository = guards;
+    f.seed.settings.applicationAutomationMode = "autonomous_submit";
+    f.authorizeSending.mockImplementation(async ({ artifact, application }) => {
+      const envelope = {
+        ...sendEnvelope(application.jobId, artifact.sha256!),
+        mode: "autonomous_submit" as const,
+      };
+      await guards.commitApplicationAuthorityEnvelope({
+        envelope,
+        expectedRevision: null,
+      });
+      return envelope;
+    });
+    const observation = {
+      identity: { id: "mode-form", revision: 1, digest: "a".repeat(64) },
+      page: { origin: "https://replica.test", safePath: "/jobs/0" },
+      complete: true,
+      controls: [
+        {
+          identity: { ref: "final-control-0", signature: "c".repeat(64) },
+          ordinal: 0,
+          kind: "button" as const,
+          label: "Submit Application",
+          formIndex: -1,
+          action: { origin: "https://replica.test", safePath: "/jobs/0" },
+        },
+      ],
+    };
+    const action = vi.fn<
+      NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>
+    >(async (_source, input) => {
+      if (phase === "final_veto")
+        f.seed.settings.applicationAutomationMode = "confirm_before_submit";
+      expect(
+        await input.veto({ observation, control: observation.controls[0]! }),
+      ).toBe(true);
+      return {
+        outcome: "submitted",
+        reason: "employer_confirmation",
+        observation,
+        control: observation.controls[0]!,
+        facts: {
+          actionAttempted: true,
+          actionIssued: true,
+          actionCompleted: true,
+          pageBefore: observation.page,
+          pageAfter: observation.page,
+          urlChanged: false,
+          requestsObservedDuringAction: 1,
+          requestsAfterClick: [],
+        },
+        confirmation: {
+          observedAt: new Date().toISOString(),
+          destination: observation.page,
+          summary: "Application received.",
+        },
+      };
+    });
+    Object.assign(f.browser, {
+      observeApplicationForm: () => Promise.resolve(observation),
+      executeExactlyOneFinalAction: action,
+    });
+    f.browser.readApplicationPageBinding.mockResolvedValue({
+      ...f.personPage,
+      bodyText: "Completed form",
+      actions: [
+        {
+          ref: "a0",
+          index: 0,
+          label: "Submit Application",
+          visible: true,
+          disabled: false,
+        },
+      ],
+    });
+    f.applications.applyJobs(
+      { selection: { ids: f.ids } },
+      "autonomous_submit",
+    );
+    if (phase === "queued")
+      f.seed.settings.applicationAutomationMode = "confirm_before_submit";
+    await f.service.start();
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    if (phase === "filling")
+      f.seed.settings.applicationAutomationMode = "confirm_before_submit";
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe(
+        "submitted",
+      ),
+    );
+    expect(action).toHaveBeenCalledOnce();
+    expect(f.applications.listApplications().rows[0]?.mode).toBe(
+      "autonomous_submit",
+    );
+    expect(f.onError).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["queued", "filling", "ready"] as const)(
+  "Fill keeps its queued mode when the default changes at %s",
+  async (phase) => {
+    const f = await setup(1);
+    f.applications.applyJobs(
+      { selection: { ids: f.ids } },
+      "confirm_before_submit",
+    );
+    if (phase === "queued")
+      f.seed.settings.applicationAutomationMode = "autonomous_submit";
+    await f.service.start();
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    if (phase === "filling")
+      f.seed.settings.applicationAutomationMode = "autonomous_submit";
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+    );
+    f.seed.settings.applicationAutomationMode = "autonomous_submit";
+    expect(f.applications.listApplications().rows[0]?.mode).toBe(
+      "confirm_before_submit",
+    );
+    expect(f.authorizeSending).not.toHaveBeenCalled();
+  },
+);
+
+it("revoking Send authority while filling still prevents the final action", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  let envelope: ReturnType<typeof sendEnvelope>;
+  f.authorizeSending.mockImplementation(async ({ artifact, application }) => {
+    envelope = {
+      ...sendEnvelope(application.jobId, artifact.sha256!),
+      mode: "autonomous_submit",
+    };
+    await guards.commitApplicationAuthorityEnvelope({
+      envelope,
+      expectedRevision: null,
+    });
+    return envelope;
+  });
+  const action = vi.fn();
+  Object.assign(f.browser, { executeExactlyOneFinalAction: action });
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await f.service.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  await guards.commitApplicationAuthorityEnvelope({
+    envelope: {
+      ...envelope!,
+      revision: 2,
+      status: "revoked",
+      revokedAt: new Date().toISOString(),
+    },
+    expectedRevision: 1,
+  });
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  expect(action).not.toHaveBeenCalled();
+});
+
 async function setup(
   count: number,
   concurrency?: number,
@@ -229,6 +396,9 @@ async function setup(
   const applications = createApplicationStore(jobs);
   const seed = createSeed();
   seed.profile.baseResume.storagePath = imported;
+  seed.profile.baseResume.sha256 = createHash("sha256")
+    .update("Synthetic imported resume")
+    .digest("hex");
   const ids = jobs.saveFoundJobs({
     searchId: null,
     jobs: Array.from(

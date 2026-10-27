@@ -18,7 +18,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     config.authority.mode === "autonomous_submit"
       ? "When the form is complete, say so with submit_application; Job Finder checks everything again and sends it. The person chose to have it sent: never ask them to look over a complete form, and finish it with needsPerson false."
       : config.authority.mode === "confirm_before_submit"
-        ? "Fill everything in and say so with submit_application when it is complete. You do not send it — the person reads it and presses send."
+        ? "Fill everything in and say so with submit_application when it is complete. You do not send it — the person reads it and presses send. When the page explicitly shows more numbered steps, complete the current valid fields and propose Next or Continue. Job Finder advances only a proven local step under a read-only fence. A server-dependent or ambiguous step is handed to the person."
         : "Fill everything in and stop. This application is set to fill in only.";
   // The saved AI applying behavior (Settings). Absent means the defaults.
   const coverLetterPolicy =

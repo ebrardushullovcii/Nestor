@@ -785,16 +785,25 @@ const server = http.createServer(async (req, res) => {
     const job = jobs.find((item) => item.id === id);
     if (!job)
       return send(404, page("", "Not found", "<h1>Page not found</h1>"));
-    if (kind === "security" && site === "gatekeeper")
+    if (kind === "security" && site === "gatekeeper") {
+      if (
+        /(?:^|;\s*)fixture_gatekeeper_verified=1(?:;|$)/u.test(
+          req.headers.cookie || "",
+        )
+      ) {
+        res.writeHead(302, { Location: `/gatekeeper/jobs/${id}` });
+        return res.end();
+      }
       return send(
         200,
         page(
           site,
           "Just a moment...",
           '<h1>Just a moment...</h1><p>Performing security verification</p><span class="spinner" aria-label="Verifying"></span>',
-          `<meta http-equiv="refresh" content="8;url=/gatekeeper/jobs/${id}">`,
+          `<script>setTimeout(() => { document.cookie = 'fixture_gatekeeper_verified=1; Path=/gatekeeper; SameSite=Lax; Max-Age=3600'; location.replace('/gatekeeper/jobs/${id}'); }, 8000);</script>`,
         ),
       );
+    }
     if (kind === "jobs") return send(200, detail(site, job));
     if (kind === "apply")
       return send(

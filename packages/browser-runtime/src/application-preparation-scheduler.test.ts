@@ -7,6 +7,31 @@ import {
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
+test("a prepared continuation goes before new work on its site, without preempting its owner", async () => {
+  const scheduler = createApplicationPreparationScheduler(2);
+  const active = await scheduler.acquire("https://jobs.example/first");
+  const order: string[] = [];
+  const normal = scheduler.acquire("https://jobs.example/new").then((lease) => {
+    order.push("new");
+    return lease;
+  });
+  const next = scheduler
+    .acquire("https://jobs.example/ready", undefined, "continuation")
+    .then((lease) => {
+      order.push("ready");
+      return lease;
+    });
+  const other = await scheduler.acquire("https://other.test/form");
+  expect(order).toEqual([]);
+  active.release();
+  const ready = await next;
+  expect(order).toEqual(["ready"]);
+  ready.release();
+  (await normal).release();
+  other.release();
+  expect(order).toEqual(["ready", "new"]);
+});
+
 test.each([
   [undefined, 4],
   ["8", 8],

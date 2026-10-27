@@ -45,6 +45,7 @@ export interface ApplicationPreparationScheduler {
   acquire: (
     url: string,
     signal?: AbortSignal,
+    priority?: "normal" | "continuation",
   ) => Promise<ApplicationPreparationLease>;
   /** Records a site's response; returns its earliest retry time when limited. */
   recordResponse: (
@@ -67,6 +68,7 @@ export function createApplicationPreparationScheduler(
     signal?: AbortSignal;
     active: boolean;
     granted: boolean;
+    priority: "normal" | "continuation";
     resolve: () => void;
     onAbort: () => void;
   };
@@ -80,7 +82,13 @@ export function createApplicationPreparationScheduler(
     clearTimeout(wake);
     wake = undefined;
     let nextWake = Infinity;
-    for (const request of requests) {
+    // Stable within a priority: ready work goes ahead of new work, without
+    // preempting the operation that currently owns this site's session.
+    for (const request of [...requests].sort(
+      (a, b) =>
+        Number(b.priority === "continuation") -
+        Number(a.priority === "continuation"),
+    )) {
       if (request.granted || request.signal?.aborted) continue;
       const until = pausedUntil(request.key);
       if (until > Date.now()) {
@@ -172,12 +180,13 @@ export function createApplicationPreparationScheduler(
       drain();
       return until;
     },
-    async acquire(url, signal) {
+    async acquire(url, signal, priority = "normal") {
       const request: Request = {
         key: "",
         ...(signal ? { signal } : {}),
         active: false,
         granted: false,
+        priority,
         resolve: () => undefined,
         onAbort: () => undefined,
       };

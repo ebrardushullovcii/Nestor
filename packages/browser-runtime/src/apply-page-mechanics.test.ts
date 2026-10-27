@@ -112,6 +112,50 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
+  test("upload feedback changes page state without changing the field's instruction hint", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<form><div><p>Resume / CV *</p><button type="button">Attach resume</button>
+        <input name="resume" type="file" aria-label="Resume / CV"><span aria-live="polite" id="feedback">No file selected</span>
+        <p id="instruction">PDF only</p></div><label>Name<input name="name"></label></form>`);
+      const before = await readRawApplyPage(page);
+      const hint = before.controls.find(
+        (control) => control.inputType === "file",
+      )!.hint;
+      await page
+        .locator("input[type=file]")
+        .setInputFiles({
+          name: "synthetic.pdf",
+          mimeType: "application/pdf",
+          buffer: Buffer.from("synthetic"),
+        });
+      await page.locator("#feedback").evaluate((element) => {
+        element.textContent = "synthetic.pdf";
+      });
+      const uploaded = await readRawApplyPage(page);
+      expect(
+        uploaded.controls.find((control) => control.inputType === "file")!.hint,
+      ).toBe(hint);
+      expect(uploaded.bodyText).toContain("synthetic.pdf");
+      await page.locator("#feedback").evaluate((element) => {
+        element.textContent = "Write this in your own words";
+      });
+      expect((await readRawApplyPage(page)).bodyText).toContain(
+        "Write this in your own words",
+      );
+      await page.locator("#instruction").evaluate((element) => {
+        element.textContent = "Word documents only";
+      });
+      expect(
+        (await readRawApplyPage(page)).controls.find(
+          (control) => control.inputType === "file",
+        )!.hint,
+      ).not.toBe(hint);
+    } finally {
+      await page.close();
+    }
+  });
+
   test("Send keeps a div calling-code picker with the native phone in its form", async () => {
     const page = await browser.newPage();
     try {

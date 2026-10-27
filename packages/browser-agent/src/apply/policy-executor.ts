@@ -37,6 +37,7 @@ import {
   isAnswerFromThisApplication,
 } from "./application-facts";
 import { normalizeSignal } from "./control-classification";
+import { localStepPreflight, localStepAdvanced } from "./local-step-preflight";
 import {
   fillPressFor,
   recordFillPress,
@@ -2079,8 +2080,7 @@ export async function executeApplyProposal(
           deps,
         );
       }
-      // Fill in for me presses only what helps it fill (see fill-presses);
-      // Next, Continue, Save and the rest are the person's.
+      // Ordinary filling presses and local wizard steps have separate fences.
       const fillPress = fillPressFor({
         config,
         observation,
@@ -2128,6 +2128,12 @@ export async function executeApplyProposal(
           };
         removesOwnedEmptyRow = true;
       }
+      const localStep =
+        !pressesFormButtons(deps.config) &&
+        !fillPress &&
+        config.hands.clickWithoutWrites
+          ? localStepPreflight(observation, proposal.ref)
+          : null;
       // "Apply now" before anything is filled opens the form; it sends nothing.
       const finalAction =
         fillPress?.kind === "open_form"
@@ -2159,7 +2165,8 @@ export async function executeApplyProposal(
       if (
         !pressesFormButtons(deps.config) &&
         !fillPress &&
-        !removesOwnedEmptyRow
+        !removesOwnedEmptyRow &&
+        !localStep
       )
         return {
           kind: "paused",
@@ -2169,6 +2176,53 @@ export async function executeApplyProposal(
           ),
         };
       const livePage = await config.hands.observe();
+      if (localStep) {
+        // Rebind to a fresh exact observation immediately before the press.
+        if (
+          livePage.signature !== observation.signature ||
+          !localStepPreflight(livePage, proposal.ref)
+        )
+          return {
+            kind: "refused",
+            reason: "The step changed. Read the current page before advancing.",
+            observation: livePage,
+          };
+        await config.safety?.closeIntermediateWriteWindow();
+        await config.safety?.closeUploadWindow?.();
+        const worker = await config.safety?.checkServiceWorker();
+        if (worker)
+          return {
+            kind: "paused",
+            pause: pressOnSitePause(
+              describeRef(livePage, proposal.ref),
+              deps.now(),
+            ),
+          };
+        // This mechanic never opens a field, upload, form-action or send window.
+        const pressed = await config.hands.clickWithoutWrites!(localStep);
+        const after = await config.hands.observe();
+        const guard = await reviewGuard(deps, after.url);
+        if (guard.pause) return { kind: "paused", pause: guard.pause };
+        if (
+          !pressed.ok ||
+          guard.openedWindowUrl ||
+          !localStepAdvanced(livePage, after)
+        )
+          return {
+            kind: "paused",
+            pause: pressOnSitePause(
+              describeRef(livePage, proposal.ref),
+              deps.now(),
+            ),
+          };
+        afterWrite(deps, null);
+        return {
+          kind: "moved",
+          note: `Advanced to step ${after.step.index} of ${after.step.total}.`,
+          observation: after,
+          progress: true,
+        };
+      }
       const personOwnedBlocker = livePage.blocker?.requiresPerson
         ? livePage.blocker
         : null;
