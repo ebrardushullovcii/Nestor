@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "assistant-lane": "node scripts/run-assistant-lane.mjs",
+    "assistant-outcomes": "node scripts/run-assistant-outcomes.mjs",
     "search-relevance": "node scripts/run-search-relevance.mjs",
     "resume-lane": "node scripts/run-resume-lane.mjs"
   },
