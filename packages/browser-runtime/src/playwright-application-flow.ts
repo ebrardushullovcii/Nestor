@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import { installMutationResponseBodyObserver } from "./mutation-response-body";
+import { installPageMessageRecorderInPage } from "./page-messages";
+import {
+  CAPTCHA_VERIFICATION_REQUEST,
+  isCaptchaVerificationRequest,
+} from "./captcha-verification";
 import {
   classifyAttachmentUpload,
   classifyUploadBind,
@@ -504,6 +509,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
   finalActionSignal: string;
   /** `PICKER_CHOICE_WINDOW_MS`, passed in: this function cannot import. */
   pickerChoiceWindowMs: number;
+  /** `CAPTCHA_VERIFICATION_REQUEST`, passed in for the same reason. */
+  captchaVerificationSignal?: string;
 }): void {
   const { intermediateMutationsAuthorized } = guardInput;
   interface InternalGuardState extends PrepareOnlyGuardSnapshot {
@@ -925,6 +932,16 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
   ): boolean => {
     const normalized = normalizeMethod(method);
     const carriesPrepared = requestCarriesPreparedValue(url, bodyText);
+    // The site's own CAPTCHA check (its script and token requests) goes on
+    // to the network fence, which lets the token requests out only at the
+    // final click or in the person's own window.
+    if (
+      !carriesPrepared &&
+      url &&
+      guardInput.captchaVerificationSignal &&
+      new RegExp(guardInput.captchaVerificationSignal, "iu").test(url)
+    )
+      return true;
     if (carriesPrepared) {
       return (
         checksOnSameSite(normalized, url, bodyText) ||
@@ -1813,10 +1830,12 @@ async function ensureFramePrepareOnlyMutationGuard(
   finalActionWindowOpen: boolean,
 ): Promise<PrepareOnlyGuardSnapshot> {
   await frame.evaluate(installMutationResponseBodyObserver);
+  await frame.evaluate(installPageMessageRecorderInPage);
   await frame.evaluate(installPrepareOnlyMutationGuardInPage, {
     intermediateMutationsAuthorized,
     finalActionSignal: FINAL_ACTION_SIGNAL.source,
     pickerChoiceWindowMs: PICKER_CHOICE_WINDOW_MS,
+    captchaVerificationSignal: CAPTCHA_VERIFICATION_REQUEST.source,
   });
   // A page handed to the person had its guard opened for them; a run that
   // takes the page back shuts it again unless its own send window is open.
@@ -1925,6 +1944,18 @@ export async function ensurePrepareOnlyMutationGuard(
         await route.abort("blockedbyclient");
       };
 
+      // The site's CAPTCHA script and frames are reads it needs on the page
+      // before Submit; its token requests wait for the final click (above).
+      if (
+        PREPARE_ONLY_SAFE_METHODS.has(method) &&
+        isCaptchaVerificationRequest(request.url()) &&
+        !requestUrlCarriesPreparedValue(request.url(), [
+          ...networkGuardState!.preparedValues,
+        ])
+      ) {
+        await route.continue();
+        return;
+      }
       // Fill in for me: nothing that writes leaves without the person's own
       // click, except the selected resume below. Saves are allowed only
       // under Send for me's own authority.
@@ -2217,10 +2248,13 @@ export async function ensurePrepareOnlyMutationGuard(
 
   if (!networkGuardState.initScriptInstalled) {
     await page.addInitScript(installMutationResponseBodyObserver);
+    // A job page's alert, confirm or prompt never opens a window.
+    await page.addInitScript(installPageMessageRecorderInPage);
     await page.addInitScript(installPrepareOnlyMutationGuardInPage, {
       intermediateMutationsAuthorized: false,
       finalActionSignal: FINAL_ACTION_SIGNAL.source,
       pickerChoiceWindowMs: PICKER_CHOICE_WINDOW_MS,
+      captchaVerificationSignal: CAPTCHA_VERIFICATION_REQUEST.source,
     });
     networkGuardState.initScriptInstalled = true;
   }

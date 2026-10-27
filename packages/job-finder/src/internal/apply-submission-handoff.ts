@@ -250,9 +250,10 @@ export function describeSubmissionOutcome(input: {
       if (
         input.result.outcome?.browserAction?.reason === "confirmation_timeout"
       ) {
+        const said = input.result.outcome.browserAction.detail;
         return {
           summary: "Send attempted; confirmation timed out",
-          detail: `${input.siteLabel} did not confirm receipt in time. Check this application on the site before trying again.`,
+          detail: `${input.siteLabel} did not confirm receipt in time.${said ? ` Its page showed this message: “${said}”` : ""} Check this application on the site before trying again.`,
           nextActionLabel: "Check the site and confirm",
         };
       }
@@ -471,7 +472,9 @@ export async function submitPreparedApplication(input: {
     runtimeInput: ApplicationSubmissionRuntimeInput,
   ) => Promise<ApplicationSubmissionRuntimeResult>;
 }): Promise<ApplicationSubmissionRuntimeResult> {
-  const outcomes = await input.repository.listSubmissionOutcomeRecords({ jobId: input.lineage.jobId });
+  const outcomes = await input.repository.listSubmissionOutcomeRecords({
+    jobId: input.lineage.jobId,
+  });
   const capacity = deriveApplySubmissionCapacity({
     envelope: input.envelope,
     outcomes,

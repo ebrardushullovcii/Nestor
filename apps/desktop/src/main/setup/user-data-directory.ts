@@ -44,3 +44,17 @@ export function configureDesktopUserDataDirectory(
   app.setPath("userData", resolvedDirectory);
   return resolvedDirectory;
 }
+
+/**
+ * "Nestor" wherever the app shows its own name (a message box title, the
+ * user agent's app token), also in a build that is not packaged, where
+ * Electron would use the package name. The data folder stays where that
+ * build always kept it, so renaming moves nothing.
+ */
+export function nameDesktopApp(
+  app: Pick<App, "getName" | "setName" | "getPath" | "setPath">,
+): void {
+  if (app.getName() === "Nestor") return;
+  app.setPath("userData", app.getPath("userData"));
+  app.setName("Nestor");
+}

@@ -1,4 +1,5 @@
 import http from "node:http";
+import { installPageMessageRecorderInPage } from "./page-messages";
 import type { AddressInfo } from "node:net";
 import {
   chromium,
@@ -315,6 +316,34 @@ describe("source-generic application browser hands", () => {
     expect(
       server.requests.filter((request) => request.includes("/submit")),
     ).toEqual([]);
+  });
+
+  test("a page alert after the click is kept with the uncertain outcome, never read as sent or not sent", async () => {
+    const { page } = await createPage(
+      "<form onsubmit=\"event.preventDefault(); alert('Cannot contact reCAPTCHA. Check your connection and try again.')\"><button id=send type=submit>Send application</button></form>",
+    );
+    await page.evaluate(installPageMessageRecorderInPage);
+    let windows = 0;
+    page.on("dialog", (dialog) => {
+      windows += 1;
+      void dialog.dismiss();
+    });
+    const observation = await observeApplicationForm(page);
+    const result = await executeExactlyOneFinalAction(page, {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      confirmationTimeoutMs: 1_000,
+      veto: () => true,
+    });
+    expect(windows).toBe(0);
+    expect(result).toMatchObject({
+      outcome: "outcome_uncertain",
+      reason: "confirmation_timeout",
+      siteMessage:
+        "Cannot contact reCAPTCHA. Check your connection and try again.",
+    });
   });
 
   test("issues exactly one fixture click and reports uncertainty, never submission", async () => {

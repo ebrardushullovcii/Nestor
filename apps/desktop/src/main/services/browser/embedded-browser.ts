@@ -1,6 +1,9 @@
 import {
   APPLY_PAGE_SELECTORS,
   collectApplyDocumentSnapshot,
+  installPageMessageRecorderInPage,
+  PAGE_MESSAGE_CONSOLE_PREFIX,
+  pageMessageReadsAsFailure,
 } from "@nestor/browser-runtime/apply-page";
 import {
   MAX_LIVE_WAITING_FORMS,
@@ -116,6 +119,44 @@ export class EmbeddedBrowser {
   private readonly personInputAt = new Map<string, number>();
 
   /** A prompt to record an outcome, never evidence that the site received it. */
+  /**
+   * What a page said through its own alert, as a banner on the person's tab.
+   * A run reads its own pages' messages and says what they mean itself.
+   */
+  private notePageMessage(tabId: string, recorded: string): void {
+    if (
+      !this.personInputTabs.has(tabId) &&
+      !this.personTabs.has(tabId) &&
+      !this.heldTabs.has(tabId)
+    )
+      return;
+    let said: { kind?: unknown; text?: unknown };
+    try {
+      said = JSON.parse(recorded) as { kind?: unknown; text?: unknown };
+    } catch {
+      return;
+    }
+    const text = typeof said.text === "string" ? said.text.trim() : "";
+    if (!text) return;
+    let site = "This site";
+    try {
+      site = new URL(this.pageMap.get(tabId)?.contents.getURL() ?? "").hostname;
+    } catch {
+      /* An unreadable address keeps the plain wording. */
+    }
+    this.requestAttention(
+      {
+        kind: pageMessageReadsAsFailure(text) ? "error" : "user_action",
+        title: `Message from ${site}`,
+        detail:
+          said.kind === "alert"
+            ? text
+            : `${text.replace(/[\s?]+$/u, "")}? Nestor answered no, so the page went on without it.`,
+      },
+      tabId,
+    );
+  }
+
   private noteUnboundSend(tabId: string): void {
     if (Date.now() - (this.personInputAt.get(tabId) ?? 0) > 2_000) return;
     if (this.applicationTabLabels.has(tabId)) return;
@@ -1206,7 +1247,9 @@ export class EmbeddedBrowser {
         webSecurity: true,
         backgroundThrottling: true,
         spellcheck: true,
-        safeDialogs: true,
+        // A job page's alert, confirm or prompt never opens a Windows box;
+        // what it said is shown in the app's own banner below.
+        disableDialogs: true,
         navigateOnDragDrop: false,
       },
     });
@@ -1278,8 +1321,26 @@ export class EmbeddedBrowser {
     };
     page.contents.on("dom-ready", installSubmitNotice);
     page.contents.on("did-frame-finish-load", installSubmitNotice);
+    // The page's own alert, confirm and prompt are dismissed and their text
+    // kept; a run reads it, and the person sees it here in the app's design.
+    const installPageMessages = () => {
+      if (page.contents.isDestroyed()) return;
+      for (const frame of page.contents.mainFrame.framesInSubtree)
+        void frame
+          .executeJavaScript(
+            `(${installPageMessageRecorderInPage.toString()})()`,
+          )
+          .catch(() => undefined);
+    };
+    page.contents.on("dom-ready", installPageMessages);
+    page.contents.on("did-frame-finish-load", installPageMessages);
     page.contents.on("console-message", (details) => {
       if (details.message === submitNoticeToken) this.noteUnboundSend(page.id);
+      else if (details.message.startsWith(PAGE_MESSAGE_CONSOLE_PREFIX))
+        this.notePageMessage(
+          page.id,
+          details.message.slice(PAGE_MESSAGE_CONSOLE_PREFIX.length),
+        );
     });
     page.contents.on("page-title-updated", update);
     page.contents.on("did-navigate", update);

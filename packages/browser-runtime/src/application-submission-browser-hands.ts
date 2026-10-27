@@ -16,6 +16,7 @@ import {
   type SubmissionPageState,
 } from "./submission-confirmation-policy";
 
+import { readPageMessages } from "./page-messages";
 import {
   closePrepareOnlyFinalActionWindow,
   openPrepareOnlyFinalActionWindow,
@@ -176,6 +177,8 @@ export type ApplicationFinalActionResult =
       readonly observation: ApplicationFormObservation;
       readonly control: ApplicationFinalControl;
       readonly facts: ApplicationExternalActionFacts;
+      /** The last thing the page said through its own alert after the click. */
+      readonly siteMessage?: string;
     }
   | {
       /** The employer page visibly confirmed receipt after the one action. */
@@ -1155,6 +1158,7 @@ export async function executeExactlyOneFinalAction(
     // The prepare-only guard stays on the page from preparation; this is the
     // one press it is opened for.
     await openPrepareOnlyFinalActionWindow(page);
+    const clickedAt = Date.now();
     try {
       await postVetoLocator.click({
         noWaitAfter: true,
@@ -1291,6 +1295,10 @@ export async function executeExactlyOneFinalAction(
         facts: { ...facts, pageAfter: readSafePageUrl(page.url()) },
       });
     }
+    // What the page said through its own alert after the click (dismissed,
+    // never a window). It is never a sign the application arrived, nor proof
+    // it did not: a site can show one and still take the application.
+    const said = (await readPageMessages(page, clickedAt)).at(-1)?.text;
     return {
       outcome: "outcome_uncertain",
       reason: "confirmation_timeout",
@@ -1301,6 +1309,7 @@ export async function executeExactlyOneFinalAction(
         requestsObservedDuringAction,
         pageAfter: readSafePageUrl(page.url()),
       },
+      ...(said ? { siteMessage: said } : {}),
     };
   });
 }

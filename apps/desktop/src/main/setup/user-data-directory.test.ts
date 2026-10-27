@@ -7,6 +7,7 @@ import {
   configureDesktopUserDataDirectory,
   getConfiguredDesktopUserDataDirectory,
   getDesktopStartupDiagnosticsPath,
+  nameDesktopApp,
   resolveDesktopUserDataDirectory,
 } from "./user-data-directory";
 
@@ -89,4 +90,25 @@ describe("configureDesktopUserDataDirectory", () => {
     ).toBe(defaultDirectory);
     expect(getDesktopStartupDiagnosticsPath("   ")).toBeNull();
   });
+});
+
+test("an unpackaged build is named Nestor and keeps its data folder", () => {
+  let name = "@nestor/desktop";
+  const paths = new Map([["userData", "C:/data/@nestor/desktop"]]);
+  const fake = {
+    getName: () => name,
+    setName: (next: string) => {
+      name = next;
+      // Electron derives the default from the name; a pinned path stays.
+      if (!paths.has("pinned")) paths.set("userData", `C:/data/${next}`);
+    },
+    getPath: (key: string) => paths.get(key)!,
+    setPath: (key: string, value: string) => {
+      paths.set(key, value);
+      paths.set("pinned", value);
+    },
+  } as unknown as Pick<App, "getName" | "setName" | "getPath" | "setPath">;
+  nameDesktopApp(fake);
+  expect(name).toBe("Nestor");
+  expect(fake.getPath("userData")).toBe("C:/data/@nestor/desktop");
 });
