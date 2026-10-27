@@ -536,6 +536,8 @@ export type ApplyProposal =
       reason: string;
       stuck?: boolean;
       needsPerson?: boolean;
+      /** Each question or task for the person, apart from the reason. */
+      forPerson?: string[];
     };
 
 export interface ApplyAgentConfig {

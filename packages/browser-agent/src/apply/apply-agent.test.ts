@@ -25,7 +25,11 @@ import {
   questionPrompt,
 } from "./policy-executor";
 import { savedAnswerForQuestion } from "./application-facts";
-import type { ApplyAgentConfig, ApplyPageHands } from "./types";
+import type {
+  ApplyAgentConfig,
+  ApplyAgentResult,
+  ApplyPageHands,
+} from "./types";
 import {
   checkWrittenApplicationAnswer,
   WrittenAnswerCheckUnavailableError,
@@ -2636,46 +2640,69 @@ describe("apply agent run endings", () => {
     expect(result.pauses[0]?.blocker?.requiresPerson).toBe(true);
   });
 
-  test("a security check the person already ticked is not reported as waiting on them", async () => {
-    const result = await runApplyAgent(
-      config(
-        page({
-          bodyText: "Apply for the role. I am not a robot. Local fake CAPTCHA.",
-          controls: [
-            nameControl(),
-            {
-              ...nameControl(),
-              index: 1,
-              id: "human",
-              name: "human",
-              inputType: "checkbox",
-              role: "checkbox",
-              label: "I am not a robot",
-              required: false,
-              checked: true,
-              value: "yes",
-            },
-          ],
-        }),
+  const solvedCheckPage = () =>
+    page({
+      bodyText: "Apply for the role. I am not a robot. Local fake CAPTCHA.",
+      controls: [
+        nameControl(),
         {
-          authority: {
-            mode: "confirm_before_submit",
-            submitAuthorized: true,
-            preApprovedAttestationKinds: [],
-            salaryDisclosure: "pause_for_user",
-            allowedOrigins: ["https://apply.example.test"],
-          },
+          ...nameControl(),
+          index: 1,
+          id: "human",
+          name: "human",
+          inputType: "checkbox",
+          role: "checkbox",
+          label: "I am not a robot",
+          required: false,
+          checked: true,
+          value: "yes",
         },
-      ),
-      repeatingModel("finish", {
-        reason:
-          "Form filled, but Submit is blocked by the 'I am not a robot' CAPTCHA which only you can tick.",
-        needsPerson: true,
-      }),
+      ],
+    });
+  const confirmFirst = {
+    authority: {
+      mode: "confirm_before_submit" as const,
+      submitAuthorized: true,
+      preApprovedAttestationKinds: [],
+      salaryDisclosure: "pause_for_user" as const,
+      allowedOrigins: ["https://apply.example.test"],
+    },
+  };
+  const solvedCheckReason =
+    "Form filled, but Submit is blocked by the 'I am not a robot' CAPTCHA which only you can tick.";
+
+  test("a security check the person already ticked is not reported as waiting on them", async () => {
+    // Asked once to name its items, the model sees the form is complete.
+    const result = await runApplyAgent(
+      config(solvedCheckPage(), confirmFirst),
+      scriptedModel([
+        {
+          name: "finish",
+          args: { reason: solvedCheckReason, needsPerson: true },
+        },
+        {
+          name: "finish",
+          args: { reason: "The form is complete.", needsPerson: false },
+        },
+      ]),
     );
 
     expect(result.pauses).toEqual([]);
     expect(result.outcome).toBe("awaiting_your_review");
+  });
+
+  test("a finish that still says needsPerson beside a ticked check hands the form back, not a security check", async () => {
+    const result = await runApplyAgent(
+      config(solvedCheckPage(), confirmFirst),
+      repeatingModel("finish", {
+        reason: solvedCheckReason,
+        needsPerson: true,
+      }),
+    );
+
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(result.pauses.some((pause) => pause.blocker)).toBe(false);
   });
 
   test("a run set to confirm first ends waiting for the person", async () => {
@@ -8325,72 +8352,317 @@ test("a file field the widget removed once storage took the file is attached, no
   expect(result.outcome).toBe("prepared");
 });
 
-describe("a run never ends waiting on the person with nothing to answer", () => {
-  const question = "Are you based in a EU or equivalent timezone?";
-  const optionalYesNo = () =>
+describe("a finish that says needsPerson always ends paused", () => {
+  const sendForMe = {
+    authority: {
+      mode: "autonomous_submit" as const,
+      submitAuthorized: true,
+      preApprovedAttestationKinds: [],
+      salaryDisclosure: "pause_for_user" as const,
+      allowedOrigins: ["https://apply.example.test"],
+    },
+  };
+  const confirmFirst = {
+    authority: {
+      mode: "confirm_before_submit" as const,
+      submitAuthorized: true,
+      preApprovedAttestationKinds: [],
+      salaryDisclosure: "pause_for_user" as const,
+      allowedOrigins: ["https://apply.example.test"],
+    },
+  };
+  const handedOver = (result: ApplyAgentResult) =>
+    result.pauses.flatMap((pause) =>
+      (pause.questions ?? (pause.question ? [pause.question] : [])).map(
+        (question) => question.prompt,
+      ),
+    );
+  const field = (
+    index: number,
+    label: string,
+    required = false,
+  ): RawApplyControl => ({
+    ...nameControl(),
+    index,
+    id: `field${index}`,
+    name: `field${index}`,
+    label,
+    required,
+    value: "",
+  });
+  const solvedCheck = (): RawApplyControl => ({
+    ...nameControl(),
+    index: 1,
+    id: "human",
+    name: "human",
+    inputType: "checkbox",
+    role: "checkbox",
+    label: "I am not a robot",
+    required: false,
+    checked: true,
+    value: "yes",
+  });
+  const captchaPage = (...controls: RawApplyControl[]) =>
     page({
-      controls: [nameControl()],
-      actions: [
-        {
-          index: 0,
-          label: "Yes",
-          visible: true,
-          disabled: false,
-          section: question,
-          pressed: false,
-        },
-        {
-          index: 1,
-          label: "No",
-          visible: true,
-          disabled: false,
-          section: question,
-          pressed: false,
-        },
-      ],
+      bodyText: "Apply for the role. I am not a robot. Local fake CAPTCHA.",
+      controls: [nameControl(), solvedCheck(), ...controls],
     });
+  const polar =
+    "Product Engineering application is fully filled — Full name Robin Ashford — please review before submitting.";
+  const relocationTerms =
+    "The person's relocation terms aren't in their profile. Please review before submitting.";
+  const relocate =
+    "Before sending, can you confirm you agree to relocate to Berlin?";
+  const mfa = "Enter the MFA code the site sent to your phone.";
+  const captchaItem = "Tick the 'I am not a robot' CAPTCHA.";
+  const yesNoQuestion = "Are you based in a EU or equivalent timezone?";
+  const longStart =
+    "Please describe, in your own words and with as much detail as you can, ";
+  const optionals = Array.from(
+    { length: 20 },
+    (_, index) => `Optional question ${index + 1}`,
+  );
+  const plain = () => page({ controls: [nameControl()] });
 
-  test("an optional question it means is left empty, and the run finishes ready", async () => {
+  // The three reviews' probes: a model that ignores the nudge, named items
+  // that look like optional fields or a solved check, more items than fit,
+  // long items, questions the page left, and a form with another step.
+  const scenarios: Array<{
+    name: string;
+    page: RawApplyPage;
+    confirmFirst?: boolean;
+    reason?: string;
+    forPerson?: string[];
+    handed?: string[];
+  }> = [
+    { name: "Polar's review request", page: plain(), reason: polar },
+    {
+      name: "Polar's review request in Fill in for me",
+      page: plain(),
+      confirmFirst: true,
+      reason: polar,
+    },
+    {
+      name: "relocation terms, reason only",
+      page: plain(),
+      reason: relocationTerms,
+    },
+    { name: "agree to relocate, reason only", page: plain(), reason: relocate },
+    {
+      name: "sign in, reason only",
+      page: plain(),
+      reason:
+        "The site asks the person to sign in before the form can be sent.",
+    },
+    { name: "MFA code, reason only", page: plain(), reason: mfa },
+    {
+      name: "human check, reason only",
+      page: plain(),
+      reason: "Please verify you are human before submitting.",
+    },
+    {
+      name: "relocation terms as an item",
+      page: plain(),
+      forPerson: [relocationTerms],
+      handed: [relocationTerms],
+    },
+    {
+      name: "agree to relocate as an item",
+      page: plain(),
+      forPerson: [relocate],
+      handed: [relocate],
+    },
+    {
+      name: "relocate beside an empty optional Location",
+      page: page({ controls: [nameControl(), field(1, "Location")] }),
+      forPerson: [relocate],
+      handed: [relocate],
+    },
+    {
+      name: "MFA beside an empty optional Phone",
+      page: page({ controls: [nameControl(), field(1, "Phone")] }),
+      forPerson: [mfa],
+      handed: [mfa],
+    },
+    {
+      name: "an optional Yes/No question named exactly",
+      page: page({
+        controls: [nameControl()],
+        actions: [
+          {
+            index: 0,
+            label: "Yes",
+            visible: true,
+            disabled: false,
+            section: yesNoQuestion,
+            pressed: false,
+          },
+          {
+            index: 1,
+            label: "No",
+            visible: true,
+            disabled: false,
+            section: yesNoQuestion,
+            pressed: false,
+          },
+        ],
+      }),
+      forPerson: [yesNoQuestion],
+    },
+    {
+      name: "an optional Pronouns field named exactly",
+      page: page({ controls: [nameControl(), field(1, "Pronouns")] }),
+      forPerson: ["Pronouns"],
+      handed: ["Pronouns"],
+    },
+    {
+      name: "a solved check beside a relocation item",
+      page: captchaPage(),
+      forPerson: [captchaItem, relocate],
+      handed: [captchaItem, relocate],
+    },
+    {
+      name: "a solved check and a relocation, reason only",
+      page: captchaPage(),
+      reason: "CAPTCHA done; confirm relocation to Berlin.",
+      handed: ["CAPTCHA done; confirm relocation to Berlin."],
+    },
+    {
+      name: "a solved check, an MFA item and an optional Pronouns",
+      page: captchaPage(field(2, "Pronouns")),
+      forPerson: [mfa, "Pronouns"],
+      handed: [mfa, "Pronouns"],
+    },
+    {
+      name: "only the solved check, named as an item",
+      page: captchaPage(),
+      forPerson: [captchaItem],
+      handed: [captchaItem],
+    },
+    {
+      name: "twenty optional fields named, and a relocation item past them",
+      page: page({
+        controls: [
+          nameControl(),
+          ...optionals.map((label, index) => field(index + 1, label)),
+        ],
+      }),
+      forPerson: [...optionals, relocate],
+      handed: [relocate],
+    },
+    {
+      name: "a relocation item beside an unanswered required office field",
+      page: page({
+        controls: [
+          nameControl(),
+          field(1, "Which office would you work from?", true),
+        ],
+      }),
+      forPerson: [relocate],
+      handed: ["Which office would you work from?", relocate],
+    },
+    {
+      name: "two long questions that start the same",
+      page: plain(),
+      forPerson: [
+        `${longStart}why you want to relocate.`,
+        `${longStart}your notice period.`,
+      ],
+      handed: [
+        `${longStart}why you want to relocate.`,
+        `${longStart}your notice period.`,
+      ],
+    },
+    {
+      name: "optional items only, on step 1 of 2",
+      page: page({
+        stepLabel: "Step 1 of 2",
+        controls: [nameControl(), field(1, "Pronouns")],
+        actions: [
+          { index: 0, label: "Continue", visible: true, disabled: false },
+        ],
+      }),
+      forPerson: ["Pronouns"],
+      handed: ["Pronouns"],
+    },
+    {
+      name: "a quoted question the page doesn't show",
+      page: plain(),
+      reason:
+        'The form asks "Which office would you work from?" and only the person knows.',
+      handed: ["Which office would you work from?"],
+    },
+    {
+      name: "relocation as an item in Fill in for me",
+      page: plain(),
+      confirmFirst: true,
+      forPerson: [relocate],
+      handed: [relocate],
+    },
+  ];
+
+  test.each(scenarios)(
+    "$name: paused, nothing ready to send",
+    async (scenario) => {
+      const result = await runApplyAgent(
+        config(scenario.page, scenario.confirmFirst ? confirmFirst : sendForMe),
+        repeatingModel("finish", {
+          reason: scenario.reason ?? "Something needs the person.",
+          needsPerson: true,
+          ...(scenario.forPerson ? { forPerson: scenario.forPerson } : {}),
+        }),
+      );
+      expect(result.outcome).toBe("paused");
+      expect(result.readyToSend).toBeNull();
+      expect(handedOver(result).length).toBeGreaterThan(0);
+      for (const prompt of scenario.handed ?? [])
+        expect(handedOver(result)).toContain(prompt);
+    },
+  );
+
+  test("past twenty items, the rest go together as one more item", async () => {
+    const items = Array.from(
+      { length: 23 },
+      (_, index) => `Question ${index + 1}?`,
+    );
     const result = await runApplyAgent(
-      config(optionalYesNo()),
+      config(plain(), sendForMe),
       repeatingModel("finish", {
-        reason: `The question "${question}" needs the person's answer.`,
+        reason: "Questions for the person.",
         needsPerson: true,
+        forPerson: items,
       }),
     );
+    expect(result.outcome).toBe("paused");
+    expect(handedOver(result)).toEqual(
+      expect.arrayContaining([
+        ...items.slice(0, 20),
+        "Question 21?; Question 22?; Question 23?",
+      ]),
+    );
+  });
+
+  test("Polar in Send for me: asked once, the model says the form is complete, and it goes out", async () => {
+    const contents: string[] = [];
+    const model = scriptedModel([
+      { name: "finish", args: { reason: polar, needsPerson: true } },
+      { name: "finish", args: { reason: polar, needsPerson: false } },
+    ]);
+    const result = await runApplyAgent(config(plain(), sendForMe), {
+      chatWithTools: (messages, definitions) => {
+        const last = messages.at(-1);
+        if (last?.role === "tool") contents.push(String(last.content));
+        return model.chatWithTools(messages, definitions);
+      },
+    });
+    expect(
+      contents.some((content) => content.includes("needsPerson false")),
+    ).toBe(true);
     expect(result.pauses).toEqual([]);
-    expect(result.outcome).toBe("prepared");
-  });
-
-  test("a question it names that the page doesn't show is handed over by name", async () => {
-    const result = await runApplyAgent(
-      config(page({ controls: [nameControl()] })),
-      repeatingModel("finish", {
-        reason:
-          'The form asks "Which office would you work from?" and only the person knows.',
-        needsPerson: true,
-      }),
-    );
-    expect(result.outcome).toBe("paused");
-    expect(
-      result.pauses
-        .flatMap((pause) => pause.questions ?? [])
-        .map((q) => q.prompt),
-    ).toEqual(["Which office would you work from?"]);
-  });
-
-  test("a reason that names nothing it can find is itself the one item", async () => {
-    const reason = "The person's relocation terms aren't in their profile.";
-    const result = await runApplyAgent(
-      config(page({ controls: [nameControl()] })),
-      repeatingModel("finish", { reason, needsPerson: true }),
-    );
-    expect(result.outcome).toBe("paused");
-    expect(
-      result.pauses
-        .flatMap((pause) => pause.questions ?? [])
-        .map((q) => q.prompt),
-    ).toEqual([reason]);
+    expect(result.outcome).toBe("ready_to_send");
+    expect(result.readyToSend).toMatchObject({
+      actionLabel: "Submit application",
+    });
   });
 });
 
