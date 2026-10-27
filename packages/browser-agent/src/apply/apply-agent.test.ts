@@ -351,7 +351,7 @@ test.each([true, false])(
     const value = "robin@example.test";
     input.sources.profile.email = value;
     const fill = vi.fn((ref: string, text: string) => {
-      source.controls[0]!.value = text;
+      source.controls[0].value = text;
       return Promise.resolve({ ok: true as const, observedValue: text });
     });
     input.hands.fillText = fill;
