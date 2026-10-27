@@ -152,6 +152,32 @@ test("Ashby with field saves: the person's own Submit gets every value Nestor ty
     await page.locator(`#${id}`).blur();
   }
   await session.uploadFile(ref("_systemfield_resume"), resume);
+  // Ashby's Yes/No buttons are pressed by their own handles, through the
+  // same toggle the answer path uses; pressing a chosen option again keeps it.
+  const toggles = (await session.readPage()).actions.filter(
+    (action) => action.pressed !== undefined,
+  );
+  expect(
+    toggles.map((action) => [action.section, action.label, action.pressed]),
+  ).toEqual([
+    ["Are you over the age of 18?", "Yes", false],
+    ["Are you over the age of 18?", "No", false],
+    ["Are you based in a EU or equivalent timezone?", "Yes", false],
+    ["Are you based in a EU or equivalent timezone?", "No", false],
+  ]);
+  for (const [index, times] of [
+    [0, 2],
+    [3, 1],
+  ] as const)
+    for (let press = 0; press < times; press++) {
+      await openPrepareOnlyIntermediateMutationWindow(page);
+      expect(
+        await session.setToggle(
+          toggles[index]!.ref ?? `a${toggles[index]!.index}`,
+          true,
+        ),
+      ).toMatchObject({ ok: true });
+    }
   await page.waitForTimeout(1_500);
   expect(await page.locator("#toast").textContent()).toBe("");
   // The person's click: Ashby's Submit carries only the form's identifiers.
@@ -189,6 +215,8 @@ test("Ashby with field saves: the person's own Submit gets every value Nestor ty
   expect(post?.fields).toMatchObject({
     _systemfield_name: "Alex Vanguard",
     _systemfield_email: "alex.vanguard@example.test",
+    adult: true,
+    timezone: false,
     _systemfield_resume: {
       file: expect.stringContaining(resume.name) as unknown,
     },

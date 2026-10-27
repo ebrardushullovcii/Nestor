@@ -76,12 +76,31 @@ const ashbyQueries = {
     "mutation ApiSubmitSingleApplicationFormAction($organizationHostedJobsPageName: String!, $jobPostingId: String!, $formRenderIdentifier: String!, $formDefinitionIdentifier: String, $actionIdentifier: String!) {\n  submitApplicationFormAction: submitSingleApplicationFormAction(organizationHostedJobsPageName: $organizationHostedJobsPageName, jobPostingId: $jobPostingId, formRenderIdentifier: $formRenderIdentifier, formDefinitionIdentifier: $formDefinitionIdentifier, actionIdentifier: $actionIdentifier) {\n    ok\n    missing\n    __typename\n  }\n}",
 };
 
+/**
+ * Ashby's Yes/No input, as its page renders it: two buttons with no type,
+ * `aria-pressed` and `data-option`, and a hidden checkbox, inside the
+ * question's field. Its label points at no element.
+ */
+const ashbyYesNo = (path, question) => `
+      <div class="field-entry"><label for="${path}-field">${question}</label>
+        <div data-yesno="${path}">
+          <button aria-pressed="false" data-option="yes">Yes</button>
+          <button aria-pressed="false" data-option="no">No</button>
+          <input type="checkbox" tabindex="-1" name="${path}" style="position:absolute;opacity:0;pointer-events:none">
+        </div></div>`;
+
 /** Ashby's form state, kept by the server per rendered form. */
 const ashbyForms = new Map();
 const ashbyFields = [
   { path: "_systemfield_name", label: "Name", required: true },
   { path: "_systemfield_email", label: "Email", required: true },
   { path: "_systemfield_resume", label: "Resume", required: true },
+  { path: "adult", label: "Are you over the age of 18?", required: true },
+  {
+    path: "timezone",
+    label: "Are you based in a EU or equivalent timezone?",
+    required: true,
+  },
 ];
 
 const sites = {
@@ -94,7 +113,9 @@ const sites = {
       <div><label for="_systemfield_resume">Resume *</label>
         <button type="button" onclick="document.getElementById('_systemfield_resume').click()">Upload File</button>
         <input id="_systemfield_resume" type="file" accept=".pdf" style="display:none">
-        <span id="chip"></span></div>`,
+        <span id="chip"></span></div>
+      ${ashbyYesNo("adult", "Are you over the age of 18?")}
+      ${ashbyYesNo("timezone", "Are you based in a EU or equivalent timezone?")}`,
     script: `
       const render = 'render-' + Math.random().toString(36).slice(2, 10);
       document.getElementById('application').dataset.render = render;
@@ -110,6 +131,21 @@ const sites = {
         if (!response.ok || body.errors) throw new Error(body.errors?.[0]?.message ?? 'Request failed');
         return body.data;
       };
+      // Ashby's Yes/No: pressing the pressed option again clears the answer;
+      // each change is saved like any other answer.
+      for (const box of document.querySelectorAll('[data-yesno]')) {
+        const [yes, no] = box.querySelectorAll('button');
+        const hidden = box.querySelector('input');
+        let value;
+        const show = () => {
+          yes.setAttribute('aria-pressed', String(value === true));
+          no.setAttribute('aria-pressed', String(value === false));
+          hidden.checked = value === true;
+          graphql('ApiSetFormValue', { formRenderIdentifier: render, path: box.dataset.yesno, value: value ?? null }).catch(() => toast('Your answer could not be saved.'));
+        };
+        yes.addEventListener('click', () => { value = value !== true || undefined; show(); });
+        no.addEventListener('click', () => { value = value === false ? undefined : false; show(); });
+      }
       // Each answer is saved as it is entered, as Ashby does.
       for (const id of ['_systemfield_name', '_systemfield_email']) {
         const field = document.getElementById(id);
@@ -247,7 +283,13 @@ async function ashbyGraphql(req, res, url, { readPost, logPost }) {
   if (op === "ApiSubmitSingleApplicationFormAction") {
     // The submit carries no answers: the server submits what it saved.
     const missing = ashbyFields
-      .filter((field) => field.required && !state[field.path])
+      .filter(
+        (field) =>
+          field.required &&
+          (state[field.path] === undefined ||
+            state[field.path] === null ||
+            state[field.path] === ""),
+      )
       .map((field) => field.label);
     if (!missing.length) logPost("/ashby-shape/apply/1", state);
     return json(res, 200, {

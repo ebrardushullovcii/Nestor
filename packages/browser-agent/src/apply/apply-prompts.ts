@@ -1,4 +1,8 @@
-import type { ApplyAgentConfig, ApplyFormObservation } from "./types";
+import type {
+  ApplyAgentConfig,
+  ApplyFormObservation,
+  ApplyPlacement,
+} from "./types";
 import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions";
 
 /**
@@ -336,6 +340,15 @@ export function describeObservationUpdate(
     .join("\n\n");
 }
 
+function withoutPlacement<T extends ApplyPlacement>(
+  entry: T,
+): Omit<T, "section" | "inForm"> {
+  const copy: T = { ...entry };
+  delete copy.section;
+  delete copy.inForm;
+  return copy;
+}
+
 /** Only structural changes stop a batch; an ordinary entered value does not. */
 export function applyStepShape(
   observation: ApplyFormObservation | null,
@@ -356,8 +369,9 @@ export function applyStepShape(
       invalid: false,
       validationMessage: "",
     })),
-    actions: observation.actions,
+    // Where a button sits can name text the page changes as it is typed in.
+    actions: observation.actions.map(withoutPlacement),
     links: observation.links,
-    clickables: observation.clickables,
+    clickables: observation.clickables.map(withoutPlacement),
   });
 }
