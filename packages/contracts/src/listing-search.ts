@@ -1,4 +1,4 @@
-import type { CandidateProfile } from "./profile";
+import type { CandidateProfile, SavedOptionFallback } from "./profile";
 import type { FoundJob, JobDetail, JobFitUpdate } from "./jobs";
 import type {
   JobSearchGoals,
@@ -85,6 +85,8 @@ export interface SearchFitInput {
   request?: string;
   profile: CandidateProfile;
   goals: JobSearchGoals;
+  /** Confirmed global country-list rules, never a grant of work permission. */
+  countryOptionFallbacks?: readonly SavedOptionFallback[];
   jobs: readonly JobDetail[];
   signal?: AbortSignal;
   onBatch?: (fits: JobFitUpdate[]) => Promise<void> | void;

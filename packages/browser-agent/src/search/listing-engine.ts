@@ -876,6 +876,12 @@ export async function readListings(
 }
 
 const explanation = z.tuple([z.string(), z.string()]);
+const FIT_WORK_ELIGIBILITY = [
+  "Judge eligibility separately in e: [compatible|review|blocked, short reason addressed to you].",
+  "Compare the listing's hiring location, residence restrictions and work-authorization requirements with currentCountry, currentCity, currentRegion, location and workEligibility. Remote does not mean worldwide. Remote-US, US residents only, or another exclusive hiring region excludes someone working from outside it, even when the skills are an exact match. An employer's office address alone is not a hiring restriction; explicit worldwide hiring includes the person.",
+  "A saved countryOptionFallbacks rule applies only to an explicit offered country list: prefer primary when offered; otherwise accept fallback only when offered. Neither choice offered is a conflict. Never hard-code a country substitution, treat Europe as EU/EEA, or infer citizenship or work authorization from residence or a fallback choice.",
+  "Set blocked only for a listing restriction contradicted by saved facts, naming that restriction. A missing authorization country is unknown, not proof of no permission. Unresolved required authorization, sponsorship, permit conditions or hiring region means review, never Strong. Set compatible only when no material place or eligibility restriction remains unresolved. Worldwide remote without a specific authorization requirement needs no invented permit check. A schedule-overlap request alone does not impose residence. Relocation willingness and permission to work are separate.",
+].join(" ");
 const fitSchema = z.object({
   id: z.number().int().positive(),
   s: z.number().int().min(0).max(100),
@@ -883,6 +889,9 @@ const fitSchema = z.object({
   r: explanation,
   p: explanation,
   c: explanation,
+  e: z
+    .tuple([z.enum(["compatible", "review", "blocked"]), z.string()])
+    .default(["review", "Your work location or permission needs checking."]),
 });
 
 function fitResponseSchema(ids: readonly number[]) {
@@ -902,8 +911,9 @@ function fitResponseSchema(ids: readonly number[]) {
       r: pair,
       p: pair,
       c: pair,
+      e: pair,
     },
-    required: ["id", "s", "why", "r", "p", "c"],
+    required: ["id", "s", "why", "r", "p", "c", "e"],
   };
   return {
     name: "job_fits",
@@ -958,6 +968,9 @@ export async function fitJobs(
     headline: profile.headline,
     summary: profile.summary,
     location: profile.currentLocation,
+    currentCity: profile.currentCity,
+    currentRegion: profile.currentRegion,
+    currentCountry: profile.currentCountry,
     yearsExperience: profile.yearsExperience,
     workEligibility: profile.workEligibility,
     skills: profile.skills,
@@ -1000,9 +1013,12 @@ export async function fitJobs(
         }));
         const answer = await ask(
           input,
-          `Judge each job from the complete listing and candidate evidence. Each listing's passages indexes, in order, reconstruct its unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : ""} Structured profile edits take priority over the resume. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"s":score,"why":"short overall reason","r":["strong|related|stretch|unrelated|unknown","role reason"],"p":["aligned|mixed|conflict|unknown","preferences reason"],"c":["strong|partial|unknown","candidate evidence"]}]}. Include every id exactly once, including low scores. Keep each explanation under 12 words without repeating sentences.`,
+          `${FIT_WORK_ELIGIBILITY} Judge each job from the complete listing and candidate evidence. Each listing's passages indexes, in order, reconstruct its unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : ""} Structured profile edits take priority over the resume. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"s":score,"why":"short overall reason","r":["strong|related|stretch|unrelated|unknown","role reason"],"p":["aligned|mixed|conflict|unknown","preferences reason"],"c":["strong|partial|unknown","candidate evidence"],"e":["compatible|review|blocked","eligibility reason"]}]}. Include every id exactly once, including low scores. Keep each explanation under 12 words without repeating sentences.`,
           {
             person: compactFacts(person),
+            ...(input.countryOptionFallbacks?.length
+              ? { countryOptionFallbacks: input.countryOptionFallbacks }
+              : {}),
             goals: input.goals,
             request: input.request,
             passages,
@@ -1024,17 +1040,40 @@ export async function fitJobs(
           counts.set(fit.id, (counts.get(fit.id) ?? 0) + 1);
         const fits = answer.fits
           .filter((fit) => counts.get(fit.id) === 1)
-          .map((fit) => ({
-            id: fit.id,
-            score: fit.s,
-            summary: fit.why,
-            reasons: [],
-            gaps: [],
-            role: { assessment: fit.r[0], explanation: fit.r[1] },
-            preferences: { assessment: fit.p[0], explanation: fit.p[1] },
-            coverage: { assessment: fit.c[0], explanation: fit.c[1] },
-            scoredAt: new Date().toISOString(),
-          }));
+          .map((fit) => {
+            const [eligibility, eligibilityReason] = fit.e;
+            const cap =
+              eligibility === "blocked"
+                ? JOB_FIT_BANDS.stretch - 1
+                : eligibility === "review" || fit.p[0] === "conflict"
+                  ? JOB_FIT_BANDS.strong - 1
+                  : 100;
+            return {
+              id: fit.id,
+              score: Math.min(fit.s, cap),
+              summary:
+                fit.s > cap
+                  ? eligibility === "compatible"
+                    ? fit.p[1]
+                    : eligibilityReason
+                  : fit.why,
+              reasons: [],
+              gaps: [],
+              role: { assessment: fit.r[0], explanation: fit.r[1] },
+              preferences: {
+                assessment:
+                  eligibility === "blocked"
+                    ? "conflict"
+                    : eligibility === "review" && fit.p[0] !== "conflict"
+                      ? "unknown"
+                      : fit.p[0],
+                explanation:
+                  eligibility === "compatible" ? fit.p[1] : eligibilityReason,
+              },
+              coverage: { assessment: fit.c[0], explanation: fit.c[1] },
+              scoredAt: new Date().toISOString(),
+            };
+          });
         output.push(...fits);
         await input.onBatch?.(fits);
         const judged = new Set(fits.map((fit) => fit.id));

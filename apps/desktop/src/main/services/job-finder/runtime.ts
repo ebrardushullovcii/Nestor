@@ -5,7 +5,10 @@ import {
   createResumeStore,
   createSourceAccessStore,
 } from "@nestor/db/job-store";
-import { readSavedApplicationAnswers } from "@nestor/db/applications";
+import {
+  readSavedApplicationAnswers,
+  readSavedCountryOptionFallbacks,
+} from "@nestor/db/applications";
 import { jobSiteTarget } from "@nestor/contracts";
 import type { BrowserSessionState } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
@@ -448,6 +451,10 @@ async function createJobFinderRuntime(
             searchPreferences,
             sources: jobSites.enabled().map(jobSiteTarget),
             sourceInstructionArtifacts,
+            countryOptionFallbacks: readSavedCountryOptionFallbacks(
+              store,
+              profile.currentCountry,
+            ),
             remoteCountsAsAnyLocation:
               settings.aiBehavior?.jobSearch.remoteCountsAsAnyLocation ?? true,
           };

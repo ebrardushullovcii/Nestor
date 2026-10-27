@@ -266,6 +266,9 @@ export function createListingSearchEngine(deps: {
         onUsage,
         ...input,
         profile: input.context.profile,
+        ...(input.context.countryOptionFallbacks?.length
+          ? { countryOptionFallbacks: input.context.countryOptionFallbacks }
+          : {}),
         goals: toJobSearchGoals({
           ...input.context.searchPreferences,
           remoteCountsAsAnyLocation: input.context.remoteCountsAsAnyLocation,

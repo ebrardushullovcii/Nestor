@@ -59,6 +59,7 @@ test("passes remote location policy into fit and retains the model's changed sco
               r: ["strong", "Requested work."],
               p: [off ? "conflict" : "aligned", "Location preference."],
               c: ["strong", "React and TypeScript experience."],
+              e: ["compatible", "Worldwide remote includes your location."],
             },
           ],
         }),

@@ -1,6 +1,8 @@
 import {
   UpsertSavedFormAnswerInputSchema,
   SavedOptionFallbackSchema,
+  sameSavedChoice,
+  type SavedOptionFallback,
   ApplicationListQuerySchema,
   ApplicationApplyModeSchema,
   DEFAULT_APPLICATION_APPLY_MODE,
@@ -887,6 +889,29 @@ export function createSavedAnswersStore(store: JobStore) {
   };
 }
 export type SavedAnswersStore = ReturnType<typeof createSavedAnswersStore>;
+
+/** Search needs only confirmed, global country-list mappings, not saved answer text. */
+export function readSavedCountryOptionFallbacks(
+  store: JobStore,
+  currentCountry: string | null,
+): SavedOptionFallback[] {
+  if (!currentCountry) return [];
+  const rows = store
+    .sql(
+      `SELECT option_fallback_json FROM form_answers
+    WHERE needs_confirmation=0 AND country='' AND site_origin=''
+      AND option_fallback_json IS NOT NULL ORDER BY id`,
+    )
+    .all() as Array<{
+    option_fallback_json: string;
+  }>;
+  return rows.flatMap((row) => {
+    const rule = SavedOptionFallbackSchema.parse(
+      JSON.parse(row.option_fallback_json) as unknown,
+    );
+    return sameSavedChoice(rule.primary, currentCountry) ? [rule] : [];
+  });
+}
 
 /** Trusted authority projection, never sent to a list screen or the model. */
 export function readSavedApplicationAnswers(

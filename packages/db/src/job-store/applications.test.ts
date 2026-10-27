@@ -15,6 +15,7 @@ import {
   createApplicationStore,
   createSavedAnswersStore,
   readSavedApplicationAnswers,
+  readSavedCountryOptionFallbacks,
 } from "./applications";
 import {
   approveOriginalResumesForTests,
@@ -24,6 +25,46 @@ import {
 
 const stores: JobStore[] = [];
 const folders: string[] = [];
+
+it("search reads only confirmed global country-list rules for the person's saved country", () => {
+  const { jobs, applications } = open();
+  const rule = {
+    primary: "Kosovo",
+    fallback: "Albania",
+    whenNeitherOffered: "skip_application" as const,
+  };
+  const remember = (
+    key: string,
+    scope: { country?: string; siteOrigin?: string },
+  ) =>
+    applications.needsYou.remember({
+      key,
+      prompt: "Country of residence",
+      answer: "Kosovo",
+      input: "choice",
+      options: ["Kosovo", "Albania"],
+      scope,
+      optionFallback: rule,
+    });
+  const global = remember("country-global", {});
+  applications.needsYou.remember({
+    key: "country-unconfirmed",
+    prompt: "Country of residence",
+    answer: "Kosovo",
+    input: "choice",
+    options: ["Kosovo", "Albania"],
+    scope: {},
+    optionFallback: rule,
+    needsConfirmation: true,
+  });
+  remember("country-site", { siteOrigin: "https://synthetic.test" });
+  remember("country-hiring", { country: "US" });
+  expect(readSavedCountryOptionFallbacks(jobs, " Kosovo ")).toEqual([rule]);
+  expect(readSavedCountryOptionFallbacks(jobs, "Canada")).toEqual([]);
+  expect(readSavedCountryOptionFallbacks(jobs, null)).toEqual([]);
+  applications.needsYou.saveAnswer({ id: global.id, answer: "Albania" });
+  expect(readSavedCountryOptionFallbacks(jobs, "Kosovo")).toEqual([]);
+});
 
 it("an exact country-named authorization source is read even without a preselected answer kind, and conflicts hand over", () => {
   const { jobs, applications } = open();
