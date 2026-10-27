@@ -167,8 +167,10 @@ const sites = {
           body.append('file', file);
           if (!(await fetch(handle.url, { method: 'POST', body })).ok) throw new Error('storage');
           await graphql('ApiSetFormValueToFile', { formRenderIdentifier: render, path: '_systemfield_resume', fileHandle: handle.handle });
+          chip.dataset.upload = 'bound';
         } catch {
           chip.textContent = '';
+          chip.dataset.upload = 'failed';
           toast(file.name + ' failed to upload');
         }
       });
@@ -187,12 +189,27 @@ const sites = {
     form: () => `
       <p><label for="first_name">First Name *</label><input id="first_name" name="first_name" required></p>
       <p><label for="last_name">Last Name *</label><input id="last_name" name="last_name" required></p>
-      <p><label for="email">Email *</label><input id="email" name="email" type="email" required></p>
+      <p><label for="email">Email *</label><input id="email" name="email" type="email" required><span id="email-error" role="alert"></span></p>
       <div><p id="resume-label">Resume/CV *</p>
         <label for="resume">Attach</label>
         <input id="resume" type="file" aria-describedby="resume-label" style="position:absolute;width:1px;height:1px;opacity:0">
         <span id="chip"></span><input type="hidden" name="resume_url" id="resume_url"></div>`,
     script: `
+      // Greenhouse checks the typed email with a GET to a sibling host
+      // (email-address-validator.us.greenhouse.io); here a sibling of the
+      // page's host when it has one, else the page's own host.
+      const email = document.getElementById('email');
+      email.addEventListener('change', async () => {
+        const host = location.hostname.split('.').length > 2
+          ? location.host.replace(/^[^.]+/, 'email-address-validator')
+          : location.host;
+        let valid = false;
+        try {
+          valid = (await (await fetch(location.protocol + '//' + host + '/greenhouse-shape/address/validate?email=' + encodeURIComponent(email.value))).json()).valid;
+        } catch {}
+        email.setAttribute('aria-invalid', String(!valid));
+        document.getElementById('email-error').textContent = valid ? '' : 'Please enter a valid email address.';
+      });
       const input = document.getElementById('resume');
       input.addEventListener('change', async () => {
         const file = input.files[0];
@@ -217,6 +234,8 @@ const sites = {
             document.getElementById('resume_url').value = signed.url + '/' + key;
           else console.error('Request failed');
         };
+        // Greenhouse shows upload progress, which makes the POST preflighted.
+        request.upload.onprogress = () => {};
         request.open('POST', signed.url);
         request.send(body);
       });`,
@@ -247,6 +266,9 @@ async function ashbyGraphql(req, res, url, { readPost, logPost }) {
   const state = ashbyForms.get(variables.formRenderIdentifier) ?? {};
   ashbyForms.set(variables.formRenderIdentifier, state);
   if (op === "ApiCreateFileUploadHandle") {
+    // A real presign crosses the Atlantic: the page waits on it before the
+    // storage POST, often longer than a press waits for the page to go quiet.
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
     const key = `uploads/7f3a9c21/${Date.now()}-${variables.filename ?? "file"}`;
     return json(res, 200, {
       data: {
@@ -334,6 +356,14 @@ export async function handleRealUploadShapes(
   }
   if (rest === "/api/non-user-graphql" && req.method === "POST") {
     await ashbyGraphql(req, res, url, { readPost, logPost });
+    return true;
+  }
+  if (rest === "/address/validate") {
+    json(res, 200, {
+      valid: /^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(
+        url.searchParams.get("email") ?? "",
+      ),
+    });
     return true;
   }
   if (rest === "/uncacheable_attributes/presigned_fields") {

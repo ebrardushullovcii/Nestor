@@ -235,8 +235,10 @@ async function noteUploadLeg(
   answer: APIResponse,
 ): Promise<void> {
   const ok = answer.status() >= 200 && answer.status() < 300;
+  const presign = getPrepareOnlyRequestPermit(request)?.uploadLeg === "presign";
+  if (!presign) grant.fileAnsweredAtMs = Date.now();
   if (!ok) return;
-  if (getPrepareOnlyRequestPermit(request)?.uploadLeg === "presign") {
+  if (presign) {
     const text = await answer.text().catch(() => "");
     const url = new URL(request.url());
     grant.presignEndpoint = `${url.origin}${url.pathname}`;
@@ -756,6 +758,52 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       /(?:^|\/)(?:analytics|beacon|ping|rum)(?:\/|$)/u.test(pathname)
     );
   };
+  // The site's own lookups on what was typed, such as Greenhouse's email
+  // check on email-address-validator.us.greenhouse.io: a GET to the page's
+  // own site (the same registrable domain), naming no write and no final
+  // action, while the person's authority lets the site save fields anyway.
+  const checksOnSameSite = (
+    method: string,
+    url: string | null,
+    bodyText: string | null,
+  ): boolean => {
+    if (!state.intermediateMutationsAuthorized || method !== "GET" || bodyText)
+      return false;
+    let parsed: URL;
+    try {
+      parsed = new URL(url ?? "", window.location.href);
+    } catch {
+      return false;
+    }
+    const site = (host: string): string => {
+      const labels = host.toLowerCase().split(".");
+      // example.co.uk keeps three labels; example.com keeps two.
+      const keep =
+        labels.length > 2 &&
+        /^(?:co|com|org|net|ac|gov|edu)$/u.test(labels.at(-2) ?? "") &&
+        (labels.at(-1)?.length ?? 0) === 2
+          ? 3
+          : 2;
+      return labels.slice(-keep).join(".");
+    };
+    if (
+      !/^https?:$/u.test(parsed.protocol) ||
+      (parsed.hostname !== window.location.hostname &&
+        (/^[\d.]+$|:/u.test(parsed.hostname) ||
+          site(parsed.hostname) !== site(window.location.hostname)))
+    )
+      return false;
+    let address = `${parsed.pathname} ${parsed.search}`;
+    try {
+      address = decodeURIComponent(address);
+    } catch {
+      /* keep the raw address */
+    }
+    return !(
+      /save|submit|apply|update|create|complete|send|post/iu.test(address) ||
+      new RegExp(guardInput.finalActionSignal, "iu").test(address)
+    );
+  };
   const isPageOwnedRead = (
     method: string,
     url: string | null,
@@ -765,7 +813,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     const normalized = normalizeMethod(method);
     const carriesPrepared = requestCarriesPreparedValue(url, bodyText);
     if (carriesPrepared) {
-      return false;
+      return checksOnSameSite(normalized, url, bodyText);
     }
     if (["GET", "HEAD", "OPTIONS"].includes(normalized)) {
       return true;
@@ -2194,11 +2242,46 @@ export async function openPrepareOnlyAttachmentUploadWindow(
  * window everywhere, so the next press (a "Done", a "Next") cannot carry the
  * selected file out with it.
  */
+/** How long a press waits for an upload to start carrying the file. */
+const UPLOAD_START_WAIT_MS = 4_000;
+/** How long a press waits for the bind after the storage answered. */
+const UPLOAD_BIND_WAIT_MS = 3_000;
+/** The most a press waits on an upload, all legs together. */
+const UPLOAD_LEGS_WAIT_MS = 15_000;
+
 export async function closePrepareOnlyAttachmentUploadWindow(
   page: Page,
 ): Promise<void> {
   const guard = prepareOnlyNetworkGuardStates.get(page);
   if (!guard?.attachmentUploadWindow) return;
+  // An upload on its way keeps its window until its own legs answer: the
+  // storage after the presign, then a bind that names the presign's handle.
+  // A press must not cut one off: on real Ashby the presign alone can take
+  // longer than the page takes to go quiet. A form that sends the file with
+  // the final submission never starts a leg, so that wait is short.
+  const startedAt = Date.now();
+  for (;;) {
+    const grant = guard.attachmentUploadWindow;
+    if (!grant) return;
+    const now = Date.now();
+    const answeredAt = grant.fileAnsweredAtMs;
+    const bindPending =
+      answeredAt !== undefined &&
+      (grant.bindsRemaining ?? 0) > 0 &&
+      (grant.handles?.length ?? 0) > 0 &&
+      now - answeredAt < UPLOAD_BIND_WAIT_MS;
+    // A leg has left (a presign, or the file itself) once the fence let
+    // one through; the window opens with two.
+    const legStarted = grant.remainingRequests < 2;
+    if (
+      answeredAt !== undefined
+        ? !bindPending
+        : !legStarted && now - startedAt >= UPLOAD_START_WAIT_MS
+    )
+      break;
+    if (now - startedAt >= UPLOAD_LEGS_WAIT_MS) break;
+    await page.waitForTimeout(200).catch(() => undefined);
+  }
   await page
     .waitForLoadState("networkidle", { timeout: 1_500 })
     .catch(() => undefined);

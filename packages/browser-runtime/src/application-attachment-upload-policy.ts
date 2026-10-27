@@ -22,6 +22,8 @@ export interface AttachmentUploadWindow {
   handles?: string[];
   /** Set to one once the storage took the file: the one bind that may follow. */
   bindsRemaining?: number;
+  /** When the request carrying the file was answered, whatever the answer. */
+  fileAnsweredAtMs?: number;
 }
 
 const uploadSignal =

@@ -63,10 +63,11 @@ const posts = (): Array<{ path: string; fields: Record<string, unknown> }> => {
   }
 };
 
-async function fillPage(slug: string, fieldSaves = false) {
+async function fillPage(slug: string, fieldSaves = false, host?: string) {
   const page = await (await browser!.newContext()).newPage();
   await ensurePrepareOnlyMutationGuard(page, fieldSaves);
-  const url = `${base}/${slug}/apply/1`;
+  const origin = host ? base.replace("127.0.0.1", host) : base;
+  const url = `${origin}/${slug}/apply/1`;
   allowPrepareOnlyRunNavigation(page, url);
   await page.goto(url);
   const session = createPlaywrightApplyPageSession({ page });
@@ -77,6 +78,14 @@ async function fillPage(slug: string, fieldSaves = false) {
   });
   return { page, session };
 }
+
+/** Ashby's widget says when its upload ended, bound or failed. */
+const uploadSettled = (page: Awaited<ReturnType<typeof fillPage>>["page"]) =>
+  page.waitForFunction(
+    () => (document.getElementById("chip") as HTMLElement).dataset.upload,
+    undefined,
+    { timeout: 20_000 },
+  );
 
 const resume = {
   name: "alex-vanguard-resume.pdf",
@@ -118,7 +127,7 @@ test("Ashby: the resume is stored and bound to its field; typed answers are not 
   await session.fillText(ref("_systemfield_name"), "Alex Vanguard");
   await page.locator("#_systemfield_name").blur();
   await session.uploadFile(ref("_systemfield_resume"), resume);
-  await page.waitForTimeout(1_500);
+  await uploadSettled(page);
   expect(await page.locator("#chip").textContent()).toBe(resume.name);
   expect(await page.locator("#toast").textContent()).not.toContain(
     "failed to upload",
@@ -178,7 +187,8 @@ test("Ashby with field saves: the person's own Submit gets every value Nestor ty
         ),
       ).toMatchObject({ ok: true });
     }
-  await page.waitForTimeout(1_500);
+  await uploadSettled(page);
+  await page.waitForTimeout(500);
   expect(await page.locator("#toast").textContent()).toBe("");
   // The person's click: Ashby's Submit carries only the form's identifiers.
   const render = await page.locator("#application").getAttribute("data-render");
@@ -221,4 +231,46 @@ test("Ashby with field saves: the person's own Submit gets every value Nestor ty
       file: expect.stringContaining(resume.name) as unknown,
     },
   });
+});
+
+test("Ashby with field saves: a press right after the upload waits for the storage and the bind", async () => {
+  const { page, session } = await fillPage("ashby-shape", true);
+  const control = (await session.readPage()).controls.find(
+    (entry) => entry.id === "_systemfield_resume",
+  )!;
+  await session.uploadFile(control.ref ?? `c${control.index}`, resume);
+  // What the executor does before any press: the replica's presign takes
+  // two seconds, as a real one can, so the storage POST starts late.
+  await session.closeUploadWindow();
+  await uploadSettled(page);
+  expect(await page.locator("#chip").textContent()).toBe(resume.name);
+  expect(await page.locator("#chip").getAttribute("data-upload")).toBe("bound");
+});
+
+test("Greenhouse with field saves: its email check on a sibling host runs, and the attached file shows", async () => {
+  const { page, session } = await fillPage(
+    "greenhouse-shape",
+    true,
+    "job-boards.gh.localhost",
+  );
+  const controls = (await session.readPage()).controls;
+  const ref = (id: string) => {
+    const control = controls.find((entry) => entry.id === id)!;
+    return control.ref ?? `c${control.index}`;
+  };
+  await registerPrepareOnlyPreparedValue(page, "alex.vanguard@example.test");
+  await openPrepareOnlyIntermediateMutationWindow(page);
+  await session.fillText(ref("email"), "alex.vanguard@example.test");
+  await page.locator("#email").dispatchEvent("change");
+  await page.waitForFunction(() =>
+    document.getElementById("email")?.getAttribute("aria-invalid"),
+  );
+  expect(await page.locator("#email").getAttribute("aria-invalid")).toBe(
+    "false",
+  );
+  await session.uploadFile(ref("resume"), resume);
+  await page.waitForFunction(
+    () => (document.getElementById("resume_url") as HTMLInputElement).value,
+  );
+  expect(await page.locator("#chip").textContent()).toBe(resume.name);
 });
