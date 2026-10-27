@@ -308,7 +308,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
               type: "array",
               items: { type: "string" },
               description:
-                "Each question the person must answer or thing they must do before this can go further, one per item, apart from the reason. Leave it empty when the form is complete; a form that only wants looking over is complete.",
+                "Each question the person must answer or thing they must do before this can go further, one per item, apart from the reason. For a form field, copy its exact observed question including its section; add no Please answer prefix, required marker or answer-format instruction. Its native field supplies those. Leave it empty when the form is complete; a form that only wants looking over is complete.",
             },
           },
           required: ["reason"],

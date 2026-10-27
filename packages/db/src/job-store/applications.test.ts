@@ -733,6 +733,139 @@ function question(
   };
 }
 
+it("does not infer a boolean answer from other text on the same question", () => {
+  const { jobs, applications } = open();
+  const memory = applications.needsYou;
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  let row = applications.claimNext()!;
+  const prompt = "Are you over the age of 21?";
+  const ask = (input: "text" | "boolean") =>
+    memory.request({
+      applicationId: row.id,
+      attempt: row.attempt,
+      kind: "question",
+      scope: {},
+      reusePrompt: true,
+      prompt,
+      input,
+      key: `age-${input}`,
+      fieldKey: `age-${input}`,
+      options: input === "boolean" ? ["Yes", "No"] : [],
+    });
+  const first = ask("text");
+  if (first.status !== "needs_you") throw new Error("Expected a question.");
+  memory.answer({ id: first.task.id, answer: "21", remember: true });
+  row = applications.claimNext()!;
+  expect(ask("boolean").status).toBe("needs_you");
+  expect(memory.list().total).toBe(1);
+});
+
+it.each([false, true])(
+  "a text Yes/No answer survives the native boolean question and later text rereads (remember: %s)",
+  (remember) => {
+    const { jobs, applications } = open();
+    const memory = applications.needsYou;
+    applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+    let row = applications.claimNext()!;
+    const ask = (input: "text" | "boolean", prompt: string, key: string) =>
+      memory.request({
+        applicationId: row.id,
+        attempt: row.attempt,
+        kind: "question",
+        scope: {},
+        reusePrompt: true,
+        input,
+        options: input === "boolean" ? ["Yes", "No"] : [],
+        prompt,
+        key,
+        fieldKey: key,
+      });
+    const text = ask(
+      "text",
+      "Are you over the age of 21? Please choose Yes or No — required.",
+      "age-text",
+    );
+    if (text.status !== "needs_you")
+      throw new Error("Expected the first question.");
+    memory.answer({ id: text.task.id, answer: "Yes", remember });
+    row = applications.claimNext()!;
+    expect(
+      ask("boolean", "Are you over the age of 21?", "age-boolean"),
+    ).toEqual({ status: "answered", answer: "Yes" });
+    expect(
+      ask("text", "Are you over the age of 21?", "age-text-reread"),
+    ).toEqual({ status: "answered", answer: "Yes" });
+    expect(memory.list().total).toBe(0);
+  },
+);
+
+it.each([false, true])(
+  "open text and boolean forms share one question and validate the choice (boolean first: %s)",
+  (booleanFirst) => {
+    const { jobs, applications } = open();
+    const memory = applications.needsYou;
+    applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+    const rows = [applications.claimNext()!, applications.claimNext()!];
+    const ask = (
+      index: number,
+      input: "text" | "boolean",
+      reuseAnswers = true,
+    ) => {
+      const row = rows[index]!;
+      return memory.request(
+        {
+          applicationId: row.id,
+          attempt: row.attempt,
+          kind: "question",
+          scope: {},
+          reusePrompt: true,
+          key: `age-${input}`,
+          fieldKey: `age-${input}`,
+          input,
+          options: input === "boolean" ? ["No", "Yes"] : [],
+          prompt: "Are you over the age of 21?",
+        },
+        { reuseAnswers },
+      );
+    };
+    const first = ask(0, booleanFirst ? "boolean" : "text");
+    if (first.status !== "needs_you")
+      throw new Error("Expected the first question.");
+    memory.saveDraft({
+      id: first.task.id,
+      answer: "No",
+      remember: true,
+      revision: 0,
+    });
+    const second = ask(1, booleanFirst ? "text" : "boolean");
+    expect(second.status).toBe("needs_you");
+    if (second.status !== "needs_you")
+      throw new Error("Expected a shared question.");
+    expect(second.task.id).toBe(first.task.id);
+    expect(second.task.input).toBe("boolean");
+    const otherRendering = ask(0, booleanFirst ? "text" : "boolean");
+    expect(otherRendering.status).toBe("needs_you");
+    if (otherRendering.status === "needs_you")
+      expect(otherRendering.task.id).toBe(first.task.id);
+    for (let reread = 0; reread < 2; reread++) {
+      const again = ask(0, booleanFirst ? "text" : "boolean", false);
+      expect(again.status).toBe("needs_you");
+      if (again.status === "needs_you")
+        expect(again.task.id).toBe(first.task.id);
+    }
+    expect(memory.list().total).toBe(1);
+    expect(memory.details(first.task.id)?.draft?.answer).toBe("No");
+    expect(memory.findAnswer(first.task.key)).toBeNull();
+    expect(() =>
+      memory.answer({ id: first.task.id, answer: "21", remember: true }),
+    ).toThrow("valid answer");
+    expect(
+      memory.answer({ id: first.task.id, answer: "No", remember: true }),
+    ).toEqual({ resolved: true, queued: 2 });
+    expect(memory.list().total).toBe(0);
+  },
+);
+
 describe("applications on the job store", () => {
   it("keeps a one-application pay answer local, and reuses only an explicitly remembered answer on other forms", () => {
     const { jobs, applications } = open();

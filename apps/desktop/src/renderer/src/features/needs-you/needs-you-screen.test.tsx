@@ -560,6 +560,48 @@ it.each([false, true])(
   },
 );
 
+it("a text question gains its native Yes/No choices without adding a card or losing the person's draft", async () => {
+  const row = claimed[0]!;
+  const prompt = "Are you over the age of 21?";
+  const requested = applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "age-text",
+    key: "age-text",
+    scope: {},
+    kind: "question",
+    input: "text",
+    options: [],
+    reusePrompt: true,
+    prompt,
+  });
+  if (requested.status !== "needs_you") throw new Error("Expected a question.");
+  show();
+  fireEvent.change(await screen.findByRole("textbox", { name: prompt }), {
+    target: { value: "No" },
+  });
+  act(() => {
+    applications.needsYou.request({
+      applicationId: row.id,
+      attempt: row.attempt,
+      fieldKey: "age-boolean",
+      key: "age-boolean",
+      scope: {},
+      kind: "question",
+      input: "boolean",
+      options: ["Yes", "No"],
+      reusePrompt: true,
+      prompt,
+    });
+  });
+  const no = await screen.findByRole("button", { name: "No", pressed: true });
+  expect(no).toBeTruthy();
+  expect(applications.needsYou.list().total).toBe(1);
+  fireEvent.click(screen.getByRole("button", { name: "Save and continue" }));
+  await waitFor(() => expect(applications.needsYou.list().total).toBe(0));
+  expect(applications.needsYou.findAnswer(requested.task.key)).toBe("No");
+});
+
 it("restores an exact question draft after leaving and returning", async () => {
   const first = ask(0);
   ask(1, "travel", "Can you travel?", "boolean");

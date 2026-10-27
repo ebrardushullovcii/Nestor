@@ -1,6 +1,58 @@
 import { expect, test } from "vitest";
 import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-question-meanings.json";
-import { savedQuestionMatches } from "./form-question-meaning";
+import {
+  formQuestionText,
+  savedQuestionMatches,
+} from "./form-question-meaning";
+
+test.each([
+  [
+    "Are you over the age of 21? Please choose Yes or No — required.",
+    "Are you over the age of 21?",
+    "Yes",
+    true,
+  ],
+  [
+    "Are you over the age of 21?",
+    "Please confirm: Are you over the age of 21? (Yes/No) — required.",
+    "No",
+    true,
+  ],
+  [
+    "Please provide your answer for: Describe your relevant project. — required.",
+    "Describe your relevant project.",
+    "The person's recorded project description.",
+    true,
+  ],
+  [
+    "Are you over the age of 21? Please choose Yes or No — required.",
+    "Are you over the age of 18?",
+    "Yes",
+    false,
+  ],
+  [
+    "Are you over the age of 21? Please choose Yes or No and accept marketing.",
+    "Are you over the age of 21?",
+    "Yes",
+    false,
+  ],
+  [
+    "Please provide your answer for: Describe C# work. — required.",
+    "Describe C++ work.",
+    "The person's recorded answer.",
+    false,
+  ],
+] as const)(
+  "question presentation keeps answer meaning: %s -> %s",
+  (saved, asked, answer, matches) => {
+    expect(savedQuestionMatches(saved, asked, answer)).toBe(matches);
+  },
+);
+test("a Yes/No instruction does not change a text question's format", () => {
+  expect(
+    formQuestionText("Please answer: Describe your project. (Yes/No)"),
+  ).toBe("Describe your project. (Yes/No)");
+});
 test.each(replay.cases)("saved-question replay: $saved -> $asked", (entry) => {
   expect(savedQuestionMatches(entry.saved, entry.asked, entry.answer)).toBe(
     entry.matches,

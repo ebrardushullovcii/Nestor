@@ -8668,9 +8668,13 @@ describe("a finish that says needsPerson always ends paused", () => {
     },
   ];
 
-  test.each([false, true])(
-    "finish instruction wrappers reuse the native handover across rereads (extra task: %s)",
-    async (extraTask) => {
+  test.each([
+    { extraTask: false, decorated: false },
+    { extraTask: true, decorated: false },
+    { extraTask: false, decorated: true },
+  ])(
+    "finish instruction wrappers reuse the native handover across rereads ($extraTask / $decorated)",
+    async ({ extraTask, decorated }) => {
       const narrative = "Describe your async project practices and challenges.";
       const age = "Are you over the age of 21?";
       const manual =
@@ -8703,8 +8707,12 @@ describe("a finish that says needsPerson always ends paused", () => {
             needsPerson: true,
             reason: "Two form questions need the person.",
             forPerson: [
-              `Please answer: ${narrative}`,
-              `Please confirm: ${age} (Yes/No)`,
+              decorated
+                ? `Please provide your answer for: ${narrative} — required.`
+                : `Please answer: ${narrative}`,
+              decorated
+                ? `${age} Please choose Yes or No — required.`
+                : `Please confirm: ${age} (Yes/No)`,
               ...(extraTask ? [manual] : []),
             ],
           }),
