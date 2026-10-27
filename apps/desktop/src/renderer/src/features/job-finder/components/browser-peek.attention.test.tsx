@@ -421,11 +421,27 @@ describe("BrowserPeek during a walk through sign-ins", () => {
     });
     try {
       render(<BrowserPeek />);
+      // Needs you's sign-in tab carries its own "then Retry" banner.
+      act(() =>
+        peek.emit({
+          ...openPage,
+          revision: 5,
+          phase: "needs_you",
+          attention: {
+            kind: "sign_in",
+            title: "Sign in to continue: scale-853",
+            detail:
+              "Finish sign-in or verification here, then Retry in Needs you.",
+          },
+        }),
+      );
       act(() => workThrough.start([site(1, "scale-853"), site(2, "orbit")]));
       expect(needsYou).toHaveBeenCalledWith("open_need", { id: 1 });
       const bar = () =>
         document.querySelector("[data-browser-walk]")?.textContent ?? "";
       await waitFor(() => expect(bar()).toContain("scale-853 · 1 of 2"));
+      // The walk's bar replaces it rather than contradicting Done.
+      expect(screen.queryByText(/then Retry in Needs you/)).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Done, next site" }));
       await waitFor(() =>
         expect(jobs).toHaveBeenCalledWith("retry_source", { id: 10 }),

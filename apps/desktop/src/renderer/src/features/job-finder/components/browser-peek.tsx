@@ -522,7 +522,9 @@ export function BrowserPeek(props: {
   const importableBrowsers = [
     ...new Set(importable.map((source) => source.browserLabel)),
   ];
-  const showNotice = addingJob || !!message || (!!state.attention && !blank);
+  // During a walk through sign-ins its own bar says what to do next.
+  const showNotice =
+    addingJob || !!message || (!!state.attention && !blank && !signingIn);
   const isSecure = !!active?.url.startsWith("https://");
   const currentAddress = blank ? "" : (active?.url ?? "");
   const typing = address.trim() !== "" && address !== currentAddress;
