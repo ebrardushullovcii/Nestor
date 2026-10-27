@@ -2590,46 +2590,69 @@ describe("apply agent run endings", () => {
     expect(result.pauses[0]?.blocker?.requiresPerson).toBe(true);
   });
 
-  test("a security check the person already ticked is not reported as waiting on them", async () => {
-    const result = await runApplyAgent(
-      config(
-        page({
-          bodyText: "Apply for the role. I am not a robot. Local fake CAPTCHA.",
-          controls: [
-            nameControl(),
-            {
-              ...nameControl(),
-              index: 1,
-              id: "human",
-              name: "human",
-              inputType: "checkbox",
-              role: "checkbox",
-              label: "I am not a robot",
-              required: false,
-              checked: true,
-              value: "yes",
-            },
-          ],
-        }),
+  const solvedCheckPage = () =>
+    page({
+      bodyText: "Apply for the role. I am not a robot. Local fake CAPTCHA.",
+      controls: [
+        nameControl(),
         {
-          authority: {
-            mode: "confirm_before_submit",
-            submitAuthorized: true,
-            preApprovedAttestationKinds: [],
-            salaryDisclosure: "pause_for_user",
-            allowedOrigins: ["https://apply.example.test"],
-          },
+          ...nameControl(),
+          index: 1,
+          id: "human",
+          name: "human",
+          inputType: "checkbox",
+          role: "checkbox",
+          label: "I am not a robot",
+          required: false,
+          checked: true,
+          value: "yes",
         },
-      ),
-      repeatingModel("finish", {
-        reason:
-          "Form filled, but Submit is blocked by the 'I am not a robot' CAPTCHA which only you can tick.",
-        needsPerson: true,
-      }),
+      ],
+    });
+  const confirmFirst = {
+    authority: {
+      mode: "confirm_before_submit" as const,
+      submitAuthorized: true,
+      preApprovedAttestationKinds: [],
+      salaryDisclosure: "pause_for_user" as const,
+      allowedOrigins: ["https://apply.example.test"],
+    },
+  };
+  const solvedCheckReason =
+    "Form filled, but Submit is blocked by the 'I am not a robot' CAPTCHA which only you can tick.";
+
+  test("a security check the person already ticked is not reported as waiting on them", async () => {
+    // Asked once to name its items, the model sees the form is complete.
+    const result = await runApplyAgent(
+      config(solvedCheckPage(), confirmFirst),
+      scriptedModel([
+        {
+          name: "finish",
+          args: { reason: solvedCheckReason, needsPerson: true },
+        },
+        {
+          name: "finish",
+          args: { reason: "The form is complete.", needsPerson: false },
+        },
+      ]),
     );
 
     expect(result.pauses).toEqual([]);
     expect(result.outcome).toBe("awaiting_your_review");
+  });
+
+  test("a finish that still says needsPerson beside a ticked check hands the form back, not a security check", async () => {
+    const result = await runApplyAgent(
+      config(solvedCheckPage(), confirmFirst),
+      repeatingModel("finish", {
+        reason: solvedCheckReason,
+        needsPerson: true,
+      }),
+    );
+
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(result.pauses.some((pause) => pause.blocker)).toBe(false);
   });
 
   test("a run set to confirm first ends waiting for the person", async () => {
@@ -8449,6 +8472,37 @@ describe("a run never ends waiting on the person with nothing to answer", () => 
     expect(result.outcome).toBe("paused");
     expect(result.readyToSend).toBeNull();
     expect(handedOver(result)).toEqual([item]);
+  });
+
+  test("beside a solved security check, a reason-only needsPerson is still never sent", async () => {
+    const reason = "CAPTCHA done; confirm relocation to Berlin.";
+    const result = await runApplyAgent(
+      config(
+        page({
+          bodyText: "Apply for the role. I am not a robot. Local fake CAPTCHA.",
+          controls: [
+            nameControl(),
+            {
+              ...nameControl(),
+              index: 1,
+              id: "human",
+              name: "human",
+              inputType: "checkbox",
+              role: "checkbox",
+              label: "I am not a robot",
+              required: false,
+              checked: true,
+              value: "yes",
+            },
+          ],
+        }),
+        sendForMe,
+      ),
+      repeatingModel("finish", { reason, needsPerson: true }),
+    );
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(handedOver(result)).toEqual([reason]);
   });
 
   test("a finish that names nothing is asked once, and the item it then names is handed over", async () => {

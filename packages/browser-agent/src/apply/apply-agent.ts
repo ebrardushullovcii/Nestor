@@ -1974,18 +1974,16 @@ async function runMeasuredApplyAgent(
         // ticked) is not waiting on them, whatever the finish text says.
         const challengeAlreadySolved = securityChallengeSolved(observation);
         const challengeInReason = reportedSecurityChallenge(outcome.reason);
-        const challengeWords =
-          /captcha|not a robot|verify you are (?:a )?human|security check/iu;
-        if (challengeAlreadySolved && observation.blocker === null) {
-          // The model is pointing at a check the person already solved: only
-          // that check is dropped, and anything else it names still goes to
-          // the person.
-          if (forPerson.length) {
-            forPerson = forPerson.filter((item) => !challengeWords.test(item));
-            finish.needsPerson = forPerson.length > 0;
-          } else if (challengeWords.test(outcome.reason))
-            finish.needsPerson = false;
-        }
+        // An item pointing at a check the person already solved is dropped;
+        // anything else it names still goes to the person. needsPerson stays
+        // as the model said: a finish that still says so is handed back.
+        if (challengeAlreadySolved && observation.blocker === null)
+          forPerson = forPerson.filter(
+            (item) =>
+              !/captcha|not a robot|verify you are (?:a )?human|security check/iu.test(
+                item,
+              ),
+          );
         const reportedChallenge = challengeAlreadySolved
           ? null
           : challengeInReason;
