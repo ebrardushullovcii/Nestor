@@ -1,6 +1,9 @@
 import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
 import fallbackReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-option-fallback.json";
-import { CandidateProfileSchema } from "@nestor/contracts";
+import {
+  CandidateProfileSchema,
+  normalizeFormQuestionPrompt,
+} from "@nestor/contracts";
 import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/repeated-employment-step.json";
 import emptiedAttach from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/emptied-required-attach.json";
 import { describe, expect, test, vi } from "vitest";
@@ -8633,5 +8636,63 @@ describe("a closed form comes back without the model", () => {
     expect(writes[0]).toBe("c0=Robin Ashford");
     // "Notice period" is new and empty: only it needed the model.
     expect(model.turns()).toBeGreaterThan(0);
+  });
+});
+
+describe("a picker the person filled on the page survives the continue", () => {
+  const question = "What country are you based in?";
+  const pickerPage = (value: string) =>
+    page({
+      controls: [
+        {
+          ...nameControl(),
+          role: "combobox",
+          label: question,
+          value,
+          options: [],
+        },
+      ],
+    });
+  const continueWith = (source: RawApplyPage) => {
+    const chosen: string[] = [];
+    const input = config(source, {
+      intermediateWritesAuthorized: false,
+      initialUnansweredPickerQuestions: [{ prompt: question, options: [] }],
+      // The run before typed "Kosovo" and the list did not take it.
+      initialPickerAttempts: [
+        {
+          question: normalizeFormQuestionPrompt(question),
+          tried: ["kosovo"],
+          notOffered: [],
+          offeredOptions: [],
+        },
+      ],
+    });
+    input.hands.chooseOption = (_ref, option) => {
+      chosen.push(option);
+      return Promise.resolve({ ok: true, observedValue: option });
+    };
+    return { input, chosen };
+  };
+
+  test("a choice the run never typed is the person's: it is kept, not chosen again", async () => {
+    const { input, chosen } = continueWith(pickerPage("Albania"));
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "finish", args: { reason: "The form is ready" } },
+      ]),
+    );
+    expect(chosen).toEqual([]);
+    expect(result.outcome).toBe("prepared");
+  });
+
+  test("the run's own leftover search is still not an answer", async () => {
+    const { input } = continueWith(pickerPage("Kosovo"));
+    const result = await runApplyAgent(
+      input,
+      repeatingModel("finish", { reason: "Looks complete" }),
+    );
+    expect(result.outcome).toBe("paused");
   });
 });

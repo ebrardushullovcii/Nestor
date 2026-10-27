@@ -115,7 +115,7 @@ import {
   reportedSecurityChallenge,
 } from "./blockers";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
-import { isControlAnswered } from "./control-classification";
+import { isControlAnswered, normalizeSignal } from "./control-classification";
 import type {
   ApplyAgentConfig,
   ApplyAgentResult,
@@ -410,16 +410,21 @@ async function runMeasuredApplyAgent(
     observe: async () => {
       const observation = await pageHands.observe();
       questionOccurrences.observe(observation);
-      // A search left in a picker whose choice failed is not an answer.
+      // A search left in a picker whose choice failed is not an answer. A
+      // value the run never typed there is: the person picked it on the
+      // page, or the site restored their pick.
       for (const control of observation.controls) {
+        const key = pickerQuestionKey(control);
+        const shown = normalizeSignal(
+          control.selectedOptionLabel || control.value,
+        );
         const previousOptions =
-          control.kind === "combobox"
-            ? unconfirmedPickers.get(pickerQuestionKey(control))
+          control.kind === "combobox" &&
+          (!shown ||
+            (guardState.pickerAttempts.get(key)?.tried.includes(shown) ?? true))
+            ? unconfirmedPickers.get(key)
             : undefined;
-        if (
-          guardState.openPickers.has(pickerQuestionKey(control)) ||
-          previousOptions
-        )
+        if (guardState.openPickers.has(key) || previousOptions)
           control.answered = false;
         if (previousOptions && !control.options.length)
           control.options = [...previousOptions];
