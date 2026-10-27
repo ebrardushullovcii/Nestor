@@ -223,6 +223,7 @@ test("a remote-policy change during a model call cannot save an old score; retry
   ]);
   await finished(runner);
   expect(store.getJob(id)?.fitScore).toBeNull();
+  expect(runner.status().search?.error).toBeNull();
   engine.fitJobs.mockImplementation(({ jobs, context }) => {
     expect(context.remoteCountsAsAnyLocation).toBe(false);
     return Promise.resolve(

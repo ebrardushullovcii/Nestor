@@ -126,7 +126,8 @@ export function createFitQueue(
       deps.store.setFit(valid);
       scored += valid.length;
       onScored(valid.length);
-      if (valid.length < jobs.length)
+      // A superseded input is normal background work, not a model failure.
+      if (updates.length < jobs.length)
         onError(
           new Error("Some jobs are still waiting for a current fit score."),
         );
