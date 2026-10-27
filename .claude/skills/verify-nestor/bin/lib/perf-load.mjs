@@ -776,7 +776,7 @@ export async function measureNestorPages(
  * Attaches to a running verify-nestor instance (`bin/up`) and samples it
  * while its search or Apply batch runs, until both stop or `seconds` pass.
  */
-export function observe(label, seconds = 900) {
+export function observe(label, seconds = 900, { heap = false } = {}) {
   const cli = path.join(import.meta.dirname, "cli.mjs");
   const out = execFileSync(
     process.execPath,
@@ -786,6 +786,7 @@ export function observe(label, seconds = 900) {
       "run",
       path.join(import.meta.dirname, "../../journeys/observe.mjs"),
       String(seconds),
+      ...(heap ? ["heap"] : []),
     ],
     {
       env: { ...process.env, NESTOR_VERIFY_LABEL: label },
@@ -808,5 +809,250 @@ export const printObserved = (r) =>
     `  CPU % of one core: median ${r.cpuMedianPercent}, p95 ${r.cpuP95Percent}`,
     `  browser pages: at most ${r.pagesMax} at once, ${r.pagesAfter} left after`,
     `  open screen: ${r.interactions} interactions, p95 ${r.interactionP95Ms ?? "-"} ms, long tasks ${r.longTasks}`,
+    ...Object.entries(r.heaps ?? {}).map(
+      ([name, h]) =>
+        `  heap ${name}: main ${h.main.totalMB} MB (${h.main.top?.slice(0, 5).join(", ")}); window ${h.window.totalMB} MB (${h.window.top?.slice(0, 5).join(", ")})`,
+    ),
     `  timeline: ${r.timelineFile}`,
   ].join("\n");
+
+/**
+ * Apply rounds back to back in one app session, then idle minutes: does
+ * memory creep from pages kept for skipped, failed or Needs-you work? Each
+ * round has `perRound` jobs: a third on replica forms the profile completes
+ * (half filled for the person, half sent), a third on forms with a question
+ * only the person can answer (Needs you), a sixth on missing pages (failed
+ * before any send) and a sixth hidden jobs (skipped). Fill in for me runs
+ * the first half of a round, Send for me the second.
+ */
+export async function measureApplyRounds({
+  rounds = 3,
+  perRound = 30,
+  idleSeconds = 600,
+  seed,
+  appCopy,
+  launch,
+}) {
+  const dataDir = mkdtempSync(path.join(tempRoot, "nestor-perf-rounds-"));
+  const appDir = appCopy();
+  const replica = await startReplicaSites(appDir);
+  const model = await startPerfModel();
+  const port = new URL(replica.url).port;
+  const host = (i) => `127.0.0.${2 + (i % 11)}`;
+  const third = Math.round(perRound / 3);
+  const sixth = Math.round(perRound / 6);
+  // Per round: complete forms, Needs-you forms, missing pages.
+  const roundUrls = Array.from({ length: rounds }, (_, r) => [
+    ...Array.from(
+      { length: third },
+      (_, i) =>
+        `http://${host(r * 31 + i)}:${port}/employer-a/apply/${1 + ((r * third + i) % 10)}`,
+    ),
+    ...Array.from(
+      { length: third },
+      (_, i) =>
+        `http://${host(r * 31 + i + 5)}:${port}/greenhouse/apply/${1 + ((r * third + i) % 6)}`,
+    ),
+    ...Array.from(
+      { length: sixth },
+      (_, i) =>
+        `http://${host(r + i)}:${port}/greenhouse/apply/${900 + r * 10 + i}`,
+    ),
+  ]);
+  let run;
+  try {
+    const seeded = await seed(dataDir, 300, 30, {
+      resumeFile: syntheticResume(dataDir),
+      applyUrls: roundUrls.flat(),
+      hiddenApplyCount: sixth * rounds,
+    });
+    run = await launch(appDir, dataDir, { extraEnv: model.env });
+    const { app, page } = run;
+    const pid = app.process().pid;
+    await countPages(app);
+    await page.waitForTimeout(8000);
+    const reading = async () => ({
+      at: Date.now(),
+      privateMB: (await processTreeMemory(pid)).privateWorkingSetMB,
+      ...(await sampleApp(app).then(({ pages, urls }) => ({ pages, urls }))),
+    });
+    const setMode = (mode) =>
+      page.evaluate(async (next) => {
+        const current = await window.nestor.jobs.run("get_settings", {});
+        await window.nestor.jobs.run("patch_settings", {
+          fields: { applicationAutomationMode: next },
+          expected: {
+            applicationAutomationMode:
+              current.applicationAutomationMode ?? "confirm_before_submit",
+          },
+        });
+      }, mode);
+    const applyAndWait = async (ids) => {
+      const result = await page.evaluate(
+        (jobIds) =>
+          window.nestor.jobFinder.applyJobs({ selection: { ids: jobIds } }),
+        ids,
+      );
+      const started = Date.now();
+      while (Date.now() - started < 10 * 60_000) {
+        await page.waitForTimeout(2000);
+        if (!(await workState(page, "apply")).running) break;
+      }
+      return result;
+    };
+    const editedIds = new Set();
+    const personEdit = async () => {
+      const target = await page.evaluate(
+        async (skip) => {
+          const list = await window.nestor.jobFinder.listApplications({
+            state: "needs_you",
+            limit: 200,
+          });
+          return list.rows.find((row) => !skip.includes(row.id))?.id ?? null;
+        },
+        [...editedIds],
+      );
+      if (!target) return { edited: false, reason: "no Needs-you application" };
+      editedIds.add(target);
+      await page.evaluate(
+        (id) => window.nestor.jobFinder.openApplication({ id }),
+        target,
+      );
+      await page.waitForTimeout(3000);
+      // Real keystrokes into the form shown in the browser panel, through
+      // Electron's input path like the person's own typing.
+      const typed = await app.evaluate(async ({ BrowserWindow }) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        const view = win?.contentView.children.find(
+          (child) => child.webContents && child.getVisible?.(),
+        );
+        if (!view) return false;
+        const contents = view.webContents;
+        contents.focus();
+        const focused = await contents.executeJavaScript(
+          `(() => { const el = [...document.querySelectorAll("input[type=text], input:not([type]), textarea")].find((e) => !e.value && e.offsetParent); if (!el) return false; el.focus(); return true; })()`,
+        );
+        if (!focused) return false;
+        for (const keyCode of ["P", "e", "r", "s", "o", "n"]) {
+          contents.sendInputEvent({ type: "keyDown", keyCode });
+          contents.sendInputEvent({ type: "char", keyCode });
+          contents.sendInputEvent({ type: "keyUp", keyCode });
+        }
+        return true;
+      });
+      await page.waitForTimeout(1000);
+      // Leave it: the browser folds away and the person goes back Home.
+      await page.evaluate(() =>
+        window.nestor.browser.command({ type: "minimize" }),
+      );
+      await page
+        .getByRole("button", { name: "Home", exact: true })
+        .first()
+        .click({ timeout: 5000 })
+        .catch(() => {});
+      return { edited: typed, applicationId: target };
+    };
+    const start = await reading();
+    const table = [];
+    const perRoundIds = seeded.applyIds.length / rounds;
+    const halves = (list) => [
+      list.filter((_, i) => i % 2 === 0),
+      list.filter((_, i) => i % 2 === 1),
+    ];
+    for (let r = 0; r < rounds; r += 1) {
+      const ids = seeded.applyIds.slice(r * perRoundIds, (r + 1) * perRoundIds);
+      const hidden = seeded.hiddenApplyIds.slice(r * sixth, (r + 1) * sixth);
+      const [idsFill, idsSend] = halves(ids);
+      const [hiddenFill, hiddenSend] = halves(hidden);
+      const before = await reading();
+      let peakMB = before.privateMB;
+      let pagesMost = before.pages;
+      let watching = true;
+      const watcher = (async () => {
+        while (watching) {
+          const now = await reading();
+          peakMB = Math.max(peakMB, now.privateMB);
+          pagesMost = Math.max(pagesMost, now.pages);
+        }
+      })();
+      await setMode("confirm_before_submit");
+      const fill = await applyAndWait([...idsFill, ...hiddenFill]);
+      await setMode("autonomous_submit");
+      const send = await applyAndWait([...idsSend, ...hiddenSend]);
+      await setMode("confirm_before_submit");
+      // The person opens one Needs-you form, types into it and leaves it:
+      // a page they edited is exempt from the waiting-page limit.
+      const edited = await personEdit();
+      await page.waitForTimeout(20_000);
+      watching = false;
+      await watcher;
+      const after = await reading();
+      const states = await workState(page, "apply");
+      const applications = await page.evaluate(async () =>
+        (
+          await window.nestor.jobFinder.listApplications({ limit: 200 })
+        ).rows.map(
+          (row) =>
+            `${row.company}: ${row.mode} ${row.state}${row.error ? ` (${row.error.slice(0, 90)})` : ""}`,
+        ),
+      );
+      table.push({
+        round: r + 1,
+        before,
+        peakMB,
+        pagesMost,
+        after,
+        queued: { fill, send },
+        states: states.detail,
+        edited,
+        applications,
+      });
+    }
+    // Idle minutes, read at the end.
+    await page.waitForTimeout(idleSeconds * 1000);
+    const idle = await reading();
+    const refillStarted = Date.now();
+    const refill = await measureRefill(app, page, model);
+    refill.calls = model.recent
+      .filter((call) => call.at >= refillStarted)
+      .map(
+        (call) =>
+          `${call.kind} on ${call.last.match(/Page: (\S+)/u)?.[1] ?? call.last.slice(0, 120)} after "${call.prev.slice(0, 160)}" -> ${call.answer.slice(0, 160)}`,
+      );
+    return {
+      rounds,
+      perRound,
+      start,
+      table,
+      idle,
+      idleSeconds,
+      refill,
+      modelCalls: { ...model.counts },
+      modelRecent: model.recent,
+    };
+  } finally {
+    await run?.app.close().catch(() => {});
+    await model.close();
+    await replica.stop();
+    rmSync(appDir, { recursive: true, force: true });
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+}
+
+export function printApplyRounds(r) {
+  const lines = [
+    `\nApply rounds: ${r.rounds} x ${r.perRound}, start ${r.start.privateMB} MB private working set, ${r.start.pages} pages`,
+    "  round | before MB | peak MB | after MB | most pages | pages after | states",
+  ];
+  for (const t of r.table)
+    lines.push(
+      `  ${t.round} | ${t.before.privateMB} | ${t.peakMB} | ${t.after.privateMB} | ${t.pagesMost} | ${t.after.pages} | ${t.states} (queued fill ${JSON.stringify(t.queued.fill)}, send ${JSON.stringify(t.queued.send)}; person edited ${JSON.stringify(t.edited)})`,
+    );
+  lines.push(
+    `  after ${Math.round(r.idleSeconds / 60)} idle minutes: ${r.idle.privateMB} MB, ${r.idle.pages} pages`,
+    `  refill on Open (${r.refill.state ?? "-"}): ${r.refill.reason ?? `opened ${r.refill.opened} in ${r.refill.openMs} ms, settled ${r.refill.settledMs} ms, ${r.refill.modelCalls} model calls`}`,
+    ...(r.refill.calls ?? []).map((c) => `    call: ${c}`),
+    `  model calls: ${JSON.stringify(r.modelCalls)}`,
+  );
+  return lines.join("\n");
+}
