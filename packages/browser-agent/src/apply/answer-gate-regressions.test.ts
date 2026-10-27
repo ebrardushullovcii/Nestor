@@ -28,14 +28,15 @@ import type {
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
 const at = "2026-10-26T12:00:00.000Z";
 
-test("LinkedIn Profile reads the same full Profile address at classification, Fill and Send", async () => {
+test("a requested LinkedIn URL fills from Profile and passes Send", async () => {
+  const label = "Please share your LinkedIn URL";
   const src = sources();
   src.profile.linkedinUrl = "linkedin.com/in/synthetic-candidate";
   const expected = "https://linkedin.com/in/synthetic-candidate";
   const original = JSON.stringify(src.profile);
   const s = setup(
-    field("LinkedIn Profile", {
-      groupLabel: "LinkedIn Profile",
+    field(label, {
+      groupLabel: label,
       required: true,
     }),
     src,
@@ -94,7 +95,7 @@ test("LinkedIn Profile reads the same full Profile address at classification, Fi
       client,
       sources: src,
       payDisclosed: false,
-      answers: [{ question: "LinkedIn Profile", answer }],
+      answers: [{ question: label, answer }],
       formControls: s.observation().controls,
       formContext: { pageText: s.page.bodyText, fields: [] },
     });
@@ -1752,6 +1753,24 @@ test.each([
     "LinkedIn profile",
     "linkedin.com/in/synthetic-robin",
     "Professional reference",
+    "linkedinUrl",
+  ],
+  [
+    "Please share your professional reference's LinkedIn URL",
+    "linkedin.com/in/synthetic-robin",
+    "",
+    "linkedinUrl",
+  ],
+  [
+    "Employee referral name",
+    "linkedin.com/in/synthetic-robin",
+    "Please share your LinkedIn URL",
+    "linkedinUrl",
+  ],
+  [
+    "Do you have a LinkedIn URL?",
+    "linkedin.com/in/synthetic-robin",
+    "",
     "linkedinUrl",
   ],
 ] as const)(
