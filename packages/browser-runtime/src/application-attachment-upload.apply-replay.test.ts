@@ -152,6 +152,54 @@ test.each([false, true])(
   },
 );
 
+test("a storage field that repeats the site's own answer exactly is not read for answers", async () => {
+  // The person's last name is also a word in the storage bucket's name.
+  const policyFor = (bucket: string) =>
+    Buffer.from(
+      JSON.stringify({
+        ...replay.policy,
+        conditions: [...replay.policy.conditions, { bucket }],
+      }),
+    ).toString("base64");
+  const policy = policyFor("synthetic-uploads");
+  const input = {
+    ...(await multipart({ ...fields, Policy: policy })),
+    preparedValues: ["Alex", "Synthetic"],
+  };
+  expect((await classifyAttachmentUpload(input)).allowed).toBe(false);
+  const issued = { ...grant, issued: [policy, fields.bucket] };
+  expect(
+    (await classifyAttachmentUpload({ ...input, window: issued })).allowed,
+  ).toBe(true);
+  // What the page makes up itself is still read: an answer in the key, a
+  // policy that differs from the one handed out, or another file.
+  for (const extra of [
+    { key: "uploads/Synthetic/resume.pdf" },
+    { Policy: policyFor("synthetic-other-uploads") },
+  ])
+    expect(
+      (
+        await classifyAttachmentUpload({
+          ...(await multipart({ ...fields, Policy: policy, ...extra })),
+          preparedValues: input.preparedValues,
+          window: issued,
+        })
+      ).allowed,
+    ).toBe(false);
+  expect(
+    (
+      await classifyAttachmentUpload({
+        ...(await multipart(
+          { ...fields, Policy: policy },
+          new Uint8Array(bytes.length),
+        )),
+        preparedValues: input.preparedValues,
+        window: issued,
+      })
+    ).allowed,
+  ).toBe(false);
+});
+
 test("Rails upload markers and a generic binary MIME remain attachment-only", async () => {
   const input = {
     ...(await multipart(

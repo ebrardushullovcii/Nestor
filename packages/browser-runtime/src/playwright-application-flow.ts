@@ -10,6 +10,7 @@ import {
 import {
   classifyAttachmentUpload,
   classifyUploadBind,
+  issuedStringsIn,
   uploadHandlesIn,
   type AttachmentUploadWindow,
 } from "./application-attachment-upload-policy";
@@ -312,6 +313,8 @@ const prepareOnlyNetworkGuardStates = new WeakMap<
     allowedIntermediateRequests: WeakSet<Request>;
     verifiedIntermediateWriteCount: number;
     pendingMutationResponses: Set<Promise<void>>;
+    /** Answers read for an open upload window's `issued` strings. */
+    pendingUploadReads: Set<Promise<void>>;
     intermediateMutationsAuthorized: boolean;
     attachmentUploadsAuthorized: boolean;
     attachmentUploadWindow: AttachmentUploadWindow | null;
@@ -1925,6 +1928,7 @@ export async function ensurePrepareOnlyMutationGuard(
       allowedIntermediateRequests: new WeakSet<Request>(),
       verifiedIntermediateWriteCount: 0,
       pendingMutationResponses: new Set<Promise<void>>(),
+      pendingUploadReads: new Set<Promise<void>>(),
       intermediateMutationsAuthorized,
       attachmentUploadsAuthorized,
       attachmentUploadWindow: null,
@@ -1959,6 +1963,35 @@ export async function ensurePrepareOnlyMutationGuard(
           if (state) state.finalActionAllowed = true;
         })
         .catch(() => undefined);
+    });
+    // What the site answers while an upload window is open: a storage leg
+    // may repeat its strings (AttachmentUploadWindow.issued).
+    page.on("response", (response) => {
+      const grant = networkGuardState!.attachmentUploadWindow;
+      const type = response.request().resourceType();
+      if (
+        !grant ||
+        (type !== "fetch" && type !== "xhr") ||
+        response.status() < 200 ||
+        response.status() >= 300
+      )
+        return;
+      const read: Promise<void> = response
+        .text()
+        .then(
+          (text) => {
+            if (networkGuardState!.attachmentUploadWindow !== grant) return;
+            grant.issued = [
+              ...new Set([
+                ...(grant.issued ?? []),
+                ...issuedStringsIn(text.slice(0, 65_536)),
+              ]),
+            ].slice(0, 256);
+          },
+          () => undefined,
+        )
+        .finally(() => networkGuardState!.pendingUploadReads.delete(read));
+      networkGuardState!.pendingUploadReads.add(read);
     });
     await page.route("**/*", async (route) => {
       const request = route.request();
@@ -2161,6 +2194,16 @@ export async function ensurePrepareOnlyMutationGuard(
         if (!bound) await denyRequest();
         return;
       }
+      // The storage leg may repeat what the presign just answered.
+      if (
+        uploadGrant &&
+        networkGuardState!.pendingUploadReads.size > 0 &&
+        ["POST", "PUT"].includes(method)
+      )
+        await Promise.race([
+          Promise.all([...networkGuardState!.pendingUploadReads]),
+          new Promise((resolve) => setTimeout(resolve, 2_000)),
+        ]);
       const attachment = await classifyAttachmentUpload({
         window:
           networkGuardState!.attachmentUploadsAuthorized &&
@@ -2712,6 +2755,7 @@ export function recordPrepareOnlyRunInterruption(
       allowedIntermediateRequests: new WeakSet<Request>(),
       verifiedIntermediateWriteCount: 0,
       pendingMutationResponses: new Set<Promise<void>>(),
+      pendingUploadReads: new Set<Promise<void>>(),
       intermediateMutationsAuthorized: false,
       attachmentUploadsAuthorized: false,
       attachmentUploadWindow: null,
