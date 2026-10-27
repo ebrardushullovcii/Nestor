@@ -2,6 +2,7 @@
 // built app, the way a person uses it. Run `perf --help` for usage.
 import { execFileSync } from "node:child_process";
 import {
+  readFileSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
@@ -37,7 +38,7 @@ Per size it reports:
   launch    process start to a usable Home (the Home numbers and the shell
             both shown): --launches cold runs (fresh app files, no Chromium
             caches, like the first start after an update), then as many warm.
-  screens   one warm session: first visit to every screen (click to heading),
+  screens   one warm session: first visit to every screen (click to a painted heading),
             three rounds of screen switches, Find jobs scrolling, 50 triage
             keys, 20 row clicks, Applications board drags, palette search, and
             reads of the Profile route. For each phase: interaction latency
@@ -60,8 +61,9 @@ Options:
   --launches  cold and warm launches each (default 5)
   --only      launch or screens, to run one part
   --search    measure a replica search instead of the sizes (see above)
-  --cpu-profile  record a renderer CPU profile of each first visit (.cpuprofile
-            files, open in Chrome DevTools) and print its busiest functions
+  --cpu-profile  record renderer CPU profiles of one more warm launch and of
+            each first visit (.cpuprofile files, open in Chrome DevTools) and
+            print their busiest functions; profiling slows what it records
   --out       folder for perf-<time>.json (default ~/Projects/nestor-agent-work/perf)
   --keep      keep the seeded data folders (printed) for a later look
   --seed-into <dir>  only seed that (empty) data folder with the first size and
@@ -163,7 +165,8 @@ function appCopy() {
   return dir;
 }
 
-function launchEnv(dataDir) {
+// The send guard's state and evidence go inside the app copy, removed with it.
+function launchEnv(appDir, dataDir) {
   const env = { ...process.env };
   for (const key of Object.keys(env))
     if (
@@ -181,23 +184,32 @@ function launchEnv(dataDir) {
     NESTOR_USER_DATA_DIR: dataDir,
     NESTOR_BROWSER_HOST: "embedded",
     NESTOR_VERIFY_NET: "replica",
-    NESTOR_VERIFY_STATE: mkdtempSync(path.join(tempRoot, "nestor-perf-state-")),
-    NESTOR_VERIFY_EVIDENCE: mkdtempSync(
-      path.join(tempRoot, "nestor-perf-evidence-"),
-    ),
+    NESTOR_VERIFY_STATE: mkdtempSync(path.join(appDir, "state-")),
+    NESTOR_VERIFY_EVIDENCE: mkdtempSync(path.join(appDir, "evidence-")),
   };
 }
 
-async function launch(appDir, dataDir) {
+async function launch(appDir, dataDir, { profileFile } = {}) {
   const { _electron } = requireDesktop("playwright");
   const app = await _electron.launch({
     executablePath: requireDesktop("electron"),
     args: ["-r", path.join(import.meta.dirname, "instance-patch.cjs"), appDir],
     cwd: desktopDir,
-    env: launchEnv(dataDir),
+    env: {
+      ...launchEnv(appDir, dataDir),
+      // The main process notes its startup steps in the data folder.
+      ...(profileFile ? { ELECTRON_ENABLE_LOGGING: "1" } : {}),
+    },
     timeout: 60_000,
   });
   const page = await app.firstWindow();
+  // Attached as soon as the window exists, so it holds the startup scripts.
+  const cdp = profileFile ? await page.context().newCDPSession(page) : null;
+  if (cdp) {
+    await cdp.send("Profiler.enable");
+    await cdp.send("Profiler.setSamplingInterval", { interval: 200 });
+    await cdp.send("Profiler.start");
+  }
   if (process.platform === "win32")
     await app
       .browserWindow(page)
@@ -214,18 +226,57 @@ async function launch(appDir, dataDir) {
   const mainStart = await app.evaluate(
     () => Date.now() - process.uptime() * 1000,
   );
+  let top;
+  let mainSteps;
+  if (cdp) {
+    const { profile } = await cdp.send("Profiler.stop");
+    writeFileSync(profileFile, JSON.stringify(profile));
+    top = topFunctions(profile, 15);
+    const log = path.join(dataDir, "startup-diagnostics.log");
+    if (existsSync(log)) {
+      mainSteps = readFileSync(log, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const [at, ...words] = line.split(" ");
+          return `${words.join(" ").trim()} ${Math.round(Date.parse(at) - mainStart)}`;
+        });
+      rmSync(log, { force: true });
+    }
+  }
   const marks = await page.evaluate(() => ({
     origin: performance.timeOrigin,
     home: performance.getEntriesByName("job-finder:home:numbers-shown")[0]
       .startTime,
     shell: performance.getEntriesByName("job-finder:shell:mounted")[0]
       .startTime,
+    fetched: Math.max(
+      0,
+      ...performance
+        .getEntriesByType("resource")
+        .filter((e) => /\/assets\/index-.*\.(js|css)$/.test(e.name))
+        .map((e) => e.responseEnd),
+    ),
+    scripts:
+      performance.getEntriesByType("navigation")[0].domContentLoadedEventEnd,
   }));
   // mainMs: process start until the window's page began loading;
   // rendererMs: from there until Home is usable.
   const rendererMs = Math.round(Math.max(marks.home, marks.shell));
   const mainMs = Math.round(marks.origin - mainStart);
-  return { app, page, launchMs: mainMs + rendererMs, mainMs, rendererMs };
+  return {
+    app,
+    page,
+    launchMs: mainMs + rendererMs,
+    mainMs,
+    rendererMs,
+    // Renderer steps: startup files fetched, then run, shell, Home numbers.
+    steps: [marks.fetched, marks.scripts, marks.shell, marks.home].map(
+      Math.round,
+    ),
+    top,
+    mainSteps,
+  };
 }
 
 const memory = (app) =>
@@ -234,6 +285,11 @@ const memory = (app) =>
     return {
       totalMB: Math.round(
         metrics.reduce((n, p) => n + p.memory.workingSetSize, 0) / 1024,
+      ),
+      // Windows only: memory no other process can share, what Task Manager
+      // shows. The working set also counts the mapped database file.
+      privateMB: Math.round(
+        metrics.reduce((n, p) => n + (p.memory.privateBytes ?? 0), 0) / 1024,
       ),
       byProcess: Object.fromEntries(
         metrics.map((p, i) => [
@@ -244,7 +300,7 @@ const memory = (app) =>
     };
   });
 
-async function measureLaunches(dataDir, runs) {
+async function measureLaunches(dataDir, runs, { cpuProfileDir } = {}) {
   const cold = [];
   const warm = [];
   const coldSplit = [];
@@ -260,7 +316,7 @@ async function measureLaunches(dataDir, runs) {
       rmSync(path.join(dataDir, dir), { recursive: true, force: true });
     const run = await launch(appDir, dataDir);
     cold.push(run.launchMs);
-    coldSplit.push([run.mainMs, run.rendererMs]);
+    coldSplit.push([run.mainMs, ...run.steps]);
     await run.app.close().catch(() => {});
     rmSync(appDir, { recursive: true, force: true });
     await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -269,12 +325,25 @@ async function measureLaunches(dataDir, runs) {
   for (let i = 0; i < runs; i += 1) {
     const run = await launch(appDir, dataDir);
     warm.push(run.launchMs);
-    warmSplit.push([run.mainMs, run.rendererMs]);
+    warmSplit.push([run.mainMs, ...run.steps]);
     await run.app.close().catch(() => {});
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
+  let profiled;
+  if (cpuProfileDir) {
+    const run = await launch(appDir, dataDir, {
+      profileFile: path.join(cpuProfileDir, "warm-launch.cpuprofile"),
+    });
+    profiled = {
+      launchMs: run.launchMs,
+      top: run.top,
+      mainSteps: run.mainSteps,
+      steps: [run.mainMs, ...run.steps],
+    };
+    await run.app.close().catch(() => {});
+  }
   rmSync(appDir, { recursive: true, force: true });
-  return { cold, warm, coldSplit, warmSplit };
+  return { cold, warm, coldSplit, warmSplit, profiled };
 }
 
 // The busiest functions in a renderer CPU profile, by self time.
@@ -344,6 +413,79 @@ async function measureScreens(dataDir, { cpuProfileDir } = {}) {
         .waitFor({ timeout: 30_000 });
     const nav = (name) =>
       page.getByRole("button", { name, exact: true }).first().click();
+    // A real click to the first frame painted with the screen usable: its
+    // heading shown and nothing in the page still loading. Timed inside the
+    // page, from the press: Playwright's own role queries cost tens of ms on
+    // a big screen.
+    await page.evaluate(() => {
+      window.__visit = (name) =>
+        new Promise((resolve) => {
+          // Screens stay mounted once visited, so only what is visible
+          // counts. A list's "Loading more…" footer is not a loading screen.
+          const visible = (el) => el?.checkVisibility() ?? false;
+          const loadingText = () => {
+            const walker = document.createTreeWalker(
+              document.querySelector("main") ?? document.body,
+              NodeFilter.SHOW_TEXT,
+            );
+            for (let node = walker.nextNode(); node; node = walker.nextNode())
+              if (
+                /Loading\b(?! more)/.test(node.data) &&
+                visible(node.parentElement)
+              )
+                return node.data;
+            return null;
+          };
+          const usable = () =>
+            [...document.querySelectorAll("h1")].some(
+              (h) => h.textContent.includes(name) && visible(h),
+            ) &&
+            ![...document.querySelectorAll("[aria-busy='true']")].some(
+              visible,
+            ) &&
+            !loadingText();
+          addEventListener(
+            "pointerdown",
+            (event) => {
+              const check = () => {
+                if (performance.now() - event.timeStamp > 15_000)
+                  return resolve(
+                    `stuck: visible h1 ${[...document.querySelectorAll("h1")]
+                      .filter(visible)
+                      .map((h) => h.textContent)
+                      .join(
+                        " / ",
+                      )}; busy ${[...document.querySelectorAll("[aria-busy='true']")].filter(visible).length}; ${loadingText() ?? ""}`,
+                  );
+                if (!usable()) return requestAnimationFrame(check);
+                requestAnimationFrame(() =>
+                  setTimeout(() =>
+                    resolve(Math.round(performance.now() - event.timeStamp)),
+                  ),
+                );
+              };
+              requestAnimationFrame(check);
+            },
+            { once: true, capture: true },
+          );
+        });
+    });
+    const navButton = (name) =>
+      page.getByRole("button", { name, exact: true }).first().elementHandle();
+    const visit = async (name, button) => {
+      button ??= await navButton(name);
+      const box = await button.boundingBox();
+      await page.evaluate((n) => {
+        window.__visitDone = window.__visit(n);
+      }, name);
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      return Promise.race([
+        page.evaluate(() => window.__visitDone),
+        new Promise((resolve) =>
+          setTimeout(() => resolve("stuck: the press never arrived"), 20_000),
+        ),
+      ]);
+    };
     await page.waitForTimeout(8000);
     const idle = await memory(app);
 
@@ -358,15 +500,13 @@ async function measureScreens(dataDir, { cpuProfileDir } = {}) {
       "Settings",
       "Home",
     ]) {
+      const button = await navButton(name);
       if (cdp) {
         await cdp.send("Profiler.enable");
         await cdp.send("Profiler.setSamplingInterval", { interval: 200 });
         await cdp.send("Profiler.start");
       }
-      const started = Date.now();
-      await nav(name);
-      await heading(name);
-      const visit = { name, ms: Date.now() - started };
+      const shown = { name, ms: await visit(name, button) };
       if (cdp) {
         await page.waitForTimeout(300);
         const { profile } = await cdp.send("Profiler.stop");
@@ -377,9 +517,14 @@ async function measureScreens(dataDir, { cpuProfileDir } = {}) {
           ),
           JSON.stringify(profile),
         );
-        visit.top = topFunctions(profile);
+        shown.top = topFunctions(profile);
       }
-      firstVisits.push(visit);
+      await heading(name);
+      // Elements on the page: what a screen renders, whatever is on screen.
+      shown.elements = await page.evaluate(
+        () => document.getElementsByTagName("*").length,
+      );
+      firstVisits.push(shown);
       await page.waitForTimeout(600);
     }
 
@@ -428,10 +573,7 @@ async function measureScreens(dataDir, { cpuProfileDir } = {}) {
         "Profile",
         "Settings",
       ]) {
-        const started = Date.now();
-        await nav(name);
-        await heading(name);
-        switches.push({ name, ms: Date.now() - started });
+        switches.push({ name, ms: await visit(name) });
         await page.waitForTimeout(400);
       }
 
@@ -531,25 +673,36 @@ function summarize(perf) {
   return out;
 }
 
+const timed = (visits) =>
+  visits.map((v) => v.ms).filter((ms) => typeof ms === "number");
+
 function print(size, result) {
   const lines = [
     `\n${size.jobs} jobs / ${size.sites} sites (seeded in ${result.seed.seedMs} ms)`,
   ];
   if (result.launch)
     lines.push(
-      `  launch cold ms: ${result.launch.cold.join(", ")} (median ${median(result.launch.cold)}; main+renderer ${result.launch.coldSplit.map((p) => p.join("+")).join(", ")})`,
-      `  launch warm ms: ${result.launch.warm.join(", ")} (median ${median(result.launch.warm)}; main+renderer ${result.launch.warmSplit.map((p) => p.join("+")).join(", ")})`,
+      `  launch cold ms: ${result.launch.cold.join(", ")} (median ${median(result.launch.cold)}; main | fetched, scripts run, shell, Home ${result.launch.coldSplit.map(([m, ...r]) => `${m} | ${r.join(", ")}`).join("; ")})`,
+      `  launch warm ms: ${result.launch.warm.join(", ")} (median ${median(result.launch.warm)}; main | fetched, scripts run, shell, Home ${result.launch.warmSplit.map(([m, ...r]) => `${m} | ${r.join(", ")}`).join("; ")})`,
+    );
+  if (result.launch?.profiled)
+    lines.push(
+      `  profiled warm launch ${result.launch.profiled.launchMs} ms (main | fetched, scripts run, shell, Home ${result.launch.profiled.steps[0]} | ${result.launch.profiled.steps.slice(1).join(", ")}); main steps ms: ${result.launch.profiled.mainSteps?.join(", ") ?? "none logged"}`,
+      `    busiest: ${result.launch.profiled.top.join("; ")}`,
     );
   if (result.screens) {
     const s = result.screens;
     lines.push(
-      `  first visits ms: ${s.firstVisits.map((v) => `${v.name} ${v.ms}`).join(", ")}`,
+      `  first visits ms: ${s.firstVisits.map((v) => `${v.name} ${v.ms} (${v.elements} elements)`).join(", ")}`,
       ...s.firstVisits
         .filter((v) => v.top)
         .map((v) => `    ${v.name} busiest: ${v.top.slice(0, 6).join("; ")}`),
-      `  switches ms: p95 ${p95(s.switches.map((v) => v.ms))}, max ${Math.max(...s.switches.map((v) => v.ms))}`,
+      `  switches ms: p95 ${p95(timed(s.switches))}, max ${Math.max(...timed(s.switches))} (${s.switches.map((v) => `${v.name} ${v.ms}`).join(", ")})`,
+      ...[...s.firstVisits, ...s.switches]
+        .filter((v) => typeof v.ms !== "number")
+        .map((v) => `  ${v.name} ${v.ms}`),
       `  Profile reads ms: ${s.profileReads.join(", ")}`,
-      `  memory MB: idle ${s.idle.totalMB}, after screens ${s.afterScreens.totalMB}`,
+      `  memory MB (working set; private): idle ${s.idle.totalMB}; ${s.idle.privateMB}, after screens ${s.afterScreens.totalMB}; ${s.afterScreens.privateMB}`,
     );
     for (const [name, p] of Object.entries(s.phases))
       lines.push(
@@ -601,7 +754,7 @@ if (options.search) {
       `search: ${Object.entries(result.stageMs)
         .map(([k, v]) => `${k} ${v} ms`)
         .join(", ")}`,
-      `  memory MB: before ${result.beforeMB}, peak ${result.peak?.totalMB} (${types}), 10 s after ${result.afterMB}`,
+      `  memory MB (working set): before ${result.beforeMB}, peak ${result.peak?.totalMB} (${types}; private ${result.peak?.privateMB}), 10 s after ${result.afterMB}`,
       `  browser pages left open: ${result.pagesLeftOpen.length ? result.pagesLeftOpen.map((p) => `${p.type} ${p.url}`).join(", ") : "none"}`,
     ].join("\n"),
   );
@@ -646,11 +799,13 @@ for (const [index, jobs] of options.sizes.entries()) {
   const dataDir = mkdtempSync(path.join(tempRoot, `nestor-perf-${jobs}-`));
   try {
     const result = { seed: await seed(dataDir, jobs, sites) };
-    if (options.only !== "screens")
-      result.launch = await measureLaunches(dataDir, options.launches);
     const cpuProfileDir = options.cpuProfile
       ? mkdtempSync(path.join(options.out, `cpu-${jobs}-`))
       : undefined;
+    if (options.only !== "screens")
+      result.launch = await measureLaunches(dataDir, options.launches, {
+        cpuProfileDir,
+      });
     if (options.only !== "launch")
       result.screens = await measureScreens(dataDir, { cpuProfileDir });
     if (cpuProfileDir) console.log(`  CPU profiles: ${cpuProfileDir}`);
