@@ -220,17 +220,67 @@ test("a background search merges all sightings before fitting; repeat reads and 
   ).toBe(true);
 });
 
-test("a retention choice saves older related jobs hidden, with full text, fit and an undoable reason", async () => {
-  const { runner, store } = setup();
+test("a retention choice keeps full older listings without fit spend; Any can score them later", async () => {
+  const { runner, store, engine } = setup();
   await runner.start({ postedWithin: "week" });
   await finished(runner);
   const row = store.listJobs({ stage: "hidden" }).rows[0]!;
   const detail = store.getJob(row.id)!;
   expect(detail.stageNote).toContain("Posted more than 7 days ago");
   expect(detail.description).toContain("Requirements: SQL");
-  expect(detail.fitScore).toBe(82);
+  expect(detail.fitScore).toBeNull();
+  expect(engine.fitJobs).not.toHaveBeenCalled();
+  expect(runner.status().search?.scored).toBe(0);
   store.moveJobs({ selection: { ids: [row.id] }, to: "found" });
   expect(store.getJob(row.id)?.stage).toBe("found");
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(store.getJob(row.id)?.fitScore).toBe(82);
+});
+
+test.each(["week", "month"] as const)(
+  "%s skips only excluded older hidden listings, never an unknown posting date",
+  async (postedWithin) => {
+    const { runner, store, engine } = setup();
+    engine.readListings.mockImplementation(({ cards }) =>
+      Promise.resolve({
+        jobs: cards.map((entry) => ({
+          ...found(entry),
+          company: `Synthetic employer ${entry.sourceId}`,
+          postedAt: entry.sourceId === "one" ? "2026-08-01T00:00:00Z" : null,
+        })),
+        failures: [],
+      }),
+    );
+    await runner.start({ postedWithin });
+    await finished(runner);
+    const judged = engine.fitJobs.mock.calls.flatMap(([input]) => input.jobs);
+    expect(judged).toHaveLength(1);
+    expect(judged[0]?.postedAt).toBeNull();
+    expect(store.stageCounts()).toMatchObject({ found: 1, hidden: 1 });
+    expect(runner.status().search?.scored).toBe(1);
+    const hidden = store.listJobs({ stage: "hidden" }).rows[0]!;
+    expect(store.getJob(hidden.id)?.description).toContain("Requirements: SQL");
+  },
+);
+
+test("Month still scores a three-week-old listing that Week excludes", async () => {
+  const { runner, engine } = setup();
+  engine.readListings.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      jobs: cards.map((entry) => ({
+        ...found(entry),
+        company: `Synthetic employer ${entry.sourceId}`,
+        postedAt: new Date(Date.now() - 21 * 86_400_000).toISOString(),
+      })),
+      failures: [],
+    }),
+  );
+  await runner.start({ postedWithin: "month" });
+  await finished(runner);
+  expect(
+    engine.fitJobs.mock.calls.flatMap(([input]) => input.jobs),
+  ).toHaveLength(2);
 });
 
 test("stop ends the search promptly and ignores a source that completes afterwards", async () => {

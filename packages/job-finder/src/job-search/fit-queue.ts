@@ -14,6 +14,10 @@ export function createFitQueue(
   const pending: number[] = [];
   const seen = new Set<number>();
   const active = new Set<Promise<void>>();
+  const cutoff =
+    !settings || settings.postedWithin === "any"
+      ? null
+      : Date.now() - (settings.postedWithin === "week" ? 7 : 30) * 86_400_000;
   let scored = 0,
     judging = 0;
   let drainers = 0;
@@ -28,6 +32,15 @@ export function createFitQueue(
   const judge = async (ids: number[]) => {
     const jobs = ids.flatMap((id) => {
       const job = deps.store.getJob(id);
+      // Retention already hid these listings. Keep their full evidence, but
+      // pay for fit only when the person includes them in a later search.
+      if (
+        job?.stage === "hidden" &&
+        cutoff !== null &&
+        job.postedAt &&
+        Date.parse(job.postedAt) < cutoff
+      )
+        return [];
       return job &&
         job.fitScore === null &&
         !job.stageNote?.startsWith("Closed:")
