@@ -6162,9 +6162,20 @@ test("renumbered handles keep current answers and two equal-worded questions dis
   ]);
 });
 
-test.each(["confirm_before_submit", "autonomous_submit"] as const)(
-  "the Greenhouse replica's plain identity fields fill from Profile in %s even when the model omits their sources",
-  async (mode) => {
+test.each([
+  { mode: "confirm_before_submit", handover: "none" },
+  { mode: "autonomous_submit", handover: "none" },
+  { mode: "confirm_before_submit", handover: "stale email" },
+  { mode: "confirm_before_submit", handover: "still needs person" },
+  { mode: "autonomous_submit", handover: "still needs person" },
+  { mode: "autonomous_submit", handover: "implicit finish" },
+  { mode: "autonomous_submit", handover: "text reply" },
+  { mode: "confirm_before_submit", handover: "invalid email" },
+  { mode: "confirm_before_submit", handover: "changed question" },
+  { mode: "confirm_before_submit", handover: "stale email plus MFA" },
+] as const)(
+  "the Greenhouse replica's plain identity fields fill from Profile in $mode ($handover)",
+  async ({ mode, handover }) => {
     const identity = [
       ["First Name *", "Robin", "profile.firstName"],
       ["Last Name *", "Ashford", "profile.lastName"],
@@ -6188,41 +6199,100 @@ test.each(["confirm_before_submit", "autonomous_submit"] as const)(
     input.authority.submitAuthorized = mode === "autonomous_submit";
     input.authority.allowedOrigins = ["https://apply.example.test"];
     input.sources.profile.email = identity[2][1];
+    const email = source.controls[2];
+    if (!email) throw new Error("The replica email input is missing.");
+    if (handover !== "none") {
+      // The site briefly reports a validation error after filling. By the
+      // model's stale handover, its asynchronous check has accepted the email.
+      input.hands.wait = () => {
+        email.invalid = true;
+        email.validationMessage = "Checking email";
+        return Promise.resolve();
+      };
+    }
     const finalClick = vi.spyOn(input.hands, "clickAction");
-    const model = repeatingModel("fill_fields", {
+    const batch = {
       fields: identity.map(([, text, storedFactId], index) => ({
         tool: "type",
         ref: `c${index}`,
         text,
         storedFactId,
       })),
-      finishWhenReady: true,
-    });
+      finishWhenReady: handover === "none",
+    };
+    const model =
+      handover === "none"
+        ? repeatingModel("fill_fields", batch)
+        : scriptedModel([
+            { name: "fill_fields", args: batch },
+            {
+              name: "finish",
+              args: {
+                reason: "Email still needs the person's answer.",
+                needsPerson: true,
+                forPerson: [
+                  "c2",
+                  ...(handover === "stale email plus MFA"
+                    ? ["Enter the MFA code the site sent to your phone."]
+                    : []),
+                ],
+              },
+            },
+            {
+              name: "finish",
+              args:
+                handover === "stale email"
+                  ? {
+                      reason: "The checked fields answer everything.",
+                      needsPerson: false,
+                    }
+                  : handover === "implicit finish"
+                    ? { reason: "The form is complete." }
+                    : {
+                        reason: "Email still needs the person's answer.",
+                        needsPerson: true,
+                        forPerson: ["c2"],
+                      },
+            },
+          ]);
+    let formTurns = 0;
     const client: LLMClient = {
-      chatWithTools: (messages, tools, options) =>
-        tools[0]?.function.name === "report_question_kinds"
-          ? Promise.resolve({
-              toolCalls: [
-                {
-                  id: "reading",
-                  type: "function",
-                  function: {
-                    name: "report_question_kinds",
-                    arguments: JSON.stringify({
-                      plainIndexes: [0, 1, 2],
-                      flagged: [],
-                      tags: identity.map((_, index) => ({
-                        index,
-                        kind: "other",
-                        country: null,
-                        sourceId: null,
-                      })),
-                    }),
-                  },
+      chatWithTools: (messages, tools, options) => {
+        if (tools[0]?.function.name === "report_question_kinds")
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "reading",
+                type: "function",
+                function: {
+                  name: "report_question_kinds",
+                  arguments: JSON.stringify({
+                    plainIndexes: [0, 1, 2],
+                    flagged: [],
+                    tags: identity.map((_, index) => ({
+                      index,
+                      kind: "other",
+                      country: null,
+                      sourceId: null,
+                    })),
+                  }),
                 },
-              ],
-            })
-          : model.chatWithTools(messages, tools, options),
+              },
+            ],
+          });
+        if (++formTurns > 1 && handover !== "invalid email") {
+          email.invalid = false;
+          email.validationMessage = "";
+          if (handover === "changed question")
+            email.hint = "Your professional reference's email address.";
+        }
+        if (handover === "text reply" && formTurns > 2)
+          return Promise.resolve({
+            content: "Everything is complete.",
+            toolCalls: [],
+          });
+        return model.chatWithTools(messages, tools, options);
+      },
     };
     const calls = vi.spyOn(client, "chatWithTools");
     const result = await runApplyAgent(input, client);
@@ -6232,14 +6302,112 @@ test.each(["confirm_before_submit", "autonomous_submit"] as const)(
     expect(result.filled.map((field) => field.answer.sourceId)).toEqual(
       identity.map(([, , sourceId]) => sourceId),
     );
-    expect(result.pauses).toEqual([]);
+    const questions = result.pauses.flatMap(
+      (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+    );
+    expect(questions.map((question) => question.prompt)).toEqual(
+      handover === "invalid email" || handover === "changed question"
+        ? ["Email *"]
+        : handover === "stale email plus MFA"
+          ? ["Enter the MFA code the site sent to your phone."]
+          : handover === "still needs person"
+            ? ["Review this application before sending."]
+            : handover === "implicit finish" || handover === "text reply"
+              ? [
+                  "Job Finder still needs you to review this application before it can finish.",
+                ]
+              : [],
+    );
     expect(result.outcome).toBe(
-      mode === "autonomous_submit" ? "ready_to_send" : "awaiting_your_review",
+      handover === "invalid email" ||
+        handover === "changed question" ||
+        handover === "stale email plus MFA" ||
+        handover === "still needs person" ||
+        handover === "implicit finish" ||
+        handover === "text reply"
+        ? "paused"
+        : mode === "autonomous_submit"
+          ? "ready_to_send"
+          : "awaiting_your_review",
     );
     expect(finalClick).not.toHaveBeenCalled();
-    expect(calls).toHaveBeenCalledTimes(2); // One page read and one form turn.
+    expect(calls).toHaveBeenCalledTimes(
+      handover === "none"
+        ? 2
+        : handover === "changed question" ||
+            [
+              "stale email",
+              "still needs person",
+              "implicit finish",
+              "text reply",
+            ].includes(handover)
+          ? 4
+          : 3,
+    );
+    if (
+      [
+        "stale email",
+        "still needs person",
+        "implicit finish",
+        "text reply",
+      ].includes(handover)
+    ) {
+      const nudges = calls.mock.calls
+        .flatMap(([messages]) => messages)
+        .filter(
+          (message) =>
+            message.role === "tool" &&
+            String(message.content).includes(
+              "These fields already have checked, still-valid answers",
+            ),
+        );
+      expect(nudges).toHaveLength(1);
+      expect(nudges[0]?.content).toContain(
+        '"question":"Email *","value":"robin@example.test"',
+      );
+      expect(nudges[0]?.content).toContain("finish with needsPerson: false");
+    }
+    if (
+      ["still needs person", "implicit finish", "text reply"].includes(handover)
+    ) {
+      expect(result.readyToSend).toBeNull();
+      expect(questions.some((question) => question.prompt === "Email *")).toBe(
+        false,
+      );
+    }
   },
 );
+
+test("a site-prefilled Email is not a checked write that can clear a handover", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        label: "Email *",
+        inputType: "email",
+        value: "robin@example.test",
+      },
+    ],
+  });
+  const input = config(source, { intermediateWritesAuthorized: false });
+  input.authority.mode = "confirm_before_submit";
+  input.sources.profile.email = "robin@example.test";
+  const result = await runApplyAgent(
+    input,
+    repeatingModel("finish", {
+      reason: "Email needs the person's answer.",
+      needsPerson: true,
+      forPerson: ["c0"],
+    }),
+  );
+  expect(result.filled).toEqual([]);
+  expect(result.outcome).toBe("paused");
+  expect(
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .map((question) => question.prompt),
+  ).toEqual(["Email *"]);
+});
 
 test("classification settles before starting a sourced writing check and before any write", async () => {
   const source = page({
@@ -8634,7 +8802,10 @@ describe("a finish that says needsPerson always ends paused", () => {
       name: "a verification code is not the phone field's value",
       page: page({ controls: [nameControl(), field(1, "Phone", true)] }),
       forPerson: ["What code should I enter in the required Phone field?"],
-      handed: ["Phone", "What code should I enter in the required Phone field?"],
+      handed: [
+        "Phone",
+        "What code should I enter in the required Phone field?",
+      ],
     },
     {
       name: "a named field with an extra condition stays a separate task",
@@ -8656,7 +8827,9 @@ describe("a finish that says needsPerson always ends paused", () => {
           { ...field(2, "Phone", true), groupLabel: "Professional reference" },
         ],
       }),
-      forPerson: ["What phone number should I enter in the required Phone field?"],
+      forPerson: [
+        "What phone number should I enter in the required Phone field?",
+      ],
       handed: ["What phone number should I enter in the required Phone field?"],
     },
     {

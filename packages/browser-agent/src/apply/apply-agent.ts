@@ -20,6 +20,7 @@ import {
 import {
   describeBrowserError,
   type ApplicationAttemptQuestion,
+  type ApplyAnswerTags,
   type ApplyFormPathStep,
 } from "@nestor/contracts";
 
@@ -191,6 +192,25 @@ function nativeFinishQuestion(
 }
 
 const DEFAULT_MAX_STEPS = 200;
+function matchesFinishQuestion(
+  prompt: string,
+  isBoolean: boolean,
+  item: string,
+) {
+  const words = (text: string) =>
+    normalizeFormQuestionPrompt(preserveTechnologyTokens(text));
+  return (
+    words(prompt) === words(item) ||
+    words(prompt) === words(formQuestionText(item, isBoolean))
+  );
+}
+function offersYesNo(options: readonly string[]) {
+  return (
+    options.length === 2 &&
+    options.some((option) => normalizeFormQuestionPrompt(option) === "yes") &&
+    options.some((option) => normalizeFormQuestionPrompt(option) === "no")
+  );
+}
 // Long forms on a slow model took 16 minutes to reach the review step;
 // 15 minutes cut them off just before it.
 const DEFAULT_TIME_BUDGET_MS = 30 * 60_000;
@@ -411,6 +431,9 @@ async function runMeasuredApplyAgent(
   };
   const now = config.now ?? (() => new Date());
   const filled: ApplyFilledControl[] = [];
+  // Only executor-approved writes, bound to this page/step and field. Page
+  // autofill and arbitrary observed values are not checked answer receipts.
+  const checkedFieldValues = new Map<string, string>();
   const attachments: ApplyAttachedDocument[] = [];
   const observedAnswers = new Map<string, ApplyFilledControl>();
   const observedAttachments = new Map<string, ApplyAttachedDocument>();
@@ -814,6 +837,10 @@ async function runMeasuredApplyAgent(
   let staleResumeNudged = false;
   let optionalLetterNudged = false;
   let forPersonNudged = false;
+  // The one-time nudge does not clear the handover. Only the model's
+  // explicit finish(needsPerson: false) does; automatic completion cannot.
+  let needsPersonFinishPending = false;
+  let finishHasOnlyCheckedFields = false;
   // What the model's last finish named for the person, apart from its reason.
   let forPerson: string[] = [];
 
@@ -827,6 +854,56 @@ async function runMeasuredApplyAgent(
     control.choiceGroupKey
       ? `${control.kind}:${control.choiceGroupKey}`
       : control.ref;
+  const currentFieldAnswer = (control: ApplyFormControl): string =>
+    control.kind === "radio"
+      ? control.label || control.value
+      : control.kind === "checkbox"
+        ? control.answerControlType === "multi_choice"
+          ? control.label || control.value
+          : control.checked
+            ? "Yes"
+            : "No"
+        : control.selectedOptionLabel || control.value;
+  const hasCheckedFieldAnswer = (
+    control: ApplyFormControl,
+    observation: ApplyFormObservation,
+    tags: ApplyAnswerTags | null | undefined,
+  ): boolean => {
+    if (
+      !holdsAnswer(control) ||
+      control.invalid ||
+      control.kind === "file" ||
+      control.credentialRole === "password"
+    )
+      return false;
+    const value = currentFieldAnswer(control);
+    if (
+      !value.trim() ||
+      checkedFieldValues
+        .get(
+          JSON.stringify([
+            reviewFieldKey(observation, control),
+            questionClassificationKey(control, observation.controls),
+          ]),
+        )
+        ?.trim() !== value.trim()
+    )
+      return false;
+    return (
+      !classifyQuestions ||
+      classifyAnswerPermission({
+        control,
+        controls: observation.controls,
+        tags,
+        sources: runConfig.sources,
+        answer: value,
+        pageInstructions: formWritingInstructions(observation),
+        approvedAttestations: config.authority.preApprovedAttestationKinds,
+        application: config.application,
+        now: now(),
+      }).kind !== "needs_you"
+    );
+  };
   // This only decides whether another proposal is worth trying. Every actual
   // write still goes through the executor and its current permission gate.
   const independentLiteral = (
@@ -1438,7 +1515,20 @@ async function runMeasuredApplyAgent(
           kind: "ok",
           content: outcome.text.slice(0, 20_000) || "That has no text.",
         };
-      case "filled":
+      case "filled": {
+        const control = outcome.observation.controls.find(
+          (control) => control.ref === outcome.filled.ref,
+        );
+        if (control) {
+          checkedFieldValues.set(
+            JSON.stringify([
+              reviewFieldKey(outcome.observation, control),
+              questionClassificationKey(control, outcome.observation.controls),
+            ]),
+            outcome.filled.answer.value,
+          );
+          heldAnswerKeys.delete(pendingQuestionKey(control));
+        }
         filled.push(outcome.filled);
         pendingQuestions.delete(
           pendingQuestionKey(
@@ -1461,6 +1551,7 @@ async function runMeasuredApplyAgent(
             ? `Filled in "${outcome.filled.label}". The form now looks like this:\n\n${describePage(outcome.observation)}`
             : `Filled in "${outcome.filled.label}".`,
         };
+      }
       case "attached":
         attachments.push(outcome.attachment);
         syncObservation(outcome.observation);
@@ -1618,6 +1709,7 @@ async function runMeasuredApplyAgent(
           needsPerson: false,
         });
       case "finished": {
+        if (outcome.needsPerson) needsPersonFinishPending = true;
         forPerson = (outcome.forPerson ?? []).flatMap((item) =>
           nativeFinishQuestion(
             item,
@@ -1663,6 +1755,42 @@ async function runMeasuredApplyAgent(
             ) ?? classifications?.get(questionPrompt(control));
           if (classification?.required) control.required = true;
         }
+        const namedQuestions = forPerson.length;
+        const checkedFields = new Map<string, string>();
+        forPerson = forPerson.filter((item) => {
+          const matches = observation.controls.filter(
+            (control) =>
+              control.visible &&
+              !control.disabled &&
+              matchesFinishQuestion(
+                questionPrompt(control),
+                control.answerControlType === "boolean" ||
+                  offersYesNo(control.options),
+                item,
+              ),
+          );
+          const target =
+            matches.length === 1
+              ? matches[0]
+              : matches.every((control) => control.kind === "radio") &&
+                  new Set(matches.map(pendingQuestionKey)).size === 1
+                ? matches.find((control) => control.checked)
+                : undefined;
+          const reading = target
+            ? (classifications?.get(
+                questionClassificationKey(target, observation.controls),
+              ) ?? classifications?.get(questionPrompt(target)))
+            : undefined;
+          if (
+            !target ||
+            !hasCheckedFieldAnswer(target, observation, reading?.answerTags)
+          )
+            return true;
+          checkedFields.set(questionPrompt(target), currentFieldAnswer(target));
+          return false;
+        });
+        finishHasOnlyCheckedFields =
+          namedQuestions > 0 && forPerson.length === 0;
         const finishWithQuestions = (): AgentLoopToolOutcome => {
           // The model has already left questions for the person. One finish
           // hands back this step, including other visible required gaps;
@@ -1757,7 +1885,9 @@ async function runMeasuredApplyAgent(
           return {
             kind: "ok",
             content:
-              "needsPerson is set but forPerson names nothing. Finish again with each question or thing the person must do as its own forPerson item, or with needsPerson false if the form is complete.",
+              checkedFields.size > 0
+                ? `These fields already have checked, still-valid answers on the current page: ${JSON.stringify([...checkedFields].map(([question, value]) => ({ question, value })))}. If nothing else needs the person, call finish with needsPerson: false. Otherwise name only the remaining things the person must do in forPerson. needsPerson: true keeps the application handed over.`
+                : "needsPerson is set but forPerson names nothing. Finish again with each question or thing the person must do as its own forPerson item, or with needsPerson false if the form is complete.",
           };
         }
         // "Whenever there is room" covers optional letter fields too. Ask
@@ -2330,6 +2460,12 @@ async function runMeasuredApplyAgent(
         const parsed = parseApplyProposal(name, rawArguments);
         if (!parsed.ok)
           return { kind: "ok", status: "refused", content: parsed.error };
+        if (
+          parsed.proposal.tool === "finish" &&
+          parsed.proposal.needsPerson === false &&
+          parseToolArguments(rawArguments)?.needsPerson === false
+        )
+          needsPersonFinishPending = false;
         const writeKey = controlWriteKey(parsed.proposal);
         const proposedRef =
           "ref" in parsed.proposal ? parsed.proposal.ref : null;
@@ -3823,23 +3959,11 @@ async function runMeasuredApplyAgent(
         status: "detected",
       });
     };
-    const matchesQuestion = (
-      prompt: string,
-      isBoolean: boolean,
-      item: string,
-    ) => {
-      if (words(prompt) === words(item)) return true;
-      return words(prompt) === words(formQuestionText(item, isBoolean));
-    };
-    const offersYesNo = (options: readonly string[]) =>
-      options.length === 2 &&
-      options.some((option) => words(option) === "yes") &&
-      options.some((option) => words(option) === "no");
     for (const item of items) {
       // Restating an already-open question does not create another task or
       // replace its options, explanation or draft. Extra clauses stay separate.
       const existing = [...pendingQuestions.values()].filter((question) =>
-        matchesQuestion(
+        matchesFinishQuestion(
           question.prompt,
           question.answerControlType === "boolean" ||
             offersYesNo(question.answerOptions),
@@ -3854,7 +3978,7 @@ async function runMeasuredApplyAgent(
         (control) =>
           control.visible &&
           !control.disabled &&
-          matchesQuestion(
+          matchesFinishQuestion(
             questionPrompt(control),
             control.answerControlType === "boolean" ||
               offersYesNo(control.options),
@@ -3896,8 +4020,20 @@ async function runMeasuredApplyAgent(
   };
   // A finish that says needsPerson always ends paused, never ready to send:
   // what it names joins whatever the page left, in the same handover.
-  const finishNeedsPerson = !skipReason && loop.finish?.needsPerson === true;
-  if (finishNeedsPerson) addFinishItems(loop.finish!.reason, forPerson);
+  const finishNeedsPerson =
+    !skipReason &&
+    (needsPersonFinishPending || loop.finish?.needsPerson === true);
+  const finishReason =
+    needsPersonFinishPending && loop.finish?.needsPerson !== true
+      ? "Job Finder still needs you to review this application before it can finish."
+      : (loop.finish?.reason ?? loop.reason);
+  if (finishNeedsPerson)
+    addFinishItems(
+      finishHasOnlyCheckedFields
+        ? "Review this application before sending."
+        : finishReason,
+      forPerson,
+    );
   const pending = collectedQuestionsPause();
   const personOwnedBlocker =
     pageTools.state.observation?.blocker?.requiresPerson === true
@@ -3974,14 +4110,14 @@ async function runMeasuredApplyAgent(
     if (first)
       pauses.push({
         code: "question_needs_you",
-        summary: loop.finish!.reason,
+        summary: finishReason,
         question: first,
         questions: missing,
         blocker: null,
       });
     if (outcome !== "paused" && outcome !== "stuck") {
       outcome = "paused";
-      reason = pauses[0]?.summary ?? loop.finish!.reason;
+      reason = pauses[0]?.summary ?? finishReason;
     }
   }
   // Nothing waiting on the person, or a run that could not finish, is never
