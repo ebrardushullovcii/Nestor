@@ -3653,6 +3653,20 @@ async function runMeasuredApplyAgent(
     const quoted = [...said.matchAll(/["‘“]([^"’”]{6,200})["’”]/gu)].map(
       (match) => String(match[1]).trim(),
     );
+    // A reason that only asks for the finished form to be looked over, on
+    // a form that reads complete and ready, is not a question: Send for me
+    // sends it, and Fill in for me leaves it Ready for the person's click.
+    if (
+      !quoted.length &&
+      /\breview|look(?:s|ed)? (?:it |them |everything )?over|before (?:submitting|sending|it is sent|you submit|you send)|fully filled|all (?:the )?(?:fields|questions) (?:are )?(?:filled|answered|complete)|everything is filled/iu.test(
+        said,
+      ) &&
+      page &&
+      (readyToSend ||
+        (!unresolvedRequiredControls(page).length &&
+          checkFormReadiness(page, uploadOptions).ok))
+    )
+      return null;
     for (const prompt of quoted.length ? quoted : [said.trim()])
       pendingQuestions.set(`named:${prompt}`, {
         id: `named_${words(prompt).replace(/ /gu, "_").slice(0, 60)}`,
@@ -3723,11 +3737,12 @@ async function runMeasuredApplyAgent(
     outcome = "stuck";
     reason = `Job Finder stopped on ${config.siteLabel} because it got stuck: ${loop.finish.reason.replace(/\.?$/u, ".")}`;
   } else if (loop.ending === "finished") {
-    // A needs-person finish whose questions are all optional lands here:
-    // those stay empty, as optional fields should.
+    // A needs-person finish lands here when its questions are all optional
+    // (those stay empty, as optional fields should) or when it only asks
+    // for a review of a form that reads complete.
     if (loop.finish?.needsPerson)
       note(
-        `Left optional questions empty: ${loop.finish.reason.replace(/\.?$/u, ".")}`,
+        `Nothing to hand over; the form reads complete: ${loop.finish.reason.replace(/\.?$/u, ".")}`,
       );
     outcome =
       readyToSend && config.authority.mode === "autonomous_submit"

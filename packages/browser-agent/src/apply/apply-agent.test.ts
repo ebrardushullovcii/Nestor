@@ -8312,6 +8312,45 @@ describe("a run never ends waiting on the person with nothing to answer", () => 
     expect(result.outcome).toBe("prepared");
   });
 
+  test("in Send for me, a request to review a filled form is not a question: the form goes out", async () => {
+    // Polar: the model finished a complete form with needsPerson and a
+    // summary that names no question.
+    const result = await runApplyAgent(
+      config(page({ controls: [nameControl()] }), {
+        authority: {
+          mode: "autonomous_submit",
+          submitAuthorized: true,
+          preApprovedAttestationKinds: [],
+          salaryDisclosure: "pause_for_user",
+          allowedOrigins: ["https://apply.example.test"],
+        },
+      }),
+      repeatingModel("finish", {
+        reason:
+          "Product Engineering application is fully filled — Full name Robin Ashford — please review before submitting.",
+        needsPerson: true,
+      }),
+    );
+    expect(result.pauses).toEqual([]);
+    expect(result.outcome).toBe("ready_to_send");
+    expect(result.readyToSend).toMatchObject({
+      actionLabel: "Submit application",
+    });
+  });
+
+  test("a review request on a form that is not complete is still the one item", async () => {
+    const result = await runApplyAgent(
+      config(page({ controls: [{ ...nameControl(), value: "" }] }), {
+        intermediateWritesAuthorized: false,
+      }),
+      repeatingModel("finish", {
+        reason: "Please review the form before submitting.",
+        needsPerson: true,
+      }),
+    );
+    expect(result.outcome).toBe("paused");
+  });
+
   test("a question it names that the page doesn't show is handed over by name", async () => {
     const result = await runApplyAgent(
       config(page({ controls: [nameControl()] })),
