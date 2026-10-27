@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import {
   STEP_HANDOVER_QUESTION_ID,
   UPLOAD_REPAIR_QUESTION_ID,
+  questionPrompt,
+  type ApplyFormControl,
 } from "@nestor/browser-agent";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import { explicitApplicationCountry } from "@nestor/browser-agent";
@@ -33,6 +35,39 @@ const geographic = new Set([
   "visa_sponsorship",
   "relocation",
 ]);
+
+/** A page value is only a draft for the person to confirm, never evidence. */
+export function pageAnswerSuggestion(
+  prompt: string,
+  controls: readonly ApplyFormControl[],
+): { answer: string; control: ApplyFormControl } | null {
+  const matching = controls.filter(
+    (control) => control.visible && questionPrompt(control) === prompt,
+  );
+  const selected = matching.every((control) => control.kind === "radio")
+    ? matching.filter((control) => control.checked)
+    : matching;
+  const control = selected.length === 1 ? selected[0] : undefined;
+  if (
+    !control ||
+    !control.answered ||
+    control.credentialRole === "password" ||
+    control.invalid ||
+    control.kind === "file" ||
+    control.kind === "other" ||
+    (control.kind === "checkbox" && control.answerControlType !== "boolean")
+  )
+    return null;
+  const answer =
+    control.kind === "radio"
+      ? control.label || control.value
+      : control.kind === "checkbox"
+        ? control.checked
+          ? "Yes"
+          : "No"
+        : control.selectedOptionLabel || control.value;
+  return answer.trim() && answer.length <= 20000 ? { answer, control } : null;
+}
 
 /** A semantic question and its answer format, scoped to the actual role's place. */
 export function describeFormQuestion(

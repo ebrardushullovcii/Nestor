@@ -532,6 +532,34 @@ it("keeps the editor on its task when new work arrives, and one remembered answe
   expect(applications.getApplication(claimed[2]!.id)?.state).toBe("needs_you");
 });
 
+it.each([false, true])(
+  "confirms a suggested page value in one click, or edits it first (edit: %s)",
+  async (edit) => {
+    const task = ask(0, "start-date", "When could you start?");
+    applications.needsYou.saveDraft({
+      id: task.id,
+      answer: "2026-11-15",
+      remember: true,
+      revision: 0,
+    });
+    show();
+    const field = await screen.findByRole("textbox", { name: task.prompt });
+    expect(field).toHaveProperty("value", "2026-11-15");
+    expect(
+      screen.getByText(/Review this draft answer before saving/),
+    ).toBeTruthy();
+    expect(applications.needsYou.findAnswer(task.key)).toBeNull();
+    if (edit) fireEvent.change(field, { target: { value: "2026-11-16" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save and continue" }));
+    await waitFor(() =>
+      expect(applications.needsYou.findAnswer(task.key)).toBe(
+        edit ? "2026-11-16" : "2026-11-15",
+      ),
+    );
+    expect(applications.needsYou.list().total).toBe(0);
+  },
+);
+
 it("restores an exact question draft after leaving and returning", async () => {
   const first = ask(0);
   ask(1, "travel", "Can you travel?", "boolean");

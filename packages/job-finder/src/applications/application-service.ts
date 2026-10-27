@@ -74,7 +74,11 @@ import {
 } from "../internal/apply-submission-handoff";
 import type { JobFinderDocumentManager } from "../internal/workspace-service-contracts";
 import { toResumeJob } from "../resumes/write-resume";
-import { describeFormQuestion, toKnownFormAnswer } from "./questions";
+import {
+  describeFormQuestion,
+  pageAnswerSuggestion,
+  toKnownFormAnswer,
+} from "./questions";
 import {
   applicationAnswerDependencies,
   applicationAnswersUnchanged,
@@ -988,6 +992,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             const form = await browser
               .readApplicationPageBinding?.("target_site", identity.resultId)
               .catch(() => null);
+            const formControls = form
+              ? buildApplyFormObservation(form, new Date().toISOString())
+                  .controls
+              : [];
+            const suggestions = written.map((answer) =>
+              pageAnswerSuggestion(answer.question, formControls),
+            );
             const questions = written.map((answer) => ({
               prompt: answer.question,
               kind: inferQuestionKind({
@@ -1033,10 +1044,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     approvedAttestations: AiBehaviorPreferenceSchema.parse(
                       settings.aiBehavior ?? {},
                     ).applying.preApprovedDeclarations,
-                    formControls: buildApplyFormObservation(
-                      form,
-                      new Date().toISOString(),
-                    ).controls,
+                    formControls,
                     sources: {
                       listingDiscovery: listingDiscovery(job),
                       profile,
@@ -1060,21 +1068,32 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     signal,
                   }).catch(() => null)
                 : null;
-            const rejected = questions.filter(
-              (_question, index) => !checks?.[index]?.supported,
+            const rejected = questions.flatMap((question, index) =>
+              checks?.[index]?.supported ? [] : [{ question, index }],
             );
             if (rejected.length) {
               applications.discardReviewAnswers(
                 row.id,
                 row.attempt,
-                rejected.map((question) => question.prompt),
+                rejected.map(({ question }) => question.prompt),
                 card?.letter?.text,
               );
               // The new question supersedes the ungrounded generated value.
               // Do not immediately consume the same unusable saved answer.
-              for (const question of rejected) {
-                const known = describeFormQuestion(question, job);
-                applications.needsYou.request(
+              for (const { question, index } of rejected) {
+                const control = suggestions[index]?.control;
+                const known = describeFormQuestion(
+                  control
+                    ? {
+                        ...question,
+                        answerControlType: control.answerControlType,
+                        answerOptions: control.options,
+                        inputConstraints: control.inputConstraints,
+                      }
+                    : question,
+                  job,
+                );
+                const requested = applications.needsYou.request(
                   {
                     applicationId: row.id,
                     attempt: row.attempt,
@@ -1089,6 +1108,24 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                   },
                   { reuseAnswers: false },
                 );
+                const suggestion = suggestions[index]?.answer;
+                if (
+                  requested.status === "needs_you" &&
+                  suggestion &&
+                  !applications.needsYou.details(requested.task.id)?.draft &&
+                  (known.input !== "boolean" ||
+                    ["Yes", "No"].includes(suggestion)) &&
+                  (known.input !== "choice" ||
+                    known.options.includes(suggestion)) &&
+                  (known.input !== "number" ||
+                    Number.isFinite(Number(suggestion)))
+                )
+                  applications.needsYou.saveDraft({
+                    id: requested.task.id,
+                    answer: suggestion,
+                    remember: true,
+                    revision: 0,
+                  });
               }
               // Refill from the person's answer after this task resolves;
               // a retained, already-answered control must not keep the old

@@ -1799,6 +1799,107 @@ it.each([
   },
 );
 
+it("a refused Send answer offers the current page value as a draft, without treating it as the person's answer", async () => {
+  const f = await setup(1);
+  const question = "When could you start?";
+  const currentValue = "2026-11-15";
+  f.browser.readApplicationPageBinding.mockResolvedValue({
+    ...f.personPage,
+    title: "Apply",
+    bodyText: "Apply for this role",
+    controls: [
+      {
+        index: 0,
+        tagName: "input",
+        inputType: "date",
+        role: "",
+        id: "start",
+        name: "start",
+        label: question,
+        groupLabel: "",
+        placeholder: "",
+        autocomplete: "",
+        required: true,
+        invalid: false,
+        validationMessage: "",
+        disabled: false,
+        readOnly: false,
+        visible: true,
+        value: currentValue,
+        checked: false,
+        multiple: false,
+        options: [],
+        selectedOptionLabel: "",
+      },
+    ],
+  });
+  preparation.answers = [
+    {
+      question,
+      answer: "Immediately",
+      source: "the filled application form",
+      written: false,
+      groundedIn: [],
+    },
+  ];
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  f.authorizeSending.mockResolvedValue(
+    sendEnvelope(
+      row.jobId,
+      f.applications.getWork(row.id)!.resumeArtifact.sha256!,
+    ),
+  );
+  f.deps.aiClient = {
+    ...f.deps.aiClient,
+    chatWithTools: () =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: "read",
+            type: "function",
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({
+                plainIndexes: [0],
+                flagged: [],
+                tags: [
+                  { index: 0, kind: "other", country: null, sourceId: null },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+  };
+  const action = vi.fn();
+  Object.assign(f.browser, { executeExactlyOneFinalAction: action });
+  expect(await f.service.sendPrepared(row.id)).toBe(false);
+  const task = f.applications.needsYou.list().rows[0]!;
+  const details = f.applications.needsYou.details(task.id)!;
+  expect(details.draft).toMatchObject({ answer: currentValue, remember: true });
+  expect(f.applications.needsYou.findAnswer(task.key)).toBeNull();
+  expect(f.applications.getWork(row.id)?.reviewCard?.answers).toEqual([]);
+  expect(action).not.toHaveBeenCalled();
+  f.service.stop();
+  expect(
+    f.applications.needsYou.answer({
+      id: task.id,
+      answer: details.draft!.answer,
+      remember: true,
+    }).resolved,
+  ).toBe(true);
+  expect(f.applications.needsYou.findAnswer(task.key)).toBe(currentValue);
+  expect(f.applications.needsYou.list().total).toBe(0);
+  expect(f.onError).not.toHaveBeenCalled();
+});
+
 it("Send for me resumes after two Needs-you answers and forwards only the final target once", async () => {
   const f = await setup(1);
   const guards = createSendGuards(f.jobs);

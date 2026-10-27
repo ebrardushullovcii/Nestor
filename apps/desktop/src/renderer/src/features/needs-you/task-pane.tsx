@@ -365,6 +365,12 @@ export function TaskPane(props: {
                 </p>
               ) : (
                 <>
+                  {details.draft?.answer ? (
+                    <p className="text-sm text-foreground-soft">
+                      Review this draft answer before saving. You can change it
+                      here.
+                    </p>
+                  ) : null}
                   <label className="flex items-center gap-2 text-sm">
                     <Checkbox
                       checked={draft.remember}
