@@ -416,8 +416,8 @@ export async function handleRealUploadShapes(
   if (rest === "/apply/1") {
     const body =
       slug === "ashby-shape"
-        ? // Ashby's page has no <form>; Submit Application is a plain button.
-          `<div id="application">${site.form()}<button type="button" id="send">Submit Application</button></div>`
+        ? // Ashby's page has no <form>; Submit has no type, like its Yes/No buttons.
+          `<div id="application">${site.form()}<button id="send">Submit Application</button></div>`
         : `<form method="post" action="/${slug}/apply/1" enctype="multipart/form-data">
         ${site.form()}<button>Submit application</button>
       </form>`;
