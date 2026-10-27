@@ -39,6 +39,7 @@ import {
 import { matchOption } from "./option-match";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
+import { currentTimezoneAnswer } from "./current-timezone";
 import { formatGithubAnswer } from "./github-username";
 import { formatProfileUrlAnswer } from "./profile-url";
 import type { ApplyQuestionClassification } from "./question-classification";
@@ -889,13 +890,22 @@ async function decideAnswer(input: {
     control.answerTags?.kind === "other"
       ? priorCompanyHistory(control, config.sources)?.answer
       : null;
+  const timezone =
+    control.answerTags?.kind === "other" &&
+    !savedAnswerForQuestion(
+      control,
+      config.sources.reusableAnswers,
+      input.controls,
+    )
+      ? currentTimezoneAnswer(control, config.sources)?.value
+      : null;
   const value = formatProfileUrlAnswer(
     control,
     formatGithubAnswer(
       control,
       control.kind === "radio" || control.kind === "checkbox"
         ? input.value
-        : (discovery?.value ?? priorCompany?.value ?? input.value),
+        : (discovery?.value ?? priorCompany?.value ?? timezone ?? input.value),
     ),
     control.answerTags?.sourceId ?? input.storedFactId,
   );

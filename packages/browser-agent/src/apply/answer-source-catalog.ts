@@ -16,6 +16,7 @@ import {
 } from "./application-facts";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
+import { currentTimezoneAnswer } from "./current-timezone";
 import {
   fullProfileUrl,
   isProfileUrlSource,
@@ -747,6 +748,30 @@ export function classifyAnswerPermission(input: {
     return exactSaved
       ? { kind: "literal", source }
       : deny("This question needs your own unchanged answer.");
+  const timezone =
+    tags.kind === "other"
+      ? currentTimezoneAnswer(input.control, input.sources)
+      : null;
+  if (timezone) {
+    if (exactSaved) return { kind: "literal", source };
+    const evidence = timezone.evidence;
+    return evidence &&
+      timezone.value === input.answer &&
+      source.purpose === "profile" &&
+      [evidence.sourceId, evidence.sourceId.split("#")[0]].includes(source.id)
+      ? {
+          kind: "literal",
+          source: {
+            ...source,
+            id: evidence.sourceId,
+            value: timezone.value,
+            country: evidence.country,
+          },
+        }
+      : deny(
+          "Your current country does not establish an unambiguous answer to this timezone question. Please choose your answer.",
+        );
+  }
   if (priorCompany)
     return priorCompany.answer?.value === input.answer && source
       ? { kind: "literal", source }
