@@ -134,12 +134,13 @@ describe("assistant action inventory", () => {
     const discovered = await after
       .find((tool) => tool.name === "load_tools")!
       .execute({ groups: ["profile"], names: [] }, {} as never);
-    expect(discovered.data).toMatchObject({
-      names: [],
-      availableTools: expect.arrayContaining([
+    expect(discovered.data).toHaveProperty("names", []);
+    expect(discovered.data).toHaveProperty(
+      "availableTools",
+      expect.arrayContaining([
         expect.objectContaining({ name: "edit_profile" }),
       ]),
-    });
+    );
     expect(catalog("profile").map((tool) => tool.name)).toEqual(
       after.map((tool) => tool.name),
     );

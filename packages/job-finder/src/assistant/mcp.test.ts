@@ -369,12 +369,11 @@ it("discovers a newly registered command without another Assistant schema or too
     });
     const load = tools.find((tool) => tool.name === "load_tools")!;
     const menu = await load.execute({ groups: ["jobs"] }, ctx);
-    expect(menu.data).toMatchObject({
-      names: [],
-      availableTools: expect.arrayContaining([
-        expect.objectContaining({ name: "test_count" }),
-      ]),
-    });
+    expect(menu.data).toHaveProperty("names", []);
+    expect(menu.data).toHaveProperty(
+      "availableTools",
+      expect.arrayContaining([expect.objectContaining({ name: "test_count" })]),
+    );
     expect(loaded).toEqual([]);
     await load.execute({ groups: [], names: ["test_count"] }, ctx);
     expect(loaded).toContain("test_count");
