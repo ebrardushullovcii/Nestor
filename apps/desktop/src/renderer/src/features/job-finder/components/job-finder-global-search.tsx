@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  JOB_FINDER_GLOBAL_SEARCH_LABEL,
   searchJobFinderEntries,
   type JobFinderGlobalSearchEntry,
   type JobFinderGlobalSearchKind,
@@ -18,13 +19,14 @@ import {
 import { useJobFinderOverlayOwnership } from "../lib/job-finder-overlay-ownership";
 import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
 
+// Re-exported for screens and tests that name the palette.
+export { JOB_FINDER_GLOBAL_SEARCH_LABEL };
+
 const kindLabels: Record<JobFinderGlobalSearchKind, string> = {
   application: "Applications",
   job: "Jobs",
   screen: "Go to",
 };
-
-export const JOB_FINDER_GLOBAL_SEARCH_LABEL = "Search your workspace";
 
 /** Finds more entries for a query, such as saved jobs from the job store. */
 export type JobFinderGlobalSearchMore = (query: string) => Promise<{

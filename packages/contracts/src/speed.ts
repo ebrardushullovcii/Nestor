@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 /**
  * How much the person lets Job Finder do at once: browser pages for search,
  * applications prepared together, and pages kept open waiting on them.
@@ -7,8 +5,9 @@ import { z } from "zod";
  * pages; the others trade memory and AI limits for speed.
  */
 export const speedLevelValues = ["standard", "faster", "maximum"] as const;
-export const SpeedLevelSchema = z.enum(speedLevelValues);
-export type SpeedLevel = z.infer<typeof SpeedLevelSchema>;
+// Plain values only, like job-finder-navigation.ts: the window imports them
+// at startup. The schema lives in speed-schema.ts.
+export type SpeedLevel = (typeof speedLevelValues)[number];
 
 export interface SpeedLevelLimits {
   label: string;

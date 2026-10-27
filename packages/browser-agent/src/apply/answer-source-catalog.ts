@@ -17,6 +17,12 @@ import {
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
 import { currentTimezoneAnswer } from "./current-timezone";
+import {
+  canonicalStartDate,
+  hasStartDateValue,
+  isStartDateControl,
+  startDateAnswer,
+} from "./start-date";
 import { phoneAnswerMatches, phoneLabels } from "./phone-answer";
 import {
   fullProfileUrl,
@@ -105,6 +111,13 @@ export function answerSourceCatalog(
     country: country(sources.posting.location),
   });
   const eligibilityFacts = sources.profile.workEligibility;
+  if (eligibilityFacts.availableStartDate)
+    rows.push({
+      id: "profile.workEligibility.availableStartDate",
+      value: eligibilityFacts.availableStartDate,
+      purpose: "profile",
+      country: null,
+    });
   if (eligibilityFacts.noticePeriodDays !== null)
     rows.push({
       id: "profile.workEligibility.noticePeriodDays",
@@ -293,13 +306,19 @@ function knownLiteralField(
     if (source.id === "profile.githubUrl" && asksGithubUsername(control))
       return false;
     const field = normalizeFormQuestionPrompt(profileLink[1] ?? "");
+    // Strip only a leading request; the remainder must still name this exact
+    // profile field. Mentions in a group, prose or another person's field grant nothing.
+    const label = normalizeFormQuestionPrompt(control.label).replace(
+      /^(?:please\s+)?(?:share|provide|enter|paste|add|include)\s+(?:your\s+)?/u,
+      "",
+    );
     if (
       [
         field,
         `${field} url`,
         `${field} profile`,
         `${field} profile url`,
-      ].includes(normalizeFormQuestionPrompt(control.label))
+      ].includes(label)
     )
       return true;
   }
@@ -483,6 +502,7 @@ export function classifyAnswerPermission(input: {
   pageInstructions: string;
   approvedAttestations?: readonly ApplicationAttestationKind[];
   application?: ApplyAgentConfig["application"];
+  now?: Date;
 }): ClassifiedAnswerDecision {
   const deny = (reason: string): ClassifiedAnswerDecision => ({
     kind: "needs_you",
@@ -893,6 +913,31 @@ export function classifyAnswerPermission(input: {
     return deny(
       "No matching country-specific work-permission source answers this question.",
     );
+  }
+  if (
+    exactSaved &&
+    (!isStartDateControl(input.control) ||
+      hasStartDateValue({
+        ...input.control,
+        value: input.answer,
+        invalid: false,
+      }))
+  )
+    return { kind: "literal", source };
+  if (tags.kind === "other" && isStartDateControl(input.control)) {
+    const start = startDateAnswer(
+      input.control,
+      input.sources,
+      input.controls,
+      input.now ?? new Date(),
+    );
+    return start &&
+      start.id === source.id &&
+      canonicalStartDate(input.answer) === start.value
+      ? { kind: "literal", source: { ...source, value: input.answer } }
+      : deny(
+          "This date must be calculated from your recorded availability or notice period.",
+        );
   }
   if (exactSaved) return { kind: "literal", source };
   if (tags.kind === "residence_country")

@@ -49,10 +49,12 @@ import {
 } from "@renderer/components/ui/tooltip";
 import { cn } from "@renderer/lib/cn";
 import type { JobFinderScreen } from "../lib/job-finder-types";
+import { JOB_FINDER_GLOBAL_SEARCH_LABEL } from "../lib/job-finder-global-search";
 import {
-  JOB_FINDER_GLOBAL_SEARCH_LABEL,
-  JobFinderGlobalSearchDialog,
-} from "./job-finder-global-search";
+  createSharedRouteLoader,
+  lazyScreen,
+  preloadWhenIdle,
+} from "@renderer/lib/lazy-screen";
 import { JobFinderTaskCenter } from "./task-center/job-finder-task-center";
 import { toDestinationBadgeCount } from "../lib/destination-counts";
 import {
@@ -460,6 +462,15 @@ function getActiveScreen(pathname: string): JobFinderScreen {
 
   return "profile";
 }
+
+// The search palette opens on Ctrl+K, never at launch: its code loads once
+// the window is idle, so the first open is still immediate.
+const loadGlobalSearchDialog = createSharedRouteLoader(async () => ({
+  default: (await import("./job-finder-global-search"))
+    .JobFinderGlobalSearchDialog,
+}));
+preloadWhenIdle([loadGlobalSearchDialog]);
+const GlobalSearchDialog = lazyScreen(loadGlobalSearchDialog);
 
 export function JobFinderShell({
   children,
@@ -1875,13 +1886,15 @@ export function JobFinderShell({
       </aside>
 
       {isGlobalSearchOpen ? (
-        <JobFinderGlobalSearchDialog
-          entries={SCREEN_ENTRIES}
-          searchMore={searchSavedJobs}
-          focusRequest={globalSearchFocusRequest}
-          onClose={() => setIsGlobalSearchOpen(false)}
-          onNavigate={handleGlobalSearchNavigate}
-        />
+        <Suspense fallback={null}>
+          <GlobalSearchDialog
+            entries={SCREEN_ENTRIES}
+            searchMore={searchSavedJobs}
+            focusRequest={globalSearchFocusRequest}
+            onClose={() => setIsGlobalSearchOpen(false)}
+            onNavigate={handleGlobalSearchNavigate}
+          />
+        </Suspense>
       ) : null}
 
       <JobFinderShortcutsDialog

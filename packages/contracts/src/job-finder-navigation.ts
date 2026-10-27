@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 export const JOB_FINDER_SETTINGS_SECTIONS = {
   "app-device": { label: "App & device", tone: "default" },
   "ai-behavior": { label: "AI behavior", tone: "default" },
@@ -13,15 +11,14 @@ export type JobFinderSettingsSection =
 export const JOB_FINDER_SETTINGS_SECTION_IDS = Object.keys(
   JOB_FINDER_SETTINGS_SECTIONS,
 ) as [JobFinderSettingsSection, ...JobFinderSettingsSection[]];
-export const JobFinderSettingsSectionSchema = z.enum(
-  JOB_FINDER_SETTINGS_SECTION_IDS,
-);
 export const settingsSectionElementId = (section: JobFinderSettingsSection) =>
   `settings-${section}` as const;
 
+// Plain values only: the window imports these at startup, and a module
+// that imports zod would bring all of zod with it. Their schemas live in
+// job-finder-navigation-schemas.ts.
 export const RESUME_VIEW_MODES = ["read", "edit"] as const;
-export const ResumeViewModeSchema = z.enum(RESUME_VIEW_MODES);
-export type ResumeViewMode = z.infer<typeof ResumeViewModeSchema>;
+export type ResumeViewMode = (typeof RESUME_VIEW_MODES)[number];
 const resumeModeLabels = { read: "Resume", edit: "Edit" } as const;
 export const RESUME_VIEW_MODE_OPTIONS = RESUME_VIEW_MODES.map((value) => ({
   value,
@@ -39,7 +36,7 @@ export function matchesJobFinderNavigationSearch(
       (expected.pathname === "/job-finder/review-queue" &&
         key === "resumeMode" &&
         !actual.searchParams.has(key) &&
-        ResumeViewModeSchema.safeParse(value).success),
+        (RESUME_VIEW_MODES as readonly string[]).includes(value)),
   );
 }
 

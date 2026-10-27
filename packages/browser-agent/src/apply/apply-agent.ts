@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { withApplyFormSend, wroteField } from "./form-send";
 import {
   answerSourceCatalog,
@@ -764,6 +765,9 @@ async function runMeasuredApplyAgent(
   let advanceFinishNudged = false;
   let staleResumeNudged = false;
   let optionalLetterNudged = false;
+  let forPersonNudged = false;
+  // What the model's last finish named for the person, apart from its reason.
+  let forPerson: string[] = [];
 
   const pendingQuestionKey = (
     control: Pick<
@@ -922,6 +926,22 @@ async function runMeasuredApplyAgent(
           ? earlier.since
           : at,
     });
+  };
+  // Every visible security check on the page is ticked or answered.
+  const securityChallengeSolved = (
+    observation: ApplyFormObservation,
+  ): boolean => {
+    const challenges = observation.controls.filter(
+      (control) => control.visible && isSecurityChallengeControl(control),
+    );
+    return (
+      challenges.length > 0 &&
+      challenges.every(
+        (control) =>
+          control.checked ||
+          (control.answered && control.value.trim().length > 0),
+      )
+    );
   };
   // A file the site (or Nestor's fence) refused gets a fixed number of
   // tries per field; after that the run stops and hands the upload over.
@@ -1550,6 +1570,7 @@ async function runMeasuredApplyAgent(
           needsPerson: false,
         });
       case "finished": {
+        forPerson = outcome.forPerson ?? [];
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();
@@ -1663,6 +1684,28 @@ async function runMeasuredApplyAgent(
           )
         )
           return finishWithQuestions();
+        // A needs-person finish names what the person must do. Its reason
+        // alone cannot tell a question from a request to look the form over,
+        // so a finish that names nothing is asked once to name it.
+        if (
+          outcome.needsPerson &&
+          !forPerson.length &&
+          !forPersonNudged &&
+          pauses.length === 0 &&
+          !deferredPress &&
+          !observation.blocker &&
+          !(
+            reportedSecurityChallenge(outcome.reason) &&
+            !securityChallengeSolved(observation)
+          )
+        ) {
+          forPersonNudged = true;
+          return {
+            kind: "ok",
+            content:
+              "needsPerson is set but forPerson names nothing. Finish again with each question or thing the person must do as its own forPerson item, or with needsPerson false if the form is complete.",
+          };
+        }
         // "Whenever there is room" covers optional letter fields too. Ask
         // once; an empty optional field never stops the application.
         const emptyOptionalLetter =
@@ -1945,28 +1988,8 @@ async function runMeasuredApplyAgent(
         };
         // A challenge the person already solved on this page (its box is
         // ticked) is not waiting on them, whatever the finish text says.
-        const challengeControls = observation.controls.filter(
-          (control) => control.visible && isSecurityChallengeControl(control),
-        );
-        const challengeAlreadySolved =
-          challengeControls.length > 0 &&
-          challengeControls.every(
-            (control) =>
-              control.checked ||
-              (control.answered && control.value.trim().length > 0),
-          );
+        const challengeAlreadySolved = securityChallengeSolved(observation);
         const challengeInReason = reportedSecurityChallenge(outcome.reason);
-        if (
-          challengeAlreadySolved &&
-          observation.blocker === null &&
-          /captcha|not a robot|verify you are (?:a )?human|security check/iu.test(
-            outcome.reason,
-          )
-        ) {
-          // The model is pointing at a check the person already solved, and
-          // nothing else on the page is waiting on them.
-          finish.needsPerson = false;
-        }
         const reportedChallenge = challengeAlreadySolved
           ? null
           : challengeInReason;
@@ -3645,32 +3668,24 @@ async function runMeasuredApplyAgent(
     pause.questions = [...questions.values()];
   }
   /**
-   * What a needs-person finish hands over: the page's own blocker, the
-   * unanswered questions its reason names (none when all are optional, and
-   * those stay empty), or else the questions it quotes, or its reason as one
-   * item. Never a "needs you" with nothing to do.
+   * What a needs-person finish leaves for the person, beside whatever the
+   * page already left: every item it named (one whose whole text is a
+   * field's question hands over that field), all of them, nothing dropped.
+   * A finish that names nothing hands over the page's blocker, else the
+   * required questions its reason names, else what it quotes, else the
+   * reason itself.
    */
-  const needsPersonHandover = (said: string): ApplyPause | null => {
+  const finishItemIds = new Set<string>();
+  const addFinishItems = (said: string, items: string[]): void => {
     const page = pageTools.state.observation;
-    if (page?.blocker)
-      return {
-        code: "page_blocked",
-        summary: said,
-        question: null,
-        blocker: page.blocker,
-      };
     const words = (text: string) =>
       text
         .toLowerCase()
         .replace(/[^\p{L}\p{N}]+/gu, " ")
         .trim();
-    const reason = words(said);
     const controls = page?.controls ?? [];
-    const named = controls.filter((control) => {
-      const prompt = words(questionPrompt(control));
-      return (
-        prompt.length > 3 &&
-        reason.includes(prompt) &&
+    const open = controls.filter(
+      (control) =>
         control.visible &&
         !control.disabled &&
         !holdsAnswer(control) &&
@@ -3681,33 +3696,24 @@ async function runMeasuredApplyAgent(
               sibling.choiceGroupKey === control.choiceGroupKey &&
               sibling.checked,
           )
-        )
-      );
-    });
-    if (named.length) {
-      const required = named.filter((control) => control.required);
-      if (!required.length) return null;
-      for (const control of required)
-        pendingQuestions.set(
-          pendingQuestionKey(control),
-          buildPendingQuestion({
-            control,
-            jobId: config.application.jobId,
-            detectedAt: now().toISOString(),
-            suggestion: null,
-            siblings: controls,
-          }),
-        );
-      return collectedQuestionsPause();
-    }
-    // Nothing on the page matches: hand over what the reason quotes (an
-    // apostrophe is not a quote), else the reason itself.
-    const quoted = [...said.matchAll(/["‘“]([^"’”]{6,200})["’”]/gu)].map(
-      (match) => String(match[1]).trim(),
+        ),
     );
-    for (const prompt of quoted.length ? quoted : [said.trim()])
+    const askOnPage = (control: (typeof controls)[number]) => {
+      const question = buildPendingQuestion({
+        control,
+        jobId: config.application.jobId,
+        detectedAt: now().toISOString(),
+        suggestion: null,
+        siblings: controls,
+      });
+      pendingQuestions.set(pendingQuestionKey(control), question);
+      finishItemIds.add(question.id);
+    };
+    const askText = (prompt: string) => {
+      const id = `named_${createHash("sha256").update(prompt).digest("hex").slice(0, 24)}`;
+      finishItemIds.add(id);
       pendingQuestions.set(`named:${prompt}`, {
-        id: `named_${words(prompt).replace(/ /gu, "_").slice(0, 60)}`,
+        id,
         prompt,
         repeatedAtDifferentStep: false,
         kind: "other",
@@ -3719,8 +3725,48 @@ async function runMeasuredApplyAgent(
         submittedAnswer: null,
         status: "detected",
       });
-    return collectedQuestionsPause();
+    };
+    for (const item of items) {
+      const field = open.filter(
+        (control) => words(questionPrompt(control)) === words(item),
+      );
+      if (field.length) field.forEach(askOnPage);
+      else askText(item);
+    }
+    if (items.length) return;
+    if (page?.blocker) {
+      // One the person owns is handed over below, as on any run.
+      if (page.blocker.requiresPerson) return;
+      pauses.push({
+        code: "page_blocked",
+        summary: said,
+        question: null,
+        blocker: page.blocker,
+      });
+      return;
+    }
+    // A pause or the page's own questions already say what is waiting.
+    if (pauses.length > 0 || pendingQuestions.size > 0) return;
+    const required = open.filter((control) => {
+      const prompt = words(questionPrompt(control));
+      return (
+        control.required && prompt.length > 3 && words(said).includes(prompt)
+      );
+    });
+    required.forEach(askOnPage);
+    if (required.length) return;
+    // Nothing on the page matches: hand over what the reason quotes (an
+    // apostrophe is not a quote), else the reason itself.
+    const quoted = [...said.matchAll(/["‘“]([^"’”]{6,200})["’”]/gu)].map(
+      (match) => String(match[1]).trim(),
+    );
+    for (const prompt of quoted.length ? quoted : [said.trim()])
+      askText(prompt);
   };
+  // A finish that says needsPerson always ends paused, never ready to send:
+  // what it names joins whatever the page left, in the same handover.
+  const finishNeedsPerson = !skipReason && loop.finish?.needsPerson === true;
+  if (finishNeedsPerson) addFinishItems(loop.finish!.reason, forPerson);
   const pending = collectedQuestionsPause();
   const personOwnedBlocker =
     pageTools.state.observation?.blocker?.requiresPerson === true
@@ -3728,7 +3774,6 @@ async function runMeasuredApplyAgent(
       : null;
   let outcome: ApplyAgentResult["outcome"];
   let reason: string;
-  let handover: ApplyPause | null;
   if (skipReason) {
     outcome = "paused";
     reason = skipReason;
@@ -3763,24 +3808,10 @@ async function runMeasuredApplyAgent(
     pauses.push(pending);
     outcome = "paused";
     reason = pending.summary;
-  } else if (
-    loop.finish?.needsPerson &&
-    (handover = needsPersonHandover(loop.finish.reason))
-  ) {
-    pauses.push(handover);
-    note(handover.summary);
-    outcome = "paused";
-    reason = handover.summary;
   } else if (loop.finish?.stuck) {
     outcome = "stuck";
     reason = `Job Finder stopped on ${config.siteLabel} because it got stuck: ${loop.finish.reason.replace(/\.?$/u, ".")}`;
   } else if (loop.ending === "finished") {
-    // A needs-person finish whose questions are all optional lands here:
-    // those stay empty, as optional fields should.
-    if (loop.finish?.needsPerson)
-      note(
-        `Left optional questions empty: ${loop.finish.reason.replace(/\.?$/u, ".")}`,
-      );
     outcome =
       readyToSend && config.authority.mode === "autonomous_submit"
         ? "ready_to_send"
@@ -3796,6 +3827,35 @@ async function runMeasuredApplyAgent(
     outcome = "stuck";
     reason = loop.reason;
   }
+  if (finishNeedsPerson) {
+    // Every item it named reaches the person, whichever pause came first.
+    const handed = new Set(
+      pauses.flatMap((pause) =>
+        (pause.questions ?? (pause.question ? [pause.question] : [])).map(
+          (question) => question.id,
+        ),
+      ),
+    );
+    const missing = [...pendingQuestions.values()].filter(
+      (question) => finishItemIds.has(question.id) && !handed.has(question.id),
+    );
+    const [first] = missing;
+    if (first)
+      pauses.push({
+        code: "question_needs_you",
+        summary: loop.finish!.reason,
+        question: first,
+        questions: missing,
+        blocker: null,
+      });
+    if (outcome !== "paused" && outcome !== "stuck") {
+      outcome = "paused";
+      reason = pauses[0]?.summary ?? loop.finish!.reason;
+    }
+  }
+  // Nothing waiting on the person, or a run that could not finish, is never
+  // ready to send.
+  if (outcome === "paused" || outcome === "stuck") readyToSend = null;
 
   const agentTiming = timingRecord.snapshot();
   const fieldsPerTurn = agentTiming.requests

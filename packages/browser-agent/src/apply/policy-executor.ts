@@ -40,6 +40,11 @@ import { matchOption } from "./option-match";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
 import { currentTimezoneAnswer } from "./current-timezone";
+import {
+  hasStartDateValue,
+  isStartDateControl,
+  startDateAnswer,
+} from "./start-date";
 import { formatGithubAnswer } from "./github-username";
 import { formatProfileUrlAnswer } from "./profile-url";
 import type { ApplyQuestionClassification } from "./question-classification";
@@ -148,6 +153,7 @@ export type ApplyExecutionOutcome =
       reason: string;
       stuck: boolean;
       needsPerson: boolean;
+      forPerson?: string[];
     };
 
 export interface ApplyExecutorDeps {
@@ -899,13 +905,25 @@ async function decideAnswer(input: {
     )
       ? currentTimezoneAnswer(control, config.sources)?.value
       : null;
+  const start = startDateAnswer(
+    control,
+    config.sources,
+    input.controls,
+    deps.now(),
+  );
+  const retainedDate = hasStartDateValue(control) ? control.value : null;
   const value = formatProfileUrlAnswer(
     control,
     formatGithubAnswer(
       control,
       control.kind === "radio" || control.kind === "checkbox"
         ? input.value
-        : (discovery?.value ?? priorCompany?.value ?? timezone ?? input.value),
+        : (retainedDate ??
+            start?.value ??
+            discovery?.value ??
+            priorCompany?.value ??
+            timezone ??
+            input.value),
     ),
     control.answerTags?.sourceId ?? input.storedFactId,
   );
@@ -931,6 +949,7 @@ async function decideAnswer(input: {
       pageInstructions: input.pageText,
       approvedAttestations: config.authority.preApprovedAttestationKinds,
       application: config.application,
+      now: deps.now(),
     });
     if (permission.kind === "needs_you")
       return {
@@ -1702,6 +1721,7 @@ export async function executeApplyProposal(
       reason: proposal.reason,
       stuck: proposal.stuck === true,
       needsPerson: proposal.needsPerson === true,
+      forPerson: proposal.forPerson ?? [],
     };
   }
 
@@ -2301,7 +2321,12 @@ export async function executeApplyProposal(
 
       const write = await writeUnderGuard(deps, {
         declaredValue: answer.value,
-        write: () => config.hands.fillText(control.ref, answer.value),
+        write: () =>
+          isStartDateControl(control) &&
+          !control.invalid &&
+          control.value === answer.value
+            ? Promise.resolve({ ok: true, observedValue: control.value })
+            : config.hands.fillText(control.ref, answer.value),
       });
       if (!write.ok) {
         return { kind: "refused", reason: write.error, observation };
