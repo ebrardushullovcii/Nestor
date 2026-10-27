@@ -1,18 +1,26 @@
 import { normalizeFormQuestionPrompt } from "./applications";
+import { preserveTechnologyTokens } from "./technology-text";
 
 type Meaning = { intent: string; subject: string; pay: boolean };
 const normal = (value: string) =>
-  normalizeFormQuestionPrompt(value.normalize("NFKD").replace(/\p{M}/gu, ""));
+  normalizeFormQuestionPrompt(
+    preserveTechnologyTokens(value.normalize("NFKD").replace(/\p{M}/gu, "")),
+  );
 
 /** Narrow meanings for saved personal answers. Unknown or compound questions stay exact-only. */
 function meaning(question: string): Meaning | null {
   const text = normal(question);
   if (
-    /\brepeated question on\b|\b(?:referee|spouse|partner s|another person|someone else)\b/u.test(
+    /\brepeated question on\b|\b(?:references?|referee|spouse|partner s|another person|someone else|emergency contact)\b/u.test(
       text,
     )
   )
     return null;
+  const clauses = text.replace(
+    /\b(?:and why|love or hate|worked(?: at)? or (?:consulted|contracted))\b/gu,
+    " ",
+  );
+  if (/\b(?:and|or)\b/u.test(clauses)) return null;
   const meanings: Meaning[] = [];
   if (/\b(?:salary|pay|compensation|earn)\b/u.test(text)) {
     if (
@@ -47,7 +55,15 @@ function meaning(question: string): Meaning | null {
   ) {
     if (/\b(?:years?|since|how long|how many|experience)\b/u.test(text))
       return null;
-    meanings.push({ intent: "monitoring_opinion", subject: "", pay: false });
+    meanings.push({
+      intent:
+        /\b(?:hate|dislike|least favou?rite)\b/u.test(text) &&
+        !/love or hate/u.test(text)
+          ? "monitoring_dislike"
+          : "monitoring_opinion",
+      subject: "",
+      pay: false,
+    });
   }
   if (
     /\b(?:worked|consulted|contracted|employed|employment)\b/u.test(text) &&
@@ -75,25 +91,55 @@ function meaning(question: string): Meaning | null {
   return meanings.length === 1 ? meanings[0]! : null;
 }
 
+const currencyCodes = new Set(Intl.supportedValuesOf("currency"));
 function currency(text: string): string | null {
   const value = text.toLowerCase();
   const matches = [
-    [/\b(?:eur|euros?)\b|€/u, "EUR"],
-    [/\b(?:usd|us dollars?)\b|\$/u, "USD"],
-    [/\b(?:gbp|pounds?)\b|£/u, "GBP"],
+    [/\b(?:eur|euros?)\b/u, "EUR"],
+    [/\b(?:usd|us dollars?)\b/u, "USD"],
+    [/\b(?:gbp|pounds?)\b/u, "GBP"],
   ] as const;
-  const found = matches
+  const found: string[] = matches
     .filter(([pattern]) => pattern.test(value))
     .map(([, code]) => code);
-  return found.length === 1 ? found[0]! : found.length > 1 ? "ambiguous" : null;
+  for (const code of text.match(/\b[A-Z]{3}\b/gu) ?? [])
+    if (currencyCodes.has(code)) found.push(code);
+  const unique = [...new Set(found)];
+  const symbols = [...new Set(text.match(/\p{Sc}/gu) ?? [])];
+  if (unique.length > 1) return "ambiguous";
+  if (unique[0]) {
+    const ownSymbol = new Intl.NumberFormat("en", {
+      style: "currency",
+      currency: unique[0],
+      currencyDisplay: "narrowSymbol",
+    })
+      .formatToParts(1)
+      .find((part) => part.type === "currency")?.value;
+    return symbols.every((symbol) => symbol === ownSymbol)
+      ? unique[0]
+      : "ambiguous";
+  }
+  if (!symbols.length) return null;
+  if (symbols.length > 1) return "ambiguous";
+  return (
+    ({ "€": "EUR", $: "USD", "£": "GBP" } as Record<string, string>)[
+      symbols[0]!
+    ] ?? "ambiguous"
+  );
+}
+function taxBasis(text: string): string | null {
+  const net = /\b(?:net|after tax|take home)\b/iu.test(normal(text));
+  const gross = /\b(?:gross|before tax|pre tax)\b/iu.test(normal(text));
+  return net && gross ? "ambiguous" : net ? "net" : gross ? "gross" : null;
 }
 function period(text: string): string | null {
   const value = normal(text),
     found = [
-      [/\b(?:annual|annually|year|yearly|annum)\b/u, "year"],
-      [/\b(?:month|monthly)\b/u, "month"],
-      [/\b(?:hour|hourly)\b/u, "hour"],
-      [/\b(?:day|daily)\b/u, "day"],
+      [/\b(?:annual|annually|years?|yearly|annum)\b/u, "year"],
+      [/\b(?:months?|monthly)\b/u, "month"],
+      [/\b(?:weeks?|weekly)\b/u, "week"],
+      [/\b(?:hours?|hourly)\b/u, "hour"],
+      [/\b(?:days?|daily)\b/u, "day"],
     ] as const;
   const matches = found
     .filter(([pattern]) => pattern.test(value))
@@ -110,17 +156,38 @@ export function savedQuestionMatches(
   savedQuestion: string,
   formQuestion: string,
   savedAnswer = "",
+  formContext = "",
 ): boolean {
   const left = normal(savedQuestion),
     right = normal(formQuestion);
   if (!left || !right) return false;
   const sourceCurrency = currency(savedQuestion) ?? currency(savedAnswer),
-    targetCurrency = currency(formQuestion);
+    targetCurrency = currency(`${formQuestion} ${formContext}`);
   if (targetCurrency && sourceCurrency !== targetCurrency) return false;
+  if (/\b(?:salary|pay|compensation)\b/u.test(left + " " + right)) {
+    for (const read of [currency, period, taxBasis]) {
+      const source = read(savedQuestion),
+        answer = read(savedAnswer),
+        required = read(`${formQuestion} ${formContext}`);
+      if (
+        [source, answer, required].includes("ambiguous") ||
+        (source && answer && source !== answer) ||
+        (required && required !== (source ?? answer))
+      )
+        return false;
+    }
+  }
   if (left === right) {
-    const required = period(formQuestion),
+    const required = period(`${formQuestion} ${formContext}`),
       source = period(savedQuestion),
       answer = period(savedAnswer);
+    if (
+      meaning(savedQuestion)?.intent === "notice_period" &&
+      required &&
+      !source &&
+      !answer
+    )
+      return false;
     return (
       !required ||
       (required !== "ambiguous" && (!answer || answer === (source ?? required)))
@@ -131,21 +198,27 @@ export function savedQuestionMatches(
   if (
     !saved ||
     !target ||
-    saved.intent !== target.intent ||
+    (saved.intent !== target.intent &&
+      !(
+        saved.pay &&
+        target.pay &&
+        /\b(?:at least|minimum)\b/u.test(normal(savedAnswer))
+      )) ||
     saved.subject !== target.subject
   )
     return false;
-  if (saved.pay) {
-    for (const read of [currency, period]) {
+  if (saved.pay || saved.intent === "notice_period") {
+    for (const read of saved.pay ? [currency, period, taxBasis] : [period]) {
       const source = read(savedQuestion),
         answer = read(savedAnswer),
-        required = read(formQuestion);
+        required = read(`${formQuestion} ${formContext}`);
       if (
         [source, answer, required].includes("ambiguous") ||
         (source && answer && source !== answer)
       )
         return false;
       if (required && required !== (source ?? answer)) return false;
+      if (!required && source && !answer) return false;
     }
   }
   return true;

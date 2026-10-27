@@ -70,6 +70,7 @@ type Task = {
 };
 
 type SavedLookup = {
+  option_fallback_json: string | null;
   id: number;
   prompt: string;
   answer: string;
@@ -360,6 +361,43 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     );
     return result.id;
   }
+  function uniqueWaitingTarget(
+    task: Task,
+    prompt: string,
+    answer: string,
+  ): boolean {
+    const targets =
+      sql(`SELECT n.application_id,n.field_key,n.task_id,t.prompt FROM application_needs_you n
+      JOIN needs_you t ON t.id=n.task_id JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
+      WHERE a.state='needs_you' AND t.resolved_at IS NULL AND t.reuse_prompt=1 AND n.application_id IN
+        (SELECT application_id FROM application_needs_you WHERE task_id=?)`).all(
+        task.id,
+      ) as {
+        application_id: number;
+        field_key: string;
+        task_id: number;
+        prompt: string;
+      }[];
+    for (const applicationId of new Set(
+      targets.map((target) => target.application_id),
+    )) {
+      const sameApplication = targets.filter(
+        (target) => target.application_id === applicationId,
+      );
+      const exact = sameApplication.filter(
+        (target) =>
+          normalizeFormQuestionPrompt(target.prompt) ===
+          normalizeFormQuestionPrompt(prompt),
+      );
+      const matches = exact.length
+        ? exact
+        : sameApplication.filter((target) =>
+            savedQuestionMatches(prompt, target.prompt, answer),
+          );
+      if (matches.length !== 1 || matches[0]?.task_id !== task.id) return false;
+    }
+    return true;
+  }
   function resolveMatching(
     key: string,
     prompt: string,
@@ -371,12 +409,25 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       `SELECT * FROM needs_you WHERE kind='question' AND resolved_at IS NULL AND country=? AND site_origin=?`,
     ).all(country, origin) as Task[];
     return waiting.reduce((queued, task) => {
+      if (sql("SELECT 1 FROM needs_you_drafts WHERE task_id=?").get(task.id))
+        return queued;
       if (
         task.answer_key !== key &&
         !(
           task.reuse_prompt === 1 &&
           savedQuestionMatches(prompt, task.prompt, answer)
         )
+      )
+        return queued;
+      if (
+        task.reuse_prompt === 1 &&
+        (!uniqueWaitingTarget(task, prompt, answer) ||
+          !uniquePromptAnswer(
+            sql(
+              "SELECT * FROM form_answers WHERE country=? AND site_origin=? AND needs_confirmation=0",
+            ).all(country, origin) as SavedLookup[],
+            task.prompt,
+          ))
       )
         return queued;
       let fitted: string;
@@ -690,16 +741,6 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           (relevantLocal.length && !local)
         )
           return [];
-        if (local?.answer != null)
-          return [
-            {
-              id: `application:${local.id}`,
-              key: question.key,
-              prompt: local.prompt,
-              answer: local.answer,
-              local: true,
-            },
-          ];
         let eligible = savedRows.filter((row) =>
           question.reusePrompt
             ? savedQuestionMatches(row.prompt, question.prompt, row.answer)
@@ -710,6 +751,19 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         const saved = question.reusePrompt
           ? uniquePromptAnswer(eligible, question.prompt)
           : eligible[0];
+        if (
+          local?.answer != null &&
+          (!saved?.option_fallback_json || saved.answer !== local.answer)
+        )
+          return [
+            {
+              id: `application:${local.id}`,
+              key: question.key,
+              prompt: local.prompt,
+              answer: local.answer,
+              local: true,
+            },
+          ];
         if (!saved) return [];
         if (question.reusePrompt) {
           const exactTargets = questions.filter(
@@ -737,6 +791,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             prompt: saved.prompt,
             answer: saved.answer,
             local: false,
+            optionFallback: saved.option_fallback_json
+              ? SavedOptionFallbackSchema.parse(
+                  JSON.parse(saved.option_fallback_json) as unknown,
+                )
+              : null,
             kind: saved.kind,
             roleFamilies: JSON.parse(saved.role_families_json) as string[],
             proofEntryIds: JSON.parse(saved.proof_entry_ids_json) as string[],
@@ -753,6 +812,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           WHERE t.kind='question' AND t.reuse_prompt=1 AND t.resolved_at IS NULL AND a.state='needs_you'`).all() as Task[];
         let queued = 0;
         for (const task of waiting) {
+          if (
+            sql("SELECT 1 FROM needs_you_drafts WHERE task_id=?").get(task.id)
+          )
+            continue;
           const saved = uniquePromptAnswer(
             sql(`SELECT * FROM form_answers
             WHERE needs_confirmation=0 AND country=? AND site_origin=? ORDER BY updated_at DESC,id DESC`).all(
@@ -767,26 +830,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               normalizeFormQuestionPrompt(task.prompt)
           )
             continue;
-          const targets =
-            sql(`SELECT n.application_id,n.field_key,t.prompt FROM application_needs_you n
-            JOIN needs_you t ON t.id=n.task_id JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
-            WHERE a.state='needs_you' AND t.resolved_at IS NULL AND t.reuse_prompt=1 AND n.application_id IN
-              (SELECT application_id FROM application_needs_you WHERE task_id=?)`).all(
-              task.id,
-            ) as {
-              application_id: number;
-              field_key: string;
-              prompt: string;
-            }[];
-          const counts = new Map<number, number>();
-          for (const target of targets)
-            if (savedQuestionMatches(saved.prompt, target.prompt, saved.answer))
-              counts.set(
-                target.application_id,
-                (counts.get(target.application_id) ?? 0) + 1,
-              );
-          if (!counts.size || [...counts.values()].some((count) => count !== 1))
-            continue;
+          if (!uniqueWaitingTarget(task, saved.prompt, saved.answer)) continue;
           let answer: string;
           try {
             answer = validateAnswer(task, saved.answer);

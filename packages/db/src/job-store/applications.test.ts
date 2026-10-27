@@ -523,6 +523,75 @@ it("restart keeps conflicting meanings, duplicate targets and unoffered answers 
   expect(applications.getApplication(choice.id)?.state).toBe("needs_you");
 });
 
+it.each(["", "I am still deciding"])(
+  "remembered answers and restart preserve the person's unfinished draft: %s",
+  (draft) => {
+    const { jobs, applications } = open();
+    applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+    const row = applications.claimNext()!;
+    const memory = applications.needsYou;
+    const waiting = memory.request(
+      question(row.id, row.attempt, {
+        key: "notice-current",
+        fieldKey: "notice-current",
+        prompt: "How much notice do you need to give?",
+        input: "text",
+        reusePrompt: true,
+        scope: {},
+      }),
+    );
+    if (waiting.status !== "needs_you") throw new Error("Expected handover");
+    memory.saveDraft({
+      id: waiting.task.id,
+      answer: draft,
+      remember: false,
+      revision: 0,
+    });
+    memory.remember({
+      key: "notice-saved",
+      prompt: "What is your notice period?",
+      answer: "Immediately",
+      input: "text",
+      options: [],
+      scope: {},
+    });
+    expect(memory.reconcileSavedQuestions()).toBe(0);
+    expect(memory.details(waiting.task.id)?.draft?.answer).toBe(draft);
+    expect(applications.getApplication(row.id)?.state).toBe("needs_you");
+  },
+);
+
+it("saving a reworded answer never resolves two distinct questions on the same application", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!;
+  for (const [index, prompt] of [
+    "How much notice do you need to give?",
+    "Required notice period",
+  ].entries())
+    applications.needsYou.request(
+      question(row.id, row.attempt, {
+        key: `notice-${index}`,
+        fieldKey: `notice-${index}`,
+        prompt,
+        input: "text",
+        reusePrompt: true,
+        scope: {},
+      }),
+      { reuseAnswers: false },
+    );
+  applications.needsYou.remember({
+    key: "notice-saved",
+    prompt: "What is your notice period?",
+    answer: "Immediately",
+    input: "text",
+    options: [],
+    scope: {},
+  });
+  expect(applications.needsYou.list().total).toBe(2);
+  expect(applications.getApplication(row.id)?.state).toBe("needs_you");
+});
+
 it("persists guarded answer Undo without retracting answers that released applications", () => {
   const folder = mkdtempSync(path.join(tmpdir(), "nestor-answer-undo-"));
   folders.push(folder);
