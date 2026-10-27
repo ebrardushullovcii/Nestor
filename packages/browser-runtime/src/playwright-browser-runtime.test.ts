@@ -3552,6 +3552,69 @@ describe("managed context active service worker gate", () => {
     },
   );
 
+  test.each([
+    ["closes", false, true],
+    ["stays open once the person pressed its Send", true, false],
+  ])(
+    "a Ready form handed to the person for their Send %s when the cap needs its page",
+    async (_label, sendPressed, closes) => {
+      const userDataDir = await mkdtemp(
+        join(tmpdir(), "nestor-runtime-hibernate-ready-"),
+      );
+      try {
+        const harness = createGateHarness({ activeServiceWorkers: () => [] });
+        Object.assign(harness.fakePage, {
+          // Two frames: no exact snapshot, so the form closes for a refill.
+          frames: () => [{}, {}],
+          // The page's guard: whether the person's Send went through it.
+          evaluate: vi.fn().mockResolvedValue(sendPressed),
+        });
+        const runtime = await createGatedRuntime({
+          userDataDir,
+          debugPort: await reserveFreePort(),
+          browser: harness.fakeBrowser,
+        });
+        const { approvedResumePath, prepareInput } = createPrepareInput({
+          userDataDir,
+        });
+        await writeFile(approvedResumePath, "synthetic resume", "utf8");
+        const prepare = createStubFormPreparer();
+        await runtime.executeApplicationFlow("target_site", {
+          ...prepareInput,
+          applicationPageBindingKey: "ready_page",
+          restorableByRefill: true,
+          prepareApplicationForm: async (args) => ({
+            ...(await prepare(args)),
+            state: "ready" as const,
+          }),
+        });
+        // Job Finder hands every Ready form over as soon as it is filled.
+        await runtime.handApplicationPageToPerson!("target_site", "ready_page");
+        expect(
+          await runtime.hibernateApplicationPageBinding!(
+            "target_site",
+            "ready_page",
+            () => true,
+          ),
+        ).toBe(closes);
+        expect(harness.fakePage.close).toHaveBeenCalledTimes(closes ? 1 : 0);
+        expect(
+          await runtime.hasApplicationPageBinding!("target_site", "ready_page"),
+        ).toBe(!closes);
+        // A closed form is no longer the person's page; Open hands it over again.
+        if (closes)
+          expect(
+            await runtime.readApplicationPageWithPerson!(
+              "target_site",
+              "ready_page",
+            ),
+          ).toBeNull();
+      } finally {
+        await rm(userDataDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("cancelling a same-site waiter does not touch the active form", async () => {
     const userDataDir = await mkdtemp(
       join(tmpdir(), "nestor-runtime-apply-abort-"),
