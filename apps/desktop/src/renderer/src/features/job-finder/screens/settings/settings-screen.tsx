@@ -473,7 +473,6 @@ export function SettingsScreen(props: {
           </h2>
           <SettingsAiBehaviorSection
             onUpdateAiBehavior={onUpdateAiBehavior}
-            onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
             settings={settings}
           />
         </section>
@@ -490,6 +489,7 @@ export function SettingsScreen(props: {
           <SettingsApplicationDefaultsSection
             availableResumeTemplates={availableResumeTemplates}
             onUpdateApplicationDefaults={onUpdateApplicationDefaults}
+            onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
             settings={settings}
           />
         </section>

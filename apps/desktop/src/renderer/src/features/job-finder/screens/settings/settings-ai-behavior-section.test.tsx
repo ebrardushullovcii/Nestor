@@ -84,6 +84,10 @@ describe("SettingsAiBehaviorSection", () => {
       screen.queryByRole("radiogroup", { name: "How picky a search is" }),
     ).toBeNull();
     expect(screen.queryByTestId("settings-ai-applying")).toBeNull();
+    // When a resume gets written lives in Resume look.
+    expect(
+      screen.queryByRole("switch", { name: "Write resumes when I shortlist" }),
+    ).toBeNull();
 
     const checked = (name: RegExp) =>
       screen.getByRole("radio", { name }).getAttribute("aria-checked");
