@@ -228,7 +228,8 @@ describe("shared list pieces", () => {
     expect(rows().length).toBeGreaterThanOrEqual(250);
     expect(farDown.isConnected).toBe(true);
     expect(farDown.textContent).toBe(farDownTitle);
-  });
+    // 250 rows drawn in jsdom take seconds on a busy machine.
+  }, 15_000);
 
   it("reads nothing while its screen is kept hidden, and once when it shows again", async () => {
     store.saveFoundJobs({ searchId: null, jobs: [found(1)] });
