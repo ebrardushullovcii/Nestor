@@ -441,6 +441,14 @@ async function chooseFromList(
   // take the choice that says it. Typing first is what makes a list of two
   // hundred countries usable at all.
   await locator.click({ timeout: 5_000 });
+  // A box that already shows a choice (the person's, or an earlier run's)
+  // searches nothing when the same text is put in it again: the page sees no
+  // change. Empty it first, so the search runs and the choice is made again.
+  if (
+    searchable &&
+    (await locator.inputValue({ timeout: 1_000 }).catch(() => "")).trim()
+  )
+    await locator.fill("", { timeout: 2_000 }).catch(() => undefined);
   // A list that is not a text box still jumps to what is typed at it.
   if (searchable)
     await locator.fill(label, { timeout: 2_000 }).catch(async () => {

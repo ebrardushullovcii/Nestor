@@ -436,3 +436,24 @@ test("Ashby: its location picker's search carries what was typed, and the choice
   // Only the search left; nothing was submitted.
   expect(sent()).toBe(sentBefore);
 });
+
+test("Ashby: a location already picked stays picked when a continue chooses it again", async () => {
+  const { page, session } = await fillPage("ashby-shape");
+  const location = async () =>
+    (await session.readPage()).controls.find((control) =>
+      control.label.startsWith("What country are you based in?"),
+    )!;
+  // The person picked it on the page.
+  await page.locator("#location-input").click();
+  await page.locator("#location-input").pressSequentially("Kos");
+  await page.getByRole("option", { name: "Kosovo" }).click();
+  expect((await location()).value).toBe("Kosovo");
+  // The continue (or a restore) chooses the same answer again.
+  await registerPrepareOnlyPreparedValue(page, "Kosovo");
+  const control = await location();
+  expect(
+    await session.chooseOption(control.ref ?? `c${control.index}`, "Kosovo"),
+  ).toMatchObject({ ok: true });
+  await page.locator("body").click({ position: { x: 1, y: 1 } });
+  expect((await location()).value).toBe("Kosovo");
+});

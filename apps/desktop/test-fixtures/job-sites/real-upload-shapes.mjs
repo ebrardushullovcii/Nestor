@@ -108,7 +108,8 @@ const ashbyYesNo = (path, question) => `
  * ApiAutocompleteGeoLocation (its name and fragments say "Autocomplete");
  * the results show in a floating listbox the input does not point at, with
  * "No results" while it is empty. A pick fills the input and is saved;
- * leaving without one clears what was typed.
+ * leaving without one clears what was typed. Putting the same text in again
+ * is no change to it, so a box that already shows a pick searches nothing.
  */
 const ashbyLocation = `
       <div class="field-entry"><label class="_required_f7cvd_91 ashby-application-form-question-title" for="_systemfield_location">What country are you based in?</label>
@@ -200,7 +201,7 @@ const sites = {
         for (const option of list.querySelectorAll('[role=option]'))
           option.addEventListener('mousedown', (event) => {
             event.preventDefault();
-            picked = place.value = option.textContent;
+            picked = shown = place.value = option.textContent;
             list.hidden = true;
             place.setAttribute('aria-expanded', 'false');
             graphql('ApiSetFormValue', { formRenderIdentifier: render, path: '_systemfield_location', value: picked }).catch(() => toast('Your answer could not be saved.'));
@@ -211,7 +212,12 @@ const sites = {
         place.setAttribute('aria-expanded', 'true');
       };
       place.addEventListener('focus', () => { open(); draw([]); });
+      // Like React's own value tracking: text put in again that equals what
+      // the box already shows is no change, so nothing is searched.
+      let shown = '';
       place.addEventListener('input', () => {
+        if (place.value === shown) return;
+        shown = place.value;
         open();
         clearTimeout(search);
         search = setTimeout(async () => {
@@ -225,7 +231,7 @@ const sites = {
       place.addEventListener('blur', () => {
         list.hidden = true;
         place.setAttribute('aria-expanded', 'false');
-        if (place.value !== picked) place.value = '';
+        if (place.value !== picked) shown = place.value = '';
       });
       // Each answer is saved as it is entered, as Ashby does.
       for (const id of ['_systemfield_name', '_systemfield_email']) {
