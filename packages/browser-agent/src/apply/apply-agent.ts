@@ -767,7 +767,13 @@ async function runMeasuredApplyAgent(
     if (cached) return cached;
     const result = checkWrittenApplicationAnswer({
       client: llmClient,
-      sources: runConfig.sources,
+      sources: {
+        ...runConfig.sources,
+        reusableAnswers: relevantSavedAnswers(
+          runConfig.sources.reusableAnswers,
+          [question],
+        ),
+      },
       payDisclosed,
       formContext: currentFormContext(),
       question,
