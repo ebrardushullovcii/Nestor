@@ -51,7 +51,11 @@ export function pageAnswerSuggestion(
   if (
     !control ||
     !control.answered ||
-    control.credentialRole === "password" ||
+    // No sign-in or code field becomes a stored draft.
+    (control.credentialRole ?? null) !== null ||
+    /password|passcode|one[- ]time|verification code|\botp\b|\bpin\b/iu.test(
+      questionPrompt(control),
+    ) ||
     control.invalid ||
     control.kind === "file" ||
     control.kind === "other" ||
