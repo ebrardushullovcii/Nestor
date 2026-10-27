@@ -95,9 +95,9 @@ Options:
             or sent; for the per-page weight of real boards
   --observe   label of a running verify-nestor instance to sample
   --for       seconds --observe watches at most (default 900)
-  --cpu-profile  record renderer CPU profiles of one more warm launch and of
-            each first visit (.cpuprofile files, open in Chrome DevTools) and
-            print their busiest functions; with --load, main-process and
+  --cpu-profile  record renderer CPU profiles of one more warm and one more
+            cold launch and of each first visit (.cpuprofile files, open in
+            Chrome DevTools) and print their busiest functions; with --load, main-process and
             renderer profiles of the run, also during main-process stalls and
             the slowest interactions. Profiling slows what it records.
             With NESTOR_PERF_TRACE=1 a load run also records a Chromium
@@ -347,12 +347,8 @@ const memory = (app) =>
   });
 
 async function measureLaunches(dataDir, runs, { cpuProfileDir } = {}) {
-  const cold = [];
-  const warm = [];
-  const coldSplit = [];
-  const warmSplit = [];
-  for (let i = 0; i < runs; i += 1) {
-    const appDir = appCopy();
+  // What a first start after an update lacks: compiled code and GPU caches.
+  const clearCaches = () => {
     for (const dir of [
       "Code Cache",
       "GPUCache",
@@ -360,6 +356,14 @@ async function measureLaunches(dataDir, runs, { cpuProfileDir } = {}) {
       "DawnWebGPUCache",
     ])
       rmSync(path.join(dataDir, dir), { recursive: true, force: true });
+  };
+  const cold = [];
+  const warm = [];
+  const coldSplit = [];
+  const warmSplit = [];
+  for (let i = 0; i < runs; i += 1) {
+    const appDir = appCopy();
+    clearCaches();
     const run = await launch(appDir, dataDir);
     cold.push(run.launchMs);
     coldSplit.push([run.mainMs, ...run.steps]);
@@ -375,21 +379,33 @@ async function measureLaunches(dataDir, runs, { cpuProfileDir } = {}) {
     await run.app.close().catch(() => {});
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
-  let profiled;
-  if (cpuProfileDir) {
-    const run = await launch(appDir, dataDir, {
-      profileFile: path.join(cpuProfileDir, "warm-launch.cpuprofile"),
-    });
-    profiled = {
-      launchMs: run.launchMs,
-      top: run.top,
-      mainSteps: run.mainSteps,
-      steps: [run.mainMs, ...run.steps],
-    };
-    await run.app.close().catch(() => {});
-  }
+  // One more launch of each kind under the profiler: warm on these app
+  // files, then cold on fresh ones with the caches gone.
+  const profiled = {};
+  if (cpuProfileDir)
+    for (const kind of ["warm", "cold"]) {
+      const dir = kind === "warm" ? appDir : appCopy();
+      if (kind === "cold") clearCaches();
+      const run = await launch(dir, dataDir, {
+        profileFile: path.join(cpuProfileDir, `${kind}-launch.cpuprofile`),
+      });
+      profiled[kind] = {
+        launchMs: run.launchMs,
+        top: run.top,
+        mainSteps: run.mainSteps,
+        steps: [run.mainMs, ...run.steps],
+      };
+      await run.app.close().catch(() => {});
+      if (kind === "cold") rmSync(dir, { recursive: true, force: true });
+    }
   rmSync(appDir, { recursive: true, force: true });
-  return { cold, warm, coldSplit, warmSplit, profiled };
+  return {
+    cold,
+    warm,
+    coldSplit,
+    warmSplit,
+    profiled: cpuProfileDir ? profiled : undefined,
+  };
 }
 
 // The busiest functions in a renderer CPU profile, by self time.
@@ -713,10 +729,10 @@ function print(size, result) {
       `  launch cold ms: ${result.launch.cold.join(", ")} (median ${median(result.launch.cold)}; main | fetched, scripts run, shell, Home ${result.launch.coldSplit.map(([m, ...r]) => `${m} | ${r.join(", ")}`).join("; ")})`,
       `  launch warm ms: ${result.launch.warm.join(", ")} (median ${median(result.launch.warm)}; main | fetched, scripts run, shell, Home ${result.launch.warmSplit.map(([m, ...r]) => `${m} | ${r.join(", ")}`).join("; ")})`,
     );
-  if (result.launch?.profiled)
+  for (const [kind, p] of Object.entries(result.launch?.profiled ?? {}))
     lines.push(
-      `  profiled warm launch ${result.launch.profiled.launchMs} ms (main | fetched, scripts run, shell, Home ${result.launch.profiled.steps[0]} | ${result.launch.profiled.steps.slice(1).join(", ")}); main steps ms: ${result.launch.profiled.mainSteps?.join(", ") ?? "none logged"}`,
-      `    busiest: ${result.launch.profiled.top.join("; ")}`,
+      `  profiled ${kind} launch ${p.launchMs} ms (main | fetched, scripts run, shell, Home ${p.steps[0]} | ${p.steps.slice(1).join(", ")}); main steps ms: ${p.mainSteps?.join(", ") ?? "none logged"}`,
+      `    busiest: ${p.top.join("; ")}`,
     );
   if (result.screens) {
     const s = result.screens;
