@@ -31,6 +31,11 @@ import {
   isAnswerFromThisApplication,
 } from "./application-facts";
 import { normalizeSignal } from "./control-classification";
+import {
+  fillPressFor,
+  recordFillPress,
+  type FillPressState,
+} from "./fill-presses";
 import { matchOption } from "./option-match";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
@@ -170,7 +175,7 @@ export interface ApplyExecutorDeps {
   }>;
 }
 
-export interface ApplyGuardState {
+export interface ApplyGuardState extends FillPressState {
   /**
    * Choices each picker question on this application refused, across runs,
    * and what its list offered then. A refused choice is never tried again.
@@ -212,6 +217,9 @@ export function createApplyGuardState(
     acknowledged: new Set<string>(),
     hasWritten: false,
     lastFieldLabel: null,
+    fieldWrites: 0,
+    openedForm: false,
+    rowsAdded: new Map(),
     notes: [],
     reportedOrigins: new Set<string>(),
     blockedSaveCount: 0,
@@ -1640,59 +1648,6 @@ export function pressOnSitePause(pressed: string, at: Date): ApplyPause {
   };
 }
 
-/** Clickable roles that are part of answering one field, not of the form. */
-const FIELD_PART_ROLES = new Set([
-  "combobox",
-  "option",
-  "listbox",
-  "radio",
-  "checkbox",
-  "switch",
-  "menuitemradio",
-  "menuitemcheckbox",
-  "treeitem",
-]);
-
-/** Whether pressing this is part of filling a field rather than the form's own button. */
-/**
- * Whether Fill in for me may open this address itself: only the application
- * form it was started on, or the page it is on. Any other link (a
- * "Continue", a step) is the person's, like any other button.
- */
-export function fillMayOpen(
-  config: Pick<ApplyAgentConfig, "application">,
-  currentUrl: string | null,
-  href: string,
-): boolean {
-  const address = (value: string | null | undefined) => {
-    if (!value) return null;
-    try {
-      const url = new URL(value, currentUrl ?? undefined);
-      return `${url.origin}${url.pathname}`;
-    } catch {
-      return null;
-    }
-  };
-  const target = address(href);
-  return (
-    target !== null &&
-    (target === address(currentUrl) ||
-      target === address(config.application.startingUrl))
-  );
-}
-
-function pressFillsAField(
-  config: ApplyAgentConfig,
-  observation: ApplyFormObservation,
-  ref: string,
-): boolean {
-  if (findControl(observation, ref)) return true;
-  const link = observation.links.find((entry) => entry.ref === ref);
-  if (link) return fillMayOpen(config, observation.url, link.href);
-  const clickable = observation.clickables.find((entry) => entry.ref === ref);
-  return clickable ? FIELD_PART_ROLES.has(clickable.role.toLowerCase()) : false;
-}
-
 /** Whether this run may press the form's own buttons (Send for me). */
 export function pressesFormButtons(
   config: Pick<
@@ -1708,6 +1663,7 @@ export function pressesFormButtons(
 function afterWrite(deps: ApplyExecutorDeps, label: string | null): void {
   deps.guardState.hasWritten = true;
   deps.guardState.lastFieldLabel = label;
+  if (label !== null) deps.guardState.fieldWrites += 1;
 }
 
 /**
@@ -1992,10 +1948,24 @@ export async function executeApplyProposal(
           deps,
         );
       }
-      const finalAction = observation.actions.find(
-        (candidate) =>
-          candidate.ref === proposal.ref && candidate.kind === "final",
-      );
+      // Fill in for me presses only what helps it fill (see fill-presses);
+      // Next, Continue, Save and the rest are the person's.
+      const fillPress = pressesFormButtons(deps.config)
+        ? null
+        : fillPressFor({
+            config,
+            observation,
+            ref: proposal.ref,
+            state: deps.guardState,
+          });
+      // "Apply now" before anything is filled opens the form; it sends nothing.
+      const finalAction =
+        fillPress?.kind === "open_form"
+          ? undefined
+          : observation.actions.find(
+              (candidate) =>
+                candidate.ref === proposal.ref && candidate.kind === "final",
+            );
       if (finalAction) {
         const preflight = runSubmitPreflight({
           observation,
@@ -2016,12 +1986,7 @@ export async function executeApplyProposal(
           observation,
         };
       }
-      // Fill in for me presses nothing but parts of a field (and links,
-      // which only open pages). A Next, Continue or Save is the person's.
-      if (
-        !pressesFormButtons(deps.config) &&
-        !pressFillsAField(config, observation, proposal.ref)
-      )
+      if (!pressesFormButtons(deps.config) && !fillPress)
         return {
           kind: "paused",
           pause: pressOnSitePause(
@@ -2053,14 +2018,18 @@ export async function executeApplyProposal(
       // A press is never a field write: let the selected file finish
       // uploading, then shut its window so this press cannot carry it.
       await config.safety?.closeUploadWindow?.().catch(() => undefined);
+      // A cookie banner is dismissed with the choice that keeps the least,
+      // whichever of its buttons the model named.
+      const pressRef = fillPress?.ref ?? proposal.ref;
       const write = await writeUnderGuard(deps, {
         declaredValue: null,
-        write: () => config.hands.clickElement(proposal.ref),
+        write: () => config.hands.clickElement(pressRef),
       });
       if (!write.ok) {
         return { kind: "refused", reason: write.error, observation };
       }
       afterWrite(deps, null);
+      if (fillPress) recordFillPress(deps.guardState, fillPress);
       const review = await reviewGuard(deps, observation.url);
       if (review.pause) {
         return { kind: "paused", pause: review.pause };
@@ -2077,7 +2046,7 @@ export async function executeApplyProposal(
         if (before.refuse) {
           return {
             kind: "refused",
-            reason: `Pressing ${describeRef(observation, proposal.ref)} tried to open ${review.openedWindowUrl} in a new tab. ${before.refuse}`,
+            reason: `Pressing ${describeRef(observation, pressRef)} tried to open ${review.openedWindowUrl} in a new tab. ${before.refuse}`,
             observation: await config.hands.observe(),
           };
         }
@@ -2086,7 +2055,7 @@ export async function executeApplyProposal(
         if (!followed.ok) {
           return {
             kind: "refused",
-            reason: `Pressing ${describeRef(observation, proposal.ref)} tried to open ${review.openedWindowUrl} in a new tab, and that page would not open here: ${followed.error}`,
+            reason: `Pressing ${describeRef(observation, pressRef)} tried to open ${review.openedWindowUrl} in a new tab, and that page would not open here: ${followed.error}`,
             observation: landed,
           };
         }
@@ -2097,7 +2066,7 @@ export async function executeApplyProposal(
         deps.guardState.lastOnSiteUrl = landed.url;
         return {
           kind: "moved",
-          note: `Pressing ${describeRef(observation, proposal.ref)} opened ${followed.url} in a new tab. Job Finder works in one tab, so it opened that address here instead.${(before.note ?? landedOrigin.note) ? ` ${before.note ?? landedOrigin.note}` : ""}`,
+          note: `Pressing ${describeRef(observation, pressRef)} opened ${followed.url} in a new tab. Job Finder works in one tab, so it opened that address here instead.${(before.note ?? landedOrigin.note) ? ` ${before.note ?? landedOrigin.note}` : ""}`,
           observation: landed,
           progress: true,
         };
@@ -2107,14 +2076,14 @@ export async function executeApplyProposal(
       if (movedOrigin.refuse) {
         return retreat(
           deps,
-          `Pressing ${describeRef(observation, proposal.ref)} led to ${after.origin ?? "another site"}. ${movedOrigin.refuse}`,
+          `Pressing ${describeRef(observation, pressRef)} led to ${after.origin ?? "another site"}. ${movedOrigin.refuse}`,
         );
       }
       deps.guardState.lastOnSiteUrl = after.url;
       return {
         kind: "moved",
         note: [
-          `Pressed ${describeRef(observation, proposal.ref)}.`,
+          `Pressed ${describeRef(observation, pressRef)}.`,
           movedOrigin.note,
         ]
           .filter(Boolean)

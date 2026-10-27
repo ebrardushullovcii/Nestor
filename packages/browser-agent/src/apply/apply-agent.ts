@@ -45,7 +45,6 @@ import {
   executeApplyProposal,
   guardStop,
   fileFieldHoldsOtherFile,
-  fillMayOpen,
   pressOnSitePause,
   pressesFormButtons,
   questionPrompt,
@@ -76,9 +75,11 @@ import {
   holdsAnswer,
   runSubmitPreflight,
   unresolvedRequiredControls,
+  STEP_HANDOVER_QUESTION_ID,
   UPLOAD_REPAIR_QUESTION_ID,
   type FileUploadProblem,
 } from "./submit-preflight";
+import { fillMayOpen } from "./fill-presses";
 import { matchOption } from "./option-match";
 import { savedPickerRule } from "./option-fallback";
 import { compactApplyPageHistory } from "./page-history";
@@ -345,6 +346,30 @@ async function runMeasuredApplyAgent(
   const observedAnswers = new Map<string, ApplyFilledControl>();
   const observedAttachments = new Map<string, ApplyAttachedDocument>();
   const pauses: ApplyPause[] = [];
+  /**
+   * A form button Fill in for me left for the person. It is handed over when
+   * the run finishes, after everything else it could fill is filled, rather
+   * than the moment the model reached for it.
+   */
+  let deferredPress: ApplyPause | null = null;
+  const deferPress = (pause: ApplyPause): string => {
+    deferredPress = pause;
+    note(`Left ${pause.question?.prompt ?? "a form button"} for the end.`);
+    return `${pause.blocker?.detail ?? pause.summary} Job Finder hands it to the person when everything else is filled: fill every other field on this page you can answer, then finish.`;
+  };
+  /**
+   * Reaching for a form button again means the page is done: the run ends
+   * with it, the person's questions first (their answers belong on this
+   * page, so the press waits for the next run).
+   */
+  const handOverPress = (
+    pause: ApplyPause,
+  ): { kind: "stop"; reason: string; data: ApplyPause } => {
+    const handover = collectedQuestionsPause() ?? pause;
+    pauses.push(handover);
+    note(handover.summary);
+    return { kind: "stop", reason: handover.summary, data: handover };
+  };
   // Letter fields whose drafted letter waits for the person's review.
   const lettersAwaitingReview = new Set<string>();
   const notes: string[] = [];
@@ -1365,6 +1390,19 @@ async function runMeasuredApplyAgent(
             : outcome.reason,
         };
       case "paused":
+        // Fill in for me: a form button waits until the rest is filled.
+        if (
+          outcome.pause.question?.id === STEP_HANDOVER_QUESTION_ID &&
+          !pressesFormButtons(runConfig)
+        )
+          return deferredPress
+            ? handOverPress(outcome.pause)
+            : {
+                kind: "ok",
+                status: "refused",
+                stopBatch: false,
+                content: deferPress(outcome.pause),
+              };
         if (
           outcome.pause.reviewDraft &&
           outcome.pause.question?.kind === "cover_letter"
@@ -1596,7 +1634,8 @@ async function runMeasuredApplyAgent(
           !outcome.stuck &&
           !outcome.needsPerson &&
           observation.blocker?.requiresPerson !== true &&
-          pendingQuestions.size === 0
+          pendingQuestions.size === 0 &&
+          !deferredPress
         ) {
           if (!advanceFinishNudged) {
             advanceFinishNudged = true;
@@ -1729,6 +1768,16 @@ async function runMeasuredApplyAgent(
               content: `The form is not finished yet. ${actionable.join(" ")} Fill each one the person's facts answer, then finish; a question their facts do not answer is handed to them with the form.`,
             };
           }
+        }
+        // The form button left for the person goes once everything the run
+        // could fill is filled. Questions for the person come first: their
+        // answers belong on this page, so the press waits for the next run.
+        if (deferredPress) {
+          if (pendingQuestions.size > 0) return finishWithQuestions();
+          const press: ApplyPause = deferredPress;
+          pauses.push(press);
+          note(press.summary);
+          return { kind: "stop", reason: press.summary, data: press };
         }
         // The summary the person reads must not say "filled in" over empty
         // required fields; name what is still empty.
@@ -2529,7 +2578,11 @@ async function runMeasuredApplyAgent(
           stopped = true;
       }
       await settleText();
-      if (parsed.thenContinue) {
+      if (parsed.thenContinue && deferredPress && !wrote) {
+        // The form button is already left for the person and this batch
+        // wrote nothing new: the page is as filled as the run can make it.
+        stopOutcome = handOverPress(deferredPress);
+      } else if (parsed.thenContinue) {
         const current = pageTools.state.observation!;
         const unresolved = unresolvedRequiredControls(current);
         if (
@@ -3002,9 +3055,8 @@ async function runMeasuredApplyAgent(
                   link?.label ? `"${link.label}"` : href || "that link",
                   now(),
                 );
-                pauses.push(pause);
-                note(pause.summary);
-                return { kind: "stop", reason: pause.summary, data: pause };
+                if (deferredPress) return handOverPress(pause);
+                return { kind: "ok", content: deferPress(pause) };
               }
             }
             const result = await tool.execute(rawArguments, context);
@@ -3233,6 +3285,83 @@ async function runMeasuredApplyAgent(
     if (pause.question) questions.set(pause.question.id, pause.question);
     pause.questions = [...questions.values()];
   }
+  /**
+   * What a needs-person finish hands over: the page's own blocker, the
+   * unanswered questions its reason names (none when all are optional, and
+   * those stay empty), or else the questions it quotes, or its reason as one
+   * item. Never a "needs you" with nothing to do.
+   */
+  const needsPersonHandover = (said: string): ApplyPause | null => {
+    const page = pageTools.state.observation;
+    if (page?.blocker)
+      return {
+        code: "page_blocked",
+        summary: said,
+        question: null,
+        blocker: page.blocker,
+      };
+    const words = (text: string) =>
+      text
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .trim();
+    const reason = words(said);
+    const controls = page?.controls ?? [];
+    const named = controls.filter((control) => {
+      const prompt = words(questionPrompt(control));
+      return (
+        prompt.length > 3 &&
+        reason.includes(prompt) &&
+        control.visible &&
+        !control.disabled &&
+        !holdsAnswer(control) &&
+        !(
+          control.choiceGroupKey &&
+          controls.some(
+            (sibling) =>
+              sibling.choiceGroupKey === control.choiceGroupKey &&
+              sibling.checked,
+          )
+        )
+      );
+    });
+    if (named.length) {
+      const required = named.filter((control) => control.required);
+      if (!required.length) return null;
+      for (const control of required)
+        pendingQuestions.set(
+          pendingQuestionKey(control),
+          buildPendingQuestion({
+            control,
+            jobId: config.application.jobId,
+            detectedAt: now().toISOString(),
+            suggestion: null,
+            siblings: controls,
+          }),
+        );
+      return collectedQuestionsPause();
+    }
+    // Nothing on the page matches: hand over what the reason quotes (an
+    // apostrophe is not a quote), else the reason itself.
+    const quoted = [...said.matchAll(/["‘“]([^"’”]{6,200})["’”]/gu)].map(
+      (match) => String(match[1]).trim(),
+    );
+    for (const prompt of quoted.length ? quoted : [said.trim()])
+      pendingQuestions.set(`named:${prompt}`, {
+        id: `named_${words(prompt).replace(/ /gu, "_").slice(0, 60)}`,
+        prompt,
+        repeatedAtDifferentStep: false,
+        kind: "other",
+        answerControlType: "text",
+        isRequired: true,
+        detectedAt: now().toISOString(),
+        answerOptions: [],
+        suggestedAnswers: [],
+        submittedAnswer: null,
+        status: "detected",
+      });
+    return collectedQuestionsPause();
+  };
   const pending = collectedQuestionsPause();
   const personOwnedBlocker =
     pageTools.state.observation?.blocker?.requiresPerson === true
@@ -3240,6 +3369,7 @@ async function runMeasuredApplyAgent(
       : null;
   let outcome: ApplyAgentResult["outcome"];
   let reason: string;
+  let handover: ApplyPause | null;
   if (skipReason) {
     outcome = "paused";
     reason = skipReason;
@@ -3274,21 +3404,24 @@ async function runMeasuredApplyAgent(
     pauses.push(pending);
     outcome = "paused";
     reason = pending.summary;
-  } else if (loop.finish?.needsPerson) {
-    const pause: ApplyPause = {
-      code: "page_blocked",
-      summary: loop.finish.reason,
-      question: null,
-      blocker: pageTools.state.observation?.blocker ?? null,
-    };
-    pauses.push(pause);
-    note(pause.summary);
+  } else if (
+    loop.finish?.needsPerson &&
+    (handover = needsPersonHandover(loop.finish.reason))
+  ) {
+    pauses.push(handover);
+    note(handover.summary);
     outcome = "paused";
-    reason = loop.finish.reason;
+    reason = handover.summary;
   } else if (loop.finish?.stuck) {
     outcome = "stuck";
     reason = `Job Finder stopped on ${config.siteLabel} because it got stuck: ${loop.finish.reason.replace(/\.?$/u, ".")}`;
   } else if (loop.ending === "finished") {
+    // A needs-person finish whose questions are all optional lands here:
+    // those stay empty, as optional fields should.
+    if (loop.finish?.needsPerson)
+      note(
+        `Left optional questions empty: ${loop.finish.reason.replace(/\.?$/u, ".")}`,
+      );
     outcome =
       readyToSend && config.authority.mode === "autonomous_submit"
         ? "ready_to_send"

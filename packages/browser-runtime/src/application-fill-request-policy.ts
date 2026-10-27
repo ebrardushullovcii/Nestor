@@ -11,14 +11,16 @@ import { readGraphQlRequest, variableStrings } from "./graphql-request";
  *
  * Nothing that writes. A plain read passes, and so does a GraphQL query
  * (never a mutation) that carries no answer and names no final action: forms
- * like Ashby's load themselves that way. The exact selected resume and its
+ * like Ashby's load themselves that way. A same-origin read that carries a
+ * picker choice just made, and nothing else of the person's, may load the
+ * list that depends on it. The exact selected resume and its
  * same-origin presign are judged separately by the attachment policy. Every
  * other request is refused, whatever it is called: autosaves, step saves and
  * analytics posts alike. That closes the class instead of guessing which
  * writes are saves.
  */
 export type StrictFillReadDecision =
-  | { allowed: true; reason: "plain_read" | "graphql_query" }
+  | { allowed: true; reason: "plain_read" | "graphql_query" | "dependent_list" }
   | {
       allowed: false;
       reason:
@@ -90,6 +92,40 @@ function runNavigationSignal(url: URL): string {
   return readSignal(url).replace(/\/apply(?=\/|\s|$)/giu, "/form");
 }
 
+/** Words that make an address a write, wherever they appear in it. */
+const WRITE_WORDS = /save|submit|apply|update|create|complete|send|post/iu;
+
+/**
+ * A read that loads the list depending on a picker choice the run just made
+ * (the regions of the chosen country): a same-origin GET from the page's own
+ * scripts whose address carries those choices and no other answer, and names
+ * no write.
+ */
+function loadsDependentList(
+  url: URL,
+  input: {
+    method: string;
+    resourceType: string;
+    preparedValues: readonly string[];
+    pickerChoices?: readonly string[];
+    frameOrigin?: string | null;
+  },
+): boolean {
+  const chosen = input.pickerChoices ?? [];
+  return (
+    input.method === "GET" &&
+    SCRIPTED_RESOURCE_TYPES.has(input.resourceType) &&
+    url.origin === input.frameOrigin &&
+    !WRITE_WORDS.test(`${decoded(url.pathname)} ${decoded(url.search)}`) &&
+    chosen.length > 0 &&
+    carriesAnswer(url, chosen) &&
+    !carriesAnswer(
+      url,
+      input.preparedValues.filter((value) => !chosen.includes(value)),
+    )
+  );
+}
+
 /**
  * Default for anything unknown: refuse. The allow paths are a read that
  * carries no answer and, for the page's own data calls (fetch, XHR) and for
@@ -104,6 +140,10 @@ export function classifyStrictFillRead(input: {
   url: string;
   bodyText?: string | null;
   preparedValues: readonly string[];
+  /** Picker choices the run made moments ago, label and submitted value. */
+  pickerChoices?: readonly string[];
+  /** The origin of the frame that sent the request. */
+  frameOrigin?: string | null;
   /**
    * A navigation: one the run itself opened (or a redirect of it), or one
    * the page started (a script, a link it followed, or a redirect of that).
@@ -147,7 +187,10 @@ export function classifyStrictFillRead(input: {
     return { allowed: false, reason: "denied_resource_type" };
   if (QUERY_GUARDED_RESOURCE_TYPES.has(input.resourceType) && url.search)
     return { allowed: false, reason: "beacon_query" };
-  if (carriesAnswer(url, input.preparedValues))
+  const dependentList =
+    carriesAnswer(url, input.preparedValues) &&
+    loadsDependentList(url, { ...input, method });
+  if (!dependentList && carriesAnswer(url, input.preparedValues))
     return { allowed: false, reason: "carries_answer" };
   const navigation =
     input.navigation ?? (input.resourceType === "document" ? "page" : null);
@@ -158,7 +201,10 @@ export function classifyStrictFillRead(input: {
         FINAL_ACTION_SIGNAL.test(runNavigationSignal(url))
   )
     return { allowed: false, reason: "final_signal" };
-  return { allowed: true, reason: "plain_read" };
+  return {
+    allowed: true,
+    reason: dependentList ? "dependent_list" : "plain_read",
+  };
 }
 
 /**

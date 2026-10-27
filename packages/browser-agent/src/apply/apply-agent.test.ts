@@ -8269,3 +8269,72 @@ test("a file field the widget removed once storage took the file is attached, no
   ).toEqual([]);
   expect(result.outcome).toBe("prepared");
 });
+
+describe("a run never ends waiting on the person with nothing to answer", () => {
+  const question = "Are you based in a EU or equivalent timezone?";
+  const optionalYesNo = () =>
+    page({
+      controls: [nameControl()],
+      actions: [
+        {
+          index: 0,
+          label: "Yes",
+          visible: true,
+          disabled: false,
+          section: question,
+          pressed: false,
+        },
+        {
+          index: 1,
+          label: "No",
+          visible: true,
+          disabled: false,
+          section: question,
+          pressed: false,
+        },
+      ],
+    });
+
+  test("an optional question it means is left empty, and the run finishes ready", async () => {
+    const result = await runApplyAgent(
+      config(optionalYesNo()),
+      repeatingModel("finish", {
+        reason: `The question "${question}" needs the person's answer.`,
+        needsPerson: true,
+      }),
+    );
+    expect(result.pauses).toEqual([]);
+    expect(result.outcome).toBe("prepared");
+  });
+
+  test("a question it names that the page doesn't show is handed over by name", async () => {
+    const result = await runApplyAgent(
+      config(page({ controls: [nameControl()] })),
+      repeatingModel("finish", {
+        reason:
+          'The form asks "Which office would you work from?" and only the person knows.',
+        needsPerson: true,
+      }),
+    );
+    expect(result.outcome).toBe("paused");
+    expect(
+      result.pauses
+        .flatMap((pause) => pause.questions ?? [])
+        .map((q) => q.prompt),
+    ).toEqual(["Which office would you work from?"]);
+  });
+
+  test("a reason that names nothing it can find is itself the one item", async () => {
+    const reason = "The person's relocation terms aren't in their profile.";
+    const result = await runApplyAgent(
+      config(page({ controls: [nameControl()] })),
+      repeatingModel("finish", { reason, needsPerson: true }),
+    );
+    expect(result.outcome).toBe("paused");
+    expect(
+      result.pauses
+        .flatMap((pause) => pause.questions ?? [])
+        .map((q) => q.prompt),
+    ).toEqual([reason]);
+  });
+});

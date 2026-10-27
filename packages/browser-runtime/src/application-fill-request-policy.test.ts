@@ -265,3 +265,53 @@ describe("an upload's redirect", () => {
     },
   );
 });
+
+describe("Fill in for me: a list that depends on a picker choice", () => {
+  // The run just chose "Portugal" (submitted as "PT") in a country picker.
+  const dependent = (
+    url: string,
+    overrides: Partial<Parameters<typeof classifyStrictFillRead>[0]> = {},
+  ) =>
+    classifyStrictFillRead({
+      method: "GET",
+      resourceType: "fetch",
+      url,
+      preparedValues: prepared,
+      pickerChoices: ["Portugal", "PT"],
+      frameOrigin: "https://jobs.example.test",
+      ...overrides,
+    }).reason;
+
+  test.each([
+    ["https://jobs.example.test/api/regions?country=PT", "dependent_list"],
+    [
+      "https://jobs.example.test/api/countries/Portugal/cities",
+      "dependent_list",
+    ],
+    // Another origin, or an answer that is not the choice, stays refused.
+    ["https://other.example.test/api/regions?country=PT", "carries_answer"],
+    [
+      "https://jobs.example.test/api/regions?country=PT&email=robin@example.test",
+      "carries_answer",
+    ],
+    // An address that names a write is refused whatever it carries.
+    ["https://jobs.example.test/api/regions/save?country=PT", "carries_answer"],
+    [
+      "https://jobs.example.test/api/regions?country=PT&action=update",
+      "carries_answer",
+    ],
+    ["https://jobs.example.test/api/autoSave?country=PT", "carries_answer"],
+    ["https://jobs.example.test/api/postRegion?country=PT", "carries_answer"],
+    ["https://jobs.example.test/apply/regions?country=PT", "carries_answer"],
+  ])("%s → %s", (url, reason) => {
+    expect(dependent(url)).toBe(reason);
+  });
+
+  test("only a just-made choice, only from the page's own scripts, only a GET", () => {
+    const url = "https://jobs.example.test/api/regions?country=PT";
+    expect(dependent(url, { pickerChoices: [] })).toBe("carries_answer");
+    expect(dependent(url, { resourceType: "document" })).toBe("carries_answer");
+    expect(dependent(url, { resourceType: "image" })).toBe("beacon_query");
+    expect(dependent(url, { method: "POST" })).toBe("not_a_read");
+  });
+});

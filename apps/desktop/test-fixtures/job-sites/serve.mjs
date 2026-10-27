@@ -4,6 +4,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { handleMoreSites, moreSites } from "./sites/router.mjs";
 import { handleRealUploadShapes } from "./real-upload-shapes.mjs";
+import { handleFillChores } from "./fill-chores.mjs";
 import { handlePersonalClaims } from "./personal-claims.mjs";
 import { handleUploadRepair } from "./upload-repair.mjs";
 import { handleHandoverOptions } from "./handover-options.mjs";
@@ -475,6 +476,8 @@ const server = http.createServer(async (req, res) => {
     if (
       await handleRealUploadShapes(req, res, url, { send, readPost, logPost })
     )
+      return;
+    if (await handleFillChores(req, res, url, { send, readPost, logPost }))
       return;
     if (handlePersonalClaims(req, res, url, { send })) return;
     if (await handleUploadRepair(req, res, url, { send, readPost, logPost }))
