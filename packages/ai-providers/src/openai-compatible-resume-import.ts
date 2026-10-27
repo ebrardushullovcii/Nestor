@@ -227,9 +227,12 @@ function normalizeCandidate(
   }
 
   const label =
-    typeof record.label === "string" && record.label.trim()
-      ? record.label.trim()
-      : `${target.section}.${target.key}${target.recordId ? `.${target.recordId}` : ""}`;
+    target.section === "application_identity" &&
+    target.key === "preferredLinkUrls"
+      ? "Links to include in applications"
+      : typeof record.label === "string" && record.label.trim()
+        ? record.label.trim()
+        : `${target.section}.${target.key}${target.recordId ? `.${target.recordId}` : ""}`;
   const confidence = normalizeConfidence(record.confidence) ?? 0.5;
 
   return {
@@ -316,7 +319,7 @@ export function buildResumeImportStageInstructions(
         "Return only conservative shared-memory suggestions.",
         "Valid target sections: narrative, proof_point, answer_bank, application_identity.",
         "Never invent sensitive facts such as work authorization, sponsorship, relocation, notice period, availability, or salary expectations.",
-        "For application_identity, prefer keys preferredEmail, preferredPhone, or preferredLinkIds.",
+        "For application_identity, use keys preferredEmail, preferredPhone, or preferredLinkUrls (an array of public URLs explicitly present in the resume, never internal link IDs). Label preferredLinkUrls as Links to include in applications.",
         "For proof_point records, use value objects with title, claim, heroMetric, supportingContext, roleFamilies, projectIds, and linkIds. Offer stated achievements, including numbered sales achievements, as reusable evidence for review. Education, degrees and certifications belong in their own sections, never in employer proof points. Attribute a claim to a role only when the source states that achievement for that role.",
         "Give each proof point a meaningful title describing its achievement, never punctuation such as a slash. Rejoin PDF line breaks in metrics only when supported by the source, and use the same number and units as the work-history achievement. Prefer concise reusable narratives grounded in multiple resume lines over clipped fragments from a single wrapped sentence.",
       ].join(" ");

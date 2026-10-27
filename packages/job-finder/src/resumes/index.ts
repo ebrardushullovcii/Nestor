@@ -1,4 +1,5 @@
 export {
+  assistantJobListPage,
   createResumeCommandRunner,
   type RunResumeCommand,
 } from "./resume-commands";

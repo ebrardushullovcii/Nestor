@@ -89,6 +89,11 @@ function getSuggestionTitle(
   candidate: ResumeImportFieldCandidateSummary,
   structuredValue: unknown,
 ): string {
+  if (
+    candidate.target.section === "application_identity" &&
+    ["preferredLinkUrls", "preferredLinkIds"].includes(candidate.target.key)
+  )
+    return "Links to include in applications";
   const sectionLabel = recordSectionLabels[candidate.target.section];
   if (!sectionLabel) {
     return titleCaseLabel(candidate.label);

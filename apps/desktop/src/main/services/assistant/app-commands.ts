@@ -23,6 +23,8 @@ import {
 
 import { runNeedsYouCommand } from "../../routes/needs-you";
 import { runJobCommand } from "../job-commands";
+import { getJobStore } from "../job-store";
+import { assistantJobListPage } from "@nestor/job-finder/resumes";
 import { runResumeCommand } from "../../routes/resumes";
 import { runTrackerCommand } from "../../routes/tracker";
 import { assistantApplicationCommands } from "./application-commands";
@@ -247,19 +249,7 @@ export function assistantAppCommands() {
             });
             return {
               summary: `${page.rows.length} jobs on this page; ${page.total}${page.totalCapped ? "+" : ""} match.`,
-              data: {
-                ...page,
-                rows: page.rows.map(
-                  ({ id, stage, title, company, location, fitScore }) => ({
-                    id,
-                    stage,
-                    title,
-                    company,
-                    location,
-                    fitScore,
-                  }),
-                ),
-              },
+              data: assistantJobListPage(getJobStore(), page),
             };
           },
           get_job: async (job, _input, { session }) => {

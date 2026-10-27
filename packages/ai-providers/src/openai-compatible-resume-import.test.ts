@@ -48,6 +48,38 @@ const documentBundle: ResumeDocumentBundle = {
 };
 
 describe("extractOpenAiCompatibleResumeImportStage", () => {
+  test("extracts application links as URLs with the review label", async () => {
+    const result = await extractOpenAiCompatibleResumeImportStage({
+      stageInput: {
+        stage: "shared_memory",
+        existingProfile: createProfile(),
+        existingSearchPreferences: createPreferences(),
+        documentBundle,
+      },
+      status,
+      fetchModelJson: (_operation, request) => {
+        expect(JSON.stringify(request)).toContain("preferredLinkUrls");
+        expect(JSON.stringify(request)).not.toContain("or preferredLinkIds");
+        return Promise.resolve({
+          candidates: [
+            {
+              target: "application_identity.preferredLinkUrls",
+              label: "Preferred link ids",
+              value: ["https://example.test/portfolio"],
+              confidence: 0.9,
+              sourceBlockIds: ["block_1"],
+            },
+          ],
+        });
+      },
+      timeoutMs: 1000,
+    });
+    expect(result.candidates[0]).toMatchObject({
+      target: { section: "application_identity", key: "preferredLinkUrls" },
+      label: "Links to include in applications",
+      value: ["https://example.test/portfolio"],
+    });
+  });
   test("accepts a bare candidate object instead of the candidates envelope", async () => {
     // Observed from the production route: with one record to return, the
     // model answered with the candidate itself as the root object.

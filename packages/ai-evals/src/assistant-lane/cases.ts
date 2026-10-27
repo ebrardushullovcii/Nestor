@@ -45,6 +45,8 @@ export interface AssistantLaneCase {
   /** Inventory entries this case exercises. */
   inventory: readonly string[];
   scripted: boolean;
+  scenario?: "ready_resume";
+  inputTokenBudget?: number;
   turns: readonly AssistantLaneTurn[];
   /** Returns what went wrong; empty means the case passed. */
   check(observation: AssistantLaneObservation): string[];
@@ -107,6 +109,46 @@ function expect(condition: boolean, failure: string): string[] {
 }
 
 const OUTCOME_CASES: AssistantLaneCase[] = [
+  {
+    id: "jobs.ready_resume",
+    inputTokenBudget: 14_000,
+    title: "A shortlisted job with an unapproved draft is ready to review",
+    inventory: [],
+    scripted: true,
+    scenario: "ready_resume",
+    turns: [
+      {
+        text: "Has a resume been written for my shortlisted Senior Product Designer at Northwind Labs?",
+        context: laneContext({ screen: "review_queue" }),
+      },
+    ],
+    check: (o) => [
+      ...expect(usedTool(o, "list_jobs"), "did not read resume state"),
+      ...expect(
+        /ready to review/iu.test(o.replyText),
+        `did not say the draft is ready to review: ${o.replyText}`,
+      ),
+      ...expect(
+        !/no resume|not.*written|not.*ready/iu.test(o.replyText),
+        "denied the saved ready draft",
+      ),
+    ],
+  },
+  {
+    id: "jobs.shortlisted_budget",
+    inputTokenBudget: 14_000,
+    title: "Show shortlisted jobs with a bounded input budget",
+    inventory: [],
+    scripted: true,
+    turns: [
+      {
+        text: "Show my shortlisted jobs",
+        context: laneContext({ screen: "review_queue" }),
+      },
+    ],
+    check: (o) =>
+      expect(usedTool(o, "list_jobs"), "shortlisted jobs were not read"),
+  },
   {
     id: "profile.simple_edit",
     title: "A simple headline edit is applied with a receipt",

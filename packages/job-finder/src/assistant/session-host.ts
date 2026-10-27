@@ -748,7 +748,22 @@ export class AssistantSessionHost {
     let result: Awaited<ReturnType<typeof runConversationTurn>>;
     try {
       result = await runConversationTurn({
-        model: { chatWithTools: (...args) => model.chatWithTools(...args) },
+        model: {
+          chatWithTools: async (messages, schemas, callOptions) => {
+            const response = await model.chatWithTools(
+              messages,
+              schemas,
+              callOptions,
+            );
+            this.log("Assistant input budget", {
+              messageTokens: estimateTokens(messages),
+              schemaTokens: estimateJsonTokens(schemas),
+              toolCount: schemas.length,
+              reportedInputTokens: response.usage?.inputTokens ?? null,
+            });
+            return response;
+          },
+        },
         tools,
         getToolDefinitions: definitions,
         onEmptyReply: async (detail) => {

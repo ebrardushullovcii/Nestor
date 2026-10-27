@@ -1,3 +1,4 @@
+import { assistantJobListPage } from "@nestor/job-finder/resumes";
 import { createApplicationStore } from "@nestor/db/applications";
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
 import {
@@ -15,6 +16,7 @@ import {
   JobSearchPreferencesSchema,
   ProfileSetupStateSchema,
   SavedJobSchema,
+  ResumeDraftSchema,
   createFreshStartCandidateProfile,
   type AssistantContextReference,
   type AssistantEvent,
@@ -33,6 +35,7 @@ import {
   createJobFinderRepository,
   openJobStore,
   createTrackerStore,
+  createResumeStore,
   type JobStore,
 } from "@nestor/db/job-store";
 import {
@@ -66,6 +69,12 @@ export interface AssistantLaneSnapshot {
 }
 
 export interface AssistantLaneRecorder {
+  inputs: {
+    messageTokens: number;
+    schemaTokens: number;
+    toolCount: number;
+    reportedInputTokens: number | null;
+  }[];
   searches: string[];
   applications: { jobIds: string[]; mode: string }[];
   sends: string[][];
@@ -354,7 +363,15 @@ function recordingPorts(
           }
           return runJobCommand(name, input);
         },
-        { group: "jobs" },
+        {
+          group: "jobs",
+          results: {
+            list_jobs: (page) => ({
+              summary: `${page.total} jobs match.`,
+              data: assistantJobListPage(store, page),
+            }),
+          },
+        },
       ),
       ...needsYouCommandTools(needsYou),
     ],
@@ -385,10 +402,29 @@ export function resolveLaneModel(
 
 export async function createAssistantLaneWorld(
   model: AssistantLaneModel,
+  scenario?: "ready_resume",
 ): Promise<AssistantLaneWorld> {
   const jobs = laneJobStore();
   const repository = createJobFinderRepository(jobs.store);
   await seedLaneProfile(repository);
+  if (scenario === "ready_resume") {
+    const id = jobs.ids.get("job_lane_1")!;
+    jobs.store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    const resumes = createResumeStore(jobs.store);
+    resumes.startWriting(id, "tailored");
+    resumes.finishWriting(
+      id,
+      ResumeDraftSchema.parse({
+        id: "lane_ready_draft",
+        jobId: String(id),
+        status: "draft",
+        templateId: "classic_ats",
+        identity: { fullName: "Riley Okafor", headline: "Product designer" },
+        createdAt: NOW,
+        updatedAt: NOW,
+      }),
+    );
+  }
   const service = createProfileService({
     repository,
     aiClient: createDeterministicJobFinderAiClient(
@@ -401,6 +437,7 @@ export async function createAssistantLaneWorld(
     documentManager: laneDocumentManager(),
   });
   const recorder: AssistantLaneRecorder = {
+    inputs: [],
     searches: [],
     applications: [],
     sends: [],
@@ -420,7 +457,10 @@ export async function createAssistantLaneWorld(
     resolveModel: () => resolution,
     publish: (event) => events.push(event),
     stallAfterMs: 60_000,
-    log: () => undefined,
+    log: (message, detail) => {
+      if (message === "Assistant input budget")
+        recorder.inputs.push(detail as AssistantLaneRecorder["inputs"][number]);
+    },
   });
   return {
     host,

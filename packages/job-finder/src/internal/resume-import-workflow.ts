@@ -37,6 +37,7 @@ import {
 } from "./resume-import-candidate-utils";
 import { resolveResumeIdentity } from "./resume-identity";
 import { extractLiteralCandidates } from "./resume-import-literal-extraction";
+import { completeResumeImport } from "./resume-import-completeness";
 import { enrichExperienceCandidatesFromNearbyMarkers } from "./resume-import-experience-markers";
 import {
   NO_AI_PROVIDER_REASON,
@@ -1585,7 +1586,12 @@ async function runResumeImportWorkflowInProcess(
     });
     const analysisWarnings = uniqueStrings([
       ...(input.importWarnings ?? []),
-      ...cachedAnalysis.run.warnings,
+      ...cachedAnalysis.run.warnings.filter(
+        (warning) =>
+          !warning.includes(
+            "the resume did not provide enough evidence to suggest",
+          ),
+      ),
     ]);
     const latestPreferences = await ctx.repository.getSearchPreferences();
     const latestProfile = await ctx.repository.getProfile();
@@ -1601,6 +1607,14 @@ async function runResumeImportWorkflowInProcess(
       cachedArtifacts.candidates,
       input.profile,
     );
+    const completeness = completeResumeImport({
+      profile: input.profile,
+      preferences: latestPreferences,
+      bundle: cachedArtifacts.bundle,
+      candidates: cachedArtifacts.candidates,
+    });
+    cachedArtifacts.candidates = completeness.candidates;
+    analysisWarnings.push(...completeness.warnings);
     const merged = applyResolvedResumeImportCandidatesToWorkspace({
       profile: input.profile,
       searchPreferences: latestPreferences,
@@ -2330,6 +2344,14 @@ async function runResumeImportWorkflowInProcess(
       reconciledCandidates,
       input.profile,
     );
+    const completeness = completeResumeImport({
+      profile: input.profile,
+      preferences: latestPreferences,
+      bundle,
+      candidates: reconciledCandidates,
+    });
+    reconciledCandidates = completeness.candidates;
+    analysisWarnings.push(...completeness.warnings);
     const merged = applyResolvedResumeImportCandidatesToWorkspace({
       profile: input.profile,
       searchPreferences: latestPreferences,

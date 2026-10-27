@@ -18,9 +18,8 @@ export { undoReceipt } from "./profile-tools";
 
 /**
  * The tool catalog (plan §6). Every group is present in a fixed order so the
- * prompt prefix and schemas stay cacheable. Group loading exists for routes
- * where the flat catalog proves too costly: common tools, the groups
- * the screen suggests, and `load_tools` for the rest.
+ * prompt prefix and schemas stay cacheable. Grouped mode starts with a small
+ * read catalog; load_tools adds exact schemas for the requested work.
  */
 export const ASSISTANT_TOOL_GROUPS: Record<
   AssistantToolGroup,
@@ -52,113 +51,26 @@ const COMMON_TOOLS = [
   "ask_person",
   "list_needs_you",
   "undo_change",
-  "get_application",
-  "get_application_details",
-  "applications_for_jobs",
-  "answer_need",
-  "read_profile",
-  "get_job",
   "list_jobs",
-  "set_default_resume_level",
 ];
+// Read-only orientation stays small. Edits and large resume schemas load by
+// exact name once the person's request needs them; navigation alone is free.
 const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
-  home: ["get_workspace_summary", "list_needs_you", "list_tracker_agenda"],
-  // Broad edit schemas load on request rather than on entering Profile.
+  home: ["get_workspace_summary"],
   profile: [
     "get_profile",
     "list_profile_records",
     "get_profile_record",
     "get_profile_goals",
     "finish_profile_setup",
-    "list_documents",
-    "import_resume",
-    "resolve_import_suggestion",
   ],
-  setup: [
-    "finish_profile_setup",
-    "list_documents",
-    "import_resume",
-    "resolve_import_suggestion",
-  ],
-  discovery: [
-    "list_sites",
-    "get_site",
-    "add_sites",
-    "update_site",
-    "remove_site",
-    "set_sites_enabled",
-    "undo_site_change",
-    "start_search",
-    "stop_search",
-    "search_status",
-    "move_jobs",
-    "undo_move",
-  ],
-  review_queue: [
-    "list_shortlisted",
-    "get_resume",
-    "save_resume",
-    "edit_resume",
-    "set_resume_level",
-    "undo_resume_level",
-    "undo_resume_change",
-    "rewrite_resume",
-    "approve_resume",
-    "record_instruction",
-    "apply_to_jobs",
-  ],
-  resume_studio: [
-    "get_resume",
-    "save_resume",
-    "set_resume_level",
-    "undo_resume_level",
-    "rewrite_resume",
-    "approve_resume",
-    "export_resume_pdf",
-  ],
-  applications: [
-    "list_applications",
-    "get_application",
-    "set_status",
-    "add_event",
-    "undo_tracker_change",
-    "record_instruction",
-    "apply_to_jobs",
-    "send_application",
-    "open_application",
-    "stop_application",
-    "list_application_work",
-    "get_application_details",
-    "applications_for_jobs",
-    "answer_need",
-  ],
-  actions: [
-    "list_needs_you",
-    "answer_need",
-    "get_need",
-    "open_need",
-    "check_need",
-    "retry_need",
-    "undo_form_answer_change",
-    "list_form_answers",
-    "get_form_answer",
-    "create_form_answer",
-    "get_form_answer_by_key",
-    "upsert_form_answer",
-    "save_form_answer",
-    "forget_form_answers",
-  ],
-  settings: [
-    "get_settings",
-    "patch_settings",
-    "read_settings",
-    "update_apply_settings",
-    "update_ai_behavior",
-    "update_workspace_behavior",
-    "set_appearance",
-    "pause_activity",
-    "action_zoom",
-  ],
+  setup: ["finish_profile_setup", "list_documents"],
+  discovery: ["list_sites", "search_status"],
+  review_queue: ["get_resume"],
+  resume_studio: ["get_resume"],
+  applications: ["list_applications", "applications_for_jobs"],
+  actions: ["get_need"],
+  settings: ["get_settings"],
 };
 
 export const loadToolsTool = defineTool({

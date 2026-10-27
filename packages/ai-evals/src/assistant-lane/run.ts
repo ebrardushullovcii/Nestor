@@ -19,6 +19,7 @@ export interface AssistantLaneCaseResult {
   replyText: string;
   toolRuns: { toolName: string; outcome: string }[];
   durationMs: number;
+  inputs: AssistantLaneWorld["recorder"]["inputs"];
   error: string | null;
 }
 
@@ -80,7 +81,7 @@ export async function runAssistantLaneCase(
   options: { turnTimeoutMs?: number } = {},
 ): Promise<AssistantLaneCaseResult> {
   const started = Date.now();
-  const world = await createAssistantLaneWorld(model);
+  const world = await createAssistantLaneWorld(model, evalCase.scenario);
   try {
     let conversationId: string | null = null;
     for (const [index, turn] of evalCase.turns.entries()) {
@@ -111,6 +112,22 @@ export async function runAssistantLaneCase(
       ...observe(view.messages),
     };
     const failures = evalCase.check(observation);
+    if (!world.recorder.inputs.length)
+      failures.push("No assistant input measurements were recorded.");
+    const inputTokens = world.recorder.inputs.reduce(
+      (sum, step) =>
+        sum +
+        Math.max(
+          step.messageTokens + step.schemaTokens,
+          model === "live" ? (step.reportedInputTokens ?? 0) : 0,
+        ),
+      0,
+    );
+    const budget = evalCase.inputTokenBudget ?? 160_000;
+    if (inputTokens > budget)
+      failures.push(
+        `Input token budget exceeded: ${inputTokens} > ${budget} (message/schema estimates or larger live-provider counts).`,
+      );
     return {
       id: evalCase.id,
       title: evalCase.title,
@@ -120,6 +137,7 @@ export async function runAssistantLaneCase(
       replyText: observation.replyText.slice(0, 600),
       toolRuns: [...observation.toolRuns],
       durationMs: Date.now() - started,
+      inputs: world.recorder.inputs,
       error: null,
     };
   } catch (error) {
@@ -132,6 +150,7 @@ export async function runAssistantLaneCase(
       replyText: "",
       toolRuns: [],
       durationMs: Date.now() - started,
+      inputs: world.recorder.inputs,
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
@@ -172,6 +191,9 @@ export function formatAssistantLaneReport(
   for (const result of results) {
     lines.push(
       `- ${result.passed ? (result.asked ? "PASS (asked)" : "PASS") : "FAIL"} ${result.id} (${Math.round(result.durationMs / 100) / 10}s): ${result.title}`,
+    );
+    lines.push(
+      `  - input steps (message/schema estimates; provider total): ${result.inputs.map((step) => `${step.messageTokens}/${step.schemaTokens}; ${step.reportedInputTokens ?? "unreported"}`).join(" | ")}`,
     );
     for (const failure of result.failures) lines.push(`  - ${failure}`);
     if (result.error) lines.push(`  - error: ${result.error}`);
