@@ -444,11 +444,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       idempotencyKey: identity.resultId,
       ...(startingUrl ? { startingUrl } : {}),
       accountCreationAuthorized: false,
-      // Fill in for me lets no save out: the only write that leaves without
-      // the person's own click is the selected resume (attachment rules).
-      // Saves are Send for me's, under its own authority.
-      intermediateMutationsAuthorized:
-        envelope?.intermediateMutationsAuthorized === true,
+      // The form's own field saves go out as the run fills, as they do when
+      // a person fills the form by hand (Ashby keeps the form only in what
+      // it saved). Fill in for me still presses no form button and sends
+      // nothing shaped like a final submit: the click stays the person's.
+      // Send for me's envelope can still withhold saves.
+      intermediateMutationsAuthorized: envelope
+        ? envelope.intermediateMutationsAuthorized === true
+        : true,
       attachmentUploadsAuthorized: true,
       // No envelope: the browser pins each live form frame's own origin.
       // An envelope, when present, continues to narrow those destinations.
@@ -459,7 +462,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ) => {
         if (
           purpose === "answers" &&
-          envelope?.intermediateMutationsAuthorized !== true
+          envelope &&
+          envelope.intermediateMutationsAuthorized !== true
         )
           return false;
         if (

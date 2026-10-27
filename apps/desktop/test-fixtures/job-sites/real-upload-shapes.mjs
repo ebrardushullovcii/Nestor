@@ -97,6 +97,7 @@ const sites = {
         <span id="chip"></span></div>`,
     script: `
       const render = 'render-' + Math.random().toString(36).slice(2, 10);
+      document.getElementById('application').dataset.render = render;
       const toast = (text) => { document.getElementById('toast').textContent = text; };
       const queries = ${JSON.stringify(ashbyQueries)};
       const graphql = async (operationName, variables) => {

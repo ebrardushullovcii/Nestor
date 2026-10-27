@@ -1481,6 +1481,18 @@ function pressFillsAField(
   return clickable ? FIELD_PART_ROLES.has(clickable.role.toLowerCase()) : false;
 }
 
+/** Whether this run may press the form's own buttons (Send for me). */
+export function pressesFormButtons(
+  config: Pick<
+    ApplyAgentConfig,
+    "pressesFormButtons" | "intermediateWritesAuthorized"
+  >,
+): boolean {
+  return (
+    config.pressesFormButtons ?? config.intermediateWritesAuthorized === true
+  );
+}
+
 function afterWrite(deps: ApplyExecutorDeps, label: string | null): void {
   deps.guardState.hasWritten = true;
   deps.guardState.lastFieldLabel = label;
@@ -1795,7 +1807,7 @@ export async function executeApplyProposal(
       // Fill in for me presses nothing but parts of a field (and links,
       // which only open pages). A Next, Continue or Save is the person's.
       if (
-        deps.config.intermediateWritesAuthorized !== true &&
+        !pressesFormButtons(deps.config) &&
         !pressFillsAField(config, observation, proposal.ref)
       )
         return {

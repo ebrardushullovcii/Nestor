@@ -8,6 +8,7 @@ import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
 import {
   allowPrepareOnlyRunNavigation,
   ensurePrepareOnlyMutationGuard,
+  openPrepareOnlyIntermediateMutationWindow,
   registerPrepareOnlyPreparedValue,
 } from "./playwright-application-flow";
 
@@ -62,15 +63,15 @@ const posts = (): Array<{ path: string; fields: Record<string, unknown> }> => {
   }
 };
 
-async function fillPage(slug: string) {
+async function fillPage(slug: string, fieldSaves = false) {
   const page = await (await browser!.newContext()).newPage();
-  await ensurePrepareOnlyMutationGuard(page, false);
+  await ensurePrepareOnlyMutationGuard(page, fieldSaves);
   const url = `${base}/${slug}/apply/1`;
   allowPrepareOnlyRunNavigation(page, url);
   await page.goto(url);
   const session = createPlaywrightApplyPageSession({ page });
   await session.installPrepareOnlyGuard({
-    intermediateMutationsAuthorized: false,
+    intermediateMutationsAuthorized: fieldSaves,
     attachmentUploadsAuthorized: true,
     allowedOrigins: [],
   });
@@ -130,4 +131,66 @@ test("Ashby: the resume is stored and bound to its field; typed answers are not 
   expect(
     posts().filter((post) => post.path === "/ashby-shape/apply/1"),
   ).toEqual([]);
+});
+
+test("Ashby with field saves: the person's own Submit gets every value Nestor typed", async () => {
+  const { page, session } = await fillPage("ashby-shape", true);
+  const controls = (await session.readPage()).controls;
+  const ref = (id: string) => {
+    const control = controls.find((entry) => entry.id === id)!;
+    return control.ref ?? `c${control.index}`;
+  };
+  // As the executor does for every field: declare the value, open the short
+  // save window, write.
+  for (const [id, value] of [
+    ["_systemfield_name", "Alex Vanguard"],
+    ["_systemfield_email", "alex.vanguard@example.test"],
+  ] as const) {
+    await registerPrepareOnlyPreparedValue(page, value);
+    await openPrepareOnlyIntermediateMutationWindow(page);
+    await session.fillText(ref(id), value);
+    await page.locator(`#${id}`).blur();
+  }
+  await session.uploadFile(ref("_systemfield_resume"), resume);
+  await page.waitForTimeout(1_500);
+  expect(await page.locator("#toast").textContent()).toBe("");
+  // The person's click: Ashby's Submit carries only the form's identifiers.
+  const render = await page.locator("#application").getAttribute("data-render");
+  const submitted = await fetch(
+    `${base}/ashby-shape/api/non-user-graphql?op=ApiSubmitSingleApplicationFormAction`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        operationName: "ApiSubmitSingleApplicationFormAction",
+        variables: {
+          organizationHostedJobsPageName: "replica",
+          formRenderIdentifier: render,
+          jobPostingId: "replica-1",
+          actionIdentifier: "submit",
+        },
+      }),
+    },
+  ).then(
+    (response) =>
+      response.json() as Promise<{
+        data: { submitApplicationFormAction: unknown };
+      }>,
+  );
+  expect(submitted.data.submitApplicationFormAction).toEqual({
+    ok: true,
+    missing: [],
+  });
+  const post = posts().find(
+    (entry) =>
+      entry.path === "/ashby-shape/apply/1" &&
+      entry.fields._systemfield_name === "Alex Vanguard",
+  );
+  expect(post?.fields).toMatchObject({
+    _systemfield_name: "Alex Vanguard",
+    _systemfield_email: "alex.vanguard@example.test",
+    _systemfield_resume: {
+      file: expect.stringContaining(resume.name) as unknown,
+    },
+  });
 });

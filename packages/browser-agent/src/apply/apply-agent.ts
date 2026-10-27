@@ -47,6 +47,7 @@ import {
   fileFieldHoldsOtherFile,
   fillMayOpen,
   pressOnSitePause,
+  pressesFormButtons,
   questionPrompt,
   pickerExhausted,
   pickerQuestionKey,
@@ -2867,7 +2868,7 @@ async function runMeasuredApplyAgent(
             const name = tool.definition.function.name;
             if (
               (name === "follow_link" || name === "navigate") &&
-              config.intermediateWritesAuthorized !== true
+              !pressesFormButtons(config)
             ) {
               let args: Record<string, unknown> = {};
               try {

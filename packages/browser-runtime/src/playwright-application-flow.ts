@@ -842,7 +842,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         .replace(/([a-z0-9])([A-Z])/g, "$1 $2");
     const finalActionSignal = new RegExp(guardInput.finalActionSignal, "iu");
     const intermediateActionSignal =
-      /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;
+      /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|set[-_\s]*(?:form[-_\s]*)?value|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;
     if (
       /\\u[\da-f]{4}|%[\da-f]{2}/iu.test(signal) ||
       finalActionSignal.test(signal) ||
@@ -1799,7 +1799,6 @@ export async function ensurePrepareOnlyMutationGuard(
           : "other";
       const uploadGrant = networkGuardState!.attachmentUploadWindow;
       if (
-        strictFill &&
         resourceKind !== "other" &&
         networkGuardState!.attachmentUploadsAuthorized &&
         classifyUploadBind({

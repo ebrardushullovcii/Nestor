@@ -2541,6 +2541,38 @@ describe("a site that saves as you go", () => {
     }
   });
 
+  test("in Fill with the site's field saves allowed, Next is still the person's", async () => {
+    const page = rawPage({
+      controls: [rawControl({ index: 0, label: "First Name", value: "Robin" })],
+      actions: [{ index: 0, label: "Next", visible: true, disabled: false }],
+    });
+    let pressed = 0;
+    const { config } = configFor(page, {
+      hands: {
+        clickElement: () => {
+          pressed += 1;
+          return Promise.resolve({ ok: true, observedValue: "clicked" });
+        },
+      },
+    });
+    const outcome = await executeApplyProposal(
+      { tool: "click", ref: "a0" },
+      observationOf(page).signature,
+      {
+        config: {
+          ...config,
+          intermediateWritesAuthorized: true,
+          pressesFormButtons: false,
+          safety: safetyThatBlocksOneSave(),
+        },
+        now,
+        guardState: createApplyGuardState(),
+      },
+    );
+    expect(pressed).toBe(0);
+    expect(outcome.kind).toBe("paused");
+  });
+
   test.each([
     ["https://apply.example.test/api/submit?applicationId=42", 0],
     ["https://apply.example.test/form/step-2", 0],
@@ -5118,7 +5150,8 @@ describe("typed answer permissions", () => {
           now,
           guardState: createApplyGuardState(),
           checkWrittenAnswer: check,
-          classifyQuestions: () => Promise.resolve(new Map([[prompt, reading]])),
+          classifyQuestions: () =>
+            Promise.resolve(new Map([[prompt, reading]])),
         },
       );
       expect(outcome.kind).toBe("filled");
@@ -5160,20 +5193,23 @@ describe("typed answer permissions", () => {
             now,
             guardState: createApplyGuardState(),
             checkWrittenAnswer: check,
-            classifyQuestions: () => Promise.resolve(new Map([
-                [
-                  row.question,
-                  {
-                    asksAboutPay: false,
-                    declarationKind: null,
-                    answerTags: {
-                      kind: row.kind as ApplyAnswerTags["kind"],
-                      country: null,
-                      sourceId,
+            classifyQuestions: () =>
+              Promise.resolve(
+                new Map([
+                  [
+                    row.question,
+                    {
+                      asksAboutPay: false,
+                      declarationKind: null,
+                      answerTags: {
+                        kind: row.kind as ApplyAnswerTags["kind"],
+                        country: null,
+                        sourceId,
+                      },
                     },
-                  },
-                ],
-              ])),
+                  ],
+                ]),
+              ),
           },
         );
         expect(outcome.kind).toBe("suggestion");
