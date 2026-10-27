@@ -27,6 +27,7 @@ import {
   SubmissionOutcomeRecordSchema,
   UPLOAD_ATTACHED_ANSWER,
   isUploadRepairPrompt,
+  normalizeFormQuestionPrompt,
   submissionConfirmationSummary,
   isActiveApplicationAuthorityEnvelope,
   type ApplicationAuthorityEnvelope,
@@ -225,6 +226,33 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
    * upload item of the attempt just before this one. The word lasts one
    * attempt and covers only the fields that item named.
    */
+  /**
+   * The picker choices earlier runs tried and the form refused, minus the
+   * questions the person answered in Needs you since the last run. Their
+   * answer says the choice is there; the old refusal (often the fence's,
+   * before a fix) must not refuse it again, nor make their own pick on the
+   * page read as the run's leftover search.
+   */
+  function pickerAttemptsAfterAnswers(
+    row: ApplicationRow,
+    execution: ApplyExecutionResult,
+  ): ApplyExecutionResult["pickerAttempts"] {
+    const answered = new Set(
+      execution.questions
+        .filter(
+          (question) =>
+            applications.needsYou.fieldAnswer(row.id, question.id)?.attempt ===
+            row.attempt - 1,
+        )
+        .map((question) => normalizeFormQuestionPrompt(question.prompt)),
+    );
+    return (execution.pickerAttempts ?? []).map((attempt) =>
+      answered.has(attempt.question)
+        ? { ...attempt, tried: [], notOffered: [] }
+        : attempt,
+    );
+  }
+
   function confirmedUploadFields(row: ApplicationRow): string[] {
     const said = applications.needsYou.fieldAnswer(
       row.id,
@@ -603,7 +631,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             ? { initialQuestionContexts: previous.execution.questionContexts }
             : {}),
           ...(previous?.execution.pickerAttempts?.length
-            ? { initialPickerAttempts: previous.execution.pickerAttempts }
+            ? {
+                initialPickerAttempts: pickerAttemptsAfterAnswers(
+                  row,
+                  previous.execution,
+                ),
+              }
             : {}),
           executionInput: facts,
           applicationRecordId: identity.applicationRecordId,

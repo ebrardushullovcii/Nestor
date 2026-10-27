@@ -43,6 +43,8 @@ const preparation = vi.hoisted(() => ({
   uploadsConfirmed: [] as boolean[],
   /** The files each run was told an earlier attempt attached on its page. */
   earlierFiles: [] as string[][],
+  /** The refused picker choices each run was handed. */
+  pickerTries: [] as string[][],
   /** What each run was given to bring a closed form back. */
   replays: [] as unknown[],
   /** The file field the run saw accepted on the form, if any. */
@@ -60,6 +62,9 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
     ) => {
       preparation.readAnswers = input.readReusableAnswers;
       preparation.replays.push(input.replay ?? null);
+      preparation.pickerTries.push(
+        (input.initialPickerAttempts ?? []).flatMap((attempt) => attempt.tried),
+      );
       preparation.earlierFiles.push(
         (input.earlierAttachments ?? []).map(
           (entry) => `${entry.field}: ${entry.fileName}`,
@@ -397,6 +402,47 @@ it("tells a continue on the same page which files the attempt before it attached
   answer();
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
   expect(preparation.earlierFiles).toEqual([[], ["Resume: resume.pdf"], []]);
+});
+
+it("a picker choice the person answered in Needs you is not refused again on the continue", async () => {
+  const f = await setup(1);
+  preparation.pickerTries.length = 0;
+  const waitingOnCountry = (tried: string[]) =>
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "country",
+          prompt: "What country are you based in?",
+          kind: "location",
+          answerControlType: "single_choice",
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+      pickerAttempts: [
+        {
+          question: "what country are you based in",
+          tried,
+          notOffered: [],
+          offeredOptions: [],
+        },
+      ],
+    });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  // The run's choice was refused (the fence held the list back then).
+  f.releases.shift()!(waitingOnCountry(["kosovo"]));
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  f.applications.needsYou.answer({
+    id: f.applications.needsYou.list().rows[0]!.id,
+    answer: "Kosovo",
+    remember: false,
+  });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  // The person said it is there: the continue may choose it again.
+  expect(preparation.pickerTries).toEqual([[], []]);
 });
 
 it("returns an answer the form still rejects to Needs you instead of failing with an empty inbox", async () => {
