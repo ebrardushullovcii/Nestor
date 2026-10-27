@@ -233,16 +233,14 @@ export function jobPageSql(query: JobListQuery, matches: number): Sql {
   const after = readCursor(query.cursor, columns.length);
   const floorApart = query.minFit !== null && query.sort !== "best_fit";
   const sortMatches = floorApart && matches <= JOB_TOTAL_CAP;
-  const arms = toFilterRanges(query).map(
-    (range) => ({
-      sql: `SELECT ${ROW_COLUMNS} FROM jobs j WHERE ${range.where}${
-        after
-          ? ` AND (${columns.map((c) => `j.${c}`).join(", ")}) < (${columns.map(() => "?").join(", ")})`
-          : ""
-      }`,
-      params: [...range.params, ...(after ?? [])],
-    }),
-  );
+  const arms = toFilterRanges(query).map((range) => ({
+    sql: `SELECT ${ROW_COLUMNS} FROM jobs j WHERE ${range.where}${
+      after
+        ? ` AND (${columns.map((c) => `j.${c}`).join(", ")}) < (${columns.map(() => "?").join(", ")})`
+        : ""
+    }`,
+    params: [...range.params, ...(after ?? [])],
+  }));
   const union = arms.map((arm) => arm.sql).join(" UNION ALL ");
   const order = `ORDER BY ${columns.map((c) => `${c} DESC`).join(", ")} LIMIT ?`;
   return {

@@ -77,4 +77,3 @@ export function handlePermitFit(req, res, url, { send }) {
   }
   return true;
 }
-

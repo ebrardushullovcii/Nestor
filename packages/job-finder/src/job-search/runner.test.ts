@@ -965,13 +965,15 @@ test("quick-stopped validated cards record successful access, while later auth e
   expect(createSearchSourcesStore(store).list({}).rows[0]?.message).toContain(
     "partial",
   );
-  engine.collectSource.mockImplementation(() => Promise.resolve({
-    cards: [],
-    complete: false,
-    needsYou: true,
-    pagesRead: 1,
-    notes: [],
-  }));
+  engine.collectSource.mockImplementation(() =>
+    Promise.resolve({
+      cards: [],
+      complete: false,
+      needsYou: true,
+      pagesRead: 1,
+      notes: [],
+    }),
+  );
   await runner.start({ postedWithin: "any" });
   await finished(runner);
   expect(sites.get(1)?.health).toBe("needs_sign_in");

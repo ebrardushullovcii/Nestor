@@ -15,7 +15,12 @@ const countryLabel = (country: string) => {
     return country;
   }
 };
-const countryChoices = new Set(ISO_COUNTRY_CODES.flatMap((code) => [code.toLowerCase(), countryLabel(code).toLowerCase()]));
+const countryChoices = new Set(
+  ISO_COUNTRY_CODES.flatMap((code) => [
+    code.toLowerCase(),
+    countryLabel(code).toLowerCase(),
+  ]),
+);
 
 /** This detail read runs only after the filtered Found list is empty. */
 export function useEmptyFitSummary(
@@ -60,7 +65,9 @@ export function emptyFitReason(
         : `${dominant.count} of ${summary.total}`;
     const missing =
       countries &&
-      (summary.workCountries ?? []).every((saved) => countryChoices.has(saved.toLowerCase())) &&
+      (summary.workCountries ?? []).every((saved) =>
+        countryChoices.has(saved.toLowerCase()),
+      ) &&
       dominant.countries.every(
         (code) =>
           !(summary.workCountries ?? []).some(

@@ -84,11 +84,11 @@ export function assessFitWorkLocation(
     (job.workModes.some((mode) => mode === "onsite" || mode === "hybrid") ||
       ((kind === "onsite" || kind === "hybrid") && quoted));
   const permissionScopes = [
-      ...profile.workEligibility.authorizedWorkCountries,
-      ...(profile.workEligibility.limitedWorkPermissions ?? []).map(
-        (permission) => permission.country,
-      ),
-    ];
+    ...profile.workEligibility.authorizedWorkCountries,
+    ...(profile.workEligibility.limitedWorkPermissions ?? []).map(
+      (permission) => permission.country,
+    ),
+  ];
   const authorized = new Set(
     permissionScopes.flatMap((country) => {
       const code = fitCountryCode(country, true);
@@ -97,7 +97,9 @@ export function assessFitWorkLocation(
   );
   // Regions and other textual permission scopes need the model's interpretation.
   // An ISO lookup cannot turn their compatible verdict into missing permission.
-  const permission = intersects(authorized, countries) || permissionScopes.some((scope) => !fitCountryCode(scope, true));
+  const permission =
+    intersects(authorized, countries) ||
+    permissionScopes.some((scope) => !fitCountryCode(scope, true));
   if (
     (physical || kind === "country_remote") &&
     countries.size > 0 &&

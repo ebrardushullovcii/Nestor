@@ -367,14 +367,40 @@ test.each([
 
 test("regional authorization stays with the model rather than an ISO country lookup", async () => {
   const [fit] = await fitJobs({
-    profile: CandidateProfileSchema.parse({ ...profile, currentCountry: "Germany", currentLocation: "Berlin",
-      workEligibility: { authorizedWorkCountries: ["European Union"] } }),
-    jobs: [{ ...job, location: "Berlin, Germany", workModes: ["onsite"], description: "Work onsite in Berlin, Germany. Current work authorization required." }],
+    profile: CandidateProfileSchema.parse({
+      ...profile,
+      currentCountry: "Germany",
+      currentLocation: "Berlin",
+      workEligibility: { authorizedWorkCountries: ["European Union"] },
+    }),
+    jobs: [
+      {
+        ...job,
+        location: "Berlin, Germany",
+        workModes: ["onsite"],
+        description:
+          "Work onsite in Berlin, Germany. Current work authorization required.",
+      },
+    ],
     goals: { targetRoles: ["Software Engineer"], locations: ["Berlin"] },
-    client: { chatWithTools: () => Promise.resolve({ content: JSON.stringify({ fits: [{
-      id: 1, s: 90, why: "Relevant work and authorized location", r: ["strong", "Relevant work"], p: ["aligned", "EU authorization covers this job"], c: ["strong", "Direct evidence"],
-      e: ["compatible", "Work onsite in Berlin", "onsite", "DE"],
-    }] }) }) },
+    client: {
+      chatWithTools: () =>
+        Promise.resolve({
+          content: JSON.stringify({
+            fits: [
+              {
+                id: 1,
+                s: 90,
+                why: "Relevant work and authorized location",
+                r: ["strong", "Relevant work"],
+                p: ["aligned", "EU authorization covers this job"],
+                c: ["strong", "Direct evidence"],
+                e: ["compatible", "Work onsite in Berlin", "onsite", "DE"],
+              },
+            ],
+          }),
+        }),
+    },
   });
   expect(fit?.score).toBe(90);
 });
