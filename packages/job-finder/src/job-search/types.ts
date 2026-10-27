@@ -32,6 +32,8 @@ export interface JobSearchRunnerDeps {
     browser?: number;
     fit?: number;
   };
+  /** Sites read in the browser at once, read at each search: the Speed setting. */
+  browserPages?: () => number;
 }
 
 export interface JobSearchRunner {

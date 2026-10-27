@@ -10,6 +10,9 @@ import {
   UpdateAiBehaviorInputSchema,
   UpdateApplicationDefaultsInputSchema,
   UpdateWorkspaceBehaviorInputSchema,
+  SPEED_LEVELS,
+  speedLevelOf,
+  speedLevelValues,
   collapsesSideMenuWithAssistant,
   writesResumesOnShortlist,
   WrittenAnswerLengthSchema,
@@ -21,6 +24,11 @@ import type { AssistantToolContext } from "../tool-kit";
 import { argText, AssistantToolError, defineTool, json } from "../tool-kit";
 import { readAssistantWorkState } from "../work-state";
 
+const describeLevel = (level: keyof typeof SPEED_LEVELS) => {
+  const limits = SPEED_LEVELS[level];
+  return `${limits.searchPages} search pages, ${limits.applyAtOnce} applications at once, ${limits.waitingPages} waiting pages kept open`;
+};
+
 const SETTINGS_LABELS: Record<string, string> = {
   applicationAutomationMode: "Apply mode",
   resumeTemplateId: "Resume template",
@@ -31,6 +39,7 @@ const SETTINGS_LABELS: Record<string, string> = {
   collapseSideMenuWithAssistant:
     "Collapse the side menu while the assistant is open",
   writeResumesOnShortlist: "Write resumes when I shortlist",
+  speedLevel: "Speed",
   tailoringMode: "Resume level",
   searchSelectivity: "Search selectivity",
 };
@@ -111,6 +120,10 @@ export const readSettingsTool = defineTool({
           snapshot.settings,
         ),
         writeResumesOnShortlist: writesResumesOnShortlist(snapshot.settings),
+        speed: {
+          level: speedLevelOf(snapshot.settings),
+          ...SPEED_LEVELS[speedLevelOf(snapshot.settings)],
+        },
         activityPaused: snapshot.activityControl.paused ?? false,
         templates: snapshot.availableResumeTemplates.map((template) => ({
           id: template.id,
@@ -228,13 +241,17 @@ export const updateWorkspaceBehaviorTool = defineTool({
   name: "update_workspace_behavior",
   group: "settings",
   description:
-    "Changes whether the left side menu folds to icons while this assistant sidebar is open (Settings > App & device), and whether a resume starts writing as soon as a job is shortlisted (Settings > AI behavior > Resumes). Send only the fields to change.",
+    "Changes whether the left side menu folds to icons while this assistant sidebar is open (Settings > App & device), whether a resume starts writing as soon as a job is shortlisted (Settings > AI behavior > Resumes), and Speed (Settings > App & device): how many pages and applications Job Finder runs at once. Send only the fields to change.",
   parameters: json.object({
     collapseSideMenuWithAssistant: json.boolean(
       "On (the default) folds the side menu while the assistant is open.",
     ),
     writeResumesOnShortlist: json.boolean(
       "On (the default) starts writing a job's resume at its level as soon as it is shortlisted. Off leaves resumes for the person to create.",
+    ),
+    speedLevel: json.enumOf(
+      [...speedLevelValues],
+      `standard (the default: ${describeLevel("standard")}), faster (${describeLevel("faster")}) or maximum (${describeLevel("maximum")}). Faster levels use more memory and spend AI limits sooner; change it only when the person asks.`,
     ),
   }),
   input: UpdateWorkspaceBehaviorInputSchema,
@@ -255,7 +272,9 @@ export const updateWorkspaceBehaviorTool = defineTool({
           .map(([key, value]) =>
             typeof value === "boolean"
               ? `${SETTINGS_LABELS[key] ?? key}: ${value ? "on" : "off"}`
-              : (SETTINGS_LABELS[key] ?? key),
+              : key === "speedLevel"
+                ? `Speed: ${SPEED_LEVELS[value as keyof typeof SPEED_LEVELS].label}`
+                : (SETTINGS_LABELS[key] ?? key),
           )
           .join(", ") || "workspace settings"
       }`,

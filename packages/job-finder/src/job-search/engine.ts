@@ -78,13 +78,18 @@ export function createListingSearchEngine(deps: {
     "readRenderedPage" | "runAgentDiscovery"
   >;
   aiClient: JobFinderAiClient;
+  /** Browser pages a search reads at once, read live: the Speed setting. */
+  browserPages?: () => number;
 }): JobSearchEngine {
   if (!deps.aiClient.chatWithTools)
     throw new Error("Search needs an available AI model.");
   const client = { chatWithTools: deps.aiClient.chatWithTools };
   const onUsage = (usage: ModelTokenUsage, stage: string) =>
     console.info("[Job search AI]", JSON.stringify({ stage, ...usage }));
-  const browser = createHostQueue({ limit: 2, perHost: 1 });
+  const browser = createHostQueue({
+    limit: () => deps.browserPages?.() ?? 2,
+    perHost: 1,
+  });
   const decisions = new Map<string, Map<string, boolean>>();
   const readPage = createHttpPageReader({
     readRendered: (url, options) => {

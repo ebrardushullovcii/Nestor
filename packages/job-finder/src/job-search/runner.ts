@@ -142,7 +142,7 @@ export function createJobSearchRunner(
       perHost: concurrency(deps.concurrency?.perHost, 2),
     });
     const browser = createHostQueue({
-      limit: concurrency(deps.concurrency?.browser, 2),
+      limit: concurrency(deps.concurrency?.browser ?? deps.browserPages?.(), 2),
       perHost: 1,
     });
     let fitError: string | null = null;

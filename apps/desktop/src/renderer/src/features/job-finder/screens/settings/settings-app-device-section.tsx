@@ -12,6 +12,7 @@ import {
 } from "@renderer/lib/theme";
 import { useRegisterSettingsDirtySection } from "./settings-dirty-sections";
 import { SettingsSectionSaveControl } from "./settings-section-save-control";
+import { SettingsSpeedControl } from "./settings-speed-control";
 import {
   hasOutstandingSectionChanges,
   useSettingsSectionSave,
@@ -242,6 +243,12 @@ export function SettingsAppDeviceSection({
             : {})}
           label="Collapse the side menu while the assistant is open"
           onCheckedChange={updateCollapseSideMenu}
+        />
+      ) : null}
+      {onUpdateWorkspaceBehavior ? (
+        <SettingsSpeedControl
+          onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
+          settings={settings}
         />
       ) : null}
     </section>

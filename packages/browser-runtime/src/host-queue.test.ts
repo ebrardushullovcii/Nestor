@@ -64,3 +64,36 @@ test("cancelling queued or unresponsive active work releases its slot and consum
   expect(queue.active).toBe(0);
   hanging.release();
 });
+
+test("a limit read from a setting applies to the next start", async () => {
+  let limit = 1;
+  const queue = createHostQueue({ limit: () => limit, perHost: 1 }),
+    a = gate(),
+    b = gate();
+  const signal = new AbortController().signal,
+    started: string[] = [];
+  const tasks = [
+    queue.run("a", signal, async () => {
+      started.push("a");
+      await a.promise;
+    }),
+    queue.run("b", signal, async () => {
+      started.push("b");
+      await b.promise;
+    }),
+    queue.run("c", signal, () => {
+      started.push("c");
+      return Promise.resolve();
+    }),
+  ];
+  await Promise.resolve();
+  expect(started).toEqual(["a"]);
+  limit = 3;
+  a.release();
+  await tasks[0];
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  // Both waiting hosts start once the limit allows; their order is fair, not fixed.
+  expect([...started].sort()).toEqual(["a", "b", "c"]);
+  b.release();
+  await Promise.all(tasks);
+});

@@ -125,7 +125,7 @@ export interface ApplicationServiceDeps {
     signal: AbortSignal;
     personClicked?: boolean;
   }): Promise<ApplicationAuthorityEnvelope | null>;
-  concurrency?: number;
+  concurrency?: number | (() => number);
   instructionMode?(input: {
     conversationId: string;
     jobId: number;
@@ -157,9 +157,15 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   const active = new Map<number, AbortController>();
   const waiting = new Map<number, number>();
   const opening = new Map<number, Promise<boolean>>();
-  const capacity = applicationPreparationConcurrency(
-    String(deps.concurrency ?? 4),
-  );
+  // Read at each pump, so a Speed change applies to the next application.
+  const capacity = () =>
+    applicationPreparationConcurrency(
+      String(
+        typeof deps.concurrency === "function"
+          ? deps.concurrency()
+          : (deps.concurrency ?? 4),
+      ),
+    );
   const onError =
     deps.onError ?? ((error: unknown) => console.error("[Apply]", error));
   let stopped = true;
@@ -1394,7 +1400,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return;
     }
     pumping = (async () => {
-      while (!stopped && active.size < capacity && !(await deps.isPaused())) {
+      while (!stopped && active.size < capacity() && !(await deps.isPaused())) {
         const row = applications.claimNext();
         if (!row) break;
         const controller = new AbortController();

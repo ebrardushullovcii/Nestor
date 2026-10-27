@@ -129,7 +129,9 @@ describe("SettingsScreen scoped section saves", () => {
     // The three themes are one segmented control of ordinary buttons with
     // aria-pressed, so they are addressable by role "button" and their
     // pressed state is exposed without radio semantics.
-    const themeGroup = within(appDevice).getByRole("group");
+    const themeGroup = within(appDevice).getByRole("group", {
+      name: "Appearance",
+    });
     expect(
       themeGroup.hasAttribute("data-settings-appearance-theme-group"),
     ).toBe(true);
@@ -208,9 +210,13 @@ describe("SettingsScreen scoped section saves", () => {
     // The staged choice survived the external settings prop refresh.
     expect(stillStagedChoice.getAttribute("aria-checked")).toBe("true");
 
-    expect(within(screen.getByRole("region", { name: "App & device" }))
-      .getByRole("switch", { name: "Collapse the side menu while the assistant is open" })
-      .getAttribute("aria-checked")).toBe("false");
+    expect(
+      within(screen.getByRole("region", { name: "App & device" }))
+        .getByRole("switch", {
+          name: "Collapse the side menu while the assistant is open",
+        })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
 
     expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
     expect(callbacks.onUpdateAiBehavior.mock.calls[0]?.[0]).toMatchObject({
@@ -375,6 +381,4 @@ describe("SettingsScreen scoped section saves", () => {
 
     view.unmount();
   });
-
-
 });

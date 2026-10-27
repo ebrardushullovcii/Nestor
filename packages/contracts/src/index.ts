@@ -42,6 +42,7 @@ export * from "./starter-job-sources";
 export * from "./diagnostic-export";
 export * from "./performance";
 export * from "./workspace";
+export * from "./speed";
 export * from "./job-search-campaigns";
 export * from "./job-finder-intelligence";
 export * from "./application-crm";
