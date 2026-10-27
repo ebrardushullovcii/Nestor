@@ -80,6 +80,18 @@ const cases: Array<{
     expected: "review",
   },
   {
+    name: "working with customers worldwide does not establish a work region",
+    location: "United States",
+    body: "You work with customers worldwide.",
+    evidence: [
+      "compatible",
+      "work with customers worldwide",
+      "broader_remote",
+      "US",
+    ],
+    expected: "review",
+  },
+  {
     name: "explicit worldwide hiring may broaden a US location",
     location: "United States",
     body: "We hire remotely worldwide.",
@@ -172,6 +184,36 @@ test("recorded work permission and relocation willingness are separate facts", (
       evidence,
     ).status,
   ).toBe("review");
+});
+
+test("worldwide recruitment does not waive a published onsite requirement", () => {
+  expect(
+    assessFitWorkLocation(
+      profile,
+      {
+        location: "United States",
+        description: "We hire worldwide.",
+        workModes: ["onsite"],
+      },
+      ["compatible", "We hire worldwide", "broader_remote", "US"],
+    ).status,
+  ).toBe("blocked");
+});
+
+test("missing passages retain an explanation for an uncertain verdict", () => {
+  const result = assessFitWorkLocation(
+    profile,
+    {
+      location: "New York City",
+      description: "Build software.",
+      workModes: [],
+    },
+    ["review", "", "unknown", "US"],
+  );
+  expect(result.status).toBe("review");
+  expect(result.reason).toBe(
+    "Your work location or permission needs checking.",
+  );
 });
 
 test("a saved country-choice fallback permits its offered list, never onsite work permission", () => {

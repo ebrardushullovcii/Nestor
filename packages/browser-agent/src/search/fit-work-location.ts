@@ -37,7 +37,9 @@ export function assessFitWorkLocation(
   evidence: FitLocationEvidence,
   fallbacks: readonly SavedOptionFallback[] = [],
 ): { status: Eligibility; reason: string } {
-  const [status, reason, kind, inferredCountries] = evidence;
+  const [status, passage, kind, inferredCountries] = evidence;
+  const reason =
+    passage.trim() || "Your work location or permission needs checking.";
   if (status === "blocked") return { status, reason };
   const currentCode = fitCountryCode(profile.currentCountry || "", true);
   const current = new Set(currentCode ? [currentCode] : []);
@@ -47,7 +49,7 @@ export function assessFitWorkLocation(
     : fitCountryCodes(inferredCountries);
   const foreign =
     current.size > 0 && countries.size > 0 && !intersects(current, countries);
-  const quote = normalized(reason);
+  const quote = normalized(passage);
   const body = normalized(job.description);
   const location = normalized(job.location ?? "");
   const quoted =
@@ -65,7 +67,7 @@ export function assessFitWorkLocation(
       quote,
     );
   const workScope =
-    /\b(work|working|hire|hiring|remote|remotely|based|reside|residents|candidates|applicants|eligible)\b/u.test(
+    /\b(hire|hiring|remote|remotely|based|reside|residents|candidates|applicants|eligible)\b|\bwork(?:ing)? (?:from|anywhere|throughout)\b/u.test(
       quote,
     );
   const broader =
@@ -74,7 +76,11 @@ export function assessFitWorkLocation(
     ((body.includes(quote) && workScope) ||
       (!countries.size && location.includes(quote)));
   const physical =
-    !(kind === "broader_remote" && broader) &&
+    !(
+      kind === "broader_remote" &&
+      broader &&
+      /\b(remote|remotely|work from|work anywhere)\b/u.test(quote)
+    ) &&
     (job.workModes.some((mode) => mode === "onsite" || mode === "hybrid") ||
       ((kind === "onsite" || kind === "hybrid") && quoted));
   const authorized = new Set(
@@ -109,13 +115,14 @@ export function assessFitWorkLocation(
   )
     return { status, reason };
   if (kind === "offered_list" && quoted) {
+    const offered = fitCountryCodes(inferredCountries);
     const accepted =
-      intersects(current, countries) ||
+      intersects(current, offered) ||
       fallbacks.some(
         (rule) =>
           (sameSavedChoice(rule.primary, profile.currentCountry ?? "") ||
             intersects(current, fitCountryCodes(rule.primary))) &&
-          intersects(countries, fitCountryCodes(rule.fallback)),
+          intersects(offered, fitCountryCodes(rule.fallback)),
       );
     if (accepted) return { status, reason };
     return {
