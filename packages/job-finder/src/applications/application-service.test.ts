@@ -1010,6 +1010,52 @@ it("opens a restored Ready form without preparing or authorizing a send again", 
   expect(f.authorizeSending).not.toHaveBeenCalled();
 });
 
+it("brings back a form waiting on a question after a restart, still waiting with the same item", async () => {
+  const f = await setup(1);
+  const waitingOnQuestion = () =>
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "office",
+          prompt: "Which office would you work from?",
+          kind: "other",
+          answerControlType: "text",
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(waitingOnQuestion());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const task = f.applications.needsYou.list().rows[0]!;
+  f.service.stop();
+  const restarted = createApplicationService(f.deps);
+  cleanups.unshift(() => restarted.stop());
+  await restarted.start();
+  const row = f.applications.listApplications().rows[0]!;
+  expect(row.state).toBe("needs_you");
+  expect(f.applications.needsYou.list().rows.map((item) => item.id)).toEqual([
+    task.id,
+  ]);
+  // The restart closed the page: Open refills the form.
+  f.browser.focusApplicationPageBinding.mockResolvedValue(false);
+  expect(await restarted.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.shift()!(waitingOnQuestion());
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
+  );
+  expect(f.applications.needsYou.list().rows.map((item) => item.id)).toEqual([
+    task.id,
+  ]);
+  expect(f.applications.getApplication(row.id)?.mode).toBe(row.mode);
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
 it("refills a lost Ready form through the bounded queue and never revives its send instruction", async () => {
   const f = await setup(1);
   f.deps.instructionMode = () => Promise.resolve("autonomous_submit");

@@ -1531,13 +1531,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (!row || !work || !["ready", "needs_you"].includes(row.state))
       return false;
     const key = applicationIdentity(id, work.attempt).resultId;
-    const fileHandover =
-      row.state === "needs_you" &&
-      work.execution.questions.some(
-        (question) =>
-          question.status === "detected" &&
-          question.answerControlType === "file",
-      );
     let focused = await browser.focusApplicationPageBinding?.(
       "target_site",
       key,
@@ -1566,7 +1559,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       waiting.set(id, work.attempt);
       return true;
     }
-    if (row.state !== "ready" && !fileHandover) return false;
+    // The page is gone (a restart closes them all): refill the form, and a
+    // form still waiting on the person stops at the same items again.
     await closePage(id, work.attempt).catch(onError);
     const queued = applications.reprepareForReview(id, row.attempt);
     if (queued) wake();
