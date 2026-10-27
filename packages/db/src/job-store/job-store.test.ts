@@ -439,6 +439,9 @@ describe("job store", () => {
       belowFloorCapped: false,
     });
     // 10–50 sit under 60; unscored jobs are not below it.
+    expect(store.countJobs({ stage: "found", minFit: 0 })).toBe(10);
+    expect(store.countJobs({ stage: "found", minFit: 60 })).toBe(5);
+    expect(store.listJobs({ stage: "found", minFit: 0 }).belowFloor).toBe(0);
     expect(store.listJobs({ stage: "found", minFit: 60 }).belowFloor).toBe(5);
     // The text filter applies: only the engineers (10–60) count.
     expect(

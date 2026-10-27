@@ -159,13 +159,18 @@ export function FindJobsScreen() {
         .run("count_jobs", filter)
         .then((result) => result.total),
   });
-  const prioritizeVisible = useCallback((rows: readonly JobRow[]) => {
-    if (stage === "found" && rows.length) {
-      void window.nestor.jobs
-        .run("prioritize_fit", { ids: rows.slice(0, 200).map((row) => row.id) })
-        .catch(() => undefined);
-    }
-  }, [stage]);
+  const prioritizeVisible = useCallback(
+    (rows: readonly JobRow[]) => {
+      if (stage === "found" && rows.length) {
+        void window.nestor.jobs
+          .run("prioritize_fit", {
+            ids: rows.slice(0, 200).map((row) => row.id),
+          })
+          .catch(() => undefined);
+      }
+    },
+    [stage],
+  );
   const actions = TRIAGE_ACTIONS[stage];
 
   // A job asked for by link stays open even when it is not on the first page.
