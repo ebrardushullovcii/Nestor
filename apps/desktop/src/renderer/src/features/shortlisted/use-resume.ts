@@ -43,6 +43,7 @@ export function useResume(jobId: number | null) {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const latest = useRef({ jobId, resume, draft, dirty });
   const saving = useRef(new Map<number, Promise<boolean>>());
+  const loadSequence = useRef(0);
   const conflicted = useRef(false);
   const unsaved = useRef(
     new Map<number, { resume: StoredResume; draft: ResumeDraft }>(),
@@ -50,8 +51,10 @@ export function useResume(jobId: number | null) {
   latest.current = { jobId, resume, draft, dirty };
 
   const load = useCallback(async (id: number) => {
+    const sequence = ++loadSequence.current;
     const view = await window.nestor.resumes.run("get_resume", { jobId: id });
-    if (latest.current.jobId !== id) return;
+    if (sequence !== loadSequence.current || latest.current.jobId !== id)
+      return;
     if (saving.current.has(id)) return;
     if (
       latest.current.resume &&
@@ -98,7 +101,9 @@ export function useResume(jobId: number | null) {
 
   /** Something else changed this job: show it, unless the person is typing. */
   const refresh = useCallback(() => {
-    if (latest.current.jobId !== null) void load(latest.current.jobId);
+    return latest.current.jobId !== null
+      ? load(latest.current.jobId)
+      : Promise.resolve();
   }, [load]);
 
   // Writing finishing, an approval elsewhere or the Assistant's edit.
@@ -107,7 +112,7 @@ export function useResume(jobId: number | null) {
       window.nestor.jobs.onChange((change) => {
         const id = latest.current.jobId;
         if (id !== null && (change.ids === null || change.ids.includes(id)))
-          refresh();
+          void refresh();
       }),
     [refresh],
   );
@@ -218,7 +223,7 @@ export function useResume(jobId: number | null) {
     setDirty(false);
     setSaveError(null);
     setSaveStatus("saved");
-    refresh();
+    void refresh();
   }, [refresh]);
 
   return {
@@ -236,6 +241,5 @@ export function useResume(jobId: number | null) {
     saveMyEdits,
     loadSaved,
     refresh,
-    setResume,
   };
 }

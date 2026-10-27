@@ -228,7 +228,16 @@ export function createResumeService(deps: ResumeServiceDeps) {
   }
 
   function setLevel(jobId: number, level: ResumeLevel) {
-    const resume = resumes.setLevel(jobId, level);
+    if (level === "original") running.get(jobId)?.abort();
+    const resume = store.transaction(() => {
+      const changed = resumes.setLevel(jobId, level);
+      if (level !== "original") return changed;
+      // Original reuses the imported file. Finish it in this transaction so
+      // neither an old writer nor a queued command reply can hold approval up.
+      resumes.startWriting(jobId, level);
+      resumes.finishWriting(jobId, null);
+      return resumes.get(jobId)!;
+    });
     pump();
     return resume;
   }

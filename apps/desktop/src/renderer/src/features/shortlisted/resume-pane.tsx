@@ -109,7 +109,7 @@ export function ResumePane(props: {
     setBusy(true);
     try {
       const next = await work();
-      if (next) view.setResume(next);
+      if (next) await view.refresh();
       return next;
     } catch (error) {
       showToast({ title: describeError(error), tone: "warning" });
@@ -137,7 +137,10 @@ export function ResumePane(props: {
     if (!changed) return;
     showToast({
       id: `resume-level-${job.id}`,
-      title: `Rewriting at ${LEVEL_LABEL[next]}`,
+      title:
+        next === "original"
+          ? "Using your original resume"
+          : `Rewriting at ${LEVEL_LABEL[next]}`,
       ...(wasApproved
         ? {
             description:
@@ -155,7 +158,7 @@ export function ResumePane(props: {
                 : {}),
             }),
           ).then((undone) => {
-            if (undone) view.refresh();
+            if (undone) void view.refresh();
           }),
       },
     });

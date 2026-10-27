@@ -5,6 +5,9 @@ import {
   ResumeDraftSchema,
   type JobChange,
   type JobDetail,
+  type ResumeCommandInput,
+  type ResumeCommandName,
+  type ResumeCommandOutputs,
   type StoredResume,
 } from "@nestor/contracts";
 import { useResume } from "./use-resume";
@@ -80,6 +83,40 @@ beforeEach(() => {
   });
 });
 afterEach(cleanup);
+
+it("keeps the newer read when an older queued snapshot arrives with the same timestamp", async () => {
+  const { result } = renderHook(() => useResume(1));
+  await waitFor(() => expect(result.current.resume?.state).toBe("ready"));
+  const read = window.nestor.resumes.run.bind(window.nestor.resumes);
+  let finish!: () => void;
+  const heldRead = <K extends ResumeCommandName>(
+    name: K,
+    input: ResumeCommandInput<K>,
+  ): Promise<ResumeCommandOutputs[K]> => {
+    if (name !== "get_resume") return read(name, input);
+    return new Promise<ResumeCommandOutputs["get_resume"]>((resolve) => {
+      finish = () =>
+        resolve({
+          job: { id: 1, title: "Designer" } as JobDetail,
+          resume: { ...saved, state: "queued" },
+          templates: [],
+        });
+    }) as Promise<ResumeCommandOutputs[K]>;
+  };
+  vi.spyOn(window.nestor.resumes, "run").mockImplementationOnce(heldRead);
+  act(() => {
+    void result.current.refresh();
+  });
+  await waitFor(() => expect(finish).toBeDefined());
+  await act(async () => {
+    await result.current.refresh();
+  });
+  await act(async () => {
+    finish();
+    await Promise.resolve();
+  });
+  expect(result.current.resume?.state).toBe("ready");
+});
 
 it("opens another job while the previous job is still saving", async () => {
   const { result, rerender } = renderHook(({ id }) => useResume(id), {
