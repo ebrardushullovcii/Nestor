@@ -5,7 +5,14 @@ import { describe, expect, it } from "vitest";
 import { RESUME_LANE_CASES } from "./cases";
 
 import type { EvalHttpCapture } from "../contracts";
-import { assessFacts, flagsLeft, inventedFacts, levelVerdicts } from "./checks";
+import {
+  assessFacts,
+  flagsLeft,
+  inventedFacts,
+  levelVerdicts,
+  levelShape,
+  workHistoryProblem,
+} from "./checks";
 import {
   rescoreResumeLane,
   scoreCase,
@@ -27,6 +34,42 @@ SKILLS
 React, TypeScript, accessibility`;
 const LISTING =
   "You will build dashboards in React. Experience with Kubernetes and Go is a plus. Datadog monitors everything.";
+
+it.each(["original", "light", "tailored", "aggressive"] as const)(
+  "%s fails when every work-history entry or its section is hidden",
+  (level) => {
+    for (const hideSection of [false, true]) {
+      const value = draft([]);
+      value.sections[0]!.included = !hideSection;
+      value.sections[0]!.entries[0]!.included = hideSection;
+      const result = scoreCase(RESUME_LANE_CASES[0]!, [
+        {
+          level,
+          draft: value,
+          error: null,
+          seconds: 0,
+          modelCalls: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+        },
+      ])[0]!;
+      expect(result.shape.workHistory?.expected).toBeGreaterThan(0);
+      expect(result.shape.workHistory?.visible).toBe(0);
+      expect(result.levelProblem).toMatch(/Dropped all work history/);
+    }
+  },
+);
+
+it("does not invent a work-history requirement for a person without roles", () => {
+  const shape = levelShape({
+    draft: draft([]),
+    source: SOURCE,
+    listing: LISTING,
+    title: "Engineer",
+    expectedExperienceIds: [],
+  });
+  expect(workHistoryProblem(shape)).toBeNull();
+});
 
 function draft(bullets: string[], headline = "Senior Software Engineer") {
   const bullet = (text: string, index: number) => ({

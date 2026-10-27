@@ -98,6 +98,71 @@ function setup(
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it.each(["light", "tailored", "aggressive"] as const)(
+    "%s keeps every saved role when the writer proposes omitting the work history",
+    async (level) => {
+      const seed = createSeed();
+      const { store, id } = setup();
+      const base = createDeterministicJobFinderAiClient();
+      const draft = await writeResume(
+        {
+          aiClient: {
+            ...base,
+            createResumeDraft: async (input) => ({
+              ...(await base.createResumeDraft(input)),
+              experienceEntries: [],
+              coverageMetadata: input.profile.experiences.map((role) => ({
+                profileRecordId: role.id,
+                classification: "omitted" as const,
+                careerFamilyFit: "unrelated" as const,
+                reasons: ["Shorten unrelated work."],
+                reviewGuidance: [],
+                coversMeaningfulGap: false,
+              })),
+            }),
+          },
+          documentManager: {
+            listResumeTemplates: () => [],
+            renderResumeArtifact: () =>
+              Promise.reject(new Error("No preview needed")),
+          },
+        },
+        { ...seed, job: store.getJob(id)!, level },
+      );
+      const section = draft?.sections.find(
+        (section) => section.kind === "experience",
+      );
+      expect(section?.included).toBe(true);
+      expect(
+        section?.entries
+          .filter((entry) => entry.included)
+          .map((entry) => entry.profileRecordId)
+          .sort(),
+      ).toEqual(
+        seed.profile.experiences
+          .filter((role) => !role.isDraft)
+          .map((role) => role.id)
+          .sort(),
+      );
+      for (const role of seed.profile.experiences.filter(
+        (role) => !role.isDraft,
+      )) {
+        const entry = section?.entries.find(
+          (entry) => entry.profileRecordId === role.id,
+        );
+        expect(entry).toMatchObject({
+          title: role.title,
+          subtitle: role.companyName,
+          startDate: role.startDate,
+          endDate: role.endDate,
+          isCurrent: role.isCurrent,
+          summary: null,
+        });
+        expect(entry?.bullets.some((bullet) => bullet.included)).toBe(false);
+      }
+    },
+  );
+
   it.each([
     ["Product designer using Kubernetes for the listed platform work.", true],
     ["Product designer with 8 years of experience.", true],

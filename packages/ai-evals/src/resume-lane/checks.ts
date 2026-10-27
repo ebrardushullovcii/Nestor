@@ -300,6 +300,7 @@ const contentWords = (text: string) =>
     .filter((word) => word.length > 2 && !STOP.has(word));
 
 export interface LevelShape {
+  workHistory?: { expected: number; visible: number };
   /**
    * Edit size: the share of the summary's and bullets' words that are not in
    * the source resume. 0 means the person's own words.
@@ -315,19 +316,47 @@ export function levelShape(input: {
   source: string;
   listing: string;
   title: string;
+  expectedExperienceIds?: readonly string[];
+  originalUnchanged?: boolean;
 }): LevelShape {
+  const expected = new Set(input.expectedExperienceIds ?? []);
+  const workHistory = {
+    expected: expected.size,
+    visible: input.originalUnchanged
+      ? expected.size
+      : new Set(
+          input.draft?.sections
+            .filter(
+              (section) => section.kind === "experience" && section.included,
+            )
+            .flatMap((section) => section.entries)
+            .filter(
+              (entry) =>
+                entry.included &&
+                entry.entryType === "experience" &&
+                Boolean(entry.title?.trim() || entry.subtitle?.trim()),
+            )
+            .map((entry) => entry.profileRecordId ?? entry.id) ?? [],
+        ).size,
+  };
   const sourceWords = new Set(contentWords(input.source));
   const shared = [...listingNames(input.listing, input.title)].filter((name) =>
     ` ${fold(input.source)} `.includes(` ${fold(name)} `),
   );
   if (!input.draft)
-    return { editSize: 0, truthfulKeywordCoverage: 0, headline: null };
+    return {
+      editSize: 0,
+      truthfulKeywordCoverage: 0,
+      headline: null,
+      workHistory,
+    };
   const lines = draftLines(input.draft);
   const written = lines
     .filter((line) => ["summary", "bullet", "text"].includes(line.where))
     .flatMap((line) => contentWords(line.text));
   const text = ` ${fold(lines.map((line) => line.text).join(" "))} `;
   return {
+    workHistory,
     editSize: written.length
       ? written.filter((word) => !sourceWords.has(word)).length / written.length
       : 0,
@@ -359,6 +388,13 @@ export function flagsLeft(draft: ResumeDraft | null): string[] {
 /** The edit size Light may not exceed: small, clear wording fixes. */
 export const LIGHT_MAX_EDIT = 0.25;
 
+export function workHistoryProblem(shape: LevelShape): string | null {
+  const history = shape.workHistory;
+  return history && history.expected > 0 && history.visible === 0
+    ? `Dropped all work history (0/${history.expected} roles).`
+    : null;
+}
+
 /**
  * Whether each level does what its name says. Every level must invent
  * nothing (0 invented facts); then Original sends the imported file
@@ -384,11 +420,14 @@ export function levelVerdicts(
       ? `${shape.inventedCount} invented ${shape.inventedCount === 1 ? "fact" : "facts"}.`
       : null;
   if (original)
-    verdicts.original = original.unchanged
-      ? null
-      : "Original did not send the imported resume unchanged.";
+    verdicts.original =
+      workHistoryProblem(original) ??
+      (original.unchanged
+        ? null
+        : "Original did not send the imported resume unchanged.");
   if (light)
     verdicts.light =
+      workHistoryProblem(light) ??
       invented(light) ??
       (light.editSize > LIGHT_MAX_EDIT
         ? `Light edited ${pct(light.editSize)} of words (at most ${pct(LIGHT_MAX_EDIT)}).`
@@ -397,12 +436,14 @@ export function levelVerdicts(
           : null);
   if (tailored)
     verdicts.tailored =
+      workHistoryProblem(tailored) ??
       invented(tailored) ??
       (light && tailored.editSize <= light.editSize
         ? `Tailored edited ${pct(tailored.editSize)}, no more than Light's ${pct(light.editSize)}.`
         : null);
   if (aggressive)
     verdicts.aggressive =
+      workHistoryProblem(aggressive) ??
       invented(aggressive) ??
       (!aggressive.headline ||
       !fold(roleTitle).includes(fold(aggressive.headline))
