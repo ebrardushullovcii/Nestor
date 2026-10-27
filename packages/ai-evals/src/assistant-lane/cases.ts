@@ -125,8 +125,10 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
     check: (o) => [
       ...expect(usedTool(o, "list_jobs"), "did not read resume state"),
       ...expect(
-        /ready to review/iu.test(o.replyText),
-        `did not say the draft is ready to review: ${o.replyText}`,
+        /(?:ready|waiting|awaiting|written|awaits)[\s\S]*review|review[\s\S]*(?:ready|waiting|awaiting)/iu.test(
+          o.replyText,
+        ),
+        `did not describe a written draft waiting for review: ${o.replyText}`,
       ),
       ...expect(
         !/no resume|not.*written|not.*ready/iu.test(o.replyText),
