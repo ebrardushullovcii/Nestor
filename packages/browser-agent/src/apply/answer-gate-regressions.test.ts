@@ -217,6 +217,68 @@ test("an Address accepts the recorded locality's spelling and country, never a d
   expect((await check("Munchen, Austria"))[0]?.supported).toBe(false);
 });
 
+test("a locality alias needs the person's answer once, then passes repeated Send checks", async () => {
+  const src = sources();
+  src.profile.currentCity = "Prishtina";
+  src.profile.currentCountry = "Kosovo";
+  const s = setup(field("Address", { groupLabel: "Address" }), src);
+  const answer = "Pristina, Kosovo";
+  const tags: ApplyAnswerTags = {
+    kind: "other",
+    country: null,
+    sourceId: "profile.currentCity",
+  };
+  const fill = () =>
+    executeApplyProposal(
+      { tool: "type", ref: "c0", text: answer },
+      s.observation().signature,
+      {
+        config: s.config,
+        guardState: createApplyGuardState(),
+        classifyQuestions: readTags(tags),
+        now: () => new Date(at),
+      },
+    );
+  const client: LLMClient = {
+    chatWithTools: () =>
+      Promise.resolve(
+        call("report_question_kinds", {
+          plainIndexes: [0],
+          flagged: [],
+          tags: [{ index: 0, ...tags }],
+        }),
+      ),
+  };
+  const check = () =>
+    checkClassifiedApplicationAnswers({
+      client,
+      sources: src,
+      payDisclosed: false,
+      answers: [{ question: "Address", answer }],
+      formControls: s.observation().controls,
+      formContext: { pageText: s.page.bodyText, fields: [] },
+    });
+  expect((await fill()).kind).not.toBe("filled");
+  expect((await check())[0]?.supported).toBe(false);
+  expect(s.fillText).not.toHaveBeenCalled();
+  src.reusableAnswers = [
+    {
+      id: "person-address",
+      kind: "other",
+      label: "Address",
+      question: "Address",
+      answer,
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  expect((await fill()).kind).toBe("filled");
+  expect(s.fillText).toHaveBeenCalledExactlyOnceWith("c0", answer);
+  expect((await check())[0]?.supported).toBe(true);
+  expect((await check())[0]?.supported).toBe(true);
+  expect(src.profile.currentCity).toBe("Prishtina");
+});
+
 test("a requested LinkedIn URL fills from Profile and passes Send", async () => {
   const label = "Please share your LinkedIn URL";
   const src = sources();

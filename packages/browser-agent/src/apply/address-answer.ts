@@ -11,7 +11,7 @@ export const addressLabels = [
   "current address",
 ];
 
-/** Locality spelling and punctuation only; no fuzzy match or invented street. */
+/** Formatting only; different locality spellings need the person's answer. */
 export function addressAnswerMatches(
   recorded: string,
   answer: string,
@@ -35,12 +35,7 @@ export function addressAnswerMatches(
     const locality = name
       ? text.slice(0, text.length - name.length).trim()
       : text;
-    // Public names for this one locality, never a transliteration heuristic.
-    const city =
-      code === "XK" && /^(?:prishtina|prishtine|pristina)$/u.test(locality)
-        ? "pristina"
-        : locality;
-    return name ? `${city} ${code}`.trim() : city;
+    return name ? `${locality} ${code}`.trim() : locality;
   };
   const expected = canonical(recorded),
     actual = canonical(answer);
