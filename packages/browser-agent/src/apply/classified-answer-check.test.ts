@@ -3,6 +3,7 @@ import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
 import { concreteClaimsSupported } from "./concrete-answer-claims";
+import { buildApplyFormObservation } from "./page-hands";
 import type { ApplyFormControl } from "./types";
 
 test("motivation cannot turn a posting requirement into an applicant fact", () => {
@@ -397,4 +398,95 @@ test("a preapproved routine declaration remains a sourced answer, while a gated 
       })
     )[0]?.supported,
   ).toBe(false);
+});
+
+test("a Yes the person picked on a Yes/No pair is checked on that pair, not a stand-in text field", async () => {
+  const question = "Are you in an European time zone?";
+  // Ashby's Yes/No: two option buttons (Yes pressed) and its hidden box.
+  const formControls = buildApplyFormObservation(
+    {
+      url: "https://jobs.example.test/acme/1/application",
+      title: "Apply",
+      bodyText: question,
+      controls: [
+        {
+          index: 0,
+          tagName: "input",
+          inputType: "checkbox",
+          role: "",
+          id: "",
+          name: "tz",
+          label: question,
+          groupLabel: "",
+          placeholder: "",
+          autocomplete: "",
+          required: true,
+          invalid: false,
+          validationMessage: "",
+          disabled: false,
+          readOnly: false,
+          visible: false,
+          value: "on",
+          checked: true,
+          multiple: false,
+          options: [],
+          selectedOptionLabel: "",
+        },
+      ],
+      actions: [
+        {
+          index: 0,
+          label: "Yes",
+          visible: true,
+          disabled: false,
+          section: question,
+          pressed: true,
+          sectionRequired: true,
+        },
+        {
+          index: 1,
+          label: "No",
+          visible: true,
+          disabled: false,
+          section: question,
+          pressed: false,
+          sectionRequired: true,
+        },
+      ],
+      links: [],
+      headings: [],
+      clickables: [],
+      openedTabs: [],
+      loading: false,
+      validationErrors: [],
+      stepLabel: null,
+    },
+    "2026-10-27T07:30:00.000Z",
+  ).controls;
+  const saved = {
+    id: "application_application:146",
+    kind: "other" as const,
+    label: question,
+    question,
+    answer: "Yes",
+    roleFamilies: [],
+    proofEntryIds: [],
+  };
+  const sourceId = `answerLibrary.${saved.id}`;
+  const checks = await checkClassifiedApplicationAnswers({
+    client: reader(
+      formControls.map((_control, index) => ({
+        index,
+        kind: "other",
+        country: null,
+        sourceId,
+      })),
+    ),
+    sources: { ...sources, reusableAnswers: [saved] },
+    answers: [{ question, answer: "Yes" }],
+    formContext: { pageText: question, fields: [] },
+    formControls,
+    payDisclosed: false,
+  });
+  expect(checks).toEqual([expect.objectContaining({ supported: true })]);
 });
