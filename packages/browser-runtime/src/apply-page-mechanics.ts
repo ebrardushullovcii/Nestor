@@ -560,6 +560,10 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                         ? actionElement.formMethod
                         : form.method) || "GET"
                     ).toUpperCase(),
+                    submitsForm:
+                      button?.type === "submit" ||
+                      input?.type === "submit" ||
+                      input?.type === "image",
                   }
                 : {}),
             };
@@ -595,8 +599,19 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
         `f${frameIndex}`,
       ),
       frame.locator(APPLY_CLICKABLE_SELECTOR).evaluateAll(
-        (elements, prefix): RawApplyClickable[] =>
+        (elements, [prefix, owned]): RawApplyClickable[] =>
           elements.slice(0, 300).flatMap((element, index) => {
+            // A button already has its own ref, with its form's action:
+            // neither it nor anything inside it (a label span, an icon),
+            // across shadow roots, is a second name to press it under.
+            for (
+              let node: Element | null = element;
+              node;
+              node =
+                node.parentElement ??
+                ((node.getRootNode() as ShadowRoot).host || null)
+            )
+              if (node.matches(owned)) return [];
             const html = element as HTMLElement;
             const style = window.getComputedStyle(html);
             const label = (
@@ -622,7 +637,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               },
             ];
           }),
-        `f${frameIndex}`,
+        [`f${frameIndex}`, APPLY_ACTION_SELECTOR] as const,
       ),
       frame
         .locator("h1, h2, h3, [role='heading']")
@@ -1299,6 +1314,10 @@ export function collectApplyDocumentSnapshot(
                   ? actionElement.formMethod
                   : form.method) || "GET"
               ).toUpperCase(),
+              submitsForm:
+                button?.type === "submit" ||
+                input?.type === "submit" ||
+                input?.type === "image",
             }
           : {}),
       };
@@ -1368,6 +1387,17 @@ export function collectApplyDocumentSnapshot(
     () =>
       ((elements: Element[]): RawApplyClickable[] =>
         elements.slice(0, 300).flatMap((element, index) => {
+          // A button already has its own ref, with its form's action:
+          // neither it nor anything inside it (a label span, an icon),
+          // across shadow roots, is a second name to press it under.
+          for (
+            let node: Element | null = element;
+            node;
+            node =
+              node.parentElement ??
+              ((node.getRootNode() as ShadowRoot).host || null)
+          )
+            if (node.matches(selectors.actions)) return [];
           const html = element as HTMLElement;
           const style = window.getComputedStyle(html);
           const rect = html.getBoundingClientRect();

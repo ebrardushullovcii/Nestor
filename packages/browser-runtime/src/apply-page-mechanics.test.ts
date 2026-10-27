@@ -95,6 +95,77 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
+  test.each([
+    [
+      "a button the clickable selector also matches",
+      `<form><label>Name <input name="name"></label><button type="submit" onclick="void 0" data-testid="apply">Apply</button></form>`,
+    ],
+    [
+      "a label span inside the button",
+      `<form><label>Name <input name="name"></label><button type="submit"><span data-testid="apply-label">Apply</span></button></form>`,
+    ],
+    [
+      "a form inside a shadow root",
+      `<role-form></role-form><script>customElements.define("role-form", class extends HTMLElement { connectedCallback() { this.attachShadow({ mode: "open" }).innerHTML = '<form><label>Name <input name="name"></label><button type="submit"><span data-testid="apply-label">Apply</span></button></form>'; } });</script>`,
+    ],
+    [
+      "a form inside a frame",
+      `<iframe srcdoc='<form><label>Name <input name="name"></label><button type="submit"><span data-testid="apply-label">Apply</span></button></form>'></iframe>`,
+    ],
+  ])(
+    "a submit button has one ref, with its form's action: %s",
+    async (_case, html) => {
+      const page = await browser.newPage();
+      try {
+        await page.setContent(html);
+        await page.waitForTimeout(200);
+        const read = await readRawApplyPage(page);
+        expect(
+          read.clickables.filter((entry) => /apply/iu.test(entry.label)),
+        ).toEqual([]);
+        expect(
+          read.actions.filter((action) => action.label === "Apply"),
+        ).toEqual([
+          expect.objectContaining({ submitsForm: true, formMethod: "GET" }),
+        ]);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  test("the detached read gives a button and what it holds one ref too", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(
+        `<form><label>Name <input name="name"></label><button type="submit" onclick="void 0"><span data-testid="apply-label">Apply</span></button><button type="button">Clear</button></form>`,
+      );
+      const source = `(${collectApplyDocumentSnapshot.toString()})(Array.from(document.querySelectorAll(${JSON.stringify(Object.values(APPLY_PAGE_SELECTORS).join(", "))})),${JSON.stringify(APPLY_PAGE_SELECTORS)},true)`;
+      const native =
+        await page.evaluate<ReturnType<typeof collectApplyDocumentSnapshot>>(
+          source,
+        );
+      expect(
+        native.clickables.filter((entry: { label: string }) =>
+          /apply/iu.test(entry.label),
+        ),
+      ).toEqual([]);
+      expect(
+        native.actions.map(
+          (action: { label: string; submitsForm?: boolean }) => [
+            action.label,
+            action.submitsForm,
+          ],
+        ),
+      ).toEqual([
+        ["Apply", true],
+        ["Clear", false],
+      ]);
+    } finally {
+      await page.close();
+    }
+  });
+
   test("a custom checkbox reads its state, never its icons' fallback text", async () => {
     // Workable's consent box: a div with the checkbox role around a hidden
     // native input and three icons, each with an SVG fallback in its desc.

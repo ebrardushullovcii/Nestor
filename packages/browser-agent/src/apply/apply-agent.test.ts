@@ -8,7 +8,11 @@ import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/appl
 import emptiedAttach from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/emptied-required-attach.json";
 import { describe, expect, test, vi } from "vitest";
 
-import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
+import type {
+  RawApplyAction,
+  RawApplyControl,
+  RawApplyPage,
+} from "@nestor/contracts";
 import type { LLMClient } from "../agent/contracts";
 import { runApplyAgent } from "./apply-agent";
 import {
@@ -9032,6 +9036,104 @@ describe("a picker the person filled on the page survives the continue", () => {
       repeatingModel("finish", { reason: "Looks complete" }),
     );
     expect(result.outcome).toBe("paused");
+  });
+});
+
+describe("a button that submits its form but reads as neither a step nor its send is the person's", () => {
+  // Askable: a contact-only role form whose one button, "Apply", submits
+  // the form; its handler posts the answers with fetch.
+  const sendForMe = {
+    authority: {
+      mode: "autonomous_submit" as const,
+      submitAuthorized: true,
+      preApprovedAttestationKinds: [],
+      salaryDisclosure: "pause_for_user" as const,
+      allowedOrigins: ["https://apply.example.test"],
+    },
+  };
+  const fillInForMe = {
+    authority: {
+      ...sendForMe.authority,
+      mode: "confirm_before_submit" as const,
+    },
+  };
+  const apply = (index = 0, label = "Apply"): RawApplyAction => ({
+    index,
+    label,
+    visible: true,
+    disabled: false,
+    formAction: "https://apply.example.test/roles/engineer",
+    formMethod: "GET",
+    submitsForm: true,
+  });
+  const email = (): RawApplyControl => ({
+    ...nameControl(),
+    index: 1,
+    id: "email",
+    name: "email",
+    inputType: "email",
+    label: "Email",
+    value: "robin@example.test",
+  });
+  const handedOver = (result: ApplyAgentResult) =>
+    result.pauses.flatMap((pause) =>
+      (pause.questions ?? []).map((question) => question.prompt),
+    );
+  const pages: Array<[string, () => RawApplyPage]> = [
+    [
+      "Askable's role form",
+      () => page({ controls: [nameControl(), email()], actions: [apply()] }),
+    ],
+    [
+      "a newsletter box with an email and Apply",
+      () => page({ controls: [email()], actions: [apply()] }),
+    ],
+  ];
+  const modes = [
+    ["Send for me", sendForMe],
+    ["Fill in for me", fillInForMe],
+  ] as const;
+
+  for (const [mode, authority] of modes)
+    test.each(pages)(
+      `${mode}: %s is handed over, and Apply is never pressed`,
+      async (_case, source) => {
+        for (const model of [
+          repeatingModel("click", { ref: "a0" }),
+          repeatingModel("finish", { reason: "The form is complete." }),
+        ]) {
+          const input = config(source(), authority);
+          const pressed = vi.fn(input.hands.clickAction);
+          const clicked = vi.fn(input.hands.clickElement);
+          input.hands.clickAction = pressed;
+          input.hands.clickElement = clicked;
+          const result = await runApplyAgent(input, model);
+          expect(pressed).not.toHaveBeenCalled();
+          expect(clicked).not.toHaveBeenCalled();
+          expect(result.outcome).toBe("paused");
+          expect(result.readyToSend).toBeNull();
+          expect(result.reason).toBe(
+            `This form's button "Apply" may send your application; press it yourself when you're ready.`,
+          );
+          expect(handedOver(result)).toContain(
+            `Press "Apply" on the site yourself when you're ready`,
+          );
+        }
+      },
+    );
+
+  test("a submit button that reads as the send stays the send", async () => {
+    const result = await runApplyAgent(
+      config(
+        page({
+          controls: [nameControl()],
+          actions: [apply(0, "Submit application")],
+        }),
+        sendForMe,
+      ),
+      repeatingModel("finish", { reason: "The form is complete." }),
+    );
+    expect(result.outcome).toBe("ready_to_send");
   });
 });
 

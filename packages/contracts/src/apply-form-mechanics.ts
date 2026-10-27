@@ -91,6 +91,8 @@ export interface RawApplyAction extends RawApplyPlacement {
   formAction?: string;
   /** HTTP method of the form this action would submit, if any. */
   formMethod?: string;
+  /** Pressing it submits its form: a submit button or input, not type=button. */
+  submitsForm?: boolean;
   /** A toggle button's `aria-pressed` state; absent on ordinary buttons. */
   pressed?: boolean;
 }

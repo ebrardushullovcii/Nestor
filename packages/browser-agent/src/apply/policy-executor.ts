@@ -73,6 +73,7 @@ import type {
   ApplyAnswer,
   ApplyAttachedDocument,
   ApplyFilledControl,
+  ApplyFormAction,
   ApplyFormControl,
   ApplyFormObservation,
   ApplyPause,
@@ -1682,6 +1683,43 @@ export function pressOnSitePause(pressed: string, at: Date): ApplyPause {
   };
 }
 
+/**
+ * A button that submits its form but reads as neither a step (Next,
+ * Continue) nor the form's send. It may send the application, and nothing
+ * on the page says so for certain, so the run never presses it.
+ */
+export function unrecognizedSubmit(action: ApplyFormAction): boolean {
+  return action.submitsForm === true && action.kind === "other";
+}
+
+/**
+ * The handover for that button, in either mode: Fill in for me leaves the
+ * click to the person anyway; in Send for me it is a Needs you item, and the
+ * person presses it in their own window.
+ */
+export function formSendPause(label: string, at: Date): ApplyPause {
+  const pause = pressOnSitePause(`"${label}"`, at);
+  const summary = `This form's button "${label}" may send your application; press it yourself when you're ready.`;
+  const question = {
+    ...pause.question!,
+    prompt: `Press "${label}" on the site yourself when you're ready`,
+    note: summary,
+  };
+  return {
+    ...pause,
+    summary,
+    question,
+    questions: [question],
+    blocker: pause.blocker && {
+      ...pause.blocker,
+      summary,
+      detail: summary,
+      nextActionLabel: `Press "${label}" yourself`,
+    },
+    formSend: true,
+  };
+}
+
 /** Whether this run may press the form's own buttons (Send for me). */
 export function pressesFormButtons(
   config: Pick<
@@ -1969,6 +2007,14 @@ export async function executeApplyProposal(
 
   switch (proposal.tool) {
     case "click": {
+      const submits = observation.actions.find(
+        (action) => action.ref === proposal.ref,
+      );
+      if (submits && unrecognizedSubmit(submits))
+        return {
+          kind: "paused",
+          pause: formSendPause(submits.label, deps.now()),
+        };
       const control = findControl(observation, proposal.ref);
       if (control?.kind === "checkbox" || control?.kind === "radio") {
         // A click changes an answer just as set_checkbox does. Keep consent

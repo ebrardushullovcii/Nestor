@@ -31,6 +31,12 @@
 // in that order, then the file, with XMLHttpRequest. Storage answers 204.
 // A failed upload shows an error under the field and clears it.
 //
+// A contact-only role form (Askable's shape): Name, Email, Phone and one
+// required consent box in a form with no method or action of its own. Its
+// Apply button submits the form; the page's handler stops the native submit,
+// checks the fields, and posts them as JSON with fetch to the site's own
+// route. Only once that answers ok does it go on to the thank-you page.
+//
 // Lever: the résumé input posts the file, renamed with spaces and other
 // punctuation turned into underscores, and the form's public `accountId` to
 // `/parseResume` with XMLHttpRequest. The answer fills the fields the person
@@ -449,6 +455,58 @@ sites["workable-shape"] = {
       });`,
 };
 
+sites["contact-form-shape"] = {
+  title: "Software Engineer, AI Tasks",
+  company: "Contact Form Replica",
+  // The form element is the page's own: no method, no action.
+  page: () => `
+      <form id="role-form" data-role="software-engineer" data-apply-endpoint="/contact-form-shape/api/apply" data-thankyou="/contact-form-shape/thanks">
+        <p><label for="name">Name</label><input id="name" name="name" required><span data-err="name"></span></p>
+        <p><label for="email">Email</label><input id="email" name="email" type="email" required><span data-err="email"></span></p>
+        <p><label for="phone">Phone, including country code</label><input id="phone" name="phone" type="tel" required><span data-err="phone"></span></p>
+        <p class="chk"><input id="consent" name="consent" type="checkbox" required><label for="consent">The company can contact me about this role. I have read the privacy policy.</label><span data-err="consent"></span></p>
+        <span data-err="submit" role="alert"></span>
+        <button type="submit" data-testid="apply">Apply</button>
+      </form>`,
+  script: `
+      const form = document.getElementById('role-form');
+      const setErr = (name, message) => { form.querySelector('[data-err="' + name + '"]').textContent = message || ''; };
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        let ok = true;
+        for (const name of ['name', 'email', 'phone']) {
+          const value = form.elements[name].value.trim();
+          setErr(name, value ? '' : 'Required');
+          if (!value) ok = false;
+        }
+        if (!form.elements.phone.value.trim().startsWith('+')) { setErr('phone', 'Include your country code, starting with +.'); ok = false; }
+        setErr('consent', form.elements.consent.checked ? '' : 'Please agree before continuing');
+        if (!form.elements.consent.checked) ok = false;
+        if (!ok) return;
+        const button = form.querySelector('button[type="submit"]');
+        button.disabled = true;
+        fetch(form.getAttribute('data-apply-endpoint'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            role: form.getAttribute('data-role'),
+            name: form.elements.name.value.trim(),
+            email: form.elements.email.value.trim(),
+            phone: form.elements.phone.value.trim(),
+          }),
+        })
+          .then((response) => response.json().then((data) => ({ response, data })))
+          .then(({ response, data }) => {
+            if (!response.ok || !data.ok) throw new Error(data.error || String(response.status));
+            location.href = data.next || form.getAttribute('data-thankyou');
+          })
+          .catch(() => {
+            button.disabled = false;
+            setErr('submit', 'Something went wrong sending your application. Please try again.');
+          });
+      });`,
+};
+
 sites["lever-shape"] = {
   title: "Embedded Engineer",
   company: "Posting Replica",
@@ -617,7 +675,7 @@ export async function handleRealUploadShapes(
   { send, readPost, logPost },
 ) {
   const [, slug, rest = ""] =
-    /^\/(ashby-shape|greenhouse-shape|lever-shape|workable-shape)(\/.*)?$/u.exec(
+    /^\/(ashby-shape|greenhouse-shape|lever-shape|workable-shape|contact-form-shape)(\/.*)?$/u.exec(
       url.pathname,
     ) ?? [];
   if (!slug) return false;
@@ -701,6 +759,15 @@ export async function handleRealUploadShapes(
     });
     return true;
   }
+  if (rest === "/api/apply" && req.method === "POST") {
+    logPost(url.pathname, await readPost(req));
+    json(res, 200, { ok: true, next: `/${slug}/thanks` });
+    return true;
+  }
+  if (rest === "/thanks") {
+    send(200, "<h1>Thanks for applying</h1><p>We'll be in touch.</p>");
+    return true;
+  }
   if (rest === "/apply/1" && req.method === "POST") {
     logPost(url.pathname, await readPost(req));
     send(200, "<h1>Thank you! Your application has been received.</h1>");
@@ -714,8 +781,9 @@ export async function handleRealUploadShapes(
     return true;
   }
   if (rest === "/apply/1") {
-    const body =
-      slug === "ashby-shape"
+    const body = site.page
+      ? site.page()
+      : slug === "ashby-shape"
         ? // Ashby's page has no <form>; Submit has no type, like its Yes/No buttons.
           `<div id="application">${site.form()}<button id="send">Submit Application</button></div>`
         : `<form method="post" action="/${slug}/apply/1" enctype="multipart/form-data">

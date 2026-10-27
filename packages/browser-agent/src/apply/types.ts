@@ -129,6 +129,8 @@ export interface ApplyFormAction extends ApplyPlacement {
   disabled: boolean;
   formAction?: string;
   formMethod?: string;
+  /** Pressing it submits its form (a submit button, not type=button). */
+  submitsForm?: boolean;
 }
 
 /** What a link on the page opens, read from the address itself. */
@@ -430,6 +432,8 @@ export interface ApplyPause {
    */
   questions?: ApplicationAttemptQuestion[];
   blocker: ApplyBlocker | null;
+  /** A button that may send the form, handed to the person in either mode. */
+  formSend?: true;
 }
 
 export interface ApplyFilledControl {

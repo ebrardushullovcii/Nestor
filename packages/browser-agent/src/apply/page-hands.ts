@@ -322,6 +322,7 @@ export function buildApplyFormObservation(
     disabled: rawAction.disabled,
     ...(rawAction.formAction ? { formAction: rawAction.formAction } : {}),
     ...(rawAction.formMethod ? { formMethod: rawAction.formMethod } : {}),
+    ...(rawAction.submitsForm ? { submitsForm: true } : {}),
     ...placementOf(rawAction),
   }));
 
