@@ -295,26 +295,30 @@ function buildOrderedContentFingerprint(value: unknown): string {
   return JSON.stringify(value) ?? "undefined";
 }
 
+function profileEditorDirtyFields(dirtyFields: unknown): unknown {
+  // Permissions are one compared-and-replaced value, not id-bearing records.
+  // RHF can mark removal of its last row with an empty dirty array; preserve
+  // that structural edit instead of adopting the saved list again.
+  if (
+    isRecord(dirtyFields) &&
+    isRecord(dirtyFields.eligibility) &&
+    Array.isArray(dirtyFields.eligibility.limitedWorkPermissions)
+  ) {
+    return {
+      ...dirtyFields,
+      eligibility: { ...dirtyFields.eligibility, limitedWorkPermissions: true },
+    };
+  }
+  return dirtyFields;
+}
+
 export function buildCanonicalAwareProfilePayload(input: {
   draftValues: ProfileEditorValues;
   dirtyFields: unknown;
   latestResumeImportReviewCandidates: readonly ResumeImportFieldCandidateSummary[];
   profile: CandidateProfile;
 }) {
-  // Permissions are one compared-and-replaced value, not id-bearing records.
-  // RHF can mark removal of its last row with an empty dirty array; preserve
-  // that structural edit instead of adopting the saved list again.
-  let dirtyFields = input.dirtyFields;
-  if (
-    isRecord(dirtyFields) &&
-    isRecord(dirtyFields.eligibility) &&
-    Array.isArray(dirtyFields.eligibility.limitedWorkPermissions)
-  ) {
-    dirtyFields = {
-      ...dirtyFields,
-      eligibility: { ...dirtyFields.eligibility, limitedWorkPermissions: true },
-    };
-  }
+  const dirtyFields = profileEditorDirtyFields(input.dirtyFields);
   // Saving only sources must preserve the profile's exact saved values.
   // Round-tripping untouched editor fields can normalize resume inputs.
   const hasDirtyField = (value: unknown): boolean =>
@@ -897,13 +901,16 @@ export function useProfileScreenForms(input: {
 
     // Meaningful external update while dirty: merge the fresh canonical
     // editor values under the kept dirty edits.
+    const dirtyProfileFields = profileEditorDirtyFields(
+      profileForm.formState.dirtyFields,
+    );
     const mergeOutcome = mergeDirtyEditorValues(
       createProfileEditorValues(
         input.profile,
         input.latestResumeImportReviewCandidates,
       ),
       draftValues,
-      profileForm.formState.dirtyFields,
+      dirtyProfileFields,
     );
 
     if (
@@ -918,7 +925,7 @@ export function useProfileScreenForms(input: {
           input.latestResumeImportReviewCandidates,
         ),
         draftValues,
-        profileForm.formState.dirtyFields,
+        dirtyProfileFields,
         pendingOwnSave.current
           ? createProfileEditorValues(
               pendingOwnSave.current.profile,

@@ -262,7 +262,7 @@ describe("useProfileScreenForms background-snapshot durability", () => {
         ],
       },
     });
-    const { result } = renderProfileScreenForms(
+    const { result, rerender } = renderProfileScreenForms(
       createInput({ profile: saved }),
     );
     act(() => {
@@ -273,6 +273,17 @@ describe("useProfileScreenForms background-snapshot durability", () => {
         .limitedWorkPermissions,
     ).toEqual([]);
     expect(result.current.draftDiffers).toBe(true);
+    rerender(createInput({ profile: { ...saved, currentLocation: "Berlin" } }));
+    expect(
+      result.current.draftProfileResult.payload?.workEligibility
+        .limitedWorkPermissions,
+    ).toEqual([]);
+    expect(
+      result.current.profileForm.getValues(
+        "eligibility.limitedWorkPermissions",
+      ),
+    ).toEqual([]);
+    expect(result.current.hasBackgroundConflict).toBe(false);
   });
 
   it("adopts a clean assistant reorder and remains clean", () => {
