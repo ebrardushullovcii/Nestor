@@ -95,6 +95,35 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
+  test("a custom checkbox reads its state, never its icons' fallback text", async () => {
+    // Workable's consent box: a div with the checkbox role around a hidden
+    // native input and three icons, each with an SVG fallback in its desc.
+    const page = await browser.newPage();
+    try {
+      await page.setContent(
+        `<label data-ui="gdpr"><div role="checkbox" aria-checked="true" aria-labelledby="consent-label" tabindex="0"><input tabindex="-1" aria-hidden="true" type="checkbox" name="gdpr" checked style="position:absolute;opacity:0">ICON ICON ICON</div><span id="consent-label"><span>I have read and accept the Privacy Notice.</span></span></label>`.replace(
+          /ICON/g,
+          '<svg aria-hidden="true" viewBox="0 0 14 14" width="16" height="16"><desc aria-hidden="true"><p>SVGs not supported by this browser.</p></desc><g><path d="M1 1h12v12H1z"></path></g></svg>',
+        ),
+      );
+      const source = `(${collectApplyDocumentSnapshot.toString()})(Array.from(document.querySelectorAll(${JSON.stringify(Object.values(APPLY_PAGE_SELECTORS).join(", "))})),${JSON.stringify(APPLY_PAGE_SELECTORS)},true)`;
+      const native =
+        await page.evaluate<ReturnType<typeof collectApplyDocumentSnapshot>>(
+          source,
+        );
+      const automated = await readRawApplyPage(page);
+      for (const read of [native.controls, automated.controls]) {
+        const box = read.find(
+          (control: { role: string }) => control.role === "checkbox",
+        )!;
+        expect(box).toMatchObject({ checked: true, value: "" });
+        expect(JSON.stringify(read)).not.toContain("SVGs not supported");
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
   test("full text and link reads retain the tail of a long listing page", async () => {
     const page = await browser.newPage();
     try {

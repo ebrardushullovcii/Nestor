@@ -196,7 +196,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             const clone = element.cloneNode(true) as Element;
             clone
               .querySelectorAll(
-                "input, textarea, select, [role='option'], [role='listbox']",
+                "input, textarea, select, svg, [role='option'], [role='listbox']",
               )
               .forEach((control) => control.remove());
             return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -332,6 +332,16 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             }
             return false;
           };
+          // The words a person sees in an element: no icons, nothing hidden from
+          // assistive technology, no scripts or styles.
+          const shownText = (element: HTMLElement): string => {
+            const clone = element.cloneNode(true) as HTMLElement;
+            for (const hidden of clone.querySelectorAll(
+              "svg, [aria-hidden='true'], script, style, template",
+            ))
+              hidden.remove();
+            return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
+          };
           // A text box that is a calendar's (a date picker): its class or its
           // picker's says date, or it asks for a date. It takes a date, read as
           // one, never words like "Immediately". (An open calendar beside a field
@@ -373,7 +383,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 const clone = ancestor.cloneNode(true) as HTMLElement;
                 clone
                   .querySelectorAll(
-                    "input, textarea, select, button, [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i]",
+                    "input, textarea, select, button, svg, [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i]",
                   )
                   .forEach((candidate) => candidate.remove());
                 const text = (clone.textContent ?? "")
@@ -476,7 +486,12 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 input?.value ??
                 textarea?.value ??
                 select?.value ??
-                html.textContent ??
+                // A custom checkbox or radio answers with its state; its
+                // text is its option at most, never an icon's fallback
+                // ("SVGs not supported by this browser.").
+                (role === "checkbox" || role === "radio"
+                  ? shownText(html)
+                  : html.textContent) ??
                 "",
               checked:
                 input?.checked ??
@@ -764,7 +779,9 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
     ) {
       const clone = box.cloneNode(true) as Element;
       clone
-        .querySelectorAll("button, a, input, select, textarea, [role='button']")
+        .querySelectorAll(
+          "button, a, input, select, textarea, svg, [role='button']",
+        )
         .forEach((node) => node.remove());
       const nearby = words(clone);
       if (nearby.length > 300) break;
@@ -861,7 +878,9 @@ export function collectApplyDocumentSnapshot(
     ) {
       const clone = box.cloneNode(true) as Element;
       clone
-        .querySelectorAll("button, a, input, select, textarea, [role='button']")
+        .querySelectorAll(
+          "button, a, input, select, textarea, svg, [role='button']",
+        )
         .forEach((node) => node.remove());
       const nearby = words(clone);
       if (nearby.length > 300) break;
@@ -905,7 +924,7 @@ export function collectApplyDocumentSnapshot(
       const clone = element.cloneNode(true) as Element;
       clone
         .querySelectorAll(
-          "input, textarea, select, [role='option'], [role='listbox']",
+          "input, textarea, select, svg, [role='option'], [role='listbox']",
         )
         .forEach((control) => control.remove());
       return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -979,7 +998,7 @@ export function collectApplyDocumentSnapshot(
         const clone = ancestor.cloneNode(true) as HTMLElement;
         clone
           .querySelectorAll(
-            "input, textarea, select, button, [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i]",
+            "input, textarea, select, button, svg, [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i]",
           )
           .forEach((candidate) => candidate.remove());
         const nearby = (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -1113,6 +1132,16 @@ export function collectApplyDocumentSnapshot(
       }
       return false;
     };
+    // The words a person sees in an element: no icons, nothing hidden from
+    // assistive technology, no scripts or styles.
+    const shownText = (element: HTMLElement): string => {
+      const clone = element.cloneNode(true) as HTMLElement;
+      for (const hidden of clone.querySelectorAll(
+        "svg, [aria-hidden='true'], script, style, template",
+      ))
+        hidden.remove();
+      return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
+    };
     // A text box that is a calendar's (a date picker): its class or its
     // picker's says date, or it asks for a date. It takes a date, read as
     // one, never words like "Immediately". (An open calendar beside a field
@@ -1200,7 +1229,11 @@ export function collectApplyDocumentSnapshot(
             : input?.value) ??
           textarea?.value ??
           select?.value ??
-          html.textContent ??
+          // A custom checkbox or radio answers with its state; its text is
+          // its option at most, never an icon's fallback.
+          (role === "checkbox" || role === "radio"
+            ? shownText(html)
+            : html.textContent) ??
           "",
         checked:
           input?.checked ?? element.getAttribute("aria-checked") === "true",
