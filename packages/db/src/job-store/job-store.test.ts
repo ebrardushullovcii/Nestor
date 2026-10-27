@@ -383,17 +383,12 @@ describe("job store", () => {
     expect(new Set(seen).size).toBe(25);
     expect(seen[0]).toBe(added[9]);
 
-    // A fit floor keeps jobs not scored yet, below the scored ones.
+    // A numeric fit floor contains assessed jobs only.
     const strong = store.listJobs({ stage: "found", minFit: 55, limit: 6 });
     expect(strong.rows.map((row) => row.fitScore)).toEqual([
-      59,
-      58,
-      57,
-      56,
-      55,
-      null,
+      59, 58, 57, 56, 55,
     ]);
-    expect(strong.total).toBe(20);
+    expect(strong.total).toBe(5);
 
     const remote = store.listJobs({ stage: "found", workModes: ["remote"] });
     expect(remote.total).toBe(13);
@@ -444,6 +439,9 @@ describe("job store", () => {
       belowFloorCapped: false,
     });
     // 10–50 sit under 60; unscored jobs are not below it.
+    expect(store.countJobs({ stage: "found", minFit: 0 })).toBe(10);
+    expect(store.countJobs({ stage: "found", minFit: 60 })).toBe(5);
+    expect(store.listJobs({ stage: "found", minFit: 0 }).belowFloor).toBe(0);
     expect(store.listJobs({ stage: "found", minFit: 60 }).belowFloor).toBe(5);
     // The text filter applies: only the engineers (10–60) count.
     expect(
@@ -505,9 +503,7 @@ describe("job store", () => {
       const mask = toWorkModeMask(filter.workModes ?? []);
       const want = rows.filter(
         (row) =>
-          (filter.minFit === undefined ||
-            row.fit_score! >= filter.minFit ||
-            row.fit_score === -1) &&
+          (filter.minFit === undefined || row.fit_score! >= filter.minFit) &&
           (mask === 0 || (row.work_modes! & mask) !== 0),
       );
       for (const sort of Object.keys(order) as (keyof typeof order)[]) {
@@ -667,4 +663,91 @@ describe("job store", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+it("numeric floors share assessed-only paging, counts and filtered bulk selection", () => {
+  const store = open();
+  const { added } = store.saveFoundJobs({
+    searchId: "s",
+    jobs: [found(1), found(2), found(3)],
+  });
+  store.setFit([
+    { id: added[0]!, score: 80, summary: "Strong", reasons: [], gaps: [] },
+    { id: added[1]!, score: 30, summary: "Low", reasons: [], gaps: [] },
+  ]);
+  const page = store.listJobs({ stage: "found", minFit: 65, limit: 1 });
+  expect(page.total).toBe(1);
+  expect(page.nextCursor).toBeNull();
+  expect(page.rows.map((row) => row.id)).toEqual([added[0]]);
+  store.moveJobs({
+    selection: {
+      filter: JobListQuerySchema.parse({ stage: "found", minFit: 65 }),
+      except: [],
+    },
+    to: "hidden",
+  });
+  expect(store.getJob(added[2]!)?.stage).toBe("found");
+});
+
+it("age restoration leaves person hides and closed listings hidden and clears obsolete notes", () => {
+  const store = open();
+  const { hidden } = store.saveFoundJobs({
+    searchId: "s",
+    jobs: [
+      found(1, { hiddenReason: "Old", hideOwner: "age_retention" }),
+      found(2, { hiddenReason: "Old", hideOwner: "person" }),
+      found(3, {
+        hiddenReason: "Closed: applications ended",
+        hideOwner: "closed_listing",
+      }),
+    ],
+  });
+  expect(store.restoreAgeHidden(null)).toBe(1);
+  expect(store.getJob(hidden[0]!)?.stageNote).toBeNull();
+  expect(hidden.slice(1).map((id) => store.getJob(id)?.stage)).toEqual([
+    "hidden",
+    "hidden",
+  ]);
+});
+
+it("fit summary groups structured limits only among scored below-floor found jobs", () => {
+  const store = open();
+  const ids = store.saveFoundJobs({
+    searchId: "s",
+    jobs: [found(1), found(2), found(3)],
+  }).added;
+  store.setFit(
+    ids.slice(0, 2).map((id) => ({
+      id,
+      score: 40,
+      summary: "Permission unknown",
+      reasons: [],
+      gaps: [],
+      limit: { kind: "eligibility_unconfirmed", countries: ["DE"] },
+    })),
+  );
+  expect(store.fitSummary(65)).toEqual({
+    total: 2,
+    checking: 1,
+    limits: [{ kind: "eligibility_unconfirmed", countries: ["DE"], count: 2 }],
+  });
+});
+
+it("duplicates within a search differ from jobs saved before it", () => {
+  const store = open();
+  const first = store.saveFoundJobs({ searchId: "first", jobs: [found(1)] });
+  const duplicate = store.saveFoundJobs({
+    searchId: "first",
+    jobs: [
+      found(1, {
+        sourceId: "other",
+        url: "https://other.test/one",
+        sourceJobId: "a",
+      }),
+    ],
+  });
+  expect(duplicate.merged).toEqual(first.added);
+  expect(duplicate.alreadySaved).toEqual([]);
+  const later = store.saveFoundJobs({ searchId: "later", jobs: [found(1)] });
+  expect(later.alreadySaved).toEqual(first.added);
 });

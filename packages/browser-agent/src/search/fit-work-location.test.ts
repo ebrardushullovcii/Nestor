@@ -42,7 +42,7 @@ const cases: Array<{
     expected: "review",
   },
   {
-    name: "foreign hybrid work is blocked despite relocation assistance",
+    name: "foreign hybrid work with missing permission needs review despite relocation assistance",
     location: "San Francisco",
     body: "Use a hybrid work model of 3 days in the office. We offer relocation assistance.",
     evidence: [
@@ -51,7 +51,7 @@ const cases: Array<{
       "hybrid",
       "US",
     ],
-    expected: "blocked",
+    expected: "review",
   },
   {
     name: "a remote work-mode quote does not prove worldwide hiring",
@@ -230,7 +230,7 @@ test("recorded work permission and relocation willingness are separate facts", (
       { ...job, workModes: [...job.workModes] },
       evidence,
     ).status,
-  ).toBe("blocked");
+  ).toBe("review");
   const allowed = CandidateProfileSchema.parse({
     ...profile,
     workEligibility: {
@@ -260,7 +260,7 @@ test("recorded work permission and relocation willingness are separate facts", (
   ).toBe("review");
 });
 
-test("worldwide recruitment does not waive a published onsite requirement", () => {
+test("worldwide recruitment leaves missing onsite permission unresolved", () => {
   expect(
     assessFitWorkLocation(
       profile,
@@ -271,7 +271,7 @@ test("worldwide recruitment does not waive a published onsite requirement", () =
       },
       ["compatible", "We hire worldwide", "broader_remote", "US"],
     ).status,
-  ).toBe("blocked");
+  ).toBe("review");
 });
 
 test("missing passages retain an explanation for an uncertain verdict", () => {
@@ -326,7 +326,7 @@ test("a saved country-choice fallback permits its offered list, never onsite wor
       ],
       [rule],
     ).status,
-  ).toBe("blocked");
+  ).toBe("review");
 });
 
 test("a US city suffix is not a Canadian work country", () => {

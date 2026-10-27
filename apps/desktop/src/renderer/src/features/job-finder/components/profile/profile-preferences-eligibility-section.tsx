@@ -15,6 +15,7 @@ import {
 import { PROFILE_WORK_CONSTRAINT_COPY } from "./profile-work-constraints-copy";
 import { ProfileSectionHeader } from "./profile-section-header";
 import { PreferredApplicationLinksField } from "./preferred-application-links-field";
+import type { ProfileBackgroundArrays } from "./profile-field-array-types";
 
 const booleanSelectOptions = [
   { label: "Not set", value: "" },
@@ -72,15 +73,11 @@ function BooleanSelectField(props: {
 }
 
 export function ProfilePreferencesEligibilitySection(props: {
+  limitedPermissionArray: ProfileBackgroundArrays["limitedPermissionArray"];
   busy: boolean;
   profileForm: UseFormReturn<ProfileEditorValues>;
 }) {
-  const {
-    control: profileControl,
-    register,
-    watch,
-    getValues,
-  } = props.profileForm;
+  const { control: profileControl, register, getValues } = props.profileForm;
   const authorizedWorkCountriesId =
     "profile-setup-field-eligibility-authorized-work-countries";
   const preferredRelocationRegionsId =
@@ -96,7 +93,10 @@ export function ProfilePreferencesEligibilitySection(props: {
   const preferredApplicationLinksId =
     "profile-setup-field-application-identity-preferred-links";
   return (
-    <section className="grid content-start gap-(--gap-card)">
+    <section
+      id="profile-work-eligibility"
+      className="grid content-start gap-(--gap-card) scroll-mt-4"
+    >
       <ProfileSectionHeader
         eyebrow="Preferences"
         title="Work eligibility"
@@ -154,79 +154,62 @@ export function ProfilePreferencesEligibilitySection(props: {
             sponsorship questions for you. Reusable answers do not override
             these limits.
           </p>
-          {watch("eligibility.limitedWorkPermissions").map(
-            (permission, index) => (
-              <div className="grid gap-3" key={index}>
-                <label className="grid gap-1 text-sm">
-                  Permit country
-                  <ProfileInput
-                    {...register(
-                      `eligibility.limitedWorkPermissions.${index}.country`,
-                    )}
-                    placeholder="Germany"
-                  />
-                </label>
-                <label className="grid gap-1 text-sm">
-                  Permit limits
-                  <ProfileTextarea
-                    {...register(
-                      `eligibility.limitedWorkPermissions.${index}.conditions`,
-                    )}
-                    placeholder="Student work permission; include hours, dates and other limits you know"
-                  />
-                </label>
-                <Controller
-                  control={profileControl}
-                  name={`eligibility.limitedWorkPermissions.${index}.requiresFutureSponsorship`}
-                  render={({ field }) => (
-                    <label className="grid gap-1 text-sm">
-                      Will you need sponsorship for future work in this country?
-                      <select
-                        className={profileSelectTriggerClassName}
-                        {...field}
-                      >
-                        <option value="">Not set</option>
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    </label>
+          {props.limitedPermissionArray.fields.map((permission, index) => (
+            <div className="grid gap-3" key={permission.fieldKey}>
+              <label className="grid gap-1 text-sm">
+                Permit country
+                <ProfileInput
+                  {...register(
+                    `eligibility.limitedWorkPermissions.${index}.country`,
                   )}
+                  placeholder="Germany"
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() =>
-                    props.profileForm.setValue(
-                      "eligibility.limitedWorkPermissions",
-                      getValues("eligibility.limitedWorkPermissions").filter(
-                        (_, itemIndex) => itemIndex !== index,
-                      ),
-                      { shouldDirty: true },
-                    )
-                  }
-                >
-                  Remove permit
-                </Button>
-              </div>
-            ),
-          )}
+              </label>
+              <label className="grid gap-1 text-sm">
+                Permit limits
+                <ProfileTextarea
+                  {...register(
+                    `eligibility.limitedWorkPermissions.${index}.conditions`,
+                  )}
+                  placeholder="Student work permission; include hours, dates and other limits you know"
+                />
+              </label>
+              <Controller
+                control={profileControl}
+                name={`eligibility.limitedWorkPermissions.${index}.requiresFutureSponsorship`}
+                render={({ field }) => (
+                  <label className="grid gap-1 text-sm">
+                    Will you need sponsorship for future work in this country?
+                    <select
+                      className={profileSelectTriggerClassName}
+                      {...field}
+                    >
+                      <option value="">Not set</option>
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
+                  </label>
+                )}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => props.limitedPermissionArray.remove(index)}
+              >
+                Remove permit
+              </Button>
+            </div>
+          ))}
           <Button
             disabled={props.busy}
             type="button"
             variant="secondary"
             onClick={() =>
-              props.profileForm.setValue(
-                "eligibility.limitedWorkPermissions",
-                [
-                  ...getValues("eligibility.limitedWorkPermissions"),
-                  {
-                    country: "",
-                    conditions: "",
-                    requiresFutureSponsorship: "",
-                  },
-                ],
-                { shouldDirty: true },
-              )
+              props.limitedPermissionArray.append({
+                country: "",
+                conditions: "",
+                requiresFutureSponsorship: "",
+              })
             }
           >
             Add limited permission

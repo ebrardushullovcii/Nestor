@@ -241,3 +241,36 @@ test("reusable import text goes to Needs you; unresolved text requires confirmat
     },
   ]);
 });
+
+test("accepted conditional permits preserve hours, dates and future sponsorship without unrestricted authorization", () => {
+  const seed = createSeed();
+  const permissions = [
+    {
+      country: "Germany",
+      conditions:
+        "Study permit; up to 20 hours weekly until 2027-09; full-time work needs sponsorship",
+      requiresFutureSponsorship: true,
+    },
+  ];
+  const candidate = ResumeImportFieldCandidateSchema.parse({
+    ...contactCandidate("email", "synthetic@example.test"),
+    id: "conditional-permit",
+    target: { section: "work_eligibility", key: "limitedWorkPermissions" },
+    value: permissions,
+    normalizedValue: permissions,
+    valuePreview: "German study permit",
+    evidenceText: permissions[0]!.conditions,
+  });
+  const imported = applyResolvedResumeImportCandidatesToWorkspace({
+    profile: seed.profile,
+    searchPreferences: seed.searchPreferences,
+    candidates: [candidate],
+    analysisProviderKind: "openai_compatible",
+    analysisProviderLabel: "Synthetic model",
+    analysisWarnings: [],
+  }).profile;
+  expect(imported.workEligibility.limitedWorkPermissions).toEqual(permissions);
+  expect(imported.workEligibility.authorizedWorkCountries).not.toContain(
+    "Germany",
+  );
+});

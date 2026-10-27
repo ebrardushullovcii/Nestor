@@ -199,6 +199,27 @@ describe("mergeDirtyEditorValues identity-safe arrays", () => {
 });
 
 describe("canonical-aware profile saves", () => {
+  it("persists removal of the last conditional permission with an empty dirty marker", () => {
+    const saved = CandidateProfileSchema.parse({
+      ...profile,
+      workEligibility: {
+        limitedWorkPermissions: [
+          { country: "Germany", conditions: "Up to 20 hours weekly" },
+        ],
+      },
+    });
+    const draftValues = createProfileEditorValues(saved);
+    draftValues.eligibility.limitedWorkPermissions = [];
+    const result = buildCanonicalAwareProfilePayload({
+      draftValues,
+      dirtyFields: { eligibility: { limitedWorkPermissions: [] } },
+      latestResumeImportReviewCandidates: [],
+      profile: saved,
+    });
+
+    expect(result.payload?.workEligibility.limitedWorkPermissions).toEqual([]);
+  });
+
   it("keeps an assistant-updated canonical field while applying a real manual edit", () => {
     const draftValues = createProfileEditorValues(profile);
     draftValues.identity.headline = "Manual headline edit";
@@ -232,6 +253,39 @@ describe("canonical-aware profile saves", () => {
 });
 
 describe("useProfileScreenForms background-snapshot durability", () => {
+  it("offers the removed final permit to autosave from the real form", () => {
+    const saved = CandidateProfileSchema.parse({
+      ...profile,
+      workEligibility: {
+        limitedWorkPermissions: [
+          { country: "Germany", conditions: "Up to 20 hours weekly" },
+        ],
+      },
+    });
+    const { result, rerender } = renderProfileScreenForms(
+      createInput({ profile: saved }),
+    );
+    act(() => {
+      result.current.backgroundArrays.limitedPermissionArray.remove(0);
+    });
+    expect(
+      result.current.draftProfileResult.payload?.workEligibility
+        .limitedWorkPermissions,
+    ).toEqual([]);
+    expect(result.current.draftDiffers).toBe(true);
+    rerender(createInput({ profile: { ...saved, currentLocation: "Berlin" } }));
+    expect(
+      result.current.draftProfileResult.payload?.workEligibility
+        .limitedWorkPermissions,
+    ).toEqual([]);
+    expect(
+      result.current.profileForm.getValues(
+        "eligibility.limitedWorkPermissions",
+      ),
+    ).toEqual([]);
+    expect(result.current.hasBackgroundConflict).toBe(false);
+  });
+
   it("adopts a clean assistant reorder and remains clean", () => {
     const education = [
       CandidateEducationSchema.parse({

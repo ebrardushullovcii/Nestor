@@ -74,6 +74,15 @@ beforeEach(() => {
     jobs: [job(1), job(2), job(3)],
   }));
   countGate = Promise.resolve();
+  store.setFit(
+    ids.map((id) => ({
+      id,
+      score: 80,
+      summary: "Assessed fit",
+      reasons: [],
+      gaps: [],
+    })),
+  );
   const run = (name: string, input: JobListQueryInput & { id?: number }) => {
     if (name === "list_jobs") return Promise.resolve(store.listJobs(input));
     if (name === "count_jobs")
@@ -260,10 +269,19 @@ function renderScreen() {
 }
 
 it("counts every match before select all acts on a list counted past 1,000", async () => {
-  store.saveFoundJobs({
+  const { added } = store.saveFoundJobs({
     searchId: null,
     jobs: Array.from({ length: 1005 }, (_, i) => job(i + 10)),
   });
+  store.setFit(
+    added.map((id) => ({
+      id,
+      score: 80,
+      summary: "Assessed fit",
+      reasons: [],
+      gaps: [],
+    })),
+  );
   let answer = () => undefined as void;
   countGate = new Promise<void>((resolve) => {
     answer = resolve;

@@ -134,7 +134,17 @@ export function registerJobRoutes(ipcMain: IpcMain): void {
     return { ok: true as const };
   });
   const store = getJobStore();
+  let fitRefresh: ReturnType<typeof setTimeout> | null = null;
   store.onChange((change) => {
+    if (
+      !searchService &&
+      (change.cause === "profile" || change.cause === "settings") &&
+      store.stageCounts().found > 0
+    ) {
+      if (fitRefresh) clearTimeout(fitRefresh);
+      fitRefresh = setTimeout(scoreUnscoredJobs, 300);
+      fitRefresh.unref?.();
+    }
     // Checked here, since the preload passes it through. A bad change is
     // dropped rather than thrown into the write that made it.
     const checked = JobChangeSchema.safeParse(change);
@@ -143,7 +153,7 @@ export function registerJobRoutes(ipcMain: IpcMain): void {
     else
       console.warn("[Desktop] Dropped a malformed job change.", checked.error);
   });
-  if (store.unscoredJobIds(1).length > 0) {
+  if (store.stageCounts().found > 0 || store.unscoredJobIds(1).length > 0) {
     setTimeout(scoreUnscoredJobs, 5_000).unref?.();
   }
 }

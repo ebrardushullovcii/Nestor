@@ -6,6 +6,7 @@ import {
   type JobDetail,
   type JobFilterInput,
   type JobFitUpdate,
+  type JobFitSummary,
   type JobListPage,
   type JobListQueryInput,
   type JobSelection,
@@ -38,6 +39,13 @@ import {
 import { createSearches, type JobSearches } from "./searches";
 import { createStatements, type Statements } from "./statements";
 import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
+import {
+  syncFitContext,
+  fitCounts,
+  fitSummary,
+  restoreAgeHidden,
+  migrateHideOwners,
+} from "./fit";
 
 export { createProfileStore, type ProfileStore } from "./profile-store";
 export {
@@ -74,11 +82,17 @@ export interface JobStore {
     jobs: readonly FoundJob[];
   }): SaveFoundJobsResult;
   setFit(updates: readonly JobFitUpdate[]): void;
+  syncFitContext(fingerprint: string): boolean;
+  fitCounts(): { checking: number; rechecking: number };
+  fitRevision(): string;
+  fitSummary(minFit: number): JobFitSummary;
+  restoreAgeHidden(cutoff: number | null): number;
   /** Saved jobs still waiting for a fit score, newest first. */
   unscoredJobIds(limit: number): number[];
   readonly searches: JobSearches;
   /** Indexed identity lookup before discovery reads a saved listing again. */
   findKnownUrls(urls: readonly string[]): string[];
+  knownJobsBeforeSearch(urls: readonly string[], searchId: string): number[];
   /** Listing-card closure evidence can retire an existing Found job without another detail read. */
   closeFoundUrls(urls: readonly string[]): number;
   lookupSeenCards(
@@ -209,7 +223,9 @@ export function openJobStore(filePath: string): JobStore {
         }
       }
     }
-    return createStatements(db);
+    const statements = createStatements(db);
+    migrateHideOwners(statements);
+    return statements;
   });
   // Its setup writes (a search cut off by the last close is stopped).
   const searches = closingOnFailure(db, () => createSearches(sql));
@@ -292,6 +308,16 @@ export function openJobStore(filePath: string): JobStore {
         Boolean(find.get(`url:${normalizeUrl(url)}`)),
       );
     },
+    knownJobsBeforeSearch(urls, searchId) {
+      if (!urls.length) return [];
+      return (
+        sql(`SELECT DISTINCT j.id FROM job_keys k JOIN jobs j ON j.id=k.job_id
+        WHERE k.key IN (SELECT value FROM json_each(?)) AND j.found_by IS NOT ?`).all(
+          JSON.stringify(urls.map((url) => `url:${normalizeUrl(url)}`)),
+          searchId,
+        ) as { id: number }[]
+      ).map((row) => row.id);
+    },
 
     saveFoundJobs({ searchId, jobs }) {
       if (jobs.length === 0)
@@ -301,6 +327,7 @@ export function openJobStore(filePath: string): JobStore {
           added,
           hidden,
           merged,
+          alreadySaved,
           ids: byInput,
           mergedStages,
         } = writeFoundJobs(sql, searchId, jobs, Date.now());
@@ -314,7 +341,13 @@ export function openJobStore(filePath: string): JobStore {
           ids: ids.length > CHANGE_ID_LIMIT ? null : ids,
           searchId,
         });
-        return { added, hidden, merged, ids: byInput };
+        return {
+          added,
+          hidden,
+          merged,
+          alreadySaved: alreadySaved ?? [],
+          ids: byInput,
+        };
       });
     },
 
@@ -323,13 +356,13 @@ export function openJobStore(filePath: string): JobStore {
       return transaction(() => {
         const rows =
           sql(`SELECT DISTINCT j.id FROM jobs j JOIN job_sightings s ON s.job_id = j.id
-          WHERE j.stage = 'found' AND s.url IN (SELECT value FROM json_each(?))`).all(
+          WHERE (j.stage = 'found' OR (j.stage='hidden' AND j.hide_owner='age_retention')) AND s.url IN (SELECT value FROM json_each(?))`).all(
             JSON.stringify(urls),
           ) as { id: number }[];
         if (!rows.length) return 0;
         const ids = rows.map((row) => row.id);
-        sql(`UPDATE jobs SET stage = 'hidden', stage_at = ?, stage_note = 'Closed: this vacancy is no longer accepting applications.'
-          WHERE id IN (SELECT value FROM json_each(?)) AND stage = 'found'`).run(
+        sql(`UPDATE jobs SET stage = 'hidden', hide_owner='closed_listing', stage_at = ?, stage_note = 'Closed: this vacancy is no longer accepting applications.'
+          WHERE id IN (SELECT value FROM json_each(?)) AND (stage = 'found' OR hide_owner='age_retention')`).run(
           Date.now(),
           JSON.stringify(ids),
         );
@@ -348,7 +381,7 @@ export function openJobStore(filePath: string): JobStore {
         const now = new Date().toISOString();
         const stageOf = sql("SELECT stage FROM jobs WHERE id = ?");
         const setRow = sql(
-          "UPDATE jobs SET fit_score = ?, fit_summary = ? WHERE id = ?",
+          "UPDATE jobs SET fit_score = ?, fit_summary = ?, fit_stale=0 WHERE id = ?",
         );
         const setDetail = sql(
           "UPDATE job_details SET fit_json = ? WHERE job_id = ?",
@@ -375,11 +408,46 @@ export function openJobStore(filePath: string): JobStore {
       });
     },
 
+    syncFitContext(fingerprint) {
+      return transaction(() => {
+        const changed = syncFitContext(sql, fingerprint);
+        if (changed)
+          notify({
+            cause: "fit",
+            stages: ["found"],
+            ids: null,
+            searchId: null,
+          });
+        return changed;
+      });
+    },
+    fitCounts: () => fitCounts(sql),
+    fitRevision: () =>
+      String(
+        sql(
+          `SELECT version || ':' || coalesce((SELECT ai_behavior_job_search_remote_counts_as_any_location FROM profile_settings WHERE id=1),'') AS revision FROM profile_revision WHERE id=1`,
+        ).get()?.revision ?? "",
+      ),
+    fitSummary: (floor) => fitSummary(sql, floor),
+    restoreAgeHidden(cutoff) {
+      return transaction(() => {
+        const n = restoreAgeHidden(sql, cutoff);
+        if (n)
+          notify({
+            cause: "stage",
+            stages: ["found", "hidden"],
+            ids: null,
+            searchId: null,
+          });
+        return n;
+      });
+    },
     unscoredJobIds: (limit) =>
       (
         sql(
-          `SELECT id FROM jobs WHERE stage IN ('found', 'shortlisted', 'resume', 'hidden') AND fit_score = -1
-           ORDER BY found_at DESC LIMIT ?`,
+          `SELECT id FROM jobs WHERE (stage IN ('found', 'shortlisted', 'resume') OR (stage='hidden' AND hide_owner='age_retention'))
+           AND (fit_score=-1 OR fit_stale=1)
+           ORDER BY CASE stage WHEN 'found' THEN 0 ELSE 1 END, fit_score DESC, found_at DESC LIMIT ?`,
         ).all(limit) as { id: number }[]
       ).map((row) => row.id),
     searches,

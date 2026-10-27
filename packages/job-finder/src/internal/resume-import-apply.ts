@@ -1,5 +1,6 @@
 import {
   CandidateProfileSchema,
+  CandidateWorkEligibilitySchema,
   isFreshStartCandidateProfile,
   CompensationPreferenceSchema,
   JobSearchPreferencesSchema,
@@ -72,6 +73,12 @@ type ResolvedResumeImportSelection = {
      * only fills an empty answer and never replaces one the person saved.
      */
     workEligibility?: {
+      limitedWorkPermissions?: {
+        values: NonNullable<
+          CandidateProfile["workEligibility"]["limitedWorkPermissions"]
+        >;
+        explicit: boolean;
+      };
       authorizedWorkCountries?: { values: string[]; explicit: boolean };
       requiresVisaSponsorship?: { value: boolean; explicit: boolean };
     };
@@ -491,6 +498,22 @@ function buildResolvedSelection(
         }
         break;
       }
+      case "work_eligibility.limitedWorkPermissions": {
+        const parsed =
+          CandidateWorkEligibilitySchema.shape.limitedWorkPermissions.safeParse(
+            value,
+          );
+        if (parsed.success && parsed.data?.length) {
+          selection.scalarFields.workEligibility = {
+            ...selection.scalarFields.workEligibility,
+            limitedWorkPermissions: {
+              values: parsed.data,
+              explicit: candidate.id === confirmedCandidateId,
+            },
+          };
+        }
+        break;
+      }
       case "work_eligibility.requiresVisaSponsorship":
         if (typeof value === "boolean") {
           selection.scalarFields.workEligibility = {
@@ -519,6 +542,12 @@ function mergeImportedWorkEligibility(
   const sponsorship = imported.requiresVisaSponsorship;
   return {
     ...current,
+    limitedWorkPermissions:
+      imported.limitedWorkPermissions &&
+      (imported.limitedWorkPermissions.explicit ||
+        !current.limitedWorkPermissions?.length)
+        ? imported.limitedWorkPermissions.values
+        : current.limitedWorkPermissions,
     authorizedWorkCountries:
       countries &&
       (countries.explicit || current.authorizedWorkCountries.length === 0)

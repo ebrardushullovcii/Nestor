@@ -10,6 +10,7 @@ import {
 } from "@nestor/contracts";
 import {
   createJobSitesStore,
+  createProfileStore,
   createSearchSourcesStore,
   type JobStore,
 } from "@nestor/db/job-store";
@@ -23,6 +24,7 @@ export interface JobSearchControl {
   status(): JobSearchStatus;
   /** Scores saved jobs in Find jobs or Shortlisted that have no fit yet. */
   scoreUnscored(): Promise<number>;
+  prioritizeFit?(ids: readonly number[]): void;
 }
 
 /**
@@ -122,6 +124,27 @@ export function createJobCommandRunner(deps: {
     ...createProfileCommandHandlers(store),
     list_jobs: (input) => store.listJobs(input),
     count_jobs: (input) => ({ total: store.countJobs(input) }),
+    fit_summary: ({ minFit }) => {
+      const eligibility = createProfileStore(store).read().workEligibility;
+      return {
+        ...store.fitSummary(minFit),
+        workCountries: [
+          ...eligibility.authorizedWorkCountries,
+          ...(eligibility.limitedWorkPermissions ?? []).map(
+            (permission) => permission.country,
+          ),
+        ],
+      };
+    },
+    prioritize_fit: ({ ids }) => {
+      const runner = current();
+      if (runner) runner.prioritizeFit?.(ids);
+      else
+        void search()
+          .then((ready) => ready.prioritizeFit?.(ids))
+          .catch(() => undefined);
+      return null;
+    },
     get_job: ({ id }) => store.getJob(id),
     stage_counts: () => store.stageCounts(),
     move_jobs: (input) => {

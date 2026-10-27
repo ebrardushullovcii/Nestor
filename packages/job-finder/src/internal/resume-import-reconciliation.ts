@@ -171,6 +171,8 @@ function existingScalarValueForCandidate(
       return profile.workEligibility.authorizedWorkCountries;
     case "work_eligibility.requiresVisaSponsorship":
       return profile.workEligibility.requiresVisaSponsorship;
+    case "work_eligibility.limitedWorkPermissions":
+      return profile.workEligibility.limitedWorkPermissions;
     default:
       return undefined;
   }

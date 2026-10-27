@@ -49,6 +49,23 @@ export interface AddedColumn {
 
 /** Columns added to tables after their release, in the order they came. */
 export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
+  {
+    table: "jobs",
+    column: "fit_stale",
+    definition: "INTEGER NOT NULL DEFAULT 0",
+  },
+  {
+    table: "jobs",
+    column: "hide_owner",
+    definition:
+      "TEXT CHECK (hide_owner IN ('person','age_retention','closed_listing'))",
+  },
+  {
+    table: "searches",
+    column: "already_saved",
+    definition: "INTEGER NOT NULL DEFAULT 0",
+  },
+  { table: "job_move_items", column: "from_hide_owner", definition: "TEXT" },
   { table: "resume_changes", column: "before_stage_at", definition: "INTEGER" },
   { table: "resume_changes", column: "after_stage_at", definition: "INTEGER" },
   { table: "resume_changes", column: "after_move_id", definition: "INTEGER" },
@@ -78,6 +95,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   stage_at INTEGER NOT NULL,
   -- why it is in its stage when the app put it there (a search hid it)
   stage_note TEXT,
+  hide_owner TEXT CHECK (hide_owner IN ('person','age_retention','closed_listing')),
   title TEXT NOT NULL,
   company TEXT NOT NULL,
   location TEXT NOT NULL,
@@ -87,6 +105,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   -- -1 until scored, so the fit order needs no NULL handling
   fit_score INTEGER NOT NULL DEFAULT -1,
   fit_summary TEXT,
+  fit_stale INTEGER NOT NULL DEFAULT 0,
   -- 0 when the listing shows no date
   posted_at INTEGER NOT NULL DEFAULT 0,
   found_at INTEGER NOT NULL,
@@ -108,6 +127,9 @@ CREATE INDEX IF NOT EXISTS jobs_by_mode_fit ON jobs (stage, work_modes, fit_scor
 CREATE INDEX IF NOT EXISTS jobs_by_mode_found ON jobs (stage, work_modes, found_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS jobs_by_mode_posted ON jobs (stage, work_modes, posted_at DESC, found_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS jobs_by_mode_stage_at ON jobs (stage, work_modes, stage_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS jobs_pending_fit ON jobs (stage, fit_stale, fit_score DESC, found_at DESC);
+CREATE INDEX IF NOT EXISTS jobs_waiting_fit ON jobs (stage, fit_score DESC, found_at DESC) WHERE fit_score=-1 OR fit_stale=1;
+CREATE TABLE IF NOT EXISTS fit_context (id INTEGER PRIMARY KEY CHECK (id=1), fingerprint TEXT NOT NULL);
 
 CREATE TABLE IF NOT EXISTS job_stage_counts (
   stage TEXT PRIMARY KEY,
@@ -157,6 +179,12 @@ CREATE TABLE IF NOT EXISTS job_details (
   facts_json TEXT NOT NULL DEFAULT '{}',
   fit_json TEXT
 );
+CREATE TRIGGER IF NOT EXISTS listing_fit_stale AFTER UPDATE OF description, seniority, employment_type, salary_min, salary_max, salary_currency ON job_details
+WHEN OLD.description IS NOT NEW.description OR OLD.seniority IS NOT NEW.seniority OR OLD.employment_type IS NOT NEW.employment_type OR OLD.salary_min IS NOT NEW.salary_min OR OLD.salary_max IS NOT NEW.salary_max OR OLD.salary_currency IS NOT NEW.salary_currency
+BEGIN UPDATE jobs SET fit_stale=1 WHERE id=NEW.job_id; END;
+CREATE TRIGGER IF NOT EXISTS listing_row_fit_stale AFTER UPDATE OF title, company, location, work_modes, salary_text ON jobs
+WHEN OLD.title IS NOT NEW.title OR OLD.company IS NOT NEW.company OR OLD.location IS NOT NEW.location OR OLD.work_modes IS NOT NEW.work_modes OR OLD.salary_text IS NOT NEW.salary_text
+BEGIN UPDATE jobs SET fit_stale=1 WHERE id=NEW.id; END;
 
 -- Each site that lists the job. A job seen on two sites is one job.
 CREATE TABLE IF NOT EXISTS job_sightings (
@@ -190,6 +218,7 @@ CREATE TABLE IF NOT EXISTS job_move_items (
   from_stage TEXT NOT NULL,
   from_stage_at INTEGER NOT NULL,
   from_stage_note TEXT,
+  from_hide_owner TEXT,
   PRIMARY KEY (move_id, job_id)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS job_move_items_by_job ON job_move_items (job_id);
@@ -207,6 +236,7 @@ CREATE TABLE IF NOT EXISTS searches (
   found INTEGER NOT NULL DEFAULT 0,
   added INTEGER NOT NULL DEFAULT 0,
   merged INTEGER NOT NULL DEFAULT 0,
+  already_saved INTEGER NOT NULL DEFAULT 0,
   scored INTEGER NOT NULL DEFAULT 0,
   error TEXT
 );

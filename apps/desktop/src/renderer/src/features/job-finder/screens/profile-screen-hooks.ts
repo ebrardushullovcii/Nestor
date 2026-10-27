@@ -33,6 +33,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // resyncs (mount, canonical reseeds), which must never read as a user edit;
 // see the draft-edit subscription in useProfileScreenForms.
 const FIELD_ARRAY_ROOT_NAMES = new Set([
+  "eligibility.limitedWorkPermissions",
   "records.experiences",
   "records.education",
   "records.certifications",
@@ -294,12 +295,30 @@ function buildOrderedContentFingerprint(value: unknown): string {
   return JSON.stringify(value) ?? "undefined";
 }
 
+function profileEditorDirtyFields(dirtyFields: unknown): unknown {
+  // Permissions are one compared-and-replaced value, not id-bearing records.
+  // RHF can mark removal of its last row with an empty dirty array; preserve
+  // that structural edit instead of adopting the saved list again.
+  if (
+    isRecord(dirtyFields) &&
+    isRecord(dirtyFields.eligibility) &&
+    Array.isArray(dirtyFields.eligibility.limitedWorkPermissions)
+  ) {
+    return {
+      ...dirtyFields,
+      eligibility: { ...dirtyFields.eligibility, limitedWorkPermissions: true },
+    };
+  }
+  return dirtyFields;
+}
+
 export function buildCanonicalAwareProfilePayload(input: {
   draftValues: ProfileEditorValues;
   dirtyFields: unknown;
   latestResumeImportReviewCandidates: readonly ResumeImportFieldCandidateSummary[];
   profile: CandidateProfile;
 }) {
+  const dirtyFields = profileEditorDirtyFields(input.dirtyFields);
   // Saving only sources must preserve the profile's exact saved values.
   // Round-tripping untouched editor fields can normalize resume inputs.
   const hasDirtyField = (value: unknown): boolean =>
@@ -307,14 +326,14 @@ export function buildCanonicalAwareProfilePayload(input: {
     (typeof value === "object" &&
       value !== null &&
       Object.values(value).some(hasDirtyField));
-  if (!hasDirtyField(input.dirtyFields)) return { payload: input.profile };
+  if (!hasDirtyField(dirtyFields)) return { payload: input.profile };
   const mergeOutcome = mergeDirtyEditorValues(
     createProfileEditorValues(
       input.profile,
       input.latestResumeImportReviewCandidates,
     ),
     input.draftValues,
-    input.dirtyFields,
+    dirtyFields,
   );
 
   return buildProfilePayload(
@@ -565,6 +584,11 @@ export function useProfileScreenForms(input: {
     };
   }, [input.onDraftEdited, preferencesForm, profileForm]);
 
+  const limitedPermissionArray = useFieldArray({
+    control: profileForm.control,
+    name: "eligibility.limitedWorkPermissions",
+    keyName: "fieldKey",
+  });
   const experienceArray = useFieldArray({
     control: profileForm.control,
     name: "records.experiences",
@@ -877,13 +901,16 @@ export function useProfileScreenForms(input: {
 
     // Meaningful external update while dirty: merge the fresh canonical
     // editor values under the kept dirty edits.
+    const dirtyProfileFields = profileEditorDirtyFields(
+      profileForm.formState.dirtyFields,
+    );
     const mergeOutcome = mergeDirtyEditorValues(
       createProfileEditorValues(
         input.profile,
         input.latestResumeImportReviewCandidates,
       ),
       draftValues,
-      profileForm.formState.dirtyFields,
+      dirtyProfileFields,
     );
 
     if (
@@ -898,7 +925,7 @@ export function useProfileScreenForms(input: {
           input.latestResumeImportReviewCandidates,
         ),
         draftValues,
-        profileForm.formState.dirtyFields,
+        dirtyProfileFields,
         pendingOwnSave.current
           ? createProfileEditorValues(
               pendingOwnSave.current.profile,
@@ -1114,6 +1141,7 @@ export function useProfileScreenForms(input: {
       }
     });
   const backgroundArrays: ProfileBackgroundArrays = {
+    limitedPermissionArray: wrapUserFieldArray(limitedPermissionArray),
     certificationArray: wrapUserFieldArray(certificationArray),
     educationArray: wrapUserFieldArray(educationArray),
     languageArray: wrapUserFieldArray(languageArray),

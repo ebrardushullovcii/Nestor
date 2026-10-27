@@ -89,6 +89,7 @@ export function ProfileActiveSectionContent({
     preferences: (
       <ProfilePreferencesTab
         busy={isProfileMutationPending}
+        limitedPermissionArray={backgroundArrays.limitedPermissionArray}
         preferencesForm={preferencesForm}
         profileForm={profileForm}
         {...(onResumeApproachChange

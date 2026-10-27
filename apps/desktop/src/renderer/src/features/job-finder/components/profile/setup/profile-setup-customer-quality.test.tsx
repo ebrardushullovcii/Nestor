@@ -393,7 +393,7 @@ describe("profile setup customer-quality guidance", () => {
     ].map((block) => block.getAttribute("data-profile-setup-block"));
     expect(blocks).toEqual(["look-for", "more-about-you"]);
     expect(container?.textContent).toContain(
-      "Jobs outside these countries will score low.",
+      "Job Finder checks each job against these countries and any limited permissions.",
     );
     const more = container?.querySelector<HTMLDetailsElement>(
       "[data-profile-setup-block='more-about-you']",

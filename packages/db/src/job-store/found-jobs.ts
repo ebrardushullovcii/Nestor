@@ -101,7 +101,7 @@ function keysOf(job: FoundJob): JobKeys {
   };
 }
 
-type KeyMatch = { job_id: number; stage: JobStage };
+type KeyMatch = { job_id: number; stage: JobStage; found_by: string | null };
 
 function toMs(iso: string | null): number {
   if (!iso) return 0;
@@ -123,10 +123,11 @@ export function writeFoundJobs(
   const added: number[] = [];
   const hidden: number[] = [];
   const merged = new Set<number>();
+  const alreadySaved = new Set<number>();
   const mergedStages = new Set<JobStage>();
   const ids: number[] = [];
   const findKey = sql(
-    "SELECT k.job_id, j.stage FROM job_keys k JOIN jobs j ON j.id = k.job_id WHERE k.key = ?",
+    "SELECT k.job_id, j.stage, j.found_by FROM job_keys k JOIN jobs j ON j.id = k.job_id WHERE k.key = ?",
   );
   const sameSite = sql(
     "SELECT 1 FROM job_sightings WHERE job_id = ? AND site = ? LIMIT 1",
@@ -219,6 +220,11 @@ export function writeFoundJobs(
         job.salaryCurrency,
         JSON.stringify(job.facts ?? {}),
       );
+      if (job.hiddenReason)
+        sql("UPDATE jobs SET hide_owner=? WHERE id=?").run(
+          job.hideOwner ?? "person",
+          id,
+        );
       if (job.hiddenReason) hidden.push(id);
       else added.push(id);
     }
@@ -256,10 +262,19 @@ export function writeFoundJobs(
         id,
       );
       merged.add(id);
+      if (searchId === null || match.found_by !== searchId)
+        alreadySaved.add(id);
       mergedStages.add(match.stage);
     }
   }
-  // A job new in this batch and seen again later in it is still just new.
-  for (const id of [...added, ...hidden]) merged.delete(id);
-  return { added, hidden, merged: [...merged], ids, mergedStages };
+  // A second sighting in this batch is a duplicate too. alreadySaved alone
+  // distinguishes jobs that predate the current search.
+  return {
+    added,
+    hidden,
+    merged: [...merged],
+    alreadySaved: [...alreadySaved],
+    ids,
+    mergedStages,
+  };
 }

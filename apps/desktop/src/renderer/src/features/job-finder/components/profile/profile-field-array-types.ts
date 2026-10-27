@@ -4,6 +4,11 @@ import type { ProfileEditorValues } from "../../lib/profile-editor";
 export type ProfileFieldArrayKeyName = "fieldKey";
 
 export interface ProfileBackgroundArrays {
+  limitedPermissionArray: UseFieldArrayReturn<
+    ProfileEditorValues,
+    "eligibility.limitedWorkPermissions",
+    ProfileFieldArrayKeyName
+  >;
   certificationArray: UseFieldArrayReturn<
     ProfileEditorValues,
     "records.certifications",

@@ -71,7 +71,10 @@ function RunningSearch(props: { status: JobSearchStatus; onStop: () => void }) {
           </strong>{" "}
           {search.sourcesDone} of {plural(search.sourcesTotal, "site")} ·{" "}
           {plural(search.added, "new job")}
-          {search.merged > 0 ? ` · ${search.merged} already saved` : ""}
+          {search.merged > 0 ? ` · ${search.merged} duplicates merged` : ""}
+          {(search.alreadySaved ?? 0) > 0
+            ? ` · ${search.alreadySaved} already saved`
+            : ""}
           {search.scored > 0 ? ` · ${search.scored} scored` : ""}
         </p>
         <Button
@@ -139,7 +142,11 @@ function lastSearchLine(status: JobSearchStatus): string | null {
         : `${plural(search.added, "new job")}`;
   const stopped = search.state === "stopped" ? " (stopped)" : "";
   return `Last search ${when}: ${outcome}${stopped}${
-    search.merged > 0 ? `, ${search.merged} already saved` : ""
+    search.merged > 0 ? `, ${search.merged} duplicates merged` : ""
+  }${
+    (search.alreadySaved ?? 0) > 0
+      ? `, ${search.alreadySaved} already saved`
+      : ""
   }.`;
 }
 

@@ -417,6 +417,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     currentLocation: "Berlin",
     currentCountry: "Germany",
     yearsExperience: 2,
+    workEligibility: { authorizedWorkCountries: ["Germany"] },
     baseResume: { id: "resume", fileName: "synthetic.txt", uploadedAt: now },
   });
   const job = JobDetailSchema.parse({
@@ -575,7 +576,10 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     client.chatWithTools.mock.calls[0][2]?.jsonSchema?.schema;
   expect(requestSchema).toMatchObject({
     properties: {
-      fits: { type: "array", items: { properties: { id: { enum: [1] } } } },
+      fits: {
+        type: "array",
+        items: { properties: { id: { type: "integer", minimum: 1 } } },
+      },
     },
   });
 });
