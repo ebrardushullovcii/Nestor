@@ -107,6 +107,8 @@ export interface AgentApplicationPreparationInput {
   earlierAttachments?: Parameters<
     typeof runApplyAgent
   >[0]["earlierAttachments"];
+  /** What an earlier run left on this form, to bring a closed page back. */
+  replay?: Parameters<typeof runApplyAgent>[0]["replay"];
   /**
    * Writes and renders the letter this application sends. Omitted when the
    * caller has no way to produce one, in which case a form that asks for a
@@ -635,6 +637,7 @@ export async function runAgentApplicationPreparation(
     ...(input.earlierAttachments?.length
       ? { earlierAttachments: input.earlierAttachments }
       : {}),
+    ...(input.replay ? { replay: input.replay } : {}),
     ...(input.initialUnansweredPickerQuestions
       ? {
           initialUnansweredPickerQuestions:
@@ -839,6 +842,7 @@ export async function runAgentApplicationPreparation(
     agentTiming: result.timing,
     questionContexts: result.questionContexts,
     pickerAttempts: result.pickerAttempts,
+    ...(result.formPath?.length ? { formPath: result.formPath } : {}),
     ...(result.skipReason ? { skipReason: result.skipReason } : {}),
   };
 }
@@ -933,6 +937,7 @@ export function createApplyFormPreparer(input: {
   initialPickerAttempts?: AgentApplicationPreparationInput["initialPickerAttempts"];
   uploadsConfirmedByPerson?: readonly string[];
   earlierAttachments?: AgentApplicationPreparationInput["earlierAttachments"];
+  replay?: AgentApplicationPreparationInput["replay"];
   initialUnansweredPickerQuestions?: AgentApplicationPreparationInput["initialUnansweredPickerQuestions"];
   now?: () => Date;
 }): NonNullable<ExecuteApplicationFlowInput["prepareApplicationForm"]> {
@@ -1001,6 +1006,7 @@ export function createApplyFormPreparer(input: {
       ...(input.earlierAttachments?.length
         ? { earlierAttachments: input.earlierAttachments }
         : {}),
+      ...(input.replay ? { replay: input.replay } : {}),
       ...(input.initialUnansweredPickerQuestions
         ? {
             initialUnansweredPickerQuestions:

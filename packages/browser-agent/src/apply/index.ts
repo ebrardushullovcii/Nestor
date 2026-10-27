@@ -1,4 +1,11 @@
 export { runApplyAgent } from "./apply-agent";
+export {
+  reviewFieldKey,
+  screenKey,
+  type FormReplay,
+  type FormReplayAnswer,
+  type FormReplayAttachment,
+} from "./form-replay";
 export { explicitApplicationCountry } from "./concrete-answer-claims";
 export {
   APPLY_TOOL_NAMES,

@@ -615,6 +615,19 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           earlierAttachments: keptPage
             ? (previous?.reviewCard?.attachments ?? [])
             : [],
+          // What the attempt before left on the form: a page that was closed
+          // (or reopened) comes back from it without the model.
+          ...(previous?.reviewCard &&
+          (previous.reviewCard.answers.length ||
+            previous.reviewCard.attachments.length)
+            ? {
+                replay: {
+                  answers: previous.reviewCard.answers,
+                  attachments: keptPage ? [] : previous.reviewCard.attachments,
+                  path: previous.execution.formPath ?? [],
+                },
+              }
+            : {}),
           readReusableAnswers: (questions) => {
             const byKey = new Map(
               questions.map((question) => [

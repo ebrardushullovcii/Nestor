@@ -1,5 +1,7 @@
+import type { FormReplay } from "./form-replay";
 import type {
   ApplyAgentTiming,
+  ApplyFormPathStep,
   ApplyPickerAttempt,
   StoredApplyPickerAttempt,
 } from "@nestor/contracts";
@@ -470,6 +472,8 @@ export interface ApplyAgentResult {
   questionContexts?: Array<{ prompt: string; step: string }>;
   /** Choices pickers on this application refused, for the next run. */
   pickerAttempts?: ApplyPickerAttempt[];
+  /** The moves this run made between the form's screens, for a restore. */
+  formPath?: ApplyFormPathStep[];
   timing?: ApplyAgentTiming;
   outcome: ApplyAgentOutcome;
   /** One plain sentence about how the run ended. Shown to the person as-is. */
@@ -576,6 +580,12 @@ export interface ApplyAgentConfig {
    * file settles it.
    */
   earlierAttachments?: readonly EarlierAttachment[];
+  /**
+   * What an earlier run left on this form, for a page that was closed: each
+   * screen's answers, its files and the path between screens. They go back
+   * without the model; only what changed reaches the model or the person.
+   */
+  replay?: FormReplay;
   /** How long an upload may stay in progress before the person gets it. */
   uploadWaitMs?: number;
   /** The guard and worker checks for this page. Absent only in tests. */

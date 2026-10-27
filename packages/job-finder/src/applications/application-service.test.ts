@@ -43,6 +43,8 @@ const preparation = vi.hoisted(() => ({
   uploadsConfirmed: [] as boolean[],
   /** The files each run was told an earlier attempt attached on its page. */
   earlierFiles: [] as string[][],
+  /** What each run was given to bring a closed form back. */
+  replays: [] as unknown[],
   /** The file field the run saw accepted on the form, if any. */
   attachedField: "Resume" as string | null,
   readAnswers:
@@ -57,6 +59,7 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
       input: Parameters<typeof actual.createApplyFormPreparer>[0],
     ) => {
       preparation.readAnswers = input.readReusableAnswers;
+      preparation.replays.push(input.replay ?? null);
       preparation.earlierFiles.push(
         (input.earlierAttachments ?? []).map(
           (entry) => `${entry.field}: ${entry.fileName}`,
@@ -1102,6 +1105,50 @@ it("brings back a form waiting on a question after a restart, still waiting with
   ]);
   expect(f.applications.getApplication(row.id)?.mode).toBe(row.mode);
   expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("a refill of a closed form gets what the attempt before left, to bring it back without the model", async () => {
+  const f = await setup(1);
+  preparation.replays.length = 0;
+  preparation.answers = [
+    {
+      question: "Full name",
+      answer: "Robin Ashford",
+      source: "your matching saved answer or profile fact",
+      sourceId: "profile.fullName",
+      written: false,
+      groundedIn: ["profile.fullName"],
+    },
+  ];
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  // The page was closed to free memory: nothing to keep, so Open refills.
+  f.browser.focusApplicationPageBinding.mockResolvedValue(false);
+  f.browser.transferApplicationPageBinding.mockResolvedValue(false);
+  const row = f.applications.listApplications().rows[0]!;
+  expect(await f.service.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(preparation.replays).toEqual([
+    null,
+    {
+      answers: [
+        expect.objectContaining({
+          question: "Full name",
+          answer: "Robin Ashford",
+        }),
+      ],
+      attachments: [
+        { label: "Resume", fileName: "resume.pdf", field: "Resume" },
+      ],
+      path: [],
+    },
+  ]);
+  preparation.answers = [];
 });
 
 it("in Send for me, Open's refill never sends, and the answer that clears the item still sends", async () => {

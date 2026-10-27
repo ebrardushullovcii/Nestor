@@ -14,6 +14,8 @@ import {
 } from "./apply-prompts";
 import type { FillFieldsEntry } from "./apply-tools";
 import { buildApplyFormObservation } from "./page-hands";
+import { reviewFieldKey, screenKey } from "./form-replay";
+import { STEP_HANDOVER_QUESTION_ID } from "./submit-preflight";
 import {
   createApplyGuardState,
   executeApplyProposal,
@@ -8370,5 +8372,266 @@ describe("a continue keeps the file an earlier attempt attached on the same page
       repeatingModel("finish", { reason: "The form is ready" }),
     );
     expect(result.reviewAttachments ?? []).toEqual([]);
+  });
+});
+
+describe("a closed form comes back without the model", () => {
+  /** Answers only a check; any real turn is counted, and finishes stuck. */
+  const countingModel = () => {
+    let turns = 0;
+    const client: LLMClient = {
+      chatWithTools: (messages, definitions) => {
+        const check = supportedChecks(messages, definitions);
+        if (check) return check;
+        turns += 1;
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: `call_${turns}`,
+              type: "function" as const,
+              function: {
+                name: "finish",
+                arguments: JSON.stringify({
+                  reason: "The model was asked.",
+                  stuck: true,
+                }),
+              },
+            },
+          ],
+        });
+      },
+    };
+    return { client, turns: () => turns };
+  };
+  const field = (
+    index: number,
+    label: string,
+    extra: Partial<RawApplyControl> = {},
+  ): RawApplyControl => ({
+    ...nameControl(),
+    index,
+    id: `f${index}`,
+    name: `f${index}`,
+    label,
+    value: "",
+    ...extra,
+  });
+  /** Hands that change the page the way a site does. */
+  const liveHands = (source: RawApplyPage, input: ApplyAgentConfig) => {
+    const find = (ref: string) =>
+      source.controls.find((entry) => (entry.ref ?? `c${entry.index}`) === ref);
+    const writes: string[] = [];
+    input.hands.fillText = (ref, value) => {
+      writes.push(`${ref}=${value}`);
+      find(ref)!.value = value;
+      return Promise.resolve({ ok: true, observedValue: value });
+    };
+    input.hands.chooseOption = (ref, option) => {
+      writes.push(`${ref}=${option}`);
+      Object.assign(find(ref)!, { value: option, selectedOptionLabel: option });
+      return Promise.resolve({ ok: true, observedValue: option });
+    };
+    input.hands.setToggle = (ref, checked) => {
+      writes.push(`${ref}=${String(checked)}`);
+      find(ref)!.checked = checked;
+      return Promise.resolve({ ok: true, observedValue: "checked" });
+    };
+    input.hands.uploadFile = (ref, file) => {
+      writes.push(`${ref}=${file.name}`);
+      find(ref)!.value = `C:\\fakepath\\${file.name}`;
+      return Promise.resolve({ ok: true, observedValue: file.name });
+    };
+    return writes;
+  };
+  const resumeDocument = {
+    id: "doc_resume",
+    fileName: "resume.txt",
+    mimeType: "text/plain",
+    label: "Your CV",
+    kind: "resume" as const,
+    loadBytes: () => Promise.resolve(new TextEncoder().encode("resume")),
+  };
+  const stored = (question: string, answer: string, fieldKey?: string) => ({
+    ...(fieldKey ? { fieldKey } : {}),
+    question,
+    answer,
+    source: "your matching saved answer or profile fact",
+    sourceId: "profile.fullName",
+    written: false,
+    groundedIn: ["profile.fullName"],
+  });
+
+  test("every stored answer and the file go back by field, and the run finishes with no model call", async () => {
+    const source = page({
+      controls: [
+        field(0, "Full name"),
+        field(1, "Email", { inputType: "email" }),
+        field(2, "Country", {
+          tagName: "select",
+          inputType: "select-one",
+          options: ["Germany", "United Kingdom"],
+        }),
+        workAuthorizationRadio(3, "Yes"),
+        workAuthorizationRadio(4, "No"),
+        field(5, "Pronouns", { required: false, value: "they/them" }),
+        field(6, "Resume", { inputType: "file" }),
+      ],
+    });
+    const input = config(source, { intermediateWritesAuthorized: false });
+    input.sources.documents = [resumeDocument];
+    const writes = liveHands(source, input);
+    input.replay = {
+      answers: [
+        stored("Full name", "Robin Ashford"),
+        stored("Email", "robin@example.test"),
+        stored("Country", "United Kingdom"),
+        stored("Are you legally authorized to work in this country?", "Yes"),
+        // The page holds another value: the site's draft or the person's.
+        stored("Pronouns", "she/her"),
+      ],
+      attachments: [
+        { field: "Resume", fileName: "resume.txt", label: "Your CV" },
+      ],
+      path: [],
+    };
+    const model = countingModel();
+    const result = await runApplyAgent(input, model.client);
+    expect(model.turns()).toBe(0);
+    expect(result.outcome).toBe("prepared");
+    expect(writes).toEqual([
+      "c6=resume.txt",
+      "c0=Robin Ashford",
+      "c1=robin@example.test",
+      "c2=United Kingdom",
+      "c3=true",
+    ]);
+    expect(source.controls.at(5)?.value).toBe("they/them");
+    expect(
+      (result.reviewFilled ?? []).find((entry) => entry.label === "Full name")
+        ?.answer.provenanceLabel,
+    ).toBe("your matching saved answer or profile fact");
+  });
+
+  test("a multi-step form: each step's answers go back, and its Next stays the person's", async () => {
+    const stepOne = page({
+      stepLabel: "Step 1 of 2: Contact",
+      controls: [
+        field(0, "Full name"),
+        field(1, "Email", { inputType: "email" }),
+      ],
+      actions: [
+        {
+          index: 0,
+          label: "Save and continue",
+          visible: true,
+          disabled: false,
+        },
+      ],
+    });
+    const stepTwo = page({
+      stepLabel: "Step 2 of 2: Experience",
+      controls: [field(0, "Years of experience")],
+    });
+    const key = (raw: RawApplyPage, index: number) => {
+      const observation = buildApplyFormObservation(
+        raw,
+        "2026-09-14T10:00:00.000Z",
+      );
+      const control = observation.controls.at(index);
+      if (!control) throw new Error("No such field on the step.");
+      return reviewFieldKey(observation, control);
+    };
+    const replay = {
+      answers: [
+        stored("Full name", "Robin Ashford", key(stepOne, 0)),
+        stored("Email", "robin@example.test", key(stepOne, 1)),
+        stored("Years of experience", "8", key(stepTwo, 0)),
+      ],
+      attachments: [],
+      path: [],
+    };
+    // The page comes back on its first step.
+    const first = config(stepOne, { intermediateWritesAuthorized: false });
+    const firstWrites = liveHands(stepOne, first);
+    first.replay = replay;
+    const firstModel = countingModel();
+    const handedOver = await runApplyAgent(first, firstModel.client);
+    expect(firstModel.turns()).toBe(0);
+    expect(firstWrites).toEqual(["c0=Robin Ashford", "c1=robin@example.test"]);
+    expect(handedOver.outcome).toBe("paused");
+    expect(
+      handedOver.pauses.flatMap((pause) => pause.questions ?? [pause.question]),
+    ).toContainEqual(
+      expect.objectContaining({ id: STEP_HANDOVER_QUESTION_ID }),
+    );
+    // The person pressed it; the continue fills the second step.
+    const second = config(stepTwo, { intermediateWritesAuthorized: false });
+    const secondWrites = liveHands(stepTwo, second);
+    second.replay = replay;
+    const secondModel = countingModel();
+    const finished = await runApplyAgent(second, secondModel.client);
+    expect(secondModel.turns()).toBe(0);
+    expect(secondWrites).toEqual(["c0=8"]);
+    expect(finished.outcome).toBe("prepared");
+  });
+
+  test("the recorded way in is taken again: the open-form button, then the answers", async () => {
+    const listing = page({
+      url: "https://apply.example.test/jobs/1",
+      controls: [],
+      actions: [
+        {
+          index: 0,
+          label: "Apply for this job",
+          visible: true,
+          disabled: false,
+        },
+      ],
+    });
+    const form = page({ controls: [field(0, "Full name")] });
+    const source: RawApplyPage = { ...listing };
+    const input = config(source, { intermediateWritesAuthorized: false });
+    const writes = liveHands(source, input);
+    input.hands.clickElement = () => {
+      Object.assign(source, form, { controls: form.controls });
+      return Promise.resolve({ ok: true, observedValue: "clicked" });
+    };
+    const listingScreen = screenKey(
+      buildApplyFormObservation(listing, "2026-09-14T10:00:00.000Z"),
+    );
+    input.replay = {
+      answers: [stored("Full name", "Robin Ashford")],
+      attachments: [],
+      path: [
+        { from: listingScreen, tool: "click", label: "Apply for this job" },
+      ],
+    };
+    const model = countingModel();
+    const result = await runApplyAgent(input, model.client);
+    expect(model.turns()).toBe(0);
+    expect(writes).toEqual(["c0=Robin Ashford"]);
+    expect(result.outcome).toBe("prepared");
+    expect(result.formPath).toEqual(input.replay.path);
+  });
+
+  test("a field the form no longer has goes to the model, with the rest already back", async () => {
+    const source = page({
+      controls: [field(0, "Full name"), field(1, "Notice period")],
+    });
+    const input = config(source, { intermediateWritesAuthorized: false });
+    const writes = liveHands(source, input);
+    input.replay = {
+      answers: [
+        stored("Full name", "Robin Ashford"),
+        stored("Start date", "Soon"),
+      ],
+      attachments: [],
+      path: [],
+    };
+    const model = countingModel();
+    await runApplyAgent(input, model.client);
+    expect(writes[0]).toBe("c0=Robin Ashford");
+    // "Notice period" is new and empty: only it needed the model.
+    expect(model.turns()).toBeGreaterThan(0);
   });
 });

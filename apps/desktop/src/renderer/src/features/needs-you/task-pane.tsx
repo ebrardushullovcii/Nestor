@@ -12,6 +12,8 @@ import {
 } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { Checkbox } from "@renderer/components/ui/checkbox";
+import { useToast } from "@renderer/components/ui/toast";
+import { openPreparedApplication } from "@renderer/features/applications/open-application";
 import { AnswerField } from "./answer-field";
 import { SourceNeedPane } from "./source-need-pane";
 
@@ -26,6 +28,7 @@ export function TaskPane(props: {
   onMissing?: (id: number) => void;
 }) {
   const { id, onEditing, onResolved } = props;
+  const { showToast } = useToast();
   const onMissing = useRef(props.onMissing);
   onMissing.current = props.onMissing;
   const [details, setDetails] = useState<NeedsYouDetails | null>(null);
@@ -209,9 +212,10 @@ export function TaskPane(props: {
                   onClick={() =>
                     void act(async () => {
                       if (
-                        !(await window.nestor.jobFinder.openApplication({
-                          id: application.id,
-                        }))
+                        !(await openPreparedApplication(
+                          application.id,
+                          showToast,
+                        ))
                       )
                         throw new Error(
                           "The form could not be opened. Try opening it again from Applications.",
@@ -252,9 +256,10 @@ export function TaskPane(props: {
                       onClick={() =>
                         void act(async () => {
                           if (
-                            !(await window.nestor.jobFinder.openApplication({
-                              id: application.id,
-                            }))
+                            !(await openPreparedApplication(
+                              application.id,
+                              showToast,
+                            ))
                           )
                             throw new Error(
                               "The form could not be opened. Try opening it again from Applications.",
