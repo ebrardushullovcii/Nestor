@@ -12,6 +12,7 @@ import {
 import {
   allowPrepareOnlyRunNavigation,
   ensurePrepareOnlyMutationGuard,
+  getLatestBlockedPrepareOnlyAttempt,
   openPrepareOnlyIntermediateMutationWindow,
   registerPrepareOnlyPreparedValue,
 } from "./playwright-application-flow";
@@ -345,6 +346,96 @@ test("Ashby with field saves: guarded Submit sends once after the Yes/No presses
       file: expect.stringContaining(resume.name) as unknown,
     },
   });
+});
+
+test("A JavaScript-sent form: its Apply submits it, and the guarded click sends the page's own POST once", async () => {
+  const { page, session } = await fillPage("contact-form-shape");
+  const read = await session.readPage();
+  const ref = (id: string) => {
+    const control = read.controls.find((entry) => entry.id === id)!;
+    return control.ref ?? `c${control.index}`;
+  };
+  for (const [id, value] of [
+    ["name", "Alex Vanguard"],
+    ["email", "alex.vanguard@example.test"],
+    ["phone", "+44 20 0000 0000"],
+  ] as const) {
+    await registerPrepareOnlyPreparedValue(page, value);
+    await session.fillText(ref(id), value);
+  }
+  await session.setToggle(ref("consent"), true);
+  // The form names no method or action; its Apply button still submits it.
+  const apply = (await session.readPage()).actions.find(
+    (action) => action.label === "Apply",
+  )!;
+  expect(apply).toMatchObject({ submitsForm: true, formMethod: "GET" });
+  const sent = () =>
+    posts().filter((post) => post.path === "/contact-form-shape/api/apply");
+  expect(sent()).toEqual([]);
+  const observation = await observeApplicationForm(page, {
+    finalActionTargets: [
+      { ref: apply.ref ?? `a${apply.index}`, label: apply.label },
+    ],
+  });
+  expect(observation.complete).toBe(true);
+  const origin = new URL(page.url()).origin;
+  const finalInput = {
+    expectedObservation: observation.identity,
+    expectedControl: observation.controls[0]!.identity,
+    expectedPageOrigin: origin,
+    allowedOrigins: [origin],
+    veto: () => true,
+    confirmationTimeoutMs: 2_000,
+  };
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().startsWith(origin))
+      requests.push(`${request.method()} ${new URL(request.url()).pathname}`);
+  });
+  expect(await executeExactlyOneFinalAction(page, finalInput)).toMatchObject({
+    outcome: "submitted",
+  });
+  expect(sent().map((post) => post.fields)).toEqual([
+    {
+      role: "software-engineer",
+      name: "Alex Vanguard",
+      email: "alex.vanguard@example.test",
+      phone: "+44 20 0000 0000",
+    },
+  ]);
+  // The page's own POST went out; the form's GET to itself never did.
+  expect(requests).toContain("POST /contact-form-shape/api/apply");
+  expect(requests).not.toContain("GET /contact-form-shape/apply/1");
+});
+
+test("A JavaScript-sent form: Apply pressed without the guarded click sends nothing", async () => {
+  const { page } = await fillPage("contact-form-shape");
+  for (const [id, value] of [
+    ["name", "Alex Vanguard"],
+    ["email", "alex.vanguard@example.test"],
+    ["phone", "+44 20 0000 0000"],
+  ] as const) {
+    await registerPrepareOnlyPreparedValue(page, value);
+    await page.fill(`#${id}`, value);
+  }
+  await page.check("#consent");
+  const sent = () =>
+    posts().filter((post) => post.path === "/contact-form-shape/api/apply")
+      .length;
+  const before = sent();
+  const requests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/contact-form-shape/api/apply"))
+      requests.push(request.method());
+  });
+  await page.click("button[type=submit]");
+  await page.waitForTimeout(1_000);
+  expect(sent()).toBe(before);
+  expect(requests).toEqual([]);
+  expect(page.url()).toContain("/contact-form-shape/apply/1");
+  expect((await getLatestBlockedPrepareOnlyAttempt(page))?.kind).toContain(
+    "submit",
+  );
 });
 
 test("Ashby with field saves: a press right after the upload waits for the storage and the bind", async () => {

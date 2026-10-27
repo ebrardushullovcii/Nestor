@@ -312,7 +312,7 @@ export function buildApplyFormObservation(
   const actions: ApplyFormAction[] = raw.actions.map((rawAction) => ({
     ref: rawAction.ref ?? `a${rawAction.index}`,
     label: rawAction.label.trim(),
-    kind: inferActionKind(rawAction.label),
+    kind: inferActionKind(rawAction.label, rawAction.submitsForm === true),
     visible: rawAction.visible,
     disabled: rawAction.disabled,
     ...(rawAction.formAction ? { formAction: rawAction.formAction } : {}),

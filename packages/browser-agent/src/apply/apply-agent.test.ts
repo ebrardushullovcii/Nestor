@@ -8762,3 +8762,50 @@ describe("a picker the person filled on the page survives the continue", () => {
     expect(result.outcome).toBe("paused");
   });
 });
+
+describe("a form's own submit button that says Apply is its send", () => {
+  // Askable: a contact-only role form whose Apply button submits the form;
+  // the page's handler posts it with fetch instead of the form's own action.
+  const applyPage = (submitsForm: boolean) =>
+    page({
+      controls: [nameControl()],
+      actions: [
+        {
+          index: 0,
+          label: "Apply",
+          visible: true,
+          disabled: false,
+          formAction: "https://apply.example.test/roles/engineer",
+          formMethod: "GET",
+          submitsForm,
+        },
+      ],
+    });
+  const sendForMe = {
+    authority: {
+      mode: "autonomous_submit" as const,
+      submitAuthorized: true,
+      preApprovedAttestationKinds: [],
+      salaryDisclosure: "pause_for_user" as const,
+      allowedOrigins: ["https://apply.example.test"],
+    },
+  };
+
+  test("in Send for me, the complete form is ready to send by that button", async () => {
+    const result = await runApplyAgent(
+      config(applyPage(true), sendForMe),
+      repeatingModel("finish", { reason: "The form is complete." }),
+    );
+    expect(result.outcome).toBe("ready_to_send");
+    expect(result.readyToSend).toMatchObject({ actionLabel: "Apply" });
+  });
+
+  test("an Apply button that does not submit a form is not the send", async () => {
+    const result = await runApplyAgent(
+      config(applyPage(false), sendForMe),
+      repeatingModel("finish", { reason: "The form is complete." }),
+    );
+    expect(result.outcome).not.toBe("ready_to_send");
+    expect(result.readyToSend).toBeNull();
+  });
+});

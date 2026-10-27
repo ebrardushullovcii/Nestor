@@ -545,6 +545,10 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                         ? actionElement.formMethod
                         : form.method) || "GET"
                     ).toUpperCase(),
+                    submitsForm:
+                      button?.type === "submit" ||
+                      input?.type === "submit" ||
+                      input?.type === "image",
                   }
                 : {}),
             };
@@ -1266,6 +1270,10 @@ export function collectApplyDocumentSnapshot(
                   ? actionElement.formMethod
                   : form.method) || "GET"
               ).toUpperCase(),
+              submitsForm:
+                button?.type === "submit" ||
+                input?.type === "submit" ||
+                input?.type === "image",
             }
           : {}),
       };
