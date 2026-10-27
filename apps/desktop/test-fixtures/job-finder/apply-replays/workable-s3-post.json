@@ -1,0 +1,34 @@
+{
+  "id": "workable-s3-post",
+  "provenance": "The shape of Workable's upload presign answer and storage POST on its hosted application forms (October 2026), read from a public job's own presign GET and its client code. The page appends Content-Type (the file's type), every presigned field in order, then the file. Field names, the empty utf8 value and the policy conditions are as observed; every other value is synthetic.",
+  "fields": {
+    "utf8": "",
+    "bucket": "synthetic-workable-files",
+    "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+    "X-Amz-Credential": "EXAMPLEUPLOADKEY12345/20990101/local-test-1/s3/aws4_request",
+    "X-Amz-Date": "20990101T000000Z",
+    "key": "tmp/ttl-1d/production/0a1b2c3d-4e5f-4789-8bcd-ef0123456789",
+    "X-Amz-Signature": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "policy": {
+    "expiration": "2099-01-01T01:00:00Z",
+    "conditions": [
+      ["starts-with", "$utf8", ""],
+      [
+        "eq",
+        "$key",
+        "tmp/ttl-1d/production/0a1b2c3d-4e5f-4789-8bcd-ef0123456789"
+      ],
+      ["content-length-range", 1, 12000000],
+      ["starts-with", "$Content-Type", ""],
+      { "utf8": "" },
+      { "bucket": "synthetic-workable-files" },
+      { "X-Amz-Algorithm": "AWS4-HMAC-SHA256" },
+      {
+        "X-Amz-Credential": "EXAMPLEUPLOADKEY12345/20990101/local-test-1/s3/aws4_request"
+      },
+      { "X-Amz-Date": "20990101T000000Z" },
+      { "key": "tmp/ttl-1d/production/0a1b2c3d-4e5f-4789-8bcd-ef0123456789" }
+    ]
+  }
+}

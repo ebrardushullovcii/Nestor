@@ -2287,6 +2287,56 @@ describe("apply agent run endings", () => {
     ]);
   });
 
+  test("a refused upload stops after two tries and says what was refused", async () => {
+    // Workable: every storage POST was held back, and the run kept
+    // uploading the same file until it was stopped by hand.
+    const source = page({
+      controls: [nameControl(), resumeFile("Resume", { value: "" })],
+    });
+    const suppliedResume = {
+      id: "resume_document",
+      fileName: "resume.txt",
+      mimeType: "text/plain",
+      label: "Your CV",
+      kind: "resume" as const,
+      loadBytes: () => Promise.resolve(new TextEncoder().encode("Resume")),
+    };
+    const uploadFile = vi.fn((_ref: string, upload: { name: string }) => {
+      // The widget empties its input and the storage request is refused.
+      source.controls[1] = resumeFile("Resume", {
+        value: "",
+        upload: {
+          described: "",
+          nearby: "Resume",
+          shown: false,
+          fileName: upload.name,
+          network: "rejected",
+        },
+      });
+      return Promise.resolve({ ok: true as const, observedValue: upload.name });
+    });
+    const input = config(source, {
+      intermediateWritesAuthorized: false,
+      sources: { ...config(source).sources, documents: [suppliedResume] },
+    });
+    input.hands.uploadFile = uploadFile;
+    const result = await runApplyAgent(
+      input,
+      repeatingModel("upload", { ref: "c1", documentId: suppliedResume.id }),
+    );
+    expect(uploadFile).toHaveBeenCalledTimes(2);
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(result.reason).toContain("resume.txt");
+    expect(result.reason).toContain("after 2 tries: its upload was refused");
+    expect(fileQuestions(result)).toEqual([
+      expect.objectContaining({
+        id: "upload_repair",
+        prompt: "Resume — upload failed",
+      }),
+    ]);
+  });
+
   test("an upload that never finishes is handed over instead of waited on forever", async () => {
     const source = page({
       controls: [nameControl(), resumeFile("Resume Uploading…")],

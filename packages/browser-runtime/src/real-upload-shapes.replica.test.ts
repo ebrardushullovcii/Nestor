@@ -120,6 +120,31 @@ test("Greenhouse: the resume reaches storage, with a name filled in", async () =
   ).toEqual([]);
 });
 
+test("Workable: the resume reaches the storage its presign named, with an empty utf8 field", async () => {
+  const { page, session } = await fillPage("workable-shape");
+  const controls = (await session.readPage()).controls;
+  const ref = (id: string) => {
+    const control = controls.find((entry) => entry.id === id)!;
+    return control.ref ?? `c${control.index}`;
+  };
+  await registerPrepareOnlyPreparedValue(page, "Alex");
+  await session.fillText(ref("firstname"), "Alex");
+  await session.uploadFile(ref("resume"), resume);
+  await page.waitForFunction(
+    () => (document.getElementById("resume_path") as HTMLInputElement).value,
+    undefined,
+    { timeout: 20_000 },
+  );
+  const stored = posts().filter(
+    (post) => post.path === "/workable-shape/storage",
+  );
+  expect(
+    stored.map((post) => (post.fields.file as { filename: string }).filename),
+  ).toEqual([resume.name]);
+  expect(stored[0]?.fields.utf8).toBe("");
+  expect(await page.locator("#resume-error").textContent()).toBe("");
+});
+
 test("Ashby: the resume is stored and bound to its field; typed answers are not saved", async () => {
   const { page, session } = await fillPage("ashby-shape");
   const controls = (await session.readPage()).controls;

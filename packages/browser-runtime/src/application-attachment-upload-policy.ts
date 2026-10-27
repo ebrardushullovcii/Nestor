@@ -160,8 +160,9 @@ function storageMetadata(
       return /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(value);
     case "content-type":
       return value === grant.mimeType || value === "application/octet-stream";
+    // Rails sends a check mark; Workable's presign hands out an empty one.
     case "utf8":
-      return value === "✓";
+      return value === "✓" || value === "";
     case "filename":
     case "file_name":
       return value === grant.fileName;
