@@ -167,12 +167,17 @@ test("Ashby with field saves: the person's own Submit gets every value Nestor ty
     (action) => action.pressed !== undefined,
   );
   expect(
-    toggles.map((action) => [action.section, action.label, action.pressed]),
+    toggles.map((action) => [
+      action.section,
+      action.label,
+      action.pressed,
+      action.sectionRequired,
+    ]),
   ).toEqual([
-    ["Are you over the age of 18?", "Yes", false],
-    ["Are you over the age of 18?", "No", false],
-    ["Are you based in a EU or equivalent timezone?", "Yes", false],
-    ["Are you based in a EU or equivalent timezone?", "No", false],
+    ["Are you over the age of 18?", "Yes", false, true],
+    ["Are you over the age of 18?", "No", false, true],
+    ["Are you based in a EU or equivalent timezone?", "Yes", false, true],
+    ["Are you based in a EU or equivalent timezone?", "No", false, true],
   ]);
   for (const [index, times] of [
     [0, 2],

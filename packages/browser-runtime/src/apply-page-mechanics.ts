@@ -666,6 +666,9 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
       if (legend && !legends.includes(legend)) legends.unshift(legend);
     }
     let section = legends.join(" — ");
+    let sectionBox: Element | null = section
+      ? element.closest("fieldset")
+      : null;
     if (!section) {
       const part = element.closest(
         "dialog, [role='dialog'], [role='alertdialog'], [role='region'], [role='group'], section, aside, form",
@@ -679,6 +682,7 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
           ) ||
           words(part.querySelector("h1, h2, h3, h4, legend"))
         : "";
+      if (section) sectionBox = part;
     }
     // The words beside it: the nearest box whose own text, without its
     // buttons and fields, says something short.
@@ -694,6 +698,7 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
       const nearby = words(clone);
       if (nearby.length > 300) break;
       section = nearby;
+      if (section) sectionBox = box;
     }
     let inForm = Boolean(
       element.closest("form, fieldset, [role='form'], [role='group']"),
@@ -708,7 +713,23 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
           "input:not([type='hidden']):not([type='button']):not([type='submit']), select, textarea",
         ),
       );
-    return { section: section.slice(0, 200), inForm };
+    // A toggle button answers the question around it; whether that question
+    // is required is said by its label (a "required" class, as Ashby's
+    // title has, aria-required, or a trailing *).
+    const sectionRequired =
+      element.hasAttribute("aria-pressed") && sectionBox
+        ? /\*\s*$/u.test(section) ||
+          Boolean(
+            sectionBox.querySelector(
+              "[aria-required='true'], label[class*='required' i], [class*='question-title'][class*='required' i]",
+            ),
+          )
+        : false;
+    return {
+      section: section.slice(0, 200),
+      inForm,
+      ...(sectionRequired ? { sectionRequired } : {}),
+    };
   });
 }
 
@@ -742,6 +763,9 @@ export function collectApplyDocumentSnapshot(
       if (legend && !legends.includes(legend)) legends.unshift(legend);
     }
     let section = legends.join(" — ");
+    let sectionBox: Element | null = section
+      ? element.closest("fieldset")
+      : null;
     if (!section) {
       const part = element.closest(
         "dialog, [role='dialog'], [role='alertdialog'], [role='region'], [role='group'], section, aside, form",
@@ -755,6 +779,7 @@ export function collectApplyDocumentSnapshot(
           ) ||
           words(part.querySelector("h1, h2, h3, h4, legend"))
         : "";
+      if (section) sectionBox = part;
     }
     // The words beside it: the nearest box whose own text, without its
     // buttons and fields, says something short.
@@ -770,6 +795,7 @@ export function collectApplyDocumentSnapshot(
       const nearby = words(clone);
       if (nearby.length > 300) break;
       section = nearby;
+      if (section) sectionBox = box;
     }
     let inForm = Boolean(
       element.closest("form, fieldset, [role='form'], [role='group']"),
@@ -784,7 +810,23 @@ export function collectApplyDocumentSnapshot(
           "input:not([type='hidden']):not([type='button']):not([type='submit']), select, textarea",
         ),
       );
-    return { section: section.slice(0, 200), inForm };
+    // A toggle button answers the question around it; whether that question
+    // is required is said by its label (a "required" class, as Ashby's
+    // title has, aria-required, or a trailing *).
+    const sectionRequired =
+      element.hasAttribute("aria-pressed") && sectionBox
+        ? /\*\s*$/u.test(section) ||
+          Boolean(
+            sectionBox.querySelector(
+              "[aria-required='true'], label[class*='required' i], [class*='question-title'][class*='required' i]",
+            ),
+          )
+        : false;
+    return {
+      section: section.slice(0, 200),
+      inForm,
+      ...(sectionRequired ? { sectionRequired } : {}),
+    };
   };
   const controls = ((elements: Element[]): RawApplyControl[] => {
     const labelText = (element: Element | null): string => {

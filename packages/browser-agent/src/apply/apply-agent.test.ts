@@ -8148,6 +8148,28 @@ describe("Ashby's Yes/No buttons are a question, not the form's buttons", () => 
     expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
   });
 
+  test("Ashby marks the question required only with a class: without an answer the person still gets it", async () => {
+    // As on real Ashby in Send for me: the run filled the rest and finished
+    // saying the person must answer; that has to become a Needs-you item.
+    const source = yesNo(null);
+    source.actions = source.actions
+      .slice(0, 2)
+      .map((action) => ({ ...action, sectionRequired: true }));
+    const result = await runApplyAgent(
+      config(source),
+      repeatingModel("finish", {
+        reason:
+          "Needs you to answer 'Are you over the age of 18?' before submitting.",
+        needsPerson: true,
+      }),
+    );
+    const asked = result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .find((entry) => entry.prompt === question);
+    expect(asked?.isRequired).toBe(true);
+    expect(asked?.answerOptions).toEqual(["Yes", "No"]);
+  });
+
   test("without an answer the person gets the question with Yes and No to pick", async () => {
     const source = yesNo(null);
     source.actions = source.actions

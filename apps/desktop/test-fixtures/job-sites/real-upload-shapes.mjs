@@ -81,10 +81,11 @@ const ashbyQueries = {
 /**
  * Ashby's Yes/No input, as its page renders it: two buttons with no type,
  * `aria-pressed` and `data-option`, and a hidden checkbox, inside the
- * question's field. Its label points at no element.
+ * question's field. Its label points at no element, and marks the question
+ * required only with a class (the asterisk is drawn by CSS).
  */
 const ashbyYesNo = (path, question) => `
-      <div class="field-entry"><label for="${path}-field">${question}</label>
+      <div class="field-entry"><label class="_required_f7cvd_91 ashby-application-form-question-title" for="${path}-field">${question}</label>
         <div data-yesno="${path}">
           <button aria-pressed="false" data-option="yes">Yes</button>
           <button aria-pressed="false" data-option="no">No</button>

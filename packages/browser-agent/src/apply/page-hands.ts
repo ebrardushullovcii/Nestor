@@ -172,9 +172,10 @@ function withToggleChoices(raw: RawApplyPage): RawApplyPage {
             groupLabel: question,
             placeholder: "",
             autocomplete: "",
-            // Only the question's own marker says so; the page has no
-            // required attribute on a button.
-            required: /\*\s*$/u.test(question),
+            // Only the question's own label says so (its required mark, or
+            // a trailing *); a button has no required attribute.
+            required:
+              action.sectionRequired === true || /\*\s*$/u.test(question),
             invalid: false,
             validationMessage: "",
             disabled: action.disabled,

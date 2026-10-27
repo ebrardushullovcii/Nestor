@@ -77,6 +77,8 @@ export interface RawApplyUpload {
 export interface RawApplyPlacement {
   section?: string;
   inForm?: boolean;
+  /** For a toggle button: the question it answers is marked required. */
+  sectionRequired?: boolean;
 }
 
 export interface RawApplyAction extends RawApplyPlacement {
