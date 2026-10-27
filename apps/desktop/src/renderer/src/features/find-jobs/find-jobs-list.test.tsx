@@ -102,13 +102,23 @@ function FoundJobs(props: { rows: readonly JobRow[] }) {
       selection={selection}
       total={props.rows.length}
       totalCapped={false}
+      windowed
     />
   );
 }
 
+/** The list's scroll box is this tall; jsdom lays nothing out. */
+const VIEW_HEIGHT = 640;
+
 beforeEach(() => {
   renders.count = 0;
-  Element.prototype.scrollIntoView = () => undefined;
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(
+    function (this: HTMLElement) {
+      return this.hasAttribute("data-locked-pane-scroll-region")
+        ? VIEW_HEIGHT
+        : 0;
+    },
+  );
   vi.stubGlobal(
     "IntersectionObserver",
     class {
@@ -120,24 +130,34 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
-it("re-renders only the row a J press leaves and the one it opens, with 300 rows loaded", () => {
-  const rows = Array.from({ length: 300 }, (_, i) => row(i + 1));
+const items = () => document.querySelectorAll("li");
+const rowNamed = (title: string) =>
+  screen.getByRole("checkbox", { name: `Select ${title}` }).closest("li")!;
+
+it("draws only the rows in view of 2,000, and a J press re-renders at most two", () => {
+  const rows = Array.from({ length: 2000 }, (_, i) => row(i + 1));
   render(<FoundJobs rows={rows} />);
-  expect(renders.count).toBeGreaterThanOrEqual(1);
+  expect(items().length).toBeGreaterThan(0);
+  expect(items().length).toBeLessThan(40);
+  const list = screen.getByRole("list", { name: "Found jobs" });
+  // The list keeps its full height, so the scrollbar is the whole list's.
+  expect(list.style.height).toBe(`${2000 * 92}px`);
+  expect(rowNamed("Designer 1").getAttribute("aria-setsize")).toBe("2000");
+  expect(rowNamed("Designer 1").getAttribute("aria-posinset")).toBe("1");
 
   renders.count = 0;
   act(() => {
     fireEvent.keyDown(window, { key: "j" });
   });
   expect(renders.count).toBeLessThanOrEqual(2);
+  expect(items().length).toBeLessThan(40);
   expect(
-    screen
-      .getByRole("checkbox", { name: "Select Designer 2" })
-      .closest("li")
-      ?.querySelector("[aria-controls]")
+    rowNamed("Designer 2")
+      .querySelector("[aria-controls]")
       ?.getAttribute("tabindex"),
   ).toBe("0");
 
@@ -147,4 +167,19 @@ it("re-renders only the row a J press leaves and the one it opens, with 300 rows
     fireEvent.keyDown(window, { key: "x" });
   });
   expect(renders.count).toBe(1);
+});
+
+it("keeps the open row drawn when the person scrolls far from it", () => {
+  const rows = Array.from({ length: 2000 }, (_, i) => row(i + 1));
+  render(<FoundJobs rows={rows} />);
+  const scroller = document.querySelector<HTMLElement>(
+    "[data-locked-pane-scroll-region]",
+  )!;
+  act(() => {
+    scroller.scrollTop = 1500 * 92;
+    fireEvent.scroll(scroller);
+  });
+  expect(screen.getByText("Designer 1500")).toBeTruthy();
+  expect(rowNamed("Designer 1").getAttribute("aria-posinset")).toBe("1");
+  expect(items().length).toBeLessThan(40);
 });

@@ -609,6 +609,7 @@ export function ShortlistedScreen() {
             }
             total={list.total}
             totalCapped={totalCapped}
+            windowed
           />
         }
       />
@@ -631,6 +632,9 @@ const ShortlistedListRow = memo(function ShortlistedListRow(
   return (
     <ListRowFrame
       active={props.active}
+      index={props.index}
+      setSize={props.setSize}
+      top={props.top}
       badge={<StatusBadge tone={status.tone}>{status.label}</StatusBadge>}
       checked={props.checked}
       id={row.id}

@@ -600,6 +600,7 @@ export function FindJobsScreen() {
             }
             total={list.total}
             totalCapped={totalCapped}
+            windowed
           />
         }
       />
