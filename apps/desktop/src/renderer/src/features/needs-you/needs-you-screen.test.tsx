@@ -637,6 +637,40 @@ it("saves numeric answers before Apply and reuses the same facts in number or te
   expect(applications.needsYou.list().rows).toEqual([]);
 });
 
+it("keeps one blocked-site card with its manual job link and no retry or saved-answer controls", async () => {
+  for (const row of claimed.slice(0, 2)) {
+    applications.needsYou.request({
+      applicationId: row.id,
+      attempt: row.attempt,
+      fieldKey: "site_access",
+      key: "access:https://jobs.example.test",
+      kind: "sign_in",
+      scope: { siteOrigin: "https://jobs.example.test" },
+      prompt: "The site refused this browser.",
+      input: "text",
+      options: [],
+      blockedUrl: "https://jobs.example.test/0",
+    });
+    applications.block(row.id, row.attempt, "The site refused this browser.");
+  }
+  const open = vi.spyOn(window.nestor.needsYou, "run");
+  show();
+  await screen.findByRole("heading", { name: "This site blocked the browser" });
+  expect(applications.needsYou.list().total).toBe(1);
+  expect(screen.getByText("https://jobs.example.test/0")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Save answer" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open in my browser" }));
+  await waitFor(() =>
+    expect(open).toHaveBeenCalledWith("open_need", {
+      id: applications.needsYou.list().rows[0]!.id,
+    }),
+  );
+  expect(applications.listApplications({ state: "blocked" }).rows).toHaveLength(
+    2,
+  );
+});
+
 it("updates a single site card as sign-in reaches MFA and applications continue", async () => {
   const request = (index: number, kind: "sign_in" | "mfa") =>
     applications.needsYou.request({

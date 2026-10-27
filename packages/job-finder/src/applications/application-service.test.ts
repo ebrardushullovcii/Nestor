@@ -118,7 +118,7 @@ const ready = () =>
 const cleanups: (() => void | Promise<void>)[] = [];
 
 it("shares one blocked-site item, closes tabs, and never retries the site or subsequent jobs", async () => {
-  const f = await setup(2, 1);
+  const f = await setup(2, 1, { onDisk: true });
   preparation.blocker = {
     code: "browser_blocked",
     requiresPerson: true,
@@ -138,7 +138,9 @@ it("shares one blocked-site item, closes tabs, and never retries the site or sub
   expect(f.execute).toHaveBeenCalledTimes(1);
   const tasks = f.applications.needsYou.list().rows;
   expect(tasks).toHaveLength(1);
-  expect(tasks[0]?.blockedUrl).toBe(f.execute.mock.calls[0]?.[1].job.canonicalUrl);
+  expect(tasks[0]?.blockedUrl).toBe(
+    f.execute.mock.calls[0]?.[1].job.canonicalUrl,
+  );
   expect(
     f.applications.needsYou.details(tasks[0]!.id)?.applications,
   ).toHaveLength(2);
@@ -149,6 +151,25 @@ it("shares one blocked-site item, closes tabs, and never retries the site or sub
   expect(
     f.applications.listApplications({ state: "queued" }).rows,
   ).toHaveLength(0);
+  f.service.stop();
+  f.jobs.close();
+  const jobs = openJobStore(f.dbPath);
+  const applications = createApplicationStore(jobs);
+  const restarted = createApplicationService({ ...f.deps, jobs, applications });
+  cleanups.unshift(() => {
+    restarted.stop();
+    jobs.close();
+  });
+  await restarted.start();
+  expect(applications.listApplications({ state: "blocked" }).rows).toHaveLength(
+    2,
+  );
+  expect(applications.needsYou.list().rows.map((task) => task.id)).toEqual([
+    tasks[0]!.id,
+  ]);
+  expect(applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(0);
+  expect(f.execute).toHaveBeenCalledOnce();
+  expect(f.authorizeSending).not.toHaveBeenCalled();
 });
 
 it("closes a saved-rule skip without adding a Needs you question", async () => {
