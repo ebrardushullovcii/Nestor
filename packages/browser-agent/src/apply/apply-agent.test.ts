@@ -25,7 +25,11 @@ import {
   questionPrompt,
 } from "./policy-executor";
 import { savedAnswerForQuestion } from "./application-facts";
-import type { ApplyAgentConfig, ApplyPageHands } from "./types";
+import type {
+  ApplyAgentConfig,
+  ApplyAgentResult,
+  ApplyPageHands,
+} from "./types";
 import {
   checkWrittenApplicationAnswer,
   WrittenAnswerCheckUnavailableError,
@@ -8299,32 +8303,39 @@ describe("a run never ends waiting on the person with nothing to answer", () => 
         },
       ],
     });
+  const sendForMe = {
+    authority: {
+      mode: "autonomous_submit" as const,
+      submitAuthorized: true,
+      preApprovedAttestationKinds: [],
+      salaryDisclosure: "pause_for_user" as const,
+      allowedOrigins: ["https://apply.example.test"],
+    },
+  };
+  const handedOver = (result: ApplyAgentResult) =>
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .map((q) => q.prompt);
 
-  test("an optional question it means is left empty, and the run finishes ready", async () => {
+  test("an optional question it names is left empty, and the run finishes ready", async () => {
     const result = await runApplyAgent(
       config(optionalYesNo()),
       repeatingModel("finish", {
-        reason: `The question "${question}" needs the person's answer.`,
+        reason: "One question needs the person's answer.",
         needsPerson: true,
+        forPerson: [question],
       }),
     );
     expect(result.pauses).toEqual([]);
     expect(result.outcome).toBe("prepared");
   });
 
-  test("in Send for me, a request to review a filled form is not a question: the form goes out", async () => {
+  test("in Send for me, a finish that names nothing on a complete form is completed: the form goes out", async () => {
     // Polar: the model finished a complete form with needsPerson and a
-    // summary that names no question.
+    // summary that names no question. Asked once to name it, it names
+    // nothing again.
     const result = await runApplyAgent(
-      config(page({ controls: [nameControl()] }), {
-        authority: {
-          mode: "autonomous_submit",
-          submitAuthorized: true,
-          preApprovedAttestationKinds: [],
-          salaryDisclosure: "pause_for_user",
-          allowedOrigins: ["https://apply.example.test"],
-        },
-      }),
+      config(page({ controls: [nameControl()] }), sendForMe),
       repeatingModel("finish", {
         reason:
           "Product Engineering application is fully filled — Full name Robin Ashford — please review before submitting.",
@@ -8338,15 +8349,58 @@ describe("a run never ends waiting on the person with nothing to answer", () => 
     });
   });
 
-  test("a review request on a form that is not complete is still the one item", async () => {
+  test.each([
+    "The person's relocation terms aren't in their profile. Please review before submitting.",
+    "Before sending, can you confirm you agree to relocate to Berlin?",
+  ])("in Send for me, a named item stops the send: %s", async (item) => {
     const result = await runApplyAgent(
-      config(page({ controls: [{ ...nameControl(), value: "" }] }), {
-        intermediateWritesAuthorized: false,
-      }),
+      config(page({ controls: [nameControl()] }), sendForMe),
       repeatingModel("finish", {
-        reason: "Please review the form before submitting.",
+        reason: "The form is filled in; one thing needs the person.",
         needsPerson: true,
+        forPerson: [item],
       }),
+    );
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(handedOver(result)).toEqual([item]);
+  });
+
+  test("a finish that names nothing is asked once, and the item it then names is handed over", async () => {
+    const item =
+      "Before sending, can you confirm you agree to relocate to Berlin?";
+    const contents: string[] = [];
+    const model = scriptedModel([
+      { name: "finish", args: { reason: item, needsPerson: true } },
+      {
+        name: "finish",
+        args: { reason: item, needsPerson: true, forPerson: [item] },
+      },
+    ]);
+    const result = await runApplyAgent(
+      config(page({ controls: [nameControl()] }), sendForMe),
+      {
+        chatWithTools: (messages, definitions) => {
+          const last = messages.at(-1);
+          if (last?.role === "tool") contents.push(String(last.content));
+          return model.chatWithTools(messages, definitions);
+        },
+      },
+    );
+    expect(contents.some((content) => content.includes("forPerson"))).toBe(
+      true,
+    );
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(handedOver(result)).toEqual([item]);
+  });
+
+  test("a finish that names nothing on a form that is not complete hands over its reason", async () => {
+    const reason = "Please review the form before submitting.";
+    // The page reads incomplete: it shows no send button yet.
+    const result = await runApplyAgent(
+      config(page({ controls: [nameControl()], actions: [] })),
+      repeatingModel("finish", { reason, needsPerson: true }),
     );
     expect(result.outcome).toBe("paused");
   });
@@ -8355,31 +8409,13 @@ describe("a run never ends waiting on the person with nothing to answer", () => 
     const result = await runApplyAgent(
       config(page({ controls: [nameControl()] })),
       repeatingModel("finish", {
-        reason:
-          'The form asks "Which office would you work from?" and only the person knows.',
+        reason: "Only the person knows which office they would work from.",
         needsPerson: true,
+        forPerson: ["Which office would you work from?"],
       }),
     );
     expect(result.outcome).toBe("paused");
-    expect(
-      result.pauses
-        .flatMap((pause) => pause.questions ?? [])
-        .map((q) => q.prompt),
-    ).toEqual(["Which office would you work from?"]);
-  });
-
-  test("a reason that names nothing it can find is itself the one item", async () => {
-    const reason = "The person's relocation terms aren't in their profile.";
-    const result = await runApplyAgent(
-      config(page({ controls: [nameControl()] })),
-      repeatingModel("finish", { reason, needsPerson: true }),
-    );
-    expect(result.outcome).toBe("paused");
-    expect(
-      result.pauses
-        .flatMap((pause) => pause.questions ?? [])
-        .map((q) => q.prompt),
-    ).toEqual([reason]);
+    expect(handedOver(result)).toEqual(["Which office would you work from?"]);
   });
 });
 

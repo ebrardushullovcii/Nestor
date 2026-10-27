@@ -290,7 +290,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
       function: {
         name: "finish",
         description:
-          "Finish. Before reporting a completed form, read the fresh page returned by fill_fields or observe, dismiss ordinary cookie banners, newsletter dialogs, and chat overlays using their own controls, and check the final button on the returned page. When questions remain for the person, use needsPerson: true; one finish hands back all the questions and ends the run. Call finish when the form is complete, when only the person can go further (they have to sign in, pass a security check, pay, or make an account), or when you are genuinely stuck. The reason is your report to the person: which site and page you were on, what you tried, what the page did, and what they need to do. Pass stuck: true when you could not get there.",
+          "Finish. Before reporting a completed form, read the fresh page returned by fill_fields or observe, dismiss ordinary cookie banners, newsletter dialogs, and chat overlays using their own controls, and check the final button on the returned page. When questions remain for the person, use needsPerson: true and name each one in forPerson; one finish hands back all the questions and ends the run. Call finish when the form is complete, when only the person can go further (they have to sign in, pass a security check, pay, or make an account), or when you are genuinely stuck. The reason is your report to the person: which site and page you were on, what you tried, what the page did, and what they need to do. Pass stuck: true when you could not get there.",
         parameters: {
           type: "object",
           properties: {
@@ -302,7 +302,13 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
             needsPerson: {
               type: "boolean",
               description:
-                "true when the person has to do something on the site before this can go further.",
+                "true when the person has to do something on the site before this can go further. Needs at least one forPerson item.",
+            },
+            forPerson: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Each question the person must answer or thing they must do before this can go further, one per item, apart from the reason. Leave it empty when the form is complete; a form that only wants looking over is complete.",
             },
           },
           required: ["reason"],
@@ -464,13 +470,19 @@ export function parseApplyProposal(
         : needsRef();
     case "finish": {
       const reason = asString(args.reason) ?? "Finished without saying why.";
+      const forPerson = (asStringArray(args.forPerson) ?? [])
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 20);
       return {
         ok: true,
         proposal: {
           tool: "finish",
           reason,
           stuck: args.stuck === true,
-          needsPerson: args.needsPerson === true,
+          // A named item is something waiting on the person.
+          needsPerson: args.needsPerson === true || forPerson.length > 0,
+          forPerson,
         },
       };
     }

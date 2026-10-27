@@ -753,6 +753,9 @@ async function runMeasuredApplyAgent(
   let advanceFinishNudged = false;
   let staleResumeNudged = false;
   let optionalLetterNudged = false;
+  let forPersonNudged = false;
+  // What the model's last finish named for the person, apart from its reason.
+  let forPerson: string[] = [];
 
   const pendingQuestionKey = (
     control: Pick<
@@ -1535,6 +1538,7 @@ async function runMeasuredApplyAgent(
           needsPerson: false,
         });
       case "finished": {
+        forPerson = outcome.forPerson ?? [];
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();
@@ -1648,6 +1652,25 @@ async function runMeasuredApplyAgent(
           )
         )
           return finishWithQuestions();
+        // A needs-person finish names what the person must do. Its reason
+        // alone cannot tell a question from a request to look the form over,
+        // so a finish that names nothing is asked once to name it.
+        if (
+          outcome.needsPerson &&
+          !forPerson.length &&
+          !forPersonNudged &&
+          pauses.length === 0 &&
+          !deferredPress &&
+          !observation.blocker &&
+          !reportedSecurityChallenge(outcome.reason)
+        ) {
+          forPersonNudged = true;
+          return {
+            kind: "ok",
+            content:
+              "needsPerson is set but forPerson names nothing. Finish again with each question or thing the person must do as its own forPerson item, or with needsPerson false if the form is complete.",
+          };
+        }
         // "Whenever there is room" covers optional letter fields too. Ask
         // once; an empty optional field never stops the application.
         const emptyOptionalLetter =
@@ -3593,12 +3616,18 @@ async function runMeasuredApplyAgent(
     pause.questions = [...questions.values()];
   }
   /**
-   * What a needs-person finish hands over: the page's own blocker, the
-   * unanswered questions its reason names (none when all are optional, and
-   * those stay empty), or else the questions it quotes, or its reason as one
-   * item. Never a "needs you" with nothing to do.
+   * What a needs-person finish hands over: the page's own blocker, else
+   * each item it names for the person. An item naming unanswered questions
+   * on the page hands those over (none when they are all optional, and
+   * those stay empty); any other item is a question of its own. A finish
+   * that names nothing on a complete, ready form is just completed; on any
+   * other form its reason is the one item. Never a "needs you" with
+   * nothing to do.
    */
-  const needsPersonHandover = (said: string): ApplyPause | null => {
+  const needsPersonHandover = (
+    said: string,
+    items: string[],
+  ): ApplyPause | null => {
     const page = pageTools.state.observation;
     if (page?.blocker)
       return {
@@ -3612,62 +3641,40 @@ async function runMeasuredApplyAgent(
         .toLowerCase()
         .replace(/[^\p{L}\p{N}]+/gu, " ")
         .trim();
-    const reason = words(said);
     const controls = page?.controls ?? [];
-    const named = controls.filter((control) => {
-      const prompt = words(questionPrompt(control));
-      return (
-        prompt.length > 3 &&
-        reason.includes(prompt) &&
-        control.visible &&
-        !control.disabled &&
-        !holdsAnswer(control) &&
-        !(
-          control.choiceGroupKey &&
-          controls.some(
-            (sibling) =>
-              sibling.choiceGroupKey === control.choiceGroupKey &&
-              sibling.checked,
+    const named = (text: string) => {
+      const wanted = words(text);
+      return controls.filter((control) => {
+        const prompt = words(questionPrompt(control));
+        return (
+          prompt.length > 3 &&
+          wanted.includes(prompt) &&
+          control.visible &&
+          !control.disabled &&
+          !holdsAnswer(control) &&
+          !(
+            control.choiceGroupKey &&
+            controls.some(
+              (sibling) =>
+                sibling.choiceGroupKey === control.choiceGroupKey &&
+                sibling.checked,
+            )
           )
-        )
-      );
-    });
-    if (named.length) {
-      const required = named.filter((control) => control.required);
-      if (!required.length) return null;
-      for (const control of required)
-        pendingQuestions.set(
-          pendingQuestionKey(control),
-          buildPendingQuestion({
-            control,
-            jobId: config.application.jobId,
-            detectedAt: now().toISOString(),
-            suggestion: null,
-            siblings: controls,
-          }),
         );
-      return collectedQuestionsPause();
-    }
-    // Nothing on the page matches: hand over what the reason quotes (an
-    // apostrophe is not a quote), else the reason itself.
-    const quoted = [...said.matchAll(/["‘“]([^"’”]{6,200})["’”]/gu)].map(
-      (match) => String(match[1]).trim(),
-    );
-    // A reason that only asks for the finished form to be looked over, on
-    // a form that reads complete and ready, is not a question: Send for me
-    // sends it, and Fill in for me leaves it Ready for the person's click.
-    if (
-      !quoted.length &&
-      /\breview|look(?:s|ed)? (?:it |them |everything )?over|before (?:submitting|sending|it is sent|you submit|you send)|fully filled|all (?:the )?(?:fields|questions) (?:are )?(?:filled|answered|complete)|everything is filled/iu.test(
-        said,
-      ) &&
-      page &&
-      (readyToSend ||
-        (!unresolvedRequiredControls(page).length &&
-          checkFormReadiness(page, uploadOptions).ok))
-    )
-      return null;
-    for (const prompt of quoted.length ? quoted : [said.trim()])
+      });
+    };
+    const askOnPage = (control: (typeof controls)[number]) =>
+      pendingQuestions.set(
+        pendingQuestionKey(control),
+        buildPendingQuestion({
+          control,
+          jobId: config.application.jobId,
+          detectedAt: now().toISOString(),
+          suggestion: null,
+          siblings: controls,
+        }),
+      );
+    const askText = (prompt: string) =>
       pendingQuestions.set(`named:${prompt}`, {
         id: `named_${words(prompt).replace(/ /gu, "_").slice(0, 60)}`,
         prompt,
@@ -3681,6 +3688,34 @@ async function runMeasuredApplyAgent(
         submittedAnswer: null,
         status: "detected",
       });
+    if (items.length) {
+      for (const item of items) {
+        const onPage = named(item);
+        if (!onPage.length) askText(item);
+        for (const control of onPage) if (control.required) askOnPage(control);
+      }
+      return collectedQuestionsPause();
+    }
+    if (
+      page &&
+      (readyToSend ||
+        (!unresolvedRequiredControls(page).length &&
+          checkFormReadiness(page, uploadOptions).ok))
+    )
+      return null;
+    const onPage = named(said);
+    if (onPage.length) {
+      const required = onPage.filter((control) => control.required);
+      for (const control of required) askOnPage(control);
+      return required.length ? collectedQuestionsPause() : null;
+    }
+    // Nothing on the page matches: hand over what the reason quotes (an
+    // apostrophe is not a quote), else the reason itself.
+    const quoted = [...said.matchAll(/["‘“]([^"’”]{6,200})["’”]/gu)].map(
+      (match) => String(match[1]).trim(),
+    );
+    for (const prompt of quoted.length ? quoted : [said.trim()])
+      askText(prompt);
     return collectedQuestionsPause();
   };
   const pending = collectedQuestionsPause();
@@ -3727,19 +3762,21 @@ async function runMeasuredApplyAgent(
     reason = pending.summary;
   } else if (
     loop.finish?.needsPerson &&
-    (handover = needsPersonHandover(loop.finish.reason))
+    (handover = needsPersonHandover(loop.finish.reason, forPerson))
   ) {
     pauses.push(handover);
     note(handover.summary);
     outcome = "paused";
     reason = handover.summary;
+    // Something waits on the person: the form does not go out.
+    readyToSend = null;
   } else if (loop.finish?.stuck) {
     outcome = "stuck";
     reason = `Job Finder stopped on ${config.siteLabel} because it got stuck: ${loop.finish.reason.replace(/\.?$/u, ".")}`;
   } else if (loop.ending === "finished") {
     // A needs-person finish lands here when its questions are all optional
-    // (those stay empty, as optional fields should) or when it only asks
-    // for a review of a form that reads complete.
+    // (those stay empty, as optional fields should) or when it names
+    // nothing for the person on a form that reads complete.
     if (loop.finish?.needsPerson)
       note(
         `Nothing to hand over; the form reads complete: ${loop.finish.reason.replace(/\.?$/u, ".")}`,

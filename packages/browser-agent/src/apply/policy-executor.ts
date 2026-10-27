@@ -148,6 +148,7 @@ export type ApplyExecutionOutcome =
       reason: string;
       stuck: boolean;
       needsPerson: boolean;
+      forPerson?: string[];
     };
 
 export interface ApplyExecutorDeps {
@@ -1702,6 +1703,7 @@ export async function executeApplyProposal(
       reason: proposal.reason,
       stuck: proposal.stuck === true,
       needsPerson: proposal.needsPerson === true,
+      forPerson: proposal.forPerson ?? [],
     };
   }
 
