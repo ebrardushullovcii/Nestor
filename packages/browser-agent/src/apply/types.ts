@@ -537,6 +537,13 @@ export interface ApplyAgentConfig {
    * When false, nothing is transmitted at all.
    */
   intermediateWritesAuthorized?: boolean;
+  /**
+   * Whether the run may press the form's own buttons (Next, Save and
+   * continue). Send for me may; Fill in for me presses only parts of a field
+   * and leaves every form button to the person, even where the site may save
+   * fields as they are filled. Defaults to `intermediateWritesAuthorized`.
+   */
+  pressesFormButtons?: boolean;
   /** Whether this exact run may enter an account-creation flow. */
   accountCreationAuthorized?: boolean;
   authority: ApplyAuthority;

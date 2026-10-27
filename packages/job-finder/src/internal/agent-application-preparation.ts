@@ -627,6 +627,9 @@ export async function runAgentApplicationPreparation(
       : {}),
     intermediateWritesAuthorized:
       executionInput.intermediateMutationsAuthorized === true,
+    // Only Send for me presses the form's own buttons; Fill in for me leaves
+    // them to the person even where the site saves fields as they are filled.
+    pressesFormButtons: executionInput.submitAuthorized === true,
     accountCreationAuthorized:
       executionInput.accountCreationAuthorized === true,
     authority: activeAuthority,
