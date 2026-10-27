@@ -110,9 +110,19 @@ export async function checkClassifiedApplicationAnswers(input: {
       });
     },
   );
-  const writing = input.answers.filter(
-    (_answer, index) => decisions[index]?.kind === "writing",
-  );
+  const writing = input.answers.flatMap((answer, index) => {
+    const decision = decisions[index];
+    return decision?.kind === "writing"
+      ? [
+          {
+            ...answer,
+            ...(decision.evidencePolicy
+              ? { evidencePolicy: decision.evidencePolicy }
+              : {}),
+          },
+        ]
+      : [];
+  });
   const checks = writing.length
     ? await checkWrittenApplicationAnswers({ ...input, answers: writing })
     : [];

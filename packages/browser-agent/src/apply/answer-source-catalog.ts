@@ -15,11 +15,15 @@ import {
   isPlainMotivationIntent,
 } from "./concrete-answer-claims";
 import { requiresOwnWords, ownWordsAppliesToQuestion } from "./own-words";
-import { employmentMonthEvidence } from "./answer-evidence";
+import { employmentMonthEvidence, isScalarAnswer } from "./answer-evidence";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import { asksGithubUsername, fieldNamesAnotherPerson } from "./github-username";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
+import {
+  asksForSpecificStory,
+  factualSummaryIsSourced,
+} from "./factual-summary";
 
 export interface ClassifiedAnswerSource {
   id: string;
@@ -59,6 +63,20 @@ export function answerSourceCatalog(
         }
       : {}),
   }));
+  const addWritingFact = (value: unknown, id: string): void => {
+    if (typeof value === "string" && value.trim())
+      rows.push({ id, value, purpose: "profile", country: null });
+    else if (value && typeof value === "object")
+      for (const [key, child] of Object.entries(value))
+        if (key !== "id") addWritingFact(child, `${id}.${key}`);
+  };
+  addWritingFact(sources.profile.summary, "profile.summary");
+  addWritingFact(
+    sources.profile.professionalSummary,
+    "profile.professionalSummary",
+  );
+  addWritingFact(sources.profile.narrative, "profile.narrative");
+  addWritingFact(sources.profile.proofBank, "profile.proofBank");
   rows.push({
     id: "posting.location",
     value: sources.posting.location,
@@ -441,7 +459,11 @@ function permitConditionsFit(
 
 export type ClassifiedAnswerDecision =
   | { kind: "literal"; source: ClassifiedAnswerSource }
-  | { kind: "writing"; source: ClassifiedAnswerSource | null }
+  | {
+      kind: "writing";
+      source: ClassifiedAnswerSource | null;
+      evidencePolicy?: "factual_summary";
+    }
   | { kind: "needs_you"; reason: string };
 /** An affirmative allow list. Tags or a positive checker verdict alone grant nothing. */
 export function classifyAnswerPermission(input: {
@@ -622,6 +644,7 @@ export function classifyAnswerPermission(input: {
     !source &&
     tags.kind === "motivation" &&
     isPlainMotivationIntent(input.answer) &&
+    !asksForSpecificStory(`${input.control.groupLabel} ${input.control.label}`) &&
     !requiresOwnWords(input.control.label) &&
     !ownWordsAppliesToQuestion(
       `${input.control.groupLabel}\n${input.pageInstructions}`,
@@ -668,12 +691,16 @@ export function classifyAnswerPermission(input: {
       "own_words",
     ].includes(tags.kind) ||
     requiresOwnWords(input.control.label) ||
-    (tags.kind === "motivation" &&
+    (["motivation", "factual_summary"].includes(tags.kind) &&
       ownWordsAppliesToQuestion(
         `${input.control.groupLabel}\n${input.pageInstructions}`,
         input.control.label,
       )) ||
     requiresSavedNationalityAnswer(input.control.label) ||
+    (["motivation", "factual_summary"].includes(tags.kind) &&
+      asksForSpecificStory(
+        `${input.control.groupLabel} ${input.control.label}`,
+      )) ||
     requiresSavedOpinionAnswer(input.control.label, input.answer);
   if (gated)
     return exactSaved
@@ -775,9 +802,32 @@ export function classifyAnswerPermission(input: {
     knownLiteralField(source, input.control)
   )
     return { kind: "literal", source };
-  // Only an affirmative motivation classification authorizes generated writing.
+  // Only an affirmative writing classification reaches the claim checker.
   if (tags.kind === "motivation" && source.purpose === "writing")
     return { kind: "writing", source };
+  if (
+    tags.kind === "factual_summary" &&
+    input.control.kind === "long_text" &&
+    ["other", "experience"].includes(input.control.questionKind) &&
+    !isScalarAnswer(input.answer) &&
+    input.answer.trim().split(/\s+/u).length >= 3 &&
+    !fieldNamesAnotherPerson(input.control) &&
+    (source.id === "resume.text" ||
+      (source.purpose === "profile" &&
+        /^profile\.(?:summary$|professionalSummary\.|narrative\.|experiences\.|education\.|projects\.|proofBank\.|skills\.|skillGroups\.|certifications\.|spokenLanguages\.)/u.test(
+          source.id,
+        )))
+  )
+    return factualSummaryIsSourced(
+      input.answer,
+      catalog
+        .filter((row) => row.purpose === "profile" || row.id === "resume.text")
+        .map((row) => row.value),
+    )
+      ? { kind: "writing", source, evidencePolicy: "factual_summary" }
+      : deny(
+          "This summary must use complete statements from your resume or Profile, without joining separate facts into a new claim.",
+        );
   return deny(
     "This value is not a verbatim answer from a known-safe matching source.",
   );

@@ -8,6 +8,8 @@ import { evidenceFitsQuestion } from "./answer-evidence";
 import ownWords from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/own-words.json";
 import k1 from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/answer-evidence-k1.json";
 import discovery from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/listing-discovery.json";
+import { classifyAnswerPermission } from "./answer-source-catalog";
+import type { ApplyFormControl } from "./types";
 
 const sources = {
   profile: CandidateProfileSchema.parse({
@@ -34,6 +36,159 @@ const sources = {
     description: "Engineering workflow tools",
   },
 };
+
+test.each([
+  {
+    name: "recorded remote work",
+    answer: "I worked remotely with a distributed team.",
+    supported: true,
+  },
+  {
+    name: "recorded Profile work practices",
+    answer: "I worked remotely with a distributed team.",
+    supported: true,
+    fromProfile: true,
+  },
+  {
+    name: "invented work practice",
+    answer: "I ran daily video standups with the distributed team.",
+    supported: false,
+  },
+  {
+    name: "invented product story",
+    answer: "I resolved a pricing incident by interviewing twelve customers.",
+    supported: false,
+  },
+])(
+  "factual summary still checks every claim: $name",
+  async ({ answer, supported, fromProfile }) => {
+    const resume =
+      "I worked remotely with a distributed team. I documented decisions asynchronously.";
+    const control: ApplyFormControl = {
+      ref: "c0",
+      kind: "long_text",
+      label: "Describe your remote work experience",
+      groupLabel: "",
+      placeholder: "",
+      required: true,
+      disabled: false,
+      readOnly: false,
+      visible: true,
+      value: "",
+      checked: false,
+      options: [],
+      selectedOptionLabel: "",
+      invalid: false,
+      validationMessage: "",
+      questionKind: "other",
+      answerControlType: "text",
+      attestationKind: null,
+      answered: false,
+    };
+    const inputSources = {
+      ...sources,
+      resumeText: resume,
+      profile: CandidateProfileSchema.parse({
+        ...sources.profile,
+        professionalSummary: { fullSummary: resume },
+      }),
+    };
+    const tags = {
+      kind: "factual_summary",
+      country: null,
+      sourceId: fromProfile
+        ? "profile.professionalSummary.fullSummary"
+        : "resume.text",
+    } as const;
+    const permission = (
+      sourceId: string | null = tags.sourceId,
+      groupLabel = "",
+      pageInstructions = "",
+    ) => {
+      const field = { ...control, groupLabel };
+      return classifyAnswerPermission({
+        sources: inputSources,
+        control: field,
+        controls: [field],
+        tags: { ...tags, sourceId },
+        answer,
+        pageInstructions,
+      });
+    };
+    expect(permission().kind).toBe(supported ? "writing" : "needs_you");
+    expect(permission(null).kind).toBe("needs_you");
+    expect(permission("posting.description").kind).toBe("needs_you");
+    expect(permission("profile.fullName").kind).toBe("needs_you");
+    expect(permission(tags.sourceId, "Professional reference").kind).toBe(
+      "needs_you",
+    );
+    expect(permission(tags.sourceId, "", "Write this yourself").kind).toBe(
+      "needs_you",
+    );
+    for (const [field, proposed, kind] of [
+      [control, "Yes", "factual_summary"],
+      [control, "Ja", "factual_summary"],
+      [
+        { ...control, questionKind: "work_authorization" as const },
+        answer,
+        "factual_summary",
+      ],
+      [control, answer, "preference"],
+    ] as const)
+      expect(
+        classifyAnswerPermission({
+          sources: inputSources,
+          control: field,
+          controls: [field],
+          tags: { ...tags, kind },
+          answer: proposed,
+          pageInstructions: "",
+        }).kind,
+      ).toBe("needs_you");
+    const client: LLMClient = {
+      chatWithTools: vi.fn<LLMClient["chatWithTools"]>().mockResolvedValue({
+        toolCalls: [
+          {
+            id: "lie",
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              arguments: JSON.stringify({
+                checks: [
+                  {
+                    index: 0,
+                    supported: true,
+                    reason: "Lying checker",
+                    evidence: [
+                      {
+                        kind: "applicant_fact",
+                        source: fromProfile ? "applicant" : "resume",
+                        path: fromProfile
+                          ? "/professionalSummary/fullSummary"
+                          : "",
+                        quote: resume,
+                        claim: answer,
+                      },
+                    ],
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    };
+    const checked = await checkWrittenApplicationAnswers({
+      client,
+      sources: inputSources,
+      payDisclosed: false,
+      answers: [
+        { question: control.label, answer, evidencePolicy: "factual_summary" },
+      ],
+    });
+    expect(checked[0]?.supported).toBe(supported);
+  },
+);
 
 test.each([
   "I am excited about the opportunity to build engineering workflow tools at Example Workshop.",
