@@ -8552,6 +8552,35 @@ describe("a finish that says needsPerson always ends paused", () => {
       handed: [mfa],
     },
     {
+      name: "a verification code is not the phone field's value",
+      page: page({ controls: [nameControl(), field(1, "Phone", true)] }),
+      forPerson: ["What code should I enter in the required Phone field?"],
+      handed: ["Phone", "What code should I enter in the required Phone field?"],
+    },
+    {
+      name: "a named field with an extra condition stays a separate task",
+      page: page({ controls: [nameControl(), field(1, "Phone", true)] }),
+      forPerson: [
+        "What phone number should I enter in the required Phone field, and do you consent to marketing texts?",
+      ],
+      handed: [
+        "Phone",
+        "What phone number should I enter in the required Phone field, and do you consent to marketing texts?",
+      ],
+    },
+    {
+      name: "two people's phone fields cannot be identified by label alone",
+      page: page({
+        controls: [
+          nameControl(),
+          field(1, "Phone", true),
+          { ...field(2, "Phone", true), groupLabel: "Professional reference" },
+        ],
+      }),
+      forPerson: ["What phone number should I enter in the required Phone field?"],
+      handed: ["What phone number should I enter in the required Phone field?"],
+    },
+    {
       name: "an optional Yes/No question named exactly",
       page: page({
         controls: [nameControl()],
@@ -8736,6 +8765,110 @@ describe("a finish that says needsPerson always ends paused", () => {
         previousIds = ids;
         expect(finalPress).not.toHaveBeenCalled();
       }
+    },
+  );
+
+  test.each([
+    "What phone number should I enter in the required Phone field for your Platform Engineer application to Northwind Tools?",
+    "What phone number should I enter in the required Phone field?",
+    "c1",
+  ])("a field handover reuses Phone's native item: %s", async (item) => {
+    const phone = { ...field(1, "Phone *", true), inputType: "tel" };
+    const form = page({ controls: [nameControl(), phone] });
+    const input = config(form, confirmFirst);
+    const finalPress = vi.spyOn(input.hands, "clickAction");
+    const result = await runApplyAgent(
+      input,
+      repeatingModel("finish", {
+        needsPerson: true,
+        reason: "The required phone field needs the person's answer.",
+        forPerson: [item],
+      }),
+    );
+    expect(handedOver(result)).toEqual(["Phone *"]);
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(finalPress).not.toHaveBeenCalled();
+    const answer = "+44 7700 900123";
+    input.sources.reusableAnswers = [
+      {
+        id: "application_phone",
+        kind: "other",
+        label: "Phone *",
+        question: "Phone *",
+        answer,
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
+    const continued = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "type", args: { ref: "c1", text: answer } },
+        {
+          name: "finish",
+          args: { reason: "The phone is filled; the form is ready." },
+        },
+      ]),
+    );
+    expect(phone.value).toBe(answer);
+    expect(continued.outcome).toBe("awaiting_your_review");
+    expect(continued.pauses).toEqual([]);
+    expect(finalPress).not.toHaveBeenCalled();
+  });
+
+  test("finish binds the field before its fresh read renumbers controls", async () => {
+    const phone = { ...field(1, "Phone *", true), inputType: "tel" };
+    const form = page({ controls: [nameControl(), phone] });
+    const model = repeatingModel("finish", {
+      needsPerson: true,
+      reason: "The phone field needs the person.",
+      forPerson: ["c1"],
+    });
+    const result = await runApplyAgent(config(form, confirmFirst), {
+      chatWithTools: async (...args) => {
+        const response = await model.chatWithTools(...args);
+        phone.index = 2;
+        form.controls = [nameControl(), field(1, "Pronouns"), phone];
+        return response;
+      },
+    });
+    expect(handedOver(result)).toEqual(["Phone *"]);
+    expect(result.outcome).toBe("paused");
+  });
+
+  test.each([false, true])(
+    "field refs past twenty keep native questions and separate manual steps (%s)",
+    async (manualStep) => {
+      const labels = Array.from(
+        { length: 23 },
+        (_, index) => `Form question ${index + 1}`,
+      );
+      const result = await runApplyAgent(
+        config(
+          page({
+            controls: [
+              nameControl(),
+              ...labels.map((label, index) => field(index + 1, label)),
+            ],
+          }),
+          confirmFirst,
+        ),
+        repeatingModel("finish", {
+          reason: "These fields need the person.",
+          needsPerson: true,
+          forPerson: [
+            ...labels.map((_, index) => `c${index + 1}`),
+            ...(manualStep ? [mfa] : []),
+          ],
+        }),
+      );
+      expect(handedOver(result)).toEqual([
+        ...labels,
+        ...(manualStep ? [mfa] : []),
+      ]);
+      expect(result.outcome).toBe("paused");
+      expect(result.readyToSend).toBeNull();
     },
   );
 

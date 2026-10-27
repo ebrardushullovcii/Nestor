@@ -1,4 +1,9 @@
-import type { FoundJob, JobChange } from "@nestor/contracts";
+import {
+  JobListQuerySchema,
+  type FoundJob,
+  type JobChange,
+  type WorkMode,
+} from "@nestor/contracts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6,6 +11,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApplicationStore } from "./applications";
+import { jobCountSql, jobPageSql, toWorkModeMask } from "./job-list";
 import { openJobStore, type JobStore } from "./job-store";
 
 function found(n: number, overrides: Partial<FoundJob> = {}): FoundJob {
@@ -404,6 +410,123 @@ describe("job store", () => {
       total: 1000,
       totalCapped: true,
     });
+  });
+
+  it("pages a fit floor and work modes in every order, below and past the count cap", () => {
+    const store = open();
+    const modes = [["remote"], ["hybrid"], ["remote", "hybrid"], ["onsite"]];
+    const { added } = store.saveFoundJobs({
+      searchId: null,
+      jobs: Array.from({ length: 1010 }, (_, i) =>
+        found(i + 1, {
+          workModes: modes[i % 4] as FoundJob["workModes"],
+          postedAt: new Date(Date.UTC(2026, 8, 1 + (i % 40))).toISOString(),
+        }),
+      ),
+    });
+    // Every seventh job stays unscored.
+    store.setFit(
+      added
+        .filter((_, i) => i % 7 !== 0)
+        .map((id, i) => ({
+          id,
+          score: 30 + (i % 70),
+          summary: `Fit ${i}`,
+          reasons: [],
+          gaps: [],
+        })),
+    );
+    const rows = store
+      .sql(
+        "SELECT id, work_modes, fit_score, found_at, posted_at, stage_at FROM jobs",
+      )
+      .all() as Record<string, number>[];
+    const order = {
+      best_fit: ["fit_score", "found_at", "id"],
+      newest: ["found_at", "id"],
+      posted: ["posted_at", "found_at", "id"],
+      recent: ["stage_at", "id"],
+    } as const;
+    const filters: { minFit?: number; workModes?: WorkMode[] }[] = [
+      { minFit: 60 },
+      { minFit: 20 },
+      { workModes: ["hybrid"] },
+      { workModes: ["remote"], minFit: 90 },
+    ];
+    for (const filter of filters) {
+      const mask = toWorkModeMask(filter.workModes ?? []);
+      const want = rows.filter(
+        (row) =>
+          (filter.minFit === undefined ||
+            row.fit_score! >= filter.minFit ||
+            row.fit_score === -1) &&
+          (mask === 0 || (row.work_modes! & mask) !== 0),
+      );
+      for (const sort of Object.keys(order) as (keyof typeof order)[]) {
+        const expected = [...want]
+          .sort((a, b) => {
+            for (const column of order[sort])
+              if (a[column] !== b[column]) return b[column]! - a[column]!;
+            return 0;
+          })
+          .map((row) => row.id);
+        const seen: number[] = [];
+        let cursor: string | null = null;
+        do {
+          const page = store.listJobs({
+            stage: "found",
+            ...filter,
+            sort,
+            limit: 200,
+            cursor,
+          });
+          expect(page.total, `${sort} ${JSON.stringify(filter)}`).toBe(
+            Math.min(expected.length, 1000),
+          );
+          seen.push(...page.rows.map((row) => row.id));
+          cursor = page.nextCursor;
+        } while (cursor);
+        expect(seen, `${sort} ${JSON.stringify(filter)}`).toEqual(expected);
+      }
+    }
+  });
+
+  it("reads a filtered page and count from index ranges, never the whole stage", () => {
+    const store = open();
+    const plan = (query: { sql: string; params: unknown[] }) =>
+      (
+        store
+          .sql(`EXPLAIN QUERY PLAN ${query.sql}`)
+          .all(...(query.params as number[])) as { detail: string }[]
+      ).map((row) => row.detail);
+    const filters: { minFit?: number; workModes?: WorkMode[] }[] = [
+      { minFit: 60 },
+      { workModes: ["flexible"] },
+      { workModes: ["remote", "hybrid"], minFit: 60 },
+    ];
+    for (const filter of filters) {
+      for (const sort of ["best_fit", "newest", "posted", "recent"] as const) {
+        const query = JobListQuerySchema.parse({
+          stage: "found",
+          ...filter,
+          sort,
+        });
+        const label = `${sort} ${JSON.stringify(filter)}`;
+        for (const detail of [
+          ...plan(jobPageSql(query, 0)),
+          ...plan(jobCountSql(query)),
+        ].filter((line) => line.includes(" USING "))) {
+          // Each range reads only jobs it keeps: the filter is in the index search.
+          expect(detail, label).toMatch(
+            /\(stage=\? AND (work_modes|fit_score)/,
+          );
+        }
+        if (sort === "best_fit" || filter.minFit === undefined)
+          expect(plan(jobPageSql(query, 0)).join("\n"), label).not.toContain(
+            "TEMP B-TREE",
+          );
+      }
+    }
   });
 
   it("tells listeners which stages changed", () => {

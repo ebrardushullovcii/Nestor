@@ -16,7 +16,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToastProvider } from "@renderer/components/ui/toast";
@@ -459,6 +459,35 @@ describe("one main action per screen", () => {
     await waitFor(() =>
       expect(followUp.getAttribute("data-variant")).toBe("outline"),
     );
+  });
+});
+
+describe("an empty Applications list", () => {
+  it("offers the approved resumes, where Apply starts one", async () => {
+    store.sql("DELETE FROM tracker_events").run();
+    store.sql("DELETE FROM tracker").run();
+    store.sql("DELETE FROM applications").run();
+    function Where() {
+      const location = useLocation();
+      return <p>{`At ${location.pathname}${location.search}`}</p>;
+    }
+    render(
+      <MemoryRouter initialEntries={["/job-finder/applications"]}>
+        <ToastProvider>
+          <Routes>
+            <Route
+              element={<ApplicationsScreen />}
+              path="/job-finder/applications"
+            />
+            <Route element={<Where />} path="/job-finder/review-queue" />
+          </Routes>
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Go to approved resumes" }),
+    );
+    await screen.findByText("At /job-finder/review-queue?tab=approved");
   });
 });
 
