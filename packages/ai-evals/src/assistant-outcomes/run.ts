@@ -37,6 +37,7 @@ import {
 import { answerOutcomeCases } from "./answer-cases";
 import { needsViewOutcomeCases } from "./needs-view-cases";
 import { answerChoiceOutcomeCases } from "./answer-choice-cases";
+import { trackerViewOutcomeCases } from "./tracker-view-cases";
 
 interface VerifyContext {
   page: Promise<Page>;
@@ -70,6 +71,7 @@ export function allBatches(
     ...siteOutcomeCases(replicaOrigin),
     ...applicationViewOutcomeCases(),
     ...trackerOutcomeCases(),
+    ...trackerViewOutcomeCases(),
     ...needsViewOutcomeCases(),
     ...answerChoiceOutcomeCases(),
     ...answerOutcomeCases(),
