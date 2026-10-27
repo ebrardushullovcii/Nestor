@@ -117,7 +117,10 @@ import {
   isSecurityChallengeControl,
   reportedSecurityChallenge,
 } from "./blockers";
-import { normalizeFormQuestionPrompt } from "@nestor/contracts";
+import {
+  normalizeFormQuestionPrompt,
+  preserveTechnologyTokens,
+} from "@nestor/contracts";
 import { isControlAnswered, normalizeSignal } from "./control-classification";
 import type {
   ApplyAgentConfig,
@@ -3684,10 +3687,7 @@ async function runMeasuredApplyAgent(
   const addFinishItems = (said: string, items: string[]): void => {
     const page = pageTools.state.observation;
     const words = (text: string) =>
-      text
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}]+/gu, " ")
-        .trim();
+      normalizeFormQuestionPrompt(preserveTechnologyTokens(text));
     const controls = page?.controls ?? [];
     const open = controls.filter(
       (control) =>
@@ -3704,14 +3704,17 @@ async function runMeasuredApplyAgent(
         ),
     );
     const askOnPage = (control: (typeof controls)[number]) => {
-      const question = buildPendingQuestion({
-        control,
-        jobId: config.application.jobId,
-        detectedAt: now().toISOString(),
-        suggestion: null,
-        siblings: controls,
-      });
-      pendingQuestions.set(pendingQuestionKey(control), question);
+      const key = pendingQuestionKey(control);
+      const question =
+        pendingQuestions.get(key) ??
+        buildPendingQuestion({
+          control,
+          jobId: config.application.jobId,
+          detectedAt: now().toISOString(),
+          suggestion: null,
+          siblings: controls,
+        });
+      pendingQuestions.set(key, question);
       finishItemIds.add(question.id);
     };
     const askText = (prompt: string) => {
@@ -3731,9 +3734,54 @@ async function runMeasuredApplyAgent(
         status: "detected",
       });
     };
+    const matchesQuestion = (
+      prompt: string,
+      isBoolean: boolean,
+      item: string,
+    ) => {
+      if (words(prompt) === words(item)) return true;
+      const question = item.replace(
+        /^\s*(?:please\s+)?(?:answer|confirm)\s*:\s*/iu,
+        "",
+      );
+      if (words(prompt) === words(question)) return true;
+      return (
+        isBoolean &&
+        words(prompt) ===
+          words(
+            question.replace(/\s*\(\s*yes\s*\/\s*no\s*\)\s*[.!?]?\s*$/iu, ""),
+          )
+      );
+    };
+    const offersYesNo = (options: readonly string[]) =>
+      options.length === 2 &&
+      options.some((option) => words(option) === "yes") &&
+      options.some((option) => words(option) === "no");
     for (const item of items) {
-      const field = open.filter(
-        (control) => words(questionPrompt(control)) === words(item),
+      // Restating an already-open question does not create another task or
+      // replace its options, explanation or draft. Extra clauses stay separate.
+      const existing = [...pendingQuestions.values()].filter((question) =>
+        matchesQuestion(
+          question.prompt,
+          question.answerControlType === "boolean" ||
+            offersYesNo(question.answerOptions),
+          item,
+        ),
+      );
+      if (existing.length) {
+        existing.forEach((question) => finishItemIds.add(question.id));
+        continue;
+      }
+      const field = controls.filter(
+        (control) =>
+          control.visible &&
+          !control.disabled &&
+          matchesQuestion(
+            questionPrompt(control),
+            control.answerControlType === "boolean" ||
+              offersYesNo(control.options),
+            item,
+          ),
       );
       if (field.length) field.forEach(askOnPage);
       else askText(item);

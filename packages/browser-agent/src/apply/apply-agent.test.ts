@@ -8479,6 +8479,31 @@ describe("a finish that says needsPerson always ends paused", () => {
   }> = [
     { name: "Polar's review request", page: plain(), reason: polar },
     {
+      name: "a wrapped question about a different technology is a separate task",
+      page: page({
+        controls: [nameControl(), field(1, "Describe your C# work.", true)],
+      }),
+      forPerson: ["Please answer: Describe your C++ work."],
+      handed: [
+        "Describe your C# work.",
+        "Please answer: Describe your C++ work.",
+      ],
+    },
+    {
+      name: "a Yes/No suffix cannot change a text question's format",
+      page: page({
+        controls: [
+          nameControl(),
+          field(1, "Describe your async practices.", true),
+        ],
+      }),
+      forPerson: ["Please answer: Describe your async practices. (Yes/No)"],
+      handed: [
+        "Describe your async practices.",
+        "Please answer: Describe your async practices. (Yes/No)",
+      ],
+    },
+    {
       name: "Polar's review request in Fill in for me",
       page: plain(),
       confirmFirst: true,
@@ -8642,6 +8667,103 @@ describe("a finish that says needsPerson always ends paused", () => {
       handed: [relocate],
     },
   ];
+
+  test.each([false, true])(
+    "finish instruction wrappers reuse the native handover across rereads (extra task: %s)",
+    async (extraTask) => {
+      const narrative = "Describe your async project practices and challenges.";
+      const age = "Are you over the age of 21?";
+      const manual =
+        "Please confirm: you agree to relocate without restrictions.";
+      let previousIds: string[] | undefined;
+      for (const stepLabel of ["Step 1 of 2", "Step 2 of 2"]) {
+        const form = page({
+          stepLabel,
+          controls: [
+            nameControl(),
+            {
+              ...field(1, narrative, true),
+              tagName: "textarea",
+              inputType: "textarea",
+            },
+            ...["Yes", "No"].map((value, i) => ({
+              ...field(i + 2, value, true),
+              inputType: "radio",
+              name: "age",
+              groupLabel: age,
+              value,
+            })),
+          ],
+        });
+        const input = config(form, sendForMe);
+        const finalPress = vi.spyOn(input.hands, "clickAction");
+        const result = await runApplyAgent(
+          input,
+          repeatingModel("finish", {
+            needsPerson: true,
+            reason: "Two form questions need the person.",
+            forPerson: [
+              `Please answer: ${narrative}`,
+              `Please confirm: ${age} (Yes/No)`,
+              ...(extraTask ? [manual] : []),
+            ],
+          }),
+        );
+        expect(result.outcome).toBe("paused");
+        expect(result.readyToSend).toBeNull();
+        const questions = result.pauses.flatMap(
+          (pause) =>
+            pause.questions ?? (pause.question ? [pause.question] : []),
+        );
+        expect(questions.map((question) => question.prompt)).toEqual([
+          narrative,
+          age,
+          ...(extraTask ? [manual] : []),
+        ]);
+        expect(
+          questions.find((question) => question.prompt === age)?.answerOptions,
+        ).toEqual(["Yes", "No"]);
+        const ids = questions.map((question) => question.id);
+        if (previousIds) expect(ids).toEqual(previousIds);
+        previousIds = ids;
+        expect(finalPress).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  test("a wrapped confirmation keeps a filled choice field's native question key and options", async () => {
+    const question = "Are you over the age of 21?";
+    const form = page({
+      controls: [
+        nameControl(),
+        {
+          ...field(1, question),
+          tagName: "select",
+          inputType: "select-one",
+          options: ["Yes", "No"],
+          value: "Yes",
+          selectedOptionLabel: "Yes",
+        },
+      ],
+    });
+    const input = config(form, sendForMe);
+    const finalPress = vi.spyOn(input.hands, "clickAction");
+    const result = await runApplyAgent(
+      input,
+      repeatingModel("finish", {
+        reason: "Confirm the selected age answer.",
+        needsPerson: true,
+        forPerson: [`Please confirm: ${question} (Yes/No)`],
+      }),
+    );
+    expect(handedOver(result)).toEqual([question]);
+    expect(result.pauses[0]?.questions?.[0]?.answerOptions).toEqual([
+      "Yes",
+      "No",
+    ]);
+    expect(result.readyToSend).toBeNull();
+    expect(finalPress).not.toHaveBeenCalled();
+  });
 
   test.each(scenarios)(
     "$name: paused, nothing ready to send",
