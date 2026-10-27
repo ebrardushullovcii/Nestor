@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
@@ -26,7 +26,12 @@ const log = join(mkdtempSync(join(tmpdir(), "nestor-replica-")), "posts.log");
 beforeAll(async () => {
   server = spawn(
     process.execPath,
-    ["../../apps/desktop/test-fixtures/job-sites/serve.mjs"],
+    [
+      resolvePath(
+        import.meta.dirname,
+        "../../../apps/desktop/test-fixtures/job-sites/serve.mjs",
+      ),
+    ],
     {
       env: { ...process.env, PORT: "0", NESTOR_FIXTURE_SUBMISSIONS_LOG: log },
     },
