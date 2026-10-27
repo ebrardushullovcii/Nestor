@@ -27,6 +27,7 @@ import { ApplicationsScreen } from "./applications-screen";
 let store: JobStore;
 let ids: number[];
 let openApplication: ReturnType<typeof vi.fn>;
+let receipt: ApplicationDetails["receipt"];
 
 function job(n: number): FoundJob {
   return {
@@ -79,6 +80,7 @@ beforeEach(() => {
   const onChange = (listener: Parameters<JobStore["onChange"]>[0]) =>
     store.onChange(listener);
   openApplication = vi.fn(() => Promise.resolve(true));
+  receipt = null;
   Object.assign(window, {
     nestor: {
       jobs: { onChange },
@@ -113,12 +115,14 @@ beforeEach(() => {
                     waitingOnYou: [],
                     preparedAt: new Date().toISOString(),
                   },
-                  receipt: null,
+                  receipt,
                 } satisfies ApplicationDetails)
               : null,
           );
         },
         openApplication,
+        applyJobs: (input: Parameters<typeof applications.applyJobs>[0]) =>
+          Promise.resolve(applications.applyJobs(input)),
         stopApplication: ({ id }: { id: number }) =>
           Promise.resolve(applications.stop(id)),
         onApplicationsChange: onChange,
@@ -369,6 +373,60 @@ describe("Applications", () => {
     await waitFor(() =>
       expect(within(detail).queryByRole("button", { name: "Stop" })).toBeNull(),
     );
+    expect(
+      within(detail).queryByRole("button", { name: "Open application" }),
+    ).toBeNull();
+  });
+});
+
+describe("a failed application is never a dead end", () => {
+  it("one click tries a run that failed before sending again", async () => {
+    applyWrites(
+      ids[1]!,
+      "state = 'failed', error = 'The page tried to send the application on its own.'",
+    );
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    expect(
+      await within(detail).findByText(
+        "Apply couldn’t finish this application. Nothing was sent.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(
+      await within(detail).findByRole("button", { name: "Try again" }),
+    );
+    await screen.findByText("Trying again");
+    expect(
+      createApplicationStore(store).getApplication(
+        createApplicationStore(store).forJobs([ids[1]!])[0]!.id,
+      )?.state,
+    ).toBe("queued");
+  });
+
+  it("a run the guarded send already tried offers nothing that could send twice", async () => {
+    applyWrites(ids[1]!, "state = 'failed'");
+    receipt = {
+      outcome: "not_submitted",
+      attemptedAt: new Date().toISOString(),
+      verifiedAt: null,
+      evidence: [],
+    } as unknown as ApplicationDetails["receipt"];
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    expect(await within(detail).findByText("Not sent")).toBeTruthy();
+    expect(
+      within(detail).queryByRole("button", { name: "Try again" }),
+    ).toBeNull();
     expect(
       within(detail).queryByRole("button", { name: "Open application" }),
     ).toBeNull();
