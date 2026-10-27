@@ -1,11 +1,12 @@
 import type { WaitingFormMemory } from "@nestor/contracts";
 
-// Ten replica forms used ~1.3 GiB working set (265 MiB private) on a 16 GiB
-// PC; a real board reached 269 MiB working set. Keep room above ten ordinary
-// forms and reserve 256 MiB for another. This is a reclamation target, not
-// an admission gate: waiting forms do not consume working slots.
-export const WAITING_FORM_MEMORY_BUDGET = 2 * 1024 * 1024 * 1024;
-const NEXT_FORM_RESERVE = 256 * 1024 * 1024;
+// Opening a closed waiting form refills it without sending, so only the most
+// recently prepared or opened forms stay live; the rest close as soon as they
+// settle. A real board's form uses about 200 MiB working set, so three fit
+// the budget. Both are reclamation targets, not admission gates: waiting
+// forms do not consume working slots.
+export const MAX_LIVE_WAITING_FORMS = 3;
+export const WAITING_FORM_MEMORY_BUDGET = 600 * 1024 * 1024;
 
 export function measureWaitingFormMemory(input: {
   recordedAt: string;
@@ -42,8 +43,5 @@ export function measureWaitingFormMemory(input: {
 }
 
 export function waitingFormsHaveCapacity(memory: WaitingFormMemory): boolean {
-  return (
-    memory.measurementComplete &&
-    memory.totalBytes + NEXT_FORM_RESERVE <= memory.budgetBytes
-  );
+  return memory.measurementComplete && memory.totalBytes <= memory.budgetBytes;
 }
