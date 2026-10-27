@@ -75,18 +75,27 @@ export function TaskPane(props: {
     };
   }, [id]);
 
-  // Browser steps can advance (sign-in → MFA) without a button press here.
-  // Question drafts keep their own stable editor and never refresh underneath typing.
+  // Access steps and a question's native format can change while it is open.
+  // Refresh the question metadata, retaining the editor's own unsaved draft.
   const accessTask = details?.task.kind !== "question" && !!details;
   useEffect(() => {
-    if (!accessTask) return;
+    if (!loaded) return;
     let live = true;
     const unsubscribe = window.nestor.jobs.onChange((change) => {
       if (change.cause !== "application") return;
       void window.nestor.needsYou
         .run("get_need", { id })
         .then((value) => {
-          if (live) setDetails(value);
+          if (live)
+            setDetails((previous) =>
+              !accessTask && previous && value
+                ? {
+                    ...previous,
+                    task: value.task,
+                    applications: value.applications,
+                  }
+                : value,
+            );
         })
         .catch(() => undefined);
     });
@@ -94,7 +103,7 @@ export function TaskPane(props: {
       live = false;
       unsubscribe();
     };
-  }, [id, accessTask]);
+  }, [id, accessTask, loaded]);
 
   function saveDraft() {
     if (pending.current) clearTimeout(pending.current);

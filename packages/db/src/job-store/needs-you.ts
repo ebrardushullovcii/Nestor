@@ -10,6 +10,8 @@ import {
   type CandidateAnswerKind,
   normalizeFormQuestionPrompt,
   savedQuestionMatches,
+  formQuestionText,
+  preserveTechnologyTokens,
   cleanFormQuestionPrompt,
   RememberFormAnswerInputSchema,
   type RememberFormAnswerInput,
@@ -114,6 +116,38 @@ function sameFormat(
     input === question.input &&
     JSON.stringify([...new Set(options)].sort()) ===
       JSON.stringify([...new Set(question.options)].sort())
+  );
+}
+
+/** One reusable Yes/No question may be rendered as plain text or native choices. */
+function compatibleYesNoQuestion(
+  task: Task,
+  value: RequestNeedsYouInput,
+): boolean {
+  if (
+    !value.reusePrompt ||
+    task.reuse_prompt !== 1 ||
+    !["text", "boolean"].includes(task.input) ||
+    !["text", "boolean"].includes(value.input) ||
+    (task.input !== "boolean" && value.input !== "boolean")
+  )
+    return false;
+  const options = JSON.parse(task.options_json) as string[];
+  const fits = (input: string, choices: readonly string[]) =>
+    input === "text"
+      ? choices.length === 0
+      : choices.length === 0 ||
+        (choices.length === 2 &&
+          choices.includes("Yes") &&
+          choices.includes("No"));
+  const key = (prompt: string) =>
+    normalizeFormQuestionPrompt(
+      preserveTechnologyTokens(formQuestionText(prompt, true)),
+    );
+  return (
+    fits(task.input, options) &&
+    fits(value.input, value.options) &&
+    key(task.prompt) === key(value.prompt)
   );
 }
 
@@ -866,7 +900,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           return { status: "stale" };
 
         if (value.kind === "question" && options.reuseAnswers !== false) {
-          const previous = sql(
+          let previous = sql(
             `SELECT t.* FROM needs_you t JOIN application_needs_you n ON n.task_id = t.id
              WHERE n.application_id = ? AND t.kind = 'question' AND t.answer_key = ?
                AND t.country = ? AND t.site_origin = ? AND t.answer IS NOT NULL
@@ -877,13 +911,58 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             value.scope.country,
             value.scope.siteOrigin,
           ) as Task | undefined;
+          if (!previous && value.reusePrompt) {
+            const matching = (
+              sql(`SELECT t.* FROM needs_you t JOIN application_needs_you n ON n.task_id=t.id
+              WHERE n.application_id=? AND t.kind='question' AND t.country=? AND t.site_origin=?
+                AND t.answer IS NOT NULL ORDER BY t.id DESC`).all(
+                value.applicationId,
+                value.scope.country,
+                value.scope.siteOrigin,
+              ) as Array<Task & { answer: string }>
+            ).filter(
+              (candidate) =>
+                candidate.reuse_prompt === 1 &&
+                (sameFormat(candidate.input, candidate.options_json, value) ||
+                  compatibleYesNoQuestion(candidate, value)) &&
+                savedQuestionMatches(
+                  candidate.prompt,
+                  value.prompt,
+                  candidate.answer,
+                ),
+            );
+            const exact = matching.filter(
+              (candidate) =>
+                normalizeFormQuestionPrompt(candidate.prompt) ===
+                normalizeFormQuestionPrompt(value.prompt),
+            );
+            previous =
+              uniquePromptAnswer(
+                exact.length ? exact : matching,
+                value.prompt,
+              ) ?? undefined;
+          }
           if (previous?.answer !== undefined && previous?.answer !== null) {
-            if (!sameFormat(previous.input, previous.options_json, value))
+            if (
+              !sameFormat(previous.input, previous.options_json, value) &&
+              !compatibleYesNoQuestion(previous, value)
+            )
               throw new Error(
                 "A shared question key must use the same answer format.",
               );
-            link(value, previous.id);
-            return { status: "answered", answer: previous.answer };
+            try {
+              const answer = validateAnswer(
+                {
+                  input: value.input,
+                  options_json: JSON.stringify(value.options),
+                },
+                previous.answer,
+              );
+              link(value, previous.id);
+              return { status: "answered", answer };
+            } catch {
+              // A text answer other than Yes/No does not answer native choices.
+            }
           }
           const saved = value.reusePrompt
             ? uniquePromptAnswer(
@@ -956,6 +1035,16 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               sameFormat(candidate.input, candidate.options_json, value),
           );
         }
+        // Sharing an unanswered Yes/No item never consumes a refused answer.
+        // Keep it shared even when a reread uses the other rendering's key.
+        if (!task && value.kind === "question" && value.reusePrompt)
+          task = (
+            sql(`SELECT * FROM needs_you WHERE kind='question' AND reuse_prompt=1
+            AND resolved_at IS NULL AND country=? AND site_origin=? ORDER BY id`).all(
+              value.scope.country,
+              value.scope.siteOrigin,
+            ) as Task[]
+          ).find((candidate) => compatibleYesNoQuestion(candidate, value));
         // Keep one site card as sign-in advances to a challenge or MFA. An
         // older waiting page must not turn its MFA card back into sign-in.
         const priority = { question: 0, sign_in: 1, captcha: 2, mfa: 3 };
@@ -972,9 +1061,18 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           task = get(task.id)!;
         }
         if (task && !sameFormat(task.input, task.options_json, value)) {
-          throw new Error(
-            "A shared question key must use the same answer format.",
-          );
+          if (compatibleYesNoQuestion(task, value)) {
+            // Native choices validate both renderings. Never downgrade them to text.
+            if (value.input === "boolean") {
+              sql(
+                "UPDATE needs_you SET input='boolean',options_json=?,prompt=? WHERE id=?",
+              ).run(JSON.stringify(value.options), value.prompt, task.id);
+              task = get(task.id)!;
+            }
+          } else
+            throw new Error(
+              "A shared question key must use the same answer format.",
+            );
         }
         if (!task) {
           const created = sql(

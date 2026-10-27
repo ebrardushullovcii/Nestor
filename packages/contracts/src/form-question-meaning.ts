@@ -2,6 +2,22 @@ import { normalizeFormQuestionPrompt } from "./applications";
 import { preserveTechnologyTokens } from "./technology-text";
 
 type Meaning = { intent: string; subject: string; pay: boolean };
+/** Instructions around a question are presentation, not a new personal fact. */
+export function formQuestionText(value: string, isBoolean = false): string {
+  let text = value
+    .trim()
+    .replace(
+      /^(?:please\s+)?(?:answer|confirm|provide\s+(?:your\s+)?answer\s+for)\s*:\s*/iu,
+      "",
+    )
+    .replace(/\s*(?:[—–-]\s*required|\(\s*required\s*\))\s*[.!]?\s*$/iu, "");
+  if (isBoolean)
+    text = text.replace(
+      /\s*(?:\(\s*yes\s*\/\s*no\s*\)|(?:please\s+)?choose\s+yes\s+or\s+no)\s*[.!?]?\s*$/iu,
+      "",
+    );
+  return text.trim() || value.trim();
+}
 const normal = (value: string) =>
   normalizeFormQuestionPrompt(
     preserveTechnologyTokens(value.normalize("NFKD").replace(/\p{M}/gu, "")),
@@ -158,8 +174,9 @@ export function savedQuestionMatches(
   savedAnswer = "",
   formContext = "",
 ): boolean {
-  const left = normal(savedQuestion),
-    right = normal(formQuestion);
+  const booleanAnswer = /^(?:yes|no)$/iu.test(savedAnswer.trim());
+  const left = normal(formQuestionText(savedQuestion, booleanAnswer)),
+    right = normal(formQuestionText(formQuestion, booleanAnswer));
   if (!left || !right) return false;
   const sourceCurrency = currency(savedQuestion) ?? currency(savedAnswer),
     targetCurrency = currency(`${formQuestion} ${formContext}`);

@@ -120,6 +120,7 @@ import {
 import {
   normalizeFormQuestionPrompt,
   preserveTechnologyTokens,
+  formQuestionText,
 } from "@nestor/contracts";
 import { isControlAnswered, normalizeSignal } from "./control-classification";
 import type {
@@ -3740,18 +3741,7 @@ async function runMeasuredApplyAgent(
       item: string,
     ) => {
       if (words(prompt) === words(item)) return true;
-      const question = item.replace(
-        /^\s*(?:please\s+)?(?:answer|confirm)\s*:\s*/iu,
-        "",
-      );
-      if (words(prompt) === words(question)) return true;
-      return (
-        isBoolean &&
-        words(prompt) ===
-          words(
-            question.replace(/\s*\(\s*yes\s*\/\s*no\s*\)\s*[.!?]?\s*$/iu, ""),
-          )
-      );
+      return words(prompt) === words(formQuestionText(item, isBoolean));
     };
     const offersYesNo = (options: readonly string[]) =>
       options.length === 2 &&
