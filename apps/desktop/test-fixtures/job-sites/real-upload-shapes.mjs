@@ -111,6 +111,19 @@ const ashbyYesNo = (path, question) => `
  * leaving without one clears what was typed. Putting the same text in again
  * is no change to it, so a box that already shows a pick searches nothing.
  */
+/**
+ * Ashby's date question, a react-datepicker: a text box ("Pick date...")
+ * whose calendar opens beside it, a month header and weekday letters, days
+ * named "Choose Tuesday, October 27th, 2026", and Previous and Next Month
+ * buttons. A pick fills the box as MM/DD/YYYY; typed words stay as typed.
+ */
+const ashbyStartDate = `
+      <div class="field-entry"><label class="ashby-application-form-question-title" for="start">When could you start?</label>
+        <div class="react-datepicker-wrapper"><div class="react-datepicker__input-container">
+          <input type="text" placeholder="Pick date..." class="ashby-application-form-input-date" value="" id="start-input">
+        </div></div>
+        <div class="react-datepicker-popper" id="start-popper" hidden></div></div>`;
+
 const ashbyLocation = `
       <div class="field-entry"><label class="_required_f7cvd_91 ashby-application-form-question-title" for="_systemfield_location">What country are you based in?</label>
         <div><p>This should be the location you're physically located</p></div>
@@ -148,7 +161,8 @@ const sites = {
         <span id="chip"></span></div>
       ${ashbyYesNo("adult", "Are you over the age of 18?")}
       ${ashbyYesNo("timezone", "Are you based in a EU or equivalent timezone?")}
-      ${ashbyLocation}`,
+      ${ashbyLocation}
+      ${ashbyStartDate}`,
     script: `
       // Ashby's monitoring wraps fetch once the page has loaded, after
       // anything installed before the page's own scripts.
@@ -185,6 +199,36 @@ const sites = {
         yes.addEventListener('click', () => { value = value !== true || undefined; show(); });
         no.addEventListener('click', () => { value = value === false ? undefined : false; show(); });
       }
+      // The start date's calendar, drawn beside the box while it is open.
+      const start = document.getElementById('start-input');
+      const popper = document.getElementById('start-popper');
+      const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const ordinal = (day) => day + (day % 10 === 1 && day !== 11 ? 'st' : day % 10 === 2 && day !== 12 ? 'nd' : day % 10 === 3 && day !== 13 ? 'rd' : 'th');
+      let shownMonth = new Date(2026, 9, 1);
+      const drawCalendar = () => {
+        const year = shownMonth.getFullYear();
+        const month = shownMonth.getMonth();
+        const count = new Date(year, month + 1, 0).getDate();
+        let days = '';
+        for (let day = 1; day <= count; day += 1) {
+          const weekday = weekdays[new Date(year, month, day).getDay()];
+          days += '<div role="option" class="react-datepicker__day" aria-label="Choose ' + weekday + ', ' + months[month] + ' ' + ordinal(day) + ', ' + year + '" data-day="' + day + '">' + day + '</div>';
+        }
+        popper.innerHTML = '<div class="react-datepicker"><button type="button" aria-label="Previous Month">‹</button><button type="button" aria-label="Next Month">›</button>' +
+          '<div class="react-datepicker__header"><div class="react-datepicker__current-month">' + months[month] + ' ' + year + '</div>' +
+          '<div class="react-datepicker__day-names">SuMoTuWeThFrSa</div></div><div role="listbox" class="react-datepicker__month">' + days + '</div></div>';
+        popper.querySelector('[aria-label="Previous Month"]').addEventListener('click', () => { shownMonth = new Date(year, month - 1, 1); drawCalendar(); });
+        popper.querySelector('[aria-label="Next Month"]').addEventListener('click', () => { shownMonth = new Date(year, month + 1, 1); drawCalendar(); });
+        for (const cell of popper.querySelectorAll('[role=option]'))
+          cell.addEventListener('click', () => {
+            const pad = (value) => String(value).padStart(2, '0');
+            start.value = pad(month + 1) + '/' + pad(Number(cell.dataset.day)) + '/' + year;
+            popper.hidden = true;
+          });
+      };
+      start.addEventListener('focus', () => { drawCalendar(); popper.hidden = false; });
+      start.addEventListener('click', () => { drawCalendar(); popper.hidden = false; });
       // The location list shows the countries matching what was typed; a
       // pick is saved like any other answer.
       const place = document.getElementById('location-input');

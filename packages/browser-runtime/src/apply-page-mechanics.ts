@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { choosePageOption } from "./choose-page-option";
+import { pickCalendarDate } from "./date-picker";
 import type {
   ApplyBlockedAttempt,
   RawApplyClickable,
@@ -331,6 +332,24 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             }
             return false;
           };
+          // A text box that is a calendar's (a date picker): its class or its
+          // picker's says date, or it asks for a date. It takes a date, read as
+          // one, never words like "Immediately". (An open calendar beside a field
+          // is also left out of the field's question, above and below.)
+          const datePicker = (element: Element): boolean =>
+            element instanceof HTMLInputElement &&
+            element.type === "text" &&
+            (/(?:^|[\s_-])date(?:picker)?(?:$|[\s_-])|datepicker/iu.test(
+              element.className,
+            ) ||
+              Boolean(
+                element.closest(
+                  "[class*='datepicker' i], [class*='date-picker' i]",
+                ),
+              ) ||
+              /pick (?:a )?date|select (?:a )?date|\b(?:dd|mm)\s*[/.-]\s*(?:dd|mm)\s*[/.-]\s*(?:yy)?yy\b/iu.test(
+                element.placeholder,
+              ));
           return elements.map((element, index) => {
             const html = element as HTMLElement;
             const input = element instanceof HTMLInputElement ? element : null;
@@ -354,7 +373,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 const clone = ancestor.cloneNode(true) as HTMLElement;
                 clone
                   .querySelectorAll(
-                    "input, textarea, select, button, [role='option'], [role='listbox']",
+                    "input, textarea, select, button, [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i]",
                   )
                   .forEach((candidate) => candidate.remove());
                 const text = (clone.textContent ?? "")
@@ -402,7 +421,9 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               ref: `${prefix}c${index}`,
               index,
               tagName,
-              inputType: input?.type.toLowerCase() ?? (role || tagName),
+              inputType: datePicker(element)
+                ? "date"
+                : (input?.type.toLowerCase() ?? (role || tagName)),
               accept: input?.accept ?? "",
               min: input?.min ?? "",
               max: input?.max ?? "",
@@ -958,7 +979,7 @@ export function collectApplyDocumentSnapshot(
         const clone = ancestor.cloneNode(true) as HTMLElement;
         clone
           .querySelectorAll(
-            "input, textarea, select, button, [role='option'], [role='listbox']",
+            "input, textarea, select, button, [role='option'], [role='listbox'], [role='grid'], [role='dialog'], [class*='popper' i], [class*='calendar' i], [class*='datepicker__' i]",
           )
           .forEach((candidate) => candidate.remove());
         const nearby = (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -1092,6 +1113,22 @@ export function collectApplyDocumentSnapshot(
       }
       return false;
     };
+    // A text box that is a calendar's (a date picker): its class or its
+    // picker's says date, or it asks for a date. It takes a date, read as
+    // one, never words like "Immediately". (An open calendar beside a field
+    // is also left out of the field's question, above and below.)
+    const datePicker = (element: Element): boolean =>
+      element instanceof HTMLInputElement &&
+      element.type === "text" &&
+      (/(?:^|[\s_-])date(?:picker)?(?:$|[\s_-])|datepicker/iu.test(
+        element.className,
+      ) ||
+        Boolean(
+          element.closest("[class*='datepicker' i], [class*='date-picker' i]"),
+        ) ||
+        /pick (?:a )?date|select (?:a )?date|\b(?:dd|mm)\s*[/.-]\s*(?:dd|mm)\s*[/.-]\s*(?:yy)?yy\b/iu.test(
+          element.placeholder,
+        ));
     return elements.map((element, index) => {
       const html = element as HTMLElement;
       const input = element instanceof HTMLInputElement ? element : null;
@@ -1108,7 +1145,9 @@ export function collectApplyDocumentSnapshot(
       return {
         index,
         tagName,
-        inputType: input?.type.toLowerCase() ?? (role || tagName),
+        inputType: datePicker(element)
+          ? "date"
+          : (input?.type.toLowerCase() ?? (role || tagName)),
         accept: input?.accept ?? "",
         min: input?.min ?? "",
         max: input?.max ?? "",
@@ -2036,6 +2075,9 @@ export function createPlaywrightApplyPageMechanics(
         return { ok: false, error: `No control named ${ref} on this page.` };
       }
       try {
+        // A calendar's text box takes a date, picked from its calendar.
+        const picked = await pickCalendarDate(page, locator, value);
+        if (picked) return picked;
         await locator.fill(value, { timeout: 5_000 });
         // Check immediate acceptance here. The apply workflow checks retention
         // after 300 ms, sharing that window across a batch of typed answers.
