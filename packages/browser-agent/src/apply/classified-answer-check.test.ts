@@ -400,9 +400,74 @@ test("a preapproved routine declaration remains a sourced answer, while a gated 
   ).toBe(false);
 });
 
-test("a Yes the person picked on a Yes/No pair is checked on that pair, not a stand-in text field", async () => {
+test.each([
+  {
+    name: "the person's Yes",
+    answer: "Yes",
+    selected: "Yes",
+    saved: true,
+    source: "saved",
+    country: "Kosovo",
+    supported: true,
+  },
+  {
+    name: "the person's Yes without an inferred source",
+    answer: "Yes",
+    selected: "Yes",
+    saved: true,
+    source: null,
+    country: "United States",
+    supported: true,
+  },
+  {
+    name: "the person's No overrides a location derivation",
+    answer: "No",
+    selected: "No",
+    saved: true,
+    source: null,
+    country: "Kosovo",
+    supported: true,
+  },
+  {
+    name: "the same Profile timezone source as Fill",
+    answer: "Yes",
+    selected: "Yes",
+    saved: false,
+    source: "profile.currentCountry#timezone",
+    country: "Kosovo",
+    supported: true,
+  },
+  {
+    name: "an uncertain Profile timezone",
+    answer: "Yes",
+    selected: "Yes",
+    saved: false,
+    source: "profile.currentCountry#timezone",
+    country: "United States",
+    supported: false,
+  },
+  {
+    name: "a card value different from the selected choice",
+    answer: "Yes",
+    selected: "No",
+    saved: true,
+    source: "saved",
+    country: "Kosovo",
+    supported: false,
+  },
+  {
+    name: "a saved answer to a different question",
+    answer: "Yes",
+    selected: "Yes",
+    saved: true,
+    source: "saved",
+    country: "Kosovo",
+    savedQuestion: "Do you require visa sponsorship?",
+    supported: false,
+  },
+])("pre-send Yes/No rechecks preserve $name", async (entry) => {
   const question = "Are you in an European time zone?";
-  // Ashby's Yes/No: two option buttons (Yes pressed) and its hidden box.
+  // Ashby's Yes/No: two option buttons and its hidden box.
   const formControls = buildApplyFormObservation(
     {
       url: "https://jobs.example.test/acme/1/application",
@@ -440,7 +505,7 @@ test("a Yes the person picked on a Yes/No pair is checked on that pair, not a st
           visible: true,
           disabled: false,
           section: question,
-          pressed: true,
+          pressed: entry.selected === "Yes",
           sectionRequired: true,
         },
         {
@@ -449,7 +514,7 @@ test("a Yes the person picked on a Yes/No pair is checked on that pair, not a st
           visible: true,
           disabled: false,
           section: question,
-          pressed: false,
+          pressed: entry.selected === "No",
           sectionRequired: true,
         },
       ],
@@ -467,26 +532,41 @@ test("a Yes the person picked on a Yes/No pair is checked on that pair, not a st
     id: "application_application:146",
     kind: "other" as const,
     label: question,
-    question,
-    answer: "Yes",
+    question: entry.savedQuestion ?? question,
+    answer: entry.answer,
     roleFamilies: [],
     proofEntryIds: [],
   };
   const sourceId = `answerLibrary.${saved.id}`;
-  const checks = await checkClassifiedApplicationAnswers({
-    client: reader(
-      formControls.map((_control, index) => ({
-        index,
-        kind: "other",
-        country: null,
-        sourceId,
-      })),
-    ),
-    sources: { ...sources, reusableAnswers: [saved] },
-    answers: [{ question, answer: "Yes" }],
-    formContext: { pageText: question, fields: [] },
-    formControls,
-    payDisclosed: false,
-  });
-  expect(checks).toEqual([expect.objectContaining({ supported: true })]);
+  const client = reader(
+    formControls.map((_control, index) => ({
+      index,
+      kind: "other",
+      country: null,
+      sourceId: entry.source === "saved" ? sourceId : entry.source,
+    })),
+  );
+  // Both pre-send checks must see the same choice and unchanged human answer.
+  for (let recheck = 0; recheck < 2; recheck += 1) {
+    const checks = await checkClassifiedApplicationAnswers({
+      client,
+      sources: {
+        ...sources,
+        profile: {
+          ...sources.profile,
+          currentCountry: entry.country,
+          currentLocation: entry.country,
+        },
+        reusableAnswers: entry.saved ? [saved] : [],
+      },
+      answers: [{ question, answer: entry.answer }],
+      formContext: { pageText: question, fields: [] },
+      formControls,
+      payDisclosed: false,
+    });
+    expect(checks).toEqual([
+      expect.objectContaining({ supported: entry.supported }),
+    ]);
+  }
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
