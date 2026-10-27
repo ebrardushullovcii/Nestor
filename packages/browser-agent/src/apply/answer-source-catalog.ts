@@ -306,13 +306,19 @@ function knownLiteralField(
     if (source.id === "profile.githubUrl" && asksGithubUsername(control))
       return false;
     const field = normalizeFormQuestionPrompt(profileLink[1] ?? "");
+    // Strip only a leading request; the remainder must still name this exact
+    // profile field. Mentions in a group, prose or another person's field grant nothing.
+    const label = normalizeFormQuestionPrompt(control.label).replace(
+      /^(?:please\s+)?(?:share|provide|enter|paste|add|include)\s+(?:your\s+)?/u,
+      "",
+    );
     if (
       [
         field,
         `${field} url`,
         `${field} profile`,
         `${field} profile url`,
-      ].includes(normalizeFormQuestionPrompt(control.label))
+      ].includes(label)
     )
       return true;
   }
