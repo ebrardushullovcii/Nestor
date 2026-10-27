@@ -373,7 +373,7 @@ export function huntOutcomeCases(origin: string): BuiltAppBatch[] {
             );
             const sites = await page.evaluate(() =>
               (window as unknown as HuntWindow).nestor.jobs.run("list_sites", {
-                limit: 200,
+                limit: 100,
               }),
             );
             const selected = sites.rows.find(
