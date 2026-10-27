@@ -20,7 +20,7 @@ export interface StoreListState<
 }
 
 export const LIST_PAGE_SIZE = 50;
-/** A refresh reloads what is on screen, up to this many rows. */
+/** The most rows one read asks for; a refresh of more reads in turns. */
 const REFRESH_MAX = 200;
 /** Changes arrive in bursts during a search; refetch at most this often. */
 const REFRESH_GAP_MS = 400;
@@ -104,14 +104,29 @@ export function useStoreList<
       return;
     }
     const current = generation.current;
-    const limit = Math.min(
-      REFRESH_MAX,
-      Math.max(LIST_PAGE_SIZE, stateRef.current.rows.length),
-    );
+    // Everything the person has loaded comes back, in place: a person far
+    // down a long list keeps their rows and their scroll position.
+    const want = Math.max(LIST_PAGE_SIZE, stateRef.current.rows.length);
     try {
-      const page = await loadRef.current({ cursor: null, limit });
+      const rows: Row[] = [];
+      const seen = new Set<number>();
+      let page: StoreListPage<Row, Counts> | null = null;
+      let cursor: string | null = null;
+      do {
+        page = await loadRef.current({
+          cursor,
+          limit: Math.min(REFRESH_MAX, want - rows.length),
+        });
+        if (current !== generation.current) return;
+        for (const row of page.rows)
+          if (!seen.has(row.id)) {
+            seen.add(row.id);
+            rows.push(row);
+          }
+        cursor = page.rows.length > 0 ? page.nextCursor : null;
+      } while (cursor && rows.length < want);
       if (paused.current) pendingRefresh.current = true;
-      else if (current === generation.current) apply(page, page.rows);
+      else apply(page, rows);
     } catch (error) {
       if (current === generation.current)
         setState((s) => ({ ...s, loading: false, error: describe(error) }));
