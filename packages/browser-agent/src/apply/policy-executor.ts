@@ -40,6 +40,7 @@ import { matchOption } from "./option-match";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
 import { formatGithubAnswer } from "./github-username";
+import { formatProfileUrlAnswer } from "./profile-url";
 import type { ApplyQuestionClassification } from "./question-classification";
 import {
   buildCoverLetterRequest,
@@ -888,11 +889,15 @@ async function decideAnswer(input: {
     control.answerTags?.kind === "other"
       ? priorCompanyHistory(control, config.sources)?.answer
       : null;
-  const value = formatGithubAnswer(
+  const value = formatProfileUrlAnswer(
     control,
-    control.kind === "radio" || control.kind === "checkbox"
-      ? input.value
-      : (discovery?.value ?? priorCompany?.value ?? input.value),
+    formatGithubAnswer(
+      control,
+      control.kind === "radio" || control.kind === "checkbox"
+        ? input.value
+        : (discovery?.value ?? priorCompany?.value ?? input.value),
+    ),
+    control.answerTags?.sourceId ?? input.storedFactId,
   );
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";

@@ -6,6 +6,7 @@ import {
 } from "@nestor/contracts";
 import { classifyAnswerPermission } from "./answer-source-catalog";
 import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
+import { fullProfileUrl } from "./profile-url";
 import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
 import {
   createApplyGuardState,
@@ -1531,3 +1532,179 @@ test.each([
     ).toBe("needs_you");
   },
 );
+
+test.each([
+  [
+    "GitHub URL",
+    "githubUrl",
+    "github.com/synthetic-robin",
+    "url",
+    "https://github.com/synthetic-robin",
+  ],
+  [
+    "GitHub URL",
+    "githubUrl",
+    "github.com/synthetic-robin?tab=repositories#work",
+    "text",
+    "https://github.com/synthetic-robin?tab=repositories#work",
+  ],
+  [
+    "LinkedIn profile",
+    "linkedinUrl",
+    "www.linkedin.com/in/synthetic-robin",
+    "text",
+    "https://www.linkedin.com/in/synthetic-robin",
+  ],
+  [
+    "Portfolio",
+    "portfolioUrl",
+    "portfolio.example.test/Work",
+    "text",
+    "https://portfolio.example.test/Work",
+  ],
+  [
+    "Code profile",
+    "githubUrl",
+    "github.com/synthetic-robin",
+    "url",
+    "https://github.com/synthetic-robin",
+  ],
+  [
+    "GitHub username",
+    "githubUrl",
+    "github.com/synthetic-robin",
+    "text",
+    "synthetic-robin",
+  ],
+] as const)(
+  "Profile URL formatting: %s (%s) fills once and passes Send",
+  async (label, key, recorded, inputType, expected) => {
+    const src = sources();
+    src.profile[key] = recorded;
+    const original = JSON.stringify(src.profile);
+    const s = setup(field(label, { inputType }), src);
+    const tags: ApplyAnswerTags = {
+      kind: "other",
+      country: null,
+      sourceId: `profile.${key}`,
+    };
+    const result = await executeApplyProposal(
+      {
+        tool: "type",
+        ref: "c0",
+        text: recorded,
+        storedFactId: `profile.${key}`,
+      },
+      s.observation().signature,
+      {
+        config: s.config,
+        guardState: createApplyGuardState(),
+        classifyQuestions: readTags(tags),
+        now: () => new Date(at),
+      },
+    );
+    expect(result.kind).toBe("filled");
+    expect(s.fillText).toHaveBeenCalledExactlyOnceWith("c0", expected);
+    expect(s.raw.value).toBe(expected);
+    if (expected.startsWith("https://")) {
+      s.raw.value = "";
+      const other = await executeApplyProposal(
+        {
+          tool: "type",
+          ref: "c0",
+          text: "https://different-account.example.test/other",
+          storedFactId: `profile.${key}`,
+        },
+        s.observation().signature,
+        {
+          config: s.config,
+          guardState: createApplyGuardState(),
+          classifyQuestions: readTags(tags),
+          now: () => new Date(at),
+        },
+      );
+      expect(other.kind).not.toBe("filled");
+      expect(s.fillText).toHaveBeenCalledTimes(1);
+      s.raw.value = expected;
+    }
+    const client: LLMClient = {
+      chatWithTools: vi.fn(() =>
+        Promise.resolve(
+          call("report_question_kinds", {
+            plainIndexes: [0],
+            flagged: [],
+            tags: [{ index: 0, ...tags }],
+          }),
+        ),
+      ),
+    };
+    const recheck = (answer: string) =>
+      checkClassifiedApplicationAnswers({
+        client,
+        sources: src,
+        payDisclosed: false,
+        answers: [{ question: label, answer }],
+        formControls: s.observation().controls,
+        formContext: { pageText: "Apply for this role", fields: [] },
+      });
+    expect((await recheck(expected))[0].supported).toBe(true);
+    if (expected.startsWith("https://")) {
+      expect(
+        (await recheck("https://different-account.example.test/other"))[0]
+          .supported,
+      ).toBe(false);
+      expect((await recheck(recorded))[0].supported).toBe(false);
+    }
+    expect(JSON.stringify(src.profile)).toBe(original);
+  },
+);
+
+test.each([
+  ["GitHub URL", "synthetic-robin", "", "githubUrl"],
+  [
+    "GitHub URL",
+    "github.com/synthetic-robin",
+    "Professional reference",
+    "githubUrl",
+  ],
+  [
+    "LinkedIn profile",
+    "linkedin.com/in/synthetic-robin",
+    "Professional reference",
+    "linkedinUrl",
+  ],
+] as const)(
+  "an incomplete address or another person's URL still needs their answer",
+  async (label, recorded, groupLabel, key) => {
+    const src = sources();
+    src.profile[key] = recorded;
+    const s = setup(field(label, { groupLabel, inputType: "url" }), src);
+    const result = await executeApplyProposal(
+      {
+        tool: "type",
+        ref: "c0",
+        text: recorded,
+        storedFactId: `profile.${key}`,
+      },
+      s.observation().signature,
+      {
+        config: s.config,
+        guardState: createApplyGuardState(),
+        classifyQuestions: readTags({
+          kind: "other",
+          country: null,
+          sourceId: `profile.${key}`,
+        }),
+        now: () => new Date(at),
+      },
+    );
+    expect(result.kind).not.toBe("filled");
+    expect(s.fillText).not.toHaveBeenCalled();
+  },
+);
+
+test("URL formatting never guesses an account or accepts credentials as an address", () => {
+  expect(fullProfileUrl("synthetic-robin")).toBeNull();
+  expect(fullProfileUrl("user:secret@github.com/synthetic-robin")).toBeNull();
+  expect(fullProfileUrl("javascript:alert(1)")).toBeNull();
+});
