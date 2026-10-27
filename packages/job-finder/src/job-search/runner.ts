@@ -125,6 +125,9 @@ export function createJobSearchRunner(
     if (active === run) active = null;
     run.controller.abort();
     notify(true);
+    // A finished search's cached database pages are not needed by anything
+    // on screen; give them back.
+    deps.store.releaseMemory();
   };
 
   const execute = async (

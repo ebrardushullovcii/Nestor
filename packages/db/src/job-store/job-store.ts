@@ -95,6 +95,11 @@ export interface JobStore {
   /** For the flows that own later stages; no Undo record. */
   setStage(ids: readonly number[], to: JobStage): number;
 
+  /**
+   * Hands the page cache back to the system once a burst of work (a search)
+   * is over; later reads warm it again.
+   */
+  releaseMemory(): void;
   close(): void;
 }
 
@@ -392,6 +397,10 @@ export function openJobStore(filePath: string): JobStore {
         });
         return outcome.moved;
       });
+    },
+
+    releaseMemory() {
+      if (db.isOpen && !db.isTransaction) db.exec("PRAGMA shrink_memory");
     },
 
     close() {
