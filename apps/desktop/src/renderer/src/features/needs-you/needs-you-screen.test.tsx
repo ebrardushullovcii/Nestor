@@ -1081,3 +1081,36 @@ it("lists filled forms under their own group, and says so when nothing is blocke
   );
   await waitFor(() => expect(openApplication).toHaveBeenCalledWith({ id: 31 }));
 });
+
+it("says why a question was asked when Apply recorded a reason", async () => {
+  const row = claimed[0]!;
+  applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "salary",
+    key: "salary",
+    scope: {},
+    prompt: "What salary do you expect?",
+    kind: "question",
+    input: "text",
+    options: [],
+    askReason: {
+      kind: "source_rejected",
+      check: "answer_grounding",
+      detail: "The saved salary is in another currency than the form asks.",
+    },
+  });
+  show();
+  const why = await screen.findByText("Why am I asked this?");
+  fireEvent.click(why);
+  expect(
+    screen.getByText(
+      "An answer was found, but the check before sending could not confirm it fits.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      "The saved salary is in another currency than the form asks.",
+    ),
+  ).toBeTruthy();
+});

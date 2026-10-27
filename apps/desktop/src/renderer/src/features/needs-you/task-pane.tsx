@@ -3,6 +3,7 @@ import type {
   CandidateAssetKind,
   NeedsYouDetails,
   NeedsYouDraft,
+  NeedsYouTask,
 } from "@nestor/contracts";
 import {
   STEP_PRESSED_ANSWER,
@@ -17,6 +18,17 @@ import { openPreparedApplication } from "@renderer/features/applications/open-ap
 import { AnswerField } from "./answer-field";
 import { SourceNeedPane } from "./source-need-pane";
 import { siteCheck, useWorkThrough } from "./work-through";
+
+/** Why Apply handed a question back, in the person's words. */
+const ASK_REASON_LEAD: Record<
+  NonNullable<NeedsYouTask["askReason"]>["kind"],
+  string
+> = {
+  no_source: "Nothing in your profile or saved answers answers it.",
+  source_rejected:
+    "An answer was found, but the check before sending could not confirm it fits.",
+  page_refused: "Nestor filled it in, but the site still marks it unanswered.",
+};
 
 /** A site as a person names it: its host, without "www.". */
 function siteHost(url: string): string {
@@ -225,6 +237,17 @@ export function TaskPane(props: {
               </p>
             ))}
           </div>
+          {task.kind === "question" && task.askReason ? (
+            <details className="text-sm" data-needs-ask-reason>
+              <summary className="cursor-pointer text-foreground-soft">
+                Why am I asked this?
+              </summary>
+              <p className="mt-2">{ASK_REASON_LEAD[task.askReason.kind]}</p>
+              <p className="mt-1 break-words text-foreground-soft">
+                {task.askReason.detail}
+              </p>
+            </details>
+          ) : null}
           {task.kind === "question" && isStepHandoverPrompt(task.prompt) ? (
             <div className="grid gap-3">
               <h2 className="font-medium">{task.prompt}</h2>
