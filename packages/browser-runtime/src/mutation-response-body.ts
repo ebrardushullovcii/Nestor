@@ -42,9 +42,18 @@ export function installMutationResponseBodyObserver(): void {
     else if (body instanceof ArrayBuffer || ArrayBuffer.isView(body))
       bodyKey = `bytes:${body.byteLength}`;
     else return null;
+    // Resolved as the browser resolves it (a blank frame takes the base of
+    // the page that made it); an address it cannot read is not observed,
+    // and never breaks the page's own request.
+    let address: string;
+    try {
+      address = new URL(url, document.baseURI || location.href).href;
+    } catch {
+      return null;
+    }
     const entry: ObservedMutationResponse = {
       method,
-      url: new URL(url, location.href).href,
+      url: address,
       bodyKey,
       startedAt: Date.now(),
       status: null,
