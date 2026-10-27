@@ -15,6 +15,7 @@ import {
   RESIDENCE_COUNTRY_LABELS,
 } from "./application-facts";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
+import { priorCompanyHistory } from "./prior-company";
 import {
   countriesIn,
   countryTerms,
@@ -508,6 +509,10 @@ export function classifyAnswerPermission(input: {
       input.sources.reusableAnswers,
       input.controls,
     ) ?? pickerRule?.saved;
+  const priorCompany =
+    tags.kind === "other"
+      ? priorCompanyHistory(input.control, input.sources)
+      : null;
   let source = catalog.find((row) => row.id === tags.sourceId);
   // A known legal question can be answered directly from an explicit,
   // unconditional profile fact. Neither a model suggestion nor residence
@@ -630,6 +635,13 @@ export function classifyAnswerPermission(input: {
       country: null,
     };
   // A listing source has its own deterministic evidence, after all gated kinds.
+  if (priorCompany?.answer)
+    source = {
+      id: priorCompany.answer.sourceId,
+      value: priorCompany.answer.value,
+      purpose: "profile",
+      country: null,
+    };
   if (
     !source &&
     tags.kind === "other" &&
@@ -645,7 +657,9 @@ export function classifyAnswerPermission(input: {
     !source &&
     tags.kind === "motivation" &&
     isPlainMotivationIntent(input.answer) &&
-    !asksForSpecificStory(`${input.control.groupLabel} ${input.control.label}`) &&
+    !asksForSpecificStory(
+      `${input.control.groupLabel} ${input.control.label}`,
+    ) &&
     !requiresOwnWords(input.control.label) &&
     !ownWordsAppliesToQuestion(
       `${input.control.groupLabel}\n${input.pageInstructions}`,
@@ -725,6 +739,12 @@ export function classifyAnswerPermission(input: {
     return exactSaved
       ? { kind: "literal", source }
       : deny("This question needs your own unchanged answer.");
+  if (priorCompany)
+    return priorCompany.answer?.value === input.answer && source
+      ? { kind: "literal", source }
+      : deny(
+          "This prior-company answer must match your recorded employment history.",
+        );
   if (tags.kind === "other" && asksListingDiscoveryControl(input.control)) {
     const recorded = listingDiscoveryAnswer(
       input.control,

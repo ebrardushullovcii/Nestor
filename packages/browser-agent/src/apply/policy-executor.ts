@@ -33,6 +33,7 @@ import {
 import { normalizeSignal } from "./control-classification";
 import { matchOption } from "./option-match";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
+import { priorCompanyHistory } from "./prior-company";
 import { formatGithubAnswer } from "./github-username";
 import type { ApplyQuestionClassification } from "./question-classification";
 import {
@@ -875,11 +876,15 @@ async function decideAnswer(input: {
     asksListingDiscoveryControl(control)
       ? listingDiscoveryAnswer(control, config.sources, input.controls)
       : null;
+  const priorCompany =
+    control.answerTags?.kind === "other"
+      ? priorCompanyHistory(control, config.sources)?.answer
+      : null;
   const value = formatGithubAnswer(
     control,
     control.kind === "radio" || control.kind === "checkbox"
       ? input.value
-      : (discovery?.value ?? input.value),
+      : (discovery?.value ?? priorCompany?.value ?? input.value),
   );
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";

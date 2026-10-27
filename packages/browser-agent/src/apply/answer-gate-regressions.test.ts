@@ -22,6 +22,204 @@ import type {
 } from "./types";
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
 const at = "2026-10-26T12:00:00.000Z";
+
+test.each([
+  { employer: "Other Workshop", expected: "No" },
+  { employer: "Example", expected: "Yes" },
+  { employer: "Example Ltd.", expected: "Yes" },
+  { employer: "Example Services", expected: "No" },
+])(
+  "prior-company answers use the employer record: $employer",
+  async ({ employer, expected }) => {
+    const src = sources();
+    src.profile = CandidateProfileSchema.parse({
+      ...src.profile,
+      experiences: [
+        { id: "role", companyName: employer, jobTitle: "Engineer" },
+      ],
+    });
+    src.resumeText = `Engineer at ${employer}. Used Example's tools.`;
+    const label = "Have you previously worked at or consulted for Example?";
+    const s = setup(field(label), src);
+    const outcome = await executeApplyProposal(
+      { tool: "type", ref: "c0", text: expected === "Yes" ? "No" : "Yes" },
+      s.observation().signature,
+      {
+        config: s.config,
+        now: () => new Date(at),
+        guardState: createApplyGuardState(),
+        classifyQuestions: readTags({
+          kind: "other",
+          country: null,
+          sourceId: null,
+        }),
+        checkWrittenAnswer: () =>
+          Promise.reject(
+            new Error(
+              "A history-derived literal needs no generated answer check.",
+            ),
+          ),
+      },
+    );
+    expect(outcome.kind).toBe("filled");
+    expect(s.raw.value).toBe(expected);
+    const client: LLMClient = {
+      chatWithTools: () =>
+        Promise.resolve(
+          call("report_question_kinds", {
+            plainIndexes: [0],
+            flagged: [],
+            tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
+          }),
+        ),
+    };
+    const check = (answer: string) =>
+      checkClassifiedApplicationAnswers({
+        client,
+        sources: src,
+        payDisclosed: false,
+        answers: [{ question: label, answer }],
+        formControls: s.observation().controls,
+        formContext: {
+          pageText: s.page.bodyText,
+          fields: [],
+        },
+      });
+    expect((await check(expected))[0]?.supported).toBe(true);
+    expect((await check(expected === "Yes" ? "No" : "Yes"))[0]?.supported).toBe(
+      false,
+    );
+  },
+);
+
+test("a prior-company radio refuses the opposite control and accepts only the matching one", async () => {
+  const src = sources();
+  src.profile = CandidateProfileSchema.parse({
+    ...src.profile,
+    experiences: [{ id: "role", companyName: "Other Workshop" }],
+  });
+  const label = "Have you previously worked at or consulted for Example?";
+  const s = setup(
+    field("Yes", { inputType: "radio", groupLabel: label, value: "Yes" }),
+    src,
+  );
+  s.page.controls.push({
+    ...s.raw,
+    index: 1,
+    id: "no",
+    label: "No",
+    value: "No",
+  });
+  s.setToggle.mockImplementation((ref, checked) => {
+    for (const control of s.page.controls)
+      control.checked = `c${control.index}` === ref ? checked : false;
+    return Promise.resolve({ ok: true, observedValue: String(checked) });
+  });
+  const deps = {
+    config: s.config,
+    now: () => new Date(at),
+    guardState: createApplyGuardState(),
+    classifyQuestions: readTags({
+      kind: "other" as const,
+      country: null,
+      sourceId: null,
+    }),
+  };
+  expect(
+    (
+      await executeApplyProposal(
+        { tool: "set_checkbox", ref: "c0", checked: true },
+        s.observation().signature,
+        deps,
+      )
+    ).kind,
+  ).not.toBe("filled");
+  expect(s.setToggle).not.toHaveBeenCalled();
+  expect(
+    (
+      await executeApplyProposal(
+        { tool: "set_checkbox", ref: "c1", checked: true },
+        s.observation().signature,
+        deps,
+      )
+    ).kind,
+  ).toBe("filled");
+  expect(s.setToggle).toHaveBeenCalledExactlyOnceWith("c1", true);
+});
+
+test("a prior-company picker selects the history-derived answer rather than the proposal", async () => {
+  const src = sources();
+  src.profile = CandidateProfileSchema.parse({
+    ...src.profile,
+    experiences: [{ id: "role", companyName: "Other Workshop" }],
+  });
+  const s = setup(
+    field("Have you previously worked at or consulted for Example?", {
+      tagName: "select",
+      options: ["Yes", "No"],
+    }),
+    src,
+  );
+  const choose = vi.fn<ApplyPageHands["chooseOption"]>((_ref, option) => {
+    s.raw.value = option;
+    s.raw.selectedOptionLabel = option;
+    return Promise.resolve({ ok: true, observedValue: option });
+  });
+  s.config.hands.chooseOption = choose;
+  const outcome = await executeApplyProposal(
+    { tool: "select", ref: "c0", option: "Yes" },
+    s.observation().signature,
+    {
+      config: s.config,
+      now: () => new Date(at),
+      guardState: createApplyGuardState(),
+      classifyQuestions: readTags({
+        kind: "other",
+        country: null,
+        sourceId: null,
+      }),
+    },
+  );
+  expect(outcome.kind).toBe("filled");
+  expect(choose).toHaveBeenCalledExactlyOnceWith("c0", "No");
+});
+
+test.each(["empty", "draft", "reference", "compound"])(
+  "unknown prior-company context stays with the person: %s",
+  (shape) => {
+    const src = sources();
+    src.profile = CandidateProfileSchema.parse({
+      ...src.profile,
+      experiences:
+        shape === "empty"
+          ? []
+          : [
+              {
+                id: "role",
+                companyName: "Other Workshop",
+                isDraft: shape === "draft",
+              },
+            ],
+    });
+    const s = setup(
+      field(
+        `Have you previously worked at or consulted for Example${shape === "compound" ? " and do you hold a driving licence" : ""}?`,
+        { groupLabel: shape === "reference" ? "Professional reference" : "" },
+      ),
+      src,
+    );
+    expect(
+      classifyAnswerPermission({
+        control: s.observation().controls[0],
+        controls: s.observation().controls,
+        tags: { kind: "other", country: null, sourceId: null },
+        sources: src,
+        answer: "No",
+        pageInstructions: "",
+      }).kind,
+    ).toBe("needs_you");
+  },
+);
 function sources(): ApplyAnswerSources {
   return {
     profile: CandidateProfileSchema.parse({
