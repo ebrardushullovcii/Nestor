@@ -193,3 +193,22 @@ it("applies the jobs on this page of Approved, next to all and the ticked ones",
   expect(sent).toMatchObject({ bulk: true });
   expect("ids" in sent.selection && sent.selection.ids).toHaveLength(50);
 });
+
+it("an empty tab offers the next step: the other tab when it has jobs, else Find jobs", async () => {
+  approveOriginalResumesForTests(store, ids);
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <ShortlistedScreen />
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+  // Every resume is approved: To review is empty, Approved holds three.
+  fireEvent.click(
+    await screen.findByRole("button", { name: "See 3 approved jobs" }),
+  );
+  await screen.findByRole("button", { name: "Apply to all 3 jobs" });
+  for (const id of ids) send(id);
+  // Both tabs are empty now: the way on is Find jobs.
+  expect(await screen.findByRole("button", { name: "Find jobs" })).toBeTruthy();
+});

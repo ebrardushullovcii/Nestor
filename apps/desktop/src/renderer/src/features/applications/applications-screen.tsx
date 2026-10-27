@@ -13,7 +13,7 @@ import {
 } from "@nestor/contracts";
 import { Download, Save } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
 import { Checkbox } from "@renderer/components/ui/checkbox";
@@ -41,6 +41,7 @@ import {
 import { cn } from "@renderer/lib/cn";
 
 import { useAssistantContextSource } from "@renderer/features/job-finder/assistant/assistant-provider";
+import { ListEmpty } from "@renderer/features/job-lists/list-empty";
 import { useAssistantTrackerView } from "@renderer/features/job-lists/use-assistant-list-view";
 
 import {
@@ -118,6 +119,7 @@ const NO_FILTER: FilterState = {
  */
 export function ApplicationsScreen() {
   const { showToast } = useToast();
+  const navigate = useNavigate();
   const setStatus = useSetStatus();
   const showChange = useTrackerChangeToast();
   const [prefs, setPrefs] = useState<Prefs>(readPrefs);
@@ -565,9 +567,19 @@ export function ApplicationsScreen() {
                 </>
               }
               empty={
-                total === 0
-                  ? "No applications yet. Approve resumes in Shortlisted and Apply sends them; each one shows up here."
-                  : "No application matches these filters."
+                total === 0 ? (
+                  <ListEmpty
+                    action={{
+                      label: "Go to approved resumes",
+                      onClick: () =>
+                        void navigate("/job-finder/review-queue?tab=approved"),
+                    }}
+                    detail="Approve resumes in Shortlisted and Apply sends them; each one shows up here."
+                    title="No applications yet"
+                  />
+                ) : (
+                  <ListEmpty title="No application matches these filters." />
+                )
               }
               hasMore={list.nextCursor !== null}
               label="Applications"
