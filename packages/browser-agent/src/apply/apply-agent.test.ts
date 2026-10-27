@@ -8653,7 +8653,7 @@ describe("a picker the person filled on the page survives the continue", () => {
         },
       ],
     });
-  const continueWith = (source: RawApplyPage) => {
+  const continueWith = (source: RawApplyPage, tried = ["kosovo"]) => {
     const chosen: string[] = [];
     const input = config(source, {
       intermediateWritesAuthorized: false,
@@ -8662,7 +8662,7 @@ describe("a picker the person filled on the page survives the continue", () => {
       initialPickerAttempts: [
         {
           question: normalizeFormQuestionPrompt(question),
-          tried: ["kosovo"],
+          tried,
           notOffered: [],
           offeredOptions: [],
         },
@@ -8685,6 +8685,22 @@ describe("a picker the person filled on the page survives the continue", () => {
     );
     expect(chosen).toEqual([]);
     expect(result.outcome).toBe("prepared");
+  });
+
+  test("once the person answered in Needs you, the pick the page shows is theirs and is kept", async () => {
+    // The service clears the run's refusals for a question the person answered.
+    const { input, chosen } = continueWith(pickerPage("Kosovo"), []);
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "finish", args: { reason: "The form is ready" } },
+      ]),
+    );
+    expect(chosen).toEqual([]);
+    expect(result.outcome).toBe("prepared");
+    expect(
+      (result.reviewFilled ?? []).map((entry) => entry.answer.value),
+    ).toContain("Kosovo");
   });
 
   test("the run's own leftover search is still not an answer", async () => {
