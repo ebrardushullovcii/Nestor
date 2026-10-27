@@ -19,6 +19,13 @@ import type { EmbeddedBrowser } from "./embedded-browser";
 
 // The same read the runtime runs through Playwright, run directly in one tab.
 const VISIBLE_ACCESS_SIGNALS_SCRIPT = `(${collectVisibleAccessSignals.toString()})()`;
+// An application attempt in these states leaves no page waiting on the person.
+const WAITING_PAGE_ENDS = new Set<string>([
+  "failed",
+  "submitted",
+  "cancelled",
+  "unsupported",
+]);
 
 function tabOriginKey(url: string): string | null {
   try {
@@ -427,9 +434,11 @@ export function withEmbeddedBrowserActivity(
                 );
               if (result.state === "failed" || result.state === "submitted")
                 browser.markFinishedTabs(tabs);
+              // Every page left waiting on the person counts toward the
+              // live limit: Ready forms and pages stopped at Needs you.
               if (
                 input.applicationPageBindingKey &&
-                result.state === "ready" &&
+                !WAITING_PAGE_ENDS.has(result.state) &&
                 browser.markPreparedForm(input.applicationPageBindingKey)
               ) {
                 applicationSources.set(input.applicationPageBindingKey, source);

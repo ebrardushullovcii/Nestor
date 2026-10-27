@@ -7,6 +7,7 @@ import {
 } from "@nestor/browser-runtime/apply-page";
 import {
   MAX_LIVE_WAITING_FORMS,
+  WAITING_FORM_BUDGET_PER_PAGE,
   measureWaitingFormMemory,
   waitingFormsHaveCapacity,
 } from "./waiting-form-memory";
@@ -398,6 +399,15 @@ export class EmbeddedBrowser {
   private readonly ownedTabs = new Map<string, Set<string>>();
   private readonly releasedOwnedTabs = new Set<string>();
   private readonly preparedForms = new Map<string, number>();
+  private liveWaitingLimit = MAX_LIVE_WAITING_FORMS;
+  // Pages the runtime could not close safely; tried again once re-marked.
+  private readonly unreclaimable = new Set<string>();
+
+  /** How many waiting pages stay live: the Speed setting's level. */
+  setLiveWaitingPageLimit(limit: number): void {
+    this.liveWaitingLimit = Math.max(1, Math.floor(limit));
+    void this.reduceWaitingFormMemory().catch(() => undefined);
+  }
   private applicationTabsClosed: ((owner: string | null) => void) | null = null;
 
   setApplicationTabsClosedHandler(
@@ -435,8 +445,9 @@ export class EmbeddedBrowser {
       this.discardedFormLabels.delete(owner);
       this.emit();
     }
-    // A fourth live form closes the oldest one that has settled.
-    if (this.liveWaitingForms().length > MAX_LIVE_WAITING_FORMS)
+    this.unreclaimable.delete(owner);
+    // One more live page than the limit closes the oldest that has settled.
+    if (this.liveWaitingForms().length > this.liveWaitingLimit)
       void this.reduceWaitingFormMemory().catch(() => undefined);
     return true;
   }
@@ -504,6 +515,7 @@ export class EmbeddedBrowser {
     const tabs = this.ownedTabs.get(owner);
     this.ownedTabs.delete(owner);
     this.preparedForms.delete(owner);
+    this.unreclaimable.delete(owner);
     this.discardedFormLabels.delete(owner);
     for (const id of tabs ?? []) {
       if (options.finished) {
@@ -1105,6 +1117,7 @@ export class EmbeddedBrowser {
         backgroundThrottled: page.contents.getBackgroundThrottling(),
       })),
       processes: app.getAppMetrics?.() ?? [],
+      budgetBytes: this.liveWaitingLimit * WAITING_FORM_BUDGET_PER_PAGE,
     });
   }
 
@@ -1115,16 +1128,28 @@ export class EmbeddedBrowser {
     }
     // A reclaimed form's tabs close asynchronously; it stops counting at once.
     const reclaimed = new Set<string>();
-    const tooManyForms = () =>
-      this.liveWaitingForms(reclaimed).length > MAX_LIVE_WAITING_FORMS;
-    const needsReclaim = () => {
+    // Live pages past the most recent `liveWaitingLimit`: the ones to close.
+    // A page that could not close never makes a more recent one close.
+    const beyondLimit = () =>
+      new Set(
+        this.liveWaitingForms(reclaimed)
+          .sort(
+            (a, b) =>
+              (this.preparedForms.get(b) ?? 0) -
+              (this.preparedForms.get(a) ?? 0),
+          )
+          .slice(this.liveWaitingLimit)
+          .filter((owner) => !this.unreclaimable.has(owner)),
+      );
+    const tooManyForms = () => beyondLimit().size > 0;
+    const memoryPressure = () => {
       const memory = this.getWaitingFormMemory();
       return (
-        tooManyForms() ||
         (memory.measurementComplete && !waitingFormsHaveCapacity(memory)) ||
         this.pageMap.size >= MAX_TOTAL_TABS - 2
       );
     };
+    const needsReclaim = () => tooManyForms() || memoryPressure();
     if (
       needsReclaim() &&
       (tooManyForms() || Date.now() - this.lastMemoryCleanupAt > 10_000)
@@ -1135,6 +1160,7 @@ export class EmbeddedBrowser {
         const started = Date.now();
         for (const [owner] of oldest) {
           if (!needsReclaim()) break;
+          if (!memoryPressure() && !beyondLimit().has(owner)) continue;
           // Exact refill verification needs a temporary working tab. Wait
           // for one rather than treating a full browser as an unsafe form.
           if (!this.hasTabCapacity()) break;
@@ -1147,6 +1173,7 @@ export class EmbeddedBrowser {
             this.canDiscardPreparedForm(owner),
           ).catch(() => false);
           if (discarded) reclaimed.add(owner);
+          else this.unreclaimable.add(owner);
           if (discarded && label) this.discardedFormLabels.set(owner, label);
         }
         if (!needsReclaim()) return;
