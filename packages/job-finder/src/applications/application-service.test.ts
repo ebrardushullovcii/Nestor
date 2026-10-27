@@ -41,6 +41,8 @@ const preparation = vi.hoisted(() => ({
   answers: [] as ApplicationReviewAnswer[],
   blocker: null as ApplyBlocker | null,
   uploadsConfirmed: [] as boolean[],
+  /** The files each run was told an earlier attempt attached on its page. */
+  earlierFiles: [] as string[][],
   /** The file field the run saw accepted on the form, if any. */
   attachedField: "Resume" as string | null,
   readAnswers:
@@ -55,6 +57,11 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
       input: Parameters<typeof actual.createApplyFormPreparer>[0],
     ) => {
       preparation.readAnswers = input.readReusableAnswers;
+      preparation.earlierFiles.push(
+        (input.earlierAttachments ?? []).map(
+          (entry) => `${entry.field}: ${entry.fileName}`,
+        ),
+      );
       preparation.uploadsConfirmed.push(
         (input.uploadsConfirmedByPerson ?? []).length > 0,
       );
@@ -349,6 +356,45 @@ async function setup(
     deps,
   };
 }
+
+it("tells a continue on the same page which files the attempt before it attached", async () => {
+  const f = await setup(1);
+  preparation.earlierFiles.length = 0;
+  const waiting = () =>
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "phone",
+          prompt: "Phone",
+          kind: "personal_info",
+          answerControlType: "text",
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(waiting());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const answer = () =>
+    f.applications.needsYou.answer({
+      id: f.applications.needsYou.list().rows[0]!.id,
+      answer: "+44 20 0000 0000",
+      remember: false,
+    });
+  answer();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  // A page that could not be kept starts fresh, with nothing carried.
+  f.browser.transferApplicationPageBinding.mockResolvedValue(false);
+  f.releases.shift()!(waiting());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  answer();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
+  expect(preparation.earlierFiles).toEqual([[], ["Resume: resume.pdf"], []]);
+});
 
 it("returns an answer the form still rejects to Needs you instead of failing with an empty inbox", async () => {
   const f = await setup(1);

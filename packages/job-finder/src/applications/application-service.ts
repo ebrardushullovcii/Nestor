@@ -387,6 +387,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         ])
       : [];
     let startingUrl: string | undefined;
+    // A continue keeps the page, and with it the files already attached.
+    let keptPage = false;
     if (
       row.attempt > 1 &&
       (!previous ||
@@ -417,6 +419,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           target,
         );
       if (transferred && previous?.accessRecheck) startingUrl = target;
+      keptPage = Boolean(transferred) && !previous?.accessRecheck;
     }
     const origin = new URL(target).origin;
     const allowedOrigins = new Set([
@@ -609,6 +612,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             reusableAnswers: letterAnswers,
           }),
           uploadsConfirmedByPerson: confirmedUploadFields(row),
+          earlierAttachments: keptPage
+            ? (previous?.reviewCard?.attachments ?? [])
+            : [],
           readReusableAnswers: (questions) => {
             const byKey = new Map(
               questions.map((question) => [

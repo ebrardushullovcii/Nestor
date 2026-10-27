@@ -8338,3 +8338,37 @@ describe("a run never ends waiting on the person with nothing to answer", () => 
     ).toEqual([reason]);
   });
 });
+
+describe("a continue keeps the file an earlier attempt attached on the same page", () => {
+  const earlier = [
+    { label: "Resume", fileName: "resume.txt", field: "Resume/CV" },
+  ];
+  test("the storage's word on that file puts it on the card", async () => {
+    // The widget replaced its resume field with the file's name.
+    const source = page({ controls: [nameControl()] });
+    source.uploads = [{ fileName: "resume.txt", network: "accepted" }];
+    const input = config(source);
+    input.earlierAttachments = earlier;
+    const result = await runApplyAgent(
+      input,
+      repeatingModel("finish", { reason: "The form is ready" }),
+    );
+    expect(
+      result.reviewAttachments?.map((entry) => [
+        entry.controlLabel,
+        entry.fileName,
+      ]),
+    ).toEqual([["Resume/CV", "resume.txt"]]);
+  });
+
+  test("without that word, or with a fresh page, nothing is claimed", async () => {
+    const result = await runApplyAgent(
+      {
+        ...config(page({ controls: [nameControl()] })),
+        earlierAttachments: earlier,
+      },
+      repeatingModel("finish", { reason: "The form is ready" }),
+    );
+    expect(result.reviewAttachments ?? []).toEqual([]);
+  });
+});

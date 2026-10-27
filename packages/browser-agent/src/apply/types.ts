@@ -436,6 +436,14 @@ export interface ApplyFilledControl {
   at: string;
 }
 
+export interface EarlierAttachment {
+  fieldKey?: string | undefined;
+  label: string;
+  fileName: string;
+  /** The field's question, as the review card names it. */
+  field: string;
+}
+
 export interface ApplyAttachedDocument {
   fieldKey?: string;
   documentId: string;
@@ -558,6 +566,13 @@ export interface ApplyAgentConfig {
    * server refusal still counts.
    */
   uploadsConfirmedByPerson?: readonly string[];
+  /**
+   * The files an earlier attempt attached on this same page, which a continue
+   * keeps. A widget that replaced its field with the file's name leaves this
+   * run no field to see; the storage's word the page still reports for that
+   * file settles it.
+   */
+  earlierAttachments?: readonly EarlierAttachment[];
   /** How long an upload may stay in progress before the person gets it. */
   uploadWaitMs?: number;
   /** The guard and worker checks for this page. Absent only in tests. */

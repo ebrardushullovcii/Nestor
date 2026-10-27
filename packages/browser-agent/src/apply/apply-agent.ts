@@ -1180,6 +1180,33 @@ async function runMeasuredApplyAgent(
         fieldKey: key,
       });
     }
+    // A continue keeps the page an earlier attempt attached a file on. Where
+    // the widget replaced that field with the file's name, this run never
+    // sees the field; the storage's word on that same file settles it.
+    for (const earlier of runConfig.earlierAttachments ?? []) {
+      const key = earlier.fieldKey ?? `earlier|${earlier.field}`;
+      if (
+        observedAttachments.has(key) ||
+        next.controls.some(
+          (control) =>
+            control.kind === "file" &&
+            questionPrompt(control) === earlier.field,
+        ) ||
+        next.uploads?.find(
+          (upload) =>
+            upload.fileName.toLowerCase() === earlier.fileName.toLowerCase(),
+        )?.network !== "accepted"
+      )
+        continue;
+      observedAttachments.set(key, {
+        documentId: `observed.${earlier.label}`,
+        fileName: earlier.fileName,
+        label: earlier.label,
+        controlLabel: earlier.field,
+        at: next.observedAt,
+        fieldKey: key,
+      });
+    }
     // However many files the site refused, on this step or an earlier one,
     // the person gets one item for this application. It goes only once each
     // of those files is seen accepted.
