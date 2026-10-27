@@ -201,6 +201,8 @@ test("an Ashby-sized form fills known facts and hands unknown facts over once", 
   const client: LLMClient = {
     chatWithTools: (messages, tools) => {
       requests.push(JSON.stringify({ messages, tools }));
+      if (tools[0]?.function.name === "match_application_answer")
+        return Promise.resolve({ toolCalls: [] });
       if (tools[0]?.function.name === "report_question_kinds") {
         reads++;
         const asked = JSON.parse(messages[1].content) as { question: string }[];
@@ -277,8 +279,8 @@ test("an Ashby-sized form fills known facts and hands unknown facts over once", 
       JSON.stringify({ requests, calls: requests.length }),
     );
   expect(reads).toBe(1);
-  expect(turns).toBe(2);
-  expect(requests).toHaveLength(3);
+  expect(turns).toBe(1); // The last-chance catalog fills the remaining known literals.
+  expect(requests).toHaveLength(4); // Reading, one fill, and two unknown-question matches.
   expect(result.outcome).toBe("paused");
   expect(result.filled).toHaveLength(5);
   expect(controls[4]?.value).toBe("");

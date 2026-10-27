@@ -52,6 +52,53 @@ function rawPage(password: string): RawApplyPage {
 }
 
 describe("buildApplyFormObservation credential redaction", () => {
+  test("application contact email is reusable; only a sign-in context makes it an identifier", () => {
+    const page = rawPage("");
+    const email = {
+      ...page.controls[0],
+      inputType: "email",
+      label: "Email *",
+      autocomplete: "email",
+    };
+    page.url = "https://fixture.example/apply/100";
+    page.title = "Application";
+    page.controls = [email];
+    expect(
+      buildApplyFormObservation(page, "2026-10-27T10:00:00Z").controls[0]
+        ?.credentialRole,
+    ).toBeNull();
+    page.controls.push({ ...email, index: 1, inputType: "password" });
+    expect(
+      buildApplyFormObservation(page, "2026-10-27T10:00:00Z").controls[0]
+        ?.credentialRole,
+    ).toBe("identifier");
+    page.controls = [email];
+    page.title = "Sign in";
+    expect(
+      buildApplyFormObservation(page, "2026-10-27T10:00:00Z").controls[0]
+        ?.credentialRole,
+    ).toBe("identifier");
+  });
+
+  test("one-time codes stay out of answer lookup and observations", () => {
+    const page = rawPage("");
+    page.controls = [
+      {
+        ...page.controls[0],
+        inputType: "text",
+        label: "Code",
+        autocomplete: "one-time-code",
+        value: "123456",
+      },
+    ];
+    const observation = buildApplyFormObservation(page, "2026-10-27T10:00:00Z");
+    expect(observation.controls[0]).toMatchObject({
+      credentialRole: "one_time_code",
+      value: "",
+      answered: true,
+    });
+    expect(JSON.stringify(observation)).not.toContain("123456");
+  });
   test("reports password presence without exposing its value", () => {
     const password = "test-secret-value";
     const observation = buildApplyFormObservation(

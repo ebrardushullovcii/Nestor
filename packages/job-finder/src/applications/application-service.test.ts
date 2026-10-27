@@ -397,7 +397,13 @@ it("tells a continue on the same page which files the attempt before it attached
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   // A page that could not be kept starts fresh, with nothing carried.
   f.browser.transferApplicationPageBinding.mockResolvedValue(false);
-  f.releases.shift()!(waiting());
+  const refused = waiting();
+  refused.questions[0]!.askReason = {
+    kind: "page_refused",
+    check: "text_retention",
+    detail: "The page cleared the phone after it was written.",
+  };
+  f.releases.shift()!(refused);
   await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
   answer();
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
@@ -445,41 +451,72 @@ it("a picker choice the person answered in Needs you is not refused again on the
   expect(preparation.pickerTries).toEqual([[], []]);
 });
 
-it("returns an answer the form still rejects to Needs you instead of failing with an empty inbox", async () => {
-  const f = await setup(1);
-  const unanswered = ApplyExecutionResultSchema.parse({
-    ...ready(),
-    state: "paused",
-    questions: [
-      {
-        id: "salary",
-        prompt: "Annual salary expectation",
-        kind: "salary_expectation",
-        answerControlType: "text",
-        inputConstraints: { type: "number" },
-        detectedAt: new Date().toISOString(),
-      },
-    ],
-  });
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
-  f.releases.shift()!(unanswered);
-  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
-  const first = f.applications.needsYou.list().rows[0]!;
-  f.applications.needsYou.answer({
-    id: first.id,
-    answer: "50000",
-    remember: true,
-  });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-  f.releases.shift()!(unanswered);
-  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
-  expect(f.applications.listApplications().rows[0]?.state).toBe("needs_you");
-  expect(f.applications.needsYou.list().rows[0]?.id).not.toBe(first.id);
-  expect(f.onError).not.toHaveBeenCalled();
-  expect(f.authorizeSending).not.toHaveBeenCalled();
-});
+it.each([null, "answer_permission", "text_retention"] as const)(
+  "re-asks only with a refused write, otherwise stops the repeated key (check: %s)",
+  async (check) => {
+    const attempted = check === "text_retention";
+    const f = await setup(1);
+    const unanswered = ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "salary",
+          prompt: "Annual salary expectation",
+          kind: "salary_expectation",
+          answerControlType: "text",
+          inputConstraints: { type: "number" },
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    });
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+    f.releases.shift()!(unanswered);
+    await vi.waitFor(() =>
+      expect(f.applications.needsYou.list().total).toBe(1),
+    );
+    const first = f.applications.needsYou.list().rows[0]!;
+    f.applications.needsYou.answer({
+      id: first.id,
+      answer: "50000",
+      remember: true,
+    });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+    const next = structuredClone(unanswered);
+    if (check === "answer_permission")
+      next.questions[0]!.askReason = {
+        kind: "source_rejected",
+        check,
+        detail: "A candidate was rejected without a page write.",
+      };
+    if (attempted)
+      next.questions[0]!.askReason = {
+        kind: "page_refused",
+        check: "text_retention",
+        detail: "The page cleared 50000 after it was typed.",
+      };
+    f.releases.shift()!(next);
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe(
+        attempted ? "needs_you" : "failed",
+      ),
+    );
+    expect(f.applications.needsYou.list().total).toBe(attempted ? 1 : 0);
+    if (attempted) {
+      expect(f.applications.needsYou.list().rows[0]?.id).not.toBe(first.id);
+      expect(
+        f.applications.needsYou.list().rows[0]?.askReason?.detail,
+      ).toContain("50000");
+    } else
+      expect(f.applications.listApplications().rows[0]?.error).toContain(
+        "without trying to write",
+      );
+    expect(f.onError).not.toHaveBeenCalled();
+    expect(f.authorizeSending).not.toHaveBeenCalled();
+  },
+);
 
 it("passes the job's current site notes and learned Apply instructions to preparation", async () => {
   const f = await setup(1);
@@ -608,7 +645,7 @@ it.each(["paused", "failed"] as const)(
         questions: [question],
       }),
     );
-    const expectedState = state === "paused" ? "needs_you" : "failed";
+    const expectedState = "failed";
     await vi.waitFor(() =>
       expect(f.applications.listApplications().rows[0]?.state).toBe(
         expectedState,
@@ -622,9 +659,7 @@ it.each(["paused", "failed"] as const)(
       expectedState,
     );
     expect(f.execute).toHaveBeenCalledOnce();
-    expect(f.applications.needsYou.list().total).toBe(
-      state === "paused" ? 1 : 0,
-    );
+    expect(f.applications.needsYou.list().total).toBe(0);
   },
 );
 

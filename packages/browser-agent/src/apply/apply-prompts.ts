@@ -68,7 +68,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     "- When typing or choosing an unchanged value from the stored-fact catalog, include storedFactId with that exact catalog id. Copy its value exactly, including dates and numbers; a formatted or composed value goes through the ordinary answer check. Choose which fact answers the question yourself. Work authorization and sponsorship always need their question and hiring context checked.",
     "- Use the person's saved expected salary for expected or desired compensation: split the amount, currency and annual/hourly period into the form's fields. Expected pay is not evidence of current pay or pay history; never put it in those fields. Use recorded employers, titles and employment dates from the selected resume and profile, retaining month precision. Ask only when a needed fact is missing or ambiguous.",
     "- Before handing back questions, collect all visible unresolved required fields and choice groups on this step, including skills groups marked required in their legend. Fill all known facts and attach available files first; ask all remaining questions together. When questions are left for the person, omit thenContinue and call finish once with needsPerson: true and each field's observed control ref as its own forPerson item: that ends this run with all the questions, without another finish or a Next click. Its native question supplies the wording; do not create another question about that field. Re-read after a step changes: drop fields no longer on this step, and never ask about optional removed history rows. If answering one field reveals a new question, include it after observing the page; do not claim a future hidden question is already known.",
-    "- When the form has rows for work history or education, enter each of the person's roles and schools from their facts, adding rows with the form's own button as needed; an attached resume does not fill those rows.",
+    "- Fill work-history or education rows only from one complete Profile record per row, retaining month precision. Before adding an optional row, check that its required employer/school, title/qualification and dates are all recorded and can be filled. Do not create optional rows you cannot finish. Remove an empty row only if you added it in this run; never remove the person's row or a row holding any answer. An attached resume does not fill existing required rows.",
     "- For a plain Yes/No question asking whether the person previously worked at or consulted for the named company, use the finalized employer records: Yes when an employer record matches, No when the recorded work history has other employers and no match. A company mentioned only in skills or the posting is not an employer. An empty or unfinished work history, or a question with additional conditions, needs the person.",
     "- When a phone field has its own country-code picker, choose the code there and type the number without it.",
     "- A picker may use a substitute only under the person's saved rule for that exact question. Job Finder applies the rule's primary choice, then fallback, and skips the application if neither is offered. Respect that decision; never invent a country substitution or turn a saved skip decision into a Needs you question. Without a saved rule, leave an unavailable choice for Needs you with the options the form offers.",
@@ -124,7 +124,11 @@ function describeAnswered(
   control: ApplyFormObservation["controls"][number],
 ): string {
   if (!control.answered) return "empty";
-  if (control.credentialRole === "password" || control.kind === "file") {
+  if (
+    control.credentialRole === "password" ||
+    control.credentialRole === "one_time_code" ||
+    control.kind === "file"
+  ) {
     return "already answered";
   }
   const shown =
@@ -155,6 +159,8 @@ function describeControl(
     control.required ? "required" : "optional",
     describeAnswered(control),
   ];
+  if (control.sectionPath?.length)
+    parts.push(`sections: ${control.sectionPath.join(" > ")}`);
   if (control.acceptedTypes?.length)
     parts.push(`accepted files: ${control.acceptedTypes.join(", ")}`);
   if (control.inputConstraints)

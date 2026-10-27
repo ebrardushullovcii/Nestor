@@ -2,6 +2,7 @@ import {
   applicationFacts,
   serializeApplicationData,
   storedFacts,
+  relevantSavedAnswers,
 } from "./application-facts";
 import type { ApplyAnswerSources } from "./types";
 
@@ -10,6 +11,10 @@ export function applicationModelFacts(
   sources: ApplyAnswerSources,
   options: { payDisclosed: boolean },
 ): string {
+  sources = {
+    ...sources,
+    reusableAnswers: relevantSavedAnswers(sources.reusableAnswers),
+  };
   const facts = applicationFacts(sources, options);
   const paths = new Map<string, string | null>();
   const escape = (key: string) =>

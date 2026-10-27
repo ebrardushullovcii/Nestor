@@ -11,6 +11,7 @@ import {
   applicationFacts,
   serializeApplicationData,
   storedFacts,
+  relevantSavedAnswers,
 } from "./application-facts";
 import { runApplyAgent } from "./apply-agent";
 import { applicationModelFacts } from "./model-facts";
@@ -111,7 +112,24 @@ test("the smaller model catalog preserves every fact, source id and record relat
       serializeApplicationData(applicationFacts(input, { payDisclosed: true })),
     ),
   );
-  const original = storedFacts(input, { payDisclosed: true });
+  const selected = relevantSavedAnswers(input.reusableAnswers);
+  expect(selected.length).toBeLessThan(input.reusableAnswers.length);
+  expect(
+    selected.reduce(
+      (sum, answer) =>
+        sum +
+        JSON.stringify({
+          id: answer.id,
+          question: answer.question,
+          answer: answer.answer,
+        }).length,
+      0,
+    ),
+  ).toBeLessThanOrEqual(12000);
+  const original = storedFacts(
+    { ...input, reusableAnswers: selected },
+    { payDisclosed: true },
+  );
   expect(
     storedFactCatalog.map((row) => ({
       id: row.id,
@@ -120,7 +138,7 @@ test("the smaller model catalog preserves every fact, source id and record relat
   ).toEqual(original.map((row) => ({ id: row.sourceId, value: row.value })));
   expect(
     storedFactCatalog.filter((row) => row.at).length,
-  ).toBeGreaterThanOrEqual(22);
+  ).toBeGreaterThanOrEqual(selected.length + 4);
   expect(
     storedFactCatalog.find(
       (row) => row.id === "profile.experiences.role-2.summary",
@@ -134,7 +152,7 @@ test("the smaller model catalog preserves every fact, source id and record relat
 
 // 24 visible controls and a 13k-character body, matching the real form's sizes.
 // Every profile value, answer, URL and document here is synthetic.
-test("a GitLab-sized six-turn fill keeps the same facts and handovers with smaller input", async () => {
+test("a GitLab-sized fill keeps the same facts and handovers with bounded input and matching", async () => {
   const input = sources();
   const entries = [
     ["Full name", "profile.fullName"],
@@ -230,6 +248,8 @@ test("a GitLab-sized six-turn fill keeps the same facts and handovers with small
   const client: LLMClient = {
     chatWithTools: (messages, tools) => {
       requests.push(JSON.stringify({ messages, tools }));
+      if (tools[0]?.function.name === "match_application_answer")
+        return Promise.resolve({ toolCalls: [] });
       if (tools[0]?.function.name === "report_question_kinds") {
         reads++;
         const questions = JSON.parse(messages[1].content) as {
@@ -374,7 +394,7 @@ test("a GitLab-sized six-turn fill keeps the same facts and handovers with small
           .map((question) => question.prompt),
       }),
     );
-  expect(turns).toBe(6);
+  expect(turns).toBe(1); // Last-chance lookup fills the known fields before handover.
   expect(reads).toBe(1);
   expect(result.filled).toHaveLength(12);
   expect(controls.slice(0, 12).map((control) => control.value)).toEqual(

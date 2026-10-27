@@ -140,11 +140,22 @@ function configFor(
     },
     chooseOption: (_ref, option) =>
       Promise.resolve({ ok: true, observedValue: option }),
-    setToggle: (_ref, checked) =>
-      Promise.resolve({
+    setToggle: (ref, checked) => {
+      const selected = page.controls.find(
+        (entry) => (entry.ref ?? `c${entry.index}`) === ref,
+      );
+      if (selected) {
+        if (selected.inputType === "radio" && checked)
+          for (const sibling of page.controls)
+            if (sibling.inputType === "radio" && sibling.name === selected.name)
+              sibling.checked = false;
+        selected.checked = checked;
+      }
+      return Promise.resolve({
         ok: true,
         observedValue: checked ? "checked" : "unchecked",
-      }),
+      });
+    },
     uploadFile: (_ref, file) =>
       Promise.resolve({ ok: true, observedValue: file.name }),
     clickAction: () => Promise.resolve({ ok: true, observedValue: "clicked" }),
@@ -184,6 +195,122 @@ function configFor(
 }
 
 const now = () => new Date("2026-09-14T10:00:00.000Z");
+
+test("optional history rows require a complete Profile record before adding, in either apply mode", async () => {
+  for (const mode of ["confirm_before_submit", "autonomous_submit"] as const) {
+    const page = rawPage({
+      controls: [rawControl({ index: 0, label: "Full name" })],
+      actions: [
+        {
+          index: 0,
+          label: "Add another work history entry",
+          inForm: true,
+          visible: true,
+          disabled: false,
+        },
+      ],
+    });
+    const { config, hands } = configFor(page, { authority: { mode } });
+    const click = vi.fn(() =>
+      Promise.resolve({ ok: true as const, observedValue: "clicked" }),
+    );
+    hands.clickElement = click;
+    const guardState = createApplyGuardState();
+    config.sources.profile = CandidateProfileSchema.parse({
+      ...config.sources.profile,
+      experiences: [{ id: "one", companyName: "Example", title: "Engineer" }],
+    });
+    const deps = { config, guardState, now };
+    expect(
+      (
+        await executeApplyProposal(
+          { tool: "click", ref: "a0" },
+          observationOf(page).signature,
+          deps,
+        )
+      ).kind,
+    ).toBe("refused");
+    expect(click).not.toHaveBeenCalled();
+    config.sources.profile.experiences[0].startDate = "2024-01";
+    expect(
+      (
+        await executeApplyProposal(
+          { tool: "click", ref: "a0" },
+          observationOf(page).signature,
+          deps,
+        )
+      ).kind,
+    ).toBe("moved");
+    expect(click).toHaveBeenCalledOnce();
+    expect(
+      (
+        await executeApplyProposal(
+          { tool: "click", ref: "a0" },
+          observationOf(page).signature,
+          deps,
+        )
+      ).kind,
+    ).toBe("refused");
+    expect(click).toHaveBeenCalledOnce();
+  }
+});
+
+test("a person's empty history row and a filled agent row cannot be removed", async () => {
+  const group = "Application — Work history 1";
+  const page = rawPage({
+    controls: [rawControl({ index: 0, label: "Company", groupLabel: group })],
+    actions: [
+      {
+        index: 0,
+        label: "Remove entry",
+        section: group,
+        inForm: true,
+        visible: true,
+        disabled: false,
+      },
+    ],
+  });
+  const { config, hands } = configFor(page, {
+    authority: { mode: "autonomous_submit" },
+  });
+  const click = vi.fn(() =>
+    Promise.resolve({ ok: true as const, observedValue: "clicked" }),
+  );
+  hands.clickElement = click;
+  const guardState = createApplyGuardState();
+  const deps = { config, guardState, now };
+  expect(
+    (
+      await executeApplyProposal(
+        { tool: "click", ref: "a0" },
+        observationOf(page).signature,
+        deps,
+      )
+    ).kind,
+  ).toBe("refused");
+  guardState.ownedHistoryRows.add(`${page.url}|${page.stepLabel}|${group}`);
+  page.controls[0].value = "Example";
+  expect(
+    (
+      await executeApplyProposal(
+        { tool: "click", ref: "a0" },
+        observationOf(page).signature,
+        deps,
+      )
+    ).kind,
+  ).toBe("refused");
+  page.controls[0].value = "";
+  expect(
+    (
+      await executeApplyProposal(
+        { tool: "click", ref: "a0" },
+        observationOf(page).signature,
+        deps,
+      )
+    ).kind,
+  ).toBe("moved");
+  expect(click).toHaveBeenCalledOnce();
+});
 
 describe("apply policy executor", () => {
   test.each([
@@ -1047,7 +1174,7 @@ describe("apply policy executor", () => {
 
     const uncheck = await executeApplyProposal(
       { tool: "set_checkbox", ref: "c1", checked: false },
-      observation.signature,
+      observationOf(page).signature,
       { config, now, guardState: createApplyGuardState(), checkWrittenAnswer },
     );
     expect(uncheck.kind).toBe("filled");
@@ -1056,7 +1183,7 @@ describe("apply policy executor", () => {
     // An option the person did not choose is not entered.
     const other = await executeApplyProposal(
       { tool: "set_checkbox", ref: "c2", checked: true },
-      observation.signature,
+      observationOf(page).signature,
       { config, now, guardState: createApplyGuardState(), checkWrittenAnswer },
     );
     expect(other.kind).not.toBe("filled");

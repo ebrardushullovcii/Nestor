@@ -160,9 +160,10 @@ export function answerSourceCatalog(
           normalizeFormQuestionPrompt(term) ===
           normalizeFormQuestionPrompt(name),
       ) ||
-      eligibility.limitedWorkPermissions?.some(
+      (eligibility.limitedWorkPermissions?.some(
         (permission) => country(permission.country) === code,
-      )
+      ) &&
+        !permitConditionsFit(sources, code))
     )
       continue;
     rows.push({
@@ -171,15 +172,25 @@ export function answerSourceCatalog(
       purpose: "work_auth",
       country: code,
     });
-    if (
-      eligibility.requiresVisaSponsorship !== null &&
-      !eligibility.limitedWorkPermissions?.some(
+    const permits =
+      eligibility.limitedWorkPermissions?.filter(
         (permission) => country(permission.country) === code,
+      ) ?? [];
+    const futureSponsorship = permits.some(
+      (permission) => permission.requiresFutureSponsorship === true,
+    );
+    if (
+      (eligibility.requiresVisaSponsorship !== null || futureSponsorship) &&
+      permits.every(
+        (permission) => permission.requiresFutureSponsorship !== null,
       )
     )
       rows.push({
         id: `profile.workEligibility.requiresVisaSponsorship.${code}`,
-        value: eligibility.requiresVisaSponsorship ? "Yes" : "No",
+        value:
+          eligibility.requiresVisaSponsorship || futureSponsorship
+            ? "Yes"
+            : "No",
         purpose: "sponsorship",
         country: code,
       });
@@ -269,15 +280,20 @@ function knownLiteralField(
   control: ApplyFormControl,
 ): boolean {
   if (fieldNamesAnotherPerson(control)) return false;
+  const questionLabel = normalizeFormQuestionPrompt(
+    control.kind === "radio" || control.answerControlType === "multi_choice"
+      ? (control.sectionPath?.at(-1) ??
+          control.groupLabel.split(" — ").at(-1) ??
+          control.label)
+      : control.label,
+  );
   if (/^profile\.(?:githubUrl|links\.[^.]+)#username$/u.test(source.id))
     return applicantContactGroup(control) && asksGithubUsername(control);
   if (
     /^profile\.skills\.\d+$/u.test(source.id) &&
     control.answerControlType === "multi_choice"
   )
-    return ["skills", "select your skills"].includes(
-      normalizeFormQuestionPrompt(control.groupLabel),
-    );
+    return ["skills", "select your skills"].includes(questionLabel);
   const historyLeaf =
     /^profile\.(experiences|education)\.[^.]+\.(companyName|title|startDate|endDate|schoolName|degree|fieldOfStudy)$/u.exec(
       source.id,
@@ -292,27 +308,13 @@ function knownLiteralField(
     fieldOfStudy: ["field of study"],
   };
   if (historyLeaf) {
-    const group = normalizeFormQuestionPrompt(control.groupLabel);
-    const groups =
-      historyLeaf[1] === "experiences"
-        ? [
-            "",
-            "employment",
-            "employment history",
-            "work history",
-            "work experience",
-          ]
-        : ["", "education", "education history"];
     return (
-      (groups.includes(group) ||
-        group === normalizeFormQuestionPrompt(control.label)) &&
-      (historyLabels[historyLeaf[2] ?? ""]?.includes(
-        normalizeFormQuestionPrompt(control.label).replace(
+      historyLabels[historyLeaf[2] ?? ""]?.includes(
+        questionLabel.replace(
           /\s+(?:dd mm yyyy|mm yyyy|yyyy mm dd|yyyy mm)$/u,
           "",
         ),
-      ) ??
-        false)
+      ) ?? false
     );
   }
   const profileLink = /^profile\.([a-zA-Z]+)Url$/u.exec(source.id);
@@ -344,7 +346,7 @@ function knownLiteralField(
         phoneLabels.some(
           (label) => label === normalizeFormQuestionPrompt(control.groupLabel),
         ))) &&
-    aliases.includes(normalizeFormQuestionPrompt(control.label))
+    aliases.includes(questionLabel)
   );
 }
 function historyRecordMatches(
@@ -370,7 +372,9 @@ function historyRecordMatches(
       (control) =>
         control.ref !== input.control.ref &&
         control.visible &&
-        group(control) === group(input.control) &&
+        (control.rowScopeKey && input.control.rowScopeKey
+          ? control.rowScopeKey === input.control.rowScopeKey
+          : group(control) === group(input.control)) &&
         (!control.scopeKey ||
           !input.control.scopeKey ||
           control.scopeKey === input.control.scopeKey) &&
@@ -518,7 +522,7 @@ export type ClassifiedAnswerDecision =
       source: ClassifiedAnswerSource | null;
       evidencePolicy?: "factual_summary";
     }
-  | { kind: "needs_you"; reason: string };
+  | { kind: "needs_you"; reason: string; check?: string };
 /** An affirmative allow list. Tags or a positive checker verdict alone grant nothing. */
 export function classifyAnswerPermission(input: {
   control: ApplyFormControl;
@@ -530,15 +534,26 @@ export function classifyAnswerPermission(input: {
   approvedAttestations?: readonly ApplicationAttestationKind[];
   application?: ApplyAgentConfig["application"];
   now?: Date;
+  /** Supplied only by the host after the independent answer check. */
+  matchedSourceId?: string | undefined;
+  /** A proposed catalog reference; it grants no semantic-match permission. */
+  candidateSourceId?: string | undefined;
 }): ClassifiedAnswerDecision {
-  const deny = (reason: string): ClassifiedAnswerDecision => ({
+  const deny = (
+    reason: string,
+    check = "answer_permission",
+  ): ClassifiedAnswerDecision => ({
     kind: "needs_you",
     reason,
+    check,
   });
   const tags = input.tags;
+  if (input.control.credentialRole)
+    return deny("Credentials and verification codes stay with the person.");
   if (!tags)
     return deny(
       "This question has not been classified safely. Please supply your answer.",
+      "question_classification",
     );
   const identity = (control: ApplyFormControl) =>
     normalizeFormQuestionPrompt(
@@ -583,7 +598,11 @@ export function classifyAnswerPermission(input: {
     tags.kind === "other"
       ? priorCompanyHistory(input.control, input.sources)
       : null;
-  let source = catalog.find((row) => row.id === tags.sourceId);
+  let source = catalog.find(
+    (row) =>
+      row.id ===
+      (input.matchedSourceId ?? input.candidateSourceId ?? tags.sourceId),
+  );
   // Plain applicant identity has an exact field-to-Profile binding. A model
   // omitting its source must not turn a known name or email into a handover.
   // Extra instructions, another person, ambiguity and gated kinds still need
@@ -592,7 +611,6 @@ export function classifyAnswerPermission(input: {
     !source &&
     tags.kind === "other" &&
     input.control.kind === "text" &&
-    input.control.credentialRole !== "password" &&
     !input.controls.some((control) => control.credentialRole === "password") &&
     !input.control.repeatedQuestion &&
     !input.control.hint?.trim() &&
@@ -625,59 +643,11 @@ export function classifyAnswerPermission(input: {
         : null;
   if (legal && !target)
     return deny("The work-permission country is unknown or ambiguous.");
-  const question = normalizeFormQuestionPrompt(
-    input.control.kind === "radio"
-      ? input.control.groupLabel
-      : input.control.label,
-  );
-  const legalGroupIsPlain =
-    input.control.kind === "radio" ||
-    [
-      "",
-      "application questions",
-      "eligibility",
-      "work eligibility",
-      "work authorization",
-    ].includes(normalizeFormQuestionPrompt(input.control.groupLabel));
-  const authorizationPrefixes = [
-    "are you legally authorized to work in ",
-    "are you legally authorised to work in ",
-    "are you legally eligible to work in ",
-    "are you eligible to work in ",
-    "are you authorized to work in ",
-    "are you authorised to work in ",
-    "do you have the right to work in ",
-    "do you have the legal right to work in ",
-  ];
-  const jurisdictions = target
-    ? [
-        "this country",
-        ...countryTerms(target).flatMap((term) => {
-          const name = normalizeFormQuestionPrompt(term);
-          return [name, `the ${name}`];
-        }),
-      ]
-    : [];
-  const knownLegalQuestion =
-    legalGroupIsPlain &&
-    (tags.kind === "work_auth"
-      ? authorizationPrefixes.some((prefix) =>
-          jurisdictions.some((name) => question === prefix + name),
-        )
-      : [
-          "will you require sponsorship",
-          "will you require visa sponsorship",
-          "do you require sponsorship",
-          "do you require visa sponsorship",
-          "will you now or in the future require sponsorship",
-          "will you now or in the future require visa sponsorship",
-          "do you now or in the future require sponsorship",
-          "do you now or in the future require visa sponsorship",
-          "will you require sponsorship for employment visa status",
-          "do you require sponsorship for employment visa status",
-          "will you now or in the future require sponsorship for employment visa status",
-          "do you now or in the future require sponsorship for employment visa status",
-        ].includes(question));
+  const knownLegalQuestion = legal && !fieldNamesAnotherPerson(input.control);
+  if (knownLegalQuestion && !source)
+    source = catalog.find(
+      (row) => row.purpose === tags.kind && row.country === target,
+    );
   if (matchingSaved) {
     const human = catalog.find(
       (row) => row.id === `answerLibrary.${matchingSaved.id}`,
@@ -800,6 +770,7 @@ export function classifyAnswerPermission(input: {
   if (!source)
     return deny(
       "There is no matching verbatim source for this question. Please supply your answer.",
+      "source_lookup",
     );
   const saved =
     savedAnswerForQuestion(
@@ -943,6 +914,23 @@ export function classifyAnswerPermission(input: {
   if (source.purpose === "authority" && tags.kind === "other")
     return { kind: "literal", source };
   if (tags.kind === "work_auth" || tags.kind === "sponsorship") {
+    if (
+      !exactSaved &&
+      (tags.hasAdditionalConditions === true ||
+        (tags.kind === "work_auth" &&
+          /\b(?:restrictions?|limitations?|sponsor(?:ship|ing|ed)?|without)\b/iu.test(
+            [
+              ...(input.control.sectionPath ?? []),
+              input.control.groupLabel,
+              input.control.label,
+              input.control.hint ?? "",
+            ].join(" "),
+          )))
+    )
+      return deny(
+        "Authorization alone does not establish the question's additional restrictions or sponsorship conditions.",
+        "permit_conditions",
+      );
     if (!target || tags.country !== target || source.country !== target)
       return deny(
         "The work-permission country is unknown or does not match the source. Please answer for this job's country.",
@@ -952,6 +940,12 @@ export function classifyAnswerPermission(input: {
         exactSaved &&
         tags.kind === "work_auth" &&
         knownLegalQuestion &&
+        tags.hasAdditionalConditions !== true &&
+        !/\b(?:restrictions?|limitations?|sponsor(?:ship)?|without)\b/iu.test(
+          input.control.kind === "radio"
+            ? (input.control.sectionPath?.at(-1) ?? input.control.groupLabel)
+            : input.control.label,
+        ) &&
         /^(?:no|false)$/iu.test(input.answer)
       ) &&
         !permitConditionsFit(input.sources, target)) ||
@@ -1013,8 +1007,10 @@ export function classifyAnswerPermission(input: {
       : deny(
           "This residence-country answer must use your recorded current country.",
         );
+  const literalQuestion =
+    tags.kind === "other" || tags.kind === "factual_summary";
   if (
-    tags.kind === "other" &&
+    literalQuestion &&
     source.purpose === "profile" &&
     !historyRecordMatches(source, input, catalog)
   ) {
@@ -1041,7 +1037,7 @@ export function classifyAnswerPermission(input: {
       "The employer, title and dates must come from the same profile record. Please answer this entry.",
     );
   if (
-    tags.kind === "other" &&
+    literalQuestion &&
     source.purpose === "profile" &&
     literalValueMatches(
       source,
@@ -1051,6 +1047,24 @@ export function classifyAnswerPermission(input: {
       input.sources,
     ) &&
     knownLiteralField(source, input.control)
+  )
+    return { kind: "literal", source };
+  // A semantic match may overcome an unfamiliar label after independent
+  // grounding. Gated kinds, permit conditions, references and same-row
+  // history checks above still apply; the value stays verbatim.
+  if (
+    tags.kind === "other" &&
+    input.matchedSourceId === source.id &&
+    ["profile", "saved"].includes(source.purpose) &&
+    !input.control.repeatedQuestion &&
+    !fieldNamesAnotherPerson(input.control) &&
+    literalValueMatches(
+      source,
+      input.control,
+      input.answer,
+      input.controls,
+      input.sources,
+    )
   )
     return { kind: "literal", source };
   // Only an affirmative writing classification reaches the claim checker.

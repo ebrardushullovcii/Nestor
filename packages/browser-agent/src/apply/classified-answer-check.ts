@@ -1,6 +1,8 @@
 import type { ApplicationAttestationKind } from "@nestor/contracts";
+import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import { questionPrompt } from "./policy-executor";
 import { phoneCountryPicker } from "./phone-answer";
+import { fieldNamesAnotherPerson } from "./github-username";
 import type { LLMClient } from "../agent/contracts";
 import type {
   ApplyAgentConfig,
@@ -38,11 +40,39 @@ export async function checkClassifiedApplicationAnswers(input: {
   /** Same AI-client scope as preparation; only identical complete readings are reused. */
   questionReadCacheScope?: object;
 }): Promise<WrittenAnswerCheck[]> {
-  const controls: ApplyFormControl[] = input.answers.map((answer, index) => {
-    const current = input.formControls?.filter(
-      (control) =>
-        control.visible && questionPrompt(control) === answer.question,
+  // Earlier wizard steps can remain in the DOM while hidden. Their actual
+  // controls and ancestry still bind the answer; an old card alone cannot.
+  const formControls = input.formControls?.map((control) => {
+    const hasVisibleTwin = input.formControls?.some(
+      (other) =>
+        other.visible && questionPrompt(other) === questionPrompt(control),
     );
+    return !control.visible && !hasVisibleTwin
+      // Wizard fieldsets are often disabled off-screen. This is a read-only
+      // grounding view, not permission to write into those controls.
+      ? { ...control, visible: true, disabled: false }
+      : control;
+  });
+  const controls: ApplyFormControl[] = input.answers.map((answer, index) => {
+    const asked = normalizeFormQuestionPrompt(answer.question);
+    const matches = formControls?.filter((control) => {
+      const prompt = normalizeFormQuestionPrompt(questionPrompt(control));
+      return (
+        control.visible &&
+        (prompt === asked ||
+          (control.groupLabel.trim().length > 0 &&
+            asked.endsWith(` ${prompt}`) &&
+            !fieldNamesAnotherPerson({
+              ...control,
+              groupLabel: answer.question,
+            })))
+      );
+    });
+    const exact = matches?.filter(
+      (control) =>
+        normalizeFormQuestionPrompt(questionPrompt(control)) === asked,
+    );
+    const current = exact?.length ? exact : matches;
     if (current?.length === 1 && current[0]) return current[0];
     const numbers = current?.filter(
       (control) => control.telInput && phoneCountryPicker(control, current),
@@ -87,7 +117,7 @@ export async function checkClassifiedApplicationAnswers(input: {
   // Classify the same full form and native metadata as preparation. Removing
   // optional fields or required flags both changes the question's context and
   // needlessly asks the model to reinterpret an already-read literal.
-  const contextControls = [...(input.formControls ?? [])];
+  const contextControls = [...(formControls ?? [])];
   for (const control of controls)
     if (
       !contextControls.some(
@@ -114,10 +144,7 @@ export async function checkClassifiedApplicationAnswers(input: {
       // A fallback label parsed from an old card is not evidence that this
       // exact applicant field still exists on the live form (for example,
       // Name may now belong to a reference section).
-      if (
-        !control ||
-        (input.formControls && !input.formControls.includes(control))
-      )
+      if (!control || (formControls && !formControls.includes(control)))
         return {
           kind: "needs_you",
           reason: "The question is no longer present.",

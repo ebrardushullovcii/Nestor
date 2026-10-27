@@ -181,12 +181,18 @@ function isAccountChoiceWall(input: {
  * and must not undo an answer the person already gave.
  */
 export function isSecurityChallengeControl(
-  control: Pick<ApplyFormControl, "label" | "groupLabel" | "placeholder">,
+  control: Pick<
+    ApplyFormControl,
+    "label" | "groupLabel" | "placeholder" | "credentialRole"
+  >,
 ): boolean {
   const signal = normalizeSignal(
     `${control.label} ${control.groupLabel} ${control.placeholder}`,
   );
-  return contains(signal, CHALLENGE_SIGNALS);
+  return (
+    control.credentialRole === "one_time_code" ||
+    contains(signal, CHALLENGE_SIGNALS)
+  );
 }
 
 function hasResolvedChallengeControl(

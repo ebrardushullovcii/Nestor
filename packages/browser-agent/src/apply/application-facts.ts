@@ -40,21 +40,13 @@ export const PROFILE_TEXT_FIELD_LABELS: Record<string, readonly string[]> = {
   "profile.headline": ["headline", "professional headline"],
 };
 export function applicantContactGroup(control: ApplyFormControl): boolean {
-  const group = normalizeFormQuestionPrompt(control.groupLabel);
+  // Section names describe layout, not the person a leaf question refers to.
+  // Reference/supervisor exclusions inspect the whole ancestry and still win.
   return (
-    !group ||
-    group === normalizeFormQuestionPrompt(control.label) ||
-    [
-      "personal information",
-      "contact information",
-      "contact details",
-      "my information",
-      "your details",
-      "personal details",
-      "application questions",
-      "work eligibility",
-      "eligibility",
-    ].includes(group)
+    !fieldNamesAnotherPerson(control) &&
+    !/\b(?:former|previous|maiden|birth)\b/iu.test(
+      `${control.sectionPath?.join(" ") ?? ""} ${control.groupLabel} ${control.hint ?? ""} ${control.placeholder}`,
+    )
   );
 }
 /** A typed applicant-country reading or an explicit residence label. */
@@ -98,6 +90,41 @@ export function serializeApplicationData(
       ? undefined
       : entry,
   );
+}
+
+/** Roughly four thousand tokens, with exact questions and local answers first. */
+export function relevantSavedAnswers(
+  answers: readonly CandidateReusableAnswer[],
+  questions: readonly string[] = [],
+): CandidateReusableAnswer[] {
+  const normalized = questions.map(normalizeFormQuestionPrompt);
+  const words = new Set(
+    normalized.flatMap((question) =>
+      question.split(" ").filter((word) => word.length > 3),
+    ),
+  );
+  const score = (answer: CandidateReusableAnswer) => {
+    const question = normalizeFormQuestionPrompt(answer.question);
+    return (
+      (answer.id.startsWith("application_") ? 10000 : 0) +
+      (normalized.includes(question) ? 1000 : 0) +
+      question.split(" ").filter((word) => words.has(word)).length
+    );
+  };
+  let remaining = 12000;
+  return [...answers]
+    .filter((answer) => !answer.needsConfirmation)
+    .sort((left, right) => score(right) - score(left))
+    .filter((answer) => {
+      const size = JSON.stringify({
+        id: answer.id,
+        question: answer.question,
+        answer: answer.answer,
+      }).length;
+      if (size > remaining) return false;
+      remaining -= size;
+      return true;
+    });
 }
 
 /**
@@ -153,7 +180,7 @@ export function applicationFacts(
             "Limited permissions establish present authorization only within their country and stated conditions. requiresFutureSponsorship describes future work, not a blanket answer for this application. Compare the job type, hours and dates; leave unresolved authorization and sponsorship questions for the person. Reusable answers cannot override permit conditions.",
         }
       : {}),
-    savedAnswers: sources.reusableAnswers
+    savedAnswers: relevantSavedAnswers(sources.reusableAnswers)
       .filter((saved) => usableSavedAnswer(saved, options.payDisclosed))
       .map((saved) => ({
         id: saved.id,
@@ -454,13 +481,18 @@ export function savedAnswerForQuestion(
   reusableAnswers: readonly CandidateReusableAnswer[],
   controls?: readonly ApplyFormControl[],
 ): CandidateReusableAnswer | null {
+  if (control.credentialRole) return null;
   const prompt = (candidate: ApplyFormControl) =>
     candidate.repeatedQuestion?.prompt ??
     ((candidate.kind === "radio" ||
       candidate.answerControlType === "multi_choice") &&
     candidate.choiceGroupKey &&
     candidate.groupLabel
-      ? candidate.groupLabel
+      ? candidate.attestationKind === null
+        ? (candidate.sectionPath?.at(-1) ??
+          candidate.groupLabel.split(" — ").at(-1) ??
+          candidate.groupLabel)
+        : candidate.groupLabel
       : key(candidate.groupLabel) === key(candidate.label)
         ? candidate.label
         : [candidate.groupLabel, candidate.label]
@@ -529,7 +561,38 @@ export function savedAnswerForQuestion(
     const groups = new Set(targets.map(group));
     return groups.size === 1 && groups.has(group(control));
   });
-  return unique(semantic);
+  if (semantic.length) return unique(semantic);
+  // Layout ancestors do not change an unambiguous leaf question. Reference
+  // sections and repeated questions never acquire this fallback.
+  if (
+    !control.repeatedQuestion &&
+    !fieldNamesAnotherPerson(control) &&
+    controls
+  )
+    return unique(
+      usable.filter((saved) => {
+        if (
+          !savedQuestionMatches(
+            saved.question,
+            control.label,
+            saved.answer,
+            context,
+          )
+        )
+          return false;
+        const targets = visible.filter((candidate) =>
+          savedQuestionMatches(
+            saved.question,
+            candidate.label,
+            saved.answer,
+            `${candidate.placeholder} ${candidate.hint ?? ""}`,
+          ),
+        );
+        const groups = new Set(targets.map(group));
+        return groups.size === 1 && groups.has(group(control));
+      }),
+    );
+  return null;
 }
 
 /** An explicit answer on the retained application is the person's decision. */

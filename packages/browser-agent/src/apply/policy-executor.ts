@@ -1,4 +1,10 @@
 import { classifyAnswerPermission } from "./answer-source-catalog";
+import { semanticAnswerKey } from "./answer-match";
+import {
+  addedHistoryKind,
+  completeHistoryCount,
+  emptyHistoryRow,
+} from "./history-row-policy";
 import { questionClassificationKey } from "./question-classification";
 import {
   OPINION_ANSWER_REASON,
@@ -185,6 +191,8 @@ export interface ApplyExecutorDeps {
 }
 
 export interface ApplyGuardState extends FillPressState {
+  addedHistoryCounts: Map<string, number>;
+  ownedHistoryRows: Set<string>;
   /**
    * Choices each picker question on this application refused, across runs,
    * and what its list offered then. A refused choice is never tried again.
@@ -215,6 +223,8 @@ export function createApplyGuardState(
   pickerAttempts: readonly StoredApplyPickerAttempt[] = [],
 ): ApplyGuardState {
   return {
+    addedHistoryCounts: new Map(),
+    ownedHistoryRows: new Set(),
     pickerAttempts: new Map(
       pickerAttempts.map((attempt) => [
         attempt.question,
@@ -613,7 +623,15 @@ export function fileFieldHoldsOtherFile(
 export function questionPrompt(control: ApplyFormControl): string {
   if (control.repeatedQuestion) return control.repeatedQuestion.prompt;
   const label = control.label.trim();
-  const group = control.groupLabel.trim();
+  const group =
+    control.attestationKind === null &&
+    (control.kind === "radio" || control.answerControlType === "multi_choice")
+      ? (
+          control.sectionPath?.at(-1) ??
+          control.groupLabel.split(" — ").at(-1) ??
+          ""
+        ).trim()
+      : control.groupLabel.trim();
   // File tasks name the input, without its fieldset legend or required marker.
   if (control.kind === "file") {
     return label.replace(/[\s*:]+$/u, "").replace(/\s+upload$/iu, "") || "file";
@@ -654,6 +672,7 @@ export function buildPendingQuestion(input: {
   siblings?: readonly ApplyFormControl[];
   /** Why stored answers did not settle it, said beside the question. */
   reason?: string | null;
+  askReason?: ApplicationAttemptQuestion["askReason"];
 }): ApplicationAttemptQuestion {
   const { control, suggestion } = input;
   const note = input.reason?.trim() || null;
@@ -671,6 +690,19 @@ export function buildPendingQuestion(input: {
       : control.options;
   return {
     id: questionIdFor(control, input.jobId, input.siblings ?? []),
+    askReason:
+      input.askReason ??
+      (note
+        ? {
+            kind: "source_rejected",
+            check: "answer_permission",
+            detail: note.slice(0, 4000),
+          }
+        : {
+            kind: "no_source",
+            detail:
+              "No applicable saved answer or Profile fact answered this question.",
+          }),
     prompt: questionPrompt(control),
     ...(control.repeatedQuestion ? { repeatedAtDifferentStep: true } : {}),
     kind: control.questionKind,
@@ -802,6 +834,7 @@ type AnswerDecision =
       reason: string;
       suggestion: ApplyAnswer | null;
       permission: boolean;
+      askReason?: ApplicationAttemptQuestion["askReason"];
     };
 
 function savedSuggestion(
@@ -945,6 +978,10 @@ async function decideAnswer(input: {
       control,
       controls: input.controls,
       tags: control.answerTags,
+      candidateSourceId: input.storedFactId,
+      matchedSourceId: config.matchedAnswers?.get(
+        semanticAnswerKey(control, value),
+      ),
       sources: config.sources,
       answer: value,
       pageInstructions: input.pageText,
@@ -956,6 +993,14 @@ async function decideAnswer(input: {
       return {
         kind: "leave",
         reason: permission.reason,
+        askReason: {
+          kind:
+            permission.check === "source_lookup"
+              ? "no_source"
+              : "source_rejected",
+          check: permission.check ?? "answer_permission",
+          detail: permission.reason.slice(0, 4000),
+        },
         suggestion: null,
         permission: true,
       };
@@ -1281,6 +1326,7 @@ function leaveUnansweredForPerson(input: {
   at: string;
   reason: string;
   suggestion: ApplyAnswer | null;
+  askReason?: ApplicationAttemptQuestion["askReason"];
 }): ApplyExecutionOutcome {
   const { control, observation, config, at, suggestion } = input;
   const reason = eligibilityReviewReason(control, config, input.reason);
@@ -1300,6 +1346,7 @@ function leaveUnansweredForPerson(input: {
             suggestion,
             siblings: observation.controls,
             reason,
+            ...(input.askReason ? { askReason: input.askReason } : {}),
           })
         : null,
     controlRef: control.ref,
@@ -1355,6 +1402,9 @@ function notEntered(input: {
     at: input.at,
     reason: input.decision.reason,
     suggestion: input.decision.suggestion,
+    ...(input.decision.askReason
+      ? { askReason: input.decision.askReason }
+      : {}),
   };
   return input.decision.permission || !input.deps.checkWrittenAnswer
     ? leaveUnansweredForPerson(args)
@@ -2031,14 +2081,53 @@ export async function executeApplyProposal(
       }
       // Fill in for me presses only what helps it fill (see fill-presses);
       // Next, Continue, Save and the rest are the person's.
-      const fillPress = pressesFormButtons(deps.config)
-        ? null
-        : fillPressFor({
-            config,
+      const fillPress = fillPressFor({
+        config,
+        observation,
+        ref: proposal.ref,
+        state: deps.guardState,
+      });
+      const clicked = [...observation.actions, ...observation.clickables].find(
+        (entry) => entry.ref === proposal.ref,
+      );
+      const historyKind = clicked ? addedHistoryKind(clicked.label) : null;
+      const historyKey = `${observation.url}|${observation.step.label}|${historyKind}`;
+      if (
+        historyKind &&
+        clicked?.inForm === true &&
+        (deps.guardState.addedHistoryCounts.get(historyKey) ?? 0) >=
+          completeHistoryCount(config.sources.profile, historyKind)
+      )
+        return {
+          kind: "refused",
+          reason:
+            "No further complete Profile record can fill this optional history row. Continue without adding it.",
+          observation,
+        };
+      let removesOwnedEmptyRow = false;
+      if (
+        clicked &&
+        /^(?:remove|delete)(?:$|\b.*\b(?:entry|row|experience|education)\b)/iu.test(
+          clicked.label,
+        )
+      ) {
+        const rowKey = `${observation.url}|${observation.step.label}|${clicked.section ?? ""}`;
+        if (
+          !deps.guardState.ownedHistoryRows.has(rowKey) ||
+          !emptyHistoryRow(
+            observation.controls.filter(
+              (control) => control.groupLabel === clicked.section,
+            ),
+          )
+        )
+          return {
+            kind: "refused",
+            reason:
+              "Only an empty history row added by this run may be removed. Keep the person's entries.",
             observation,
-            ref: proposal.ref,
-            state: deps.guardState,
-          });
+          };
+        removesOwnedEmptyRow = true;
+      }
       // "Apply now" before anything is filled opens the form; it sends nothing.
       const finalAction =
         fillPress?.kind === "open_form"
@@ -2067,7 +2156,11 @@ export async function executeApplyProposal(
           observation,
         };
       }
-      if (!pressesFormButtons(deps.config) && !fillPress)
+      if (
+        !pressesFormButtons(deps.config) &&
+        !fillPress &&
+        !removesOwnedEmptyRow
+      )
         return {
           kind: "paused",
           pause: pressOnSitePause(
@@ -2153,6 +2246,20 @@ export async function executeApplyProposal(
         };
       }
       const after = await config.hands.observe();
+      if (historyKind && clicked?.inForm === true) {
+        deps.guardState.addedHistoryCounts.set(
+          historyKey,
+          (deps.guardState.addedHistoryCounts.get(historyKey) ?? 0) + 1,
+        );
+        const oldGroups = new Set(
+          observation.controls.map((control) => control.groupLabel),
+        );
+        for (const control of after.controls)
+          if (control.groupLabel && !oldGroups.has(control.groupLabel))
+            deps.guardState.ownedHistoryRows.add(
+              `${after.url}|${after.step.label}|${control.groupLabel}`,
+            );
+      }
       const movedOrigin = await authorizeOrigin(after, reason, deps);
       if (movedOrigin.refuse) {
         return retreat(
@@ -2681,6 +2788,39 @@ export async function executeApplyProposal(
           : checked
             ? "Yes"
             : "No";
+      const after = await config.hands.observe();
+      const retained = after.controls.find(
+        (entry) =>
+          entry.ref === control.ref &&
+          entry.label === control.label &&
+          entry.groupLabel === control.groupLabel,
+      );
+      if (!retained || retained.checked !== checked || retained.invalid) {
+        const reason =
+          retained?.validationMessage ||
+          "The page did not keep the selected answer.";
+        const question = buildPendingQuestion({
+          control,
+          jobId: config.application.jobId,
+          detectedAt: at,
+          suggestion: radioAnswer,
+          siblings: after.controls,
+          reason,
+        });
+        question.askReason = {
+          kind: "page_refused",
+          check: "choice_retention",
+          detail: reason,
+        };
+        return {
+          kind: "suggestion",
+          answer: radioAnswer,
+          note: reason,
+          question,
+          controlRef: control.ref,
+          observation: after,
+        };
+      }
       return {
         kind: "filled",
         filled: {
@@ -2711,7 +2851,7 @@ export async function executeApplyProposal(
                 }),
           at,
         },
-        observation: await config.hands.observe(),
+        observation: after,
       };
     }
 

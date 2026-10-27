@@ -485,18 +485,23 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         answerRecords: [],
       },
     );
-    const letterAnswers = readSavedApplicationAnswers(jobs, [
-      "self_intro",
-      "career_transition",
-      "availability",
-      "notice_period",
-      "travel",
-    ]);
+    const letterAnswers = readSavedApplicationAnswers(
+      jobs,
+      [
+        "self_intro",
+        "career_transition",
+        "availability",
+        "notice_period",
+        "travel",
+      ],
+      origin,
+    );
+    const savedAnswers = readSavedApplicationAnswers(jobs, undefined, origin);
     const answerDependencies = applicationAnswerDependencies(
       applications.needsYou,
       row.id,
       origin,
-      letterAnswers,
+      savedAnswers,
     );
     const facts: Omit<ExecuteApplicationFlowInput, "prepareApplicationForm"> = {
       ...(instructions.length ? { instructions } : {}),
@@ -630,11 +635,23 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       {
         ...facts,
         prepareApplicationForm: createApplyFormPreparer({
+          reusableAnswers: savedAnswers,
           initialUnansweredPickerQuestions:
             previous?.execution.questions
               .filter(
                 (question) =>
-                  question.status === "detected" && !question.submittedAnswer,
+                  question.status === "detected" &&
+                  !question.submittedAnswer &&
+                  !applications.needsYou.answersForQuestions(
+                    row.id,
+                    [
+                      {
+                        ...describeFormQuestion(question, job),
+                        prompt: question.prompt,
+                      },
+                    ],
+                    origin,
+                  ).length,
               )
               .map((question) => ({
                 prompt: question.prompt,
@@ -696,8 +713,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 question,
               ]),
             );
-            return Promise.resolve(
-              answerDependencies
+            return Promise.resolve([
+              ...answerDependencies.includeContext(
+                readSavedApplicationAnswers(jobs, undefined, origin),
+              ),
+              ...answerDependencies
                 .read(
                   questions.map((question) => ({
                     ...describeFormQuestion(question, job),
@@ -725,7 +745,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     row.id,
                   ),
                 ),
-            );
+            ]);
           },
           onPrepared: (outcome) => {
             agent = outcome.result;
@@ -843,6 +863,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             earlier.status === "detected" &&
             describeFormQuestion(earlier, job).key === known.key,
         ) ?? false;
+      const refusedWrite = question.askReason?.kind === "page_refused";
       const currentAnswer = applications.needsYou
         .answersForQuestions(
           row.id,
@@ -858,6 +879,22 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             (answer) =>
               answer.key === known.key && answer.answer === currentAnswer,
           );
+      if (
+        ((repeated && currentAnswer != null) ||
+          (alreadyRead && question.askReason?.kind !== "source_rejected")) &&
+        !refusedWrite &&
+        question.id !== STEP_HANDOVER_QUESTION_ID &&
+        question.id !== UPLOAD_REPAIR_QUESTION_ID
+      ) {
+        applications.finishPreparation({
+          id: row.id,
+          attempt: row.attempt,
+          state: "failed",
+          error: `Job Finder stopped because "${question.prompt}" came back without trying to write an answer. Your earlier answers are kept. Try again after correcting this application.`,
+        });
+        await closePage(row.id, row.attempt);
+        return;
+      }
       const requested = applications.needsYou.request(
         {
           applicationId: row.id,
@@ -870,13 +907,17 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           input: known.input,
           options: known.options,
           reusePrompt: known.reusePrompt,
+          askReason: question.askReason ?? {
+            kind: "no_source",
+            detail:
+              "No applicable saved answer or Profile fact answered this question.",
+          },
         },
         // A refused upload, or a button handed to the person, is never
         // settled by an earlier answer.
         {
           reuseAnswers:
-            !repeated &&
-            !alreadyRead &&
+            !refusedWrite &&
             question.id !== UPLOAD_REPAIR_QUESTION_ID &&
             question.id !== STEP_HANDOVER_QUESTION_ID,
         },
@@ -1087,6 +1128,24 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               checks?.[index]?.supported ? [] : [{ question, index }],
             );
             if (rejected.length) {
+              const repeatedAnswer = rejected.find(
+                ({ index }) =>
+                  applications.needsYou.answersForQuestions(
+                    row.id,
+                    [queries[index]!],
+                    origin,
+                  ).length > 0,
+              );
+              if (repeatedAnswer) {
+                applications.submissionRefused(
+                  row.id,
+                  row.attempt,
+                  `Job Finder stopped because your saved answer to "${repeatedAnswer.question.prompt}" could not be verified before sending: ${checks?.[repeatedAnswer.index]?.reason ?? "The answer check was unavailable."} Your earlier answers are kept.`,
+                );
+                applications.stop(row.id);
+                await closePage(row.id, row.attempt);
+                return;
+              }
               applications.discardReviewAnswers(
                 row.id,
                 row.attempt,
@@ -1116,6 +1175,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     kind: "question",
                     key: known.key,
                     scope: {},
+                    askReason: {
+                      kind: "source_rejected",
+                      check: "send_answer_grounding",
+                      detail: (
+                        checks?.[index]?.reason ??
+                        "The send-time answer check could not verify this value."
+                      ).slice(0, 4000),
+                    },
                     prompt: question.prompt,
                     input: known.input,
                     options: known.options,

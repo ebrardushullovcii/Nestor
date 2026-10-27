@@ -347,6 +347,8 @@ async function ledgerleafRun(conditionalContact = false) {
   const model: LLMClient = {
     chatWithTools: (messages, definitions) => {
       const name = definitions[0]?.function.name;
+      if (name === "match_application_answer")
+        return Promise.resolve(reply(name, { sourceId: null, answer: null }));
       if (name === "report_question_kinds") {
         calls.classifications += 1;
         const questions = JSON.parse(String(messages[1].content)) as Array<{

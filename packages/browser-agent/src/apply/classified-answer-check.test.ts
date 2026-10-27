@@ -58,6 +58,81 @@ const sources = {
   reusableAnswers: [],
   documents: [],
 };
+
+test("send-time grounding binds a retained earlier wizard control without trusting a missing card field", async () => {
+  const field: ApplyFormControl = {
+    ref: "c0",
+    kind: "text",
+    label: "Full name",
+    groupLabel: "Contact details",
+    sectionPath: ["Application", "Contact details"],
+    placeholder: "",
+    required: true,
+    disabled: true,
+    readOnly: false,
+    visible: false,
+    value: "Alex Vanguard",
+    checked: false,
+    options: [],
+    selectedOptionLabel: "",
+    invalid: false,
+    validationMessage: "",
+    questionKind: "other",
+    answerControlType: "text",
+    attestationKind: null,
+    answered: true,
+  };
+  const input = {
+    client: reader([
+      { index: 0, kind: "other", country: null, sourceId: "profile.fullName" },
+    ]),
+    sources,
+    payDisclosed: false,
+    answers: [
+      {
+        question: "Step 1 of 4: Contact details — Full name",
+        answer: "Alex Vanguard",
+      },
+    ],
+    formContext: { pageText: "Review", fields: [] },
+    formControls: [field],
+  };
+  expect((await checkClassifiedApplicationAnswers(input))[0]?.supported).toBe(
+    true,
+  );
+  expect(
+    (await checkClassifiedApplicationAnswers({ ...input, formControls: [] }))[0]
+      ?.supported,
+  ).toBe(false);
+  expect(
+    (
+      await checkClassifiedApplicationAnswers({
+        ...input,
+        answers: [
+          {
+            question: "Professional reference — Full name",
+            answer: "Alex Vanguard",
+          },
+        ],
+        formControls: [{ ...field, groupLabel: "", sectionPath: [] }],
+      })
+    )[0]?.supported,
+  ).toBe(false);
+  expect(
+    (
+      await checkClassifiedApplicationAnswers({
+        ...input,
+        formControls: [
+          {
+            ...field,
+            groupLabel: "Professional reference",
+            sectionPath: ["Professional reference"],
+          },
+        ],
+      })
+    )[0]?.supported,
+  ).toBe(false);
+});
 function reader(tags: unknown[]): LLMClient {
   return {
     chatWithTools: vi.fn(() =>

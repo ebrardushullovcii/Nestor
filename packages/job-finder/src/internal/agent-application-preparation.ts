@@ -103,6 +103,7 @@ export interface AgentApplicationPreparationInput {
   readReusableAnswers?: Parameters<
     typeof runApplyAgent
   >[0]["readReusableAnswers"];
+  reusableAnswers?: CandidateReusableAnswer[];
   uploadsConfirmedByPerson?: readonly string[];
   earlierAttachments?: Parameters<
     typeof runApplyAgent
@@ -666,7 +667,7 @@ export async function runAgentApplicationPreparation(
         description: executionInput.job.description,
       },
       ...(approvedLetterText != null ? { approvedLetterText } : {}),
-      reusableAnswers: [],
+      reusableAnswers: input.reusableAnswers ?? [],
       documents: toApplyDocuments(executionInput),
     },
     application: {
@@ -933,6 +934,7 @@ export function createApplyFormPreparer(input: {
   onPrepared?: AgentApplicationPreparationInput["onPrepared"];
   onProgress?: AgentApplicationPreparationInput["onProgress"];
   readReusableAnswers?: AgentApplicationPreparationInput["readReusableAnswers"];
+  reusableAnswers?: CandidateReusableAnswer[];
   initialQuestionContexts?: AgentApplicationPreparationInput["initialQuestionContexts"];
   initialPickerAttempts?: AgentApplicationPreparationInput["initialPickerAttempts"];
   uploadsConfirmedByPerson?: readonly string[];
@@ -991,6 +993,9 @@ export function createApplyFormPreparer(input: {
       searchPreferences: input.searchPreferences,
       llmClient,
       questionReadCacheScope: input.aiClient,
+      ...(input.reusableAnswers
+        ? { reusableAnswers: input.reusableAnswers }
+        : {}),
       ...(input.readReusableAnswers
         ? { readReusableAnswers: input.readReusableAnswers }
         : {}),

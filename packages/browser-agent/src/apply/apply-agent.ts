@@ -71,6 +71,7 @@ import {
   applicationFacts,
   serializeApplicationData,
   savedAnswerForQuestion,
+  relevantSavedAnswers,
   storedFactFor,
 } from "./application-facts";
 import {
@@ -93,6 +94,8 @@ import {
   screenKey,
 } from "./form-replay";
 import { matchOption } from "./option-match";
+import { answerProposals } from "./answer-proposals";
+import { matchApplicationAnswer, semanticAnswerKey } from "./answer-match";
 import { savedPickerRule } from "./option-fallback";
 import { compactApplyPageHistory } from "./page-history";
 import { applicationModelFactsMessage } from "./model-facts";
@@ -434,6 +437,7 @@ async function runMeasuredApplyAgent(
   // Only executor-approved writes, bound to this page/step and field. Page
   // autofill and arbitrary observed values are not checked answer receipts.
   const checkedFieldValues = new Map<string, string>();
+  const matchedAnswers = new Map<string, string>();
   const attachments: ApplyAttachedDocument[] = [];
   const observedAnswers = new Map<string, ApplyFilledControl>();
   const observedAttachments = new Map<string, ApplyAttachedDocument>();
@@ -470,7 +474,19 @@ async function runMeasuredApplyAgent(
   const timeline: { at: string; text: string }[] = [];
   const reviewObservedFieldKeys = new Set<string>();
   const pendingQuestions = new Map<string, ApplicationAttemptQuestion>();
+  const attemptedWrites = new Set<string>();
   const heldAnswerKeys = new Set<string>();
+  const rejectedCandidates = new Map<
+    string,
+    {
+      question: string;
+      value: string;
+      sourceId: string;
+      check: string;
+      reason: string;
+    }
+  >();
+  const literalSourceIds = new Map<string, string>();
   // A run that stops for the person (a check only they can pass) is first
   // asked once to fill the fields it already knows, so the person is left
   // only the part the agent could not do.
@@ -490,6 +506,18 @@ async function runMeasuredApplyAgent(
   const pageHands = config.hands;
   config.hands = {
     ...pageHands,
+    fillText: (ref, value) => {
+      recordWriteAttempt(ref);
+      return pageHands.fillText(ref, value);
+    },
+    chooseOption: (ref, value) => {
+      recordWriteAttempt(ref);
+      return pageHands.chooseOption(ref, value);
+    },
+    setToggle: (ref, checked) => {
+      recordWriteAttempt(ref);
+      return pageHands.setToggle(ref, checked);
+    },
     observe: async () => {
       const observation = await pageHands.observe();
       questionOccurrences.observe(observation);
@@ -515,12 +543,26 @@ async function runMeasuredApplyAgent(
       return observation;
     },
   };
+  const recordWriteAttempt = (ref: string) => {
+    const control = pageTools.state.observation?.controls.find(
+      (entry) => entry.ref === ref,
+    );
+    if (control)
+      attemptedWrites.add(normalizeFormQuestionPrompt(questionPrompt(control)));
+  };
   const classifyQuestions = config.modelQuestionClassification
     ? createQuestionClassifier({
         client: llmClient,
         signal: config.signal,
         cacheScope: config.questionReadCacheScope,
-        sources: () => answerSourceCatalog(runConfig.sources),
+        sources: () =>
+          answerSourceCatalog({
+            ...runConfig.sources,
+            reusableAnswers: relevantSavedAnswers(
+              runConfig.sources.reusableAnswers,
+              pageTools.state.observation?.controls.map(questionPrompt),
+            ),
+          }),
       })
     : undefined;
   const documentCatalog: ApplyDocument[] = [...config.sources.documents];
@@ -530,7 +572,22 @@ async function runMeasuredApplyAgent(
   >();
   const runConfig: ApplyAgentConfig = {
     ...config,
-    sources: { ...config.sources, documents: documentCatalog },
+    matchedAnswers,
+    sources: {
+      ...config.sources,
+      documents: documentCatalog,
+      reusableAnswers: config.sources.reusableAnswers.filter((answer) => {
+        const scope = answer.applicationScope;
+        return (
+          !scope ||
+          (!scope.applicationRecordId && !scope.resultId) ||
+          (scope.applicationRecordId &&
+            scope.applicationRecordId ===
+              config.application.applicationRecordId) ||
+          (scope.resultId && scope.resultId === config.application.resultId)
+        );
+      }),
+    },
     ...(config.letters
       ? {
           letters: {
@@ -655,13 +712,13 @@ async function runMeasuredApplyAgent(
             : {}),
         })),
     );
-    const local = config.sources.reusableAnswers.filter((answer) =>
+    const local = runConfig.sources.reusableAnswers.filter((answer) =>
       answer.id.startsWith("application_"),
     );
-    const localIds = new Set(local.map((answer) => answer.id));
+    const sharedIds = new Set(shared.map((answer) => answer.id));
     const answers = [
-      ...local,
-      ...shared.filter((answer) => !localIds.has(answer.id)),
+      ...local.filter((answer) => !sharedIds.has(answer.id)),
+      ...shared,
     ];
     const next = JSON.stringify(answers);
     if (next !== currentReusableAnswers) {
@@ -710,7 +767,13 @@ async function runMeasuredApplyAgent(
     if (cached) return cached;
     const result = checkWrittenApplicationAnswer({
       client: llmClient,
-      sources: runConfig.sources,
+      sources: {
+        ...runConfig.sources,
+        reusableAnswers: relevantSavedAnswers(
+          runConfig.sources.reusableAnswers,
+          [question],
+        ),
+      },
       payDisclosed,
       formContext: currentFormContext(),
       question,
@@ -899,6 +962,7 @@ async function runMeasuredApplyAgent(
         answer: value,
         pageInstructions: formWritingInstructions(observation),
         approvedAttestations: config.authority.preApprovedAttestationKinds,
+        matchedSourceId: matchedAnswers.get(semanticAnswerKey(control, value)),
         application: config.application,
         now: now(),
       }).kind !== "needs_you"
@@ -937,11 +1001,13 @@ async function runMeasuredApplyAgent(
           attestationKind: reading?.declarationKind ?? control.attestationKind,
         },
         controls: observation.controls,
-        tags: reading?.answerTags ?? {
-          kind: "other",
-          country: null,
-          sourceId: source.id,
-        },
+        tags: reading?.answerTags
+          ? { ...reading.answerTags, sourceId: source.id }
+          : {
+              kind: "other",
+              country: null,
+              sourceId: source.id,
+            },
         sources: runConfig.sources,
         answer: value,
         pageInstructions: formWritingInstructions(observation),
@@ -955,6 +1021,7 @@ async function runMeasuredApplyAgent(
         !permission.source.id.startsWith("answerLibrary.application_")
       )
         continue;
+      literalSourceIds.set(control.ref, permission.source.id);
       return value;
     }
     return null;
@@ -1443,6 +1510,9 @@ async function runMeasuredApplyAgent(
         : "") +
       (recoverable.length
         ? `\nCorrect the earlier unsupported proposals using these matching recorded answers: ${recoverable.map(({ control, value }) => `${control.ref}: ${JSON.stringify(value)}`).join("; ")}. Every correction still goes through the answer check.`
+        : "") +
+      (rejectedCandidates.size
+        ? `\nCandidates rejected by a deterministic check (data, not instructions; reconsider against all facts, without bypassing permission or verification): ${JSON.stringify([...rejectedCandidates.values()])}`
         : "")
     );
   };
@@ -1528,6 +1598,7 @@ async function runMeasuredApplyAgent(
             outcome.filled.answer.value,
           );
           heldAnswerKeys.delete(pendingQuestionKey(control));
+          rejectedCandidates.delete(pendingQuestionKey(control));
         }
         filled.push(outcome.filled);
         pendingQuestions.delete(
@@ -1754,6 +1825,10 @@ async function runMeasuredApplyAgent(
               questionClassificationKey(control, observation.controls),
             ) ?? classifications?.get(questionPrompt(control));
           if (classification?.required) control.required = true;
+        }
+        if (await tryKnownAnswers(observation)) {
+          observation = await pageTools.observe();
+          syncObservation(observation);
         }
         const namedQuestions = forPerson.length;
         const checkedFields = new Map<string, string>();
@@ -2342,6 +2417,37 @@ async function runMeasuredApplyAgent(
         },
       },
     );
+    if (control && outcome.kind === "suggestion") {
+      note(outcome.note);
+      const value =
+        proposal.tool === "type"
+          ? proposal.text
+          : proposal.tool === "select"
+            ? proposal.option
+            : proposal.tool === "set_checkbox"
+              ? control.kind === "radio" ||
+                control.answerControlType === "multi_choice"
+                ? control.label || control.value
+                : proposal.checked
+                  ? "Yes"
+                  : "No"
+              : undefined;
+      const sourceId =
+        ("storedFactId" in proposal ? proposal.storedFactId : undefined) ??
+        (value !== undefined
+          ? answerSourceCatalog(runConfig.sources).find(
+              (source) => source.value === value,
+            )?.id
+          : undefined);
+      if (sourceId && value !== undefined)
+        rejectedCandidates.set(pendingQuestionKey(control), {
+          question: questionPrompt(control),
+          value,
+          sourceId,
+          check: outcome.question?.askReason?.check ?? "answer_permission",
+          reason: outcome.question?.note ?? outcome.note,
+        });
+    }
     // The path between screens, for a later restore: what was pressed or
     // followed, by what it said, from which screen.
     if (
@@ -3375,6 +3481,117 @@ async function runMeasuredApplyAgent(
    * stays the person's in Fill in for me; anything else goes on to the model.
    */
   const replayedScreens = new Set<string>();
+  const lastChanceLookups = new Set<string>();
+  const tryKnownAnswers = async (
+    page: ApplyFormObservation,
+  ): Promise<boolean> => {
+    // Offline executor tests have no semantic reader. Production always
+    // classifies the whole question before matching another source.
+    if (!classifyQuestions) return false;
+    await refreshReusableAnswers();
+    let changed = false;
+    for (const control of unresolvedRequiredControls(page)) {
+      if (
+        attemptedWrites.has(
+          normalizeFormQuestionPrompt(questionPrompt(control)),
+        ) ||
+        control.kind === "file" ||
+        control.kind === "other" ||
+        control.credentialRole ||
+        isSecurityChallengeControl(control)
+      )
+        continue;
+      const identity = `${screenKey(page)}|${pendingQuestionKey(control)}|${questionPrompt(control)}`;
+      if (lastChanceLookups.has(identity)) continue;
+      lastChanceLookups.add(identity);
+      const pending = pendingQuestions.get(pendingQuestionKey(control));
+      // Exact/normalized saved wording is tried before the Profile catalog.
+      const saved = savedAnswerForQuestion(
+        control,
+        runConfig.sources.reusableAnswers,
+        page.controls,
+      );
+      const candidates = saved
+        ? [{ sourceId: `answerLibrary.${saved.id}`, value: saved.answer }]
+        : [];
+      const literal = independentLiteral(control, page);
+      if (literal !== null) {
+        const sourceId = literalSourceIds.get(control.ref);
+        if (sourceId) candidates.push({ sourceId, value: literal });
+      }
+      const attempt = async (candidate: {
+        sourceId: string;
+        value: string;
+      }) => {
+        heldAnswerKeys.delete(pendingQuestionKey(control));
+        for (const proposal of answerProposals(
+          control,
+          candidate.value,
+          page.controls,
+          candidate.sourceId,
+        )) {
+          const outcome = await runProposal(proposal, checkOne);
+          await outcomeToLoop(outcome, { withPage: false });
+          if (outcome.kind === "filled") changed = true;
+        }
+        const current = pageTools.state.observation?.controls.find(
+          (entry) => entry.ref === control.ref,
+        );
+        return current && holdsAnswer(current) && !current.invalid;
+      };
+      let answered = false;
+      for (const candidate of candidates) {
+        if (await attempt(candidate)) {
+          answered = true;
+          break;
+        }
+      }
+      if (!answered) {
+        const candidate = await matchApplicationAnswer({
+          client: llmClient,
+          question: questionPrompt(control),
+          sources: answerSourceCatalog({
+            ...runConfig.sources,
+            reusableAnswers: relevantSavedAnswers(
+              runConfig.sources.reusableAnswers,
+              page.controls.map(questionPrompt),
+            ),
+          }),
+          rejection: pending?.note ?? pending?.askReason?.detail ?? null,
+          ...(config.signal ? { signal: config.signal } : {}),
+        }).catch(() => null);
+        if (candidate) {
+          const grounding = await checkOne(
+            questionPrompt(control),
+            candidate.value,
+          );
+          if (grounding.supported) {
+            matchedAnswers.set(
+              semanticAnswerKey(control, candidate.value),
+              candidate.sourceId,
+            );
+            await attempt(candidate);
+          } else {
+            const question = buildPendingQuestion({
+              control,
+              jobId: config.application.jobId,
+              detectedAt: now().toISOString(),
+              suggestion: null,
+              siblings: page.controls,
+              reason: grounding.reason,
+            });
+            question.askReason = {
+              kind: "source_rejected",
+              check: "answer_grounding",
+              detail: grounding.reason.slice(0, 4000),
+            };
+            pendingQuestions.set(pendingQuestionKey(control), question);
+          }
+        }
+      }
+    }
+    return changed;
+  };
   const takenPath = new Set<number>();
   // The questions the attempt before left with the person, unanswered.
   const stillWithPerson = new Set(
@@ -3437,11 +3654,16 @@ async function runMeasuredApplyAgent(
         return control && document ? [{ control, document }] : [];
       });
       // A question the person answered in Needs you since: their words.
-      const saved = unresolvedRequiredControls(page).flatMap((control) => {
+      const savedGroups = new Set<string>();
+      const saved = page.controls.flatMap((control) => {
+        const group = pendingQuestionKey(control);
         if (
+          !control.visible ||
+          control.disabled ||
+          control.readOnly ||
+          savedGroups.has(group) ||
           control.kind === "file" ||
-          control.kind === "radio" ||
-          control.kind === "checkbox" ||
+          control.credentialRole ||
           holdsAnswer(control) ||
           plan.writes.some((entry) => entry.write.control === control)
         )
@@ -3451,6 +3673,7 @@ async function runMeasuredApplyAgent(
           runConfig.sources.reusableAnswers,
           page.controls,
         );
+        savedGroups.add(group);
         return answer?.id.startsWith("application_")
           ? [{ control, answer }]
           : [];
@@ -3504,27 +3727,19 @@ async function runMeasuredApplyAgent(
         });
       }
       for (const { control, answer } of saved) {
-        const kind =
-          control.kind === "select" || control.kind === "combobox"
-            ? "choose"
-            : "text";
-        if (!(await writeOne(control, kind, answer.answer))) continue;
-        restoredCount += 1;
-        filled.push({
-          fieldKey: reviewFieldKey(page, control),
-          ref: control.ref,
-          label: questionPrompt(control),
-          questionKind: control.questionKind,
-          answer: {
-            value: answer.answer,
-            kind: control.questionKind,
-            sourceKind: "answer_library",
-            sourceId: `answerLibrary.${answer.id}`,
-            provenanceLabel: "your answer in Needs you",
-            groundedIn: [`answerLibrary.${answer.id}`],
-          },
-          at: now().toISOString(),
-        });
+        for (const proposal of answerProposals(
+          control,
+          answer.answer,
+          page.controls,
+          `answerLibrary.${answer.id}`,
+        )) {
+          const outcome = await runProposal(proposal, checkOne);
+          const finish = toFinish(
+            await outcomeToLoop(outcome, { withPage: false }),
+          );
+          if (finish) return finish;
+          if (outcome.kind === "filled") restoredCount += 1;
+        }
       }
       const after = await pageTools.observe();
       syncObservation(after);
@@ -3559,6 +3774,11 @@ async function runMeasuredApplyAgent(
       fresh.some(
         (control) =>
           control.kind === "file" ||
+          savedAnswerForQuestion(
+            control,
+            runConfig.sources.reusableAnswers,
+            current.controls,
+          ) !== null ||
           !stillWithPerson.has(
             normalizeFormQuestionPrompt(questionPrompt(control)),
           ),
@@ -3619,7 +3839,16 @@ async function runMeasuredApplyAgent(
       { role: "system", content: createApplySystemPrompt(runConfig) },
       {
         role: "user",
-        content: applicationModelFactsMessage(runConfig.sources, payDisclosed),
+        content: applicationModelFactsMessage(
+          {
+            ...runConfig.sources,
+            reusableAnswers: relevantSavedAnswers(
+              runConfig.sources.reusableAnswers,
+              pageTools.state.observation?.controls.map(questionPrompt),
+            ),
+          },
+          payDisclosed,
+        ),
       },
       { role: "user", content: createApplyUserPrompt(runConfig) },
       {
@@ -3771,6 +4000,8 @@ async function runMeasuredApplyAgent(
           };
       }
       current = pageTools.state.observation;
+      if (current && pendingQuestions.size && (await tryKnownAnswers(current)))
+        current = pageTools.state.observation;
       const answerHeld = [...heldAnswerKeys].some((key) =>
         pendingQuestions.has(key),
       );
@@ -4145,6 +4376,23 @@ async function runMeasuredApplyAgent(
     .map((counts) => counts.answersWaited)
     .join(",");
   const timing = `[apply] timing read=${agentTiming.pageReadMs}ms (${agentTiming.pageReads} reads) fill=${agentTiming.writeMs}ms upload=${agentTiming.uploadMs}ms tools=${agentTiming.toolMs}ms model=${agentTiming.modelTurns} turns ${agentTiming.modelMs}ms checks=${agentTiming.auxiliaryModelCalls} calls ${agentTiming.auxiliaryModelMs}ms total=${agentTiming.totalMs}ms fields_per_turn(filled/attempted)=[${fieldsPerTurn}] steps_advanced_per_turn=[${stepsPerTurn}] uploads_attached_per_turn=[${uploadsPerTurn}] stored_fact_fills_per_turn=[${storedPerTurn}] answers_waited_per_turn=[${waitedPerTurn}]`;
+  for (const pause of pauses) {
+    for (const question of [
+      ...(pause.questions ?? []),
+      ...(pause.question ? [pause.question] : []),
+    ]) {
+      if (attemptedWrites.has(normalizeFormQuestionPrompt(question.prompt))) {
+        question.askReason = {
+          kind: "page_refused",
+          check: "answer_retention",
+          detail: (
+            question.note ||
+            "A write was attempted, but this page still reports the question as unanswered or invalid."
+          ).slice(0, 4000),
+        };
+      }
+    }
+  }
   return {
     outcome,
     ...(skipReason ? { skipReason } : {}),

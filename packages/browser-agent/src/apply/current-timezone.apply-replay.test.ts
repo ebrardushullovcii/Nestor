@@ -446,10 +446,15 @@ test.each([
         Promise.resolve(
           tools[0]?.function.name === "report_question_kinds"
             ? s.classification(1)
-            : call("fill_fields", {
-                fields: [{ tool: "type", ref: "c0", text: "Yes" }],
-                finishWhenReady: true,
-              }),
+            : tools[0]?.function.name === "match_application_answer"
+              ? call("match_application_answer", {
+                  sourceId: null,
+                  answer: null,
+                })
+              : call("fill_fields", {
+                  fields: [{ tool: "type", ref: "c0", text: "Yes" }],
+                  finishWhenReady: true,
+                }),
         ),
       ),
     };
@@ -457,7 +462,9 @@ test.each([
     expect(result.outcome).toBe(outcome);
     expect(s.field.value).toBe(outcome === "prepared" ? "Yes" : "");
     expect(result.pauses).toHaveLength(outcome === "prepared" ? 0 : 1);
-    expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+    expect(client.chatWithTools).toHaveBeenCalledTimes(
+      outcome === "paused" ? 3 : 2,
+    );
     expect(s.clickAction).not.toHaveBeenCalled();
   },
 );

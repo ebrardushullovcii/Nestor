@@ -246,6 +246,7 @@ test.each([null, "listingDiscovery"])(
       kind: "text" as const,
       label: "Employee referral name",
       groupLabel: "How did you hear about this job?",
+      sectionPath: ["How did you hear about this job?"],
       options: [],
       answerControlType: "text" as const,
     };
@@ -322,6 +323,7 @@ test.each([
       ref: `r${index}`,
       kind,
       groupLabel: "How did you hear about this job?",
+      sectionPath: ["How did you hear about this job?"],
       label,
       value: label,
       options: [],
@@ -390,7 +392,10 @@ test.each([
       field.signature,
       deps,
     );
-    expect(correct).toMatchObject({
+    expect(
+      correct,
+      correct.kind === "suggestion" ? correct.note : "",
+    ).toMatchObject({
       kind: "filled",
       filled: { ref: "r0", answer: { value: "Job board" } },
     });

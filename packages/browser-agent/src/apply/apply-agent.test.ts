@@ -334,6 +334,81 @@ function repeatingModel(
   };
 }
 
+test.each([true, false])(
+  "last-chance semantic matches still require independent grounding (supported: %s)",
+  async (supported) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          label: "Contact e-mail",
+          inputType: "email",
+          value: "",
+        },
+      ],
+    });
+    const input = config(source, { modelQuestionClassification: true });
+    const value = "robin@example.test";
+    input.sources.profile.email = value;
+    const fill = vi.fn((ref: string, text: string) => {
+      source.controls[0].value = text;
+      return Promise.resolve({ ok: true as const, observedValue: text });
+    });
+    input.hands.fillText = fill;
+    let matches = 0;
+    const finish = repeatingModel("finish", {
+      reason: "I filled what I could.",
+    });
+    const report = (name: string, args: Record<string, unknown>) =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: name,
+            type: "function" as const,
+            function: { name, arguments: JSON.stringify(args) },
+          },
+        ],
+      });
+    const result = await runApplyAgent(input, {
+      chatWithTools: (messages, definitions, options) => {
+        const tool = definitions[0]?.function.name;
+        if (tool === "report_question_kinds")
+          return report(tool, {
+            plainIndexes: [0],
+            flagged: [],
+            tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
+          });
+        if (tool === "match_application_answer") {
+          matches += 1;
+          return report(tool, { sourceId: "profile.email", answer: value });
+        }
+        if (tool === "report_answer_checks" && !supported)
+          return report(tool, {
+            checks: [
+              {
+                index: 0,
+                supported: false,
+                reason:
+                  "This question is not established by the applicant facts.",
+                evidence: [],
+              },
+            ],
+          });
+        return finish.chatWithTools(messages, definitions, options);
+      },
+    });
+    expect(matches).toBe(1);
+    if (supported) {
+      expect(fill).toHaveBeenCalledExactlyOnceWith("c0", value);
+      expect(result.outcome).toBe("prepared");
+      expect(result.pauses).toEqual([]);
+    } else {
+      expect(fill).not.toHaveBeenCalled();
+      expect(result.outcome).toBe("paused");
+    }
+  },
+);
+
 function scriptedModel(
   turns: Array<{ name: string; args: Record<string, unknown> }>,
 ): LLMClient {
@@ -3870,7 +3945,8 @@ describe("apply readiness regressions", () => {
       },
     );
     expect(result.outcome).toBe("paused");
-    expect(result.timing?.auxiliaryModelCalls).toBe(1);
+    // One question reading plus the one last-chance answer match.
+    expect(result.timing?.auxiliaryModelCalls).toBe(2);
     expect(result.pauses[0]?.questions).toHaveLength(1);
     expect(result.pauses[0]?.question).toMatchObject({
       prompt: "Select your skills *",
@@ -9392,6 +9468,98 @@ describe("a closed form comes back without the model", () => {
       (result.reviewFilled ?? []).find((entry) => entry.label === "Full name")
         ?.answer.provenanceLabel,
     ).toBe("your matching saved answer or profile fact");
+  });
+
+  test.each(["radio", "checkbox"] as const)(
+    "newly answered Needs-you %s groups replay through the executor",
+    async (kind) => {
+      const question =
+        kind === "radio"
+          ? "Are you legally authorized to work in this country?"
+          : "Select your skills";
+      const source = page({
+        controls:
+          kind === "radio"
+            ? [
+                workAuthorizationRadio(0, "Yes"),
+                workAuthorizationRadio(1, "No"),
+              ]
+            : [
+                field(0, "TypeScript", {
+                  inputType: "checkbox",
+                  name: "skills",
+                  groupLabel: question,
+                  required: false,
+                }),
+                field(1, "SQL", {
+                  inputType: "checkbox",
+                  name: "skills",
+                  groupLabel: question,
+                  required: false,
+                }),
+              ],
+      });
+      const input = config(source, { intermediateWritesAuthorized: false });
+      input.replay = { answers: [], attachments: [], path: [] };
+      input.readReusableAnswers = () =>
+        Promise.resolve([
+          {
+            id: "application_31",
+            kind: "other",
+            label: question,
+            question,
+            answer: kind === "radio" ? "Yes" : '["TypeScript","SQL"]',
+            roleFamilies: [],
+            proofEntryIds: [],
+          },
+        ]);
+      const writes = liveHands(source, input);
+      const model = countingModel();
+      const result = await runApplyAgent(input, model.client);
+      expect(writes).toEqual(
+        kind === "radio" ? ["c0=true"] : ["c0=true", "c1=true"],
+      );
+      expect(model.turns()).toBe(0);
+      expect(result.outcome).toBe("prepared");
+      expect(result.pauses).toEqual([]);
+    },
+  );
+
+  test("a saved radio answer the page refuses carries the attempted-write reason", async () => {
+    const question = "Are you legally authorized to work in this country?";
+    const source = page({
+      controls: [
+        workAuthorizationRadio(0, "Yes"),
+        workAuthorizationRadio(1, "No"),
+      ],
+    });
+    const input = config(source, { intermediateWritesAuthorized: false });
+    input.replay = { answers: [], attachments: [], path: [] };
+    input.initialUnansweredPickerQuestions = [
+      { prompt: question, options: ["Yes", "No"] },
+    ];
+    input.readReusableAnswers = () =>
+      Promise.resolve([
+        {
+          id: "application_31",
+          kind: "other",
+          label: question,
+          question,
+          answer: "Yes",
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+      ]);
+    input.hands.setToggle = vi.fn(() =>
+      Promise.resolve({ ok: true as const, observedValue: "checked" }),
+    );
+    const result = await runApplyAgent(input, countingModel().client);
+    expect(input.hands.setToggle).toHaveBeenCalled();
+    expect(
+      result.pauses
+        .flatMap((pause) => pause.questions ?? [])
+        .some((question) => question.askReason?.kind === "page_refused"),
+    ).toBe(true);
   });
 
   test("a multi-step form: each step's answers go back, and its Next stays the person's", async () => {

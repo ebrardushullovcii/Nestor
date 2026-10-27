@@ -52,6 +52,7 @@ import { toIso } from "./job-list";
 import { createRowUndo } from "./row-undo";
 
 type Task = {
+  ask_reason_json?: string | null;
   id: number;
   kind: NeedsYouTask["kind"];
   answer_key: string;
@@ -157,6 +158,9 @@ function compatibleYesNoQuestion(
 function toTask(row: Task): NeedsYouTask {
   const options: unknown = JSON.parse(row.options_json);
   return NeedsYouTaskSchema.parse({
+    ...(row.ask_reason_json
+      ? { askReason: JSON.parse(row.ask_reason_json) as unknown }
+      : {}),
     id: row.id,
     kind: row.kind,
     key: row.answer_key,
@@ -254,12 +258,23 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       | undefined;
     return row ?? null;
   };
-  const link = (input: RequestNeedsYouInput, taskId: number) =>
-    sql(
+  const link = (input: RequestNeedsYouInput, taskId: number) => {
+    // Keep the answered association when a genuinely refused write needs a
+    // new task for this field. It remains an application-local answer source.
+    sql(`INSERT OR IGNORE INTO application_needs_you(application_id,attempt,field_key,task_id)
+      SELECT n.application_id,n.attempt,n.field_key || ':answered:' || n.task_id,n.task_id
+      FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
+      WHERE n.application_id=? AND n.field_key=? AND n.task_id<>? AND t.answer IS NOT NULL`).run(
+      input.applicationId,
+      input.fieldKey,
+      taskId,
+    );
+    return sql(
       `INSERT INTO application_needs_you (application_id, attempt, field_key, task_id)
      VALUES (?, ?, ?, ?) ON CONFLICT(application_id, field_key) DO UPDATE SET
        attempt = excluded.attempt, task_id = excluded.task_id`,
     ).run(input.applicationId, input.attempt, input.fieldKey, taskId);
+  };
 
   const resolve = (task: Task, answer: string | null): number => {
     sql("UPDATE needs_you SET resolved_at = ?, answer = ? WHERE id = ?").run(
@@ -757,22 +772,29 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         reuse_prompt: number;
       }>;
       return questions.flatMap<FormAnswerMatch>((question) => {
-        const relevantLocal = localRows.filter((row) =>
-          question.reusePrompt
-            ? row.reuse_prompt === 1 &&
+        const relevantLocal = localRows.filter(
+          (row) =>
+            row.answer_key === question.key ||
+            (question.reusePrompt &&
+              row.reuse_prompt === 1 &&
               savedQuestionMatches(
                 row.prompt,
                 question.prompt,
                 row.answer ?? "",
-              )
-            : row.answer_key === question.key,
+              )),
         );
-        const exactLocal = relevantLocal.find((row) =>
-          question.reusePrompt
-            ? normalizeFormQuestionPrompt(row.prompt) ===
-              normalizeFormQuestionPrompt(question.prompt)
-            : row.answer_key === question.key,
-        );
+        const exactLocal =
+          relevantLocal.find(
+            (row) => row.answer !== null && row.answer_key === question.key,
+          ) ??
+          relevantLocal.find(
+            (row) =>
+              row.answer !== null &&
+              (question.reusePrompt
+                ? normalizeFormQuestionPrompt(row.prompt) ===
+                  normalizeFormQuestionPrompt(question.prompt)
+                : row.answer_key === question.key),
+          );
         const local =
           exactLocal ??
           uniquePromptAnswer(
@@ -782,21 +804,27 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             ),
             question.prompt,
           );
-        if (
-          relevantLocal.some((row) => row.answer === null) ||
-          (relevantLocal.length && !local)
-        )
+        // An open task is not an answer and cannot hide an answered task or
+        // a remembered answer. Conflicting actual answers remain ambiguous.
+        if (relevantLocal.some((row) => row.answer !== null) && !local)
           return [];
-        let eligible = savedRows.filter((row) =>
-          question.reusePrompt
-            ? savedQuestionMatches(row.prompt, question.prompt, row.answer)
-            : row.answer_key === question.key,
+        let eligible = savedRows.filter(
+          (row) =>
+            row.answer_key === question.key ||
+            (question.reusePrompt &&
+              savedQuestionMatches(row.prompt, question.prompt, row.answer)),
         );
+        const exactKeys = eligible.filter(
+          (row) => row.answer_key === question.key,
+        );
+        if (exactKeys.length) eligible = exactKeys;
         if (eligible.some((row) => row.site_origin === origin))
           eligible = eligible.filter((row) => row.site_origin === origin);
-        const saved = question.reusePrompt
-          ? uniquePromptAnswer(eligible, question.prompt)
-          : eligible[0];
+        const saved =
+          eligible.find((row) => row.answer_key === question.key) ??
+          (question.reusePrompt
+            ? uniquePromptAnswer(eligible, question.prompt)
+            : eligible[0]);
         if (
           local?.answer != null &&
           (!saved?.option_fallback_json || saved.answer !== local.answer)
@@ -805,13 +833,16 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             {
               id: `application:${local.id}`,
               key: question.key,
-              prompt: local.prompt,
+              prompt:
+                local.answer_key === question.key
+                  ? question.prompt
+                  : local.prompt,
               answer: local.answer,
               local: true,
             },
           ];
         if (!saved) return [];
-        if (question.reusePrompt) {
+        if (question.reusePrompt && saved.answer_key !== question.key) {
           const exactTargets = questions.filter(
             (target) =>
               normalizeFormQuestionPrompt(target.prompt) ===
@@ -834,7 +865,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           {
             id: `saved:${saved.id}`,
             key: question.key,
-            prompt: saved.prompt,
+            prompt:
+              saved.answer_key === question.key
+                ? question.prompt
+                : saved.prompt,
             answer: saved.answer,
             local: false,
             optionFallback: saved.option_fallback_json
@@ -1106,6 +1140,13 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           task = get(Number(created.lastInsertRowid))!;
         }
         link(value, task.id);
+        if (value.askReason) {
+          sql("UPDATE needs_you SET ask_reason_json=? WHERE id=?").run(
+            JSON.stringify(value.askReason),
+            task.id,
+          );
+          task = get(task.id)!;
+        }
         if (value.blockedUrl) {
           sql("UPDATE needs_you SET blocked_url=?,prompt=? WHERE id=?").run(
             value.blockedUrl,

@@ -61,6 +61,7 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   },
   { table: "form_answers", column: "option_fallback_json", definition: "TEXT" },
   { table: "needs_you", column: "blocked_url", definition: "TEXT" },
+  { table: "needs_you", column: "ask_reason_json", definition: "TEXT" },
   {
     table: "applications",
     column: "review_refill",

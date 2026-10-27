@@ -28,12 +28,16 @@ export interface RawApplyControl {
   name: string;
   /** Transient identity of the containing form/root within this page read. */
   scopeKey?: string;
+  /** Transient identity of the nearest enclosing row/group within that form. */
+  rowScopeKey?: string;
   /** Current visible calling code on this tel input's own collapsed country button. */
   phoneCallingCode?: string;
   label: string;
   /** Help text beside the field, besides its label. */
   hint?: string;
   groupLabel: string;
+  /** Named enclosing sections, outermost first, without interpreting their meaning. */
+  sectionPath?: string[];
   placeholder: string;
   autocomplete: string;
   required: boolean;

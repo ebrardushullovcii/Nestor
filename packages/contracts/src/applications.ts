@@ -5,6 +5,7 @@ import {
 import { SourceAccessReferenceSchema } from "./source-access";
 import { optionalStoredField } from "./stored-json";
 import { z } from "zod";
+import { ApplicationQuestionAskReasonSchema } from "./application-question-reason";
 import { CandidateAnswerKindSchema } from "./profile";
 
 import { IsoDateTimeSchema } from "./base";
@@ -147,6 +148,7 @@ export const FormAnswerScopeSchema = z
 export type FormAnswerScope = z.infer<typeof FormAnswerScopeSchema>;
 
 export const NeedsYouTaskSchema = z.object({
+  askReason: ApplicationQuestionAskReasonSchema.optional(),
   id: z.number().int().positive(),
   kind: NeedsYouKindSchema,
   key: z.string().min(1),
