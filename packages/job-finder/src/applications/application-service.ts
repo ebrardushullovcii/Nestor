@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createModelUsageRecorder } from "@nestor/ai-providers";
 import { accumulateApplyUsage } from "./apply-usage";
+import { rememberPersonPageAnswers } from "./person-page-answers";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import {
@@ -423,6 +424,22 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     let startingUrl: string | undefined;
     // A continue keeps the page, and with it the files already attached.
     let keptPage = false;
+    if (previous) {
+      const personPage = await browser
+        .readApplicationPageWithPerson?.(
+          "target_site",
+          applicationIdentity(row.id, previous.attempt).resultId,
+        )
+        .catch(() => null);
+      if (personPage && current(row))
+        rememberPersonPageAnswers({
+          page: personPage,
+          application: row,
+          job,
+          memory: applications.needsYou,
+          earlierQuestions: previous.execution.questions,
+        });
+    }
     if (
       row.attempt > 1 &&
       (!previous ||

@@ -491,6 +491,85 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         return savedAnswer(id)!;
       });
     },
+    /** Internal caller verified native input on this application's exact field. */
+    rememberPersonAnswer(
+      input: RequestNeedsYouInput,
+      answer: string,
+      kind: CandidateAnswerKind = "other",
+    ): SavedFormAnswer | null {
+      const value = RequestNeedsYouInputSchema.parse(input);
+      if (value.kind !== "question") return null;
+      return store.transaction(() => {
+        const application = sql(
+          "SELECT attempt,state FROM applications WHERE id=?",
+        ).get(value.applicationId) as
+          | { attempt: number; state: string }
+          | undefined;
+        if (
+          !application ||
+          application.attempt !== value.attempt ||
+          !["running", "needs_you", "ready"].includes(application.state)
+        )
+          return null;
+        const fitted = validateAnswer(
+          { input: value.input, options_json: JSON.stringify(value.options) },
+          answer,
+        );
+        const previous = sql(
+          "SELECT task_id FROM application_needs_you WHERE application_id=? AND field_key=?",
+        ).get(value.applicationId, value.fieldKey) as
+          | { task_id: number }
+          | undefined;
+        const savedId = writeAnswer({
+          key: value.key,
+          scope: value.scope,
+          prompt: value.prompt,
+          input: value.input,
+          options: value.options,
+          answer: fitted,
+          kind,
+        });
+        const old = previous ? get(previous.task_id) : undefined;
+        if (
+          old?.answer === fitted &&
+          normalizeFormQuestionPrompt(old.prompt) ===
+            normalizeFormQuestionPrompt(value.prompt)
+        ) {
+          changed();
+          return savedAnswer(savedId);
+        }
+        const inserted =
+          sql(`INSERT INTO needs_you(kind,answer_key,country,site_origin,prompt,input,options_json,opened_at,prompt_key,reuse_prompt)
+          VALUES('question',?,?,?,?,?,?,?,?,?)`).run(
+            value.key,
+            value.scope.country,
+            value.scope.siteOrigin,
+            value.prompt,
+            value.input,
+            JSON.stringify(value.options),
+            Date.now(),
+            normalizeFormQuestionPrompt(value.prompt),
+            value.reusePrompt ? 1 : 0,
+          );
+        const task = get(Number(inserted.lastInsertRowid))!;
+        link(value, task.id);
+        if (old)
+          sql(
+            "UPDATE needs_you SET resolved_at=? WHERE id=? AND resolved_at IS NULL AND NOT EXISTS(SELECT 1 FROM application_needs_you WHERE task_id=?)",
+          ).run(Date.now(), old.id, old.id);
+        resolve(task, fitted);
+        if (value.reusePrompt)
+          resolveMatching(
+            value.key,
+            value.prompt,
+            value.scope.country,
+            value.scope.siteOrigin,
+            fitted,
+          );
+        changed();
+        return savedAnswer(savedId);
+      });
+    },
     details(id: number): NeedsYouDetails | null {
       const task = get(id);
       if (!task || task.resolved_at !== null) return null;
