@@ -121,7 +121,10 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
     turns: [
       {
         text: "Has a resume been written for my shortlisted Senior Product Designer at Northwind Labs?",
-        context: laneContext({ screen: "review_queue" }),
+        context: laneContext({
+          screen: "review_queue",
+          route: "/job-finder/review-queue",
+        }),
       },
     ],
     check: (o) => [
@@ -150,7 +153,10 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
     turns: [
       {
         text: "Show my shortlisted jobs",
-        context: laneContext({ screen: "review_queue" }),
+        context: laneContext({
+          screen: "review_queue",
+          route: "/job-finder/review-queue",
+        }),
       },
     ],
     check: (o) =>

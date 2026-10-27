@@ -364,7 +364,6 @@ function recordingPorts(
     commands: [
       ...assistantCommandTools<typeof JOB_COMMANDS, JobCommandOutputs>(
         JOB_COMMANDS,
-        RESUME_COMMANDS,
         (name, input) => {
           if (name === "start_search") {
             recorder.searches.push(JSON.stringify(input).slice(0, 400));
@@ -466,12 +465,34 @@ export async function createAssistantLaneWorld(
   });
   const events: AssistantEvent[] = [];
   const resolution = resolveLaneModel(model);
-  const host = new AssistantSessionHost({
+  const host: AssistantSessionHost = new AssistantSessionHost({
     repository: createAssistantRepository({ filePath: ":memory:" }),
     service,
     ports: recordingPorts(recorder, jobs.store, needsYou, repository),
     resolveModel: () => resolution,
-    publish: (event) => events.push(event),
+    publish: (event) => {
+      events.push(event);
+      // This world records navigation rather than opening a window. Give the
+      // host the same completion signal as the renderer; built-app checks
+      // separately prove that the requested screen actually appears.
+      if (
+        event.payload.type === "open_route" &&
+        event.payload.navigationRequestId
+      ) {
+        host.acknowledgeNavigation({
+          conversationId: event.conversationId,
+          navigationRequestId: event.payload.navigationRequestId,
+          displayedRoute: event.payload.route,
+          section: new URL(
+            event.payload.route,
+            "http://lane.test",
+          ).searchParams.get("section"),
+          overlay: "none",
+          status: "displayed",
+          reason: null,
+        });
+      }
+    },
     stallAfterMs: 60_000,
     log: (message, detail) => {
       if (message === "Assistant input budget")
