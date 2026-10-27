@@ -31,8 +31,9 @@ export function applicationModelFacts(
       const position = facts[root].findIndex((entry) =>
         id.startsWith(`profile.${root}.${entry.id}.`),
       );
-      if (position >= 0) {
-        const prefix = `profile.${root}.${facts[root][position].id}.`;
+      const record = facts[root][position];
+      if (record) {
+        const prefix = `profile.${root}.${record.id}.`;
         return `/${root}/${position}/${id.slice(prefix.length).split(".").map(escape).join("/")}`;
       }
     }
