@@ -8552,6 +8552,35 @@ describe("a finish that says needsPerson always ends paused", () => {
       handed: [mfa],
     },
     {
+      name: "a verification code is not the phone field's value",
+      page: page({ controls: [nameControl(), field(1, "Phone", true)] }),
+      forPerson: ["What code should I enter in the required Phone field?"],
+      handed: ["Phone", "What code should I enter in the required Phone field?"],
+    },
+    {
+      name: "a named field with an extra condition stays a separate task",
+      page: page({ controls: [nameControl(), field(1, "Phone", true)] }),
+      forPerson: [
+        "What phone number should I enter in the required Phone field, and do you consent to marketing texts?",
+      ],
+      handed: [
+        "Phone",
+        "What phone number should I enter in the required Phone field, and do you consent to marketing texts?",
+      ],
+    },
+    {
+      name: "two people's phone fields cannot be identified by label alone",
+      page: page({
+        controls: [
+          nameControl(),
+          field(1, "Phone", true),
+          { ...field(2, "Phone", true), groupLabel: "Professional reference" },
+        ],
+      }),
+      forPerson: ["What phone number should I enter in the required Phone field?"],
+      handed: ["What phone number should I enter in the required Phone field?"],
+    },
+    {
       name: "an optional Yes/No question named exactly",
       page: page({
         controls: [nameControl()],
@@ -8738,6 +8767,49 @@ describe("a finish that says needsPerson always ends paused", () => {
       }
     },
   );
+
+  test.each([
+    "What phone number should I enter in the required Phone field for your Platform Engineer application to Northwind Tools?",
+    "What phone number should I enter in the required Phone field?",
+    "c1",
+  ])("a field handover reuses Phone's native item: %s", async (item) => {
+    const phone = { ...field(1, "Phone *", true), inputType: "tel" };
+    const form = page({ controls: [nameControl(), phone] });
+    const input = config(form, confirmFirst);
+    const finalPress = vi.spyOn(input.hands, "clickAction");
+    const result = await runApplyAgent(
+      input,
+      repeatingModel("finish", {
+        needsPerson: true,
+        reason: "The required phone field needs the person's answer.",
+        forPerson: [item],
+      }),
+    );
+    expect(handedOver(result)).toEqual(["Phone *"]);
+    expect(result.outcome).toBe("paused");
+    expect(result.readyToSend).toBeNull();
+    expect(finalPress).not.toHaveBeenCalled();
+  });
+
+  test("finish binds the field before its fresh read renumbers controls", async () => {
+    const phone = { ...field(1, "Phone *", true), inputType: "tel" };
+    const form = page({ controls: [nameControl(), phone] });
+    const model = repeatingModel("finish", {
+      needsPerson: true,
+      reason: "The phone field needs the person.",
+      forPerson: ["c1"],
+    });
+    const result = await runApplyAgent(config(form, confirmFirst), {
+      chatWithTools: async (...args) => {
+        const response = await model.chatWithTools(...args);
+        phone.index = 2;
+        form.controls = [nameControl(), field(1, "Pronouns"), phone];
+        return response;
+      },
+    });
+    expect(handedOver(result)).toEqual(["Phone *"]);
+    expect(result.outcome).toBe("paused");
+  });
 
   test("a wrapped confirmation keeps a filled choice field's native question key and options", async () => {
     const question = "Are you over the age of 21?";
