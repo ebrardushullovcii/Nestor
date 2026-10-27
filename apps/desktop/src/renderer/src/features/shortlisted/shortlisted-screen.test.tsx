@@ -171,7 +171,8 @@ it("keeps a finished level change when its older queued command reply arrives la
   });
   await waitFor(() =>
     expect(
-      within(detail).getByRole("button", { name: "Approve" }).disabled,
+      within(detail).getByRole<HTMLButtonElement>("button", { name: "Approve" })
+        .disabled,
     ).toBe(false),
   );
   expect(within(detail).queryByText("Waiting", { exact: true })).toBeNull();

@@ -106,8 +106,7 @@ it("repeats edit after the person chooses Resume on the kept job, consumes reque
     flush: vi.fn(() => Promise.resolve()),
     saveMyEdits: vi.fn(() => Promise.resolve()),
     loadSaved: vi.fn(),
-    refresh: vi.fn(),
-    setResume: vi.fn(),
+    refresh: vi.fn(() => Promise.resolve()),
   } satisfies ReturnType<typeof useResume>;
   function Nav() {
     const navigate = useNavigate();
