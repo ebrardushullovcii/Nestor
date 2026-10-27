@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SpeedLevelSchema } from "./speed";
+import { SpeedLevelSchema } from "./speed-schema";
 
 import {
   AiProviderKindSchema,

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { JobFinderSettingsSectionSchema } from "./job-finder-navigation";
+import { JobFinderSettingsSectionSchema } from "./job-finder-navigation-schemas";
 import {
   JobFinderSettingsSchema,
   UpdateWorkspaceBehaviorInputSchema,
