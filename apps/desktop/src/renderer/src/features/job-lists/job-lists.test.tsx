@@ -170,4 +170,48 @@ describe("shared list pieces", () => {
     );
     expect(await screen.findByText("1 job")).toBeTruthy();
   });
+
+  it("a refresh far down a long list keeps every loaded row in place", async () => {
+    // Scrolling to the end of the list asks for more: capture that call.
+    const atEnd: Array<() => void> = [];
+    Object.assign(window, {
+      IntersectionObserver: class {
+        constructor(
+          private readonly callback: (
+            entries: Array<{ isIntersecting: boolean }>,
+          ) => void,
+        ) {}
+        observe() {
+          atEnd.push(() => this.callback([{ isIntersecting: true }]));
+        }
+        disconnect() {}
+      },
+    });
+    store.saveFoundJobs({
+      searchId: null,
+      jobs: Array.from({ length: 260 }, (_, i) => found(i + 1)),
+    });
+    render(<FoundList />);
+    expect(await screen.findByText("260 jobs")).toBeTruthy();
+    // Scroll past 200: five pages of fifty.
+    for (let loaded = 50; loaded < 250; loaded += 50) {
+      atEnd.at(-1)!();
+      await waitFor(() =>
+        expect(screen.getAllByRole("listitem").length).toBeGreaterThan(loaded),
+      );
+    }
+    const rows = () => screen.getAllByRole("listitem");
+    expect(rows()).toHaveLength(250);
+    const farDown = rows()[230]!;
+    const farDownTitle = farDown.textContent;
+    // A search saves one more job: the list refreshes in the background.
+    store.saveFoundJobs({ searchId: null, jobs: [found(999)] });
+    expect(await screen.findByText("261 jobs")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Designer 999")).toBeTruthy());
+    // Nothing loaded was dropped, and the row far down is the same element,
+    // updated in place rather than rebuilt from the top.
+    expect(rows().length).toBeGreaterThanOrEqual(250);
+    expect(farDown.isConnected).toBe(true);
+    expect(farDown.textContent).toBe(farDownTitle);
+  });
 });

@@ -1,10 +1,16 @@
+// In page order. A section `within` another has no tab of its own: it sits
+// at the end of that one, and links to it still land on it.
 export const JOB_FINDER_SETTINGS_SECTIONS = {
-  "app-device": { label: "App & device", tone: "default" },
   "ai-behavior": { label: "AI behavior", tone: "default" },
   "application-defaults": { label: "Resume look", tone: "default" },
   "application-authority": { label: "Applying", tone: "default" },
-  diagnostics: { label: "Diagnostics", tone: "default" },
-  "danger-zone": { label: "Delete everything", tone: "destructive" },
+  "app-device": { label: "App & device", tone: "default" },
+  diagnostics: { label: "Diagnostics", tone: "default", within: "app-device" },
+  "danger-zone": {
+    label: "Delete everything",
+    tone: "destructive",
+    within: "app-device",
+  },
 } as const;
 export type JobFinderSettingsSection =
   keyof typeof JOB_FINDER_SETTINGS_SECTIONS;

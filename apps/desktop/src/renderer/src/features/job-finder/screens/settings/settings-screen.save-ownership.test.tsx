@@ -166,7 +166,7 @@ describe("Settings save ownership", () => {
 
     const region = screen.getByRole("region", { name: "AI behavior" });
     const replies = within(region).getByRole("radiogroup", {
-      name: "How the profile assistant replies",
+      name: "How much the assistant suggests",
     });
     fireEvent.click(
       within(replies)
@@ -197,7 +197,7 @@ describe("Settings save ownership", () => {
 
     const ai = screen.getByRole("region", { name: "AI behavior" });
     const replies = within(ai).getByRole("radiogroup", {
-      name: "How the profile assistant replies",
+      name: "How much the assistant suggests",
     });
     fireEvent.click(
       within(replies)

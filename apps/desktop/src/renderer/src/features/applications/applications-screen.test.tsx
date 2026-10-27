@@ -433,6 +433,35 @@ describe("a failed application is never a dead end", () => {
   });
 });
 
+describe("one main action per screen", () => {
+  it("the page's Follow up is secondary while an application is open, whose own action leads", async () => {
+    // A reminder that is already due on the submitted application.
+    store
+      .sql(
+        "INSERT INTO tracker_events (job_id, kind, at, title, due_at) VALUES (?, 'reminder', ?, 'Synthetic follow-up', ?)",
+      )
+      .run(ids[0]!, Date.now() - 60_000, Date.now() - 60_000);
+    applyWrites(ids[1]!, "state = 'failed'");
+    const list = renderScreen();
+    const followUp = await screen.findByRole("button", {
+      name: "Follow up on 1 application",
+    });
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    const own = await within(detail).findByRole("button", {
+      name: "Try again",
+    });
+    expect(own.getAttribute("data-variant")).toBe("primary");
+    await waitFor(() =>
+      expect(followUp.getAttribute("data-variant")).toBe("outline"),
+    );
+  });
+});
+
 describe("an empty Applications list", () => {
   it("offers the approved resumes, where Apply starts one", async () => {
     store.sql("DELETE FROM tracker_events").run();

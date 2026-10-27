@@ -468,6 +468,8 @@ export function ApplicationsScreen() {
                       setFilter({ ...NO_FILTER, due: true, sort: "next" })
                     }
                     size="toolbar"
+                    // With an application open, its own action leads.
+                    variant={activeId === null ? "primary" : "outline"}
                   >
                     Follow up on {plural(dueCount, "application")}
                   </Button>

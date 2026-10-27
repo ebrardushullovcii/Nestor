@@ -157,6 +157,14 @@ export const NeedsYouTaskSchema = z.object({
   openedAt: IsoDateTimeSchema,
   source: SourceAccessReferenceSchema.optional(),
   blockedUrl: optionalStoredField(z.string().url().nullable(), null),
+  /** The application waiting on it (the first, when several are) and how many. */
+  waitingFor: z
+    .object({
+      company: z.string(),
+      title: z.string(),
+      count: z.number().int().positive(),
+    })
+    .optional(),
 });
 export type NeedsYouTask = z.infer<typeof NeedsYouTaskSchema>;
 
@@ -181,6 +189,7 @@ export const RequestNeedsYouInputSchema = NeedsYouTaskSchema.omit({
   id: true,
   openedAt: true,
   source: true,
+  waitingFor: true,
 })
   .extend({
     applicationId: ApplicationIdSchema,
