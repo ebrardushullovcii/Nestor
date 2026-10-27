@@ -912,6 +912,10 @@ async function runMeasuredApplyAgent(
           : at,
     });
   };
+  // A file the site (or Nestor's fence) refused gets a fixed number of
+  // tries per field; after that the run stops and hands the upload over.
+  const MAX_UPLOAD_TRIES = 2;
+  const uploadTries = new Map<string, number>();
   const uploadsStillUploading = () =>
     [...uploadLedger.values()].some((entry) => entry.state === "uploading");
 
@@ -2044,6 +2048,43 @@ async function runMeasuredApplyAgent(
         note: "This question is already waiting for the person's answer. Continue with other fields; do not retry it.",
         observation: current,
       };
+    if (proposal.tool === "upload" && control) {
+      const label = questionPrompt(control);
+      const tries = uploadTries.get(label) ?? 0;
+      const refused = [...uploadLedger.values()].find(
+        (entry) =>
+          entry.label === label &&
+          (entry.state === "rejected" || entry.state === "unconfirmed"),
+      );
+      if (refused && tries >= MAX_UPLOAD_TRIES) {
+        const fileName =
+          refused.fileName ||
+          control.upload?.fileName ||
+          config.sources.documents.find(
+            (document) => document.id === proposal.documentId,
+          )?.fileName;
+        const file = fileName ? `${fileName} ` : "the file ";
+        const summary = `"${label}" did not take ${file}after ${tries} tries${refused.state === "rejected" ? ": its upload was refused" : ": the site never showed it attached"}. Attach it yourself; your other answers are kept.`;
+        return {
+          kind: "paused",
+          pause: {
+            code: "document_needs_you",
+            summary,
+            question: pendingQuestions.get(UPLOAD_REPAIR_QUESTION_ID) ?? {
+              ...buildPendingQuestion({
+                control,
+                jobId: config.application.jobId,
+                detectedAt: now().toISOString(),
+                suggestion: null,
+              }),
+              note: summary,
+            },
+            blocker: null,
+          },
+        };
+      }
+      uploadTries.set(label, tries + 1);
+    }
     const writeKey = controlWriteKey(proposal);
     if (proposal.tool !== "finish") observationNeeded = true;
     const isField =

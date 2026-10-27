@@ -24,6 +24,13 @@
 // the name shows only once the upload progress reached 100%.
 // A failed send only logs to the console.
 //
+// Workable: a GET on the form's own site
+// (`/api/v1/jobs/<code>/form/upload/resume`) hands out the storage URL and
+// its fields: an empty `utf8`, the bucket, the signing fields, the key and
+// a policy. The page sends `Content-Type` (the file's own type), each field
+// in that order, then the file, with XMLHttpRequest. Storage answers 204.
+// A failed upload shows an error under the field and clears it.
+//
 // Lever: the résumé input posts the file, renamed with spaces and other
 // punctuation turned into underscores, and the form's public `accountId` to
 // `/parseResume` with XMLHttpRequest. The answer fills the fields the person
@@ -69,6 +76,26 @@ const greenhousePolicy = Buffer.from(
       { "x-amz-credential": s3Signing["X-Amz-Credential"] },
       { "x-amz-algorithm": s3Signing["X-Amz-Algorithm"] },
       { "x-amz-date": s3Signing["X-Amz-Date"] },
+    ],
+  }),
+).toString("base64");
+
+const workableKey =
+  "tmp/ttl-1d/production/0a1b2c3d-4e5f-4789-8bcd-ef0123456789";
+const workablePolicy = Buffer.from(
+  JSON.stringify({
+    expiration: "2099-01-01T01:00:00Z",
+    conditions: [
+      ["starts-with", "$utf8", ""],
+      ["eq", "$key", workableKey],
+      ["content-length-range", 1, 12000000],
+      ["starts-with", "$Content-Type", ""],
+      { utf8: "" },
+      { bucket: "synthetic-workable-files" },
+      { "X-Amz-Algorithm": s3Signing["X-Amz-Algorithm"] },
+      { "X-Amz-Credential": s3Signing["X-Amz-Credential"] },
+      { "X-Amz-Date": s3Signing["X-Amz-Date"] },
+      { key: workableKey },
     ],
   }),
 ).toString("base64");
@@ -381,6 +408,47 @@ const sites = {
   },
 };
 
+sites["workable-shape"] = {
+  title: "Senior Backend Developer",
+  company: "Hosted Form Replica",
+  form: () => `
+      <p><label for="firstname">First name *</label><input id="firstname" name="firstname" required></p>
+      <p><label for="lastname">Last name *</label><input id="lastname" name="lastname" required></p>
+      <p><label for="email">Email *</label><input id="email" name="email" type="email" required></p>
+      <div><label for="resume">Resume *</label>
+        <input id="resume" type="file" accept=".pdf,.doc,.docx,.odt,.rtf">
+        <span id="chip"></span><span id="resume-error" role="alert"></span>
+        <input type="hidden" name="resume_path" id="resume_path"></div>`,
+  script: `
+      const input = document.getElementById('resume');
+      input.addEventListener('change', async () => {
+        const file = input.files[0];
+        if (!file) return;
+        const chip = document.getElementById('chip');
+        const error = document.getElementById('resume-error');
+        chip.textContent = 'Uploading…';
+        error.textContent = '';
+        const signed = (await (await fetch('/workable-shape/api/v1/jobs/1/form/upload/resume')).json()).uploadPostUrl;
+        const body = new FormData();
+        body.append('Content-Type', file.type);
+        Object.keys(signed.fields).forEach((key) => body.append(key, signed.fields[key]));
+        body.append('file', file);
+        const request = new XMLHttpRequest();
+        request.onloadend = () => {
+          if (request.status >= 200 && request.status < 300) {
+            document.getElementById('resume_path').value = signed.path;
+            chip.textContent = file.name;
+          } else {
+            chip.textContent = '';
+            error.textContent = 'Something went wrong while uploading your file.';
+            input.value = '';
+          }
+        };
+        request.open('POST', signed.url);
+        request.send(body);
+      });`,
+};
+
 sites["lever-shape"] = {
   title: "Embedded Engineer",
   company: "Posting Replica",
@@ -549,7 +617,7 @@ export async function handleRealUploadShapes(
   { send, readPost, logPost },
 ) {
   const [, slug, rest = ""] =
-    /^\/(ashby-shape|greenhouse-shape|lever-shape)(\/.*)?$/u.exec(
+    /^\/(ashby-shape|greenhouse-shape|lever-shape|workable-shape)(\/.*)?$/u.exec(
       url.pathname,
     ) ?? [];
   if (!slug) return false;
@@ -594,6 +662,24 @@ export async function handleRealUploadShapes(
       valid: /^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(
         url.searchParams.get("email") ?? "",
       ),
+    });
+    return true;
+  }
+  if (rest === "/api/v1/jobs/1/form/upload/resume") {
+    json(res, 200, {
+      downloadUrl: `${storageOrigin(req)}/workable-shape/storage/${workableKey}`,
+      uploadPostUrl: {
+        url: `${storageOrigin(req)}/workable-shape/storage`,
+        fields: {
+          utf8: "",
+          bucket: "synthetic-workable-files",
+          ...s3Signing,
+          key: workableKey,
+          Policy: workablePolicy,
+          "X-Amz-Signature": "a".repeat(64),
+        },
+        path: workableKey,
+      },
     });
     return true;
   }

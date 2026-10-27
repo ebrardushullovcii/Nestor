@@ -6,6 +6,7 @@ import responseReplay from "../../../apps/desktop/test-fixtures/job-finder/apply
 import realShapes from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/real-upload-shapes.json";
 import ashbyBind from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/ashby-upload-bind.json";
 import greenhouseS3 from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/greenhouse-s3-post.json";
+import workableS3 from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/workable-s3-post.json";
 import { inspectPageMutationResponse } from "./mutation-response-body";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -331,6 +332,64 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
     expect(await inspectPageMutationResponse(page, observed)).toMatchObject({
       accepted: true,
     });
+  });
+
+  test("Fill: Workable's storage POST (an empty utf8 field, the file's type) gets through", async () => {
+    const site = await startTrackedServer(),
+      storage = await startTrackedServer();
+    const Policy = Buffer.from(JSON.stringify(workableS3.policy)).toString(
+      "base64",
+    );
+    // Workable's presign is a GET on the form's own site.
+    site.registerJson("/api/v1/jobs/REPLICA1/form/upload/resume", {
+      uploadPostUrl: {
+        url: storage.baseUrl + "/",
+        fields: { ...workableS3.fields, Policy },
+        path: workableS3.fields.key,
+      },
+    });
+    storage.registerResponse("/", {
+      status: 204,
+      type: "text/plain",
+      body: "",
+    });
+    site.registerHtml(
+      "/workable",
+      `<label>First name<input id="first"></label><label for="resume">Resume</label><input id="resume" type="file"><output id="result"></output><script>
+      document.getElementById('resume').addEventListener('change', async function () {
+        const file = this.files[0];
+        const signed = (await (await fetch('/api/v1/jobs/REPLICA1/form/upload/resume')).json()).uploadPostUrl;
+        const body = new FormData();
+        body.append('Content-Type', file.type);
+        Object.keys(signed.fields).forEach((key) => body.append(key, signed.fields[key]));
+        body.append('file', file);
+        const status = await new Promise((resolve) => { const xhr = new XMLHttpRequest(); xhr.open('POST', signed.url); xhr.onloadend = () => resolve(xhr.status); xhr.send(body); });
+        document.getElementById('result').textContent = String(status);
+      });</script>`,
+    );
+    const { page } = await newGuardedPage();
+    await page.goto(`${site.baseUrl}/workable`);
+    const session = createPlaywrightApplyPageSession({ page });
+    await session.installPrepareOnlyGuard({
+      intermediateMutationsAuthorized: false,
+      attachmentUploadsAuthorized: true,
+      allowedOrigins: [],
+    });
+    await page.fill("#first", realShapes.firstName);
+    await registerPrepareOnlyPreparedValue(page, realShapes.firstName);
+    const resume = (await session.readPage()).controls.find(
+      (field) => field.inputType === "file",
+    )!;
+    await session.uploadFile(resume.ref ?? `c${resume.index}`, {
+      name: realShapes.fileName,
+      mimeType: "application/pdf",
+      bytes: new TextEncoder().encode("%PDF-1.4 synthetic upload bytes"),
+    });
+    await page.waitForFunction(
+      () => !!document.getElementById("result")?.textContent,
+    );
+    expect(await page.locator("#result").textContent()).toBe("204");
+    expect(requestHitsFor(storage.hits, "/")).toHaveLength(1);
   });
 
   test("Fill: Ashby's upload binds the stored file to the form once, and no answer leaves", async () => {
