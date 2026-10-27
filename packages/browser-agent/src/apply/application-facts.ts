@@ -43,16 +43,19 @@ export function applicantContactGroup(control: ApplyFormControl): boolean {
     ].includes(group)
   );
 }
-/** A section title or a bare country field cannot establish residence. */
+/** A typed applicant-country reading or an explicit residence label. */
 export function isExplicitResidenceCountryControl(
   control: ApplyFormControl,
 ): boolean {
   const label = normalizeFormQuestionPrompt(control.label);
   return (
-    label !== "country" &&
-    RESIDENCE_COUNTRY_LABELS.includes(label) &&
-    applicantContactGroup(control) &&
+    ((label !== "country" &&
+      RESIDENCE_COUNTRY_LABELS.includes(label) &&
+      applicantContactGroup(control)) ||
+      (control.answerTags?.kind === "residence_country" &&
+        control.answerTags.sourceId === "profile.currentCountry")) &&
     !fieldNamesAnotherPerson(control) &&
+    !requiresSavedNationalityAnswer(control.label) &&
     control.asksHiringCountry !== true
   );
 }

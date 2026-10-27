@@ -491,7 +491,7 @@ export function classifyAnswerPermission(input: {
     );
   const catalog = answerSourceCatalog(input.sources);
   const pickerRule = savedPickerRule(
-    input.control,
+    { ...input.control, answerTags: tags },
     [input.control.groupLabel, input.control.label].filter(Boolean).join(" — "),
     {
       sources: input.sources,
@@ -807,6 +807,16 @@ export function classifyAnswerPermission(input: {
     );
   }
   if (exactSaved) return { kind: "literal", source };
+  if (tags.kind === "residence_country")
+    return source.id === "profile.currentCountry" &&
+      source.purpose === "profile" &&
+      !fieldNamesAnotherPerson(input.control) &&
+      !input.control.asksHiringCountry &&
+      literalValueMatches(source, input.control, input.answer)
+      ? { kind: "literal", source }
+      : deny(
+          "This residence-country answer must use your recorded current country.",
+        );
   if (
     tags.kind === "other" &&
     source.purpose === "profile" &&
