@@ -19,6 +19,7 @@ import {
 import {
   describeBrowserError,
   type ApplicationAttemptQuestion,
+  type ApplyFormPathStep,
 } from "@nestor/contracts";
 
 import { withReasoningTask, type LLMClient } from "../agent/contracts";
@@ -80,6 +81,13 @@ import {
   type FileUploadProblem,
 } from "./submit-preflight";
 import { fillMayOpen } from "./fill-presses";
+import {
+  nextPathStep,
+  planReplay,
+  replayedAnswer,
+  reviewFieldKey,
+  screenKey,
+} from "./form-replay";
 import { matchOption } from "./option-match";
 import { savedPickerRule } from "./option-fallback";
 import { compactApplyPageHistory } from "./page-history";
@@ -347,6 +355,8 @@ async function runMeasuredApplyAgent(
   const observedAnswers = new Map<string, ApplyFilledControl>();
   const observedAttachments = new Map<string, ApplyAttachedDocument>();
   const pauses: ApplyPause[] = [];
+  /** The moves between screens, carried on from the run this one restores. */
+  const formPath: ApplyFormPathStep[] = [...(config.replay?.path ?? [])];
   /**
    * A form button Fill in for me left for the person. It is handed over when
    * the run finishes, after everything else it could fill is filled, rather
@@ -2054,6 +2064,45 @@ async function runMeasuredApplyAgent(
         },
       },
     );
+    // The path between screens, for a later restore: what was pressed or
+    // followed, by what it said, from which screen.
+    if (
+      outcome.kind === "moved" &&
+      before &&
+      (proposal.tool === "click" ||
+        proposal.tool === "follow_link" ||
+        proposal.tool === "navigate")
+    ) {
+      const link =
+        proposal.tool === "follow_link"
+          ? before.links.find((entry) => entry.ref === proposal.ref)
+          : undefined;
+      const label =
+        proposal.tool === "navigate"
+          ? proposal.url
+          : proposal.tool === "follow_link"
+            ? (link?.label ?? "")
+            : ([...before.actions, ...before.clickables].find(
+                (entry) => entry.ref === proposal.ref,
+              )?.label ?? "");
+      const href = proposal.tool === "navigate" ? proposal.url : link?.href;
+      const step: ApplyFormPathStep = {
+        from: screenKey(before),
+        tool: proposal.tool,
+        label: label.slice(0, 300),
+        ...(href ? { href: href.slice(0, 4_096) } : {}),
+      };
+      if (
+        formPath.length < 40 &&
+        !formPath.some(
+          (entry) =>
+            entry.from === step.from &&
+            entry.tool === step.tool &&
+            entry.label === step.label,
+        )
+      )
+        formPath.push(step);
+    }
     const commitField = () => {
       if (
         (proposal.tool === "select" || proposal.tool === "type") &&
@@ -3032,6 +3081,223 @@ async function runMeasuredApplyAgent(
       );
     },
   };
+  /**
+   * Brings back a closed form without the model: follows the recorded path
+   * to the screen that holds stored answers, writes each one into its empty
+   * field (one page read per screen), re-attaches the same file under the
+   * upload rules, and fills a question the person answered in Needs you.
+   * What already holds a value (the site's own draft, the person's edit) is
+   * kept. The run finishes here when the screen is complete; a step button
+   * stays the person's in Fill in for me; anything else goes on to the model.
+   */
+  const replayedScreens = new Set<string>();
+  const takenPath = new Set<number>();
+  const restoreFromReplay = async (): Promise<AgentLoopFinish | null> => {
+    const replay = runConfig.replay;
+    if (!replay) return null;
+    const toFinish = (
+      reported: AgentLoopToolOutcome,
+    ): AgentLoopFinish | null =>
+      reported.kind === "finish"
+        ? reported.finish
+        : reported.kind === "stop"
+          ? {
+              reason: reported.reason,
+              needsPerson: true,
+              stuck: false,
+              data: {},
+            }
+          : null;
+    const safety = runConfig.safety;
+    const writeOne = async (
+      control: ApplyFormControl,
+      kind: "text" | "choose" | "toggle",
+      value: string,
+    ): Promise<boolean> => {
+      if (kind !== "toggle") await safety?.registerPreparedValue(value);
+      if (runConfig.intermediateWritesAuthorized === true)
+        await safety?.openIntermediateWriteWindow().catch(() => undefined);
+      const result =
+        kind === "text"
+          ? await runConfig.hands.fillText(control.ref, value)
+          : kind === "choose"
+            ? await runConfig.hands.chooseOption(control.ref, value)
+            : await runConfig.hands.setToggle(control.ref, true);
+      return result.ok;
+    };
+    for (let hop = 0; hop <= replay.path.length; hop += 1) {
+      const page = pageTools.state.observation;
+      if (!page || page.blocker) return null;
+      const screen = screenKey(page);
+      if (replayedScreens.has(screen)) break;
+      const plan = planReplay(page, replay);
+      const files = replay.attachments.flatMap((attachment) => {
+        const control = page.controls.find(
+          (entry) =>
+            entry.kind === "file" &&
+            !entry.disabled &&
+            !holdsAnswer(entry) &&
+            (attachment.fieldKey
+              ? attachment.fieldKey === reviewFieldKey(page, entry)
+              : questionPrompt(entry) === attachment.field),
+        );
+        const document = runConfig.sources.documents.find(
+          (entry) => entry.fileName === attachment.fileName,
+        );
+        return control && document ? [{ control, document }] : [];
+      });
+      // A question the person answered in Needs you since: their words.
+      const saved = unresolvedRequiredControls(page).flatMap((control) => {
+        if (
+          control.kind === "file" ||
+          control.kind === "radio" ||
+          control.kind === "checkbox" ||
+          holdsAnswer(control) ||
+          plan.writes.some((entry) => entry.write.control === control)
+        )
+          return [];
+        const answer = savedAnswerForQuestion(
+          control,
+          runConfig.sources.reusableAnswers,
+          page.controls,
+        );
+        return answer?.id.startsWith("application_")
+          ? [{ control, answer }]
+          : [];
+      });
+      if (!plan.writes.length && !plan.kept && !files.length && !saved.length) {
+        // Nothing of this screen is stored: take the recorded way on.
+        const next = nextPathStep(page, replay, takenPath);
+        if (!next) break;
+        takenPath.add(next.index);
+        const proposal: ApplyProposal | null =
+          next.step.tool === "navigate"
+            ? { tool: "navigate", url: next.step.href ?? next.step.label }
+            : next.ref
+              ? { tool: next.step.tool, ref: next.ref }
+              : null;
+        if (!proposal) break;
+        const finish = toFinish(
+          await outcomeToLoop(await runProposal(proposal, checkOne), {
+            withPage: false,
+          }),
+        );
+        if (finish) return finish;
+        continue;
+      }
+      replayedScreens.add(screen);
+      // Files first: each upload reads the page it changed, and the plain
+      // writes after it share one read at the end.
+      for (const { control, document } of files) {
+        const finish = toFinish(
+          await outcomeToLoop(
+            await runProposal(
+              { tool: "upload", ref: control.ref, documentId: document.id },
+              checkOne,
+            ),
+            { withPage: false },
+          ),
+        );
+        if (finish) return finish;
+      }
+      let restoredCount = 0;
+      for (const { write, answer } of plan.writes) {
+        if (!(await writeOne(write.control, write.kind, write.value))) continue;
+        restoredCount += 1;
+        filled.push({
+          fieldKey: reviewFieldKey(page, write.control),
+          ref: write.control.ref,
+          label: questionPrompt(write.control),
+          questionKind: write.control.questionKind,
+          answer: replayedAnswer(answer, write.control),
+          at: now().toISOString(),
+        });
+      }
+      for (const { control, answer } of saved) {
+        const kind =
+          control.kind === "select" || control.kind === "combobox"
+            ? "choose"
+            : "text";
+        if (!(await writeOne(control, kind, answer.answer))) continue;
+        restoredCount += 1;
+        filled.push({
+          fieldKey: reviewFieldKey(page, control),
+          ref: control.ref,
+          label: questionPrompt(control),
+          questionKind: control.questionKind,
+          answer: {
+            value: answer.answer,
+            kind: control.questionKind,
+            sourceKind: "answer_library",
+            sourceId: `answerLibrary.${answer.id}`,
+            provenanceLabel: "your answer in Needs you",
+            groundedIn: [`answerLibrary.${answer.id}`],
+          },
+          at: now().toISOString(),
+        });
+      }
+      const after = await pageTools.observe();
+      syncObservation(after);
+      note(
+        `Brought back ${restoredCount} answer${restoredCount === 1 ? "" : "s"} on this screen without the model${plan.kept ? `; ${plan.kept} were already there` : ""}${plan.missing.length ? `; ${plan.missing.length} no longer match a field` : ""}.`,
+      );
+      const stopped = await guardStop(
+        { config: runConfig, now, guardState },
+        after.url,
+      );
+      if (stopped) {
+        pauses.push(stopped);
+        return {
+          reason: stopped.summary,
+          needsPerson: true,
+          stuck: false,
+          data: {},
+        };
+      }
+      break;
+    }
+    const current = pageTools.state.observation;
+    if (!current || current.blocker) return null;
+    const open = unresolvedRequiredControls(current);
+    if (
+      open.some((control) => !pendingQuestions.has(pendingQuestionKey(control)))
+    )
+      return null;
+    if (open.length)
+      return {
+        reason: collectedQuestionsPause()!.summary,
+        needsPerson: true,
+        stuck: false,
+        data: {},
+      };
+    // The screen is complete. A next step stays the person's in Fill in for
+    // me: its button is handed over the way the run hands it over.
+    const advance = current.actions.find(
+      (action) =>
+        action.kind === "advance" && action.visible && !action.disabled,
+    );
+    if (advance && !pressesFormButtons(runConfig) && !deferredPress) {
+      const finish = toFinish(
+        await outcomeToLoop(
+          await runProposal({ tool: "click", ref: advance.ref }, checkOne),
+          { withPage: false },
+        ),
+      );
+      if (finish) return finish;
+    }
+    // With the step handed over the screen is done; otherwise it must read
+    // as ready.
+    if (!deferredPress && !checkFormReadiness(current, uploadOptions).ok)
+      return null;
+    return toFinish(
+      await outcomeToLoop({
+        kind: "finished",
+        reason: "The form is back as it was left.",
+        stuck: false,
+        needsPerson: false,
+      }),
+    );
+  };
   const loop = await runAgentLoop({
     // What stays the same for every application this person makes leads:
     // the instructions, then their facts. The job, its resume and its page
@@ -3149,6 +3415,10 @@ async function runMeasuredApplyAgent(
     // cannot fill anything. This includes answer refusals, not just pickers.
     beforeModelTurn: async () => {
       await refreshReusableAnswers();
+      // A form brought back from what an earlier run left: no model call
+      // for a screen that matches it.
+      const restored = await restoreFromReplay();
+      if (restored) return restored;
       let current = pageTools.state.observation;
       if (current?.blocker?.code === "browser_blocked")
         return {
@@ -3510,5 +3780,6 @@ async function runMeasuredApplyAgent(
     readyToSend,
     questionContexts: questionOccurrences.snapshot(),
     pickerAttempts: [...guardState.pickerAttempts.values()],
+    formPath,
   };
 }

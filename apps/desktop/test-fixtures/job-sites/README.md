@@ -14,6 +14,8 @@ From the repo root, run `node apps/desktop/test-fixtures/job-sites/serve.mjs` wi
 
 `http://127.0.0.1:47950/fill-chores/apply/1` is one form with the chores around it: a cookie banner (Accept all or Reject all), an "Apply for this job" button that reveals the form, a region list loaded with a GET for the chosen country beside a GET autosave of that choice, and work history rows added with "Add another position".
 
+`http://127.0.0.1:47950/steps-shape/jobs/1` is a two-step application in Workday's shape: the listing's "Apply" opens the form, a step list marks the current step, and "Save and Continue" keeps the step as the site's own draft before the next shows (coming back to a saved step shows what was saved). Only the last step's Submit sends it.
+
 `http://127.0.0.1:47950/atlas/` has 300 jobs and exercises page numbers, query filters, sorting, duplicate jobs, sponsored cards and discovery decoys.
 
 `http://127.0.0.1:47950/ripple/` has 300 jobs and exercises load more, query filters, duplicate jobs, initials-only companies and a local ATS redirect.

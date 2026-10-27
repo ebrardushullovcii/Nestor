@@ -2317,6 +2317,18 @@ export const ApplyPickerAttemptSchema = z.object({
   offeredOptions: z.array(z.string().max(300)).max(500),
 });
 export type ApplyPickerAttempt = z.infer<typeof ApplyPickerAttemptSchema>;
+/**
+ * One move Fill made between the form's screens: the button that opened the
+ * form, a cookie banner, a link it followed. `from` is the screen it was on
+ * (address without query, and step label). A restore follows the same path.
+ */
+export const ApplyFormPathStepSchema = z.object({
+  from: z.string().max(2_000),
+  tool: z.enum(["click", "follow_link", "navigate"]),
+  label: z.string().max(300),
+  href: z.string().max(4_096).optional(),
+});
+export type ApplyFormPathStep = z.infer<typeof ApplyFormPathStepSchema>;
 /** As stored by a run from before `notOffered` was kept. */
 export type StoredApplyPickerAttempt = z.input<typeof ApplyPickerAttemptSchema>;
 
@@ -2325,6 +2337,7 @@ export const ApplyExecutionResultSchema = z.object({
     z.array(ApplyPickerAttemptSchema).max(200),
     [],
   ),
+  formPath: optionalStoredField(z.array(ApplyFormPathStepSchema).max(40), []),
   skipReason: optionalStoredField(z.string().min(1).max(2000).nullable(), null),
   applyUsageTotals: optionalStoredField(
     ApplicationApplyUsageTotalsSchema.nullable(),
