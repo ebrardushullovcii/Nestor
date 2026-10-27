@@ -15,13 +15,17 @@ export default async function journey(ctx) {
     ctx.app.evaluate(({ app }) => {
       const byType = {};
       let total = 0;
+      let own = 0;
       for (const p of app.getAppMetrics()) {
         total += p.memory.workingSetSize;
+        own += p.memory.privateBytes ?? 0;
         byType[p.type] = (byType[p.type] ?? 0) + p.memory.workingSetSize;
       }
       const mb = (kb) => Math.round(kb / 1024);
       return {
         totalMB: mb(total),
+        // Windows only: memory no other process can share (Task Manager).
+        privateMB: mb(own),
         byTypeMB: Object.fromEntries(
           Object.entries(byType).map(([k, v]) => [k, mb(v)]),
         ),
