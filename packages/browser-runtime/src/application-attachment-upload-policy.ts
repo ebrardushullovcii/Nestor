@@ -26,8 +26,24 @@ export interface AttachmentUploadWindow {
   fileAnsweredAtMs?: number;
 }
 
+// A résumé parser (Lever's `/parseResume`) takes the file the same way.
 const uploadSignal =
-  /(?:^|[^a-z0-9])(?:uploads?|attachments?|files?|objects?|blobs?|storage|documents?)(?:[^a-z0-9]|$)/iu;
+  /(?:^|[^a-z0-9])(?:uploads?|attachments?|files?|objects?|blobs?|storage|documents?|resumes?|cvs?)(?:[^a-z0-9]|$)/iu;
+
+/**
+ * A file's name as a site may rewrite it before sending: Lever turns spaces
+ * and other punctuation into underscores. The bytes are still checked
+ * exactly; this only stops a renamed copy from reading as another file.
+ */
+export function sameAttachmentName(sent: string, chosen: string): boolean {
+  const plain = (name: string) =>
+    name
+      .normalize("NFC")
+      .replace(/[^\p{L}\p{N}.-]+/gu, "_")
+      .replace(/^[._]+|[._]+$/gu, "")
+      .toLowerCase();
+  return sent === chosen || plain(sent) === plain(chosen);
+}
 const splitCase = (value: string) =>
   value.replace(/([a-z0-9])([A-Z])/gu, "$1 $2");
 
@@ -240,7 +256,12 @@ function storageMetadata(
     case "authenticity_token":
       return /^[\w+/=-]{1,4096}$/u.test(value);
     default:
-      return false;
+      // The form's own opaque identifier, such as Lever's `accountId`: a
+      // public id from the page, never an answer (those are checked apart).
+      return (
+        /(?:^|[a-z_-])id$/iu.test(key) &&
+        /^(?=[\w-]*\d)[\w-]{6,64}$/u.test(value)
+      );
   }
 }
 
@@ -348,7 +369,7 @@ export async function classifyAttachmentUpload(input: {
     );
     if (
       files.length !== 1 ||
-      files[0]!.name !== grant.fileName ||
+      !sameAttachmentName(files[0]!.name, grant.fileName) ||
       files[0]!.size !== grant.byteLength
     )
       return { allowed: false, containsFile: files.length > 0 };

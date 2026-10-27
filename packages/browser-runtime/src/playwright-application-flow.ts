@@ -1065,10 +1065,20 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         : body instanceof Blob
           ? [body]
           : [];
+    // Mirrors sameAttachmentName: a site may rename the file it sends
+    // (Lever turns spaces into underscores); the network fence checks bytes.
+    const plainName = (name: string) =>
+      name
+        .normalize("NFC")
+        .replace(/[^\p{L}\p{N}.-]+/gu, "_")
+        .replace(/^[._]+|[._]+$/gu, "")
+        .toLowerCase();
     if (
       files.length !== 1 ||
       files[0]!.size !== grant.byteLength ||
-      (files[0] instanceof File && files[0].name !== grant.fileName)
+      (files[0] instanceof File &&
+        files[0].name !== grant.fileName &&
+        plainName(files[0].name) !== plainName(grant.fileName))
     )
       return false;
     grant.remainingRequests -= 1;

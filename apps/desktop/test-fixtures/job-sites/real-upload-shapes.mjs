@@ -23,6 +23,13 @@
 // and the file with XMLHttpRequest. Storage answers 201 with an XML receipt;
 // the name shows only once the upload progress reached 100%.
 // A failed send only logs to the console.
+//
+// Lever: the résumé input posts the file, renamed with spaces and other
+// punctuation turned into underscores, and the form's public `accountId` to
+// `/parseResume` with XMLHttpRequest. The answer fills the fields the person
+// has not touched (a change or paste marks one touched) and the hidden
+// `resumeStorageId`; the page shows "Success!" or that it could not read the
+// file. The final submit posts the whole form.
 
 const s3Signing = {
   "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
@@ -293,6 +300,54 @@ const sites = {
   },
 };
 
+sites["lever-shape"] = {
+  title: "Embedded Engineer",
+  company: "Posting Replica",
+  form: () => `
+      <p><label for="name">Full name ✱</label><input id="name" name="name" required></p>
+      <p><label for="email">Email ✱</label><input id="email" name="email" type="email" required></p>
+      <p><label for="phone">Phone</label><input id="phone" name="phone"></p>
+      <div><label for="resume-upload-input">Resume/CV ✱</label>
+        <input id="resume-upload-input" name="resume" type="file" required>
+        <span class="resume-upload-working" hidden>Uploading…</span>
+        <span class="resume-upload-success" hidden>Success!</span>
+        <span class="resume-upload-failure" hidden>Couldn't auto-read resume.</span></div>
+      <input type="hidden" name="accountId" value="0a1b2c3d-4e5f-4789-8bcd-ef0123456789">
+      <input type="hidden" name="resumeStorageId" value="">`,
+  script: `
+      const touched = new Set();
+      for (const id of ['name', 'email', 'phone'])
+        for (const type of ['change', 'paste'])
+          document.getElementById(id).addEventListener(type, () => touched.add(id));
+      const show = (name) => {
+        for (const state of ['working', 'success', 'failure'])
+          document.querySelector('.resume-upload-' + state).hidden = state !== name;
+      };
+      const sanitize = (name) => name.replace(/[<>:"/\\\\|?*\\s]/g, '_').replace(/^\\.+|\\.+$/g, '').replace(/^_+|_+$/g, '').replace(/_+/g, '_') || 'untitled';
+      document.getElementById('resume-upload-input').addEventListener('change', function () {
+        const file = this.files && this.files[0];
+        if (!file || file.size === 0) return;
+        show('working');
+        const body = new FormData();
+        body.append('resume', file, sanitize(file.name));
+        body.append('accountId', document.querySelector('input[name=accountId]').value);
+        const request = new XMLHttpRequest();
+        request.onreadystatechange = () => {
+          if (request.readyState !== 4) return;
+          let profile = null;
+          try { profile = request.status === 200 ? JSON.parse(request.response) : null; } catch {}
+          if (!profile) return show('failure');
+          show('success');
+          for (const id of ['name', 'email', 'phone'])
+            if (!touched.has(id) || !document.getElementById(id).value)
+              document.getElementById(id).value = profile[id] || '';
+          document.querySelector('input[name=resumeStorageId]').value = profile.resumeStorageId;
+        };
+        request.open('POST', '/lever-shape/parseResume');
+        request.send(body);
+      });`,
+};
+
 function storageOrigin(req) {
   const port = /:(\d+)$/u.exec(req.headers.host ?? "")?.[1] ?? "80";
   return `http://localhost:${port}`;
@@ -381,7 +436,9 @@ export async function handleRealUploadShapes(
   { send, readPost, logPost },
 ) {
   const [, slug, rest = ""] =
-    /^\/(ashby-shape|greenhouse-shape)(\/.*)?$/u.exec(url.pathname) ?? [];
+    /^\/(ashby-shape|greenhouse-shape|lever-shape)(\/.*)?$/u.exec(
+      url.pathname,
+    ) ?? [];
   if (!slug) return false;
   const site = sites[slug];
   if (req.method === "OPTIONS") {
@@ -403,6 +460,16 @@ export async function handleRealUploadShapes(
       res.writeHead(204, cors);
       res.end();
     }
+    return true;
+  }
+  if (rest === "/parseResume" && req.method === "POST") {
+    logPost(url.pathname, await readPost(req));
+    json(res, 200, {
+      name: "Parsed From File",
+      email: "parsed@example.test",
+      phone: "+44 20 0000 0000",
+      resumeStorageId: "replica-resume-storage-1",
+    });
     return true;
   }
   if (rest === "/api/non-user-graphql" && req.method === "POST") {

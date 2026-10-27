@@ -394,3 +394,46 @@ test("Ashby's bind: one, to the presign's endpoint, naming its handle, after sto
     false,
   );
 });
+
+test("a résumé parser on the form's own site takes the exact file, renamed, with the form's id", async () => {
+  const leverGrant = { ...grant, fileName: "Alex Vanguard CV.pdf" };
+  const parse = async (
+    extra: Record<string, string>,
+    fileName = "Alex_Vanguard_CV.pdf",
+    fileBytes = bytes,
+  ) => {
+    const form = new FormData();
+    form.set(
+      "resume",
+      new Blob([fileBytes], { type: grant.mimeType }),
+      fileName,
+    );
+    for (const [key, value] of Object.entries(extra)) form.set(key, value);
+    const request = new Request("https://apply.example.test/parseResume", {
+      method: "POST",
+      body: form,
+    });
+    return classifyAttachmentUpload({
+      window: leverGrant,
+      nowMs: 1000,
+      method: "POST",
+      url: request.url,
+      contentType: request.headers.get("content-type")!,
+      body: new Uint8Array(await request.arrayBuffer()),
+      preparedValues: ["Alex Vanguard"],
+    });
+  };
+  const accountId = "0a1b2c3d-4e5f-4789-8bcd-ef0123456789";
+  expect((await parse({ accountId })).allowed).toBe(true);
+  // Other bytes, another file's name, an answer, or any other field: no.
+  expect(
+    (await parse({ accountId }, undefined, new Uint8Array(bytes.length)))
+      .allowed,
+  ).toBe(false);
+  expect((await parse({ accountId }, "cover_letter.pdf")).allowed).toBe(false);
+  expect((await parse({ accountId: "Alex Vanguard" })).allowed).toBe(false);
+  expect((await parse({ accountId, name: "Alex Vanguard" })).allowed).toBe(
+    false,
+  );
+  expect((await parse({ accountId, note: "hello there" })).allowed).toBe(false);
+});
