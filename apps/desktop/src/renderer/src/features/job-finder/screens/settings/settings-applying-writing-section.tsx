@@ -1,4 +1,5 @@
-import { useId } from "react";
+import { ChevronRight } from "lucide-react";
+import { useId, type ReactNode } from "react";
 import {
   AiBehaviorPreferenceSchema,
   CoverLetterPreferenceSchema,
@@ -154,6 +155,32 @@ function toInput(slice: ApplyingWritingSlice): UpdateAiBehaviorInput {
   };
 }
 
+/**
+ * The choices most people set once and leave: closed under a line that says
+ * where they stand, so the common ones read first. Still their only home.
+ */
+function MoreChoices(props: {
+  summary: string;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <details
+      className="group min-w-0 border-t border-(--surface-panel-border) pt-3"
+      data-testid={props.testId}
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-(length:--text-body) font-medium text-foreground [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          aria-hidden="true"
+          className="size-4 shrink-0 transition-transform group-open:rotate-90"
+        />
+        {props.summary}
+      </summary>
+      <div className="mt-3 grid min-w-0 gap-3">{props.children}</div>
+    </details>
+  );
+}
+
 export function SettingsApplyingWritingSection(props: {
   onUpdateAiBehavior: (
     input: UpdateAiBehaviorInput,
@@ -251,8 +278,9 @@ export function SettingsApplyingWritingSection(props: {
         </Field>
       </div>
 
-      <Field>
-        <FieldLabel>Declarations it may tick for you</FieldLabel>
+      <MoreChoices
+        summary={`Declarations it may tick for you: ${draft.applying.preApprovedDeclarations.filter((kind) => declarationChoices.some((choice) => choice.kind === kind)).length} of ${declarationChoices.length} allowed`}
+      >
         <p className="text-(length:--text-small) leading-5 text-muted-foreground">
           Any box not allowed here is left for you, and the run carries on with
           the rest of the form.
@@ -286,12 +314,12 @@ export function SettingsApplyingWritingSection(props: {
             />
           ))}
         </div>
-      </Field>
+      </MoreChoices>
 
       {writesLetters ? (
-        <div
-          className="grid min-w-0 gap-3 border-t border-(--surface-panel-border) pt-3"
-          data-testid="settings-ai-cover-letter-style"
+        <MoreChoices
+          summary="How a letter reads: its sound, length, language and an example"
+          testId="settings-ai-cover-letter-style"
         >
           <p className="max-w-[72ch] text-(length:--text-description) leading-5 text-foreground-soft">
             How a letter should read. A letter only ever says things your
@@ -364,7 +392,7 @@ export function SettingsApplyingWritingSection(props: {
               nothing from this letter is reused as a fact about another job.
             </p>
           </Field>
-        </div>
+        </MoreChoices>
       ) : null}
     </div>
   );
