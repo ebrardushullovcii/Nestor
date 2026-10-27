@@ -62,7 +62,7 @@ describe("settings and application standing the assistant reports", () => {
     );
     const settings = (await service.read()).settings;
     expect(settings.collapseSideMenuWithAssistant).toBe(false);
-    expect(settings.keepSessionAlive).toBeDefined();
+    expect(settings.writeResumesOnShortlist).toBeDefined();
     expect(summaries).toEqual([
       "Changed Collapse the side menu while the assistant is open: off",
     ]);

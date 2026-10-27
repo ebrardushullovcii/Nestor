@@ -236,9 +236,7 @@ async function seedLaneProfile(repository: JobFinderRepository) {
       fontPreset: "inter_requisite",
       appearanceTheme: "system",
       humanReviewRequired: true,
-      keepSessionAlive: false,
       allowAutoSubmitOverride: false,
-      discoveryOnly: false,
     }),
   );
 }

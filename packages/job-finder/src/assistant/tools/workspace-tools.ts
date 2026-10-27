@@ -341,7 +341,7 @@ export const openInAppTool = defineTool({
     ),
     settingsSection: json.enumOf(
       JOB_FINDER_SETTINGS_SECTION_IDS,
-      "Settings section to show. application-defaults is Resume look; application-authority is Applying; workspace-behavior is Browser & saved jobs.",
+      "Settings section to show. application-defaults is Resume look; application-authority is Applying.",
     ),
     needsView: json.looseObject(
       "Needs you tab (tasks/saved), kind (question/sign_in/captcha/mfa or null), text filter, focusId, selectedIds (up to 50), all (selectedIds are exceptions when true). IDs name tasks on tasks and saved answers on saved.",

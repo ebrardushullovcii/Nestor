@@ -206,8 +206,6 @@ describe("createCatalogSessionAgent", () => {
         appearanceTheme: "system",
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
-        keepSessionAlive: true,
-        discoveryOnly: false,
       },
     });
     const serialized = JSON.stringify(result);
@@ -290,8 +288,6 @@ describe("createCatalogSessionAgent", () => {
         appearanceTheme: "system",
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
-        keepSessionAlive: true,
-        discoveryOnly: false,
       },
     });
 
@@ -330,8 +326,6 @@ describe("createCatalogSessionAgent", () => {
         appearanceTheme: "system",
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
-        keepSessionAlive: true,
-        discoveryOnly: false,
       },
       mode: "prepare_only",
     });
@@ -372,8 +366,6 @@ describe("createCatalogSessionAgent", () => {
         appearanceTheme: "system" as const,
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
-        keepSessionAlive: true,
-        discoveryOnly: false,
       },
     };
 
@@ -414,8 +406,6 @@ describe("createCatalogSessionAgent", () => {
         appearanceTheme: "system",
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
-        keepSessionAlive: true,
-        discoveryOnly: false,
       },
       mode: "prepare_only",
     });
@@ -452,8 +442,6 @@ describe("createCatalogSessionAgent", () => {
         appearanceTheme: "system",
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
-        keepSessionAlive: true,
-        discoveryOnly: false,
       },
       mode: "prepare_only",
     });
@@ -489,8 +477,6 @@ describe("createCatalogSessionAgent", () => {
         appearanceTheme: "system",
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
-        keepSessionAlive: true,
-        discoveryOnly: false,
       },
       mode: "prepare_only",
       recoveryContext: {
@@ -550,8 +536,6 @@ describe("createCatalogSessionAgent", () => {
           appearanceTheme: "system",
           humanReviewRequired: true,
           allowAutoSubmitOverride: false,
-          keepSessionAlive: true,
-          discoveryOnly: false,
         },
       }),
     ).rejects.toThrow(/not ready for automation/i);

@@ -73,8 +73,6 @@ export async function seedPerfWorkspace(input: {
         appearanceTheme: "system",
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
-        keepSessionAlive: false,
-        discoveryOnly: false,
         // Resume writing would run the whole time; a hunt's shortlist has
         // its resumes already.
         writeResumesOnShortlist: false,

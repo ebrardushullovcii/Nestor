@@ -13,8 +13,8 @@ describe("side menu setting", () => {
       collapseSideMenuWithAssistant: false,
     });
     expect(off.settings.collapseSideMenuWithAssistant).toBe(false);
-    expect(off.settings.keepSessionAlive).toBe(
-      before.settings.keepSessionAlive,
+    expect(off.settings.writeResumesOnShortlist).toBe(
+      before.settings.writeResumesOnShortlist,
     );
 
     const on = await profileWork.updateWorkspaceBehavior({

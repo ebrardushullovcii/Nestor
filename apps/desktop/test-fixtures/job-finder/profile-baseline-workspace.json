@@ -187,8 +187,6 @@
     "fontPreset": "inter_requisite",
     "appearanceTheme": "system",
     "humanReviewRequired": true,
-    "keepSessionAlive": true,
-    "allowAutoSubmitOverride": false,
-    "discoveryOnly": false
+    "allowAutoSubmitOverride": false
   }
 }

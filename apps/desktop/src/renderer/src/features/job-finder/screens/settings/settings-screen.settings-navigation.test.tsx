@@ -63,13 +63,6 @@ vi.mock("./settings-apply-mode-section", () => ({
     </section>
   ),
 }));
-vi.mock("./settings-workspace-behavior-section", () => ({
-  SettingsWorkspaceBehaviorSection: () => (
-    <section data-testid="panel-workspace-behavior">
-      Workspace behavior panel
-    </section>
-  ),
-}));
 vi.mock("./settings-runtime-summary", () => ({
   SettingsRuntimeSummary: () => (
     <section data-testid="panel-diagnostics-runtime">
@@ -102,7 +95,6 @@ const sectionLabels = [
   // Plain-language tab names. The renames change the labels only: the
   // prepare-only boundary and every permission it describes are unchanged.
   "Applying",
-  "Browser & saved jobs",
   "Diagnostics",
   "Delete everything",
 ] as const;
@@ -129,7 +121,21 @@ describe("SettingsScreen information architecture", () => {
     vi.clearAllMocks();
   });
 
-  it("exposes exactly seven sticky section anchors whose labels match named landmarks", () => {
+  it("does not expose the retired Browser & saved jobs section", () => {
+    render(
+      <MemoryRouter>
+        <SettingsScreen {...baseProps} />
+      </MemoryRouter>,
+    );
+    expect(
+      screen.queryByRole("link", { name: "Browser & saved jobs" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Browser & saved jobs" }),
+    ).toBeNull();
+  });
+
+  it("exposes exactly six sticky section anchors whose labels match named landmarks", () => {
     render(
       <MemoryRouter>
         <SettingsScreen {...baseProps} />
@@ -154,7 +160,7 @@ describe("SettingsScreen information architecture", () => {
       );
     }
 
-    expect(within(nav).queryAllByRole("link")).toHaveLength(7);
+    expect(within(nav).queryAllByRole("link")).toHaveLength(6);
   });
 
   it("keeps keyboard-reachable nav targets with visible focus and scroll offset", () => {
@@ -367,7 +373,7 @@ describe("SettingsScreen information architecture", () => {
     }
   });
 
-  it("anchors wrap the real settings panels in the seven-label order", () => {
+  it("anchors wrap the real settings panels in the six-label order", () => {
     render(
       <MemoryRouter>
         <SettingsScreen {...baseProps} />
@@ -391,11 +397,6 @@ describe("SettingsScreen information architecture", () => {
     ).toBe(true);
     expect(
       document
-        .getElementById("settings-workspace-behavior")
-        ?.contains(screen.getByTestId("panel-workspace-behavior")),
-    ).toBe(true);
-    expect(
-      document
         .getElementById("settings-diagnostics")
         ?.contains(screen.getByTestId("panel-diagnostics-runtime")),
     ).toBe(true);
@@ -414,7 +415,6 @@ describe("SettingsScreen information architecture", () => {
       "panel-app-device",
       "panel-application-defaults",
       "panel-application-authority",
-      "panel-workspace-behavior",
       "panel-diagnostics-runtime",
       "panel-diagnostics-support",
       "panel-danger-zone",
@@ -551,7 +551,7 @@ describe("SettingsScreen section anchor navigation", () => {
       name: "Settings sections",
     });
     const links = within(nav).getAllByRole("link");
-    expect(links).toHaveLength(7);
+    expect(links).toHaveLength(6);
 
     for (const label of sectionLabels) {
       const link = within(nav).getByRole("link", { name: label });

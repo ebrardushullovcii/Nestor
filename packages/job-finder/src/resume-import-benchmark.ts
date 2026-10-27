@@ -1054,7 +1054,6 @@ async function createBenchmarkContext(input: {
       ),
     persistSourceDebugRun: () => Promise.resolve(undefined),
     openRunBrowserSession: () => Promise.resolve(undefined),
-    closeRunBrowserSession: () => Promise.resolve(undefined),
   };
 }
 

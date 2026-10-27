@@ -38,7 +38,7 @@ interface SettingsAppDeviceSectionProps {
   onUpdateAppearanceTheme: (
     theme: AppearanceTheme,
   ) => Promise<boolean | void> | void;
-  /** Saves the side menu choice; the same path as Browser & saved jobs. */
+  /** Saves the side menu choice independently of the theme. */
   onUpdateWorkspaceBehavior?: (
     input: UpdateWorkspaceBehaviorInput,
   ) => Promise<boolean | void> | void;

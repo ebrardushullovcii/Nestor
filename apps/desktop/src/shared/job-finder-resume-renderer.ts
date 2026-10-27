@@ -2333,8 +2333,6 @@ export function renderResumeTemplateCatalogPreviewHtml(
         appearanceTheme: "system",
         humanReviewRequired: true,
         allowAutoSubmitOverride: false,
-        keepSessionAlive: false,
-        discoveryOnly: false,
       },
     },
     { mode: "catalog", catalogLayout: options?.layout ?? "thumbnail" },

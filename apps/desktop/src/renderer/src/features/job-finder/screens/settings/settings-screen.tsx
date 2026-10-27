@@ -15,7 +15,6 @@ import type {
 } from "@nestor/contracts";
 import {
   Activity,
-  AppWindow,
   MonitorSmartphone,
   Palette,
   Send,
@@ -47,18 +46,15 @@ import { SettingsRuntimeSummary } from "./settings-runtime-summary";
 import { focusSettingsSection } from "./settings-section-anchor";
 import { SettingsSupportControls } from "./settings-support-controls";
 import { SettingsUnsavedChangesBar } from "./settings-unsaved-changes-bar";
-import { SettingsWorkspaceBehaviorSection } from "./settings-workspace-behavior-section";
 import { SettingsWorkspaceControls } from "./settings-workspace-controls";
 
-// `Application authority` and `Workspace behavior` were product vocabulary,
-// not user vocabulary. The boundary and every permission it describes are
+// `Application authority` was product vocabulary, not user vocabulary.
+// The boundary and every permission it describes are
 // ADR 0022: one switch decides whether Job Finder sends the application or
 // leaves it filled in for the person to send. The section is named for the
 // thing it decides.
 export const SETTINGS_APPLICATION_AUTHORITY_LABEL =
   JOB_FINDER_SETTINGS_SECTIONS["application-authority"].label;
-export const SETTINGS_WORKSPACE_BEHAVIOR_LABEL =
-  JOB_FINDER_SETTINGS_SECTIONS["workspace-behavior"].label;
 
 const sectionIcons: Record<JobFinderSettingsSection, typeof MonitorSmartphone> =
   {
@@ -66,7 +62,6 @@ const sectionIcons: Record<JobFinderSettingsSection, typeof MonitorSmartphone> =
     "ai-behavior": Sparkles,
     "application-defaults": Palette,
     "application-authority": Send,
-    "workspace-behavior": AppWindow,
     diagnostics: Activity,
     "danger-zone": Trash2,
   };
@@ -183,7 +178,7 @@ export function SettingsScreen(props: {
   const subnavRef = useRef<HTMLElement | null>(null);
   const subnavRowRef = useRef<HTMLDivElement | null>(null);
   const unsavedBarRef = useRef<HTMLDivElement | null>(null);
-  // Seven labels at one colour with no current-item marker are a list, not
+  // Labels at one colour with no current-item marker are a list, not
   // navigation. The active section is tracked so the nav can say where the
   // reader is.
   const [activeSectionId, setActiveSectionId] = useState<string>(
@@ -537,21 +532,6 @@ export function SettingsScreen(props: {
               settings={settings}
             />
           </SettingsApplyModeSection>
-        </section>
-
-        <section
-          aria-labelledby="settings-workspace-behavior-heading"
-          className={SETTINGS_LATER_SECTION_CLASS}
-          id="settings-workspace-behavior"
-          tabIndex={-1}
-        >
-          <h2 className="sr-only" id="settings-workspace-behavior-heading">
-            {SETTINGS_WORKSPACE_BEHAVIOR_LABEL}
-          </h2>
-          <SettingsWorkspaceBehaviorSection
-            onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
-            settings={settings}
-          />
         </section>
 
         <section

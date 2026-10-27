@@ -107,33 +107,6 @@ export function SettingsRuntimeSummary({
         <p className="text-(length:--text-description) leading-5 text-foreground-soft">
           {browserStatus.detail}
         </p>
-        <p className="text-(length:--text-small) leading-5 text-foreground-soft">
-          Browser session persistence is currently{" "}
-          {settings.keepSessionAlive ? "on" : "off"}.
-        </p>
-      </section>
-
-      <section className="surface-card-tint grid gap-2.5 rounded-(--radius-field) border border-(--surface-panel-border) px-3.5 py-3.5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-[10px] uppercase tracking-(--tracking-badge) text-muted-foreground">
-            Search results
-          </span>
-          <StatusBadge tone={settings.discoveryOnly ? "muted" : "active"}>
-            {settings.discoveryOnly
-              ? "Only jobs you shortlist"
-              : "Keep every result"}
-          </StatusBadge>
-        </div>
-        <strong className="text-(length:--text-body) font-semibold text-foreground">
-          {settings.discoveryOnly
-            ? "Only jobs you shortlist are kept"
-            : "Every new result can stay visible"}
-        </strong>
-        <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-          {settings.discoveryOnly
-            ? "Only jobs you actively shortlist are kept in the workspace."
-            : "Fresh search results remain available until you clean them up or move them forward."}
-        </p>
       </section>
 
       <section className="surface-card-tint grid gap-2.5 rounded-(--radius-field) border border-(--surface-panel-border) px-3.5 py-3.5">

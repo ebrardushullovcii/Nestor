@@ -13,7 +13,6 @@ const storedBeforeTheSetting = {
   appearanceTheme: "system",
   humanReviewRequired: true,
   allowAutoSubmitOverride: false,
-  keepSessionAlive: false,
 };
 
 describe("collapse the side menu while the assistant is open", () => {

@@ -174,9 +174,7 @@ export function createDocumentTestSeed() {
     fontPreset: "inter_requisite",
     appearanceTheme: "system",
     humanReviewRequired: true,
-    keepSessionAlive: false,
     allowAutoSubmitOverride: false,
-    discoveryOnly: false,
   });
   return { profile, savedJobs: [job], settings };
 }

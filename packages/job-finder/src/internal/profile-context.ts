@@ -52,5 +52,4 @@ export interface ProfileContext {
     source: JobSource,
     options?: OpenBrowserSessionOptions,
   ) => Promise<void>;
-  closeRunBrowserSession: (source: JobSource) => Promise<void>;
 }

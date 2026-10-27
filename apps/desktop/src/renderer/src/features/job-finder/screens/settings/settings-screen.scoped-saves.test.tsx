@@ -24,7 +24,6 @@ import { SettingsScreen } from "./settings-screen";
 
 // Plain-language section labels. The renames change the tab names only; the
 // prepare-only boundary is untouched.
-const WORKSPACE_BEHAVIOR_LABEL = "Browser & saved jobs";
 const AI_BEHAVIOR_LABEL = "AI behavior";
 const RESUME_LOOK_LABEL = "Resume look";
 
@@ -43,7 +42,6 @@ function parseSettings(
     allowAutoSubmitOverride: false,
     fontPreset: "inter_requisite",
     humanReviewRequired: true,
-    keepSessionAlive: false,
     resumeFormat: "pdf",
     resumeTemplateId: "classic_ats",
     ...overrides,
@@ -173,9 +171,6 @@ describe("SettingsScreen scoped section saves", () => {
     expect(callbacks.onUpdateAiBehavior).not.toHaveBeenCalled();
     expect(callbacks.onUpdateWorkspaceBehavior).not.toHaveBeenCalled();
 
-    const workspace = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
-    });
     const resumeLook = screen.getByRole("region", {
       name: RESUME_LOOK_LABEL,
     });
@@ -183,21 +178,6 @@ describe("SettingsScreen scoped section saves", () => {
     expect(
       within(resumeLook).queryByRole("button", { name: "Save resume look" }),
     ).toBeNull();
-
-    // The switch saves when flipped, with only the fields it owns.
-    const keepBrowserSwitch = within(workspace).getAllByRole("switch")[0]!;
-    fireEvent.click(keepBrowserSwitch);
-    expect(keepBrowserSwitch.getAttribute("aria-checked")).toBe("true");
-
-    await waitFor(() =>
-      expect(callbacks.onUpdateWorkspaceBehavior).toHaveBeenCalledWith({
-        discoveryOnly: false,
-        keepSessionAlive: true,
-      }),
-    );
-    // No other section's save was triggered by the workspace save.
-    expect(callbacks.onUpdateApplicationDefaults).not.toHaveBeenCalled();
-    expect(callbacks.onUpdateAiBehavior).not.toHaveBeenCalled();
 
     view.unmount();
   });
@@ -217,7 +197,7 @@ describe("SettingsScreen scoped section saves", () => {
     expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
 
     // External refresh: persisted workspace behavior changed elsewhere.
-    view.rerender(parseSettings({ keepSessionAlive: true }));
+    view.rerender(parseSettings({ collapseSideMenuWithAssistant: false }));
 
     const refreshedAiRegion = screen.getByRole("region", {
       name: AI_BEHAVIOR_LABEL,
@@ -228,19 +208,9 @@ describe("SettingsScreen scoped section saves", () => {
     // The staged choice survived the external settings prop refresh.
     expect(stillStagedChoice.getAttribute("aria-checked")).toBe("true");
 
-    const refreshedWorkspaceRegion = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
-    });
-    expect(
-      within(refreshedWorkspaceRegion)
-        .getAllByRole("switch")[0]
-        ?.getAttribute("aria-checked"),
-    ).toBe("true");
-    expect(
-      within(refreshedWorkspaceRegion).queryByRole("button", {
-        name: "Save browser & saved jobs",
-      }),
-    ).toBeNull();
+    expect(within(screen.getByRole("region", { name: "App & device" }))
+      .getByRole("switch", { name: "Collapse the side menu while the assistant is open" })
+      .getAttribute("aria-checked")).toBe("false");
 
     expect(callbacks.onUpdateAiBehavior).toHaveBeenCalledTimes(1);
     expect(callbacks.onUpdateAiBehavior.mock.calls[0]?.[0]).toMatchObject({
@@ -406,41 +376,5 @@ describe("SettingsScreen scoped section saves", () => {
     view.unmount();
   });
 
-  it("keeps workspace behavior staged while its scoped save stays pending and when it resolves false", async () => {
-    let resolveBehavior: ((saved: boolean) => void) | null = null;
-    const callbacks = createCallbacks();
-    callbacks.onUpdateWorkspaceBehavior.mockImplementationOnce(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveBehavior = resolve;
-        }),
-    );
-    const view = renderScreen(parseSettings(), callbacks);
 
-    const workspace = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
-    });
-    // Flipping the switch starts its save at once.
-    fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
-    expect(callbacks.onUpdateWorkspaceBehavior).toHaveBeenCalledTimes(1);
-    expect(
-      within(workspace).getAllByRole("switch")[0]!.getAttribute("aria-checked"),
-    ).toBe("true");
-
-    await act(() => {
-      resolveBehavior?.(false);
-      return Promise.resolve();
-    });
-
-    expect(
-      within(workspace).getByText(
-        "Browser & saved jobs were not saved. Retry before leaving this page.",
-      ),
-    ).toBeTruthy();
-    expect(
-      within(workspace).getAllByRole("switch")[0]!.getAttribute("aria-checked"),
-    ).toBe("true");
-
-    view.unmount();
-  });
 });

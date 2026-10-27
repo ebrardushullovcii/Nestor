@@ -38,7 +38,6 @@ beforeAll(() => {
   globalActScope.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
-const WORKSPACE_BEHAVIOR_LABEL = "Browser & saved jobs";
 const APPLICATION_AUTHORITY_LABEL = "Applying";
 
 function parseSettings(
@@ -49,7 +48,6 @@ function parseSettings(
     appearanceTheme: "dark",
     fontPreset: "inter_requisite",
     humanReviewRequired: true,
-    keepSessionAlive: false,
     resumeFormat: "pdf",
     resumeTemplateId: "classic_ats",
     ...overrides,
@@ -123,9 +121,7 @@ describe("Settings section nav is real navigation", () => {
     expect(
       within(nav).getByRole("link", { name: APPLICATION_AUTHORITY_LABEL }),
     ).toBeTruthy();
-    expect(
-      within(nav).getByRole("link", { name: WORKSPACE_BEHAVIOR_LABEL }),
-    ).toBeTruthy();
+    expect(within(nav).queryByRole("link", { name: "Browser & saved jobs" })).toBeNull();
 
     const authority = screen.getByRole("region", {
       name: APPLICATION_AUTHORITY_LABEL,
@@ -155,7 +151,6 @@ describe("Settings save ownership", () => {
       "App & device",
       "AI behavior",
       "Resume look",
-      WORKSPACE_BEHAVIOR_LABEL,
     ]) {
       const region = screen.getByRole("region", { name: label });
       expect(region.querySelector("[data-settings-save-state]")).toBeNull();
@@ -236,53 +231,8 @@ describe("Settings save ownership", () => {
     await waitFor(() => expect(unsavedBar()).toBeNull());
   });
 
-  it("saves a Browser & saved jobs switch when it is flipped", async () => {
-    const callbacks = createCallbacks();
-    renderScreen(parseSettings(), callbacks);
 
-    const workspace = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
-    });
-    fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
 
-    await waitFor(() =>
-      expect(callbacks.onUpdateWorkspaceBehavior).toHaveBeenCalledWith({
-        discoveryOnly: false,
-        keepSessionAlive: true,
-      }),
-    );
-    // No Save press and no reminder: the switch acts like the theme.
-    expect(
-      within(workspace).queryByRole("button", {
-        name: "Save browser & saved jobs",
-      }),
-    ).toBeNull();
-    await waitFor(() => expect(unsavedBar()).toBeNull());
-    expect(
-      within(workspace).getByText("Browser & saved jobs saved."),
-    ).toBeTruthy();
-  });
-
-  it("keeps the bar up while a failed section is still unsaved", async () => {
-    const callbacks = createCallbacks();
-    callbacks.onUpdateWorkspaceBehavior.mockResolvedValueOnce(false);
-    renderScreen(parseSettings(), callbacks);
-
-    const workspace = screen.getByRole("region", {
-      name: WORKSPACE_BEHAVIOR_LABEL,
-    });
-    // The switch saves when flipped; this save fails.
-    fireEvent.click(within(workspace).getAllByRole("switch")[0]!);
-
-    await waitFor(() =>
-      expect(
-        within(workspace).getByText(
-          "Browser & saved jobs were not saved. Retry before leaving this page.",
-        ),
-      ).toBeTruthy(),
-    );
-    expect(unsavedBar()).not.toBeNull();
-  });
 });
 
 describe("Settings appearance preview", () => {
@@ -376,11 +326,13 @@ describe("Settings save bar reaches the window bottom", () => {
     // the route's former trailing `pb-8` both ended that block above the
     // window, so the bar came to rest 40px up with the page's own template
     // card rendering under and below it. Neither may return.
-    renderScreen(parseSettings(), createCallbacks());
+    const callbacks = createCallbacks();
+    callbacks.onUpdateAppearanceTheme.mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    renderScreen(parseSettings(), callbacks);
     fireEvent.click(
-      within(
-        screen.getByRole("region", { name: WORKSPACE_BEHAVIOR_LABEL }),
-      ).getAllByRole("switch")[0]!,
+      within(screen.getByRole("region", { name: "App & device" })).getByRole("button", { name: "Light" }),
     );
 
     const bar = unsavedBar();

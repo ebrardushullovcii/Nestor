@@ -149,8 +149,6 @@ export function createSyntheticJobFinderSettings() {
     appearanceTheme: "system",
     humanReviewRequired: true,
     allowAutoSubmitOverride: false,
-    keepSessionAlive: true,
-    discoveryOnly: false,
   });
 }
 
