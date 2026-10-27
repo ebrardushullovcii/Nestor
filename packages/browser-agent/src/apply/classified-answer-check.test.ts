@@ -71,7 +71,7 @@ test("send-time grounding binds a retained earlier wizard control without trusti
     disabled: false,
     readOnly: false,
     visible: false,
-    value: sources.profile.fullName,
+    value: "Alex Vanguard",
     checked: false,
     options: [],
     selectedOptionLabel: "",
@@ -91,7 +91,7 @@ test("send-time grounding binds a retained earlier wizard control without trusti
     answers: [
       {
         question: "Step 1 of 4: Contact details — Full name",
-        answer: sources.profile.fullName,
+        answer: "Alex Vanguard",
       },
     ],
     formContext: { pageText: "Review", fields: [] },
