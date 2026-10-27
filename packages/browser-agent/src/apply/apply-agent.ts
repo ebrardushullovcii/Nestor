@@ -911,8 +911,15 @@ async function runMeasuredApplyAgent(
     };
   };
 
+  const pageViews = new Set<string>();
+  const describePage = (observation: ApplyFormObservation): string => {
+    const text = describeObservation(observation);
+    pageViews.add(text);
+    return text;
+  };
   const startOrigin = originOf(config.application.startingUrl);
   const pageTools = createPageTools(config.hands, {
+    describe: describePage,
     allowUrl: (url) => {
       const origin = originOf(url);
       if (!origin) return null;
@@ -1144,9 +1151,11 @@ async function runMeasuredApplyAgent(
   };
 
   let modelObservation: ApplyFormObservation | null = null;
-  const pageViews = new Set<string>();
   let observationNeeded = false;
-  const renderObservation = (observation: ApplyFormObservation): string => {
+  const withAnswerGuidance = (
+    observation: ApplyFormObservation,
+    pageText: string,
+  ): string => {
     const waiting = observation.controls.filter(
       (control) =>
         heldAnswerKeys.has(pendingQuestionKey(control)) &&
@@ -1160,14 +1169,21 @@ async function runMeasuredApplyAgent(
       (control) =>
         !recoverable.some((entry) => entry.control.ref === control.ref),
     );
-    const text =
-      describeObservationUpdate(observation, modelObservation) +
+    return (
+      pageText +
       (withPerson.length
         ? `\nAlready waiting for the person; do not retry these fields: ${withPerson.map((control) => `${control.ref} (${questionPrompt(control)})`).join("; ")}. Fill the remaining fields, then finish with needsPerson: true.`
         : "") +
       (recoverable.length
         ? `\nCorrect the earlier unsupported proposals using these matching recorded answers: ${recoverable.map(({ control, value }) => `${control.ref}: ${JSON.stringify(value)}`).join("; ")}. Every correction still goes through the answer check.`
-        : "");
+        : "")
+    );
+  };
+  const renderObservation = (observation: ApplyFormObservation): string => {
+    const text = withAnswerGuidance(
+      observation,
+      describeObservationUpdate(observation, modelObservation),
+    );
     pageViews.add(text);
     // Observations may be mutated by classification; retain an independent snapshot.
     modelObservation = structuredClone(observation);
@@ -1252,7 +1268,7 @@ async function runMeasuredApplyAgent(
           kind: "ok",
           progress: true,
           content: withPage
-            ? `Filled in "${outcome.filled.label}". The form now looks like this:\n\n${describeObservation(outcome.observation)}`
+            ? `Filled in "${outcome.filled.label}". The form now looks like this:\n\n${describePage(outcome.observation)}`
             : `Filled in "${outcome.filled.label}".`,
         };
       case "attached":
@@ -1265,7 +1281,7 @@ async function runMeasuredApplyAgent(
           kind: "ok",
           progress: true,
           content: withPage
-            ? `Attached ${outcome.attachment.label}. The form now looks like this:\n\n${describeObservation(outcome.observation)}`
+            ? `Attached ${outcome.attachment.label}. The form now looks like this:\n\n${describePage(outcome.observation)}`
             : `Attached ${outcome.attachment.label}.`,
         };
       case "moved":
@@ -1276,7 +1292,7 @@ async function runMeasuredApplyAgent(
           progress: outcome.progress,
           stopBatch: true,
           content: withPage
-            ? `${outcome.note}\n\nThe page now:\n\n${describeObservation(outcome.observation)}`
+            ? `${outcome.note}\n\nThe page now:\n\n${describePage(outcome.observation)}`
             : outcome.note,
         };
       case "suggestion": {
@@ -1310,7 +1326,7 @@ async function runMeasuredApplyAgent(
           status: "refused",
           stopBatch: true,
           content: withPage
-            ? `${outcome.reason}\n\nThe page now:\n\n${describeObservation(outcome.observation)}`
+            ? `${outcome.reason}\n\nThe page now:\n\n${describePage(outcome.observation)}`
             : outcome.reason,
         };
       case "paused":
@@ -2878,7 +2894,7 @@ async function runMeasuredApplyAgent(
         ? compactApplyPageHistory(
             messages,
             pageViews,
-            describeObservation(current),
+            withAnswerGuidance(current, describePage(current)),
           )
         : messages;
       return llmClient.chatWithTools(
