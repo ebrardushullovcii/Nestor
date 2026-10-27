@@ -75,6 +75,8 @@ const greenhousePolicy = Buffer.from(
 
 // The operations as Ashby's client sends them (its public bundle).
 const ashbyQueries = {
+  ApiAutocompleteGeoLocation:
+    "query ApiAutocompleteGeoLocation($text: String!, $locationTypes: [GeoLocationType!]) {\n  result: autocompleteGeoLocation(text: $text, locationTypes: $locationTypes) {\n    ...AutocompleteLocationResultParts\n    __typename\n  }\n}\n\nfragment AutocompleteGeoLocationParts on GeoLocation {\n  name\n  type\n  providerLocationId\n  __typename\n}\n\nfragment AutocompleteLocationParts on AutocompleteLocation {\n  name\n  geoLocationPath {\n    ...AutocompleteGeoLocationParts\n    __typename\n  }\n  __typename\n}\n\nfragment AutocompleteLocationResultParts on AutocompleteLocationResult {\n  suggestions {\n    ...AutocompleteLocationParts\n    __typename\n  }\n  __typename\n}",
   ApiCreateFileUploadHandle:
     "mutation ApiCreateFileUploadHandle($organizationHostedJobsPageName: String!, $fileUploadContext: FileUploadContext!, $filename: String!, $contentType: String!, $contentLength: Int!) {\n  fileUploadHandle: createFileUploadHandle(organizationHostedJobsPageName: $organizationHostedJobsPageName, fileUploadContext: $fileUploadContext, filename: $filename, contentType: $contentType, contentLength: $contentLength) {\n    handle\n    url\n    fields\n    __typename\n  }\n}",
   ApiSetFormValueToFile:
@@ -102,12 +104,16 @@ const ashbyYesNo = (path, question) => `
 /**
  * Ashby's location question: an autocomplete with no `required` and no id
  * its label could point at. Only the title's class says it is required.
+ * What is typed is searched with the GraphQL query
+ * ApiAutocompleteGeoLocation (its name and fragments say "Autocomplete");
+ * the results show in a floating listbox the input does not point at, with
+ * "No results" while it is empty. A pick fills the input and is saved;
+ * leaving without one clears what was typed.
  */
 const ashbyLocation = `
       <div class="field-entry"><label class="_required_f7cvd_91 ashby-application-form-question-title" for="_systemfield_location">What country are you based in?</label>
         <div><p>This should be the location you're physically located</p></div>
-        <div><input placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" role="combobox" value="" id="location-input">
-          <ul role="listbox" id="location-list" hidden></ul></div></div>`;
+        <div><input placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" role="combobox" value="" id="location-input"></div></div>`;
 
 /** Ashby's form state, kept by the server per rendered form. */
 const ashbyForms = new Map();
@@ -181,20 +187,45 @@ const sites = {
       // The location list shows the countries matching what was typed; a
       // pick is saved like any other answer.
       const place = document.getElementById('location-input');
-      const list = document.getElementById('location-list');
-      place.addEventListener('input', () => {
-        const typed = place.value.trim().toLowerCase();
-        const matches = ['Portugal', 'Germany', 'United Kingdom', 'Albania'].filter((name) => typed && name.toLowerCase().includes(typed));
-        list.innerHTML = matches.map((name) => '<li role="option">' + name + '</li>').join('');
-        list.hidden = !matches.length;
-        place.setAttribute('aria-expanded', String(!list.hidden));
-        for (const option of list.querySelectorAll('li'))
-          option.addEventListener('click', () => {
-            place.value = option.textContent;
+      const list = document.createElement('div');
+      list.setAttribute('role', 'listbox');
+      list.hidden = true;
+      document.body.append(list);
+      let picked = '';
+      let search;
+      const draw = (names) => {
+        list.innerHTML = names.length
+          ? names.map((name) => '<div role="option">' + name + '</div>').join('')
+          : '<div>No results</div>';
+        for (const option of list.querySelectorAll('[role=option]'))
+          option.addEventListener('mousedown', (event) => {
+            event.preventDefault();
+            picked = place.value = option.textContent;
             list.hidden = true;
             place.setAttribute('aria-expanded', 'false');
-            graphql('ApiSetFormValue', { formRenderIdentifier: render, path: '_systemfield_location', value: option.textContent }).catch(() => toast('Your answer could not be saved.'));
+            graphql('ApiSetFormValue', { formRenderIdentifier: render, path: '_systemfield_location', value: picked }).catch(() => toast('Your answer could not be saved.'));
           });
+      };
+      const open = () => {
+        list.hidden = false;
+        place.setAttribute('aria-expanded', 'true');
+      };
+      place.addEventListener('focus', () => { open(); draw([]); });
+      place.addEventListener('input', () => {
+        open();
+        clearTimeout(search);
+        search = setTimeout(async () => {
+          try {
+            draw((await graphql('ApiAutocompleteGeoLocation', { text: place.value, locationTypes: ['Country'] })).result.suggestions.map((entry) => entry.name));
+          } catch {
+            draw([]);
+          }
+        }, 300);
+      });
+      place.addEventListener('blur', () => {
+        list.hidden = true;
+        place.setAttribute('aria-expanded', 'false');
+        if (place.value !== picked) place.value = '';
       });
       // Each answer is saved as it is entered, as Ashby does.
       for (const id of ['_systemfield_name', '_systemfield_email']) {
@@ -391,6 +422,38 @@ async function ashbyGraphql(req, res, url, { readPost, logPost }) {
             "X-Amz-Signature": "a".repeat(64),
           },
           __typename: "FileUploadHandle",
+        },
+      },
+    });
+  }
+  if (op === "ApiAutocompleteGeoLocation") {
+    const text = String(variables.text ?? "").toLowerCase();
+    const names = [
+      "Albania",
+      "Germany",
+      "Kosovo",
+      "Portugal",
+      "United Kingdom",
+    ];
+    return json(res, 200, {
+      data: {
+        result: {
+          suggestions: (text
+            ? names.filter((name) => name.toLowerCase().includes(text))
+            : []
+          ).map((name) => ({
+            name,
+            geoLocationPath: [
+              {
+                name,
+                type: "Country",
+                providerLocationId: `replica-${name}`,
+                __typename: "GeoLocation",
+              },
+            ],
+            __typename: "AutocompleteLocation",
+          })),
+          __typename: "AutocompleteLocationResult",
         },
       },
     });

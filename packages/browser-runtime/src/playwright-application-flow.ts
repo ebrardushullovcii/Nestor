@@ -885,7 +885,17 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     url: string | null,
     bodyText: string | null,
   ): boolean => {
-    if (normalizeMethod(method) !== "GET" || !url || bodyText) return false;
+    // A GET, or a GraphQL query: Ashby's location picker searches with one,
+    // carrying what was typed into it.
+    const normalized = normalizeMethod(method);
+    if (
+      !url ||
+      !(
+        (normalized === "GET" && !bodyText) ||
+        (normalized === "POST" && isGraphQlReadBody(bodyText))
+      )
+    )
+      return false;
     let parsed: URL;
     try {
       parsed = new URL(url, window.location.href);
@@ -905,7 +915,9 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       address = next;
     }
     if (
-      /save|submit|apply|update|create|complete|send|post/iu.test(address) ||
+      /(?:^|[^a-z])(?:save|submit|apply|update|create|complete|send|post)(?:[^a-z]|$)/iu.test(
+        address.replace(/([a-z\d])([A-Z])/gu, "$1 $2"),
+      ) ||
       new RegExp(guardInput.finalActionSignal, "iu").test(address)
     )
       return false;
@@ -917,7 +929,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       carriesPreparedValue(parsed.pathname, values) ||
       [...parsed.searchParams.values()].some((value) =>
         carriesPreparedValue(value, values),
-      );
+      ) ||
+      (bodyText !== null && carriesPreparedValue(bodyText, values));
     return (
       chosen.length > 0 &&
       carries(chosen) &&
@@ -1984,7 +1997,17 @@ export async function ensurePrepareOnlyMutationGuard(
           )) ||
           isNetworkLayerPageOwnedRead(request, [
             ...networkGuardState!.preparedValues,
-          ]))
+          ]) ||
+          // A picker's own list read, as in Fill below.
+          classifyStrictFillRead({
+            method,
+            resourceType,
+            url: request.url(),
+            bodyText: request.postData(),
+            preparedValues: [...networkGuardState!.preparedValues],
+            pickerChoices: recentPickerChoices(networkGuardState!),
+            frameOrigin: requestFrameOrigin(request),
+          }).reason === "dependent_list")
       ) {
         await route.continue();
         return;

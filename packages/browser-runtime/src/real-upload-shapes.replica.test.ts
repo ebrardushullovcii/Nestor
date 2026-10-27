@@ -415,3 +415,24 @@ test("Lever: the renamed resume reaches its parser with the form's id, and typed
     posts().filter((post) => post.path === "/lever-shape/apply/1"),
   ).toEqual([]);
 });
+
+test("Ashby: its location picker's search carries what was typed, and the choice reads back", async () => {
+  const { page, session } = await fillPage("ashby-shape");
+  const sent = () =>
+    posts().filter((post) => post.path === "/ashby-shape/apply/1").length;
+  const sentBefore = sent();
+  const location = (await session.readPage()).controls.find((control) =>
+    control.label.startsWith("What country are you based in?"),
+  )!;
+  // As the executor does: the answer is declared before it is chosen.
+  await registerPrepareOnlyPreparedValue(page, "Kosovo");
+  expect(
+    await session.chooseOption(location.ref ?? `c${location.index}`, "Kosovo"),
+  ).toMatchObject({ ok: true, observedValue: "Kosovo" });
+  const after = (await session.readPage()).controls.find((control) =>
+    control.label.startsWith("What country are you based in?"),
+  );
+  expect(after).toMatchObject({ role: "combobox", value: "Kosovo" });
+  // Only the search left; nothing was submitted.
+  expect(sent()).toBe(sentBefore);
+});
