@@ -35,6 +35,10 @@ export const RESIDENCE_COUNTRY_LABELS: readonly string[] = [
   "what country are you based in",
   "what is your current country of residence",
 ];
+export const PROFILE_TEXT_FIELD_LABELS: Record<string, readonly string[]> = {
+  "profile.summary": ["summary", "professional summary"],
+  "profile.headline": ["headline", "professional headline"],
+};
 export function applicantContactGroup(control: ApplyFormControl): boolean {
   const group = normalizeFormQuestionPrompt(control.groupLabel);
   return (
@@ -404,6 +408,12 @@ export function storedFactFor(input: {
   }).find(
     (candidate) =>
       (!factId || candidate.sourceId === factId) &&
+      (!PROFILE_TEXT_FIELD_LABELS[candidate.sourceId] ||
+        (applicantContactGroup(input.control) &&
+          !fieldNamesAnotherPerson(input.control) &&
+          PROFILE_TEXT_FIELD_LABELS[candidate.sourceId]?.includes(
+            normalizeFormQuestionPrompt(input.control.label),
+          ))) &&
       (!isProfileUrlSource(candidate.sourceId) ||
         !wantsProfileUrl(input.control) ||
         fullProfileUrl(candidate.value) !== null) &&

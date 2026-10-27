@@ -14,6 +14,7 @@ import {
   savedAnswerForQuestion,
   applicantContactGroup,
   RESIDENCE_COUNTRY_LABELS,
+  PROFILE_TEXT_FIELD_LABELS,
 } from "./application-facts";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
@@ -230,8 +231,7 @@ const contactLabels: Record<string, readonly string[]> = {
   "profile.lastName": ["last name", "surname", "family name"],
   "profile.email": ["email", "email address", "your email"],
   "profile.phone": phoneLabels,
-  "profile.summary": ["summary", "professional summary"],
-  "profile.headline": ["headline", "professional headline"],
+  ...PROFILE_TEXT_FIELD_LABELS,
   "profile.currentCity": [
     ...addressLabels,
     "city",
