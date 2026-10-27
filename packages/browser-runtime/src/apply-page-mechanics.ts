@@ -284,6 +284,34 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 : {}),
             };
           };
+          // A question's title can say it is required when its control doesn't
+          // (Ashby marks the title with a "required" class and leaves its pickers
+          // bare): the nearest box with a title and no other field.
+          const titledRequired = (element: Element): boolean => {
+            for (
+              let box = element.parentElement, depth = 0;
+              box && box !== document.body && depth < 4;
+              box = box.parentElement, depth += 1
+            ) {
+              const title = box.querySelector(
+                "label, legend, [class*='question-title' i]",
+              );
+              if (!title) continue;
+              const alone = Array.from(
+                box.querySelectorAll(
+                  "input:not([type='hidden']), select, textarea",
+                ),
+              ).every((field) => field === element);
+              return (
+                alone &&
+                (/\*\s*$/u.test(title.textContent ?? "") ||
+                  box.querySelector(
+                    "[aria-required='true'], label[class*='required' i], [class*='question-title'][class*='required' i]",
+                  ) !== null)
+              );
+            }
+            return false;
+          };
           return elements.map((element, index) => {
             const html = element as HTMLElement;
             const input = element instanceof HTMLInputElement ? element : null;
@@ -373,7 +401,9 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               required:
                 Boolean(
                   input?.required ?? textarea?.required ?? select?.required,
-                ) || element.getAttribute("aria-required") === "true",
+                ) ||
+                element.getAttribute("aria-required") === "true" ||
+                titledRequired(element),
               invalid:
                 element.getAttribute("aria-invalid") === "true" ||
                 Boolean(
@@ -1017,6 +1047,32 @@ export function collectApplyDocumentSnapshot(
           : {}),
       };
     };
+    // A question's title can say it is required when its control doesn't
+    // (Ashby marks the title with a "required" class and leaves its pickers
+    // bare): the nearest box with a title and no other field.
+    const titledRequired = (element: Element): boolean => {
+      for (
+        let box = element.parentElement, depth = 0;
+        box && box !== document.body && depth < 4;
+        box = box.parentElement, depth += 1
+      ) {
+        const title = box.querySelector(
+          "label, legend, [class*='question-title' i]",
+        );
+        if (!title) continue;
+        const alone = Array.from(
+          box.querySelectorAll("input:not([type='hidden']), select, textarea"),
+        ).every((field) => field === element);
+        return (
+          alone &&
+          (/\*\s*$/u.test(title.textContent ?? "") ||
+            box.querySelector(
+              "[aria-required='true'], label[class*='required' i], [class*='question-title'][class*='required' i]",
+            ) !== null)
+        );
+      }
+      return false;
+    };
     return elements.map((element, index) => {
       const html = element as HTMLElement;
       const input = element instanceof HTMLInputElement ? element : null;
@@ -1050,7 +1106,8 @@ export function collectApplyDocumentSnapshot(
         autocomplete: input?.autocomplete ?? textarea?.autocomplete ?? "",
         required:
           Boolean(input?.required ?? textarea?.required ?? select?.required) ||
-          element.getAttribute("aria-required") === "true",
+          element.getAttribute("aria-required") === "true" ||
+          titledRequired(element),
         invalid:
           element.getAttribute("aria-invalid") === "true" ||
           Boolean(
@@ -1773,6 +1830,14 @@ async function pressToggleButton(
       (element) => element.getAttribute("aria-pressed") === "true",
     );
   try {
+    // Only an option button is pressed here, never the form's own buttons:
+    // a ref that went stale must not turn Submit into a plain button.
+    if (
+      !(await locator.evaluate((element) =>
+        element.hasAttribute("aria-pressed"),
+      ))
+    )
+      return { ok: false, error: "That is not an option button." };
     if ((await pressed()) !== checked) {
       await locator.evaluate((element) => {
         if (

@@ -256,6 +256,19 @@ test("Ashby with field saves: guarded Submit sends once after the Yes/No presses
         ),
       ).toMatchObject({ ok: true });
     }
+  // The location picker is required only by its title's class.
+  const location = (await session.readPage()).controls.find((control) =>
+    control.label.startsWith("What country are you based in?"),
+  )!;
+  expect(location).toMatchObject({ role: "combobox", required: true });
+  await registerPrepareOnlyPreparedValue(page, "United Kingdom");
+  await openPrepareOnlyIntermediateMutationWindow(page);
+  expect(
+    await session.chooseOption(
+      location.ref ?? `c${location.index}`,
+      "United Kingdom",
+    ),
+  ).toMatchObject({ ok: true });
   await uploadSettled(page);
   await page.waitForTimeout(500);
   expect(await page.locator("#toast").textContent()).toBe("");
@@ -302,6 +315,7 @@ test("Ashby with field saves: guarded Submit sends once after the Yes/No presses
     _systemfield_email: "alex.vanguard@example.test",
     adult: true,
     timezone: false,
+    _systemfield_location: "United Kingdom",
     _systemfield_resume: {
       file: expect.stringContaining(resume.name) as unknown,
     },

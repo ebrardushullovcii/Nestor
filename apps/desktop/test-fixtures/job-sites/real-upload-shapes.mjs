@@ -92,6 +92,16 @@ const ashbyYesNo = (path, question) => `
           <input type="checkbox" tabindex="-1" name="${path}" style="position:absolute;opacity:0;pointer-events:none">
         </div></div>`;
 
+/**
+ * Ashby's location question: an autocomplete with no `required` and no id
+ * its label could point at. Only the title's class says it is required.
+ */
+const ashbyLocation = `
+      <div class="field-entry"><label class="_required_f7cvd_91 ashby-application-form-question-title" for="_systemfield_location">What country are you based in?</label>
+        <div><p>This should be the location you're physically located</p></div>
+        <div><input placeholder="Start typing..." aria-autocomplete="list" aria-expanded="false" aria-haspopup="listbox" role="combobox" value="" id="location-input">
+          <ul role="listbox" id="location-list" hidden></ul></div></div>`;
+
 /** Ashby's form state, kept by the server per rendered form. */
 const ashbyForms = new Map();
 const ashbyFields = [
@@ -102,6 +112,11 @@ const ashbyFields = [
   {
     path: "timezone",
     label: "Are you based in a EU or equivalent timezone?",
+    required: true,
+  },
+  {
+    path: "_systemfield_location",
+    label: "What country are you based in?",
     required: true,
   },
 ];
@@ -118,7 +133,8 @@ const sites = {
         <input id="_systemfield_resume" type="file" accept=".pdf" style="display:none">
         <span id="chip"></span></div>
       ${ashbyYesNo("adult", "Are you over the age of 18?")}
-      ${ashbyYesNo("timezone", "Are you based in a EU or equivalent timezone?")}`,
+      ${ashbyYesNo("timezone", "Are you based in a EU or equivalent timezone?")}
+      ${ashbyLocation}`,
     script: `
       // Ashby's monitoring wraps fetch once the page has loaded, after
       // anything installed before the page's own scripts.
@@ -155,6 +171,24 @@ const sites = {
         yes.addEventListener('click', () => { value = value !== true || undefined; show(); });
         no.addEventListener('click', () => { value = value === false ? undefined : false; show(); });
       }
+      // The location list shows the countries matching what was typed; a
+      // pick is saved like any other answer.
+      const place = document.getElementById('location-input');
+      const list = document.getElementById('location-list');
+      place.addEventListener('input', () => {
+        const typed = place.value.trim().toLowerCase();
+        const matches = ['Portugal', 'Germany', 'United Kingdom', 'Albania'].filter((name) => typed && name.toLowerCase().includes(typed));
+        list.innerHTML = matches.map((name) => '<li role="option">' + name + '</li>').join('');
+        list.hidden = !matches.length;
+        place.setAttribute('aria-expanded', String(!list.hidden));
+        for (const option of list.querySelectorAll('li'))
+          option.addEventListener('click', () => {
+            place.value = option.textContent;
+            list.hidden = true;
+            place.setAttribute('aria-expanded', 'false');
+            graphql('ApiSetFormValue', { formRenderIdentifier: render, path: '_systemfield_location', value: option.textContent }).catch(() => toast('Your answer could not be saved.'));
+          });
+      });
       // Each answer is saved as it is entered, as Ashby does.
       for (const id of ['_systemfield_name', '_systemfield_email']) {
         const field = document.getElementById(id);
