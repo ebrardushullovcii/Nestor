@@ -36,6 +36,88 @@ const card = (title: string, id = title): ListingCard => ({
   sourceLabel: source.label,
 });
 
+test.each(["No open positions", "No current vacancies", "0 open jobs"])(
+  "an explicit empty HTML inventory is complete: %s",
+  async (message) => {
+    const navigateFallback = vi.fn(() =>
+      Promise.reject(new Error("No navigation needed")),
+    );
+    const inventory = await collectSource({
+      source,
+      readPage: () =>
+        Promise.resolve({
+          finalUrl: source.url,
+          html: `<main><h1>Careers</h1><p>${message}</p></main>`,
+        }),
+      navigateFallback,
+    });
+    expect(inventory).toMatchObject({
+      cards: [],
+      pagesRead: 1,
+      complete: true,
+      emptyConfirmed: true,
+      requiresBrowser: false,
+    });
+    expect(inventory.notes.join(" ")).toContain("all observed pages covered");
+    expect(navigateFallback).not.toHaveBeenCalled();
+  },
+);
+
+test("an empty shell is incomplete and explicit emptiness cannot hide a failed page", async () => {
+  const shell = await collectSource({
+    source,
+    readPage: () =>
+      Promise.resolve({
+        finalUrl: source.url,
+        html: '<main>Loading</main><script>{"message":"No open positions"}</script>',
+      }),
+  });
+  expect(shell.complete).toBe(false);
+  expect(shell.emptyConfirmed).not.toBe(true);
+  const failed = await collectSource({
+    source,
+    readPage: (url) =>
+      url === source.url
+        ? Promise.resolve({
+            finalUrl: url,
+            html: '<main>No open positions<a rel="next" href="/page/2">Next</a></main>',
+          })
+        : Promise.reject(new DiscoveryPageReadError(503)),
+  });
+  expect(failed).toMatchObject({
+    cards: [],
+    complete: false,
+    emptyConfirmed: true,
+  });
+});
+
+test("a browser fallback may confirm an empty inventory but cannot assert emptiness without evidence", async () => {
+  for (const emptyConfirmed of [true, false]) {
+    const inventory = await collectSource({
+      source,
+      readPage: () =>
+        Promise.resolve({
+          finalUrl: source.url,
+          html: '<main>Loading</main><script src="app.js"></script>',
+        }),
+      navigateFallback: () =>
+        Promise.resolve({
+          cards: [],
+          pagesRead: 1,
+          complete: true,
+          emptyConfirmed,
+          notes: emptyConfirmed
+            ? ["The site explicitly reports no open positions."]
+            : [],
+        }),
+    });
+    expect(inventory.complete).toBe(emptyConfirmed);
+    expect(
+      inventory.notes.join(" ").includes("coverage could not be confirmed"),
+    ).toBe(!emptyConfirmed);
+  }
+});
+
 test("detail reads retain all visible requirements and interactive controls without parsing script payloads", () => {
   const detail = readListingHtml(
     `<style>.hidden { display:none }</style><script>window.state=${JSON.stringify({ payload: "script-only ".repeat(25000) })}</script><main><article><h1>Engineer</h1><p>First requirement: TypeScript.</p><p>Final requirement: German B1.</p><a href="/apply">Apply</a></article></main>`,
