@@ -223,6 +223,9 @@ export function buildApplyFormObservation(
       kind,
       ...(rawControl.scopeKey ? { scopeKey: rawControl.scopeKey } : {}),
       ...(inputType === "tel" ? { telInput: true } : {}),
+      ...(inputType === "tel" && rawControl.phoneCallingCode
+        ? { phoneCallingCode: rawControl.phoneCallingCode }
+        : {}),
       ...(inputType === "url" ? { urlInput: true } : {}),
       ...(inputType === "month" || inputType === "date"
         ? { dateInputType: inputType }

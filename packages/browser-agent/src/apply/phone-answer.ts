@@ -29,6 +29,18 @@ export function phoneAnswerMatches(
   if (expected === actual) return true;
   // An explicit international answer cannot be interpreted as national digits.
   if (answer.trim().startsWith("+") || !control.scopeKey) return false;
+  // Some native phone widgets use a button opening a dialog, not a combobox.
+  // The reader binds its current displayed code directly to this tel input.
+  if (control.phoneCallingCode !== undefined)
+    return (
+      control.telInput === true &&
+      control.visible &&
+      !control.disabled &&
+      !control.invalid &&
+      !fieldNamesAnotherPerson(control) &&
+      /^\+[1-9]\d{0,2}$/u.test(control.phoneCallingCode) &&
+      `${control.phoneCallingCode.slice(1)}${actual}` === expected
+    );
   const picker = phoneCountryPicker(control, controls);
   if (!picker) return false;
   const codes = [

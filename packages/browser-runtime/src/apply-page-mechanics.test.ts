@@ -201,6 +201,155 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
+  test.each(["form", "formless", "shadow", "iframe"] as const)(
+    "Send binds national digits to the collapsed dialog button in its own %s widget",
+    async (surface) => {
+      const page = await browser.newPage();
+      try {
+        // The captured widget has no combobox role. Its button owns a hidden
+        // dialog/listbox and exposes the current code in its name and child text.
+        const html = `<form><label id="phone_label">Phone</label>
+        <div data-role="illustrated-input"><div><div class="iti iti--input-container">
+          <div class="iti__country-container">
+            <button type="button" class="iti__selected-country" aria-expanded="false"
+              aria-label="Change country for phone number, currently selected Slovenia (+386)"
+              aria-haspopup="dialog" aria-controls="iti-0__country-selector" title="Slovenia">
+              <div><div class="iti__flag"></div><div aria-hidden="true">⌄</div></div>
+              <div class="iti__selected-dial-code">+386</div>
+            </button>
+            <div id="iti-0__country-selector" role="dialog" aria-modal="true" style="display:none">
+              <ul role="listbox" aria-label="List of countries">
+                <li role="option" aria-selected="false">United Kingdom (+44)</li>
+                <li role="option" aria-selected="true">Slovenia (+386)</li>
+              </ul>
+            </div>
+          </div>
+          <input aria-required="true" aria-labelledby="phone_label" aria-describedby="phone_helper"
+            maxlength="255" required id="input_phone" name="phone" type="tel"
+            dir="auto" autocomplete="tel" inputmode="tel" value="31 000 111">
+        </div></div></div><span id="phone_helper"></span></form>`;
+        if (surface === "shadow") {
+          await page.setContent('<main id="host"></main>');
+          await page.locator("#host").evaluate((host, html) => {
+            host.attachShadow({ mode: "open" }).innerHTML = html;
+          }, html);
+        } else if (surface === "iframe") {
+          await page.setContent('<iframe title="Application"></iframe>');
+          const frame = page
+            .frames()
+            .find((frame) => frame !== page.mainFrame());
+          if (!frame) throw new Error("The replica iframe did not load.");
+          await frame.setContent(html);
+        } else {
+          await page.setContent(
+            surface === "formless"
+              ? html.replace("<form>", "").replace("</form>", "")
+              : html,
+          );
+        }
+        const root = surface === "iframe" ? page.frameLocator("iframe") : page;
+        const sources = {
+          profile: CandidateProfileSchema.parse({
+            id: "synthetic",
+            phone: "+38631000111",
+            yearsExperience: 3,
+            baseResume: {
+              id: "resume",
+              fileName: "synthetic.txt",
+              uploadedAt: "2026-10-27T12:00:00.000Z",
+              extractionStatus: "ready",
+            },
+          }),
+          resumeText: null,
+          documents: [],
+          reusableAnswers: [],
+          posting: {
+            title: "Engineer",
+            company: "Example",
+            location: "Remote",
+            description: "Build tools.",
+          },
+        };
+        const client = {
+          chatWithTools: () =>
+            Promise.resolve({
+              toolCalls: [
+                {
+                  id: "read",
+                  type: "function" as const,
+                  function: {
+                    name: "report_question_kinds",
+                    arguments: JSON.stringify({
+                      plainIndexes: [0],
+                      flagged: [],
+                      tags: [
+                        {
+                          index: 0,
+                          kind: "other",
+                          country: null,
+                          sourceId: "profile.phone",
+                        },
+                      ],
+                    }),
+                  },
+                },
+              ],
+            }),
+        };
+        const check = async (answer = "31 000 111") => {
+          const raw = await readRawApplyPage(page);
+          const form = buildApplyFormObservation(
+            raw,
+            "2026-10-27T12:00:00.000Z",
+          );
+          expect(form.controls).toHaveLength(1);
+          return (
+            await checkClassifiedApplicationAnswers({
+              client,
+              sources,
+              payDisclosed: false,
+              answers: [{ question: "Phone", answer }],
+              formControls: form.controls,
+              formContext: { pageText: raw.bodyText, fields: [] },
+            })
+          )[0]?.supported;
+        };
+        expect(await check()).toBe(true);
+        expect(await check("31 000 112")).toBe(false);
+        const button = root.locator("button");
+        await button.evaluate((button) => {
+          button.setAttribute(
+            "aria-label",
+            "Change country for phone number, currently selected United Kingdom (+44)",
+          );
+          const code = button.querySelector(".iti__selected-dial-code");
+          if (code) code.textContent = "+44";
+        });
+        expect(await check()).toBe(false);
+        // A stale accessible name or a code hidden by the page grants nothing.
+        await button.locator(".iti__selected-dial-code").evaluate((code) => {
+          code.textContent = "+386";
+        });
+        expect(await check()).toBe(false);
+        await button.evaluate((button) => {
+          button.setAttribute(
+            "aria-label",
+            "Change country for phone number, currently selected Slovenia (+386)",
+          );
+          button.style.opacity = "0";
+        });
+        expect(await check()).toBe(false);
+        await button.evaluate((button) => {
+          button.style.opacity = "1";
+          button.parentElement?.parentElement?.parentElement?.append(button);
+        });
+        expect(await check()).toBe(false);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
   test("a detached native read retains a checked challenge and never reads password or one-time-code values", async () => {
     const page = await browser.newPage();
     try {

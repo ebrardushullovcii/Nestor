@@ -249,6 +249,73 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               form ? `form${forms.indexOf(form)}` : "root"
             }`;
           };
+          const phoneCallingCodeFor = (
+            element: Element,
+          ): string | undefined => {
+            if (
+              !(element instanceof HTMLInputElement) ||
+              element.type !== "tel"
+            )
+              return undefined;
+            const box = element.parentElement;
+            if (
+              !box ||
+              box.querySelectorAll(
+                "input:not([type='hidden']),textarea,select,[role='combobox']",
+              ).length !== 1
+            )
+              return undefined;
+            const buttons = Array.from(
+              box.querySelectorAll(
+                "button[aria-haspopup='dialog'][aria-expanded='false'][aria-controls]",
+              ),
+            );
+            if (buttons.length !== 1) return undefined;
+            const button = buttons[0];
+            if (
+              !(button instanceof HTMLButtonElement) ||
+              button.disabled ||
+              button.getAttribute("aria-disabled") === "true" ||
+              button.getAttribute("aria-invalid") === "true" ||
+              button.form !== element.form ||
+              !button.checkVisibility({
+                checkOpacity: true,
+                checkVisibilityCSS: true,
+              }) ||
+              button.closest('[aria-hidden="true"]')
+            )
+              return undefined;
+            const root = element.getRootNode();
+            const owned = button.getAttribute("aria-controls");
+            const dialog =
+              (root instanceof Document || root instanceof ShadowRoot) && owned
+                ? root.getElementById(owned)
+                : null;
+            if (
+              !dialog ||
+              !box.contains(dialog) ||
+              dialog.getAttribute("role") !== "dialog" ||
+              !dialog.querySelector("[role='listbox']") ||
+              dialog.checkVisibility({
+                checkOpacity: true,
+                checkVisibilityCSS: true,
+              })
+            )
+              return undefined;
+            const shown = [
+              ...button.innerText.matchAll(/\+[1-9]\d{0,2}(?!\d)/gu),
+            ];
+            const named = [
+              ...(button.getAttribute("aria-label") ?? "").matchAll(
+                /\+[1-9]\d{0,2}(?!\d)/gu,
+              ),
+            ];
+            return shown.length === 1 &&
+              named.length === 1 &&
+              shown[0]?.[0] === named[0]?.[0]
+              ? shown[0]?.[0]
+              : undefined;
+          };
           // What a file input's own field shows about its upload: the site's
           // message for it, the chip with the chosen name, or the browser's
           // own widget. Help text further away is never read as a failure.
@@ -363,6 +430,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
           return elements.map((element, index) => {
             const html = element as HTMLElement;
             const input = element instanceof HTMLInputElement ? element : null;
+            const phoneCallingCode = phoneCallingCodeFor(element);
             const textarea =
               element instanceof HTMLTextAreaElement ? element : null;
             const select =
@@ -443,6 +511,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               id: html.id,
               name: input?.name ?? textarea?.name ?? select?.name ?? "",
               scopeKey: scopeKeyFor(element),
+              ...(phoneCallingCode ? { phoneCallingCode } : {}),
               label,
               hint: hintFor(element, label),
               groupLabel: legend ?? "",
@@ -1082,6 +1151,63 @@ export function collectApplyDocumentSnapshot(
           : [];
       return `r${rootIndex}${form ? `form${forms.indexOf(form)}` : "root"}`;
     };
+    const phoneCallingCodeFor = (element: Element): string | undefined => {
+      if (!(element instanceof HTMLInputElement) || element.type !== "tel")
+        return undefined;
+      const box = element.parentElement;
+      if (
+        !box ||
+        box.querySelectorAll(
+          "input:not([type='hidden']),textarea,select,[role='combobox']",
+        ).length !== 1
+      )
+        return undefined;
+      const buttons = Array.from(
+        box.querySelectorAll(
+          "button[aria-haspopup='dialog'][aria-expanded='false'][aria-controls]",
+        ),
+      );
+      if (buttons.length !== 1) return undefined;
+      const button = buttons[0];
+      if (
+        !(button instanceof HTMLButtonElement) ||
+        button.disabled ||
+        button.getAttribute("aria-disabled") === "true" ||
+        button.getAttribute("aria-invalid") === "true" ||
+        button.form !== element.form ||
+        !button.checkVisibility({
+          checkOpacity: true,
+          checkVisibilityCSS: true,
+        }) ||
+        button.closest('[aria-hidden="true"]')
+      )
+        return undefined;
+      const root = element.getRootNode();
+      const owned = button.getAttribute("aria-controls");
+      const dialog =
+        (root instanceof Document || root instanceof ShadowRoot) && owned
+          ? root.getElementById(owned)
+          : null;
+      if (
+        !dialog ||
+        !box.contains(dialog) ||
+        dialog.getAttribute("role") !== "dialog" ||
+        !dialog.querySelector("[role='listbox']") ||
+        dialog.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })
+      )
+        return undefined;
+      const shown = [...button.innerText.matchAll(/\+[1-9]\d{0,2}(?!\d)/gu)];
+      const named = [
+        ...(button.getAttribute("aria-label") ?? "").matchAll(
+          /\+[1-9]\d{0,2}(?!\d)/gu,
+        ),
+      ];
+      return shown.length === 1 &&
+        named.length === 1 &&
+        shown[0]?.[0] === named[0]?.[0]
+        ? shown[0]?.[0]
+        : undefined;
+    };
 
     // What a file input's own field shows about its upload: the site's
     // message for it, the chip with the chosen name, or the browser's
@@ -1188,6 +1314,7 @@ export function collectApplyDocumentSnapshot(
     return elements.map((element, index) => {
       const html = element as HTMLElement;
       const input = element instanceof HTMLInputElement ? element : null;
+      const phoneCallingCode = phoneCallingCodeFor(element);
       const textarea = element instanceof HTMLTextAreaElement ? element : null;
       const select = element instanceof HTMLSelectElement ? element : null;
       const role = element.getAttribute("role")?.toLowerCase() ?? "";
@@ -1213,6 +1340,7 @@ export function collectApplyDocumentSnapshot(
         id: html.id ?? "",
         name: input?.name ?? textarea?.name ?? select?.name ?? "",
         scopeKey: scopeKeyFor(element),
+        ...(phoneCallingCode ? { phoneCallingCode } : {}),
         label: directLabel(element),
         hint: hintFor(element, directLabel(element)),
         groupLabel: groupLabel(element),
