@@ -100,6 +100,16 @@ test("plain applicant identity binds to its own exact Profile value when the mod
     );
     expect(decide(sources, field, null, value).kind).toBe("needs_you");
     expect(
+      classifyAnswerPermission({
+        sources,
+        control: field,
+        controls: [field],
+        tags,
+        answer: value,
+        pageInstructions: "Professional reference",
+      }).kind,
+    ).toBe("needs_you");
+    expect(
       decide(sources, field, { ...tags, kind: "own_words" }, value).kind,
     ).toBe("needs_you");
   }

@@ -596,6 +596,10 @@ export function classifyAnswerPermission(input: {
     !input.controls.some((control) => control.credentialRole === "password") &&
     !input.control.repeatedQuestion &&
     !input.control.hint?.trim() &&
+    !fieldNamesAnotherPerson({
+      ...input.control,
+      hint: input.pageInstructions,
+    }) &&
     (!input.control.placeholder.trim() ||
       normalizeFormQuestionPrompt(input.control.placeholder) ===
         normalizeFormQuestionPrompt(input.control.label))
