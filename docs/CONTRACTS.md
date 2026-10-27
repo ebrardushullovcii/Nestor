@@ -20,7 +20,6 @@ Each line names the symbol or file to check before changing the behavior. If the
 - Compensation matching compares only the saved minimum, and only when explicit currencies match; a null range maximum is not a ceiling, and missing or different currencies stay neutral and never infer an exchange rate (`matching-compensation.ts`).
 - The fresh-start seed persists no fake facts: identity strings stay null and placeholder strings are never counted as real (`createFreshStartCandidateProfile`, `hasProfileSetupPlaceholderValue`).
 - Setup readiness has one canonical rule and requires a runnable enabled public source, not an explicit target title (`evaluateProfileSetupReadiness`, `isRunnableJobDiscoveryTarget`).
-- `STARTER_JOB_SOURCES` seed with `enabled: false` and never enable themselves; pristine legacy workspaces adopt them once (`adoptPristineWorkspaceStarterSources`).
 - Long-running profile flows commit through the revision CAS boundary and retry a stale commit exactly once before surfacing a typed error (`commitMergedProfileUpdateWithStaleRetry`, `MAX_PROFILE_COMMIT_ATTEMPTS`).
 
 ### Resume export and approval

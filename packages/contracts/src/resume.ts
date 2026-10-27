@@ -5,8 +5,19 @@ import {
   NonEmptyStringSchema,
   ResumeTemplateIdSchema,
 } from "./base";
-import { ResumeBatchProviderBlockSchema } from "./resume-batch";
 import { AgentTaskMessageAttributionSchema } from "./agent-task";
+
+export interface ResumeBatchProviderBlock {
+  reason: "funding" | "authentication" | "permission";
+  message: string;
+}
+export const ResumeBatchProviderBlockSchema: z.ZodType<ResumeBatchProviderBlock> =
+  z
+    .object({
+      reason: z.enum(["funding", "authentication", "permission"]),
+      message: NonEmptyStringSchema,
+    })
+    .strict();
 
 const ProbabilitySchema = z.number().min(0).max(1);
 
