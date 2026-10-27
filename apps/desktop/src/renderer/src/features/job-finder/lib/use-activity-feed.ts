@@ -19,6 +19,8 @@ let started = false;
 /** Bumped when the last user unmounts: a read or tick from before is dropped. */
 let generation = 0;
 let users = 0;
+/** Counts reads started: only the newest one's answer is shown. */
+let reads = 0;
 let pending: ReturnType<typeof setTimeout> | null = null;
 let unsubscribes: Array<() => void> = [];
 const listeners = new Set<() => void>();
@@ -30,8 +32,9 @@ function read(): void {
   const activity = window.nestor?.activity;
   if (!activity) return;
   const current = generation;
+  const mine = ++reads;
   const settle = (next: ActivityFeedState) => {
-    if (current !== generation) return;
+    if (current !== generation || mine !== reads) return;
     state = next;
     for (const listener of listeners) listener();
   };
@@ -53,6 +56,17 @@ export function refreshActivityFeed(): void {
     pending = null;
     read();
   }, REFRESH_GAP_MS);
+}
+
+/**
+ * Reads now, for something the person did (opened Activity, pressed Try
+ * again): a refresh still waiting out its gap is folded into this read.
+ */
+export function readActivityFeedNow(): void {
+  if (!started) return;
+  if (pending !== null) clearTimeout(pending);
+  pending = null;
+  read();
 }
 
 function start(): void {

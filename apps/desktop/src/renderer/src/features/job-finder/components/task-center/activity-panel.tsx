@@ -4,7 +4,7 @@ import type { ActivityFeed, ActivityMove } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
 import { StatusBadge } from "../status-badge";
-import { refreshActivityFeed } from "../../lib/use-activity-feed";
+import { readActivityFeedNow } from "../../lib/use-activity-feed";
 import {
   describeMove,
   describeMovedOn,
@@ -74,8 +74,8 @@ function MoveRow(props: { move: ActivityMove }) {
       });
       const partial = describeUndo(move, result.moved);
       if (partial) showToast({ ...partial, tone: "warning" });
-      // The move is spent; the next read drops it.
-      refreshActivityFeed();
+      // The move is spent; reading now drops it.
+      readActivityFeedNow();
     } catch {
       setError("Undo did not work. Try again.");
       setUndoing(false);
@@ -144,7 +144,7 @@ export function ActivityPanel(props: {
       >
         Activity could not be read.
         <Button
-          onClick={refreshActivityFeed}
+          onClick={readActivityFeedNow}
           size="compact"
           type="button"
           variant="secondary"

@@ -68,3 +68,22 @@ test("a read still on its way when the last user unmounts is dropped", async () 
   expect(screen.getByTestId("feed").textContent).toBe("none");
   expect(feed).toHaveBeenCalledTimes(2);
 });
+
+test("Try again reads at once, and an older failed read cannot hide its answer", async () => {
+  const { Feed, readActivityFeedNow, refreshActivityFeed } = await load();
+  let fail!: (error: Error) => void;
+  feed.mockReturnValueOnce(new Promise((_, reject) => (fail = reject)));
+  render(<Feed />);
+  await settle();
+  refreshActivityFeed();
+  feed.mockResolvedValueOnce({ rows: ["fresh"] });
+  readActivityFeedNow();
+  expect(feed).toHaveBeenCalledTimes(2);
+  await settle();
+  fail(new Error("database is locked"));
+  await settle();
+  expect(screen.getByTestId("feed").textContent).toContain("fresh");
+  // The refresh waiting out its gap was folded into that read.
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(feed).toHaveBeenCalledTimes(2);
+});
