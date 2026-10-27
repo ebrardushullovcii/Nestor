@@ -26,6 +26,34 @@ import {
 const stores: JobStore[] = [];
 const folders: string[] = [];
 
+it("an exact answer key wins before normalized-wording alternatives", () => {
+  const { applications } = open();
+  const memory = applications.needsYou;
+  memory.remember({
+    key: "exact",
+    prompt: "Earlier wording",
+    answer: "The exact stored answer",
+    input: "text",
+    scope: {},
+    options: [],
+  });
+  memory.remember({
+    key: "alternative",
+    prompt: "Current wording",
+    answer: "Another answer",
+    input: "text",
+    scope: {},
+    options: [],
+  });
+  expect(
+    memory.answersForQuestions(
+      1,
+      [{ key: "exact", prompt: "Current wording", reusePrompt: true }],
+      "https://replica.test",
+    )[0]?.answer,
+  ).toBe("The exact stored answer");
+});
+
 it("a refused write preserves the answered link and an open task cannot hide it after restart", () => {
   const folder = mkdtempSync(path.join(tmpdir(), "nestor-answer-replay-"));
   folders.push(folder);

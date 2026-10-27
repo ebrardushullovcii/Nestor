@@ -772,24 +772,29 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         reuse_prompt: number;
       }>;
       return questions.flatMap<FormAnswerMatch>((question) => {
-        const relevantLocal = localRows.filter((row) =>
-          question.reusePrompt
-            ? row.reuse_prompt === 1 &&
+        const relevantLocal = localRows.filter(
+          (row) =>
+            row.answer_key === question.key ||
+            (question.reusePrompt &&
+              row.reuse_prompt === 1 &&
               savedQuestionMatches(
                 row.prompt,
                 question.prompt,
                 row.answer ?? "",
-              )
-            : row.answer_key === question.key,
+              )),
         );
-        const exactLocal = relevantLocal.find(
-          (row) =>
-            row.answer !== null &&
-            (question.reusePrompt
-              ? normalizeFormQuestionPrompt(row.prompt) ===
-                normalizeFormQuestionPrompt(question.prompt)
-              : row.answer_key === question.key),
-        );
+        const exactLocal =
+          relevantLocal.find(
+            (row) => row.answer !== null && row.answer_key === question.key,
+          ) ??
+          relevantLocal.find(
+            (row) =>
+              row.answer !== null &&
+              (question.reusePrompt
+                ? normalizeFormQuestionPrompt(row.prompt) ===
+                  normalizeFormQuestionPrompt(question.prompt)
+                : row.answer_key === question.key),
+          );
         const local =
           exactLocal ??
           uniquePromptAnswer(
@@ -803,16 +808,23 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         // a remembered answer. Conflicting actual answers remain ambiguous.
         if (relevantLocal.some((row) => row.answer !== null) && !local)
           return [];
-        let eligible = savedRows.filter((row) =>
-          question.reusePrompt
-            ? savedQuestionMatches(row.prompt, question.prompt, row.answer)
-            : row.answer_key === question.key,
+        let eligible = savedRows.filter(
+          (row) =>
+            row.answer_key === question.key ||
+            (question.reusePrompt &&
+              savedQuestionMatches(row.prompt, question.prompt, row.answer)),
         );
+        const exactKeys = eligible.filter(
+          (row) => row.answer_key === question.key,
+        );
+        if (exactKeys.length) eligible = exactKeys;
         if (eligible.some((row) => row.site_origin === origin))
           eligible = eligible.filter((row) => row.site_origin === origin);
-        const saved = question.reusePrompt
-          ? uniquePromptAnswer(eligible, question.prompt)
-          : eligible[0];
+        const saved =
+          eligible.find((row) => row.answer_key === question.key) ??
+          (question.reusePrompt
+            ? uniquePromptAnswer(eligible, question.prompt)
+            : eligible[0]);
         if (
           local?.answer != null &&
           (!saved?.option_fallback_json || saved.answer !== local.answer)
@@ -821,13 +833,16 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             {
               id: `application:${local.id}`,
               key: question.key,
-              prompt: local.prompt,
+              prompt:
+                local.answer_key === question.key
+                  ? question.prompt
+                  : local.prompt,
               answer: local.answer,
               local: true,
             },
           ];
         if (!saved) return [];
-        if (question.reusePrompt) {
+        if (question.reusePrompt && saved.answer_key !== question.key) {
           const exactTargets = questions.filter(
             (target) =>
               normalizeFormQuestionPrompt(target.prompt) ===
@@ -850,7 +865,10 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           {
             id: `saved:${saved.id}`,
             key: question.key,
-            prompt: saved.prompt,
+            prompt:
+              saved.answer_key === question.key
+                ? question.prompt
+                : saved.prompt,
             answer: saved.answer,
             local: false,
             optionFallback: saved.option_fallback_json
