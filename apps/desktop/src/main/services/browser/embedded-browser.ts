@@ -1037,9 +1037,9 @@ export class EmbeddedBrowser {
             edit.checked === control.checked &&
             edit.personAnswer?.pageUrl === raw.url,
         );
-        return same.length === 1
-          ? { ...control, personAnswer: same[0]!.personAnswer }
-          : control;
+        const personAnswer =
+          same.length === 1 ? same[0]?.personAnswer : undefined;
+        return personAnswer ? { ...control, personAnswer } : control;
       }),
     };
   }
