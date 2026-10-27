@@ -34,6 +34,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // resyncs (mount, canonical reseeds), which must never read as a user edit;
 // see the draft-edit subscription in useProfileSetupForms.
 const FIELD_ARRAY_ROOT_NAMES = new Set([
+  "eligibility.limitedWorkPermissions",
   "records.experiences",
   "records.education",
   "records.certifications",
@@ -459,6 +460,11 @@ export function useProfileSetupForms(input: {
     };
   }, [input.onDraftEdited, preferencesForm, profileForm]);
 
+  const limitedPermissionArray = useFieldArray({
+    control: profileForm.control,
+    name: "eligibility.limitedWorkPermissions",
+    keyName: "fieldKey",
+  });
   const experienceArray = useFieldArray({
     control: profileForm.control,
     name: "records.experiences",
@@ -504,6 +510,7 @@ export function useProfileSetupForms(input: {
       }
     });
   const backgroundArrays: ProfileBackgroundArrays = {
+    limitedPermissionArray: wrapUserFieldArray(limitedPermissionArray),
     certificationArray: wrapUserFieldArray(certificationArray),
     educationArray: wrapUserFieldArray(educationArray),
     languageArray: wrapUserFieldArray(languageArray),
