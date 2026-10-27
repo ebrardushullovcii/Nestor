@@ -11,7 +11,7 @@ import { Button } from "@renderer/components/ui/button";
 import { isImeComposingEvent } from "../../lib/job-finder-shortcuts";
 import { useJobFinderOverlayOwnership } from "../../lib/job-finder-overlay-ownership";
 import {
-  refreshActivityFeed,
+  readActivityFeedNow,
   useActivityFeed,
 } from "../../lib/use-activity-feed";
 
@@ -110,7 +110,7 @@ export function JobFinderTaskCenter(props: JobFinderTaskCenterProps) {
           // The panel state owns openness so overlay ownership and shell
           // shortcut blocking stay truthful; cancel the native summary toggle.
           event.preventDefault();
-          refreshActivityFeed();
+          readActivityFeedNow();
           setIsPanelOpen((open) => !open);
         }}
         ref={summaryRef}
