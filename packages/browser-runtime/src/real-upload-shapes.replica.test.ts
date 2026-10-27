@@ -457,3 +457,32 @@ test("Ashby: a location already picked stays picked when a continue chooses it a
   await page.locator("body").click({ position: { x: 1, y: 1 } });
   expect((await location()).value).toBe("Kosovo");
 });
+
+test("Ashby: a date picker reads as a date, takes only a date, and its open calendar is not its question", async () => {
+  const { page, session } = await fillPage("ashby-shape");
+  const start = async () =>
+    (await session.readPage()).controls.find((control) =>
+      control.label.startsWith("When could you start?"),
+    )!;
+  // The calendar is open beside the box: its month and weekdays stay out.
+  await page.locator("#start-input").click();
+  expect(await start()).toMatchObject({
+    inputType: "date",
+    label: "When could you start?",
+  });
+  const ref = async () => {
+    const control = await start();
+    return control.ref ?? `c${control.index}`;
+  };
+  expect(await session.fillText(await ref(), "Immediately")).toMatchObject({
+    ok: false,
+  });
+  expect((await start()).value).toBe("");
+  // A date three months on: the calendar is moved to it and the day picked.
+  await registerPrepareOnlyPreparedValue(page, "2027-01-15");
+  expect(await session.fillText(await ref(), "2027-01-15")).toMatchObject({
+    ok: true,
+    observedValue: "01/15/2027",
+  });
+  expect((await start()).value).toBe("01/15/2027");
+});
