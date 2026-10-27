@@ -671,10 +671,15 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             ? (previous?.reviewCard?.attachments ?? [])
             : [],
           // What the attempt before left on the form: a page that was closed
-          // (or reopened) comes back from it without the model.
+          // (or reopened) comes back from it without the model, and so do
+          // the questions it left with the person.
           ...(previous?.reviewCard &&
           (previous.reviewCard.answers.length ||
-            previous.reviewCard.attachments.length)
+            previous.reviewCard.attachments.length ||
+            previous.execution.questions.some(
+              (question) =>
+                question.status === "detected" && !question.submittedAnswer,
+            ))
             ? {
                 replay: {
                   answers: previous.reviewCard.answers,

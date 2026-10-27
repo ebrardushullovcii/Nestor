@@ -92,7 +92,12 @@ function countingModel() {
   };
 }
 
-async function run(page: Page, replay: FormReplay) {
+async function run(
+  page: Page,
+  replay: FormReplay,
+  /** The questions the attempt before left with the person. */
+  unanswered: readonly string[] = [],
+) {
   const session = createPlaywrightApplyPageSession({ page });
   await session.installPrepareOnlyGuard({
     intermediateMutationsAuthorized: false,
@@ -152,6 +157,10 @@ async function run(page: Page, replay: FormReplay) {
       siteLabel: "Steps Replica",
       intermediateWritesAuthorized: false,
       replay,
+      initialUnansweredPickerQuestions: unanswered.map((prompt) => ({
+        prompt,
+        options: [],
+      })),
     },
     model.client,
   );
@@ -220,4 +229,42 @@ test("a closed two-step form comes back step by step, with no model call", async
   const third = await run(page, replay);
   expect(third.turns).toBe(0);
   expect(third.writes).toEqual([]);
+}, 60_000);
+
+test("a closed Needs-you form comes back with its open question still the person's, with no model call", async () => {
+  const replay: FormReplay = {
+    answers: [answer("First Name", "Alex"), answer("Last Name", "Vanguard")],
+    attachments: [],
+    path: [
+      {
+        from: `${base}/steps-shape/jobs/1|`,
+        tool: "follow_link",
+        label: "Apply",
+        href: `${base}/steps-shape/apply/1`,
+      },
+    ],
+  };
+  const open = async () => {
+    const page = await (await browser!.newContext()).newPage();
+    await ensurePrepareOnlyMutationGuard(page, false, [], true);
+    allowPrepareOnlyRunNavigation(page, `${base}/steps-shape/jobs/1`);
+    await page.goto(`${base}/steps-shape/jobs/1`);
+    return page;
+  };
+  const sent = posts().length;
+  // The attempt before asked the person for their email; it is still open.
+  const restored = await run(await open(), replay, ["Email *"]);
+  expect(restored.turns).toBe(0);
+  expect(restored.writes).toEqual(["Alex", "Vanguard"]);
+  expect(restored.result.outcome).toBe("paused");
+  expect(
+    restored.result.pauses.flatMap((pause) =>
+      (pause.questions ?? []).map((question) => question.prompt),
+    ),
+  ).toEqual([expect.stringMatching(/^Email/u)]);
+
+  // A field nobody asked about means the page differs: the model reads it.
+  const differs = await run(await open(), replay);
+  expect(differs.turns).toBeGreaterThan(0);
+  expect(posts()).toHaveLength(sent);
 }, 60_000);

@@ -3240,6 +3240,12 @@ async function runMeasuredApplyAgent(
    */
   const replayedScreens = new Set<string>();
   const takenPath = new Set<number>();
+  // The questions the attempt before left with the person, unanswered.
+  const stillWithPerson = new Set(
+    (config.initialUnansweredPickerQuestions ?? []).map((question) =>
+      normalizeFormQuestionPrompt(question.prompt),
+    ),
+  );
   const restoreFromReplay = async (): Promise<AgentLoopFinish | null> => {
     const replay = runConfig.replay;
     if (!replay) return null;
@@ -3407,10 +3413,33 @@ async function runMeasuredApplyAgent(
     const current = pageTools.state.observation;
     if (!current || current.blocker) return null;
     const open = unresolvedRequiredControls(current);
+    // A question the person was already asked, and has not answered yet, is
+    // theirs again as the attempt before left it. Any other open field means
+    // the page differs from what was recorded: the model reads it.
+    const fresh = open.filter(
+      (control) => !pendingQuestions.has(pendingQuestionKey(control)),
+    );
     if (
-      open.some((control) => !pendingQuestions.has(pendingQuestionKey(control)))
+      fresh.some(
+        (control) =>
+          control.kind === "file" ||
+          !stillWithPerson.has(
+            normalizeFormQuestionPrompt(questionPrompt(control)),
+          ),
+      )
     )
       return null;
+    for (const control of fresh)
+      pendingQuestions.set(
+        pendingQuestionKey(control),
+        buildPendingQuestion({
+          control,
+          jobId: config.application.jobId,
+          detectedAt: now().toISOString(),
+          suggestion: null,
+          siblings: current.controls,
+        }),
+      );
     if (open.length)
       return {
         reason: collectedQuestionsPause()!.summary,
