@@ -903,6 +903,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               client && form
                 ? await checkClassifiedApplicationAnswers({
                     client,
+                    application: {
+                      jobId: String(job.id),
+                      applicationId: identity.resultId,
+                      resultId: identity.resultId,
+                      applicationRecordId: String(row.id),
+                      startingUrl: form.url ?? job.applyUrl ?? job.url,
+                    },
                     questionReadCacheScope: deps.aiClient,
                     approvedAttestations: AiBehaviorPreferenceSchema.parse(
                       settings.aiBehavior ?? {},

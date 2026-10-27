@@ -8,7 +8,13 @@ import type {
   ApplicationAttestationKind,
 } from "@nestor/contracts";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
-import { storedFacts, savedAnswerForQuestion } from "./application-facts";
+import {
+  storedFacts,
+  savedAnswerForQuestion,
+  applicantContactGroup,
+  RESIDENCE_COUNTRY_LABELS,
+} from "./application-facts";
+import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import {
   countriesIn,
   countryTerms,
@@ -19,11 +25,15 @@ import { employmentMonthEvidence, isScalarAnswer } from "./answer-evidence";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import { asksGithubUsername, fieldNamesAnotherPerson } from "./github-username";
-import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 import {
   asksForSpecificStory,
   factualSummaryIsSourced,
 } from "./factual-summary";
+import type {
+  ApplyAgentConfig,
+  ApplyAnswerSources,
+  ApplyFormControl,
+} from "./types";
 
 export interface ClassifiedAnswerSource {
   id: string;
@@ -193,14 +203,7 @@ const contactLabels: Record<string, readonly string[]> = {
     "city of residence",
     "your city",
   ],
-  "profile.currentCountry": [
-    "country",
-    "country of residence",
-    "residence country",
-    "current country",
-    "what country are you based in",
-    "what is your current country of residence",
-  ],
+  "profile.currentCountry": RESIDENCE_COUNTRY_LABELS,
   "profile.yearsExperience": [
     "years of experience",
     "total experience",
@@ -295,23 +298,6 @@ function knownLiteralField(
   return (
     applicantContactGroup(control) &&
     aliases.includes(normalizeFormQuestionPrompt(control.label))
-  );
-}
-function applicantContactGroup(control: ApplyFormControl): boolean {
-  const group = normalizeFormQuestionPrompt(control.groupLabel);
-  return (
-    !group ||
-    [
-      "personal information",
-      "contact information",
-      "contact details",
-      "my information",
-      "your details",
-      "personal details",
-      "application questions",
-      "work eligibility",
-      "eligibility",
-    ].includes(group)
   );
 }
 function historyRecordMatches(
@@ -474,6 +460,7 @@ export function classifyAnswerPermission(input: {
   answer: string;
   pageInstructions: string;
   approvedAttestations?: readonly ApplicationAttestationKind[];
+  application?: ApplyAgentConfig["application"];
 }): ClassifiedAnswerDecision {
   const deny = (reason: string): ClassifiedAnswerDecision => ({
     kind: "needs_you",
@@ -502,11 +489,25 @@ export function classifyAnswerPermission(input: {
       "This question has more than one possible target. Please answer this entry yourself.",
     );
   const catalog = answerSourceCatalog(input.sources);
-  const matchingSaved = savedAnswerForQuestion(
+  const pickerRule = savedPickerRule(
     input.control,
-    input.sources.reusableAnswers,
-    input.controls,
+    [input.control.groupLabel, input.control.label].filter(Boolean).join(" — "),
+    {
+      sources: input.sources,
+      application: input.application ?? {
+        jobId: "",
+        applicationId: "",
+        startingUrl: "",
+      },
+    },
+    { forEvidence: true },
   );
+  const matchingSaved =
+    savedAnswerForQuestion(
+      input.control,
+      input.sources.reusableAnswers,
+      input.controls,
+    ) ?? pickerRule?.saved;
   let source = catalog.find((row) => row.id === tags.sourceId);
   // A known legal question can be answered directly from an explicit,
   // unconditional profile fact. Neither a model suggestion nor residence
@@ -658,12 +659,30 @@ export function classifyAnswerPermission(input: {
     return deny(
       "There is no matching verbatim source for this question. Please supply your answer.",
     );
-  const saved = savedAnswerForQuestion(
-    input.control,
-    input.sources.reusableAnswers,
-    input.controls,
-  );
+  const saved =
+    savedAnswerForQuestion(
+      input.control,
+      input.sources.reusableAnswers,
+      input.controls,
+    ) ?? pickerRule?.saved;
   let savedValueMatches = source.value === input.answer;
+  if (saved && pickerRule?.saved.id === saved.id) {
+    const primary = strictOptionMatch(
+      input.control.options,
+      pickerRule.rule.primary,
+    );
+    const fallback = strictOptionMatch(
+      input.control.options,
+      pickerRule.rule.fallback,
+    );
+    if (
+      (primary.kind === "match" && input.answer === primary.value) ||
+      (primary.kind === "none" &&
+        fallback.kind === "match" &&
+        input.answer === fallback.value)
+    )
+      savedValueMatches = true;
+  }
   if (input.control.answerControlType === "multi_choice" && saved) {
     try {
       const choices: unknown = JSON.parse(saved.answer);

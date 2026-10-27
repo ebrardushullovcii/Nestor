@@ -1,10 +1,14 @@
 import {
   normalizeFormQuestionPrompt,
+  preserveTechnologyTokens,
   type CandidateReusableAnswer,
   type SavedOptionFallback,
 } from "@nestor/contracts";
 
-import { isAnswerFromThisApplication } from "./application-facts";
+import {
+  isAnswerFromThisApplication,
+  isExplicitResidenceCountryControl,
+} from "./application-facts";
 import { normalizeSignal } from "./control-classification";
 import type { ApplyAgentConfig, ApplyFormControl } from "./types";
 
@@ -137,23 +141,22 @@ export function strictOptionMatch(
   | { kind: "match"; value: string }
   | { kind: "ambiguous"; candidates: string[] }
   | { kind: "none" } {
-  const wanted = normalizeSignal(desired);
+  const normalized = (value: string) =>
+    normalizeSignal(preserveTechnologyTokens(value));
+  const wanted = normalized(desired);
   if (!wanted) return { kind: "none" };
   // The same list read twice is one list.
   options = [
-    ...new Map(
-      options.map((option) => [normalizeSignal(option), option]),
-    ).values(),
+    ...new Map(options.map((option) => [normalized(option), option])).values(),
   ];
-  const exact = options.find((option) => normalizeSignal(option) === wanted);
+  const exact = options.find((option) => normalized(option) === wanted);
   if (exact) return { kind: "match", value: exact };
   // A qualifier counts only when it is the same name in another language or
   // script, or the place's own code; "China (Hong Kong SAR)" is a different
   // choice from "China", and is handed over.
   const variants = placeSpellings(desired);
   const qualified = options.filter((option) => {
-    if (normalizeSignal(option.replace(qualifier, " ")) !== wanted)
-      return false;
+    if (normalized(option.replace(qualifier, " ")) !== wanted) return false;
     const qualifiers = [...option.matchAll(qualifier)].map((match) =>
       spelling(match[1] ?? ""),
     );
@@ -166,11 +169,11 @@ export function strictOptionMatch(
   const [only] = qualified;
   if (qualified.length === 1 && only) return { kind: "match", value: only };
   const near = options.filter((option) => {
-    const normalized = normalizeSignal(option);
+    const text = normalized(option);
     return (
-      normalized.length > 0 &&
-      (` ${normalized} `.includes(` ${wanted} `) ||
-        ` ${wanted} `.includes(` ${normalized} `))
+      text.length > 0 &&
+      (` ${text} `.includes(` ${wanted} `) ||
+        ` ${wanted} `.includes(` ${text} `))
     );
   });
   return near.length > 0
@@ -181,32 +184,46 @@ export function strictOptionMatch(
 /**
  * The person's saved fallback rule for this exact picker, when it applies.
  *
- * Only the question the rule was saved for, word for word, and only while that
- * picker is required and still unanswered: a rule never decides another
- * question, an optional field or a choice already made. An answer saved for
- * another application stays with that application.
+ * Match the saved question, or an explicit alias of the person's residence
+ * country. Only required, unanswered pickers run the rule; evidence checks can
+ * also read it after filling. Application-scoped rules stay with that application.
  */
 export function savedPickerRule(
   control: ApplyFormControl,
   prompt: string,
   config: Pick<ApplyAgentConfig, "application" | "sources">,
+  options: { forEvidence?: boolean } = {},
 ): { saved: CandidateReusableAnswer; rule: SavedOptionFallback } | null {
   if (
     (control.kind !== "select" && control.kind !== "combobox") ||
     // The page's own required flag: the model's reading never turns an
     // optional picker into one whose rule can skip the application.
     !(control.requiredOnPage ?? control.required) ||
-    control.answered ||
+    (!options.forEvidence && control.answered) ||
     control.disabled ||
     !control.visible
   )
     return null;
-  const asked = normalizeFormQuestionPrompt(prompt);
+  const questionKey = (value: string) =>
+    normalizeFormQuestionPrompt(preserveTechnologyTokens(value));
+  const asked = questionKey(prompt);
   const rules = config.sources.reusableAnswers.filter(
     (saved) =>
       saved.optionFallback &&
       !saved.needsConfirmation &&
-      normalizeFormQuestionPrompt(saved.question) === asked &&
+      (questionKey(saved.question) === asked ||
+        (isExplicitResidenceCountryControl(control) &&
+          normalizeSignal(saved.optionFallback.primary) ===
+            normalizeSignal(config.sources.profile.currentCountry ?? "") &&
+          (() => {
+            const parts = saved.question.split(/\s+[—–]\s+/u);
+            return isExplicitResidenceCountryControl({
+              ...control,
+              label: parts.at(-1) ?? "",
+              groupLabel: parts.slice(0, -1).join(" — "),
+            });
+          })())) &&
+      (!control.repeatedQuestion || !!saved.applicationScope) &&
       (!saved.applicationScope ||
         isAnswerFromThisApplication(
           saved,

@@ -1,7 +1,11 @@
 import type { ApplicationAttestationKind } from "@nestor/contracts";
 import { questionPrompt } from "./policy-executor";
 import type { LLMClient } from "../agent/contracts";
-import type { ApplyAnswerSources, ApplyFormControl } from "./types";
+import type {
+  ApplyAgentConfig,
+  ApplyAnswerSources,
+  ApplyFormControl,
+} from "./types";
 import {
   answerSourceCatalog,
   classifyAnswerPermission,
@@ -21,6 +25,7 @@ export async function checkClassifiedApplicationAnswers(input: {
   client: LLMClient;
   sources: ApplyAnswerSources;
   payDisclosed: boolean;
+  application?: ApplyAgentConfig["application"];
   approvedAttestations?: readonly ApplicationAttestationKind[];
   answers: readonly { question: string; answer: string }[];
   formContext: {
@@ -105,6 +110,7 @@ export async function checkClassifiedApplicationAnswers(input: {
         tags: reading?.answerTags,
         approvedAttestations: input.approvedAttestations ?? [],
         sources: input.sources,
+        ...(input.application ? { application: input.application } : {}),
         answer: answer.answer,
         pageInstructions: input.formContext.pageText,
       });

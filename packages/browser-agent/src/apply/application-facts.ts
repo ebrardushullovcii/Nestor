@@ -9,6 +9,7 @@ import {
   asksGithubUsername,
   formatGithubAnswer,
   githubUsername,
+  fieldNamesAnotherPerson,
 } from "./github-username";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import type {
@@ -16,6 +17,45 @@ import type {
   ApplyAnswerSources,
   ApplyFormControl,
 } from "./types";
+
+export const RESIDENCE_COUNTRY_LABELS: readonly string[] = [
+  "country",
+  "country of residence",
+  "residence country",
+  "current country",
+  "what country are you based in",
+  "what is your current country of residence",
+];
+export function applicantContactGroup(control: ApplyFormControl): boolean {
+  const group = normalizeFormQuestionPrompt(control.groupLabel);
+  return (
+    !group ||
+    [
+      "personal information",
+      "contact information",
+      "contact details",
+      "my information",
+      "your details",
+      "personal details",
+      "application questions",
+      "work eligibility",
+      "eligibility",
+    ].includes(group)
+  );
+}
+/** A section title or a bare country field cannot establish residence. */
+export function isExplicitResidenceCountryControl(
+  control: ApplyFormControl,
+): boolean {
+  const label = normalizeFormQuestionPrompt(control.label);
+  return (
+    label !== "country" &&
+    RESIDENCE_COUNTRY_LABELS.includes(label) &&
+    applicantContactGroup(control) &&
+    !fieldNamesAnotherPerson(control) &&
+    control.asksHiringCountry !== true
+  );
+}
 
 // An answer explicitly supplied for this application is separate from permission
 // to infer pay from the Profile. The reader scopes reused answers to their question.

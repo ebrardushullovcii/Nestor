@@ -424,6 +424,8 @@ async function applyPickerRule(input: {
       control,
       value: wanted,
       storedFactId: `answerLibrary.${saved.id}`,
+      pageText: formWritingInstructions(observation),
+      controls: observation.controls,
     });
     if (choice.kind === "leave") {
       return notEntered({ deps, control, observation, at, decision: choice });
@@ -462,7 +464,8 @@ async function applyPickerRule(input: {
             : {
                 ...choice.answer,
                 value: option,
-                sourceId: `${choice.answer.sourceId}#fallback`,
+                sourceKind: "answer_library",
+                sourceId: `answerLibrary.${saved.id}#fallback`,
                 provenanceLabel: "your saved fallback for this question",
                 groundedIn: ["your saved fallback for this question"],
               },
@@ -899,6 +902,7 @@ async function decideAnswer(input: {
       answer: value,
       pageInstructions: input.pageText,
       approvedAttestations: config.authority.preApprovedAttestationKinds,
+      application: config.application,
     });
     if (permission.kind === "needs_you")
       return {
