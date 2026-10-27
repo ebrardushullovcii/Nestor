@@ -30,12 +30,14 @@ import {
   LIST_DETAIL_REGION_ID,
   ListDetailLayout,
   ListPane,
+  listRowPlacement,
   NO_SELECTION,
   plural,
   selectAll,
   toggleSelection,
   useListKeys,
   useStoreList,
+  type ListRowState,
   type ListSelection,
 } from "@renderer/features/job-lists";
 import { cn } from "@renderer/lib/cn";
@@ -601,13 +603,13 @@ export function ApplicationsScreen() {
               label="Applications"
               loading={list.loading}
               noun="application"
+              windowed
               onClearSelection={() => setSelection(NO_SELECTION)}
               onLoadMore={() => void list.loadMore()}
               onSelectAll={() => setSelection(selectAll())}
               renderRow={(row, state) => (
                 <ApplicationRow
-                  active={state.active}
-                  checked={state.checked}
+                  {...state}
                   columns={showColumns}
                   density={prefs.density}
                   onActivate={setActiveId}
@@ -755,15 +757,15 @@ function ViewOptions(props: {
  * One application as a row of the columns the person chose. Memoized, so a
  * key press re-renders only the rows whose state changed.
  */
-const ApplicationRow = memo(function ApplicationRow(props: {
-  row: TrackerRow;
-  active: boolean;
-  checked: boolean;
-  columns: readonly Column[];
-  density: Density;
-  onActivate: (id: number) => void;
-  onToggle: (id: number, shiftKey: boolean) => void;
-}) {
+const ApplicationRow = memo(function ApplicationRow(
+  props: ListRowState & {
+    row: TrackerRow;
+    columns: readonly Column[];
+    density: Density;
+    onActivate: (id: number) => void;
+    onToggle: (id: number, shiftKey: boolean) => void;
+  },
+) {
   const { row } = props;
   const shows = (column: Column) => props.columns.includes(column);
   const status = describeStatus(row);
@@ -772,7 +774,11 @@ const ApplicationRow = memo(function ApplicationRow(props: {
   const stage = shows("status") || shows("since");
   const timing = shows("next") || shows("applied");
   return (
-    <li className="relative min-w-0 pl-10" data-list-row-id={row.id}>
+    <li
+      className="relative min-w-0 pl-10"
+      data-list-row-id={row.id}
+      {...listRowPlacement(props)}
+    >
       <div className="absolute inset-y-0 left-0 z-10 flex w-10 items-center justify-center">
         <Checkbox
           aria-label={`Select ${row.company}, ${row.title}`}

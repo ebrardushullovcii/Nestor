@@ -1,4 +1,18 @@
-import { Fragment, memo, useEffect, useRef, type ReactNode } from "react";
+import {
+  defaultRangeExtractor,
+  useVirtualizer,
+  type Range,
+} from "@tanstack/react-virtual";
+import {
+  Fragment,
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import type { AssistantJobView, AssistantTrackerView } from "@nestor/contracts";
 
 import { Checkbox } from "@renderer/components/ui/checkbox";
@@ -61,26 +75,27 @@ export function ListDetailLayout(props: {
  * One row: a tick box, then title (with one badge slot), meta and status
  * lines. Selection never changes the row's size.
  */
-export const ListRowFrame = memo(function ListRowFrame(props: {
-  id: number;
-  title: string;
-  active: boolean;
-  checked: boolean;
-  onActivate: (id: number) => void;
-  onToggle: (id: number, shiftKey: boolean) => void;
-  /** Trailing on the title line: a score, a status badge. */
-  badge?: ReactNode;
-  /** Under the title: employer, place. */
-  meta: string;
-  /** Third line: why it fits, what it is waiting on. */
-  status?: ReactNode;
-  /** Right end of the third line: dates, sources. */
-  trailing?: ReactNode;
-}) {
+export const ListRowFrame = memo(function ListRowFrame(
+  props: ListRowState & {
+    id: number;
+    title: string;
+    onActivate: (id: number) => void;
+    onToggle: (id: number, shiftKey: boolean) => void;
+    /** Trailing on the title line: a score, a status badge. */
+    badge?: ReactNode;
+    /** Under the title: employer, place. */
+    meta: string;
+    /** Third line: why it fits, what it is waiting on. */
+    status?: ReactNode;
+    /** Right end of the third line: dates, sources. */
+    trailing?: ReactNode;
+  },
+) {
   return (
     <li
       className="relative min-w-0 pl-10 [contain-intrinsic-size:auto_92px] [content-visibility:auto]"
       data-list-row-id={props.id}
+      {...listRowPlacement(props)}
     >
       <div
         className="absolute inset-y-0 left-0 z-10 flex w-10 cursor-pointer items-start justify-center pt-4"
@@ -146,7 +161,40 @@ export const ListRowFrame = memo(function ListRowFrame(props: {
 export interface ListRowState {
   active: boolean;
   checked: boolean;
+  /** In a windowed list: the row's place, its offset and the list's size. */
+  index?: number | undefined;
+  top?: number | undefined;
+  setSize?: number | undefined;
 }
+
+/**
+ * Where a row of a windowed list sits: placed at its offset, and numbered for
+ * assistive tech, which sees only the rows in the window. Nothing for a list
+ * that renders every row.
+ */
+export function listRowPlacement(state: ListRowState): {
+  style?: CSSProperties;
+  "aria-posinset"?: number;
+  "aria-setsize"?: number | undefined;
+} {
+  if (state.index === undefined || state.top === undefined) return {};
+  return {
+    style: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      width: "100%",
+      transform: `translateY(${state.top}px)`,
+    },
+    "aria-posinset": state.index + 1,
+    "aria-setsize": state.setSize,
+  };
+}
+
+/** A row's height before the first one is measured. */
+const ROW_HEIGHT = 92;
+/** Rows drawn past each end of the window. */
+const OVERSCAN = 6;
 
 /**
  * The list half of a list screen: a toolbar with the select-all box and the
@@ -179,11 +227,55 @@ export function ListPane<Row extends { id: number }>(props: {
   footer?: ReactNode;
   /** Singular noun for the rows, e.g. "job". */
   noun?: string;
+  /**
+   * Draw only the rows in view (plus the open one), so a list of thousands
+   * costs what a list of twenty does. Rows must share one height and place
+   * themselves with `listRowPlacement`.
+   */
+  windowed?: boolean;
 }) {
   const noun = props.noun ?? "job";
   const sentinel = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const { onLoadMore, hasMore } = props;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { onLoadMore, hasMore, rows } = props;
+  const windowed = props.windowed ?? false;
+
+  // Rows share one height (each line is cut to one line): the first one
+  // drawn gives it, so a denser list or a larger font still lines up.
+  const [rowHeight, setRowHeight] = useState(ROW_HEIGHT);
+  useLayoutEffect(() => {
+    if (!windowed) return;
+    const first = listRef.current?.firstElementChild;
+    const height = first instanceof HTMLElement ? first.offsetHeight : 0;
+    if (height > 0 && height !== rowHeight) setRowHeight(height);
+  });
+
+  const activeIndex =
+    props.activeId === null
+      ? -1
+      : rows.findIndex((row) => row.id === props.activeId);
+  const virtualizer = useVirtualizer({
+    enabled: windowed,
+    count: windowed ? rows.length : 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => rowHeight,
+    getItemKey: (index) => rows[index]?.id ?? index,
+    overscan: OVERSCAN,
+    // The open row is always drawn, so it keeps focus and its key handling
+    // when the person scrolls away from it.
+    rangeExtractor: (range: Range) => {
+      const indexes = defaultRangeExtractor(range);
+      if (activeIndex < 0 || indexes.includes(activeIndex)) return indexes;
+      return [...indexes, activeIndex].sort((a, b) => a - b);
+    },
+  });
+  useEffect(() => {
+    if (windowed) virtualizer.measure();
+  }, [rowHeight, virtualizer, windowed]);
+  // A scroll box with no height has no layout to window by (a test's DOM):
+  // every row is drawn, as an unwindowed list does.
+  const drawWindow = windowed && virtualizer.scrollRect?.height !== 0;
 
   useEffect(() => {
     const node = sentinel.current;
@@ -198,12 +290,20 @@ export function ListPane<Row extends { id: number }>(props: {
     return () => observer.disconnect();
   }, [hasMore, onLoadMore, props.rows.length]);
 
+  // Moving with J/K or a click brings the open row into view.
+  const activeIndexRef = useRef(activeIndex);
+  activeIndexRef.current = activeIndex;
   useEffect(() => {
     if (props.activeId === null) return;
+    if (drawWindow) {
+      if (activeIndexRef.current >= 0)
+        virtualizer.scrollToIndex(activeIndexRef.current, { align: "auto" });
+      return;
+    }
     listRef.current
       ?.querySelector(`[data-list-row-id="${props.activeId}"]`)
       ?.scrollIntoView({ block: "nearest" });
-  }, [props.activeId]);
+  }, [props.activeId, virtualizer, drawWindow]);
 
   const allChecked =
     props.rows.length > 0 &&
@@ -274,6 +374,7 @@ export function ListPane<Row extends { id: number }>(props: {
       <div
         className="min-h-0 flex-1 overflow-y-auto"
         data-locked-pane-scroll-region
+        ref={scrollRef}
       >
         {props.rows.length === 0 && !props.loading ? (
           <div className="p-6">{props.empty}</div>
@@ -282,15 +383,36 @@ export function ListPane<Row extends { id: number }>(props: {
             aria-label={props.label}
             className={jobFinderListRegionClassName}
             ref={listRef}
+            style={
+              drawWindow
+                ? { position: "relative", height: virtualizer.getTotalSize() }
+                : undefined
+            }
           >
-            {props.rows.map((row) => (
-              <Fragment key={row.id}>
-                {props.renderRow(row, {
-                  active: row.id === props.activeId,
-                  checked: isSelected(props.selection, row.id),
-                })}
-              </Fragment>
-            ))}
+            {drawWindow
+              ? virtualizer.getVirtualItems().map((item) => {
+                  const row = rows[item.index];
+                  if (!row) return null;
+                  return (
+                    <Fragment key={row.id}>
+                      {props.renderRow(row, {
+                        active: row.id === props.activeId,
+                        checked: isSelected(props.selection, row.id),
+                        index: item.index,
+                        top: item.start,
+                        setSize: props.totalCapped ? -1 : props.total,
+                      })}
+                    </Fragment>
+                  );
+                })
+              : rows.map((row) => (
+                  <Fragment key={row.id}>
+                    {props.renderRow(row, {
+                      active: row.id === props.activeId,
+                      checked: isSelected(props.selection, row.id),
+                    })}
+                  </Fragment>
+                ))}
           </ul>
         )}
         {hasMore ? null : props.footer}

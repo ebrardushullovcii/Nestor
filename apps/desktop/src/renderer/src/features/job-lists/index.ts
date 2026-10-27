@@ -9,6 +9,7 @@ export {
   ListDetailLayout,
   ListPane,
   ListRowFrame,
+  listRowPlacement,
   type ListRowState,
 } from "./list-pane";
 export {

@@ -40,6 +40,9 @@ export const FindJobsRow = memo(function FindJobsRow(
     <ListRowFrame
       active={props.active}
       checked={props.checked}
+      index={props.index}
+      setSize={props.setSize}
+      top={props.top}
       badge={
         <>
           {row.fitScore !== null ? (
