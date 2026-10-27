@@ -11,13 +11,15 @@ test("a chat search checks its saved choices through the paged site contract", a
   vi.stubGlobal("window", {
     nestor: {
       jobs: {
-        async run(name: string, input: unknown) {
+        run(name: string, input: unknown) {
           if (name === "list_sites") {
             JOB_COMMANDS.list_sites.input.parse(input);
-            return { rows: [{ id: 11, url: `${origin}/board/` }] };
+            return Promise.resolve({
+              rows: [{ id: 11, url: `${origin}/board/` }],
+            });
           }
           if (name === "search_status")
-            return {
+            return Promise.resolve({
               search: {
                 id: "synthetic-search",
                 state: "done",
@@ -30,7 +32,7 @@ test("a chat search checks its saved choices through the paged site contract", a
                   sites: { ids: [11] },
                 },
               },
-            };
+            });
           throw Error(`Unexpected read: ${name}`);
         },
       },
