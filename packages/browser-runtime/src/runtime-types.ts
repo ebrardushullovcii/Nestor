@@ -355,7 +355,7 @@ export interface BrowserSessionRuntime {
   readApplicationPageBinding?(
     source: JobSource,
     pageBindingKey: string,
-  ): Promise<RawApplyPage>;
+  ): Promise<RawApplyPage | null>;
   /**
    * Reload the exact retained application page once: the person signed in
    * to the same site in another tab, and this page still shows the sign-in

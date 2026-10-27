@@ -14,6 +14,18 @@ import {
 import { describeApplicationPreparationProgress } from "@nestor/job-finder";
 
 describe("withEmbeddedBrowserActivity", () => {
+  test("a missing application page stays null without attributing any field", async () => {
+    const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
+    const withPersonFieldAnswers = vi.fn();
+    const wrapped = withEmbeddedBrowserActivity(
+      { ...base, readApplicationPageBinding: () => Promise.resolve(null) },
+      { withPersonFieldAnswers } as unknown as EmbeddedBrowser,
+    );
+    expect(
+      await wrapped.readApplicationPageBinding?.("target_site", "closed"),
+    ).toBeNull();
+    expect(withPersonFieldAnswers).not.toHaveBeenCalled();
+  });
   test("a person-held native form remains live when its automation Page detaches", async () => {
     const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
     const hasApplicationPageBinding = vi.fn(() => Promise.resolve(false));
