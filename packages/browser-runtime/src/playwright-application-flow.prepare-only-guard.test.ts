@@ -323,6 +323,62 @@ describe("Prepare-only guard real-Chromium fixtures", () => {
   });
 
   test.each([false, true])(
+    "the bot check also goes out from the blank frame Cloudflare runs it in (field saves allowed: %s)",
+    async (saves) => {
+      // Cloudflare's script sends its beacon from a hidden about:blank frame
+      // it adds to the page: that frame runs as the page, on its origin.
+      const site = await startTrackedServer();
+      site.registerHtml(
+        "/blank-frame-check",
+        `<label>Name <input id="name"></label><script>
+        window.postFromBlank = async (url, body) => {
+          const frame = document.createElement("iframe");
+          frame.style.display = "none";
+          document.body.appendChild(frame);
+          try { await frame.contentWindow.fetch(url, { method: "POST", body }); return "sent"; } catch { return "refused"; }
+        };</script>`,
+      );
+      if (!browser) throw new Error("The fixture browser is not running.");
+      const context = await browser.newContext();
+      activeContexts.push(context);
+      const page = await context.newPage();
+      await ensurePrepareOnlyMutationGuard(page, saves);
+      await page.goto(`${site.baseUrl}/blank-frame-check`);
+      await page.fill("#name", realShapes.firstName);
+      await registerPrepareOnlyPreparedValue(page, realShapes.firstName);
+      const post = (url: string, body: string) =>
+        page.evaluate(
+          ({ url, body }) =>
+            (
+              window as unknown as {
+                postFromBlank: (u: string, b: string) => Promise<string>;
+              }
+            ).postFromBlank(url, body),
+          { url, body },
+        );
+      expect(
+        await post("/cdn-cgi/challenge-platform/h/g/jsd/oneshot/abc", "fp-abc"),
+      ).toBe("sent");
+      // The frame gets nothing the page itself would not: no answer, no
+      // other path. The site receives neither (below), whichever layer
+      // refuses them: a frame made after the answers were registered may
+      // only meet the network fence.
+      await post(
+        "/cdn-cgi/challenge-platform/h/g/jsd/oneshot/abc",
+        `fp ${realShapes.firstName}`,
+      );
+      await post("/cdn-cgi/profile", "fp-abc");
+      expect(
+        requestHitsFor(
+          site.hits,
+          "/cdn-cgi/challenge-platform/h/g/jsd/oneshot/abc",
+        ),
+      ).toHaveLength(1);
+      expect(requestHitsFor(site.hits, "/cdn-cgi/profile")).toHaveLength(0);
+    },
+  );
+
+  test.each([false, true])(
     "a native GET submission carrying answers that nothing authorized is refused (field saves allowed: %s)",
     async (saves) => {
       // Sol's reproduction: a completed form in a shadow root, whose GET put

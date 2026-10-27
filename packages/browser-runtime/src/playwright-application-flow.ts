@@ -164,7 +164,11 @@ export function allowPrepareOnlyRunNavigation(page: Page, url: string): void {
 
 function requestFrameOrigin(request: Request): string | null {
   try {
-    return new URL(request.frame().url()).origin;
+    // A frame with no document of its own (about:blank, about:srcdoc) runs
+    // as the frame that holds it: Cloudflare sends its bot check from one.
+    let frame: ReturnType<Request["frame"]> | null = request.frame();
+    while (frame && /^about:/u.test(frame.url())) frame = frame.parentFrame();
+    return frame ? new URL(frame.url()).origin : null;
   } catch {
     return null;
   }
@@ -600,13 +604,16 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
 
   const normalizeMethod = (value: string | null | undefined): string =>
     (value || "GET").trim().toUpperCase() || "GET";
+  // Addresses resolve as the browser resolves them: against the document's
+  // base, which a blank frame takes from the page that made it.
   const normalizeUrl = (value: unknown): string | null => {
     try {
+      const base = document.baseURI || window.location.href;
       if (typeof value === "string" || value instanceof URL) {
-        return new URL(String(value), window.location.href).toString();
+        return new URL(String(value), base).toString();
       }
       if (typeof Request !== "undefined" && value instanceof Request) {
-        return new URL(value.url, window.location.href).toString();
+        return new URL(value.url, base).toString();
       }
     } catch {
       return null;
@@ -967,9 +974,11 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     // The site's own passive bot check (`isSiteBotCheckRequest`).
     if (!carriesPrepared && url && guardInput.siteBotCheckPath) {
       try {
-        const parsed = new URL(url, window.location.href);
+        // `window.origin` and the base address are the page's own in a blank
+        // frame it made, where `location` reads "about:blank".
+        const parsed = new URL(url, document.baseURI);
         if (
-          parsed.origin === window.location.origin &&
+          parsed.origin === window.origin &&
           new RegExp(guardInput.siteBotCheckPath, "u").test(parsed.pathname)
         )
           return true;
