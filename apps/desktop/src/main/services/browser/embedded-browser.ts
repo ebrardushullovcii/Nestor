@@ -47,6 +47,7 @@ import {
   resolvePageViewBounds,
   type ViewRect,
 } from "./embedded-browser-layout";
+import { sendObserverSource } from "./send-observer";
 import { alignClientHintHeaders } from "./browser-identity";
 import {
   browserDisplayUrl,
@@ -118,6 +119,12 @@ export class EmbeddedBrowser {
   private activeTabId: string | null = null;
   private unboundSendNotice: { id: string; tabId: string } | null = null;
   private readonly personInputAt = new Map<string, number>();
+  /**
+   * When the person pressed a prepared form's send in their own window, by
+   * tab. Kept here, not in the page, so the page moving on (a "finish your
+   * application" step, a new document without the guard) cannot erase it.
+   */
+  private readonly personSendPressedAt = new Map<string, number>();
 
   /** A prompt to record an outcome, never evidence that the site received it. */
   /**
@@ -156,6 +163,13 @@ export class EmbeddedBrowser {
       },
       tabId,
     );
+  }
+
+  /** The person's own press of a prepared form's send, just after their input. */
+  private noteBoundSend(tabId: string): void {
+    if (!this.personInputTabs.has(tabId)) return;
+    if (Date.now() - (this.personInputAt.get(tabId) ?? 0) > 2_000) return;
+    this.personSendPressedAt.set(tabId, Date.now());
   }
 
   private noteUnboundSend(tabId: string): void {
@@ -957,9 +971,20 @@ export class EmbeddedBrowser {
         return (${collectApplyDocumentSnapshot.toString()})(elements, ${JSON.stringify(APPLY_PAGE_SELECTORS)},true);
       })()`,
     );
-    return read
-      ? { ...read.value, url: read.url, stepLabel: null, openedTabs: [] }
-      : null;
+    if (!read) return null;
+    const pressedAt = Math.max(
+      this.personSendPressedAt.get(tabs[0]!) ?? 0,
+      read.value.sendPressedAt ? Date.parse(read.value.sendPressedAt) : 0,
+    );
+    return {
+      ...read.value,
+      url: read.url,
+      stepLabel: null,
+      openedTabs: [],
+      ...(pressedAt
+        ? { sendPressedAt: new Date(pressedAt).toISOString() }
+        : {}),
+    };
   }
 
   /** Every open tab, the person's own included; the limit counts them all. */
@@ -1329,20 +1354,13 @@ export class EmbeddedBrowser {
     // page scripts access to any app command. The native input ledger excludes
     // automation; this message can only create a dismissible recording hint.
     const submitNoticeToken = `nestor-unbound-send-${randomUUID()}`;
+    const boundSendToken = `nestor-bound-send-${randomUUID()}`;
     const installSubmitNotice = () => {
       if (page.contents.isDestroyed()) return;
       for (const frame of page.contents.mainFrame.framesInSubtree)
         void frame
           .executeJavaScript(
-            `(() => {
-        if (window.__nestorUnboundSendObserver) return;
-        window.__nestorUnboundSendObserver = true;
-        const isBound = () => window.__nestorPreparedApplication || sessionStorage.getItem('__nestorPreparedApplication');
-        const finalControl = element => element && /(?:submit|send[-_\\s]*application|complete[-_\\s]*(?:the[-_\\s]*)?application|apply[-_\\s]*(?:now|job))/iu.test([element.textContent, element.getAttribute('aria-label'), element.value].filter(Boolean).join(' '));
-        const note = element => { if (!isBound() && finalControl(element)) console.debug(${JSON.stringify(submitNoticeToken)}); };
-        document.addEventListener('submit', event => { if (event.isTrusted) note(event.submitter); }, true);
-        document.addEventListener('click', event => { if (event.isTrusted) note(event.target?.closest('button,input[type=submit],[role=button]')); }, true);
-      })()`,
+            sendObserverSource(submitNoticeToken, boundSendToken),
           )
           .catch(() => undefined);
     };
@@ -1363,6 +1381,7 @@ export class EmbeddedBrowser {
     page.contents.on("did-frame-finish-load", installPageMessages);
     page.contents.on("console-message", (details) => {
       if (details.message === submitNoticeToken) this.noteUnboundSend(page.id);
+      else if (details.message === boundSendToken) this.noteBoundSend(page.id);
       else if (details.message.startsWith(PAGE_MESSAGE_CONSOLE_PREFIX))
         this.notePageMessage(
           page.id,
@@ -1494,6 +1513,7 @@ export class EmbeddedBrowser {
       this.agentPresses.forget(page.id);
       this.personInputTabs.delete(page.id);
       this.personInputAt.delete(page.id);
+      this.personSendPressedAt.delete(page.id);
       this.parkedTabs.delete(page.id);
       this.heldTabs.delete(page.id);
       this.personTabs.delete(page.id);
@@ -1721,6 +1741,7 @@ export class EmbeddedBrowser {
   private async closeTabForAutomation(tabId: string): Promise<void> {
     this.personInputTabs.delete(tabId);
     this.personInputAt.delete(tabId);
+    this.personSendPressedAt.delete(tabId);
     const page = this.pageMap.get(tabId);
     if (!page || page.contents.isDestroyed()) return;
     await Promise.all(

@@ -546,6 +546,32 @@ test("same-title tabs include place and distinguish the same place by reference"
   expect(new Set(titles).size).toBe(2);
 });
 
+test("the person's own send in their window is kept by the app, so the page moving on cannot erase it", async () => {
+  // Askable: the person pressed Apply; the page posted and moved on to
+  // "Finish your application", a new document without the page guard.
+  const { browser, state } = makeBrowser();
+  const native = browser as unknown as {
+    personInputTabs: Set<string>;
+    personInputAt: Map<string, number>;
+    noteBoundSend(id: string): void;
+  };
+  state.ownedTabs.set("result", new Set(["prepared"]));
+  native.personInputTabs.add("prepared");
+  // Without the person's own input just before, it is not their press.
+  native.personInputAt.set("prepared", Date.now() - 5_000);
+  native.noteBoundSend("prepared");
+  expect(
+    (await browser.readApplicationPageWithPerson("result"))?.sendPressedAt,
+  ).toBeUndefined();
+  native.personInputAt.set("prepared", Date.now());
+  const before = Date.now();
+  native.noteBoundSend("prepared");
+  const pressed = (await browser.readApplicationPageWithPerson("result"))
+    ?.sendPressedAt;
+  expect(pressed).toBeDefined();
+  expect(Date.parse(pressed!)).toBeGreaterThanOrEqual(before);
+});
+
 test("a general-browser send prompt requires recent person input and never claims a send", () => {
   const { browser, state: browserState } = makeBrowser();
   browserState.ownedTabs.set("result", new Set(["prepared"]));
