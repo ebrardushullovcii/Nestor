@@ -3,6 +3,7 @@ import {
   collectApplyDocumentSnapshot,
 } from "@nestor/browser-runtime/apply-page";
 import {
+  MAX_LIVE_WAITING_FORMS,
   measureWaitingFormMemory,
   waitingFormsHaveCapacity,
 } from "./waiting-form-memory";
@@ -393,7 +394,16 @@ export class EmbeddedBrowser {
       this.discardedFormLabels.delete(owner);
       this.emit();
     }
+    // A fourth live form closes the oldest one that has settled.
+    if (this.liveWaitingForms().length > MAX_LIVE_WAITING_FORMS)
+      void this.reduceWaitingFormMemory().catch(() => undefined);
     return true;
+  }
+
+  private liveWaitingForms(except?: ReadonlySet<string>): string[] {
+    return [...this.preparedForms.keys()].filter(
+      (owner) => !except?.has(owner) && this.ownedTabs.get(owner)?.size,
+    );
   }
 
   private canDiscardPreparedForm(owner: string): boolean {
@@ -1062,14 +1072,22 @@ export class EmbeddedBrowser {
       await this.memoryCleanup;
       return this.getWaitingFormMemory();
     }
+    // A reclaimed form's tabs close asynchronously; it stops counting at once.
+    const reclaimed = new Set<string>();
+    const tooManyForms = () =>
+      this.liveWaitingForms(reclaimed).length > MAX_LIVE_WAITING_FORMS;
     const needsReclaim = () => {
       const memory = this.getWaitingFormMemory();
       return (
+        tooManyForms() ||
         (memory.measurementComplete && !waitingFormsHaveCapacity(memory)) ||
         this.pageMap.size >= MAX_TOTAL_TABS - 2
       );
     };
-    if (needsReclaim() && Date.now() - this.lastMemoryCleanupAt > 10_000) {
+    if (
+      needsReclaim() &&
+      (tooManyForms() || Date.now() - this.lastMemoryCleanupAt > 10_000)
+    ) {
       this.lastMemoryCleanupAt = Date.now();
       this.memoryCleanup = (async () => {
         const oldest = [...this.preparedForms].sort((a, b) => a[1] - b[1]);
@@ -1087,6 +1105,7 @@ export class EmbeddedBrowser {
           const discarded = await this.reclaimPreparedForm?.(owner, () =>
             this.canDiscardPreparedForm(owner),
           ).catch(() => false);
+          if (discarded) reclaimed.add(owner);
           if (discarded && label) this.discardedFormLabels.set(owner, label);
         }
         if (!needsReclaim()) return;
@@ -1424,6 +1443,10 @@ export class EmbeddedBrowser {
   private selectPage(id: string): void {
     if (!this.pageMap.has(id)) return;
     this.activeTabId = id;
+    // Opening a waiting form makes it one of the most recent, kept live.
+    for (const [owner, tabs] of this.ownedTabs)
+      if (tabs.has(id) && this.preparedForms.has(owner))
+        this.preparedForms.set(owner, Date.now());
     this.layout();
     this.emit();
   }

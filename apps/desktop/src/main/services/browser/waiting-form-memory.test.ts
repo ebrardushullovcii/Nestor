@@ -41,22 +41,18 @@ test("unknown memory stays unmeasured, never a measured zero", () => {
   expect(waitingFormsHaveCapacity(memory)).toBe(false);
 });
 
-test("reserves space for another form and blocks admission under memory pressure", () => {
+test("waiting forms over the budget have no capacity and are over budget", () => {
   const measure = (bytes: number) =>
     measureWaitingFormMemory({
       recordedAt,
       tabs: [{ tabId: "one", processId: 1, backgroundThrottled: true }],
       processes: [{ pid: 1, memory: { workingSetSize: bytes / 1024 } }],
     });
+  expect(waitingFormsHaveCapacity(measure(WAITING_FORM_MEMORY_BUDGET))).toBe(
+    true,
+  );
   expect(
-    waitingFormsHaveCapacity(
-      measure(WAITING_FORM_MEMORY_BUDGET - 256 * 1024 * 1024),
-    ),
-  ).toBe(true);
-  expect(
-    waitingFormsHaveCapacity(
-      measure(WAITING_FORM_MEMORY_BUDGET - 255 * 1024 * 1024),
-    ),
+    waitingFormsHaveCapacity(measure(WAITING_FORM_MEMORY_BUDGET + 1024)),
   ).toBe(false);
   expect(measure(WAITING_FORM_MEMORY_BUDGET + 1024).overBudget).toBe(true);
 });

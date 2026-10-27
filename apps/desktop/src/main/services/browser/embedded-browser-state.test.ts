@@ -795,6 +795,7 @@ test("pressure reclaims the oldest eligible form and preserves a person's page",
   let pressure = true;
   vi.spyOn(browser, "getWaitingFormMemory").mockImplementation(() => ({
     ...originalMemory,
+    totalBytes: pressure ? 2 : originalMemory.totalBytes,
     budgetBytes: pressure ? 1 : originalMemory.budgetBytes,
   }));
   const reclaim = vi.fn((_owner: string, canDiscard: () => boolean) => {
@@ -808,6 +809,35 @@ test("pressure reclaims the oldest eligible form and preserves a person's page",
     "old-ready",
     expect.any(Function),
   );
+});
+
+test("a fourth waiting form closes the oldest one; opening a form keeps it live", async () => {
+  const run = async (open?: string) => {
+    const { browser, state } = makeBrowser();
+    const forms = [
+      ["first", "search"],
+      ["second", "prepared"],
+      ["third", "working"],
+      ["fourth", "parked"],
+    ] as const;
+    for (const [owner, tab] of forms)
+      state.ownedTabs.set(owner, new Set([tab]));
+    const reclaim = vi.fn<(owner: string) => Promise<boolean>>(() =>
+      Promise.resolve(true),
+    );
+    browser.setPreparedFormReclaimer(reclaim);
+    for (const [owner] of forms.slice(0, 3)) {
+      browser.markPreparedForm(owner);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    if (open) browser.showTab(open);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    browser.markPreparedForm("fourth");
+    await browser.reduceWaitingFormMemory();
+    return reclaim.mock.calls.map(([owner]) => owner);
+  };
+  expect(await run()).toEqual(["first"]);
+  expect(await run("search")).toEqual(["second"]);
 });
 
 test("only idle retained pages freeze; active source loading stays awake", async () => {
