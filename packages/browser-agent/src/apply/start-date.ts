@@ -10,8 +10,11 @@ export function isStartDateControl(control: ApplyFormControl): boolean {
     !/\b(?:employment history|work history|education|previous (?:job|role|employer))\b/iu.test(
       control.groupLabel,
     ) &&
-    (control.questionKind === "availability" ||
-      /\b(?:when (?:can|could|would) you start|available to start|earliest start|start date)\b/iu.test(
+    ((control.questionKind === "availability" &&
+      /^profile\.workEligibility\.(?:availableStartDate|noticePeriodDays)$/u.test(
+        control.answerTags?.sourceId ?? "",
+      )) ||
+      /\b(?:when (?:can|could|would) you start|available to start|earliest start|(?:available|preferred) start date)\b/iu.test(
         control.label,
       ))
   );
