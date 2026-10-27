@@ -43,6 +43,7 @@ export * from "./diagnostic-export";
 export * from "./performance";
 export * from "./workspace";
 export * from "./speed";
+export * from "./speed-schema";
 export * from "./job-search-campaigns";
 export * from "./job-finder-intelligence";
 export * from "./application-crm";
@@ -65,6 +66,7 @@ export * from "./listing-salary-evidence";
 export * from "./saved-job-sightings";
 export * from "./assistant-job-view";
 export * from "./job-finder-navigation";
+export * from "./job-finder-navigation-schemas";
 export * from "./app-commands";
 export * from "./job-sites";
 

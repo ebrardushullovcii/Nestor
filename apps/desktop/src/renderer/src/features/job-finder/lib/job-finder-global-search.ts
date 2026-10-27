@@ -2,6 +2,8 @@ import { matchesCollectionSearch } from "../components/collection-search-toolbar
 
 export type JobFinderGlobalSearchKind = "application" | "job" | "screen";
 
+export const JOB_FINDER_GLOBAL_SEARCH_LABEL = "Search your workspace";
+
 export interface JobFinderGlobalSearchEntry {
   href: string;
   id: string;
