@@ -173,7 +173,8 @@ export async function pickCalendarDate(
   }
   // No calendar to pick from: type it the way the box asks for it.
   await locator.fill(typedDate(wanted, placeholder), { timeout: 5_000 });
-  await locator.press("Enter").catch(() => undefined);
+  // Tab, never Enter: Enter in a form's text box submits the form.
+  await locator.press("Tab").catch(() => undefined);
   const observedValue = await locator.inputValue({ timeout: 2_000 });
   return observedValue.trim()
     ? { ok: true, observedValue }
