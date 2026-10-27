@@ -36,6 +36,7 @@ import {
 import {
   armPlaywrightApplicationFormAction,
   createPlaywrightApplyPageSession,
+  readRawApplyPage,
 } from "./apply-page-mechanics";
 
 // Transport proofs use the actual request permit recorded by the fence.
@@ -265,6 +266,30 @@ const requestHitsFor = (
   hits.filter((hit) => hit.kind === "request" && hit.path === path);
 
 describe("Prepare-only guard real-Chromium fixtures", () => {
+  test("a send pressed in the person's window is recorded, even when the page holds its request back", async () => {
+    // Workable's Submit waits on a check of its own before any request
+    // leaves; the page stays on "Submitting…".
+    const site = await startTrackedServer();
+    site.registerHtml(
+      "/hold",
+      `<form id="apply"><label>Name <input id="name" name="name"></label><button type="submit">Submit application</button></form><script>
+      document.getElementById('apply').addEventListener('submit', (event) => { event.preventDefault(); event.target.querySelector('button').textContent = 'Submitting…'; });</script>`,
+    );
+    const { page } = await newGuardedPage();
+    await page.goto(`${site.baseUrl}/hold`);
+    await page.fill("#name", realShapes.firstName);
+    await registerPrepareOnlyPreparedValue(page, realShapes.firstName);
+    // Before the person has the page, the press is blocked, not a send.
+    await page.click("button");
+    expect((await readRawApplyPage(page)).sendPressedAt).toBeUndefined();
+    await openPrepareOnlyFinalActionWindow(page, 60_000);
+    const before = Date.now();
+    await page.click("button");
+    const pressed = (await readRawApplyPage(page)).sendPressedAt;
+    expect(pressed).toBeDefined();
+    expect(Date.parse(pressed!)).toBeGreaterThanOrEqual(before - 1_000);
+  });
+
   test("Fill: Greenhouse's real storage POST (encryption, 201, utf8 and token in the policy) gets through with its receipt", async () => {
     const site = await startTrackedServer(),
       storage = await startTrackedServer();

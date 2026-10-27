@@ -180,6 +180,12 @@ export interface RawApplyPage {
    * dismisses those and never shows them as a window; their text is here.
    */
   pageMessages?: RawApplyPageMessage[];
+  /**
+   * When the page's send was last pressed while sends were let through (the
+   * person's own window, or the run's one authorized click): the page's form
+   * holding the prepared answers was submitted, or its send button clicked.
+   */
+  sendPressedAt?: string;
 }
 
 export interface RawApplyPageMessage {

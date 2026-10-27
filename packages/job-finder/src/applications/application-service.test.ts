@@ -1441,6 +1441,70 @@ it("records the person's confirmed submission, moves Approved to applied, and cl
   );
 });
 
+it("the person's own Submit in their window is Uncertain at once, and Applied when the site confirms it", async () => {
+  // EUROPEAN DYNAMICS: the person pressed Submit; the site stayed on
+  // "Submitting…" with no confirmation, and the application stayed Ready.
+  const f = await setup(1);
+  vi.useFakeTimers();
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const submitting: RawApplyPage = {
+    ...f.personPage,
+    title: "Apply",
+    bodyText: "Submitting…",
+    sendPressedAt: new Date(Date.now() + 1_000).toISOString(),
+  };
+  await vi.advanceTimersByTimeAsync(1_000);
+  f.browser.readApplicationPageWithPerson.mockResolvedValue(submitting);
+  await vi.advanceTimersByTimeAsync(2_000);
+  let row = f.applications.listApplications().rows[0]!;
+  expect(row.state).toBe("uncertain");
+  expect(f.applications.getSubmissionReceipt(row.id)).toMatchObject({
+    outcome: "outcome_uncertain",
+    retry: { eligible: false, blockReason: "outcome_uncertain" },
+  });
+  // Nothing sends it again: apply skips it, and its page stays open.
+  expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
+    0,
+  );
+  expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
+  // The site confirms it on their page.
+  f.browser.readApplicationPageWithPerson.mockResolvedValue(f.personPage);
+  await vi.advanceTimersByTimeAsync(2_000);
+  row = f.applications.listApplications().rows[0]!;
+  expect(row.state).toBe("submitted");
+  expect(f.jobs.getJob(row.jobId)?.stage).toBe("applied");
+  expect(f.browser.releaseApplicationPageBinding).toHaveBeenCalledWith(
+    "target_site",
+    `application_${row.id}_attempt_1`,
+  );
+});
+
+it("a press older than the application's own state is not the person's send", async () => {
+  const f = await setup(1);
+  vi.useFakeTimers();
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  f.browser.readApplicationPageWithPerson.mockResolvedValue({
+    ...f.personPage,
+    title: "Apply",
+    bodyText: "Apply",
+    sendPressedAt: new Date(Date.now() - 60_000).toISOString(),
+  });
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(f.applications.listApplications().rows[0]?.state).toBe("ready");
+});
+
 it("recovers interrupted preparation, settles an interrupted send from its saved outcome or holds it for confirmation, and a restart from disk resends nothing", async () => {
   const f = await setup(3, undefined, { onDisk: true });
   f.applications.applyJobs({ selection: { ids: f.ids } });

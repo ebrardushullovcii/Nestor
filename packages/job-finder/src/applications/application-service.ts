@@ -38,6 +38,7 @@ import {
   type CandidateProfile,
   type CandidateAnswerKind,
   type JobFinderSettings,
+  type SubmissionOutcomeRecord,
   type JobSearchPreferences,
   type JobDetail,
   type NeedsYouKind,
@@ -161,6 +162,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   const resumes = createResumeStore(jobs);
   const active = new Map<number, AbortController>();
   const waiting = new Map<number, number>();
+  /**
+   * Applications the person sent on the site themselves, kept Uncertain until
+   * the site confirms it: attempt, and how long their page is watched for it.
+   */
+  const pressedByPerson = new Map<
+    number,
+    { attempt: number; pressedAt: string; until: number }
+  >();
   const opening = new Map<number, Promise<boolean>>();
   // Read at each pump, so a Speed change applies to the next application.
   const capacity = () =>
@@ -1275,6 +1284,130 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     else await operation();
   }
 
+  /** A receipt for the person's own send on the site, by its own key. */
+  function personReceipt(
+    row: ApplicationRow,
+    attempt: number,
+    outcome:
+      | { kind: "pressed"; at: string; url: URL }
+      | { kind: "confirmed"; attemptedAt: string; url: URL; summary: string },
+  ): SubmissionOutcomeRecord {
+    const identity = applicationIdentity(row.id, attempt);
+    const key = `person_${identity.resultId}`;
+    const at = new Date().toISOString();
+    const confirmed = outcome.kind === "confirmed";
+    return SubmissionOutcomeRecordSchema.parse({
+      id: confirmed ? key : `${key}_pressed`,
+      preflightId: key,
+      idempotencyKey: key,
+      authorityEnvelopeId: key,
+      authorityRevision: 1,
+      ...identity,
+      jobId: String(row.jobId),
+      outcome: confirmed ? "submitted" : "outcome_uncertain",
+      attemptedAt: confirmed ? outcome.attemptedAt : outcome.at,
+      verifiedAt: confirmed ? at : null,
+      evidence: [
+        {
+          id: key,
+          kind: "employer_site_state",
+          observedAt: at,
+          destination: {
+            origin: outcome.url.origin,
+            safePath: outcome.url.pathname,
+          },
+          artifactRefId: null,
+          summary: confirmed
+            ? outcome.summary
+            : "You pressed send on the site; it has not confirmed the application yet.",
+        },
+      ],
+      retry: {
+        eligible: false,
+        blockReason: confirmed ? "submission_confirmed" : "outcome_uncertain",
+      },
+    });
+  }
+
+  /**
+   * The person pressed the form's send on the site in their own window, and
+   * the site has not confirmed it. From that press the application is
+   * Uncertain, so nothing sends it again; their page stays watched, and a
+   * confirmation moves it to Applied.
+   */
+  async function recordPersonPress(
+    row: ApplicationRow,
+    attempt: number,
+  ): Promise<boolean> {
+    const identity = applicationIdentity(row.id, attempt);
+    const page = await browser
+      .readApplicationPageWithPerson?.("target_site", identity.resultId)
+      .catch(() => null);
+    const pressedAt = page?.sendPressedAt;
+    if (
+      !page?.url ||
+      !pressedAt ||
+      Date.parse(pressedAt) < Date.parse(row.updatedAt) ||
+      !current(row)
+    )
+      return false;
+    const receipt = personReceipt(row, attempt, {
+      kind: "pressed",
+      at: pressedAt,
+      url: new URL(page.url),
+    });
+    if (!applications.recordSubmission(row.id, attempt, receipt)) return false;
+    waiting.delete(row.id);
+    pressedByPerson.set(row.id, {
+      attempt,
+      pressedAt,
+      // Their page is watched this long for the site's confirmation.
+      until: Date.now() + 10 * 60_000,
+    });
+    return true;
+  }
+
+  /** A confirmation on the person's page after their own send. */
+  async function confirmPersonPress(id: number): Promise<void> {
+    const watched = pressedByPerson.get(id);
+    const row = applications.getApplication(id);
+    if (!watched) return;
+    if (
+      !row ||
+      row.attempt !== watched.attempt ||
+      row.state !== "uncertain" ||
+      Date.now() > watched.until
+    ) {
+      pressedByPerson.delete(id);
+      return;
+    }
+    const identity = applicationIdentity(id, watched.attempt);
+    const page = await browser
+      .readApplicationPageWithPerson?.("target_site", identity.resultId)
+      .catch(() => null);
+    if (
+      !page ||
+      page.loading ||
+      !page.url ||
+      !hasSubmissionConfirmationText(page.bodyText)
+    )
+      return;
+    const preparedUrl = applications.getWork(id)?.reviewCard?.pageUrl;
+    const destination = new URL(page.url);
+    if (!preparedUrl || destination.origin !== new URL(preparedUrl).origin)
+      return;
+    const receipt = personReceipt(row, watched.attempt, {
+      kind: "confirmed",
+      attemptedAt: watched.pressedAt,
+      url: destination,
+      summary: submissionConfirmationSummary(page.bodyText),
+    });
+    if (applications.resolveUncertainSend(id, receipt)) {
+      pressedByPerson.delete(id);
+      await closePage(id, watched.attempt);
+    }
+  }
+
   async function recordPersonSubmission(
     row: ApplicationRow,
     attempt: number,
@@ -1295,33 +1428,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     const preparedUrl = applications.getWork(id)?.reviewCard?.pageUrl;
     if (!preparedUrl || destination.origin !== new URL(preparedUrl).origin)
       return false;
-    const at = new Date().toISOString();
-    const key = `person_${identity.resultId}`;
-    const receipt = SubmissionOutcomeRecordSchema.parse({
-      id: key,
-      preflightId: key,
-      idempotencyKey: key,
-      authorityEnvelopeId: key,
-      authorityRevision: 1,
-      ...identity,
-      jobId: String(row.jobId),
-      outcome: "submitted",
-      attemptedAt: at,
-      verifiedAt: at,
-      evidence: [
-        {
-          id: key,
-          kind: "employer_site_state",
-          observedAt: at,
-          destination: {
-            origin: destination.origin,
-            safePath: destination.pathname,
-          },
-          artifactRefId: null,
-          summary: submissionConfirmationSummary(page.bodyText),
-        },
-      ],
-      retry: { eligible: false, blockReason: "submission_confirmed" },
+    const receipt = personReceipt(row, attempt, {
+      kind: "confirmed",
+      attemptedAt: new Date().toISOString(),
+      url: destination,
+      summary: submissionConfirmationSummary(page.bodyText),
     });
     if (!applications.recordSubmission(id, attempt, receipt)) return false;
     await closePage(id, attempt);
@@ -1454,6 +1565,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (stopped || watching) return;
     watching = true;
     try {
+      for (const id of [...pressedByPerson.keys()])
+        await confirmPersonPress(id);
       for (const [id, attempt] of waiting) {
         const row = applications.getApplication(id);
         if (
@@ -1471,6 +1584,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           continue;
         }
         if (await recordPersonSubmission(row, attempt)) continue;
+        if (await recordPersonPress(row, attempt)) continue;
         if (await checkUploadRepair(row)) continue;
         await checkApplicationAccess(row);
       }
