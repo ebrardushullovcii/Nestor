@@ -447,9 +447,11 @@ export function savedAnswerForQuestion(
     candidate.choiceGroupKey &&
     candidate.groupLabel
       ? candidate.groupLabel
-      : [candidate.groupLabel, candidate.label]
-          .filter((part) => part.trim())
-          .join(" — "));
+      : key(candidate.groupLabel) === key(candidate.label)
+        ? candidate.label
+        : [candidate.groupLabel, candidate.label]
+            .filter((part) => part.trim())
+            .join(" — "));
   const key = (value: string) =>
     normalizeFormQuestionPrompt(preserveTechnologyTokens(value));
   const rawPrompt = prompt(control);
