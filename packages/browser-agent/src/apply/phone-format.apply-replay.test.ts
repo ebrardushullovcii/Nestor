@@ -231,6 +231,35 @@ function setup() {
   };
 }
 
+test.each([false, true])(
+  "a country picker also labelled Phone stays with its number at Fill and Send (saved: %s)",
+  async (saved) => {
+    const s = setup();
+    s.country.label = "Phone";
+    if (saved) {
+      s.config.sources.profile.phone = "+383 45 000 222";
+      s.config.sources.reusableAnswers = [
+        {
+          id: "person-phone",
+          kind: "other",
+          label: "Phone",
+          question: "Phone",
+          answer: recorded,
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+      ];
+      s.setSource("answerLibrary.person-phone");
+    }
+    expect((await s.execute("44000111")).kind).toBe("filled");
+    expect((await s.check("44000111"))[0]?.supported).toBe(true);
+    expect((await s.check("44000112"))[0]?.supported).toBe(false);
+    s.country.selectedOptionLabel = "Albania +355";
+    expect((await s.check("44000111"))[0]?.supported).toBe(false);
+    expect(s.clickAction).not.toHaveBeenCalled();
+  },
+);
+
 test.each([
   recorded,
   "+383 (44) 000-111",
@@ -369,6 +398,7 @@ test("the preferred application phone is the recorded number used by the gate", 
 
 test("the person's remembered Phone answer clears once with the national number", async () => {
   const s = setup();
+  s.country.label = "Phone";
   s.config.sources.reusableAnswers = [
     {
       id: "phone-answer",

@@ -1047,7 +1047,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       jobId: String(job.id),
                       applicationId: identity.resultId,
                       resultId: identity.resultId,
-                      applicationRecordId: String(row.id),
+                      applicationRecordId: identity.applicationRecordId,
                       startingUrl: form.url ?? job.applyUrl ?? job.url,
                     },
                     questionReadCacheScope: deps.aiClient,

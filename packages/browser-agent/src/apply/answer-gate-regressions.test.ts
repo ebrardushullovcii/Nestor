@@ -28,6 +28,257 @@ import type {
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
 const at = "2026-10-26T12:00:00.000Z";
 
+test.each([
+  ["School", "profile.education.college.schoolName", "Example College"],
+  [
+    "Field of study",
+    "profile.education.college.fieldOfStudy",
+    "Computer Science",
+  ],
+  ["Degree", "profile.education.college.degree", "BSc"],
+  ["Summary", "profile.summary", "I build software and test it."],
+] as const)(
+  "a recorded %s survives the current form's hidden companion at Send",
+  async (label, sourceId, answer) => {
+    const src = sources();
+    src.profile = CandidateProfileSchema.parse({
+      ...src.profile,
+      summary: "I build software and test it.",
+      education: [
+        {
+          id: "college",
+          schoolName: "Example College",
+          fieldOfStudy: "Computer Science",
+          degree: "BSc",
+        },
+      ],
+    });
+    const s = setup(field(label, { groupLabel: label }), src);
+    const tags: ApplyAnswerTags = { kind: "other", country: null, sourceId };
+    const result = await executeApplyProposal(
+      { tool: "type", ref: "c0", text: answer, storedFactId: sourceId },
+      s.observation().signature,
+      {
+        config: s.config,
+        guardState: createApplyGuardState(),
+        classifyQuestions: readTags(tags),
+        now: () => new Date(at),
+      },
+    );
+    expect(result.kind).toBe("filled");
+    s.page.controls.push({
+      ...s.raw,
+      index: 1,
+      id: "hidden-companion",
+      visible: false,
+    });
+    if (label === "School") s.raw.role = "combobox";
+    const client: LLMClient = {
+      chatWithTools: () =>
+        Promise.resolve(
+          call("report_question_kinds", {
+            plainIndexes: [0],
+            flagged: [],
+            tags: [{ index: 0, ...tags }],
+          }),
+        ),
+    };
+    expect(
+      (
+        await checkClassifiedApplicationAnswers({
+          client,
+          sources: src,
+          payDisclosed: false,
+          answers: [{ question: label, answer }],
+          formControls: s.observation().controls,
+          formContext: { pageText: s.page.bodyText, fields: [] },
+        })
+      )[0]?.supported,
+    ).toBe(true);
+    src.profile.education = [];
+    src.profile.summary = null;
+    const check = () =>
+      checkClassifiedApplicationAnswers({
+        client,
+        sources: src,
+        payDisclosed: false,
+        answers: [{ question: label, answer }],
+        formControls: s.observation().controls,
+        formContext: { pageText: s.page.bodyText, fields: [] },
+      });
+    expect((await check())[0]?.supported).toBe(false);
+    src.reusableAnswers = [
+      {
+        id: "person-answer",
+        kind: "other",
+        label,
+        question: label,
+        answer,
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
+    expect((await check())[0]?.supported).toBe(true);
+    expect((await check())[0]?.supported).toBe(true);
+  },
+);
+
+test("redundant education group labels still bind the degree to the same school record", () => {
+  const src = sources();
+  src.profile = CandidateProfileSchema.parse({
+    ...src.profile,
+    education: [
+      { id: "first", schoolName: "First College", degree: "BSc" },
+      { id: "second", schoolName: "Second College", degree: "MSc" },
+    ],
+  });
+  const s = setup(field("Degree", { groupLabel: "Degree" }), src);
+  const controls = s.observation().controls;
+  const degree = controls[0];
+  if (!degree) throw new Error("The synthetic degree field is missing.");
+  controls.push({
+    ...degree,
+    ref: "school",
+    scopeKey: "form0",
+    label: "School",
+    groupLabel: "School",
+    value: "Second College",
+  });
+  const check = (answer: string, sourceId: string) =>
+    classifyAnswerPermission({
+      control: degree,
+      controls,
+      sources: src,
+      answer,
+      pageInstructions: "",
+      tags: { kind: "other", country: null, sourceId },
+    });
+  expect(check("BSc", "profile.education.first.degree").kind).toBe("needs_you");
+  expect(check("MSc", "profile.education.second.degree").kind).toBe("literal");
+});
+
+test("an Address accepts the recorded locality's spelling and country, never a different address", async () => {
+  const src = sources();
+  src.profile.currentCity = "München";
+  src.profile.currentCountry = "Germany";
+  const s = setup(field("Address", { groupLabel: "Address" }), src);
+  const tags: ApplyAnswerTags = {
+    kind: "other",
+    country: null,
+    sourceId: "profile.currentCity",
+  };
+  expect(
+    (
+      await executeApplyProposal(
+        { tool: "type", ref: "c0", text: "Munchen, Germany" },
+        s.observation().signature,
+        {
+          config: s.config,
+          guardState: createApplyGuardState(),
+          classifyQuestions: readTags(tags),
+          now: () => new Date(at),
+        },
+      )
+    ).kind,
+  ).toBe("filled");
+  const client: LLMClient = {
+    chatWithTools: () =>
+      Promise.resolve(
+        call("report_question_kinds", {
+          plainIndexes: [0],
+          flagged: [],
+          tags: [{ index: 0, ...tags }],
+        }),
+      ),
+  };
+  const check = (answer: string) =>
+    checkClassifiedApplicationAnswers({
+      client,
+      sources: src,
+      payDisclosed: false,
+      answers: [{ question: "Address", answer }],
+      formControls: s.observation().controls,
+      formContext: { pageText: s.page.bodyText, fields: [] },
+    });
+  expect((await check("Munchen, Germany"))[0]?.supported).toBe(true);
+  expect((await check("Berlin, Germany"))[0]?.supported).toBe(false);
+  src.reusableAnswers = [
+    {
+      id: "person-address",
+      kind: "other",
+      label: "Address",
+      question: "Address",
+      answer: "München, Germany",
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  expect((await check("Munchen, Germany"))[0]?.supported).toBe(true);
+  expect((await check("Munchen, Austria"))[0]?.supported).toBe(false);
+});
+
+test("a locality alias needs the person's answer once, then passes repeated Send checks", async () => {
+  const src = sources();
+  src.profile.currentCity = "Prishtina";
+  src.profile.currentCountry = "Kosovo";
+  const s = setup(field("Address", { groupLabel: "Address" }), src);
+  const answer = "Pristina, Kosovo";
+  const tags: ApplyAnswerTags = {
+    kind: "other",
+    country: null,
+    sourceId: "profile.currentCity",
+  };
+  const fill = () =>
+    executeApplyProposal(
+      { tool: "type", ref: "c0", text: answer },
+      s.observation().signature,
+      {
+        config: s.config,
+        guardState: createApplyGuardState(),
+        classifyQuestions: readTags(tags),
+        now: () => new Date(at),
+      },
+    );
+  const client: LLMClient = {
+    chatWithTools: () =>
+      Promise.resolve(
+        call("report_question_kinds", {
+          plainIndexes: [0],
+          flagged: [],
+          tags: [{ index: 0, ...tags }],
+        }),
+      ),
+  };
+  const check = () =>
+    checkClassifiedApplicationAnswers({
+      client,
+      sources: src,
+      payDisclosed: false,
+      answers: [{ question: "Address", answer }],
+      formControls: s.observation().controls,
+      formContext: { pageText: s.page.bodyText, fields: [] },
+    });
+  expect((await fill()).kind).not.toBe("filled");
+  expect((await check())[0]?.supported).toBe(false);
+  expect(s.fillText).not.toHaveBeenCalled();
+  src.reusableAnswers = [
+    {
+      id: "person-address",
+      kind: "other",
+      label: "Address",
+      question: "Address",
+      answer,
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  expect((await fill()).kind).toBe("filled");
+  expect(s.fillText).toHaveBeenCalledExactlyOnceWith("c0", answer);
+  expect((await check())[0]?.supported).toBe(true);
+  expect((await check())[0]?.supported).toBe(true);
+  expect(src.profile.currentCity).toBe("Prishtina");
+});
+
 test("a requested LinkedIn URL fills from Profile and passes Send", async () => {
   const label = "Please share your LinkedIn URL";
   const src = sources();

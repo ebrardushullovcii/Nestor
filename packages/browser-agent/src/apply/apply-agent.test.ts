@@ -3616,6 +3616,44 @@ test("an optional letter the run cannot attach is noted, never a stop", async ()
   );
 });
 
+test.each([
+  ["Summary", "summary"],
+  ["Headline", "headline"],
+] as const)(
+  "the literal %s field still uses its exact Profile text without a writing check",
+  async (label, key) => {
+    const source = page({
+      controls: [{ ...nameControl(), label, groupLabel: label, value: "" }],
+    });
+    const input = config(source);
+    const text = input.sources.profile[key];
+    if (!text) throw new Error("The synthetic Profile text is missing.");
+    const model = scriptedModel([
+      {
+        name: "fill_fields",
+        args: { fields: [{ tool: "type", ref: "c0", text }] },
+      },
+      {
+        name: "finish",
+        args: { reason: "The literal Profile field is filled." },
+      },
+    ]);
+    const calls = vi.spyOn(model, "chatWithTools");
+    const fill = vi.spyOn(input.hands, "fillText");
+    const finalPress = vi.spyOn(input.hands, "clickAction");
+    const result = await runApplyAgent(input, model);
+    expect(result.outcome).toBe("prepared");
+    expect(fill).toHaveBeenCalledExactlyOnceWith("c0", text);
+    expect(
+      calls.mock.calls.some(
+        ([, definitions]) =>
+          definitions[0]?.function.name === "report_answer_checks",
+      ),
+    ).toBe(false);
+    expect(finalPress).not.toHaveBeenCalled();
+  },
+);
+
 test("fill_fields fills a page in one step with one fact check for the answers that need it", async () => {
   const text = (index: number, label: string): RawApplyControl => ({
     ...nameControl(),

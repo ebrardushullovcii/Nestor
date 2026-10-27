@@ -1,4 +1,5 @@
 import { inferAttestationKind } from "./control-classification";
+import { addressAnswerMatches, addressLabels } from "./address-answer";
 import {
   asksListingDiscoveryControl,
   listingDiscoveryAnswer,
@@ -13,6 +14,7 @@ import {
   savedAnswerForQuestion,
   applicantContactGroup,
   RESIDENCE_COUNTRY_LABELS,
+  PROFILE_TEXT_FIELD_LABELS,
 } from "./application-facts";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
@@ -23,7 +25,11 @@ import {
   isStartDateControl,
   startDateAnswer,
 } from "./start-date";
-import { phoneAnswerMatches, phoneLabels } from "./phone-answer";
+import {
+  phoneAnswerMatches,
+  phoneCountryPicker,
+  phoneLabels,
+} from "./phone-answer";
 import {
   fullProfileUrl,
   isProfileUrlSource,
@@ -91,7 +97,11 @@ export function answerSourceCatalog(
       : {}),
   }));
   const addWritingFact = (value: unknown, id: string): void => {
-    if (typeof value === "string" && value.trim())
+    if (
+      typeof value === "string" &&
+      value.trim() &&
+      !rows.some((row) => row.id === id)
+    )
       rows.push({ id, value, purpose: "profile", country: null });
     else if (value && typeof value === "object")
       for (const [key, child] of Object.entries(value))
@@ -221,12 +231,15 @@ const contactLabels: Record<string, readonly string[]> = {
   "profile.lastName": ["last name", "surname", "family name"],
   "profile.email": ["email", "email address", "your email"],
   "profile.phone": phoneLabels,
+  ...PROFILE_TEXT_FIELD_LABELS,
   "profile.currentCity": [
+    ...addressLabels,
     "city",
     "current city",
     "city of residence",
     "your city",
   ],
+  "profile.currentLocation": addressLabels,
   "profile.currentCountry": RESIDENCE_COUNTRY_LABELS,
   "profile.yearsExperience": [
     "years of experience",
@@ -255,6 +268,7 @@ function knownLiteralField(
   source: ClassifiedAnswerSource,
   control: ApplyFormControl,
 ): boolean {
+  if (fieldNamesAnotherPerson(control)) return false;
   if (/^profile\.(?:githubUrl|links\.[^.]+)#username$/u.test(source.id))
     return applicantContactGroup(control) && asksGithubUsername(control);
   if (
@@ -290,7 +304,8 @@ function knownLiteralField(
           ]
         : ["", "education", "education history"];
     return (
-      groups.includes(group) &&
+      (groups.includes(group) ||
+        group === normalizeFormQuestionPrompt(control.label)) &&
       (historyLabels[historyLeaf[2] ?? ""]?.includes(
         normalizeFormQuestionPrompt(control.label).replace(
           /\s+(?:dd mm yyyy|mm yyyy|yyyy mm dd|yyyy mm)$/u,
@@ -302,7 +317,6 @@ function knownLiteralField(
   }
   const profileLink = /^profile\.([a-zA-Z]+)Url$/u.exec(source.id);
   if (profileLink) {
-    if (fieldNamesAnotherPerson(control)) return false;
     if (source.id === "profile.githubUrl" && asksGithubUsername(control))
       return false;
     const field = normalizeFormQuestionPrompt(profileLink[1] ?? "");
@@ -330,7 +344,6 @@ function knownLiteralField(
         phoneLabels.some(
           (label) => label === normalizeFormQuestionPrompt(control.groupLabel),
         ))) &&
-    (source.id !== "profile.phone" || !fieldNamesAnotherPerson(control)) &&
     aliases.includes(normalizeFormQuestionPrompt(control.label))
   );
 }
@@ -344,6 +357,10 @@ function historyRecordMatches(
   );
   if (!record) return true;
   const prefix = record[1];
+  const group = (control: ApplyFormControl) => {
+    const group = normalizeFormQuestionPrompt(control.groupLabel);
+    return group === normalizeFormQuestionPrompt(control.label) ? "" : group;
+  };
   const leaves =
     record[2] === "experiences"
       ? ["companyName", "title", "startDate", "endDate"]
@@ -353,8 +370,10 @@ function historyRecordMatches(
       (control) =>
         control.ref !== input.control.ref &&
         control.visible &&
-        normalizeFormQuestionPrompt(control.groupLabel) ===
-          normalizeFormQuestionPrompt(input.control.groupLabel) &&
+        group(control) === group(input.control) &&
+        (!control.scopeKey ||
+          !input.control.scopeKey ||
+          control.scopeKey === input.control.scopeKey) &&
         control.value.trim(),
     )
     .every((control) => {
@@ -374,7 +393,15 @@ function literalValueMatches(
   control: ApplyFormControl,
   answer: string,
   controls: readonly ApplyFormControl[] = [],
+  sources?: ApplyAnswerSources,
 ): boolean {
+  if (sources && /^profile\.current(?:City|Location)$/u.test(source.id))
+    return addressAnswerMatches(
+      source.value,
+      answer,
+      sources.profile,
+      addressLabels.includes(normalizeFormQuestionPrompt(control.label)),
+    );
   if (source.id === "profile.phone")
     return phoneAnswerMatches(source.value, answer, control, controls);
   if (isProfileUrlSource(source.id) && wantsProfileUrl(control)) {
@@ -517,8 +544,10 @@ export function classifyAnswerPermission(input: {
     normalizeFormQuestionPrompt(
       [control.groupLabel, control.label].filter(Boolean).join(" — "),
     );
+  const phonePicker = phoneCountryPicker(input.control, input.controls);
   const same = input.controls.filter(
     (control) =>
+      control !== phonePicker &&
       control.visible &&
       !control.disabled &&
       identity(control) === identity(input.control),
@@ -644,6 +673,7 @@ export function classifyAnswerPermission(input: {
       (control) =>
         control.visible &&
         !control.disabled &&
+        control !== phonePicker &&
         knownLiteralField(profilePhone, control),
     ).length === 1 &&
     phoneAnswerMatches(
@@ -752,6 +782,13 @@ export function classifyAnswerPermission(input: {
       input.controls,
     ) ?? pickerRule?.saved;
   let savedValueMatches = source.value === input.answer;
+  if (
+    saved &&
+    !fieldNamesAnotherPerson(input.control) &&
+    addressLabels.includes(normalizeFormQuestionPrompt(input.control.label)) &&
+    addressAnswerMatches(source.value, input.answer, input.sources.profile)
+  )
+    savedValueMatches = true;
   if (
     saved &&
     tags.kind === "other" &&
@@ -980,7 +1017,13 @@ export function classifyAnswerPermission(input: {
   if (
     tags.kind === "other" &&
     source.purpose === "profile" &&
-    literalValueMatches(source, input.control, input.answer, input.controls) &&
+    literalValueMatches(
+      source,
+      input.control,
+      input.answer,
+      input.controls,
+      input.sources,
+    ) &&
     knownLiteralField(source, input.control)
   )
     return { kind: "literal", source };
