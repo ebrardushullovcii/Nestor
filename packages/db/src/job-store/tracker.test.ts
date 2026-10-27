@@ -7,7 +7,7 @@ import {
   openJobStore,
   type JobStore,
 } from "./job-store";
-import { createTrackerStore } from "./tracker";
+import { createTrackerStore, trackerPageSql } from "./tracker";
 
 const stores: JobStore[] = [];
 afterEach(() => {
@@ -254,5 +254,25 @@ describe("applications tracker", () => {
     expect(tracker.counts()).toMatchObject({ applied: 1, replied: 204 });
     tracker.undoChange(result.undoId!);
     expect(tracker.counts().applied).toBe(205);
+  });
+
+  it("reads every sort's page in index order, without sorting the rows", () => {
+    const { store } = sent(1);
+    const plan = (sql: string, ...params: (string | number)[]) =>
+      (
+        store.sql(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as {
+          detail: string;
+        }[]
+      )
+        .map((row) => row.detail)
+        .join("\n");
+    for (const sort of ["recent", "applied", "next"] as const) {
+      const all = plan(trackerPageSql(sort, "1"), 51);
+      const one = plan(trackerPageSql(sort, "t.status IN (?)"), "applied", 51);
+      expect(all, sort).toMatch(/SCAN t USING (COVERING )?INDEX tracker_by_/);
+      expect(one, sort).toMatch(/SEARCH t USING (COVERING )?INDEX tracker_by_/);
+      for (const detail of [all, one])
+        expect(detail, sort).not.toContain("TEMP B-TREE");
+    }
   });
 });
