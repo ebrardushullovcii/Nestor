@@ -60,12 +60,25 @@ const ROW_COLUMNS = `t.job_id, j.title, j.company, j.location, t.status, t.statu
   CASE WHEN t.status = 'applying' THEN COALESCE(a.disposition,a.state) END AS work,
   CASE WHEN t.status = 'applying' THEN a.error END AS work_error`;
 
-/** Each order is an indexed column, then `job_id`, so a page position is exact. */
+/**
+ * Each order is an indexed column or expression, then `job_id`, so a page
+ * position is exact. The expressions match tracker-schema.ts's indexes
+ * character for character, or SQLite sorts every row instead.
+ */
 const SORT: Record<TrackerSort, { key: string; dir: "ASC" | "DESC" }> = {
   recent: { key: "t.status_at", dir: "DESC" },
   applied: { key: "COALESCE(t.applied_at, 0)", dir: "DESC" },
   next: { key: "COALESCE(t.next_at, 9007199254740991)", dir: "ASC" },
 };
+
+/** One page of the tracker list, in `sort` order; exported for its plan test. */
+export function trackerPageSql(sort: TrackerSort, where: string): string {
+  const order = SORT[sort];
+  return `SELECT ${ROW_COLUMNS}, ${order.key} AS sort_key
+    FROM tracker t JOIN jobs j ON j.id = t.job_id
+    LEFT JOIN applications a ON a.job_id = t.job_id
+    WHERE ${where} ORDER BY ${order.key} ${order.dir}, t.job_id ${order.dir} LIMIT ?`;
+}
 
 function toEvent(row: EventRecord): TrackerEvent {
   return {
@@ -221,10 +234,10 @@ export function createTrackerStore(store: JobStore) {
       }
       const from = `FROM tracker t JOIN jobs j ON j.id = t.job_id
         LEFT JOIN applications a ON a.job_id = t.job_id`;
-      const records = sql(
-        `SELECT ${ROW_COLUMNS}, ${order.key} AS sort_key ${from}
-         WHERE ${where} ORDER BY ${order.key} ${order.dir}, t.job_id ${order.dir} LIMIT ?`,
-      ).all(...params, query.limit + 1) as (RowRecord & { sort_key: number })[];
+      const records = sql(trackerPageSql(query.sort, where)).all(
+        ...params,
+        query.limit + 1,
+      ) as (RowRecord & { sort_key: number })[];
       const more = records.length > query.limit;
       const page = records.slice(0, query.limit);
       const last = page.at(-1);

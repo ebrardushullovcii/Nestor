@@ -101,6 +101,12 @@ CREATE INDEX IF NOT EXISTS jobs_by_found ON jobs (stage, found_at DESC, id DESC)
 CREATE INDEX IF NOT EXISTS jobs_by_posted ON jobs (stage, posted_at DESC, found_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS jobs_by_stage_at ON jobs (stage, stage_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS jobs_by_search ON jobs (found_by, stage, fit_score DESC, found_at DESC, id DESC);
+-- A work-mode filter reads one range per stored mask in each order
+-- (job-list.ts toFilterRanges), never the whole stage.
+CREATE INDEX IF NOT EXISTS jobs_by_mode_fit ON jobs (stage, work_modes, fit_score DESC, found_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS jobs_by_mode_found ON jobs (stage, work_modes, found_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS jobs_by_mode_posted ON jobs (stage, work_modes, posted_at DESC, found_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS jobs_by_mode_stage_at ON jobs (stage, work_modes, stage_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS job_stage_counts (
   stage TEXT PRIMARY KEY,

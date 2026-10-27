@@ -54,21 +54,20 @@ export interface FilterSql {
   stageOnly: boolean;
 }
 
-export function toFilterSql(filter: JobFilter): FilterSql {
+/** Every stored mask holding any of `modes`, so the filter is index equality. */
+function masksWithAny(modes: readonly WorkMode[]): number[] {
+  const want = toWorkModeMask(modes);
+  return Array.from({ length: 15 }, (_, i) => i + 1).filter(
+    (mask) => (mask & want) !== 0,
+  );
+}
+
+function sharedFilterSql(filter: JobFilter) {
   const clauses = ["j.stage = ?"];
   const params: SQLInputValue[] = [filter.stage];
   if (filter.searchId) {
     clauses.push("j.found_by = ?");
     params.push(filter.searchId);
-  }
-  if (filter.minFit !== null) {
-    // Jobs not scored yet stay visible, so they show up the moment they are found.
-    clauses.push("(j.fit_score >= ? OR j.fit_score = -1)");
-    params.push(filter.minFit);
-  }
-  if (filter.workModes.length > 0) {
-    clauses.push("(j.work_modes & ?) <> 0");
-    params.push(toWorkModeMask(filter.workModes));
   }
   const match = toTextMatch(filter.text);
   if (match) {
@@ -77,11 +76,67 @@ export function toFilterSql(filter: JobFilter): FilterSql {
     );
     params.push(match);
   }
+  return { clauses, params };
+}
+
+/** The whole filter as one WHERE, for moves and Apply on every match. */
+export function toFilterSql(filter: JobFilter): FilterSql {
+  const { clauses, params } = sharedFilterSql(filter);
+  if (filter.minFit !== null) {
+    // Jobs not scored yet stay visible, so they show up the moment they are found.
+    clauses.push("(j.fit_score >= ? OR j.fit_score = -1)");
+    params.push(filter.minFit);
+  }
+  if (filter.workModes.length > 0) {
+    const masks = masksWithAny(filter.workModes);
+    clauses.push(`j.work_modes IN (${masks.map(() => "?").join(", ")})`);
+    params.push(...masks);
+  }
   return {
     where: clauses.join(" AND "),
     params,
     stageOnly: clauses.length === 1,
   };
+}
+
+/**
+ * The filter as disjoint index ranges, one WHERE each: one stored work-mode
+ * mask, then scored at or above the fit floor or not scored yet. A page
+ * merges the ranges in sort order and a count adds them up, so neither reads
+ * the jobs the filter leaves out, however many there are (schema.ts indexes
+ * jobs_by_fit and jobs_by_mode_*). Without `splitFloor` the floor stays one
+ * check on the jobs read in another order than fit (jobPageSql).
+ */
+export function toFilterRanges(
+  filter: JobFilter,
+  splitFloor = true,
+): FilterSql[] {
+  const shared = sharedFilterSql(filter);
+  const modes: ([string, SQLInputValue] | null)[] =
+    filter.workModes.length > 0
+      ? masksWithAny(filter.workModes).map((mask) => ["j.work_modes = ?", mask])
+      : [null];
+  const fits: ([string, SQLInputValue] | null)[] =
+    filter.minFit === null
+      ? [null]
+      : splitFloor
+        ? [
+            ["j.fit_score >= ?", filter.minFit],
+            ["j.fit_score = ?", -1],
+          ]
+        : [["(j.fit_score >= ? OR j.fit_score = -1)", filter.minFit]];
+  return modes.flatMap((mode) =>
+    fits.map((fit) => {
+      const extra = [mode, fit].filter((part) => part !== null);
+      return {
+        where: [...shared.clauses, ...extra.map(([clause]) => clause)].join(
+          " AND ",
+        ),
+        params: [...shared.params, ...extra.map(([, value]) => value)],
+        stageOnly: shared.clauses.length === 1 && extra.length === 0,
+      };
+    }),
+  );
 }
 
 /** Every order ends in `id`, so a page position is exact. All descending. */
@@ -173,36 +228,75 @@ export function readStageCounts(sql: Statements): JobStageCounts {
   return counts;
 }
 
-export function listJobs(sql: Statements, query: JobListQuery): JobListPage {
-  const filter = toFilterSql(query);
+interface Sql {
+  sql: string;
+  params: SQLInputValue[];
+}
+
+/**
+ * One page past the cursor: each filter range in index order, merged. A fit
+ * floor's ranges come in fit order only, so in another order up to the
+ * cap's worth of `matches` are read by their ranges and sorted; past the
+ * cap, reading that order's index and skipping jobs below the floor ends
+ * sooner.
+ */
+export function jobPageSql(query: JobListQuery, matches: number): Sql {
   const columns = SORT_COLUMNS[query.sort];
   const after = readCursor(query.cursor, columns.length);
-  const where = after
-    ? `${filter.where} AND (${columns.map((c) => `j.${c}`).join(", ")}) < (${columns.map(() => "?").join(", ")})`
-    : filter.where;
-  const order = columns.map((c) => `j.${c} DESC`).join(", ");
-  const records = sql(
-    `SELECT ${ROW_COLUMNS} FROM jobs j WHERE ${where} ORDER BY ${order} LIMIT ?`,
-  ).all(...filter.params, ...(after ?? []), query.limit + 1) as RowRecord[];
+  const floorApart = query.minFit !== null && query.sort !== "best_fit";
+  const sortMatches = floorApart && matches <= JOB_TOTAL_CAP;
+  const arms = toFilterRanges(query, !floorApart || sortMatches).map(
+    (range) => ({
+      sql: `SELECT ${ROW_COLUMNS} FROM jobs j WHERE ${range.where}${
+        after
+          ? ` AND (${columns.map((c) => `j.${c}`).join(", ")}) < (${columns.map(() => "?").join(", ")})`
+          : ""
+      }`,
+      params: [...range.params, ...(after ?? [])],
+    }),
+  );
+  const union = arms.map((arm) => arm.sql).join(" UNION ALL ");
+  const order = `ORDER BY ${columns.map((c) => `${c} DESC`).join(", ")} LIMIT ?`;
+  return {
+    sql: sortMatches
+      ? `WITH matches AS MATERIALIZED (${union}) SELECT * FROM matches ${order}`
+      : `${union} ${order}`,
+    params: [...arms.flatMap((arm) => arm.params), query.limit + 1],
+  };
+}
+
+/** How many jobs match, up to one past the cap: each range counted apart. */
+export function jobCountSql(filter: JobFilter): Sql {
+  const ranges = toFilterRanges(filter);
+  return {
+    sql: `SELECT count(*) AS n FROM (${ranges
+      .map((range) => `SELECT 1 FROM jobs j WHERE ${range.where}`)
+      .join(" UNION ALL ")} LIMIT ${JOB_TOTAL_CAP + 1})`,
+    params: ranges.flatMap((range) => range.params),
+  };
+}
+
+export function listJobs(sql: Statements, query: JobListQuery): JobListPage {
+  const columns = SORT_COLUMNS[query.sort];
+  const counts = readStageCounts(sql);
+  const { stageOnly } = toFilterSql(query);
+  const countSql = jobCountSql(query);
+  const total = stageOnly
+    ? counts[query.stage]
+    : (sql(countSql.sql).get(...countSql.params) as { n: number }).n;
+  const pageSql = jobPageSql(query, total);
+  const records = sql(pageSql.sql).all(...pageSql.params) as RowRecord[];
   const hasMore = records.length > query.limit;
   const page = hasMore ? records.slice(0, query.limit) : records;
   const last = page.at(-1);
-  const counts = readStageCounts(sql);
-  const total = filter.stageOnly
-    ? counts[query.stage]
-    : (
-        sql(
-          `SELECT count(*) AS n FROM (SELECT 1 FROM jobs j WHERE ${filter.where} LIMIT ${JOB_TOTAL_CAP + 1})`,
-        ).get(...filter.params) as { n: number }
-      ).n;
   return {
     rows: page.map(toRow),
     nextCursor:
       hasMore && last
         ? JSON.stringify(columns.map((c) => last[c as keyof RowRecord]))
         : null,
-    total: filter.stageOnly ? total : Math.min(total, JOB_TOTAL_CAP),
-    totalCapped: !filter.stageOnly && total > JOB_TOTAL_CAP,
+    total: stageOnly ? total : Math.min(total, JOB_TOTAL_CAP),
+    totalCapped: !stageOnly && total > JOB_TOTAL_CAP,
     counts,
   };
 }
