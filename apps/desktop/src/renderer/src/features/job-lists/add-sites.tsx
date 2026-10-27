@@ -45,6 +45,8 @@ export function AddSites(props: {
     if (hasInvalid)
       throw new Error("Fix the remaining source addresses before continuing.");
   };
+  // One address a line: the count tells a long paste arrived whole.
+  const addresses = text.split("\n").filter((line) => line.trim()).length;
   const addRef = useRef(add);
   addRef.current = add;
   useEffect(() => {
@@ -68,11 +70,16 @@ export function AddSites(props: {
           <label className="text-sm font-medium" htmlFor="job-site-urls">
             Job site URLs
           </label>
+          {/* No spellcheck or wrapping: checking and laying out a paste of
+              900 addresses froze the window for seconds. */}
           <ProfileTextarea
             id="job-site-urls"
+            aria-describedby="job-site-urls-count"
             aria-label="Job site URLs"
             rows={4}
+            spellCheck={false}
             value={text}
+            wrap="off"
             placeholder="Paste careers or job-board URLs, one per line"
             onChange={(event) => {
               setText(event.target.value);
@@ -80,6 +87,14 @@ export function AddSites(props: {
               setDuplicateUrls([]);
             }}
           />
+          <p
+            className="text-(length:--text-small) text-foreground-soft tabular-nums"
+            id="job-site-urls-count"
+          >
+            {addresses > 0
+              ? `${addresses.toLocaleString()} address${addresses === 1 ? "" : "es"}`
+              : null}
+          </p>
           <Button
             className="justify-self-start"
             disabled={!text.trim()}

@@ -4,8 +4,10 @@ import {
   type TrackerStatus,
   type TrackerStatusCounts,
 } from "@nestor/contracts";
-import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { Button } from "@renderer/components/ui/button";
 import { useStoreList } from "@renderer/features/job-lists";
 import { StatusBadge } from "@renderer/features/job-finder/components/status-badge";
 import { cn } from "@renderer/lib/cn";
@@ -24,19 +26,25 @@ const CARD_PAGE = 30;
 const DRAG_TYPE = "application/x-nestor-job";
 
 /**
- * The board: one column per stage, each with its own list read a page at a
- * time from the store, so a stage of 500 applications scrolls in place.
- * Drag a card to another column to move it.
+ * The board: one column per stage across the whole width, each with its own
+ * list read a page at a time from the store, so a stage of 500 applications
+ * scrolls in place. An empty stage folds to a thin labelled rail that still
+ * takes a drop. Drag a card to another column to move it.
  */
 export function ApplicationsBoard(props: {
   filter: Omit<TrackerFilterInput, "statuses">;
   activeId: number | null;
   onActivate: (id: number) => void;
+  /** Room on the right for the details sheet, so every column scrolls clear of it. */
+  sheetOpen?: boolean;
 }) {
   return (
     <div
       aria-label="Applications by stage"
-      className="grid min-h-0 min-w-0 flex-1 auto-cols-[minmax(14rem,1fr)] grid-flow-col gap-3 overflow-x-auto pb-2"
+      className={cn(
+        "flex min-h-0 min-w-0 flex-1 gap-3 overflow-x-auto pb-2",
+        props.sheetOpen && "pr-[29rem]",
+      )}
       role="region"
     >
       {STAGE_GROUPS.map((group) => (
@@ -94,13 +102,17 @@ function BoardColumn(props: {
       ? null
       : (group.statuses[0] as Exclude<TrackerStatus, "applying">);
 
+  const empty = !list.loading && list.rows.length === 0;
+
   return (
     <section
       aria-label={`${group.label}, ${list.total}`}
       className={cn(
         "flex min-h-0 flex-col rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-well)",
+        empty ? "w-10 shrink-0" : "min-w-44 flex-[1_1_14rem]",
         over && "border-(--focus-ring)",
       )}
+      data-board-rail={empty || undefined}
       onDragLeave={() => setOver(false)}
       onDragOver={(event) => {
         if (!target || !event.dataTransfer.types.includes(DRAG_TYPE)) return;
@@ -114,29 +126,37 @@ function BoardColumn(props: {
           void setStatus({ ids: [id] }, target);
       }}
     >
-      <header className="flex items-baseline justify-between px-3 py-2">
-        <h3 className="text-sm font-semibold">{group.label}</h3>
-        <span className="text-xs tabular-nums text-foreground-soft">
-          {list.total.toLocaleString()}
-        </span>
-      </header>
-      <ul className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto px-2 pb-2">
-        {list.rows.map((row) => (
-          <li key={row.id}>
-            <BoardCard
-              active={row.id === props.activeId}
-              onActivate={props.onActivate}
-              row={row}
-            />
-          </li>
-        ))}
-        {!list.loading && list.rows.length === 0 ? (
-          <li className="px-1 py-3 text-xs text-foreground-muted">
-            {target ? "Drop an application here." : "Nothing here."}
-          </li>
-        ) : null}
-        <div aria-hidden ref={sentinel} />
-      </ul>
+      {empty ? (
+        // Read top to bottom: the stage and its 0, with room for a drop.
+        <header
+          className="flex flex-1 items-center gap-2 py-3 text-sm [writing-mode:vertical-rl]"
+          title={target ? "Drop an application here." : undefined}
+        >
+          <h3 className="font-semibold">{group.label}</h3>
+          <span className="text-xs tabular-nums text-foreground-soft">0</span>
+        </header>
+      ) : (
+        <>
+          <header className="flex items-baseline justify-between px-3 py-2">
+            <h3 className="truncate text-sm font-semibold">{group.label}</h3>
+            <span className="text-xs tabular-nums text-foreground-soft">
+              {list.total.toLocaleString()}
+            </span>
+          </header>
+          <ul className="grid min-h-0 flex-1 content-start gap-2 overflow-y-auto px-2 pb-2">
+            {list.rows.map((row) => (
+              <li key={row.id}>
+                <BoardCard
+                  active={row.id === props.activeId}
+                  onActivate={props.onActivate}
+                  row={row}
+                />
+              </li>
+            ))}
+            <div aria-hidden ref={sentinel} />
+          </ul>
+        </>
+      )}
     </section>
   );
 }
@@ -183,5 +203,61 @@ function BoardCard(props: {
         )}
       </span>
     </button>
+  );
+}
+
+function isTyping(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))
+  );
+}
+
+/**
+ * The open card's details, as a sheet over the right of the board, so the
+ * board keeps the whole width. Escape or the close button puts it away; in a
+ * field, Escape leaves the field first.
+ */
+export function BoardDetailSheet(props: {
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const onClose = useRef(props.onClose);
+  onClose.current = props.onClose;
+  useEffect(() => {
+    // Capture, so the list's own Escape (clear the ticks) waits its turn.
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (isTyping(event.target)) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      event.preventDefault();
+      onClose.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+  return (
+    <div
+      aria-label="Application details"
+      className="absolute inset-y-0 right-0 z-20 flex w-[28rem] max-w-full flex-col overflow-hidden rounded-(--radius-panel) border border-(--surface-panel-border) bg-card shadow-xl"
+      role="dialog"
+    >
+      <div className="flex shrink-0 justify-end px-2 pt-2">
+        <Button
+          aria-label="Close details"
+          onClick={props.onClose}
+          size="icon-sm"
+          title="Close · Esc"
+          type="button"
+          variant="ghost"
+        >
+          <X aria-hidden />
+        </Button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {props.children}
+      </div>
+    </div>
   );
 }

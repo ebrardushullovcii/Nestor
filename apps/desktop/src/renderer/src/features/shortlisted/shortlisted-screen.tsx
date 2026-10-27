@@ -3,7 +3,7 @@ import type {
   ShortlistedPage,
   ShortlistedRow,
 } from "@nestor/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
@@ -15,7 +15,6 @@ import { PageHeader } from "@renderer/features/job-finder/components/page-header
 import { StatusBadge } from "@renderer/features/job-finder/components/status-badge";
 import { useAssistantContextSource } from "@renderer/features/job-finder/assistant/assistant-provider";
 import {
-  countSelected,
   isSelected,
   ListDetailLayout,
   ListPane,
@@ -25,7 +24,9 @@ import {
   selectAll,
   toggleSelection,
   useListKeys,
+  useSelectAllCount,
   useStoreList,
+  type ListRowState,
   type ListSelection,
 } from "@renderer/features/job-lists";
 
@@ -87,7 +88,19 @@ export function ShortlistedScreen() {
     refreshOn: (change) =>
       change.stages.includes("shortlisted") || change.stages.includes("resume"),
   });
-  const selectedCount = countSelected(selection, list.total);
+  const { selectedCount, counting, totalCapped } = useSelectAllCount({
+    key: JSON.stringify([tab, text]),
+    selection,
+    total: list.total,
+    totalCapped: list.totalCapped,
+    count: () =>
+      window.nestor.jobs
+        .run("count_jobs", { stage: tab, text })
+        .then((result) => result.total),
+  });
+  const selectedText = `${selectedCount.toLocaleString()}${
+    totalCapped && selection.all ? "+" : ""
+  }`;
 
   // A job asked for by link (`?jobId=`) stays open in its own tab.
   const linkedJob = Number(searchParams.get("jobId") ?? "");
@@ -415,10 +428,13 @@ export function ShortlistedScreen() {
     return () => window.removeEventListener("keydown", onKey);
   }, [approve]);
 
-  const toggle = (id: number, shiftKey: boolean) =>
-    setSelection((current) =>
-      toggleSelection(current, id, shiftKey, list.rows),
-    );
+  const toggle = useCallback(
+    (id: number, shiftKey: boolean) =>
+      setSelection((current) =>
+        toggleSelection(current, id, shiftKey, latest.current.list.rows),
+      ),
+    [],
+  );
   const toReview = list.counts.shortlisted;
   const approved = list.counts.resume;
   const navigate = useNavigate();
@@ -449,16 +465,18 @@ export function ShortlistedScreen() {
                     </Button>
                   ) : null}
                   <Button
-                    disabled={busy !== null || list.loading}
+                    disabled={busy !== null || list.loading || counting}
                     onClick={() =>
                       void apply(selectedCount === 0 ? "all" : "target")
                     }
                     pending={busy === "apply"}
                     size="toolbar"
                   >
-                    {selectedCount > 0
-                      ? `Apply to ${plural(selectedCount, "job")}`
-                      : `Apply to all ${list.totalCapped ? "matching jobs" : plural(list.total, "job")}`}
+                    {counting
+                      ? "Apply"
+                      : selectedCount > 0
+                        ? `Apply to ${selectedText} job${selectedCount === 1 ? "" : "s"}`
+                        : `Apply to all ${list.totalCapped ? "matching jobs" : plural(list.total, "job")}`}
                   </Button>
                 </>
               ) : null
@@ -509,21 +527,21 @@ export function ShortlistedScreen() {
             bulkActions={
               <>
                 <Button
-                  disabled={busy !== null}
+                  disabled={busy !== null || counting}
                   onClick={() => void moveBack()}
                   size="toolbar"
                   variant="outline"
                 >
-                  Move back
+                  {counting ? "Move back" : `Move ${selectedText} back`}
                 </Button>
                 <Button
-                  disabled={busy !== null}
+                  disabled={busy !== null || counting}
                   onClick={() =>
                     void (tab === "shortlisted" ? approve() : apply())
                   }
                   size="toolbar"
                 >
-                  {tab === "shortlisted" ? "Approve" : "Apply"}
+                  {`${tab === "shortlisted" ? "Approve" : "Apply"}${counting ? "" : ` ${selectedText}`}`}
                 </Button>
               </>
             }
@@ -563,30 +581,18 @@ export function ShortlistedScreen() {
               tab === "shortlisted" ? "Resumes to review" : "Approved resumes"
             }
             loading={list.loading}
+            counting={counting}
             onClearSelection={() => setSelection(NO_SELECTION)}
             onLoadMore={() => void list.loadMore()}
             onSelectAll={() => setSelection(selectAll())}
-            renderRow={(row, state) => {
-              const status = row.application
-                ? APPLICATION_BADGE[row.application.status]
-                : describeResume(row.resume);
-              return (
-                <ListRowFrame
-                  active={state.active}
-                  badge={
-                    <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
-                  }
-                  checked={state.checked}
-                  id={row.id}
-                  key={row.id}
-                  meta={[row.company, row.location].filter(Boolean).join(" · ")}
-                  onActivate={setActiveId}
-                  onToggle={toggle}
-                  status={row.resume ? LEVEL_LABEL[row.resume.level] : null}
-                  title={row.title}
-                />
-              );
-            }}
+            renderRow={(row, state) => (
+              <ShortlistedListRow
+                {...state}
+                onActivate={setActiveId}
+                onToggle={toggle}
+                row={row}
+              />
+            )}
             rows={list.rows}
             selectedCount={selectedCount}
             selection={selection}
@@ -602,10 +608,37 @@ export function ShortlistedScreen() {
               />
             }
             total={list.total}
-            totalCapped={list.totalCapped}
+            totalCapped={totalCapped}
           />
         }
       />
     </LockedScreenLayout>
   );
 }
+
+/** One shortlisted job and its resume's state; memoized like every list row. */
+const ShortlistedListRow = memo(function ShortlistedListRow(
+  props: ListRowState & {
+    row: ShortlistedRow;
+    onActivate: (id: number) => void;
+    onToggle: (id: number, shiftKey: boolean) => void;
+  },
+) {
+  const { row } = props;
+  const status = row.application
+    ? APPLICATION_BADGE[row.application.status]
+    : describeResume(row.resume);
+  return (
+    <ListRowFrame
+      active={props.active}
+      badge={<StatusBadge tone={status.tone}>{status.label}</StatusBadge>}
+      checked={props.checked}
+      id={row.id}
+      meta={[row.company, row.location].filter(Boolean).join(" · ")}
+      onActivate={props.onActivate}
+      onToggle={props.onToggle}
+      status={row.resume ? LEVEL_LABEL[row.resume.level] : null}
+      title={row.title}
+    />
+  );
+});

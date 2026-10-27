@@ -1,4 +1,5 @@
 import type { JobRow, JobSort } from "@nestor/contracts";
+import { memo } from "react";
 
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
@@ -20,19 +21,25 @@ const SORT_LABEL: Record<JobSort, string> = {
 
 export const FIND_JOBS_FILTER_SELECTOR = "[data-find-jobs-filter]";
 
-/** One Find jobs row: fit on the title line, why on the third. */
-export function FindJobsRow(props: {
-  row: JobRow;
-  state: ListRowState;
-  onActivate: (id: number) => void;
-  onToggle: (id: number, shiftKey: boolean) => void;
-}) {
+/**
+ * One Find jobs row: fit on the title line, why on the third. Memoized, so a
+ * J press re-renders only the row it leaves and the row it opens; the
+ * handlers must be stable.
+ */
+export const FindJobsRow = memo(function FindJobsRow(
+  props: ListRowState & {
+    row: JobRow;
+    onActivate: (id: number) => void;
+    onToggle: (id: number, shiftKey: boolean) => void;
+  },
+) {
   const { row } = props;
   const fit = describeFit(row.fitScore, row.stage);
   const age = describeAge(row.postedAt ?? row.foundAt);
   return (
     <ListRowFrame
-      {...props.state}
+      active={props.active}
+      checked={props.checked}
       badge={
         <>
           {row.fitScore !== null ? (
@@ -63,7 +70,7 @@ export function FindJobsRow(props: {
         .join(" · ")}
     />
   );
-}
+});
 
 /** Filter, the fit floor and the sort, above the rows. */
 export function FindJobsToolbar(props: {
@@ -73,7 +80,7 @@ export function FindJobsToolbar(props: {
   sorts: readonly JobSort[];
   onSort: (sort: JobSort) => void;
   /** Null hides the fit floor control (tabs other than Found). */
-  fitFloor: { floor: number | null; below: number | null } | null;
+  fitFloor: { floor: number | null; below: string | null } | null;
   onToggleFloor: () => void;
 }) {
   return (
@@ -103,9 +110,7 @@ export function FindJobsToolbar(props: {
           {props.fitFloor.floor === null
             ? "Any fit"
             : `Fit ${props.fitFloor.floor}+${
-                props.fitFloor.below
-                  ? ` · ${props.fitFloor.below.toLocaleString()} below`
-                  : ""
+                props.fitFloor.below ? ` · ${props.fitFloor.below} below` : ""
               }`}
         </Button>
       ) : null}

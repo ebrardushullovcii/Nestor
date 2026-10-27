@@ -12,7 +12,7 @@ import {
   type TrackerSelectionInput,
 } from "@nestor/contracts";
 import { Download, Save } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
@@ -49,7 +49,7 @@ import {
   useSetStatus,
   useTrackerChangeToast,
 } from "./application-detail";
-import { ApplicationsBoard } from "./applications-board";
+import { ApplicationsBoard, BoardDetailSheet } from "./applications-board";
 import {
   countGroup,
   describeDue,
@@ -115,7 +115,8 @@ const NO_FILTER: FilterState = {
 /**
  * Applications: every application from the moment Apply takes it, where it
  * stands, what is next, its replies, interviews, reminders and notes. A list
- * with columns or a board by stage, the details always beside it.
+ * with columns, the details beside it, or a board by stage, a card's details
+ * over its right side.
  */
 export function ApplicationsScreen() {
   const { showToast } = useToast();
@@ -125,6 +126,8 @@ export function ApplicationsScreen() {
   const [prefs, setPrefs] = useState<Prefs>(readPrefs);
   const [filter, setFilter] = useState<FilterState>(NO_FILTER);
   const [activeId, setActiveId] = useState<number | null>(null);
+  // On the board, details open only when a card is clicked.
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const [views, setViews] = useState<TrackerView[]>([]);
   const [tags, setTags] = useState<{ tag: string; count: number }[]>([]);
@@ -179,7 +182,9 @@ export function ApplicationsScreen() {
   const { key: navigationKey } = useLocation();
   const linked = Number(searchParams.get("jobId") ?? "");
   useEffect(() => {
-    if (Number.isInteger(linked) && linked > 0) setActiveId(linked);
+    if (!Number.isInteger(linked) || linked <= 0) return;
+    setActiveId(linked);
+    setSheetOpen(true);
   }, [linked, navigationKey]);
 
   // A new list starts with nothing ticked; its first application opens.
@@ -266,10 +271,13 @@ export function ApplicationsScreen() {
     return activeId === null ? null : { ids: [activeId] };
   }, []);
 
-  const toggle = (id: number, shiftKey: boolean) =>
-    setSelection((current) =>
-      toggleSelection(current, id, shiftKey, list.rows),
-    );
+  const toggle = useCallback(
+    (id: number, shiftKey: boolean) =>
+      setSelection((current) =>
+        toggleSelection(current, id, shiftKey, latest.current.list.rows),
+      ),
+    [],
+  );
 
   useListKeys({
     rows: list.rows,
@@ -503,23 +511,31 @@ export function ApplicationsScreen() {
       }
     >
       {prefs.layout === "board" ? (
-        <ListDetailLayout
-          applicationState={{
+        // The board takes the whole width; a card's details open over it.
+        <div
+          className="relative flex min-h-0 flex-1 xl:h-full"
+          data-application-list-state={JSON.stringify({
             ...query,
             layout: prefs.layout,
             selectedIds: [...selection.ids],
             all: selection.all,
-          }}
-          detail={detail}
-          list={
-            <ApplicationsBoard
-              activeId={activeId}
-              filter={withoutStatuses(query)}
-              onActivate={setActiveId}
-            />
-          }
-          table
-        />
+          })}
+        >
+          <ApplicationsBoard
+            activeId={sheetOpen ? activeId : null}
+            filter={withoutStatuses(query)}
+            onActivate={(id) => {
+              setActiveId(id);
+              setSheetOpen(true);
+            }}
+            sheetOpen={sheetOpen && activeId !== null}
+          />
+          {sheetOpen && activeId !== null ? (
+            <BoardDetailSheet onClose={() => setSheetOpen(false)}>
+              {detail}
+            </BoardDetailSheet>
+          ) : null}
+        </div>
       ) : (
         <ListDetailLayout
           applicationState={{
@@ -594,7 +610,6 @@ export function ApplicationsScreen() {
                   checked={state.checked}
                   columns={showColumns}
                   density={prefs.density}
-                  key={row.id}
                   onActivate={setActiveId}
                   onToggle={toggle}
                   row={row}
@@ -736,8 +751,11 @@ function ViewOptions(props: {
   );
 }
 
-/** One application as a row of the columns the person chose. */
-function ApplicationRow(props: {
+/**
+ * One application as a row of the columns the person chose. Memoized, so a
+ * key press re-renders only the rows whose state changed.
+ */
+const ApplicationRow = memo(function ApplicationRow(props: {
   row: TrackerRow;
   active: boolean;
   checked: boolean;
@@ -828,4 +846,4 @@ function ApplicationRow(props: {
       </SelectableRow>
     </li>
   );
-}
+});

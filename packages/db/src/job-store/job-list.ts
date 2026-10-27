@@ -265,15 +265,43 @@ export function jobPageSql(query: JobListQuery, matches: number): Sql {
   };
 }
 
-/** How many jobs match, up to one past the cap: each range counted apart. */
-export function jobCountSql(filter: JobFilter): Sql {
+/**
+ * How many jobs match, up to one past the cap (`exact` counts them all):
+ * each range counted apart.
+ */
+export function jobCountSql(filter: JobFilter, exact = false): Sql {
   const ranges = toFilterRanges(filter);
   return {
     sql: `SELECT count(*) AS n FROM (${ranges
       .map((range) => `SELECT 1 FROM jobs j WHERE ${range.where}`)
-      .join(" UNION ALL ")} LIMIT ${JOB_TOTAL_CAP + 1})`,
+      .join(" UNION ALL ")}${exact ? "" : ` LIMIT ${JOB_TOTAL_CAP + 1}`})`,
     params: ranges.flatMap((range) => range.params),
   };
+}
+
+/**
+ * Scored jobs under the fit floor that the rest of the filter keeps, up to
+ * one past the cap, from the same index ranges; null without a floor.
+ */
+export function belowFloorSql(filter: JobFilter): Sql | null {
+  if (filter.minFit === null) return null;
+  const ranges = toFilterRanges({ ...filter, minFit: null });
+  return {
+    sql: `SELECT count(*) AS n FROM (${ranges
+      .map(
+        (range) =>
+          `SELECT 1 FROM jobs j WHERE ${range.where} AND j.fit_score >= 0 AND j.fit_score < ?`,
+      )
+      .join(" UNION ALL ")} LIMIT ${JOB_TOTAL_CAP + 1})`,
+    params: ranges.flatMap((range) => [...range.params, filter.minFit]),
+  };
+}
+
+/** Every job the filter matches, counted exactly however many there are. */
+export function countJobs(sql: Statements, filter: JobFilter): number {
+  if (toFilterSql(filter).stageOnly) return readStageCounts(sql)[filter.stage];
+  const count = jobCountSql(filter, true);
+  return (sql(count.sql).get(...count.params) as { n: number }).n;
 }
 
 export function listJobs(sql: Statements, query: JobListQuery): JobListPage {
@@ -286,6 +314,10 @@ export function listJobs(sql: Statements, query: JobListQuery): JobListPage {
     : (sql(countSql.sql).get(...countSql.params) as { n: number }).n;
   const pageSql = jobPageSql(query, total);
   const records = sql(pageSql.sql).all(...pageSql.params) as RowRecord[];
+  const below = belowFloorSql(query);
+  const belowFloor = below
+    ? (sql(below.sql).get(...below.params) as { n: number }).n
+    : null;
   const hasMore = records.length > query.limit;
   const page = hasMore ? records.slice(0, query.limit) : records;
   const last = page.at(-1);
@@ -297,6 +329,9 @@ export function listJobs(sql: Statements, query: JobListQuery): JobListPage {
         : null,
     total: stageOnly ? total : Math.min(total, JOB_TOTAL_CAP),
     totalCapped: !stageOnly && total > JOB_TOTAL_CAP,
+    belowFloor:
+      belowFloor === null ? null : Math.min(belowFloor, JOB_TOTAL_CAP),
+    belowFloorCapped: belowFloor !== null && belowFloor > JOB_TOTAL_CAP,
     counts,
   };
 }

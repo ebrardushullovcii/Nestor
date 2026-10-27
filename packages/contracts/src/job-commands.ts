@@ -7,6 +7,7 @@ import { z } from "zod";
 import type { AppCommandDefinition } from "./app-commands";
 
 import {
+  JobFilterSchema,
   JobIdSchema,
   JobListQuerySchema,
   JobSearchSettingsSchema,
@@ -47,6 +48,12 @@ export const JOB_COMMANDS = {
     description:
       "One page of jobs in one stage (found = Find jobs inbox, hidden, shortlisted, resume = ready to apply, applied), with filters, a sort, the matching total and every stage's count. Pass nextCursor back as cursor for the next page.",
     input: JobListQuerySchema,
+  },
+  count_jobs: {
+    effect: "read",
+    description:
+      "Exactly how many jobs match a filter (stage, text, fit floor, work modes), with no cap: list_jobs stops counting at 1,000. Use it before a bulk move of every match.",
+    input: JobFilterSchema,
   },
   get_job: {
     effect: "read",
@@ -157,6 +164,7 @@ export type JobCommandInput<K extends JobCommandName> = z.input<
 
 export interface JobCommandOutputs extends ProfileCommandOutputs {
   list_jobs: JobListPage;
+  count_jobs: { total: number };
   get_job: JobDetail | null;
   stage_counts: JobStageCounts;
   move_jobs: MoveJobsResult;

@@ -128,7 +128,7 @@ it("approves every selected resume across pages, with an excluded job kept", asy
   fireEvent.click(
     within(screen.getByRole("region", { name: "Resumes to review" })).getByRole(
       "button",
-      { name: "Approve" },
+      { name: "Approve 119" },
     ),
   );
   await waitFor(() => expect(store.stageCounts().resume).toBe(119));

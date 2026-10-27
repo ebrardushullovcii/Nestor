@@ -121,6 +121,7 @@ export function createJobCommandRunner(deps: {
   const handlers: Handlers = {
     ...createProfileCommandHandlers(store),
     list_jobs: (input) => store.listJobs(input),
+    count_jobs: (input) => ({ total: store.countJobs(input) }),
     get_job: ({ id }) => store.getJob(id),
     stage_counts: () => store.stageCounts(),
     move_jobs: (input) => {

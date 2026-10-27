@@ -1,6 +1,8 @@
 import type { JobChange, JobStageCounts } from "@nestor/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useEffectWhileKeptRouteShown } from "@renderer/features/job-finder/lib/kept-route-visibility";
+
 /** One page of any store-backed list: `list_jobs`, `list_shortlisted`, … */
 export interface StoreListPage<Row, Counts = JobStageCounts> {
   rows: Row[];
@@ -10,14 +12,16 @@ export interface StoreListPage<Row, Counts = JobStageCounts> {
   counts: Counts;
 }
 
-export interface StoreListState<
+export type StoreListState<
   Row,
   Counts = JobStageCounts,
-> extends StoreListPage<Row, Counts> {
-  /** True until the first page of this list arrives. */
-  loading: boolean;
-  error: string | null;
-}
+  Extra extends object = object,
+> = StoreListPage<Row, Counts> &
+  Partial<Extra> & {
+    /** True until the first page of this list arrives. */
+    loading: boolean;
+    error: string | null;
+  };
 
 export const LIST_PAGE_SIZE = 50;
 /** The most rows one read asks for; a refresh of more reads in turns. */
@@ -37,6 +41,48 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : "Could not load the list.";
 }
 
+/** Deep equality of plain data read over IPC: rows, counts. */
+function same(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (
+    typeof left !== "object" ||
+    typeof right !== "object" ||
+    left === null ||
+    right === null ||
+    Array.isArray(left) !== Array.isArray(right)
+  )
+    return false;
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every((key) => same(a[key], b[key]))
+  );
+}
+
+/**
+ * The new rows, keeping each unchanged row's old object (and the old array
+ * when nothing changed), so memoized rows skip the render.
+ */
+function reuseRows<Row extends { id: number }>(
+  before: readonly Row[],
+  after: Row[],
+): Row[] {
+  const old = new Map(before.map((row) => [row.id, row]));
+  let changed = before.length !== after.length;
+  const rows = after.map((row, index) => {
+    const kept = old.get(row.id);
+    if (kept && same(kept, row)) {
+      if (before[index] !== kept) changed = true;
+      return kept;
+    }
+    changed = true;
+    return row;
+  });
+  return changed ? rows : (before as Row[]);
+}
+
 /**
  * Any list read from the job store: the first page, more pages as the person
  * scrolls, and a quiet refetch of what is on screen when a `jobs:changed`
@@ -49,12 +95,14 @@ function describe(error: unknown): string {
 export function useStoreList<
   Row extends { id: number },
   Counts = JobStageCounts,
+  /** Whatever else a page carries, e.g. `belowFloor`; kept from the last page. */
+  Extra extends object = object,
 >(options: {
   key: string;
   load: (page: {
     cursor: string | null;
     limit: number;
-  }) => Promise<StoreListPage<Row, Counts>>;
+  }) => Promise<StoreListPage<Row, Counts> & Extra>;
   refreshOn?: (change: JobChange) => boolean;
   /** Counts before the first page arrives; job stage counts by default. */
   emptyCounts?: Counts;
@@ -70,14 +118,18 @@ export function useStoreList<
   paused.current = options.pauseUpdates ?? false;
   const pendingRefresh = useRef(false);
 
-  const [state, setState] = useState<StoreListState<Row, Counts>>({
-    rows: [],
-    nextCursor: null,
-    total: 0,
-    totalCapped: false,
-    counts: options.emptyCounts ?? (EMPTY_COUNTS as Counts),
-    loading: true,
-    error: null,
+  const [state, setState] = useState<StoreListState<Row, Counts, Extra>>(() => {
+    // No page yet, so none of its extra fields.
+    const empty: StoreListState<Row, Counts> = {
+      rows: [],
+      nextCursor: null,
+      total: 0,
+      totalCapped: false,
+      counts: options.emptyCounts ?? (EMPTY_COUNTS as Counts),
+      loading: true,
+      error: null,
+    };
+    return empty as StoreListState<Row, Counts, Extra>;
   });
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -85,15 +137,26 @@ export function useStoreList<
   const loadingMore = useRef(false);
 
   const apply = useCallback(
-    (page: StoreListPage<Row, Counts>, rows: Row[]) =>
-      setState({
-        rows,
-        nextCursor: page.nextCursor,
-        total: page.total,
-        totalCapped: page.totalCapped,
-        counts: page.counts,
-        loading: false,
-        error: null,
+    (page: StoreListPage<Row, Counts> & Extra, rows: Row[]) =>
+      setState((current): StoreListState<Row, Counts, Extra> => {
+        const next = {
+          ...page,
+          rows: reuseRows(current.rows, rows),
+          counts: same(current.counts, page.counts)
+            ? current.counts
+            : page.counts,
+          loading: false,
+          error: null,
+        };
+        // A refresh that changed nothing renders nothing.
+        return Object.keys(next).every((key) =>
+          Object.is(
+            next[key as keyof typeof next],
+            current[key as keyof typeof current],
+          ),
+        )
+          ? current
+          : next;
       }),
     [],
   );
@@ -110,7 +173,7 @@ export function useStoreList<
     try {
       const rows: Row[] = [];
       const seen = new Set<number>();
-      let page: StoreListPage<Row, Counts> | null = null;
+      let page: (StoreListPage<Row, Counts> & Extra) | null = null;
       let cursor: string | null = null;
       do {
         page = await loadRef.current({
@@ -147,7 +210,13 @@ export function useStoreList<
     void refresh();
   }, [refresh]);
 
-  useEffect(() => {
+  // Listens only while the screen shows: a kept screen hidden behind another
+  // one reads nothing, and reads once when it shows again.
+  const shownWith = useRef<typeof refresh | null>(null);
+  useEffectWhileKeptRouteShown(() => {
+    // A new list (a new `refresh`) is loaded by the effect above.
+    if (shownWith.current === refresh) void refresh();
+    shownWith.current = refresh;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let last = 0;
     const schedule = () => {
