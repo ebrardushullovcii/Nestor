@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import {
   CandidateProfileSchema,
+  CandidateReusableAnswerSchema,
   type RawApplyControl,
   type RawApplyPage,
 } from "@nestor/contracts";
@@ -92,13 +93,25 @@ test("an Ashby-sized form fills known facts and hands unknown facts over once", 
     currentCountry: "Germany",
     githubUrl: "https://github.com/robin-example",
     linkedinUrl: "https://www.linkedin.com/in/robin-example",
-    summary: "Maintained internal deployment documentation. ".repeat(65),
+    summary: "Maintained internal deployment documentation. ".repeat(12),
     yearsExperience: 4,
+    experiences: Array.from({ length: 4 }, (_, index) => ({
+      id: `synthetic-employer-${index}`,
+      companyName: `Example Workshop ${index}`,
+      title: "Platform Engineer",
+      summary:
+        "Maintained internal services and documented deployment procedures. ".repeat(
+          16,
+        ),
+      startDate: "2021-01",
+      endDate: "2024-01",
+      isDraft: false,
+    })),
     baseResume: {
       id: "synthetic-resume",
       fileName: "resume.pdf",
       uploadedAt: "2026-10-27T00:00:00Z",
-      textContent: "Maintained internal deployment documentation.",
+      textContent: "Maintained internal deployment documentation. ".repeat(240),
       textUpdatedAt: "2026-10-27T00:00:00Z",
       extractionStatus: "ready",
     },
@@ -120,19 +133,38 @@ test("an Ashby-sized form fills known facts and hands unknown facts over once", 
     modelQuestionClassification: true,
     sources: {
       profile,
-      resumeText: "Maintained internal deployment documentation. ".repeat(65),
+      resumeText: profile.baseResume.textContent,
       posting: {
         title: "Platform Engineer",
         company: "Example Workshop",
         location: "Germany",
         description: "Maintain internal platform services. ".repeat(30),
       },
-      reusableAnswers: [],
+      reusableAnswers: Array.from({ length: 18 }, (_, index) =>
+        CandidateReusableAnswerSchema.parse({
+          id: `synthetic-saved-${index}`,
+          kind: "other",
+          label: `Recorded work practice ${index}`,
+          question: `Describe your recorded work practice ${index}`,
+          answer:
+            "Documented a repeatable process for reviewing service health. ".repeat(
+              12,
+            ),
+        }),
+      ),
       documents: [],
     },
     hands: {
-      observe: () =>
-        Promise.resolve(buildApplyFormObservation(raw, "2026-10-27T00:00:00Z")),
+      observe: () => {
+        // Real forms echo selected choices, entered answers and file names in
+        // innerText. Their own lines must not invalidate every question read.
+        raw.bodyText = [body, ...controls.map((control) => control.value)].join(
+          "\n",
+        );
+        return Promise.resolve(
+          buildApplyFormObservation(raw, "2026-10-27T00:00:00Z"),
+        );
+      },
       fillText: (ref, value) => {
         const control = controls.find((entry) => `c${entry.index}` === ref)!;
         control.value = value;
@@ -239,6 +271,11 @@ test("an Ashby-sized form fills known facts and hands unknown facts over once", 
     },
   };
   const result = await runApplyAgent(config, client);
+  if (process.env.NESTOR_APPLY_COST_CAPTURE)
+    writeFileSync(
+      process.env.NESTOR_APPLY_COST_CAPTURE,
+      JSON.stringify({ requests, calls: requests.length }),
+    );
   expect(reads).toBe(1);
   expect(turns).toBe(2);
   expect(requests).toHaveLength(3);
@@ -256,10 +293,5 @@ test("an Ashby-sized form fills known facts and hands unknown facts over once", 
   // A serialization-size ceiling, not a substitute for provider-reported tokens.
   expect(
     requests.reduce((sum, request) => sum + Buffer.byteLength(request), 0),
-  ).toBeLessThan(160_000);
-  if (process.env.NESTOR_APPLY_COST_CAPTURE)
-    writeFileSync(
-      process.env.NESTOR_APPLY_COST_CAPTURE,
-      JSON.stringify({ requests, calls: requests.length }),
-    );
+  ).toBeLessThan(400_000);
 });
