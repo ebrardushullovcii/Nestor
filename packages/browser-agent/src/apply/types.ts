@@ -57,6 +57,9 @@ export interface ApplyFormControl {
   dateInputType?: "date" | "month";
   /** Native URL inputs require a complete address even when the label is generic. */
   urlInput?: boolean;
+  /** Native phone metadata and form/root identity, retained for calling-code binding. */
+  telInput?: boolean;
+  scopeKey?: string;
   inputConstraints?: {
     type: "number" | "date" | "month";
     min?: string;
