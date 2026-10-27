@@ -222,7 +222,6 @@ export function buildApplyFormObservation(
       ref: rawControl.ref ?? `c${rawControl.index}`,
       kind,
       ...(rawControl.scopeKey ? { scopeKey: rawControl.scopeKey } : {}),
-      ...(rawControl.formKey ? { formKey: rawControl.formKey } : {}),
       ...(inputType === "tel" ? { telInput: true } : {}),
       ...(inputType === "url" ? { urlInput: true } : {}),
       ...(inputType === "month" || inputType === "date"
@@ -324,7 +323,6 @@ export function buildApplyFormObservation(
     ...(rawAction.formAction ? { formAction: rawAction.formAction } : {}),
     ...(rawAction.formMethod ? { formMethod: rawAction.formMethod } : {}),
     ...(rawAction.submitsForm ? { submitsForm: true } : {}),
-    ...(rawAction.formKey ? { formKey: rawAction.formKey } : {}),
     ...placementOf(rawAction),
   }));
 

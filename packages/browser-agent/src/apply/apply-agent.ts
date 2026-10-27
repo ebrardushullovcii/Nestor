@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { withApplyFormSend, wroteField } from "./form-send";
 import {
   answerSourceCatalog,
   classifyAnswerPermission,
@@ -49,6 +48,8 @@ import {
   guardStop,
   fileFieldHoldsOtherFile,
   pressOnSitePause,
+  formSendPause,
+  unrecognizedSubmit,
   pressesFormButtons,
   questionPrompt,
   pickerExhausted,
@@ -350,16 +351,6 @@ async function runMeasuredApplyAgent(
   const config: ApplyAgentConfig = {
     ...input,
     signal: runSignal,
-    hands: {
-      ...input.hands,
-      // A form whose only button says "Apply" is sent by it once that form
-      // is this application's (form-send).
-      observe: async () =>
-        withApplyFormSend(await input.hands.observe(), {
-          wrote: wroteField(filled),
-          uploads: uploadOptions,
-        }),
-    },
   };
   const now = config.now ?? (() => new Date());
   const filled: ApplyFilledControl[] = [];
@@ -1475,7 +1466,7 @@ async function runMeasuredApplyAgent(
         // Fill in for me: a form button waits until the rest is filled.
         if (
           outcome.pause.question?.id === STEP_HANDOVER_QUESTION_ID &&
-          !pressesFormButtons(runConfig)
+          (!pressesFormButtons(runConfig) || outcome.pause.formSend === true)
         )
           return deferredPress
             ? handOverPress(outcome.pause)
@@ -1877,6 +1868,20 @@ async function runMeasuredApplyAgent(
         // The form button left for the person goes once everything the run
         // could fill is filled. Questions for the person come first: their
         // answers belong on this page, so the press waits for the next run.
+        // A form whose button submits it but reads as neither a step nor
+        // its send (Askable's "Apply") is the person's to press.
+        const unrecognizedSend = observation.actions.some(
+          (action) => action.kind === "final" && action.visible,
+        )
+          ? undefined
+          : observation.actions.find(
+              (action) =>
+                unrecognizedSubmit(action) &&
+                action.visible &&
+                !action.disabled,
+            );
+        if (unrecognizedSend && !deferredPress)
+          deferredPress = formSendPause(unrecognizedSend.label, now());
         if (deferredPress) {
           if (pendingQuestions.size > 0) return finishWithQuestions();
           const press: ApplyPause = deferredPress;

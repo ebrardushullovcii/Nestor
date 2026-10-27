@@ -62,8 +62,6 @@ export interface ApplyFormControl {
   /** Native phone metadata and form/root identity, retained for calling-code binding. */
   telInput?: boolean;
   scopeKey?: string;
-  /** The form element holding it in this read, as on its form's buttons. */
-  formKey?: string;
   inputConstraints?: {
     type: "number" | "date" | "month";
     min?: string;
@@ -133,8 +131,6 @@ export interface ApplyFormAction extends ApplyPlacement {
   formMethod?: string;
   /** Pressing it submits its form (a submit button, not type=button). */
   submitsForm?: boolean;
-  /** The form element holding it in this read, as on its form's fields. */
-  formKey?: string;
 }
 
 /** What a link on the page opens, read from the address itself. */
@@ -436,6 +432,8 @@ export interface ApplyPause {
    */
   questions?: ApplicationAttemptQuestion[];
   blocker: ApplyBlocker | null;
+  /** A button that may send the form, handed to the person in either mode. */
+  formSend?: true;
 }
 
 export interface ApplyFilledControl {

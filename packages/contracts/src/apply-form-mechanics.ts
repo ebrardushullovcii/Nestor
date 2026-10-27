@@ -28,8 +28,6 @@ export interface RawApplyControl {
   name: string;
   /** Transient identity of the containing form/root within this page read. */
   scopeKey?: string;
-  /** The form element holding it in this page read, when it has one. */
-  formKey?: string;
   label: string;
   /** Help text beside the field, besides its label. */
   hint?: string;
@@ -95,8 +93,6 @@ export interface RawApplyAction extends RawApplyPlacement {
   formMethod?: string;
   /** Pressing it submits its form: a submit button or input, not type=button. */
   submitsForm?: boolean;
-  /** The form element holding it in this page read: as on its form's fields. */
-  formKey?: string;
   /** A toggle button's `aria-pressed` state; absent on ordinary buttons. */
   pressed?: boolean;
 }

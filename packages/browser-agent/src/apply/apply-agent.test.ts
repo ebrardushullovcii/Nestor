@@ -9039,9 +9039,9 @@ describe("a picker the person filled on the page survives the continue", () => {
   });
 });
 
-describe("a form's only Apply button is its send only when the form is this application's", () => {
-  // Askable: a contact-only role form whose one button, Apply, submits the
-  // form; the page's handler posts it with fetch instead of the form's GET.
+describe("a button that submits its form but reads as neither a step nor its send is the person's", () => {
+  // Askable: a contact-only role form whose one button, "Apply", submits
+  // the form; its handler posts the answers with fetch.
   const sendForMe = {
     authority: {
       mode: "autonomous_submit" as const,
@@ -9051,17 +9051,13 @@ describe("a form's only Apply button is its send only when the form is this appl
       allowedOrigins: ["https://apply.example.test"],
     },
   };
-  const confirmFirst = {
+  const fillInForMe = {
     authority: {
       ...sendForMe.authority,
       mode: "confirm_before_submit" as const,
     },
   };
-  const apply = (
-    index: number,
-    formKey: string,
-    label = "Apply",
-  ): RawApplyAction => ({
+  const apply = (index = 0, label = "Apply"): RawApplyAction => ({
     index,
     label,
     visible: true,
@@ -9069,117 +9065,76 @@ describe("a form's only Apply button is its send only when the form is this appl
     formAction: "https://apply.example.test/roles/engineer",
     formMethod: "GET",
     submitsForm: true,
-    formKey,
   });
-  const name = (formKey?: string): RawApplyControl => ({
+  const email = (): RawApplyControl => ({
     ...nameControl(),
-    ...(formKey ? { formKey } : {}),
+    index: 1,
+    id: "email",
+    name: "email",
+    inputType: "email",
+    label: "Email",
+    value: "robin@example.test",
   });
-  const field = (
-    index: number,
-    label: string,
-    formKey: string,
-    extra: Partial<RawApplyControl> = {},
-  ): RawApplyControl => ({
-    ...nameControl(),
-    index,
-    id: `field${index}`,
-    name: `field${index}`,
-    label,
-    required: false,
-    formKey,
-    ...extra,
-  });
-  const run = (
-    source: RawApplyPage,
-    mode: typeof sendForMe | typeof confirmFirst,
-  ) =>
-    runApplyAgent(
-      config(source, mode),
-      repeatingModel("finish", { reason: "The form is complete." }),
+  const handedOver = (result: ApplyAgentResult) =>
+    result.pauses.flatMap((pause) =>
+      (pause.questions ?? []).map((question) => question.prompt),
     );
-
-  test.each([
-    ["Send for me", sendForMe, "ready_to_send"],
-    ["Fill in for me", confirmFirst, "awaiting_your_review"],
-  ] as const)(
-    "%s: the role form holding the person's details is sent by its Apply",
-    async (_mode, mode, outcome) => {
-      const result = await run(
-        page({ controls: [name("form0")], actions: [apply(0, "form0")] }),
-        mode,
-      );
-      expect(result.outcome).toBe(outcome);
-      expect(result.readyToSend).toMatchObject({ actionLabel: "Apply" });
-    },
-  );
-
-  const notTheSend: Array<[string, RawApplyPage]> = [
+  const pages: Array<[string, () => RawApplyPage]> = [
     [
-      "a search filter's Apply, beside the person's details in another form",
-      page({
-        controls: [
-          name("form0"),
-          field(1, "Keywords", "form1", { value: "engineer" }),
-        ],
-        actions: [apply(0, "form1")],
-      }),
+      "Askable's role form",
+      () => page({ controls: [nameControl(), email()], actions: [apply()] }),
     ],
     [
-      "cookie preferences' Apply",
-      page({
-        controls: [
-          name("form0"),
-          field(1, "Analytics cookies", "form1", {
-            inputType: "checkbox",
-            checked: true,
-            value: "on",
-          }),
-        ],
-        actions: [apply(0, "form1")],
-      }),
-    ],
-    [
-      "a listing's Apply, in a form with none of the person's answers",
-      page({ controls: [name()], actions: [apply(0, "form0")] }),
-    ],
-    [
-      "an Apply beside another submit in the same form",
-      page({
-        controls: [name("form0")],
-        actions: [apply(0, "form0"), apply(1, "form0", "Save draft")],
-      }),
-    ],
-    [
-      "an Apply whose form does not read ready",
-      page({
-        controls: [
-          name("form0"),
-          field(1, "Email", "form0", { required: true, value: "" }),
-        ],
-        actions: [apply(0, "form0")],
-      }),
-    ],
-    [
-      "an Apply that does not submit a form",
-      page({
-        controls: [name("form0")],
-        actions: [{ ...apply(0, "form0"), submitsForm: false }],
-      }),
+      "a newsletter box with an email and Apply",
+      () => page({ controls: [email()], actions: [apply()] }),
     ],
   ];
-  for (const [mode, authority] of [
+  const modes = [
     ["Send for me", sendForMe],
-    ["Fill in for me", confirmFirst],
-  ] as const)
-    test.each(notTheSend)(
-      `${mode}: %s is not the send`,
+    ["Fill in for me", fillInForMe],
+  ] as const;
+
+  for (const [mode, authority] of modes)
+    test.each(pages)(
+      `${mode}: %s is handed over, and Apply is never pressed`,
       async (_case, source) => {
-        const result = await run(source, authority);
-        expect(result.outcome).not.toBe("ready_to_send");
-        expect(result.readyToSend).toBeNull();
+        for (const model of [
+          repeatingModel("click", { ref: "a0" }),
+          repeatingModel("finish", { reason: "The form is complete." }),
+        ]) {
+          const input = config(source(), authority);
+          const pressed = vi.fn(input.hands.clickAction);
+          const clicked = vi.fn(input.hands.clickElement);
+          input.hands.clickAction = pressed;
+          input.hands.clickElement = clicked;
+          const result = await runApplyAgent(input, model);
+          expect(pressed).not.toHaveBeenCalled();
+          expect(clicked).not.toHaveBeenCalled();
+          expect(result.outcome).toBe("paused");
+          expect(result.readyToSend).toBeNull();
+          expect(result.reason).toBe(
+            `This form's button "Apply" may send your application; press it yourself when you're ready.`,
+          );
+          expect(handedOver(result)).toContain(
+            `Press "Apply" on the site yourself when you're ready`,
+          );
+        }
       },
     );
+
+  test("a submit button that reads as the send stays the send", async () => {
+    const result = await runApplyAgent(
+      config(
+        page({
+          controls: [nameControl()],
+          actions: [apply(0, "Submit application")],
+        }),
+        sendForMe,
+      ),
+      repeatingModel("finish", { reason: "The form is complete." }),
+    );
+    expect(result.outcome).toBe("ready_to_send");
+  });
 });
 
 test("a custom checkbox the page draws itself is a checkbox, and its answer is its state", async () => {

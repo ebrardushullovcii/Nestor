@@ -95,40 +95,72 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
-  test("a submit button has one ref, with its form, never a clickable alias", async () => {
+  test.each([
+    [
+      "a button the clickable selector also matches",
+      `<form><label>Name <input name="name"></label><button type="submit" onclick="void 0" data-testid="apply">Apply</button></form>`,
+    ],
+    [
+      "a label span inside the button",
+      `<form><label>Name <input name="name"></label><button type="submit"><span data-testid="apply-label">Apply</span></button></form>`,
+    ],
+    [
+      "a form inside a shadow root",
+      `<role-form></role-form><script>customElements.define("role-form", class extends HTMLElement { connectedCallback() { this.attachShadow({ mode: "open" }).innerHTML = '<form><label>Name <input name="name"></label><button type="submit"><span data-testid="apply-label">Apply</span></button></form>'; } });</script>`,
+    ],
+    [
+      "a form inside a frame",
+      `<iframe srcdoc='<form><label>Name <input name="name"></label><button type="submit"><span data-testid="apply-label">Apply</span></button></form>'></iframe>`,
+    ],
+  ])(
+    "a submit button has one ref, with its form's action: %s",
+    async (_case, html) => {
+      const page = await browser.newPage();
+      try {
+        await page.setContent(html);
+        await page.waitForTimeout(200);
+        const read = await readRawApplyPage(page);
+        expect(
+          read.clickables.filter((entry) => /apply/iu.test(entry.label)),
+        ).toEqual([]);
+        expect(
+          read.actions.filter((action) => action.label === "Apply"),
+        ).toEqual([
+          expect.objectContaining({ submitsForm: true, formMethod: "GET" }),
+        ]);
+      } finally {
+        await page.close();
+      }
+    },
+  );
+
+  test("the detached read gives a button and what it holds one ref too", async () => {
     const page = await browser.newPage();
     try {
       await page.setContent(
-        `<form id="role"><label>Name <input name="name"></label><button type="submit" onclick="void 0" data-testid="apply">Apply</button></form><form id="filters"><label>Keywords <input name="q"></label><button type="button">Clear</button></form>`,
+        `<form><label>Name <input name="name"></label><button type="submit" onclick="void 0"><span data-testid="apply-label">Apply</span></button><button type="button">Clear</button></form>`,
       );
       const source = `(${collectApplyDocumentSnapshot.toString()})(Array.from(document.querySelectorAll(${JSON.stringify(Object.values(APPLY_PAGE_SELECTORS).join(", "))})),${JSON.stringify(APPLY_PAGE_SELECTORS)},true)`;
       const native =
         await page.evaluate<ReturnType<typeof collectApplyDocumentSnapshot>>(
           source,
         );
-      const automated = await readRawApplyPage(page);
-      for (const read of [native, automated]) {
-        expect(
-          read.clickables.filter(
-            (entry: { label: string }) => entry.label === "Apply",
-          ),
-        ).toEqual([]);
-        const apply = read.actions.find(
-          (action: { label: string }) => action.label === "Apply",
-        )!;
-        const clear = read.actions.find(
-          (action: { label: string }) => action.label === "Clear",
-        )!;
-        expect(apply.submitsForm).toBe(true);
-        expect(clear.submitsForm).toBe(false);
-        const formOf = (name: string) =>
-          read.controls.find(
-            (control: { name: string }) => control.name === name,
-          )!.formKey;
-        expect(apply.formKey).toBe(formOf("name"));
-        expect(clear.formKey).toBe(formOf("q"));
-        expect(formOf("name")).not.toBe(formOf("q"));
-      }
+      expect(
+        native.clickables.filter((entry: { label: string }) =>
+          /apply/iu.test(entry.label),
+        ),
+      ).toEqual([]);
+      expect(
+        native.actions.map(
+          (action: { label: string; submitsForm?: boolean }) => [
+            action.label,
+            action.submitsForm,
+          ],
+        ),
+      ).toEqual([
+        ["Apply", true],
+        ["Clear", false],
+      ]);
     } finally {
       await page.close();
     }
