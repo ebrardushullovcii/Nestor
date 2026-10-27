@@ -45,6 +45,13 @@ export interface RawApplyControl {
   multiple: boolean;
   options: string[];
   selectedOptionLabel: string;
+  /** Native person input, tied to this exact field/value and document; never page autofill. */
+  personAnswer?: {
+    pageUrl: string;
+    value: string;
+    checked: boolean;
+    recordedAt: string;
+  };
   /** What a file input's own field shows about its upload. */
   upload?: RawApplyUpload;
 }

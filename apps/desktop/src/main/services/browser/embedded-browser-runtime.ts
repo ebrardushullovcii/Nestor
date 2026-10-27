@@ -270,6 +270,12 @@ export function withEmbeddedBrowserActivity(
       };
     },
     closeSession: (source) => runtime.closeSession(source),
+    async readApplicationPageBinding(source, key) {
+      const raw = await runtime.readApplicationPageBinding?.(source, key);
+      return raw
+        ? ((await browser.withPersonFieldAnswers?.(key, raw)) ?? raw)
+        : null;
+    },
     async readApplicationPageWithPerson(source, key) {
       const page = await browser.readApplicationPageWithPerson(key);
       if (!page)

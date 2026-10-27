@@ -40,6 +40,11 @@ import path from "node:path";
 import { TabLifecycle } from "./tab-lifecycle";
 import { routeMainWindowZoomShortcut } from "../../setup/window-zoom";
 import { createAgentInputLedger } from "./agent-input-ledger";
+import {
+  personFieldEditsInPage,
+  PERSON_FIELD_WORLD,
+  type PersonFieldCommand,
+} from "./person-field-edits";
 import { BrowserCdpBridge, type BrowserCdpPage } from "./browser-cdp-bridge";
 import { getEmbeddedBrowserFocusAction } from "./embedded-browser-focus-policy";
 import {
@@ -883,6 +888,8 @@ export class EmbeddedBrowser {
       if (key && this.agentPresses.claimKey(page.id, key)) return;
     }
     this.notePersonInput(page.id);
+    if (!this.automationCommands.has(page.id))
+      void this.personFieldCommand(page.id, { kind: "native", input: kind });
     if (this.lentTabs.has(page.id)) {
       // The person's click or key in a lent tab takes it back from the
       // assistant, and only from the assistant (ADR 0038).
@@ -958,8 +965,83 @@ export class EmbeddedBrowser {
       })()`,
     );
     return read
-      ? { ...read.value, url: read.url, stepLabel: null, openedTabs: [] }
+      ? this.withPersonFieldAnswers(owner, {
+          ...read.value,
+          url: read.url,
+          stepLabel: null,
+          openedTabs: [],
+        })
       : null;
+  }
+
+  private async personFieldCommand(
+    id: string,
+    command: PersonFieldCommand,
+  ): Promise<RawApplyPage["controls"]> {
+    const page = this.pageMap.get(id);
+    if (
+      !page ||
+      page.contents.isDestroyed() ||
+      !page.contents.executeJavaScriptInIsolatedWorld
+    )
+      return [];
+    const selectors = JSON.stringify(APPLY_PAGE_SELECTORS);
+    const selector = JSON.stringify(
+      Object.values(APPLY_PAGE_SELECTORS).join(", "),
+    );
+    const controlsSelector = JSON.stringify(APPLY_PAGE_SELECTORS.controls);
+    try {
+      return (await page.contents.executeJavaScriptInIsolatedWorld(
+        PERSON_FIELD_WORLD,
+        [
+          {
+            code: `
+        (${personFieldEditsInPage.toString()})(${JSON.stringify(command)}, () => {
+          const elements = [];
+          const visit = root => { elements.push(...root.querySelectorAll(${selector})); for (const element of root.querySelectorAll('*')) if (element.shadowRoot) visit(element.shadowRoot); };
+          visit(document);
+          return (${collectApplyDocumentSnapshot.toString()})(elements, ${selectors}, true);
+        }, ${controlsSelector})`,
+          },
+        ],
+      )) as RawApplyPage["controls"];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Only the exact application-owned document and the field the person edited. */
+  async withPersonFieldAnswers(
+    owner: string,
+    raw: RawApplyPage,
+  ): Promise<RawApplyPage> {
+    const tabs = [...(this.ownedTabs.get(owner) ?? [])].filter(
+      (id) => this.pageMap.get(id)?.contents.getURL() === raw.url,
+    );
+    if (tabs.length !== 1) return raw;
+    const edits = await this.personFieldCommand(tabs[0]!, { kind: "read" });
+    return {
+      ...raw,
+      controls: raw.controls.map((control) => {
+        if (control.ref && !/^f0c\d+$/u.test(control.ref)) return control;
+        const same = edits.filter(
+          (edit) =>
+            edit.index === control.index &&
+            edit.id === control.id &&
+            edit.name === control.name &&
+            edit.tagName === control.tagName &&
+            edit.inputType === control.inputType &&
+            edit.label === control.label &&
+            edit.groupLabel === control.groupLabel &&
+            edit.value === control.value &&
+            edit.checked === control.checked &&
+            edit.personAnswer?.pageUrl === raw.url,
+        );
+        return same.length === 1
+          ? { ...control, personAnswer: same[0]!.personAnswer }
+          : control;
+      }),
+    };
   }
 
   /** Every open tab, the person's own included; the limit counts them all. */
@@ -999,7 +1081,7 @@ export class EmbeddedBrowser {
     );
   }
 
-  private noteAutomationCommand(
+  private async noteAutomationCommand(
     id: string,
     active: boolean,
     emulateFocus = true,
@@ -1024,6 +1106,8 @@ export class EmbeddedBrowser {
       0,
       (this.automationCommands.get(id) ?? 0) + (active ? 1 : -1),
     );
+    if (count > 0) this.automationCommands.set(id, count);
+    else this.automationCommands.delete(id);
     if (!active && settle) {
       // Let field autosaves settle before freezing, without keeping focus or
       // painting hidden tabs. Native reads do not cancel this settling window.
@@ -1035,10 +1119,13 @@ export class EmbeddedBrowser {
       this.automationIdleTimers.set(id, timer);
     }
     if (count > 0) {
-      this.automationCommands.set(id, count);
       return this.tabLifecycle
         .setFrozen(page.contents, false)
         .then(async () => {
+          await this.personFieldCommand(id, {
+            kind: "automation",
+            active: true,
+          });
           if (emulateFocus && !page.contents.isDestroyed())
             await page.contents.debugger.sendCommand(
               "Emulation.setFocusEmulationEnabled",
@@ -1046,7 +1133,7 @@ export class EmbeddedBrowser {
             );
         });
     }
-    this.automationCommands.delete(id);
+    await this.personFieldCommand(id, { kind: "automation", active: false });
     if (emulateFocus && page.contents.debugger.isAttached())
       return page.contents.debugger
         .sendCommand("Emulation.setFocusEmulationEnabled", {
@@ -1347,6 +1434,12 @@ export class EmbeddedBrowser {
           .catch(() => undefined);
     };
     page.contents.on("dom-ready", installSubmitNotice);
+    page.contents.on("dom-ready", () => {
+      void this.personFieldCommand(page.id, {
+        kind: "automation",
+        active: this.automationCommands.has(page.id),
+      });
+    });
     page.contents.on("did-frame-finish-load", installSubmitNotice);
     // The page's own alert, confirm and prompt are dismissed and their text
     // kept; a run reads it, and the person sees it here in the app's design.
