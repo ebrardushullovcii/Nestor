@@ -63,21 +63,18 @@ const COMMON_TOOLS = [
 ];
 const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
   home: ["get_workspace_summary", "list_needs_you", "list_tracker_agenda"],
+  // Broad edit schemas load on request rather than on entering Profile.
   profile: [
     "get_profile",
     "list_profile_records",
     "get_profile_record",
-    "patch_profile",
     "get_profile_goals",
-    "patch_profile_goals",
-    "edit_profile",
     "finish_profile_setup",
     "list_documents",
     "import_resume",
     "resolve_import_suggestion",
   ],
   setup: [
-    "edit_profile",
     "finish_profile_setup",
     "list_documents",
     "import_resume",

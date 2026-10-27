@@ -2,9 +2,11 @@ import {
   APPLICATION_COMMANDS,
   JOB_COMMANDS,
   NEEDS_YOU_COMMANDS,
+  PROFILE_COMMANDS,
   RESUME_COMMANDS,
   TRACKER_COMMANDS,
   type ResumeCommandOutputs,
+  type ProfileCommandOutputs,
 } from "@nestor/contracts";
 import { describe, expect, it } from "vitest";
 
@@ -17,6 +19,69 @@ import { ACTION_INVENTORY } from "./action-inventory";
 import { buildAssistantToolCatalog, listAllAssistantToolNames } from "./tools";
 
 describe("assistant action inventory", () => {
+  it("loads a requested Profile edit without sending every edit schema on opening Profile", async () => {
+    const commands = assistantCommandTools<
+      typeof PROFILE_COMMANDS,
+      ProfileCommandOutputs
+    >(PROFILE_COMMANDS, () => Promise.reject(new Error("Catalog only")), {
+      group: "profile",
+    });
+    const loaded = new Set<string>();
+    const catalog = (screen: "profile" | "setup") =>
+      buildAssistantToolCatalog({
+        commands,
+        mode: "grouped",
+        browserAvailable: false,
+        screen,
+        loadedToolNames: [...loaded],
+        onLoadToolNames: (names) => names.forEach((name) => loaded.add(name)),
+      });
+    for (const screen of ["profile", "setup"] as const) {
+      const initial = catalog(screen);
+      expect(initial.map((tool) => tool.name)).not.toEqual(
+        expect.arrayContaining(["edit_profile"]),
+      );
+      expect(initial.some((tool) => tool.name === "finish_profile_setup")).toBe(
+        true,
+      );
+    }
+    const initial = catalog("profile");
+    expect(initial.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining([
+        "get_profile",
+        "list_profile_records",
+        "get_profile_record",
+        "get_profile_goals",
+      ]),
+    );
+    for (const name of ["patch_profile", "patch_profile_goals", "edit_profile"])
+      expect(initial.some((tool) => tool.name === name), name).toBe(false);
+    const loader = initial.find((tool) => tool.name === "load_tools")!;
+    const loadedResult = await loader.execute(
+      { groups: [], names: ["patch_profile"] },
+      {} as never,
+    );
+    expect(loadedResult.data).toMatchObject({ names: ["patch_profile"] });
+    const after = catalog("profile");
+    expect(after.find((tool) => tool.name === "patch_profile")).toMatchObject({
+      name: "patch_profile",
+      parameters: commands.find((tool) => tool.name === "patch_profile")!
+        .parameters,
+    });
+    expect(after.some((tool) => tool.name === "patch_profile_goals")).toBe(false);
+    expect(after.some((tool) => tool.name === "edit_profile")).toBe(false);
+    // Domain loading still reaches the other Profile actions when requested.
+    await after.find((tool) => tool.name === "load_tools")!.execute(
+      { groups: ["profile"], names: [] },
+      {} as never,
+    );
+    const all = catalog("profile");
+    for (const command of commands)
+      expect(all.some((tool) => tool.name === command.name), command.name).toBe(
+        true,
+      );
+  });
+
   it("offers the real resume commands and PDF export in the resume editor", () => {
     const commands = assistantCommandTools<
       typeof RESUME_COMMANDS,
