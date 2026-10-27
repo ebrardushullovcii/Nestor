@@ -3498,6 +3498,56 @@ describe("managed context active service worker gate", () => {
     },
   );
 
+  test.each([
+    ["can be refilled", true, true],
+    ["cannot be refilled", false, false],
+  ])(
+    "a waiting form that cannot be snapshotted closes to save memory only when it %s",
+    async (_label, restorableByRefill, closes) => {
+      const userDataDir = await mkdtemp(
+        join(tmpdir(), "nestor-runtime-hibernate-refill-"),
+      );
+      try {
+        const debugPort = await reserveFreePort();
+        const harness = createGateHarness({ activeServiceWorkers: () => [] });
+        // More than one frame: the exact snapshot refuses this form.
+        Object.assign(harness.fakePage, { frames: () => [{}, {}] });
+        const runtime = await createGatedRuntime({
+          userDataDir,
+          debugPort,
+          browser: harness.fakeBrowser,
+        });
+        const { approvedResumePath, prepareInput } = createPrepareInput({
+          userDataDir,
+        });
+        await writeFile(approvedResumePath, "approved resume", "utf8");
+        // The stub ends the run waiting on the person (Needs you).
+        await runtime.executeApplicationFlow("target_site", {
+          ...prepareInput,
+          applicationPageBindingKey: "waiting_page",
+          restorableByRefill,
+        });
+        expect(
+          await runtime.hibernateApplicationPageBinding!(
+            "target_site",
+            "waiting_page",
+            () => true,
+          ),
+        ).toBe(closes);
+        expect(harness.fakePage.close).toHaveBeenCalledTimes(closes ? 1 : 0);
+        // Closed, it is no longer a live page: Open refills it instead.
+        expect(
+          await runtime.hasApplicationPageBinding!(
+            "target_site",
+            "waiting_page",
+          ),
+        ).toBe(!closes);
+      } finally {
+        await rm(userDataDir, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("cancelling a same-site waiter does not touch the active form", async () => {
     const userDataDir = await mkdtemp(
       join(tmpdir(), "nestor-runtime-apply-abort-"),
