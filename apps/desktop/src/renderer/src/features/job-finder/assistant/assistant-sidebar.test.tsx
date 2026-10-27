@@ -4,6 +4,7 @@ import {
   ASSISTANT_MESSAGE_MAX_CHARS,
   AssistantConversationSchema,
   type AssistantActivity,
+  type AssistantConversation,
 } from "@nestor/contracts";
 import {
   act,
@@ -32,6 +33,7 @@ const conversation = AssistantConversationSchema.parse({
 function fakeBridge(
   sendMessage: () => Promise<never>,
   activity: AssistantActivity | null = null,
+  conversations: AssistantConversation[] = [conversation],
 ) {
   return {
     getStatus: vi.fn(() =>
@@ -44,8 +46,8 @@ function fakeBridge(
     ),
     listConversations: vi.fn(() =>
       Promise.resolve({
-        conversations: [conversation],
-        currentConversationId: conversation.id,
+        conversations,
+        currentConversationId: conversations[0]?.id ?? null,
       }),
     ),
     readConversation: vi.fn(() =>
@@ -118,6 +120,69 @@ async function renderSidebar(bridge: ReturnType<typeof fakeBridge>) {
     "[data-assistant-composer]",
   ) as HTMLTextAreaElement;
 }
+
+describe("chat history dismissal", () => {
+  it.each([
+    { label: "no chats", entries: [] },
+    { label: "saved chats", entries: [conversation] },
+  ])("closes on Escape and returns focus with $label", async ({ entries }) => {
+    await renderSidebar(
+      fakeBridge(() => Promise.reject(new Error("unused")), null, entries),
+    );
+    const opener = screen.getByRole("button", { name: "Chat history" });
+    opener.focus();
+    fireEvent.click(opener);
+    await screen.findByRole("dialog", { name: "Chat history" });
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull(),
+    );
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("switches between history and chat search without stacking them", async () => {
+    await renderSidebar(fakeBridge(() => Promise.reject(new Error("unused"))));
+    const history = screen.getByRole("button", { name: "Chat history" });
+    fireEvent.click(history);
+    await screen.findByRole("dialog", { name: "Chat history" });
+    fireEvent.click(screen.getByRole("button", { name: "Search this chat" }));
+    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
+    expect(
+      screen.getByRole("textbox", { name: "Find in this chat" }),
+    ).toBeTruthy();
+    fireEvent.click(history);
+    expect(
+      screen.queryByRole("textbox", { name: "Find in this chat" }),
+    ).toBeNull();
+    const dialog = screen.getByRole("dialog", { name: "Chat history" });
+    fireEvent.keyDown(dialog, { key: "f", ctrlKey: true });
+    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
+    expect(
+      screen.getByRole("textbox", { name: "Find in this chat" }),
+    ).toBeTruthy();
+  });
+
+  it("dismisses on an outside click and reopens the assistant without old panels", async () => {
+    const composer = await renderSidebar(
+      fakeBridge(() => Promise.reject(new Error("unused"))),
+    );
+    const history = screen.getByRole("button", { name: "Chat history" });
+    fireEvent.click(history);
+    fireEvent.mouseDown(composer);
+    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
+    fireEvent.click(history);
+    fireEvent.click(document.querySelector('[aria-label="New chat"]')!);
+    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Search this chat" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close the assistant" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "open" }));
+    expect(
+      screen.queryByRole("textbox", { name: "Find in this chat" }),
+    ).toBeNull();
+  });
+});
 
 describe("assistant composer keeps what the person wrote", () => {
   it("shows progress and Stop for a background resume batch after its model turn replied", async () => {
