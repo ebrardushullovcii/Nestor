@@ -844,6 +844,18 @@ export function collectApplyDocumentSnapshot(
 ) {
   const matching = (selector: string) =>
     elements.filter((element) => element.matches(selector));
+  // When the page's send was last pressed while sends were let through.
+  const sendPressed = (): { sendPressedAt?: string } => {
+    const at = (
+      window as unknown as Record<
+        string,
+        { sendPressedAt?: number } | undefined
+      >
+    )["__nestorPrepareOnlyMutationGuardV1"]?.sendPressedAt;
+    return typeof at === "number"
+      ? { sendPressedAt: new Date(at).toISOString() }
+      : {};
+  };
   const safe = <T>(read: () => T, fallback: T): T => {
     try {
       return read();
@@ -1437,6 +1449,7 @@ export function collectApplyDocumentSnapshot(
     title: document.title,
     bodyText: document.body?.innerText.slice(0, 20_000) ?? "",
     loading: document.readyState !== "complete",
+    ...sendPressed(),
   };
 }
 

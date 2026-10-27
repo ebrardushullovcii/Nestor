@@ -535,6 +535,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
      * The guard then lets the form's own submit and requests through.
      */
     finalActionAllowed: boolean;
+    /** When the send was pressed while `finalActionAllowed` let it through. */
+    sendPressedAt?: number;
     formSubmitWrapper: typeof HTMLFormElement.prototype.submit | null;
     formRequestSubmitWrapper:
       | typeof HTMLFormElement.prototype.requestSubmit
@@ -1143,11 +1145,14 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     document.addEventListener(
       "submit",
       (event) => {
-        if (state.finalActionAllowed) {
-          return;
-        }
         const form =
           event.target instanceof HTMLFormElement ? event.target : null;
+        if (state.finalActionAllowed) {
+          // A send that goes out: the form holding the answers was submitted.
+          if (formCarriesPreparedValue(form) === true)
+            state.sendPressedAt = Date.now();
+          return;
+        }
         const submitter =
           event instanceof SubmitEvent && event.submitter instanceof HTMLElement
             ? event.submitter
@@ -1175,7 +1180,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     document.addEventListener(
       "click",
       (event) => {
-        if (state.finalActionAllowed || !state.preparedValues.length) return;
+        if (!state.finalActionAllowed && !state.preparedValues.length) return;
         const control =
           event.target instanceof Element
             ? event.target.closest<HTMLElement>(
@@ -1184,14 +1189,23 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
             : null;
         if (!control) return;
         const form = (control as HTMLButtonElement).form;
-        if (form && authorizedSubmitter(form, control)) return;
         const label =
           control.getAttribute("aria-label") ||
           (control instanceof HTMLInputElement
             ? control.value
             : control.textContent) ||
           "";
-        if (!new RegExp(guardInput.finalActionSignal, "iu").test(label)) return;
+        const sends = new RegExp(guardInput.finalActionSignal, "iu").test(
+          label,
+        );
+        if (state.finalActionAllowed) {
+          // A send that goes out, even one a page script holds back for a
+          // check of its own before any request leaves.
+          if (sends) state.sendPressedAt = Date.now();
+          return;
+        }
+        if (form && authorizedSubmitter(form, control)) return;
+        if (!sends) return;
         recordBlockedAttempt(
           "dom_submit",
           "POST",
