@@ -272,5 +272,13 @@ test("Greenhouse with field saves: its email check on a sibling host runs, and t
   await page.waitForFunction(
     () => (document.getElementById("resume_url") as HTMLInputElement).value,
   );
+  // The page shows the name only after its own upload progress hit 100%:
+  // the browser sent the file itself.
   expect(await page.locator("#chip").textContent()).toBe(resume.name);
+  // The input is gone; the page read still reports the storage's word.
+  const after = await session.readPage();
+  expect(after.controls.some((control) => control.id === "resume")).toBe(false);
+  expect(after.uploads).toEqual([
+    { fileName: resume.name, network: "accepted" },
+  ]);
 });

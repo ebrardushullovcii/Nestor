@@ -2025,6 +2025,15 @@ export function createPlaywrightApplyPageMechanics(
         return { ok: false, error: `No control named ${ref} on this page.` };
       }
       try {
+        // Read before the file goes in: some widgets (Greenhouse) remove
+        // the input the moment it changes.
+        const field = await locator
+          .evaluate((element) =>
+            element instanceof HTMLInputElement
+              ? element.name || element.id || null
+              : null,
+          )
+          .catch(() => null);
         await locator.setInputFiles(
           {
             name: file.name,
@@ -2034,13 +2043,7 @@ export function createPlaywrightApplyPageMechanics(
           { timeout: 15_000 },
         );
         rememberAttachedFile(page, ref, {
-          field: await locator
-            .evaluate((element) =>
-              element instanceof HTMLInputElement
-                ? element.name || element.id || null
-                : null,
-            )
-            .catch(() => null),
+          field,
           name: file.name,
           size: file.bytes.byteLength,
           sha256: createHash("sha256").update(file.bytes).digest("hex"),

@@ -161,6 +161,17 @@ export interface RawApplyPage {
   stepLabel: string | null;
   /** True when the page is still loading; the model may wait and look again. */
   loading: boolean;
+  /**
+   * The server's word on each file Nestor gave a file field on this page,
+   * kept even when the widget then removed the field (Greenhouse replaces
+   * its input with the file's name once the upload lands).
+   */
+  uploads?: RawApplyUploadOutcome[];
+}
+
+export interface RawApplyUploadOutcome {
+  fileName: string;
+  network: NonNullable<RawApplyUpload["network"]>;
 }
 
 /** Exact retained form control chosen by browser-agent for a human handoff. */

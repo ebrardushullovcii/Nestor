@@ -4,7 +4,8 @@
 // `localhost` on this same server, while the form is on 127.0.0.1. Storage
 // accepts every upload, so whatever stops one is on Nestor's side.
 //
-// Ashby keeps the form on its server. Every GraphQL call goes to
+// Ashby keeps the form on its server, and its monitoring wraps fetch once
+// the page has loaded. Every GraphQL call goes to
 // `/api/non-user-graphql?op=<operation>`. Each answer is saved as it is
 // entered with ApiSetFormValue. A file asks ApiCreateFileUploadHandle for a
 // handle, posts `Content-Type`, the signing fields and the file to the
@@ -17,9 +18,10 @@
 // Greenhouse: a GET to the presign host hands out the signing fields and a
 // key template: `x-amz-server-side-encryption`, `success_action_status: 201`
 // and a policy that also names the form's `utf8` and `authenticity_token`.
-// The page empties the file input, then sends `utf8`, the signing fields,
+// The page removes the file input, then sends `utf8`, the signing fields,
 // the key, `authenticity_token`, `Content-Type: application/octet-stream`
-// and the file with XMLHttpRequest. Storage answers 201 with an XML receipt.
+// and the file with XMLHttpRequest. Storage answers 201 with an XML receipt;
+// the name shows only once the upload progress reached 100%.
 // A failed send only logs to the console.
 
 const s3Signing = {
@@ -117,6 +119,12 @@ const sites = {
       ${ashbyYesNo("adult", "Are you over the age of 18?")}
       ${ashbyYesNo("timezone", "Are you based in a EU or equivalent timezone?")}`,
     script: `
+      // Ashby's monitoring wraps fetch once the page has loaded, after
+      // anything installed before the page's own scripts.
+      addEventListener('load', () => {
+        const unwrapped = window.fetch;
+        window.fetch = function () { return unwrapped.apply(this, arguments); };
+      });
       const render = 'render-' + Math.random().toString(36).slice(2, 10);
       document.getElementById('application').dataset.render = render;
       const toast = (text) => { document.getElementById('toast').textContent = text; };
@@ -226,16 +234,24 @@ const sites = {
         body.append('authenticity_token', '1234');
         body.append('Content-Type', 'application/octet-stream');
         body.append('file', file);
-        input.value = '';
-        document.getElementById('chip').textContent = file.name;
+        // Greenhouse removes the input once it has the file, shows progress,
+        // and shows the file's name only when the upload reached 100% and
+        // the storage answered 2xx.
+        input.remove();
+        const chip = document.getElementById('chip');
+        chip.textContent = 'Uploading…';
+        let progress = 0;
         const request = new XMLHttpRequest();
         request.onloadend = () => {
-          if (request.status >= 200 && request.status < 300)
+          if (request.status >= 200 && request.status < 300) {
             document.getElementById('resume_url').value = signed.url + '/' + key;
-          else console.error('Request failed');
+            if (progress >= 100) chip.textContent = file.name;
+          } else console.error('Request failed');
         };
-        // Greenhouse shows upload progress, which makes the POST preflighted.
-        request.upload.onprogress = () => {};
+        // The progress listener also makes the POST preflighted.
+        request.upload.onprogress = (event) => {
+          progress = (event.loaded / event.total) * 100;
+        };
         request.open('POST', signed.url);
         request.send(body);
       });`,

@@ -8168,3 +8168,82 @@ describe("Ashby's Yes/No buttons are a question, not the form's buttons", () => 
     expect(asked?.answerOptions).toEqual(["Yes", "No"]);
   });
 });
+
+test("a file field the widget removed once storage took the file is attached, not a question", async () => {
+  // Greenhouse replaces its resume input with the file's name once the
+  // upload lands; the page read still reports the storage's word.
+  const source = page({
+    controls: [
+      nameControl(),
+      {
+        ...nameControl(),
+        index: 1,
+        id: "resume",
+        name: "resume",
+        inputType: "file",
+        label: "Attach",
+        hint: "Resume/CV *",
+        required: true,
+        value: "",
+        upload: {
+          described: "Resume/CV *",
+          nearby: "Resume/CV * Attach",
+          shown: false,
+        },
+      },
+    ],
+  });
+  const suppliedResume = {
+    id: "resume_document",
+    fileName: "resume.txt",
+    mimeType: "text/plain",
+    label: "Your CV",
+    kind: "resume" as const,
+    loadBytes: () => Promise.resolve(new TextEncoder().encode("Resume")),
+  };
+  const input = config(source, {
+    intermediateWritesAuthorized: false,
+    sources: { ...config(source).sources, documents: [suppliedResume] },
+  });
+  let uploaded = 0;
+  input.hands.uploadFile = (_ref, file) => {
+    uploaded = 1;
+    // The upload is on its way: the field shows the file, the server has
+    // not answered yet.
+    source.controls[1] = {
+      ...source.controls[1],
+      value: `fakepath/${file.name}`,
+      upload: {
+        described: "Resume/CV *",
+        nearby: "Resume/CV * Attach",
+        shown: false,
+        fileName: file.name,
+        network: "pending",
+      },
+    };
+    return Promise.resolve({ ok: true as const, observedValue: file.name });
+  };
+  const observe = input.hands.observe;
+  input.hands.observe = () => {
+    // A read later the widget has removed the field, and storage answered.
+    if (uploaded > 0 && uploaded++ > 1 && source.controls.length > 1) {
+      source.controls = [source.controls[0]];
+      source.uploads = [{ fileName: "resume.txt", network: "accepted" }];
+    }
+    return observe();
+  };
+  const result = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "upload", args: { ref: "c1", documentId: suppliedResume.id } },
+      { name: "finish", args: { reason: "The form is ready" } },
+      { name: "finish", args: { reason: "The form is ready" } },
+    ]),
+  );
+  expect(
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .filter((question) => question.answerControlType === "file"),
+  ).toEqual([]);
+  expect(result.outcome).toBe("prepared");
+});

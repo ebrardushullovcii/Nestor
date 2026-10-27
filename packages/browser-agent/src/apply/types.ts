@@ -22,6 +22,7 @@ import type {
   CandidateReusableAnswer,
   JobSearchPreferences,
   RawApplyUpload,
+  RawApplyUploadOutcome,
 } from "@nestor/contracts";
 
 /**
@@ -230,6 +231,11 @@ export interface ApplyFormObservation {
   validationErrors: string[];
   /** True while the page is still loading. The model may wait and look again. */
   loading: boolean;
+  /**
+   * The server's word on files Nestor gave this page's file fields, by file
+   * name, including fields the widget removed once it had the file.
+   */
+  uploads?: readonly RawApplyUploadOutcome[];
   /**
    * Something only the person can do. Reported as a fact the model can act on
    * or work around; it never ends the run on its own.
