@@ -180,5 +180,5 @@ test("a response with no eligibility verdict cannot silently become Strong", asy
     },
   });
   expect(fit?.score).toBe(JOB_FIT_BANDS.strong - 1);
-  expect(fit?.preferences.assessment).toBe("unknown");
+  expect(fit?.preferences?.assessment).toBe("unknown");
 });
