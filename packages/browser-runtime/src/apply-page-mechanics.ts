@@ -2142,6 +2142,16 @@ export function createPlaywrightApplyPageMechanics(
               : null,
           )
           .catch(() => null);
+        // Leave the field being typed in, as a person reaching for the file
+        // does: its answer is then committed, and a résumé parser that fills
+        // untouched fields (Lever's) leaves it alone.
+        await page
+          .evaluate(() => {
+            const active = document.activeElement;
+            if (active instanceof HTMLElement && active !== document.body)
+              active.blur();
+          })
+          .catch(() => undefined);
         await locator.setInputFiles(
           {
             name: file.name,

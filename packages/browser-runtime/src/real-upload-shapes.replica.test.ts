@@ -371,3 +371,47 @@ test("Greenhouse with field saves: its email check on a sibling host runs, and t
     { fileName: resume.name, network: "accepted" },
   ]);
 });
+
+test("Lever: the renamed resume reaches its parser with the form's id, and typed answers stay", async () => {
+  const { page, session } = await fillPage("lever-shape");
+  const controls = (await session.readPage()).controls;
+  const ref = (id: string) => {
+    const control = controls.find((entry) => entry.id === id)!;
+    return control.ref ?? `c${control.index}`;
+  };
+  await registerPrepareOnlyPreparedValue(page, "Alex Vanguard");
+  await session.fillText(ref("name"), "Alex Vanguard");
+  // A name with spaces: Lever sends it as Alex_Vanguard_CV.pdf.
+  await session.uploadFile(ref("resume-upload-input"), {
+    ...resume,
+    name: "Alex Vanguard CV.pdf",
+  });
+  await page.waitForFunction(
+    () =>
+      !(document.querySelector(".resume-upload-working") as HTMLElement)
+        .hidden ||
+      !(document.querySelector(".resume-upload-success") as HTMLElement)
+        .hidden ||
+      !(document.querySelector(".resume-upload-failure") as HTMLElement).hidden,
+  );
+  await page.waitForFunction(
+    () =>
+      (document.querySelector(".resume-upload-working") as HTMLElement).hidden,
+  );
+  expect(await page.locator(".resume-upload-success").isVisible()).toBe(true);
+  expect(
+    posts()
+      .filter((post) => post.path === "/lever-shape/parseResume")
+      .map((post) => [
+        (post.fields.resume as { filename: string }).filename,
+        post.fields.accountId,
+      ]),
+  ).toEqual([["Alex_Vanguard_CV.pdf", "0a1b2c3d-4e5f-4789-8bcd-ef0123456789"]]);
+  expect(await page.locator("#name").inputValue()).toBe("Alex Vanguard");
+  expect(await page.locator("input[name=resumeStorageId]").inputValue()).toBe(
+    "replica-resume-storage-1",
+  );
+  expect(
+    posts().filter((post) => post.path === "/lever-shape/apply/1"),
+  ).toEqual([]);
+});
