@@ -1,8 +1,17 @@
 // @vitest-environment jsdom
 
-import type { FoundJob, JobListQueryInput } from "@nestor/contracts";
+import {
+  ResumeDraftSchema,
+  type FoundJob,
+  type JobListQueryInput,
+  type ResumeCommandInput,
+  type ResumeCommandName,
+  type ResumeCommandOutputs,
+  type StoredResume,
+} from "@nestor/contracts";
 import {
   approveOriginalResumesForTests,
+  createResumeStore,
   openJobStore,
   type JobStore,
 } from "@nestor/db/job-store";
@@ -10,10 +19,12 @@ import { createApplicationStore } from "@nestor/db/applications";
 import { createResumeCommandReads } from "@nestor/job-finder/resumes";
 import {
   cleanup,
+  act,
   fireEvent,
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -83,6 +94,13 @@ beforeEach(() => {
   });
   Element.prototype.scrollIntoView = () => undefined;
   vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.stubGlobal(
     "IntersectionObserver",
     class {
       observe() {}
@@ -99,6 +117,66 @@ afterEach(() => {
 
 const detailTitle = () =>
   screen.getByRole("heading", { level: 2, name: /Instructional Designer/ });
+
+it("keeps a finished level change when its older queued command reply arrives last", async () => {
+  const id = ids.at(-1)!;
+  const resumes = createResumeStore(store);
+  resumes.setLevel(id, "original");
+  resumes.startWriting(id, "original");
+  resumes.finishWriting(id, null);
+  const read = window.nestor.resumes.run.bind(window.nestor.resumes);
+  let finish!: () => void;
+  const delayed = <K extends ResumeCommandName>(
+    name: K,
+    input: ResumeCommandInput<K>,
+  ): Promise<ResumeCommandOutputs[K]> => {
+    if (name !== "set_resume_level") return read(name, input);
+    const change = input as ResumeCommandInput<"set_resume_level">;
+    const queued = resumes.setLevel(change.jobId, change.level);
+    return new Promise<StoredResume>((resolve) => {
+      finish = () => resolve(queued);
+    }) as Promise<ResumeCommandOutputs[K]>;
+  };
+  vi.spyOn(window.nestor.resumes, "run").mockImplementation(delayed);
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <ShortlistedScreen />
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+  const detail = await screen.findByRole("region", {
+    name: `Resume for ${store.getJob(id)!.title}`,
+  });
+  fireEvent.click(within(detail).getByRole("button", { name: "Light" }));
+  await waitFor(() => expect(finish).toBeDefined());
+  act(() => {
+    resumes.startWriting(id, "light");
+    resumes.finishWriting(
+      id,
+      ResumeDraftSchema.parse({
+        id: "completed-draft",
+        jobId: String(id),
+        status: "draft",
+        templateId: "classic_ats",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    );
+  });
+  await within(detail).findByText("To review", { exact: true });
+  await act(async () => {
+    finish();
+    await Promise.resolve();
+  });
+  await waitFor(() =>
+    expect(
+      within(detail).getByRole<HTMLButtonElement>("button", { name: "Approve" })
+        .disabled,
+    ).toBe(false),
+  );
+  expect(within(detail).queryByText("Waiting", { exact: true })).toBeNull();
+});
 
 it("names the filtered Approved jobs Apply will take and offers no empty batch", async () => {
   approveOriginalResumesForTests(store, ids.slice(0, 2));

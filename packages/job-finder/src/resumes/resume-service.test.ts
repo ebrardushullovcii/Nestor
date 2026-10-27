@@ -98,6 +98,58 @@ function setup(
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it("keeps the last tailored approval available to Undo after choosing Original", async () => {
+    const { store, service, id } = setup();
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    const before = await service.approve(id);
+    const original = service.setLevel(id, "original");
+    expect(original).toMatchObject({
+      level: "original",
+      state: "ready",
+      draft: null,
+      approvedAt: null,
+    });
+    expect(service.undoLevel(id, original.levelChangeId!)).toMatchObject({
+      level: before.level,
+      draft: before.draft,
+      approvedAt: before.approvedAt,
+      pdfPath: before.pdfPath,
+      pdfSha256: before.pdfSha256,
+    });
+  });
+
+  it("makes Original approvable while its old tailored write is still running", async () => {
+    const base = createDeterministicJobFinderAiClient();
+    let writeSignal: AbortSignal | undefined;
+    const createResumeDraft: typeof base.createResumeDraft = (input) => {
+      writeSignal = input.signal;
+      return new Promise((_resolve, reject) => {
+        input.signal?.addEventListener("abort", () =>
+          reject(new DOMException("Stopped", "AbortError")),
+        );
+      });
+    };
+    const { store, service, id, renderResumeArtifact } = setup({
+      aiClient: { ...base, createResumeDraft },
+    });
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    await vi.waitFor(() => expect(writeSignal).toBeDefined());
+
+    expect(service.setLevel(id, "original")).toMatchObject({
+      level: "original",
+      state: "ready",
+      draft: null,
+    });
+    expect(writeSignal?.aborted).toBe(true);
+    const approved = await service.approve(id);
+    expect(approved.approvedAt).not.toBeNull();
+    expect(approved.draft).toBeNull();
+    expect(renderResumeArtifact).not.toHaveBeenCalled();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(service.get(id).resume?.approvedAt).toBe(approved.approvedAt);
+    expect(stageOf(store, id)).toBe("resume");
+  });
   it.each(["light", "tailored", "aggressive"] as const)(
     "%s keeps every saved role when the writer proposes omitting the work history",
     async (level) => {
