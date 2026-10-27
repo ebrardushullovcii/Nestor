@@ -369,6 +369,21 @@ test("A JavaScript-sent form: its Apply submits it, and the guarded click sends 
     (action) => action.label === "Apply",
   )!;
   expect(apply).toMatchObject({ submitsForm: true, formMethod: "GET" });
+  // Its form is the one holding the person's fields.
+  expect(apply.formKey).toBeTruthy();
+  expect(
+    read.controls
+      .filter((control) =>
+        ["name", "email", "phone", "consent"].includes(control.id),
+      )
+      .map((control) => control.formKey),
+  ).toEqual(Array(4).fill(apply.formKey));
+  // The button has one ref: no clickable alias without its form's action.
+  expect(
+    (await session.readPage()).clickables.filter(
+      (entry) => entry.label === "Apply",
+    ),
+  ).toEqual([]);
   const sent = () =>
     posts().filter((post) => post.path === "/contact-form-shape/api/apply");
   expect(sent()).toEqual([]);

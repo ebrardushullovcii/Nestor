@@ -466,7 +466,7 @@ sites["contact-form-shape"] = {
         <p><label for="phone">Phone, including country code</label><input id="phone" name="phone" type="tel" required><span data-err="phone"></span></p>
         <p class="chk"><input id="consent" name="consent" type="checkbox" required><label for="consent">The company can contact me about this role. I have read the privacy policy.</label><span data-err="consent"></span></p>
         <span data-err="submit" role="alert"></span>
-        <button type="submit">Apply</button>
+        <button type="submit" data-testid="apply">Apply</button>
       </form>`,
   script: `
       const form = document.getElementById('role-form');

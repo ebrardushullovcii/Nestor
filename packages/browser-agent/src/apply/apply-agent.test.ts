@@ -8,7 +8,11 @@ import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/appl
 import emptiedAttach from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/emptied-required-attach.json";
 import { describe, expect, test, vi } from "vitest";
 
-import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
+import type {
+  RawApplyAction,
+  RawApplyControl,
+  RawApplyPage,
+} from "@nestor/contracts";
 import type { LLMClient } from "../agent/contracts";
 import { runApplyAgent } from "./apply-agent";
 import {
@@ -8763,24 +8767,9 @@ describe("a picker the person filled on the page survives the continue", () => {
   });
 });
 
-describe("a form's own submit button that says Apply is its send", () => {
-  // Askable: a contact-only role form whose Apply button submits the form;
-  // the page's handler posts it with fetch instead of the form's own action.
-  const applyPage = (submitsForm: boolean) =>
-    page({
-      controls: [nameControl()],
-      actions: [
-        {
-          index: 0,
-          label: "Apply",
-          visible: true,
-          disabled: false,
-          formAction: "https://apply.example.test/roles/engineer",
-          formMethod: "GET",
-          submitsForm,
-        },
-      ],
-    });
+describe("a form's only Apply button is its send only when the form is this application's", () => {
+  // Askable: a contact-only role form whose one button, Apply, submits the
+  // form; the page's handler posts it with fetch instead of the form's GET.
   const sendForMe = {
     authority: {
       mode: "autonomous_submit" as const,
@@ -8790,22 +8779,133 @@ describe("a form's own submit button that says Apply is its send", () => {
       allowedOrigins: ["https://apply.example.test"],
     },
   };
-
-  test("in Send for me, the complete form is ready to send by that button", async () => {
-    const result = await runApplyAgent(
-      config(applyPage(true), sendForMe),
+  const confirmFirst = {
+    authority: {
+      ...sendForMe.authority,
+      mode: "confirm_before_submit" as const,
+    },
+  };
+  const apply = (
+    index: number,
+    formKey: string,
+    label = "Apply",
+  ): RawApplyAction => ({
+    index,
+    label,
+    visible: true,
+    disabled: false,
+    formAction: "https://apply.example.test/roles/engineer",
+    formMethod: "GET",
+    submitsForm: true,
+    formKey,
+  });
+  const name = (formKey?: string): RawApplyControl => ({
+    ...nameControl(),
+    ...(formKey ? { formKey } : {}),
+  });
+  const field = (
+    index: number,
+    label: string,
+    formKey: string,
+    extra: Partial<RawApplyControl> = {},
+  ): RawApplyControl => ({
+    ...nameControl(),
+    index,
+    id: `field${index}`,
+    name: `field${index}`,
+    label,
+    required: false,
+    formKey,
+    ...extra,
+  });
+  const run = (
+    source: RawApplyPage,
+    mode: typeof sendForMe | typeof confirmFirst,
+  ) =>
+    runApplyAgent(
+      config(source, mode),
       repeatingModel("finish", { reason: "The form is complete." }),
     );
-    expect(result.outcome).toBe("ready_to_send");
-    expect(result.readyToSend).toMatchObject({ actionLabel: "Apply" });
-  });
 
-  test("an Apply button that does not submit a form is not the send", async () => {
-    const result = await runApplyAgent(
-      config(applyPage(false), sendForMe),
-      repeatingModel("finish", { reason: "The form is complete." }),
+  test.each([
+    ["Send for me", sendForMe, "ready_to_send"],
+    ["Fill in for me", confirmFirst, "awaiting_your_review"],
+  ] as const)(
+    "%s: the role form holding the person's details is sent by its Apply",
+    async (_mode, mode, outcome) => {
+      const result = await run(
+        page({ controls: [name("form0")], actions: [apply(0, "form0")] }),
+        mode,
+      );
+      expect(result.outcome).toBe(outcome);
+      expect(result.readyToSend).toMatchObject({ actionLabel: "Apply" });
+    },
+  );
+
+  const notTheSend: Array<[string, RawApplyPage]> = [
+    [
+      "a search filter's Apply, beside the person's details in another form",
+      page({
+        controls: [
+          name("form0"),
+          field(1, "Keywords", "form1", { value: "engineer" }),
+        ],
+        actions: [apply(0, "form1")],
+      }),
+    ],
+    [
+      "cookie preferences' Apply",
+      page({
+        controls: [
+          name("form0"),
+          field(1, "Analytics cookies", "form1", {
+            inputType: "checkbox",
+            checked: true,
+            value: "on",
+          }),
+        ],
+        actions: [apply(0, "form1")],
+      }),
+    ],
+    [
+      "a listing's Apply, in a form with none of the person's answers",
+      page({ controls: [name()], actions: [apply(0, "form0")] }),
+    ],
+    [
+      "an Apply beside another submit in the same form",
+      page({
+        controls: [name("form0")],
+        actions: [apply(0, "form0"), apply(1, "form0", "Save draft")],
+      }),
+    ],
+    [
+      "an Apply whose form does not read ready",
+      page({
+        controls: [
+          name("form0"),
+          field(1, "Email", "form0", { required: true, value: "" }),
+        ],
+        actions: [apply(0, "form0")],
+      }),
+    ],
+    [
+      "an Apply that does not submit a form",
+      page({
+        controls: [name("form0")],
+        actions: [{ ...apply(0, "form0"), submitsForm: false }],
+      }),
+    ],
+  ];
+  for (const [mode, authority] of [
+    ["Send for me", sendForMe],
+    ["Fill in for me", confirmFirst],
+  ] as const)
+    test.each(notTheSend)(
+      `${mode}: %s is not the send`,
+      async (_case, source) => {
+        const result = await run(source, authority);
+        expect(result.outcome).not.toBe("ready_to_send");
+        expect(result.readyToSend).toBeNull();
+      },
     );
-    expect(result.outcome).not.toBe("ready_to_send");
-    expect(result.readyToSend).toBeNull();
-  });
 });

@@ -359,24 +359,12 @@ const ADVANCE_ACTION_SIGNALS = [
 
 const BACK_ACTION_SIGNALS = ["back", "previous", "go back", "return to"];
 
-// A form's own submit button that only says "Apply" sends the form: its
-// page handler may post it with JavaScript (fetch) instead of the form's
-// own action, but pressing it is still the send.
-const SUBMIT_APPLY_LABEL =
-  /^apply(?: (?:for|to) (?:this|the) (?:role|job|position|opening|opportunity))?$/u;
-
-export function inferActionKind(
-  label: string,
-  submitsForm = false,
-): ApplyActionKind {
+export function inferActionKind(label: string): ApplyActionKind {
   const signal = normalizeSignal(label);
   if (!signal) {
     return "other";
   }
-  if (
-    containsAny(signal, FINAL_ACTION_SIGNALS) ||
-    (submitsForm && SUBMIT_APPLY_LABEL.test(signal))
-  ) {
+  if (containsAny(signal, FINAL_ACTION_SIGNALS)) {
     return "final";
   }
   if (containsAny(signal, BACK_ACTION_SIGNALS)) {

@@ -232,6 +232,15 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
           const roots = Array.from(
             new Set(elements.map((element) => element.getRootNode())),
           );
+          // The form a field or button belongs to, the same for both.
+          const formKeyOf = (form: Element | null): { formKey?: string } => {
+            const root = form?.getRootNode();
+            return form && root instanceof Document
+              ? {
+                  formKey: `${prefix}form${Array.from(root.forms).indexOf(form as HTMLFormElement)}`,
+                }
+              : {};
+          };
           const scopeKeyFor = (element: Element): string => {
             const root = element.getRootNode();
             const rootIndex = roots.indexOf(root);
@@ -433,6 +442,9 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               id: html.id,
               name: input?.name ?? textarea?.name ?? select?.name ?? "",
               scopeKey: scopeKeyFor(element),
+              ...formKeyOf(
+                (input ?? textarea ?? select)?.form ?? element.closest("form"),
+              ),
               label,
               hint: hintFor(element, label),
               groupLabel: legend ?? "",
@@ -513,6 +525,11 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               element instanceof HTMLButtonElement ? element : null;
             const actionElement = input ?? button;
             const form = actionElement?.form ?? null;
+            const formRoot = form?.getRootNode();
+            const formKey =
+              form && formRoot instanceof Document
+                ? `${prefix}form${Array.from(formRoot.forms).indexOf(form)}`
+                : undefined;
             const style = window.getComputedStyle(html);
             return {
               ref: `${prefix}a${index}`,
@@ -549,6 +566,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                       button?.type === "submit" ||
                       input?.type === "submit" ||
                       input?.type === "image",
+                    ...(formKey ? { formKey } : {}),
                   }
                 : {}),
             };
@@ -584,8 +602,11 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
         `f${frameIndex}`,
       ),
       frame.locator(APPLY_CLICKABLE_SELECTOR).evaluateAll(
-        (elements, prefix): RawApplyClickable[] =>
+        (elements, [prefix, owned]): RawApplyClickable[] =>
           elements.slice(0, 300).flatMap((element, index) => {
+            // A button already has its own ref, with its form's action:
+            // never a second name it could be pressed under.
+            if (element.matches(owned)) return [];
             const html = element as HTMLElement;
             const style = window.getComputedStyle(html);
             const label = (
@@ -611,7 +632,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               },
             ];
           }),
-        `f${frameIndex}`,
+        [`f${frameIndex}`, APPLY_ACTION_SELECTOR] as const,
       ),
       frame
         .locator("h1, h2, h3, [role='heading']")
@@ -1025,6 +1046,15 @@ export function collectApplyDocumentSnapshot(
     const roots = Array.from(
       new Set(elements.map((element) => element.getRootNode())),
     );
+    // The form a field or button belongs to, the same for both.
+    const formKeyOf = (form: Element | null): { formKey?: string } => {
+      const root = form?.getRootNode();
+      return form && root instanceof Document
+        ? {
+            formKey: `form${Array.from(root.forms).indexOf(form as HTMLFormElement)}`,
+          }
+        : {};
+    };
     const scopeKeyFor = (element: Element): string => {
       const root = element.getRootNode();
       const rootIndex = roots.indexOf(root);
@@ -1161,6 +1191,9 @@ export function collectApplyDocumentSnapshot(
         id: html.id ?? "",
         name: input?.name ?? textarea?.name ?? select?.name ?? "",
         scopeKey: scopeKeyFor(element),
+        ...formKeyOf(
+          (input ?? textarea ?? select)?.form ?? element.closest("form"),
+        ),
         label: directLabel(element),
         hint: hintFor(element, directLabel(element)),
         groupLabel: groupLabel(element),
@@ -1238,6 +1271,11 @@ export function collectApplyDocumentSnapshot(
       const button = element instanceof HTMLButtonElement ? element : null;
       const actionElement = input ?? button;
       const form = actionElement?.form ?? null;
+      const formRoot = form?.getRootNode();
+      const formKey =
+        form && formRoot instanceof Document
+          ? `form${Array.from(formRoot.forms).indexOf(form)}`
+          : undefined;
       const style = window.getComputedStyle(html);
       return {
         index,
@@ -1274,6 +1312,7 @@ export function collectApplyDocumentSnapshot(
                 button?.type === "submit" ||
                 input?.type === "submit" ||
                 input?.type === "image",
+              ...(formKey ? { formKey } : {}),
             }
           : {}),
       };
@@ -1343,6 +1382,9 @@ export function collectApplyDocumentSnapshot(
     () =>
       ((elements: Element[]): RawApplyClickable[] =>
         elements.slice(0, 300).flatMap((element, index) => {
+          // A button already has its own ref, with its form's action:
+          // never a second name it could be pressed under.
+          if (element.matches(selectors.actions)) return [];
           const html = element as HTMLElement;
           const style = window.getComputedStyle(html);
           const rect = html.getBoundingClientRect();

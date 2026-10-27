@@ -1,3 +1,4 @@
+import { withApplyFormSend, wroteField } from "./form-send";
 import {
   answerSourceCatalog,
   classifyAnswerPermission,
@@ -348,6 +349,16 @@ async function runMeasuredApplyAgent(
   const config: ApplyAgentConfig = {
     ...input,
     signal: runSignal,
+    hands: {
+      ...input.hands,
+      // A form whose only button says "Apply" is sent by it once that form
+      // is this application's (form-send).
+      observe: async () =>
+        withApplyFormSend(await input.hands.observe(), {
+          wrote: wroteField(filled),
+          uploads: uploadOptions,
+        }),
+    },
   };
   const now = config.now ?? (() => new Date());
   const filled: ApplyFilledControl[] = [];

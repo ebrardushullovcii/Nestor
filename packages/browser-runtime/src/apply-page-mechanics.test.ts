@@ -95,6 +95,45 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
+  test("a submit button has one ref, with its form, never a clickable alias", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(
+        `<form id="role"><label>Name <input name="name"></label><button type="submit" onclick="void 0" data-testid="apply">Apply</button></form><form id="filters"><label>Keywords <input name="q"></label><button type="button">Clear</button></form>`,
+      );
+      const source = `(${collectApplyDocumentSnapshot.toString()})(Array.from(document.querySelectorAll(${JSON.stringify(Object.values(APPLY_PAGE_SELECTORS).join(", "))})),${JSON.stringify(APPLY_PAGE_SELECTORS)},true)`;
+      const native =
+        await page.evaluate<ReturnType<typeof collectApplyDocumentSnapshot>>(
+          source,
+        );
+      const automated = await readRawApplyPage(page);
+      for (const read of [native, automated]) {
+        expect(
+          read.clickables.filter(
+            (entry: { label: string }) => entry.label === "Apply",
+          ),
+        ).toEqual([]);
+        const apply = read.actions.find(
+          (action: { label: string }) => action.label === "Apply",
+        )!;
+        const clear = read.actions.find(
+          (action: { label: string }) => action.label === "Clear",
+        )!;
+        expect(apply.submitsForm).toBe(true);
+        expect(clear.submitsForm).toBe(false);
+        const formOf = (name: string) =>
+          read.controls.find(
+            (control: { name: string }) => control.name === name,
+          )!.formKey;
+        expect(apply.formKey).toBe(formOf("name"));
+        expect(clear.formKey).toBe(formOf("q"));
+        expect(formOf("name")).not.toBe(formOf("q"));
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
   test("full text and link reads retain the tail of a long listing page", async () => {
     const page = await browser.newPage();
     try {
