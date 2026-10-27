@@ -1,0 +1,145 @@
+import {
+  sameSavedChoice,
+  type CandidateProfile,
+  type JobDetail,
+  type SavedOptionFallback,
+} from "@nestor/contracts";
+import {
+  fitCountryCode,
+  fitCountryCodes,
+  fitCountryNames,
+} from "./fit-country-codes";
+
+export const fitLocationKinds = [
+  "onsite",
+  "hybrid",
+  "country_remote",
+  "broader_remote",
+  "offered_list",
+  "unknown",
+] as const;
+type Eligibility = "compatible" | "review" | "blocked";
+export type FitLocationEvidence = [
+  Eligibility,
+  string,
+  (typeof fitLocationKinds)[number],
+  string,
+];
+const normalized = (text: string) =>
+  text.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
+const intersects = (left: ReadonlySet<string>, right: ReadonlySet<string>) =>
+  [...left].some((country) => right.has(country));
+
+/** Only demote. A location label or relocation assistance cannot grant work permission. */
+export function assessFitWorkLocation(
+  profile: CandidateProfile,
+  job: Pick<JobDetail, "location" | "description" | "workModes">,
+  evidence: FitLocationEvidence,
+  fallbacks: readonly SavedOptionFallback[] = [],
+): { status: Eligibility; reason: string } {
+  const [status, reason, kind, inferredCountries] = evidence;
+  if (status === "blocked") return { status, reason };
+  const currentCode = fitCountryCode(profile.currentCountry || "", true);
+  const current = new Set(currentCode ? [currentCode] : []);
+  const published = fitCountryCode(job.location ?? "");
+  const countries = published
+    ? new Set([published])
+    : fitCountryCodes(inferredCountries);
+  const foreign =
+    current.size > 0 && countries.size > 0 && !intersects(current, countries);
+  const quote = normalized(reason);
+  const body = normalized(job.description);
+  const location = normalized(job.location ?? "");
+  const quoted =
+    quote.length >= 6 && (body.includes(quote) || location.includes(quote));
+  // A verbatim "fully remote" quote proves a work mode, not a hiring region.
+  const geographic =
+    [...fitCountryNames(current), profile.currentCountry ?? ""].some(
+      (name) =>
+        name &&
+        ` ${quote.replace(/[^\p{L}\p{N}]+/gu, " ")} `.includes(
+          ` ${normalized(name)} `,
+        ),
+    ) ||
+    /\b(worldwide|globally|anywhere|any country|all countries|europe|emea|apac|americas|asia|africa|oceania)\b/u.test(
+      quote,
+    );
+  const workScope =
+    /\b(work|working|hire|hiring|remote|remotely|based|reside|residents|candidates|applicants|eligible)\b/u.test(
+      quote,
+    );
+  const broader =
+    quoted &&
+    geographic &&
+    ((body.includes(quote) && workScope) ||
+      (!countries.size && location.includes(quote)));
+  const physical =
+    !(kind === "broader_remote" && broader) &&
+    (job.workModes.some((mode) => mode === "onsite" || mode === "hybrid") ||
+      ((kind === "onsite" || kind === "hybrid") && quoted));
+  const authorized = new Set(
+    [
+      ...profile.workEligibility.authorizedWorkCountries,
+      ...(profile.workEligibility.limitedWorkPermissions ?? []).map(
+        (permission) => permission.country,
+      ),
+    ].flatMap((country) => {
+      const code = fitCountryCode(country, true);
+      return code ? [code] : [];
+    }),
+  );
+  const permission = intersects(authorized, countries);
+  if (foreign && physical && !permission)
+    return {
+      status: "blocked",
+      reason:
+        "This role requires on-site or hybrid work without recorded permission there.",
+    };
+  if (foreign && physical && profile.workEligibility.willingToRelocate !== true)
+    return {
+      status: "review",
+      reason:
+        "This role requires moving to its work country; relocation willingness is not confirmed.",
+    };
+  if (status === "review") return { status, reason };
+  if (
+    kind === "broader_remote" &&
+    broader &&
+    (!foreign || !location.includes(quote))
+  )
+    return { status, reason };
+  if (kind === "offered_list" && quoted) {
+    const accepted =
+      intersects(current, countries) ||
+      fallbacks.some(
+        (rule) =>
+          (sameSavedChoice(rule.primary, profile.currentCountry ?? "") ||
+            intersects(current, fitCountryCodes(rule.primary))) &&
+          intersects(countries, fitCountryCodes(rule.fallback)),
+      );
+    if (accepted) return { status, reason };
+    return {
+      status: "blocked",
+      reason:
+        "The offered work-country list contains neither your country nor its saved fallback.",
+    };
+  }
+  if (
+    foreign &&
+    !(permission && profile.workEligibility.willingToRelocate === true)
+  )
+    return {
+      status: "review",
+      reason:
+        "The published work location is abroad; broader hiring eligibility is not evidenced.",
+    };
+  if (
+    !current.size ||
+    (!countries.size && !(kind === "broader_remote" && broader))
+  )
+    return {
+      status: "review",
+      reason: "The listing does not establish where you may work.",
+    };
+  return { status, reason };
+}
