@@ -87,6 +87,12 @@ test("passes remote location policy into fit and retains the model's changed sco
       preferences: { assessment: "conflict" },
     });
     expect(chatWithTools).toHaveBeenCalledTimes(2);
+    expect(
+      chatWithTools.mock.calls.map((call) => call[2]?.conversationKey),
+    ).toEqual([
+      `fit-judging:${seed.profile.id}`,
+      `fit-judging:${seed.profile.id}`,
+    ]);
   } finally {
     store.close();
   }
