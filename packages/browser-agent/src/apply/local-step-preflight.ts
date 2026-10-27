@@ -26,9 +26,7 @@ export function localStepPreflight(page: ApplyFormObservation, ref: string) {
         !control.disabled &&
         (control.invalid ||
           (control.required && !control.answered) ||
-          control.credentialRole === "password" ||
-          (control.credentialRole === "identifier" &&
-            !(control.questionKind === "personal_info" && /e-?mail/iu.test(control.label)))),
+          control.credentialRole === "password"),
     )
   )
     return null;

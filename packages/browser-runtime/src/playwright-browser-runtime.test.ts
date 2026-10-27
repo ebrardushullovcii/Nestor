@@ -3462,6 +3462,7 @@ describe("managed context active service worker gate", () => {
       });
       expect(save.mock.calls.at(-1)?.[0].snapshot?.fields[0]?.checked).toBe(true);
       snapshot.fields[0]!.checked = false;
+      Object.assign(harness.fakePage, {evaluate: vi.fn().mockResolvedValue(undefined)});
       await runtime.handApplicationPageToPerson!("target_site", "ready");
       expect(save.mock.calls.at(-1)?.[0].snapshot?.fields[0]?.checked).toBe(false);
     } finally {
