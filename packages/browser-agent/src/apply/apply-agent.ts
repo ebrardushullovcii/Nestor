@@ -20,6 +20,7 @@ import {
 import {
   describeBrowserError,
   type ApplicationAttemptQuestion,
+  type ApplyAnswerTags,
   type ApplyFormPathStep,
 } from "@nestor/contracts";
 
@@ -191,6 +192,25 @@ function nativeFinishQuestion(
 }
 
 const DEFAULT_MAX_STEPS = 200;
+function matchesFinishQuestion(
+  prompt: string,
+  isBoolean: boolean,
+  item: string,
+) {
+  const words = (text: string) =>
+    normalizeFormQuestionPrompt(preserveTechnologyTokens(text));
+  return (
+    words(prompt) === words(item) ||
+    words(prompt) === words(formQuestionText(item, isBoolean))
+  );
+}
+function offersYesNo(options: readonly string[]) {
+  return (
+    options.length === 2 &&
+    options.some((option) => normalizeFormQuestionPrompt(option) === "yes") &&
+    options.some((option) => normalizeFormQuestionPrompt(option) === "no")
+  );
+}
 // Long forms on a slow model took 16 minutes to reach the review step;
 // 15 minutes cut them off just before it.
 const DEFAULT_TIME_BUDGET_MS = 30 * 60_000;
@@ -411,6 +431,9 @@ async function runMeasuredApplyAgent(
   };
   const now = config.now ?? (() => new Date());
   const filled: ApplyFilledControl[] = [];
+  // Only executor-approved writes, bound to this page/step and field. Page
+  // autofill and arbitrary observed values are not checked answer receipts.
+  const checkedFieldValues = new Map<string, string>();
   const attachments: ApplyAttachedDocument[] = [];
   const observedAnswers = new Map<string, ApplyFilledControl>();
   const observedAttachments = new Map<string, ApplyAttachedDocument>();
@@ -827,6 +850,55 @@ async function runMeasuredApplyAgent(
     control.choiceGroupKey
       ? `${control.kind}:${control.choiceGroupKey}`
       : control.ref;
+  const hasCheckedFieldAnswer = (
+    control: ApplyFormControl,
+    observation: ApplyFormObservation,
+    tags: ApplyAnswerTags | null | undefined,
+  ): boolean => {
+    if (
+      !holdsAnswer(control) ||
+      control.invalid ||
+      control.kind === "file" ||
+      control.credentialRole === "password"
+    )
+      return false;
+    const value =
+      control.kind === "radio"
+        ? control.label || control.value
+        : control.kind === "checkbox"
+          ? control.answerControlType === "multi_choice"
+            ? control.label || control.value
+            : control.checked
+              ? "Yes"
+              : "No"
+          : control.selectedOptionLabel || control.value;
+    if (
+      !value.trim() ||
+      checkedFieldValues
+        .get(
+          JSON.stringify([
+            reviewFieldKey(observation, control),
+            questionClassificationKey(control, observation.controls),
+          ]),
+        )
+        ?.trim() !== value.trim()
+    )
+      return false;
+    return (
+      !classifyQuestions ||
+      classifyAnswerPermission({
+        control,
+        controls: observation.controls,
+        tags,
+        sources: runConfig.sources,
+        answer: value,
+        pageInstructions: formWritingInstructions(observation),
+        approvedAttestations: config.authority.preApprovedAttestationKinds,
+        application: config.application,
+        now: now(),
+      }).kind !== "needs_you"
+    );
+  };
   // This only decides whether another proposal is worth trying. Every actual
   // write still goes through the executor and its current permission gate.
   const independentLiteral = (
@@ -1438,7 +1510,20 @@ async function runMeasuredApplyAgent(
           kind: "ok",
           content: outcome.text.slice(0, 20_000) || "That has no text.",
         };
-      case "filled":
+      case "filled": {
+        const control = outcome.observation.controls.find(
+          (control) => control.ref === outcome.filled.ref,
+        );
+        if (control) {
+          checkedFieldValues.set(
+            JSON.stringify([
+              reviewFieldKey(outcome.observation, control),
+              questionClassificationKey(control, outcome.observation.controls),
+            ]),
+            outcome.filled.answer.value,
+          );
+          heldAnswerKeys.delete(pendingQuestionKey(control));
+        }
         filled.push(outcome.filled);
         pendingQuestions.delete(
           pendingQuestionKey(
@@ -1461,6 +1546,7 @@ async function runMeasuredApplyAgent(
             ? `Filled in "${outcome.filled.label}". The form now looks like this:\n\n${describePage(outcome.observation)}`
             : `Filled in "${outcome.filled.label}".`,
         };
+      }
       case "attached":
         attachments.push(outcome.attachment);
         syncObservation(outcome.observation);
@@ -1663,6 +1749,40 @@ async function runMeasuredApplyAgent(
             ) ?? classifications?.get(questionPrompt(control));
           if (classification?.required) control.required = true;
         }
+        const namedQuestions = forPerson.length;
+        forPerson = forPerson.filter((item) => {
+          const matches = observation.controls.filter(
+            (control) =>
+              control.visible &&
+              !control.disabled &&
+              matchesFinishQuestion(
+                questionPrompt(control),
+                control.answerControlType === "boolean" ||
+                  offersYesNo(control.options),
+                item,
+              ),
+          );
+          const target =
+            matches.length === 1
+              ? matches[0]
+              : matches.every((control) => control.kind === "radio") &&
+                  new Set(matches.map(pendingQuestionKey)).size === 1
+                ? matches.find((control) => control.checked)
+                : undefined;
+          const reading = target
+            ? (classifications?.get(
+                questionClassificationKey(target, observation.controls),
+              ) ?? classifications?.get(questionPrompt(target)))
+            : undefined;
+          return (
+            !target ||
+            !hasCheckedFieldAnswer(target, observation, reading?.answerTags)
+          );
+        });
+        // A stale field request cannot recreate a handover after that exact
+        // answer passed the executor and is still valid on the live page.
+        if (namedQuestions > 0 && forPerson.length === 0)
+          outcome.needsPerson = false;
         const finishWithQuestions = (): AgentLoopToolOutcome => {
           // The model has already left questions for the person. One finish
           // hands back this step, including other visible required gaps;
@@ -3823,23 +3943,11 @@ async function runMeasuredApplyAgent(
         status: "detected",
       });
     };
-    const matchesQuestion = (
-      prompt: string,
-      isBoolean: boolean,
-      item: string,
-    ) => {
-      if (words(prompt) === words(item)) return true;
-      return words(prompt) === words(formQuestionText(item, isBoolean));
-    };
-    const offersYesNo = (options: readonly string[]) =>
-      options.length === 2 &&
-      options.some((option) => words(option) === "yes") &&
-      options.some((option) => words(option) === "no");
     for (const item of items) {
       // Restating an already-open question does not create another task or
       // replace its options, explanation or draft. Extra clauses stay separate.
       const existing = [...pendingQuestions.values()].filter((question) =>
-        matchesQuestion(
+        matchesFinishQuestion(
           question.prompt,
           question.answerControlType === "boolean" ||
             offersYesNo(question.answerOptions),
@@ -3854,7 +3962,7 @@ async function runMeasuredApplyAgent(
         (control) =>
           control.visible &&
           !control.disabled &&
-          matchesQuestion(
+          matchesFinishQuestion(
             questionPrompt(control),
             control.answerControlType === "boolean" ||
               offersYesNo(control.options),
