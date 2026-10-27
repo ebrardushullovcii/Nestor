@@ -40,3 +40,24 @@ test("mixed limits show counts without claiming they all share one reason", () =
       "60 found jobs score below 65. Most often: work authorization (32), role (20).",
   });
 });
+
+test("blocked and unconfirmed authorization in the same country count as one visible reason", () => {
+  expect(
+    emptyFitReason(
+      {
+        total: 60,
+        checking: 0,
+        limits: [
+          { kind: "eligibility", countries: ["DE"], count: 30 },
+          { kind: "eligibility_unconfirmed", countries: ["DE"], count: 30 },
+        ],
+        workCountries: [],
+      },
+      65,
+    ),
+  ).toEqual({
+    eligibility: true,
+    detail:
+      "All 60 are held back by work authorization in Germany. Your profile doesn't list Germany as a place you can work.",
+  });
+});

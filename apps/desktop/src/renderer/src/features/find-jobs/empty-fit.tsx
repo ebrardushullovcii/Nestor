@@ -51,7 +51,20 @@ export function emptyFitReason(
   floor: number | null,
 ): { detail: string | null; eligibility: boolean } {
   if (!summary?.total) return { detail: null, eligibility: false };
-  const dominant = summary.limits.find(
+  // Both eligibility limits have one visible reason. Combine them for the
+  // same countries before deciding whether authorization explains the list.
+  const reasons = new Map<string, (typeof summary.limits)[number]>();
+  for (const limit of summary.limits) {
+    const kind =
+      limit.kind === "eligibility_unconfirmed" ? "eligibility" : limit.kind;
+    const key = `${kind}:${[...limit.countries].sort().join(",")}`;
+    reasons.set(key, {
+      ...limit,
+      kind,
+      count: limit.count + (reasons.get(key)?.count ?? 0),
+    });
+  }
+  const dominant = [...reasons.values()].find(
     (limit) => limit.count / summary.total >= 0.6,
   );
   if (dominant) {
@@ -92,13 +105,13 @@ export function emptyFitReason(
       labels[limit.kind],
       (counts.get(labels[limit.kind]) ?? 0) + limit.count,
     );
-  const reasons = [...counts]
+  const reasonCounts = [...counts]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 2)
     .map(([name, count]) => `${name} (${count})`)
     .join(", ");
   return {
     eligibility: false,
-    detail: `${summary.total} found jobs score below ${floor}.${reasons ? ` Most often: ${reasons}.` : ""}`,
+    detail: `${summary.total} found jobs score below ${floor}.${reasonCounts ? ` Most often: ${reasonCounts}.` : ""}`,
   };
 }
