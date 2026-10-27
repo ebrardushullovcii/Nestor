@@ -24,6 +24,7 @@ function makeBrowser() {
     parkedTabs: Map<string, null>;
     heldTabs: Map<string, string[]>;
     personTabs: Set<string>;
+    personSendPressedAt: Map<string, number>;
     ownedTabs: Map<string, Set<string>>;
     closeReleasedOwnedTabs(): void;
     operations: Map<AbortController, string>;
@@ -885,6 +886,29 @@ test("a waiting page that cannot close never makes a more recent one close", asy
   }
   await browser.reduceWaitingFormMemory();
   expect(reclaim.mock.calls.map(([owner]) => owner)).toEqual(["first"]);
+});
+
+test("a waiting page whose Send the person pressed never closes for the cap", async () => {
+  const { browser, state } = makeBrowser();
+  const forms = [
+    ["sent", "search"],
+    ["second", "prepared"],
+    ["third", "working"],
+    ["fourth", "parked"],
+  ] as const;
+  for (const [owner, tab] of forms) state.ownedTabs.set(owner, new Set([tab]));
+  // The press outlives the page's own record once the page navigates.
+  state.personSendPressedAt.set("search", Date.now());
+  const reclaim = vi.fn<(owner: string) => Promise<boolean>>(() =>
+    Promise.resolve(true),
+  );
+  browser.setPreparedFormReclaimer(reclaim);
+  for (const [owner] of forms) {
+    browser.markPreparedForm(owner);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  await browser.reduceWaitingFormMemory();
+  expect(reclaim).not.toHaveBeenCalledWith("sent", expect.any(Function));
 });
 
 test("the Speed level's limit sets how many waiting pages stay live", async () => {
