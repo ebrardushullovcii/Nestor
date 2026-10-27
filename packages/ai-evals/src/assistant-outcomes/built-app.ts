@@ -19,6 +19,11 @@ type AppWindow = Window & { nestor: { assistant: DesktopAssistantBridge } };
 export interface BuiltAppEvidence {
   operations: readonly AssistantOperation[];
   receipts: readonly AssistantChangeReceipt[];
+  needAnswers?: readonly {
+    id: number;
+    answer: string | null;
+    resolved: boolean;
+  }[];
 }
 export interface BuiltAppAction {
   actionId: string;

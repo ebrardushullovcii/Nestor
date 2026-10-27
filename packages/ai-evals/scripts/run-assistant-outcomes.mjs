@@ -16,10 +16,14 @@ Usage:
   pnpm --filter @nestor/ai-evals assistant-outcomes --list
   pnpm --filter @nestor/ai-evals assistant-outcomes --out <outside-repo-directory> [--build]
   pnpm --filter @nestor/ai-evals assistant-outcomes --case navigation --out <directory>
+  pnpm --filter @nestor/ai-evals assistant-outcomes --everyday --out <directory> --build
   pnpm --filter @nestor/ai-evals assistant-outcomes --merge <assistant-observations.json> --merge <another.json> --out <directory>
 
 --list          Print the full action map, exclusions and implemented case IDs. No app starts.
 --case PREFIX   Run matching action IDs, plus their prerequisite batches. Repeatable.
+--everyday      Run screen navigation, search choices, triage/Undo, resume approval,
+                Fill and Send starts, Needs-you answers/remember/skip, Speed and tracking.
+                The full action denominator is kept, including unexercised failures.
 --out PATH      Result directory, outside the checkout. Defaults under ~/Projects/nestor-agent-work.
 --label NAME    Isolated instance label (default: assistant-outcomes-<timestamp>).
 --build         Build and stamp the desktop before running; otherwise require a matching build.
@@ -51,6 +55,7 @@ try {
       help: { type: "boolean", short: "h" },
       list: { type: "boolean" },
       case: { type: "string", multiple: true },
+      everyday: { type: "boolean" },
       out: { type: "string" },
       label: { type: "string" },
       build: { type: "boolean" },
@@ -102,7 +107,7 @@ try {
       )
         throw Error("Results must be outside the repository");
       if (values.merge?.length) {
-        if (values.case?.length || values.build)
+        if (values.case?.length || values.build || values.everyday)
           throw Error("--merge cannot build or run cases");
         process.exitCode = await runNode([
           journey,
@@ -136,7 +141,11 @@ try {
             "drive",
             "run",
             journey,
-            JSON.stringify({ prefixes: values.case ?? [], label }),
+            JSON.stringify({
+              prefixes: values.case ?? [],
+              everyday: values.everyday ?? false,
+              label,
+            }),
           );
           process.exitCode = status;
           await writeFile(

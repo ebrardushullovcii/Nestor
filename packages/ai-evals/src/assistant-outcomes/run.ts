@@ -38,6 +38,7 @@ import { answerOutcomeCases } from "./answer-cases";
 import { needsViewOutcomeCases } from "./needs-view-cases";
 import { answerChoiceOutcomeCases } from "./answer-choice-cases";
 import { trackerViewOutcomeCases } from "./tracker-view-cases";
+import { huntOutcomeCases, seedHuntFixtures } from "./hunt-cases";
 
 interface VerifyContext {
   page: Promise<Page>;
@@ -61,6 +62,7 @@ export function allBatches(
   const batches = [
     ...navigationOutcomeCases(),
     ...shellOutcomeCases(),
+    ...huntOutcomeCases(replicaOrigin),
     ...readOutcomeCases(),
     ...profileFieldOutcomeCases(),
     ...profileRecordOutcomeCases(),
@@ -110,6 +112,18 @@ export function selectBatches(
   return batches.filter((batch) => chosen.has(batch.id));
 }
 
+/** Everyday hunt proof, while retaining the full inventory in its report. */
+export function everydayBatches(batches: readonly BuiltAppBatch[]) {
+  return batches.filter(
+    (batch) =>
+      batch.id.startsWith("hunt-") ||
+      /^open-(?:home|profile|discovery|shortlisted|applications|needs_you|settings)$/u.test(
+        batch.id,
+      ) ||
+      batch.id === "tracker-status",
+  );
+}
+
 export function list() {
   const batches = allBatches();
   const covered = new Set(
@@ -134,7 +148,7 @@ export function list() {
 
 export async function run(
   ctx: VerifyContext,
-  options: { label: string; prefixes?: string[] },
+  options: { label: string; prefixes?: string[]; everyday?: boolean },
 ) {
   if (ctx.ai !== "live")
     throw Error(
@@ -152,8 +166,9 @@ export async function run(
     throw Error(
       "Refusing to seed anything except an isolated verify-nestor data folder",
     );
+  const available = allBatches(ctx.sites.url);
   const batches = selectBatches(
-    allBatches(ctx.sites.url),
+    options.everyday ? everydayBatches(available) : available,
     options.prefixes ?? [],
   );
   const state = JSON.parse(
@@ -298,14 +313,19 @@ export async function run(
       fields: {
         collapseSideMenuWithAssistant: false,
         applicationAutomationMode: "confirm_before_submit",
+        resumeApplicationMode: "original_resume",
+        writeResumesOnShortlist: false,
       },
     });
   });
+  if (batches.some((batch) => batch.id.startsWith("hunt-")))
+    await seedHuntFixtures(ctx.app, page, ctx.userDataDir, ctx.sites.url);
   await writeFile(
     path.join(ctx.evidenceDir, "case-selection.json"),
     JSON.stringify(
       {
         requestedPrefixes: options.prefixes ?? [],
+        everyday: options.everyday ?? false,
         selectedBatches: batches.map((batch) => batch.id),
         inventoryTotal: ACTION_INVENTORY.length,
         setup:
@@ -370,7 +390,31 @@ export async function run(
         const parsed = AssistantChangeReceiptSchema.safeParse(row.data);
         return parsed.success ? [parsed.data] : [];
       });
-      return Promise.resolve({ operations, receipts });
+      const needAnswers = ctx
+        .db("needs_you", {
+          limit: 200,
+          pattern: "Outcome question:",
+          name: `${batchId}-waiting-answers`,
+        })
+        .flatMap((row) => {
+          if (
+            !row ||
+            typeof row !== "object" ||
+            !("id" in row) ||
+            typeof row.id !== "number" ||
+            !("answer" in row) ||
+            !("resolved_at" in row)
+          )
+            return [];
+          return [
+            {
+              id: row.id,
+              answer: typeof row.answer === "string" ? row.answer : null,
+              resolved: row.resolved_at !== null,
+            },
+          ];
+        });
+      return Promise.resolve({ operations, receipts, needAnswers });
     },
   });
   const lines = [
