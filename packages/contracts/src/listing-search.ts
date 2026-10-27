@@ -57,6 +57,8 @@ export interface SourceInventory {
   cards: ListingCard[];
   pagesRead: number;
   complete: boolean;
+  /** An inventory page explicitly reported no open positions, rather than an empty/loading shell. */
+  emptyConfirmed?: boolean;
   notes: string[];
   needsYou?: boolean;
   /** An observed HTTP 401/403 or explicit sign-in wall; browser reading may still resolve it. */

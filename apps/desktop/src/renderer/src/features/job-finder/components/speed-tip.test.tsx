@@ -62,36 +62,56 @@ test("on a strong computer at Standard, the tip opens the Speed setting once", a
   install({ memoryGb: 31.8, cores: 16 });
   renderTip();
   await waitForTip();
-  fireEvent.click(screen.getByRole("button", { name: "Open Speed setting" }));
+  fireEvent.click(screen.getByRole("button", { name: "Speed setting" }));
   expect(screen.getByTestId("where").textContent).toBe(
     "/job-finder/settings#settings-speed",
   );
-  expect(screen.queryByText(/can run Job Finder faster/u)).toBeNull();
+  expect(screen.queryByText(/can run more at once/u)).toBeNull();
   cleanup();
   renderTip();
   await waitForTip();
-  expect(screen.queryByText(/can run Job Finder faster/u)).toBeNull();
+  expect(screen.queryByText(/can run more at once/u)).toBeNull();
 });
 
 test("dismissing the tip ends it for good", async () => {
   install({ memoryGb: 31.8, cores: 16 });
   renderTip();
   await waitForTip();
-  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Dismiss the Speed tip" }),
+  );
   cleanup();
   renderTip();
   await waitForTip();
-  expect(screen.queryByText(/can run Job Finder faster/u)).toBeNull();
+  expect(screen.queryByText(/can run more at once/u)).toBeNull();
 });
 
 test("no tip on an 8 GB laptop or when a faster level is already on", async () => {
   install({ memoryGb: 7.8, cores: 8 });
   renderTip();
   await waitForTip();
-  expect(screen.queryByText(/can run Job Finder faster/u)).toBeNull();
+  expect(screen.queryByText(/can run more at once/u)).toBeNull();
   cleanup();
   install({ memoryGb: 31.8, cores: 16 }, "faster");
   renderTip();
   await waitForTip();
-  expect(screen.queryByText(/can run Job Finder faster/u)).toBeNull();
+  expect(screen.queryByText(/can run more at once/u)).toBeNull();
+});
+
+test("the tip is a quiet side note: no main button, gone by itself, and seen once shown", async () => {
+  install({ memoryGb: 31.8, cores: 16 });
+  renderTip();
+  await waitForTip();
+  expect(screen.getByText(/can run more at once/u)).toBeTruthy();
+  // No claim about free memory, and no button that outranks the screen's own.
+  expect(screen.queryByText(/plenty of memory/u)).toBeNull();
+  expect(screen.queryByRole("button", { name: /Open Speed/u })).toBeNull();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(13_000);
+  });
+  expect(screen.queryByText(/can run more at once/u)).toBeNull();
+  cleanup();
+  renderTip();
+  await waitForTip();
+  expect(screen.queryByText(/can run more at once/u)).toBeNull();
 });

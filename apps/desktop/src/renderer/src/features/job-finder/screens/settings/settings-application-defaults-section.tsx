@@ -6,12 +6,14 @@ import type {
   JobFinderSettings,
   ResumeTemplateDefinition,
   UpdateApplicationDefaultsInput,
+  UpdateWorkspaceBehaviorInput,
 } from "@nestor/contracts";
 import { Field, FieldLabel } from "@renderer/components/ui/field";
 import { FormSelect } from "../../components/form-select";
 import { ResumeThemePicker } from "../../components/resume-theme-picker";
 import { useRegisterSettingsDirtySection } from "./settings-dirty-sections";
 import { SettingsSectionSaveControl } from "./settings-section-save-control";
+import { SettingsWriteOnShortlist } from "./settings-write-on-shortlist";
 import {
   hasOutstandingSectionChanges,
   useSettingsSectionSave,
@@ -55,11 +57,16 @@ interface SettingsApplicationDefaultsSectionProps {
     input: UpdateApplicationDefaultsInput,
   ) => Promise<boolean | void> | void;
   settings: JobFinderSettings;
+  /** Saves the resume-writing switch at once. */
+  onUpdateWorkspaceBehavior?: (
+    input: UpdateWorkspaceBehaviorInput,
+  ) => Promise<boolean | void> | void;
 }
 
 export function SettingsApplicationDefaultsSection({
   availableResumeTemplates,
   onUpdateApplicationDefaults,
+  onUpdateWorkspaceBehavior,
   settings,
 }: SettingsApplicationDefaultsSectionProps) {
   const fontPresetId = useId();
@@ -216,6 +223,12 @@ export function SettingsApplicationDefaultsSection({
           </p>
         </div>
       </div>
+      {onUpdateWorkspaceBehavior ? (
+        <SettingsWriteOnShortlist
+          onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
+          settings={settings}
+        />
+      ) : null}
     </section>
   );
 }

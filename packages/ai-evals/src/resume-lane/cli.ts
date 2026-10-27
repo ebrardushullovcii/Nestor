@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ResumeLevel } from "@nestor/contracts";
 
 import { RESUME_LANE_CASES } from "./cases";
+import { workHistoryProblem } from "./checks";
 import {
   formatResumeLaneReport,
   rescoreResumeLane,
@@ -33,6 +34,7 @@ Per level it reports:
                    or removes, and whether it ran (main Aggressive: no model checker);
                    saved model traces permit an audit without more calls
   flags left       problems the writer flagged and did not fix
+  work history     visible/source roles; dropping all experience fails the eval
   edit size, time (median per resume, and over all written resumes), model
   calls and tokens in/out
 
@@ -92,6 +94,8 @@ export async function runResumeLaneCli(argv: readonly string[]): Promise<void> {
     const report = formatResumeLaneReport(`${model} (rescored)`, results);
     console.log(report);
     if (outDir) await writeReport(outDir, report, results);
+    if (results.some((result) => workHistoryProblem(result.shape)))
+      process.exitCode = 1;
     return;
   }
   console.log(
@@ -109,6 +113,8 @@ export async function runResumeLaneCli(argv: readonly string[]): Promise<void> {
   const report = formatResumeLaneReport(model, results);
   console.log(`\n${report}`);
   if (outDir) await writeReport(outDir, report, results);
+  if (results.some((result) => workHistoryProblem(result.shape)))
+    process.exitCode = 1;
 }
 
 async function writeReport(

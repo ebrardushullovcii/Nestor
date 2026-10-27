@@ -132,6 +132,23 @@ describe("SettingsApplyingWritingSection", () => {
     expect(screen.getByText(/Direct and brief/i)).toBeTruthy();
   });
 
+  it("leads with the common choices; declarations and letter style wait closed, saying where they stand", () => {
+    renderSection(vi.fn(() => Promise.resolve(true)));
+    const closed = [...document.querySelectorAll("details")];
+    expect(closed).toHaveLength(2);
+    expect(closed.every((details) => !details.open)).toBe(true);
+    expect(
+      screen.getByText(/^Declarations it may tick for you: \d of \d allowed$/u),
+    ).toBeTruthy();
+    expect(screen.getByText(/^How a letter reads/u)).toBeTruthy();
+    // The common choices are out in the open.
+    expect(
+      screen
+        .getByRole("radiogroup", { name: "When to write a cover letter" })
+        .closest("details"),
+    ).toBeNull();
+  });
+
   it("hides letter style when letters are off", () => {
     renderSection(vi.fn(() => Promise.resolve(true)));
 

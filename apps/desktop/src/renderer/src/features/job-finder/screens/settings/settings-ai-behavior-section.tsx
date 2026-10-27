@@ -1,16 +1,12 @@
-import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { SETTINGS_AI_JOB_SEARCH_ANCHOR_ID } from "../../lib/job-finder-route-hrefs";
 import {
   AiBehaviorPreferenceSchema,
   JOB_FINDER_SETTINGS_SECTIONS,
-  writesResumesOnShortlist,
   type AiProfileAssistantBehavior,
   type JobFinderSettings,
   type ProfileAssistantInitiative,
-  type ProfileAssistantReplyStyle,
   type UpdateAiBehaviorInput,
-  type UpdateWorkspaceBehaviorInput,
 } from "@nestor/contracts";
 import {
   ChoiceCards,
@@ -56,20 +52,6 @@ const initiativeOptions: readonly ChoiceCardOption<ProfileAssistantInitiative>[]
       id: "proactive",
       label: "Proactive",
       detail: "Also points out gaps and offers fixes.",
-    },
-  ];
-
-const replyStyleOptions: readonly ChoiceCardOption<ProfileAssistantReplyStyle>[] =
-  [
-    {
-      id: "brief",
-      label: "Brief",
-      detail: "One or two sentences.",
-    },
-    {
-      id: "conversational",
-      label: "Conversational",
-      detail: "Explains its reasoning.",
     },
   ];
 
@@ -126,45 +108,13 @@ interface SettingsAiBehaviorSectionProps {
     input: UpdateAiBehaviorInput,
     options?: { undo?: () => void },
   ) => Promise<boolean | void> | void;
-  /** Saves a switch at once, like the other switches in Settings. */
-  onUpdateWorkspaceBehavior?: (
-    input: UpdateWorkspaceBehaviorInput,
-  ) => Promise<boolean | void> | void;
   settings: JobFinderSettings;
 }
 
 export function SettingsAiBehaviorSection({
   onUpdateAiBehavior,
-  onUpdateWorkspaceBehavior,
   settings,
 }: SettingsAiBehaviorSectionProps) {
-  const savedWritesOnShortlist = writesResumesOnShortlist(settings);
-  const [writeOnShortlist, setWriteOnShortlist] = useState(
-    savedWritesOnShortlist,
-  );
-  const [writeOnShortlistFailed, setWriteOnShortlistFailed] = useState(false);
-  useEffect(() => {
-    setWriteOnShortlist(savedWritesOnShortlist);
-  }, [savedWritesOnShortlist]);
-  // A switch acts when flipped and goes back if the save fails.
-  const updateWriteOnShortlist = (checked: boolean) => {
-    setWriteOnShortlist(checked);
-    setWriteOnShortlistFailed(false);
-    const revert = () => {
-      setWriteOnShortlist(!checked);
-      setWriteOnShortlistFailed(true);
-    };
-    try {
-      void Promise.resolve(
-        onUpdateWorkspaceBehavior?.({ writeResumesOnShortlist: checked }),
-      ).then((saved) => {
-        if (saved === false) revert();
-      }, revert);
-    } catch {
-      revert();
-    }
-  };
-
   const { draft, edit, hasUnsavedChanges, saveState, sendTypedText } =
     useAiBehaviorSliceSave({
       settings,
@@ -197,8 +147,8 @@ export function SettingsAiBehaviorSection({
             {SETTINGS_AI_BEHAVIOR_LABEL}
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-            How it talks, how locations count when it searches, and when a
-            resume gets written.
+            How much the assistant suggests, and how locations count when it
+            searches.
           </p>
         </div>
         <SettingsSectionSaveControl
@@ -218,8 +168,6 @@ export function SettingsAiBehaviorSection({
           title="Assistant"
           description="The assistant in the side chat."
         />
-        {/* Two separate choices, each under its own name. Side by side they
-          read as one row of five cards. */}
         <ChoiceField label="Suggestions">
           <ChoiceCards
             aria-label="How much the assistant suggests"
@@ -227,15 +175,6 @@ export function SettingsAiBehaviorSection({
             onChange={(initiative) => editAssistant({ initiative })}
             options={initiativeOptions}
             value={draft.profileAssistant.initiative}
-          />
-        </ChoiceField>
-        <ChoiceField label="Reply length">
-          <ChoiceCards
-            aria-label="How the profile assistant replies"
-            columns={3}
-            onChange={(replyStyle) => editAssistant({ replyStyle })}
-            options={replyStyleOptions}
-            value={draft.profileAssistant.replyStyle}
           />
         </ChoiceField>
       </article>
@@ -260,31 +199,6 @@ export function SettingsAiBehaviorSection({
           }
         />
       </article>
-
-      {onUpdateWorkspaceBehavior ? (
-        <article
-          className="grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-overlay-subtle) p-3.5"
-          data-testid="settings-ai-resumes"
-        >
-          <GroupHeading
-            title="Resumes"
-            description="When a job's resume gets written. The resume level itself lives in Profile, under Preferences."
-          />
-          <ToggleField
-            checked={writeOnShortlist}
-            description="A job's resume starts writing at your Profile resume level as soon as you shortlist it, so it is ready when you open it."
-            hint={
-              writeOnShortlistFailed
-                ? "This was not saved. Try the switch again."
-                : writeOnShortlist
-                  ? "On: resumes start when you shortlist a job."
-                  : "Off: create resumes yourself from Shortlisted."
-            }
-            label="Write resumes when I shortlist"
-            onCheckedChange={updateWriteOnShortlist}
-          />
-        </article>
-      ) : null}
     </section>
   );
 }

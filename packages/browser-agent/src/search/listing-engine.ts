@@ -177,6 +177,7 @@ export async function collectSource(
     notes: string[] = [];
   let complete = true,
     recognized = false,
+    emptyConfirmed = false,
     needsAccess = false,
     httpError = false;
   while (queue.length) {
@@ -225,6 +226,7 @@ export async function collectSource(
           )
         ) {
           recognized = true;
+          emptyConfirmed = true;
           notes.push("The site explicitly reports no open positions.");
           return;
         }
@@ -288,11 +290,16 @@ export async function collectSource(
       cards: [...cards.values()],
       lane: "browser",
       pagesRead: visited.size + fallback.pagesRead,
-      complete: cards.size > 0 && fallback.complete,
+      complete:
+        fallback.complete &&
+        (cards.size > 0 || fallback.emptyConfirmed === true),
+      ...(!cards.size && fallback.emptyConfirmed
+        ? { emptyConfirmed: true }
+        : {}),
       notes: [
         ...notes,
         ...fallback.notes,
-        ...(cards.size
+        ...(cards.size || (fallback.complete && fallback.emptyConfirmed)
           ? []
           : [
               "No listings were read; coverage could not be confirmed. Open the site or check its jobs-board URL.",
@@ -301,8 +308,9 @@ export async function collectSource(
       ...(fallback.needsYou ? { needsYou: true } : {}),
     };
   }
+  const covered = complete && recognized && (cards.size > 0 || emptyConfirmed);
   notes.push(
-    `${cards.size} listings collected from ${visited.size} pages; ${complete && recognized && cards.size > 0 ? "all observed pages covered" : "coverage incomplete"}.`,
+    `${cards.size} listings collected from ${visited.size} pages; ${covered ? "all observed pages covered" : "coverage incomplete"}.`,
   );
   return {
     cards: [...cards.values()],
@@ -310,7 +318,8 @@ export async function collectSource(
     requiresBrowser: !recognized || !complete,
     ...(needsAccess ? { accessBlocked: true } : {}),
     pagesRead: visited.size,
-    complete: complete && recognized && cards.size > 0,
+    complete: covered,
+    ...(!cards.size && emptyConfirmed ? { emptyConfirmed: true } : {}),
     notes,
   };
 }

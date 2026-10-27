@@ -128,13 +128,14 @@ export function gradeRanking(
   };
 }
 
-/** Complete with no inventory reads or no observed vacancies is never silently green. */
+/** Completeness needs a real read and observed cards or explicit empty evidence. */
 export function coverageHonest(
   complete: boolean,
   reads: number,
   cards: number,
+  emptyConfirmed = false,
 ) {
-  return !complete || (reads > 0 && cards > 0);
+  return !complete || (reads > 0 && (cards > 0 || emptyConfirmed));
 }
 
 /** Each persona is one search; cache/reasoning counters are subsets of usage. */
@@ -191,7 +192,9 @@ export async function runSearchRelevance(input: {
         inventory.complete,
         Math.min(inventory.pagesRead, reader.reads.length),
         inventory.cards.length,
+        inventory.emptyConfirmed,
       ),
+      emptyConfirmed: inventory.emptyConfirmed === true,
       missingRecordings: reader.missing,
       notes: inventory.notes,
     });

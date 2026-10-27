@@ -88,15 +88,14 @@ vi.mock("./settings-workspace-controls", () => ({
   ),
 }));
 const sectionLabels = [
-  "App & device",
   // Every choice about how the AI behaves, in one place.
   "AI behavior",
   "Resume look",
   // Plain-language tab names. The renames change the labels only: the
   // prepare-only boundary and every permission it describes are unchanged.
   "Applying",
-  "Diagnostics",
-  "Delete everything",
+  // Diagnostics and Delete everything sit at its end, without tabs.
+  "App & device",
 ] as const;
 
 const baseSettings = {
@@ -135,7 +134,7 @@ describe("SettingsScreen information architecture", () => {
     ).toBeNull();
   });
 
-  it("exposes exactly six sticky section anchors whose labels match named landmarks", () => {
+  it("exposes exactly four sticky section anchors whose labels match named landmarks", () => {
     render(
       <MemoryRouter>
         <SettingsScreen {...baseProps} />
@@ -160,7 +159,12 @@ describe("SettingsScreen information architecture", () => {
       );
     }
 
-    expect(within(nav).queryAllByRole("link")).toHaveLength(6);
+    expect(within(nav).queryAllByRole("link")).toHaveLength(4);
+    // Folded into App & device: still named regions links can land on.
+    for (const name of ["Diagnostics", "Delete everything"]) {
+      expect(within(nav).queryByRole("link", { name })).toBeNull();
+      expect(screen.getByRole("region", { name })).toBeTruthy();
+    }
   });
 
   it("keeps keyboard-reachable nav targets with visible focus and scroll offset", () => {
@@ -235,7 +239,7 @@ describe("SettingsScreen information architecture", () => {
     const current = links.find(
       (link) => link.getAttribute("aria-current") === "location",
     );
-    expect(current?.textContent).toBe("App & device");
+    expect(current?.textContent).toBe("AI behavior");
     expect(current?.className).toContain("after:bg-primary");
     expect(current?.className).toContain("after:opacity-100");
   });
@@ -373,7 +377,7 @@ describe("SettingsScreen information architecture", () => {
     }
   });
 
-  it("anchors wrap the real settings panels in the six-label order", () => {
+  it("anchors wrap the real settings panels in page order, Diagnostics and Delete everything after App & device", () => {
     render(
       <MemoryRouter>
         <SettingsScreen {...baseProps} />
@@ -412,9 +416,9 @@ describe("SettingsScreen information architecture", () => {
     ).toBe(true);
 
     const panels = [
-      "panel-app-device",
       "panel-application-defaults",
       "panel-application-authority",
+      "panel-app-device",
       "panel-diagnostics-runtime",
       "panel-diagnostics-support",
       "panel-danger-zone",
@@ -551,7 +555,7 @@ describe("SettingsScreen section anchor navigation", () => {
       name: "Settings sections",
     });
     const links = within(nav).getAllByRole("link");
-    expect(links).toHaveLength(6);
+    expect(links).toHaveLength(4);
 
     for (const label of sectionLabels) {
       const link = within(nav).getByRole("link", { name: label });
@@ -609,9 +613,9 @@ describe("SettingsScreen section anchor navigation", () => {
       const nav = screen.getByRole("navigation", {
         name: "Settings sections",
       });
-      const link = within(nav).getByRole("link", { name: "Diagnostics" });
+      const link = within(nav).getByRole("link", { name: "Resume look" });
       const { focus, scrollIntoView } = stubSectionScrollAndFocus(
-        "settings-diagnostics",
+        "settings-application-defaults",
       );
 
       const nativeActivationWasAllowed = fireEvent.click(link, init);
@@ -626,7 +630,7 @@ describe("SettingsScreen section anchor navigation", () => {
   it("still prevents default when the target section is missing so the route never changes", async () => {
     renderSettingsHashRoute();
 
-    document.getElementById("settings-diagnostics")?.remove();
+    document.getElementById("settings-application-defaults")?.remove();
     const focusSpy = vi
       .spyOn(HTMLElement.prototype, "focus")
       .mockImplementation(() => {});
@@ -640,7 +644,7 @@ describe("SettingsScreen section anchor navigation", () => {
       const nav = screen.getByRole("navigation", {
         name: "Settings sections",
       });
-      const link = within(nav).getByRole("link", { name: "Diagnostics" });
+      const link = within(nav).getByRole("link", { name: "Resume look" });
 
       const nativeActivationWasAllowed = fireEvent.click(link);
       await flushJsdomNavigationTimers();
@@ -694,7 +698,7 @@ it("scrolls the last focused tab fully into view with edge clearance", () => {
   const row = document.querySelector<HTMLElement>(
     "[data-settings-subnav-row]",
   )!;
-  const link = screen.getByRole("link", { name: "Delete everything" });
+  const link = screen.getByRole("link", { name: "App & device" });
   Object.defineProperties(row, {
     clientWidth: { configurable: true, value: 300 },
     scrollWidth: { configurable: true, value: 1012 },
