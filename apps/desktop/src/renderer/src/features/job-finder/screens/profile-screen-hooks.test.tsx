@@ -253,6 +253,28 @@ describe("canonical-aware profile saves", () => {
 });
 
 describe("useProfileScreenForms background-snapshot durability", () => {
+  it("offers the removed final permit to autosave from the real form", () => {
+    const saved = CandidateProfileSchema.parse({
+      ...profile,
+      workEligibility: {
+        limitedWorkPermissions: [
+          { country: "Germany", conditions: "Up to 20 hours weekly" },
+        ],
+      },
+    });
+    const { result } = renderProfileScreenForms(
+      createInput({ profile: saved }),
+    );
+    act(() => {
+      result.current.backgroundArrays.limitedPermissionArray.remove(0);
+    });
+    expect(
+      result.current.draftProfileResult.payload?.workEligibility
+        .limitedWorkPermissions,
+    ).toEqual([]);
+    expect(result.current.draftDiffers).toBe(true);
+  });
+
   it("adopts a clean assistant reorder and remains clean", () => {
     const education = [
       CandidateEducationSchema.parse({

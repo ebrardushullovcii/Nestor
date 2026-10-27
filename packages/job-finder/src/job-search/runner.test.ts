@@ -989,6 +989,7 @@ test.each([false, true])(
     context.sources = sites.enabled().map(jobSiteTarget);
     access.request(1, "Sign in");
     const gate = deferred<void>();
+    let reads = 0;
     engine.collectSource.mockImplementation(async ({ target, onCards }) => {
       const cards = numberedCards(target.id, 400, "Backend Engineer");
       await onCards?.(cards.slice(0, 1));
@@ -996,8 +997,9 @@ test.each([false, true])(
       return { cards: [], complete: false, pagesRead: 1, notes: [] };
     });
     engine.readListings.mockImplementation(async ({ cards }) => {
-      await gate.promise;
-      return blocked
+      const first = reads++ === 0;
+      if (!first) await gate.promise;
+      return blocked && !first
         ? {
             jobs: [],
             failures: cards.map(({ url }) => ({
@@ -1008,7 +1010,7 @@ test.each([false, true])(
           }
         : { jobs: cards.map(found), failures: [] };
     });
-    await runner.start({ postedWithin: "any" });
+    await runner.retrySource(1);
     await vi.waitFor(() => expect(sites.get(1)?.health).toBe("healthy"));
     expect(access.pending(1)).toBe(true);
     gate.resolve(undefined);

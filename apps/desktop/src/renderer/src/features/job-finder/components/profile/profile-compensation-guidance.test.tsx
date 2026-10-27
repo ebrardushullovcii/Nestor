@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { useForm } from "react-hook-form";
+import { useFieldArray, useForm } from "react-hook-form";
 import { it, expect, describe, afterEach } from "vitest";
 import {
   CandidateProfileSchema,
@@ -56,10 +56,16 @@ function Harness() {
   const preferencesForm = useForm({
     defaultValues: createSearchPreferencesEditorValues(preferences),
   });
+  const limitedPermissionArray = useFieldArray({
+    control: profileForm.control,
+    name: "eligibility.limitedWorkPermissions",
+    keyName: "fieldKey",
+  });
   return (
     <>
       <ProfilePreferencesEligibilitySection
         busy={false}
+        limitedPermissionArray={limitedPermissionArray}
         profileForm={profileForm}
       />
       <ProfilePreferencesTargetingSection preferencesForm={preferencesForm} />
@@ -88,9 +94,15 @@ function EligibilityHarness() {
   const profileForm = useForm({
     defaultValues: createProfileEditorValues(profile),
   });
+  const limitedPermissionArray = useFieldArray({
+    control: profileForm.control,
+    name: "eligibility.limitedWorkPermissions",
+    keyName: "fieldKey",
+  });
   return (
     <ProfilePreferencesEligibilitySection
       busy={false}
+      limitedPermissionArray={limitedPermissionArray}
       profileForm={profileForm}
     />
   );
