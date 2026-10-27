@@ -36,7 +36,9 @@ function iso(date: Date): string {
 
 /** No Date.parse guesses: a picker value must describe a real calendar day. */
 export function canonicalStartDate(value: string): string | null {
-  let parts = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value.trim());
+  let parts: readonly string[] | null = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(
+    value.trim(),
+  );
   if (!parts) {
     const slash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/u.exec(value.trim());
     // The observed custom picker can show MM/DD/YYYY. An ambiguous date
