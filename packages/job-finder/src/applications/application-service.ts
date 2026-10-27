@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { createModelUsageRecorder } from "@nestor/ai-providers";
+import { accumulateApplyUsage } from "./apply-usage";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import {
@@ -544,7 +546,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     };
     let agent: ApplyAgentResult | null = null;
     let review: ApplicationReviewCard | null = null;
-    const result = await browser.executeApplicationFlow(
+    const usageRecorder = createModelUsageRecorder();
+    const executeApplicationFlow: BrowserSessionRuntime["executeApplicationFlow"] =
+      (...args) =>
+        usageRecorder.run(() => browser.executeApplicationFlow(...args));
+    const result = await executeApplicationFlow(
       "target_site",
       {
         ...facts,
@@ -640,6 +646,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           pickerAttempts: result.pickerAttempts?.length
             ? result.pickerAttempts
             : (previous?.execution.pickerAttempts ?? []),
+          applyUsageTotals: accumulateApplyUsage(
+            previous?.execution,
+            usageRecorder.snapshot(),
+          ),
           answerDependencies: answerDependencies.snapshot(),
         },
         reviewCard: review,

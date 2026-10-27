@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { writeFileSync } from "node:fs";
 import { ApplyAgentTimingSchema } from "@nestor/contracts";
 import type { RawApplyPage } from "@nestor/contracts";
 import type { ApplyPageHands } from "./types";
@@ -36,6 +37,17 @@ test("counts provider tokens for filling and checks, and exposes calls without u
     cachedInputTokens: 120,
     reasoningTokens: 10,
   });
+  if (process.env.NESTOR_APPLY_EVAL_METRICS_PATH)
+    writeFileSync(
+      process.env.NESTOR_APPLY_EVAL_METRICS_PATH,
+      JSON.stringify({
+        calls:
+          timing.snapshot().modelTurns + timing.snapshot().auxiliaryModelCalls,
+        ...timing.snapshot().tokenUsage,
+        cachedTokensArePartOfInputTokens: true,
+        retriesAreIncluded: true,
+      }),
+    );
 });
 
 test("measures decisions, auxiliary checks, reads, writes, uploads and longest steps without storing content", async () => {
@@ -119,6 +131,36 @@ test("a failed model attempt is counted and active calls are included on stop", 
   resolve?.({});
   await work;
   expect(timing.snapshot()).toMatchObject({ modelTurns: 2, modelMs: 50 });
+});
+
+test("provider retries count as additional calls with unknown tokens until the provider reports them", async () => {
+  const timing = createApplyTiming(() => new Date(0));
+  const model = timing.model({
+    chatWithTools: (_messages, _tools, options) => {
+      options?.onRequestAttempt?.({ attempt: 0, maxAttempts: 2 });
+      options?.onRequestAttempt?.({ attempt: 1, maxAttempts: 2 });
+      return Promise.resolve({
+        usage: {
+          inputTokens: 100,
+          outputTokens: 10,
+          cachedInputTokens: 60,
+          reasoningTokens: 0,
+        },
+      });
+    },
+  });
+  await model.chatWithTools([], [], { parallelToolCalls: true });
+  expect(timing.snapshot()).toMatchObject({
+    modelTurns: 1,
+    transportCalls: 2,
+    transportRetries: 1,
+    tokenUsage: {
+      inputTokens: 100,
+      cachedInputTokens: 60,
+      reportedCalls: 1,
+      unreportedCalls: 1,
+    },
+  });
 });
 
 test("counts every safety read and measures uploads, writes and failed reads", async () => {

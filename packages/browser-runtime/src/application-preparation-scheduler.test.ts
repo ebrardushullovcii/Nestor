@@ -8,13 +8,13 @@ import {
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 test.each([
-  [undefined, 16],
-  ["16", 16],
-  ["99", 16],
+  [undefined, 4],
+  ["16", 4],
+  ["99", 4],
   ["1", 1],
   ["0", 1],
-  ["bad", 16],
-  ["2.5", 16],
+  ["bad", 4],
+  ["2.5", 4],
 ] as const)("application concurrency %s resolves to %i", (value, expected) => {
   expect(applicationPreparationConcurrency(value)).toBe(expected);
 });
@@ -134,10 +134,10 @@ describe("application preparation ownership", () => {
     busy.release();
   });
 
-  test("an unbounded requested capacity still admits at most sixteen workers", async () => {
+  test("an unbounded requested capacity still admits at most four workers", async () => {
     const scheduler = createApplicationPreparationScheduler(Infinity);
     const leases = await Promise.all(
-      Array.from({ length: 16 }, (_, index) =>
+      Array.from({ length: 4 }, (_, index) =>
         scheduler.acquire(`https://site${index}.example/apply`),
       ),
     );

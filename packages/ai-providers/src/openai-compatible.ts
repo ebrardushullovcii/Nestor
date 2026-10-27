@@ -1,3 +1,4 @@
+import { normalizeModelUsage } from "./model-token-usage";
 import {
   AgentTaskExecutionReceiptSchema,
   AgentProviderStatusSchema,
@@ -53,7 +54,6 @@ import {
   resolveTaskReasoningEffortsFromEnvironment,
   type ModelReasoningEffort,
   type ModelReasoningTask,
-  type ModelUsagePayload,
 } from "./openai-compatible-transport";
 import {
   type ModelRequestResilienceOptions,
@@ -150,27 +150,7 @@ function isStableFitRoute(route: {
   );
 }
 
-/** Token usage in one shape whatever API reported it. */
-export function normalizeModelUsage(usage: ModelUsagePayload): {
-  inputTokens: number;
-  outputTokens: number;
-  cachedInputTokens: number;
-  reasoningTokens: number;
-} {
-  const count = (value: number | undefined) =>
-    typeof value === "number" && Number.isFinite(value)
-      ? Math.max(0, Math.round(value))
-      : 0;
-  return {
-    inputTokens: count(usage.prompt_tokens),
-    outputTokens: count(usage.completion_tokens),
-    cachedInputTokens: Math.max(
-      count(usage.prompt_tokens_details?.cached_tokens),
-      count(usage.prompt_cache_hit_tokens),
-    ),
-    reasoningTokens: count(usage.completion_tokens_details?.reasoning_tokens),
-  };
-}
+export { normalizeModelUsage } from "./model-token-usage";
 function buildResumeRewriteProposalPrompt(
   tailoringMode: "conservative" | "balanced" | "aggressive",
 ): string {
@@ -913,6 +893,13 @@ export function createOpenAiCompatibleJobFinderAiClient(
           ...resilience,
           signal: options?.signal,
           onStreamEvent: options?.onStreamEvent,
+          onEvent: (event) => {
+            if (event.type === "attempt_started")
+              options?.onRequestAttempt?.({
+                attempt: event.attempt,
+                maxAttempts: event.maxAttempts,
+              });
+          },
         });
 
         const choice = payload.choices?.[0];

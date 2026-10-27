@@ -24,3 +24,4 @@ export type { ModelStreamEvent } from "./model-request-transport";
 export type { ModelReasoningTask } from "./openai-compatible-transport";
 
 export { buildResumeSkillContextFilter } from "./resume-skill-context";
+export { createModelUsageRecorder } from "./model-usage-scope";
