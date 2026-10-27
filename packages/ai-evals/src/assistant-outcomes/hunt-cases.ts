@@ -187,7 +187,9 @@ export async function seedHuntFixtures(
         jobs: urls.map((url, index) => ({
           title: index < 2 ? "Platform Engineer" : `Outcome hunt ${index}`,
           company: index < 2 ? "Job Board Replica" : "Synthetic Hunt",
-          location: "Remote, Worldwide",
+          // Identical title/company/place on different hosts is one job.
+          // These copies represent distinct roles for the two mode checks.
+          location: index === 0 ? "Remote, Europe" : "Remote, Worldwide",
           workModes: ["remote"],
           url,
           applyUrl: url,
