@@ -300,6 +300,8 @@ const prepareOnlyNetworkGuardStates = new WeakMap<
     preparedValues: Set<string>;
     /** Exact addresses the run is about to open, each good for one navigation. */
     runNavigations: Set<string>;
+    /** Picker choices the run just made, with when, for dependent-list reads. */
+    pickerChoices: Map<string, number>;
     allowedIntermediateRequests: WeakSet<Request>;
     verifiedIntermediateWriteCount: number;
     pendingMutationResponses: Set<Promise<void>>;
@@ -500,6 +502,8 @@ export async function closePrepareOnlyFinalActionWindow(
 export function installPrepareOnlyMutationGuardInPage(guardInput: {
   intermediateMutationsAuthorized: boolean;
   finalActionSignal: string;
+  /** `PICKER_CHOICE_WINDOW_MS`, passed in: this function cannot import. */
+  pickerChoiceWindowMs: number;
 }): void {
   const { intermediateMutationsAuthorized } = guardInput;
   interface InternalGuardState extends PrepareOnlyGuardSnapshot {
@@ -512,6 +516,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
      * not judge, and spend allowances on, what the outer one already let out.
      */
     forwarding: boolean;
+    pickerChoices: Array<{ value: string; at: number }>;
     intermediateMutationsAuthorized: boolean;
     intermediateMutationWindow: IntermediateMutationWindowSnapshot | null;
     attachmentUploadWindow: AttachmentUploadWindow | null;
@@ -548,6 +553,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     refusals: [],
     forwarding: false,
     preparedValues: [],
+    pickerChoices: [],
     intermediateMutationsAuthorized,
     intermediateMutationWindow: null,
     attachmentUploadWindow: null,
@@ -571,6 +577,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
   state.preparedValues ??= [];
   state.refusals ??= [];
   state.forwarding ??= false;
+  state.pickerChoices ??= [];
   state.finalActionAllowed ??= false;
   state.authorizedFormActionWindow ??= null;
   pageWindow["__nestorPrepareOnlyMutationGuardV1"] = state;
@@ -863,6 +870,53 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       new RegExp(guardInput.finalActionSignal, "iu").test(address)
     );
   };
+  // Mirrors the dependent-list read in application-fill-request-policy.ts:
+  // a same-origin GET that carries only picker choices just made, such as
+  // the regions of the chosen country, and names no write.
+  const loadsDependentList = (
+    method: string,
+    url: string | null,
+    bodyText: string | null,
+  ): boolean => {
+    if (normalizeMethod(method) !== "GET" || !url || bodyText) return false;
+    let parsed: URL;
+    try {
+      parsed = new URL(url, window.location.href);
+    } catch {
+      return false;
+    }
+    if (parsed.origin !== window.location.origin) return false;
+    let address = `${parsed.pathname} ${parsed.search}`;
+    for (let pass = 0; pass < 4; pass++) {
+      let next = address;
+      try {
+        next = decodeURIComponent(address);
+      } catch {
+        break;
+      }
+      if (next === address) break;
+      address = next;
+    }
+    if (
+      /save|submit|apply|update|create|complete|send|post/iu.test(address) ||
+      new RegExp(guardInput.finalActionSignal, "iu").test(address)
+    )
+      return false;
+    const now = Date.now();
+    const chosen = state.pickerChoices
+      .filter((choice) => now - choice.at <= guardInput.pickerChoiceWindowMs)
+      .map((choice) => choice.value);
+    const carries = (values: readonly string[]): boolean =>
+      carriesPreparedValue(parsed.pathname, values) ||
+      [...parsed.searchParams.values()].some((value) =>
+        carriesPreparedValue(value, values),
+      );
+    return (
+      chosen.length > 0 &&
+      carries(chosen) &&
+      !carries(state.preparedValues.filter((value) => !chosen.includes(value)))
+    );
+  };
   const isPageOwnedRead = (
     method: string,
     url: string | null,
@@ -872,7 +926,10 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     const normalized = normalizeMethod(method);
     const carriesPrepared = requestCarriesPreparedValue(url, bodyText);
     if (carriesPrepared) {
-      return checksOnSameSite(normalized, url, bodyText);
+      return (
+        checksOnSameSite(normalized, url, bodyText) ||
+        loadsDependentList(normalized, url, bodyText)
+      );
     }
     if (["GET", "HEAD", "OPTIONS"].includes(normalized)) {
       return true;
@@ -1516,6 +1573,22 @@ export function registerPrepareOnlyPreparedValueInPage(value: string): void {
   }
 }
 
+/** Runs inside an application page as Job Finder makes one picker choice. */
+export function markPrepareOnlyPickerChoiceInPage(values: string[]): void {
+  const pageWindow = window as unknown as Record<string, unknown>;
+  const state = pageWindow["__nestorPrepareOnlyMutationGuardV1"] as
+    | { pickerChoices?: Array<{ value: string; at: number }> }
+    | undefined;
+  if (!state) return;
+  const at = Date.now();
+  state.pickerChoices = [
+    ...(state.pickerChoices ?? []).filter(
+      (choice) => !values.includes(choice.value),
+    ),
+    ...values.map((value) => ({ value, at })),
+  ].slice(-16);
+}
+
 /** Runs inside the application page and returns only serializable guard data. */
 export function readPrepareOnlyMutationGuardInPage(): PrepareOnlyGuardSnapshot {
   const pageWindow = window as unknown as Record<string, unknown>;
@@ -1743,6 +1816,7 @@ async function ensureFramePrepareOnlyMutationGuard(
   await frame.evaluate(installPrepareOnlyMutationGuardInPage, {
     intermediateMutationsAuthorized,
     finalActionSignal: FINAL_ACTION_SIGNAL.source,
+    pickerChoiceWindowMs: PICKER_CHOICE_WINDOW_MS,
   });
   // A page handed to the person had its guard opened for them; a run that
   // takes the page back shuts it again unless its own send window is open.
@@ -1773,6 +1847,7 @@ export async function ensurePrepareOnlyMutationGuard(
       blockedAttempts: [],
       preparedValues: new Set<string>(),
       runNavigations: new Set<string>(),
+      pickerChoices: new Map<string, number>(),
       allowedIntermediateRequests: new WeakSet<Request>(),
       verifiedIntermediateWriteCount: 0,
       pendingMutationResponses: new Set<Promise<void>>(),
@@ -1886,6 +1961,8 @@ export async function ensurePrepareOnlyMutationGuard(
           url: request.url(),
           bodyText: request.postData(),
           preparedValues: [...networkGuardState!.preparedValues],
+          pickerChoices: recentPickerChoices(networkGuardState!),
+          frameOrigin: requestFrameOrigin(request),
           ...(navigation ? { navigation } : {}),
         }).allowed
       ) {
@@ -1902,6 +1979,8 @@ export async function ensurePrepareOnlyMutationGuard(
                   url,
                   bodyText: body,
                   preparedValues: [...networkGuardState!.preparedValues],
+                  pickerChoices: recentPickerChoices(networkGuardState!),
+                  frameOrigin: requestFrameOrigin(request),
                   // A redirect of the run's own navigation is still the run's.
                   ...(navigation ? { navigation } : {}),
                 }).allowed,
@@ -2141,6 +2220,7 @@ export async function ensurePrepareOnlyMutationGuard(
     await page.addInitScript(installPrepareOnlyMutationGuardInPage, {
       intermediateMutationsAuthorized: false,
       finalActionSignal: FINAL_ACTION_SIGNAL.source,
+      pickerChoiceWindowMs: PICKER_CHOICE_WINDOW_MS,
     });
     networkGuardState.initScriptInstalled = true;
   }
@@ -2415,6 +2495,43 @@ export async function registerPrepareOnlyPreparedValue(
   }
 }
 
+/** How long after a picker choice its dependent list may load. */
+export const PICKER_CHOICE_WINDOW_MS = 10_000;
+
+function recentPickerChoices(state: {
+  pickerChoices: Map<string, number>;
+}): string[] {
+  const now = Date.now();
+  return [...state.pickerChoices]
+    .filter(([, at]) => now - at <= PICKER_CHOICE_WINDOW_MS)
+    .map(([value]) => value);
+}
+
+/**
+ * Notes a picker choice the run is about to make (its label and the value it
+ * submits), so a same-origin read that loads the list depending on it, such
+ * as the regions of the chosen country, may carry it for a short while.
+ */
+export async function markPrepareOnlyPickerChoice(
+  page: Page,
+  values: readonly string[],
+): Promise<void> {
+  const networkGuardState = prepareOnlyNetworkGuardStates.get(page);
+  if (!networkGuardState) return;
+  const chosen = [...new Set(values.map((value) => value.trim()))].filter(
+    Boolean,
+  );
+  const at = Date.now();
+  for (const value of chosen) networkGuardState.pickerChoices.set(value, at);
+  for (const frame of page.frames()) {
+    try {
+      await frame.evaluate(markPrepareOnlyPickerChoiceInPage, chosen);
+    } catch {
+      // The network guard holds the choice and remains authoritative.
+    }
+  }
+}
+
 export async function getLatestBlockedPrepareOnlyAttempt(
   page: Page,
 ): Promise<PrepareOnlyBlockedAttempt | null> {
@@ -2459,6 +2576,7 @@ export function recordPrepareOnlyRunInterruption(
       blockedAttempts: [],
       preparedValues: new Set<string>(),
       runNavigations: new Set<string>(),
+      pickerChoices: new Map<string, number>(),
       allowedIntermediateRequests: new WeakSet<Request>(),
       verifiedIntermediateWriteCount: 0,
       pendingMutationResponses: new Set<Promise<void>>(),

@@ -36,6 +36,7 @@ import {
   openPrepareOnlyIntermediateMutationWindow,
   closePrepareOnlyAttachmentUploadWindow,
   allowPrepareOnlyRunNavigation,
+  markPrepareOnlyPickerChoice,
   openPrepareOnlyAttachmentUploadWindow,
   registerPrepareOnlyPreparedValue,
   readPrepareOnlyIntermediateWriteCount,
@@ -2423,6 +2424,8 @@ export function createPlaywrightApplyPageSession(input: {
         await registerPrepareOnlyPreparedValue(page, value).catch(
           () => undefined,
         );
+      // The page may load the list that depends on this choice.
+      await markPrepareOnlyPickerChoice(page, [optionLabel, value ?? ""]);
       return mechanics.chooseOption(ref, optionLabel);
     },
     uploadFile: async (ref, file) => {

@@ -423,6 +423,53 @@ describe("Fill in for me sends nothing but the selected resume", () => {
     expect(site.hits.map((hit) => hit.path)).not.toContain("/api/save");
   });
 
+  test("a country picker's choice may load its regions, and nothing else of the person's", async () => {
+    const site = await startSite();
+    site.html(
+      "/form",
+      `<label for="email">Email</label><input id="email" name="email">
+       <label for="country">Country</label>
+       <select id="country" name="country"
+         onchange="fetch('/api/regions?country=' + this.value).then((r) => r.json()).then(() => { document.body.dataset.regions = 'loaded'; }, () => {})">
+         <option value=""></option><option value="PT">Portugal</option></select>`,
+    );
+    const page = await fillPage(site, "/form");
+    const session = createPlaywrightApplyPageSession({ page });
+    const { controls } = await session.readPage();
+    const ref = (id: string) => {
+      const control = controls.find((entry) => entry.id === id)!;
+      return control.ref ?? `c${control.index}`;
+    };
+    await registerPrepareOnlyPreparedValue(page, "robin@example.test");
+    await session.fillText(ref("email"), "robin@example.test");
+    await registerPrepareOnlyPreparedValue(page, "Portugal");
+    await session.chooseOption(ref("country"), "Portugal");
+    await page.waitForFunction(
+      () => document.body.dataset.regions === "loaded",
+    );
+    const others = await page.evaluate(async () => {
+      const get = (url: string) =>
+        fetch(url).then(
+          (response) => response.ok,
+          () => false,
+        );
+      return {
+        withEmail: await get(
+          "/api/regions?country=PT&email=robin%40example.test",
+        ),
+        save: await get("/api/regions/save?country=PT"),
+        update: await get("/api/regions?country=PT&action=update"),
+      };
+    });
+    expect(others).toEqual({ withEmail: false, save: false, update: false });
+    expect(
+      site.hits
+        .filter((hit) => hit.path.startsWith("/api/"))
+        .map((hit) => `${hit.method} ${hit.path}${hit.query}`),
+    ).toEqual(["GET /api/regions?country=PT"]);
+    expect(writes(site)).toEqual([]);
+  });
+
   test("GraphQL is read by its parser: a CR-hidden mutation and a defaulted answer never pass", async () => {
     const site = await startSite();
     site.html("/form", "<input>");

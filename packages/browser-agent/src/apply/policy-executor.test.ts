@@ -2498,8 +2498,11 @@ describe("a site that saves as you go", () => {
     "Save",
     "Done",
     "Absenden",
+    // Outside a form, or once a field holds an answer, these are the
+    // person's too; see the Fill presses below for where they are not.
     "Add another",
-    "Accept cookies",
+    "Accept",
+    "Apply",
     "✓",
     "",
   ])("in Fill, %j is never pressed: the person gets it", async (label) => {
@@ -2653,6 +2656,182 @@ describe("a site that saves as you go", () => {
       },
     );
     expect(pressed).toBe(1);
+  });
+
+  describe("in Fill, presses that only help it fill", () => {
+    const fillPresses = async (
+      page: RawApplyPage,
+      refs: string[],
+      options: {
+        guardState?: ReturnType<typeof createApplyGuardState>;
+        continuation?: boolean;
+      } = {},
+    ) => {
+      const pressed: string[] = [];
+      const { config } = configFor(page, {
+        hands: {
+          clickElement: (ref) => {
+            pressed.push(ref);
+            return Promise.resolve({ ok: true, observedValue: "clicked" });
+          },
+        },
+      });
+      const guardState = options.guardState ?? createApplyGuardState();
+      const outcomes = [];
+      for (const ref of refs)
+        outcomes.push(
+          await executeApplyProposal(
+            { tool: "click", ref },
+            observationOf(page).signature,
+            {
+              config: {
+                ...config,
+                intermediateWritesAuthorized: false,
+                safety: safetyThatBlocksOneSave(),
+                application: {
+                  ...config.application,
+                  ...(options.continuation
+                    ? { continuation: { sourceUrls: [] } }
+                    : {}),
+                },
+              },
+              now,
+              guardState,
+            },
+          ),
+        );
+      return { pressed, outcomes };
+    };
+    const banner = (labels: string[], section = "Cookie preferences") =>
+      labels.map((label, index) => ({
+        index,
+        label,
+        visible: true,
+        disabled: false,
+        section,
+      }));
+
+    test("a cookie banner is dismissed with Reject, whichever button was asked for", async () => {
+      const page = rawPage({ actions: banner(["Accept all", "Reject all"]) });
+      const { pressed, outcomes } = await fillPresses(page, ["a0"]);
+      expect(pressed).toEqual(["a1"]);
+      expect(outcomes[0]?.kind).toBe("moved");
+    });
+
+    test("a banner without Reject is dismissed with Necessary only, else Accept", async () => {
+      const necessary = rawPage({
+        actions: banner(["Accept all cookies", "Necessary cookies only"]),
+      });
+      expect((await fillPresses(necessary, ["a0"])).pressed).toEqual(["a1"]);
+      const acceptOnly = rawPage({
+        actions: banner(["OK"], "We use cookies to run this site."),
+      });
+      expect((await fillPresses(acceptOnly, ["a0"])).pressed).toEqual(["a0"]);
+    });
+
+    test("Accept outside a cookie banner is the person's", async () => {
+      const page = rawPage({ actions: banner(["Accept"], "Offer details") });
+      const { pressed, outcomes } = await fillPresses(page, ["a0"]);
+      expect(pressed).toEqual([]);
+      expect(outcomes[0]?.kind).toBe("paused");
+    });
+
+    test("the button that opens the form is pressed once, before anything is filled", async () => {
+      const listing = () =>
+        rawPage({
+          bodyText: "Platform Engineer. About the role.",
+          actions: [
+            { index: 0, label: "Apply now", visible: true, disabled: false },
+          ],
+        });
+      const first = await fillPresses(listing(), ["a0", "a0"]);
+      expect(first.pressed).toEqual(["a0"]);
+      expect(first.outcomes.map((outcome) => outcome.kind)).toEqual([
+        "moved",
+        // The second time it reads as the send, and nothing is ready.
+        "refused",
+      ]);
+
+      const filled = createApplyGuardState();
+      filled.fieldWrites = 1;
+      const afterFilling = await fillPresses(listing(), ["a0"], {
+        guardState: filled,
+      });
+      expect(afterFilling.pressed).toEqual([]);
+
+      const continued = await fillPresses(listing(), ["a0"], {
+        continuation: true,
+      });
+      expect(continued.pressed).toEqual([]);
+    });
+
+    test("an Apply button that would submit a form is not an opener", async () => {
+      const page = rawPage({
+        actions: [
+          {
+            index: 0,
+            label: "Apply",
+            visible: true,
+            disabled: false,
+            formAction: "https://apply.example.test/form",
+            formMethod: "POST",
+          },
+        ],
+      });
+      const { pressed, outcomes } = await fillPresses(page, ["a0"]);
+      expect(pressed).toEqual([]);
+      expect(outcomes[0]?.kind).toBe("paused");
+    });
+
+    test("Add another inside the form adds one row, and the next waits for it to be filled", async () => {
+      const page = rawPage({
+        controls: [rawControl({ index: 0, label: "Job title" })],
+        actions: [
+          {
+            index: 0,
+            label: "+ Add another work history entry",
+            visible: true,
+            disabled: false,
+            section: "Work history",
+            inForm: true,
+          },
+        ],
+      });
+      const guardState = createApplyGuardState();
+      const twice = await fillPresses(page, ["a0", "a0"], { guardState });
+      expect(twice.pressed).toEqual(["a0"]);
+      expect(twice.outcomes[1]?.kind).toBe("paused");
+
+      guardState.fieldWrites += 1;
+      expect((await fillPresses(page, ["a0"], { guardState })).pressed).toEqual(
+        ["a0"],
+      );
+    });
+
+    test("an Add button outside the form, or one that saves, is the person's", async () => {
+      const page = rawPage({
+        controls: [rawControl({ index: 0, label: "Job title" })],
+        actions: [
+          { index: 0, label: "Add", visible: true, disabled: false },
+          {
+            index: 1,
+            label: "Add to favourites",
+            visible: true,
+            disabled: false,
+            inForm: true,
+          },
+          {
+            index: 2,
+            label: "Add and continue",
+            visible: true,
+            disabled: false,
+            inForm: true,
+          },
+        ],
+      });
+      const { pressed } = await fillPresses(page, ["a0", "a1", "a2"]);
+      expect(pressed).toEqual([]);
+    });
   });
 
   test("a press shuts the upload window first, so it cannot carry the selected file", async () => {
