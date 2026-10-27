@@ -16,14 +16,22 @@ export interface ActivityFeedState {
 
 let state: ActivityFeedState = { feed: null, failed: false };
 let started = false;
+/** Bumped when the last user unmounts: a read or tick from before is dropped. */
+let generation = 0;
+let users = 0;
 let pending: ReturnType<typeof setTimeout> | null = null;
+let unsubscribes: Array<() => void> = [];
 const listeners = new Set<() => void>();
 
 function read(): void {
-  // Hosts without the bridge (tests of other screens) have no Activity.
+  // Hosts without the bridge (tests of other screens) have no Activity, and
+  // a tick that outlived its window has nothing to read.
+  if (typeof window === "undefined") return;
   const activity = window.nestor?.activity;
   if (!activity) return;
+  const current = generation;
   const settle = (next: ActivityFeedState) => {
+    if (current !== generation) return;
     state = next;
     for (const listener of listeners) listener();
   };
@@ -40,7 +48,7 @@ const REFRESH_GAP_MS = 1000;
 
 /** Reads again soon; a burst of changes becomes one read. */
 export function refreshActivityFeed(): void {
-  if (pending !== null) return;
+  if (!started || pending !== null) return;
   pending = setTimeout(() => {
     pending = null;
     read();
@@ -51,11 +59,24 @@ function start(): void {
   if (started || typeof window === "undefined" || !window.nestor?.activity)
     return;
   started = true;
+  const current = generation;
   afterFirstScreen(() => {
+    if (current !== generation) return;
     read();
-    window.nestor.jobs.onChange?.(refreshActivityFeed);
-    window.nestor.jobs.onSearchStatus?.(refreshActivityFeed);
+    unsubscribes = [
+      window.nestor.jobs.onChange?.(refreshActivityFeed),
+      window.nestor.jobs.onSearchStatus?.(refreshActivityFeed),
+    ].filter((unsubscribe): unsubscribe is () => void => !!unsubscribe);
   });
+}
+
+/** The last user went away: no timer, listener or read outlives it. */
+function stop(): void {
+  generation += 1;
+  started = false;
+  if (pending !== null) clearTimeout(pending);
+  pending = null;
+  for (const unsubscribe of unsubscribes.splice(0)) unsubscribe();
 }
 
 function subscribe(listener: () => void): () => void {
@@ -66,6 +87,13 @@ function subscribe(listener: () => void): () => void {
 const snapshot = () => state;
 
 export function useActivityFeed(): ActivityFeedState {
-  useEffect(start, []);
+  useEffect(() => {
+    users += 1;
+    start();
+    return () => {
+      users -= 1;
+      if (users === 0) stop();
+    };
+  }, []);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
