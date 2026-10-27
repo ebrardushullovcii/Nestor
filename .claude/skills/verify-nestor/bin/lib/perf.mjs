@@ -9,6 +9,7 @@ import {
   symlinkSync,
   writeFileSync,
   existsSync,
+  readdirSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -759,6 +760,18 @@ function print(size, result) {
 const options = parseArgs(process.argv.slice(2));
 if (options.help) {
   console.log(HELP);
+  process.exit(0);
+}
+if (options.seedInto) {
+  const jobs = options.sizes[0];
+  const sites = options.sites?.[0] ?? (jobs > 1000 ? 900 : 30);
+  mkdirSync(options.seedInto, { recursive: true });
+  if (readdirSync(options.seedInto).length > 0)
+    throw new Error(`--seed-into takes an empty folder: ${options.seedInto}`);
+  await seed(options.seedInto, jobs, sites);
+  console.log(
+    `Seeded ${options.seedInto} with ${jobs} jobs and ${sites} job sites. Launch it with NESTOR_USER_DATA_DIR=${options.seedInto}`,
+  );
   process.exit(0);
 }
 if (options.load || options.chromium || options.observe) {
