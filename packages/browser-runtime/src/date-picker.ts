@@ -89,23 +89,29 @@ export async function pickCalendarDate(
   locator: Locator,
   value: string,
 ): Promise<ApplyWriteResult | null> {
-  const placeholder = await locator
-    .evaluate((element) => {
-      // Mirrors the reader's date-picker test in apply-page-mechanics.
-      if (!(element instanceof HTMLInputElement) || element.type !== "text")
-        return null;
-      const picker =
-        /(?:^|[\s_-])date(?:picker)?(?:$|[\s_-])|datepicker/iu.test(
-          element.className,
-        ) ||
-        Boolean(
-          element.closest("[class*='datepicker' i], [class*='date-picker' i]"),
-        ) ||
-        /pick (?:a )?date|select (?:a )?date|\b(?:dd|mm)\s*[/.-]\s*(?:dd|mm)\s*[/.-]\s*(?:yy)?yy\b/iu.test(
-          element.placeholder,
-        );
-      return picker ? element.placeholder : null;
-    })
+  // A control that cannot be asked (a stand-in in a test, a detached
+  // field) is not a date picker: it is written as plain text.
+  const placeholder = await Promise.resolve()
+    .then(() =>
+      locator.evaluate((element) => {
+        // Mirrors the reader's date-picker test in apply-page-mechanics.
+        if (!(element instanceof HTMLInputElement) || element.type !== "text")
+          return null;
+        const picker =
+          /(?:^|[\s_-])date(?:picker)?(?:$|[\s_-])|datepicker/iu.test(
+            element.className,
+          ) ||
+          Boolean(
+            element.closest(
+              "[class*='datepicker' i], [class*='date-picker' i]",
+            ),
+          ) ||
+          /pick (?:a )?date|select (?:a )?date|\b(?:dd|mm)\s*[/.-]\s*(?:dd|mm)\s*[/.-]\s*(?:yy)?yy\b/iu.test(
+            element.placeholder,
+          );
+        return picker ? element.placeholder : null;
+      }),
+    )
     .catch(() => null);
   if (placeholder === null) return null;
   const wanted = parseWantedDate(value);
