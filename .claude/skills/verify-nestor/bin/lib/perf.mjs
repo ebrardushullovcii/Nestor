@@ -1,6 +1,5 @@
 // `perf`: measures Nestor's speed on synthetic hunts of a given size, in the
 // built app, the way a person uses it. Run `perf --help` for usage.
-import { execFileSync } from "node:child_process";
 import {
   readFileSync,
   cpSync,
@@ -20,12 +19,14 @@ import {
   tempRoot,
   workRoot,
 } from "./common.mjs";
+import { topFunctions } from "./perf-sample.mjs";
 
 const HELP = `perf: Nestor speed on a synthetic hunt, in the built app
 
 Usage:
   pnpm perf [--sizes 300,20000] [--launches 5] [--only launch|screens] [--out <dir>]
-  pnpm perf --search
+  pnpm perf --load search|apply|search,apply [--sites 90,900] [--chromium 8]
+  pnpm perf --observe <label> [--for 900]
 
 Build first (pnpm --filter @nestor/desktop build); perf runs apps/desktop/out
 as is. Each size gets its own private data folder, seeded before launch with a
@@ -45,25 +46,62 @@ Per size it reports:
             (Event Timing, input to next paint) p95 and max, long tasks over
             50 ms, and long animation frames. Memory is the total working set of
             every app process, idle and after all screens.
-  search    with --search only: a fresh instance (bin/up --ai live) imports
-            the synthetic resume, adds the replica board and searches it
-            (journeys/search-memory.mjs). Reports memory across every app
-            process before, at its peak and 10 s after, and the browser pages
-            still open. It makes real model calls with this checkout's keys.
+
+Load (--load, scripted model, replica sites only):
+  load      seeds the size (default 20,000 jobs) with that many of the
+            replica's 900 sites (an even mix of boards, aggregators, gates,
+            script-rendered, rate-limited and slow ones; one run per --sites
+            value) and 20 approved jobs on replica application forms, then
+            launches the built app on a scripted local model, so no real model
+            call is made. It starts a search of every site, an Apply batch
+            (Fill in for me) of the 20, or both at once, and moves around the
+            app like a person meanwhile. It records memory across every app
+            process (Task Manager's private working set every few seconds,
+            working set and CPU every second), browser pages as they open
+            and close, main-process stalls, and the open screen's
+            interaction p95, slowest interactions and long tasks. After an
+            Apply batch it opens the oldest waiting application, which the
+            waiting-page limit closed, and times its refill.
+  chromium  --chromium N opens the same N pages (replica application forms,
+            or --urls) in Nestor's own browser and then in plain Chromium
+            (Playwright's build), and reads Task Manager's private working
+            set across all processes of each, per page. Windows only.
+  observe   --observe <label> samples a running verify-nestor instance (start
+            it with bin/up, attach before starting the search) like a load
+            run, until its search and Apply work stop, or --for seconds pass.
+            It makes no clicks and no model calls of its own; the timeline is
+            saved in the instance's evidence folder.
 
 Targets (D2): launch < 1 s; clicks and switches <= 100 ms p95; no long task over
-50 ms; the same work at 300 and 20,000 jobs (within 1.2x); search under 800 MB
-with no browser page left open after it.
+50 ms; the same work at 300 and 20,000 jobs (within 1.2x); under --load, memory
+back near idle with no browser page open within seconds of the work ending.
 
 Options:
   --sizes     job counts to measure, comma-separated (default 300,20000)
   --sites     job sites per size, comma-separated (default by size, see above)
   --launches  cold and warm launches each (default 5)
   --only      launch or screens, to run one part
-  --search    measure a replica search instead of the sizes (see above)
+  --load      search, apply or search,apply under load (see above)
+  --chromium  pages to open at once, first in Nestor's own browser (the built
+            app), then in plain Chromium, measured the same way
+  --shortlist-resumes  written (default, as in a real hunt) or unwritten,
+            which keeps the resume writer busy throughout a load run
+  --memory-detail  with --load: heap snapshots of main and the app's window
+            before the work, at its end and after, summarized by
+            constructor, and IPC traffic per channel. Snapshots pause the
+            app for seconds; the run's timings are not comparable
+  --urls      a file of real job-site URLs (one per line) for --chromium to
+            open instead of replica pages: read only, nothing is filled in
+            or sent; for the per-page weight of real boards
+  --observe   label of a running verify-nestor instance to sample
+  --for       seconds --observe watches at most (default 900)
   --cpu-profile  record renderer CPU profiles of one more warm launch and of
             each first visit (.cpuprofile files, open in Chrome DevTools) and
-            print their busiest functions; profiling slows what it records
+            print their busiest functions; with --load, main-process and
+            renderer profiles of the run, also during main-process stalls and
+            the slowest interactions. Profiling slows what it records.
+            With NESTOR_PERF_TRACE=1 a load run also records a Chromium
+            trace of every process (trace.json, open in Perfetto)
   --out       folder for perf-<time>.json (default ~/Projects/nestor-agent-work/perf)
   --keep      keep the seeded data folders (printed) for a later look
   --seed-into <dir>  only seed that (empty) data folder with the first size and
@@ -96,7 +134,13 @@ function parseArgs(argv) {
     else if (arg === "--only") options.only = value();
     else if (arg === "--out") options.out = path.resolve(value());
     else if (arg === "--keep") options.keep = true;
-    else if (arg === "--search") options.search = true;
+    else if (arg === "--load") options.load = value().split(",");
+    else if (arg === "--chromium") options.chromium = Number(value());
+    else if (arg === "--observe") options.observe = value();
+    else if (arg === "--for") options.observeFor = Number(value());
+    else if (arg === "--urls") options.urls = path.resolve(value());
+    else if (arg === "--memory-detail") options.memoryDetail = true;
+    else if (arg === "--shortlist-resumes") options.shortlistResumes = value();
     else if (arg === "--cpu-profile") options.cpuProfile = true;
     else if (arg === "--seed-into") options.seedInto = path.resolve(value());
     else throw new Error(`Unknown option ${arg}; see --help`);
@@ -108,7 +152,7 @@ function parseArgs(argv) {
   return options;
 }
 
-async function seed(dataDir, jobs, sites) {
+async function seed(dataDir, jobs, sites, extra = {}) {
   const { createServer } = requireDesktop("vite");
   const src = (dir) => path.join(checkout, "packages", dir, "src");
   const server = await createServer({
@@ -145,6 +189,7 @@ async function seed(dataDir, jobs, sites) {
       file: path.join(dataDir, "job-finder.sqlite"),
       jobs,
       sites,
+      ...extra,
     });
   } finally {
     await server.close();
@@ -189,7 +234,7 @@ function launchEnv(appDir, dataDir) {
   };
 }
 
-async function launch(appDir, dataDir, { profileFile } = {}) {
+async function launch(appDir, dataDir, { profileFile, extraEnv } = {}) {
   const { _electron } = requireDesktop("playwright");
   const app = await _electron.launch({
     executablePath: requireDesktop("electron"),
@@ -199,6 +244,7 @@ async function launch(appDir, dataDir, { profileFile } = {}) {
       ...launchEnv(appDir, dataDir),
       // The main process notes its startup steps in the data folder.
       ...(profileFile ? { ELECTRON_ENABLE_LOGGING: "1" } : {}),
+      ...extraEnv,
     },
     timeout: 60_000,
   });
@@ -347,24 +393,6 @@ async function measureLaunches(dataDir, runs, { cpuProfileDir } = {}) {
 }
 
 // The busiest functions in a renderer CPU profile, by self time.
-function topFunctions(profile, count = 12) {
-  const self = new Map();
-  const interval =
-    (profile.endTime - profile.startTime) / Math.max(1, profile.samples.length);
-  const hits = new Map();
-  for (const id of profile.samples) hits.set(id, (hits.get(id) ?? 0) + 1);
-  for (const node of profile.nodes) {
-    const { functionName, url, lineNumber } = node.callFrame;
-    if (["(idle)", "(program)", "(root)"].includes(functionName)) continue;
-    const key = `${functionName || "(anonymous)"} ${url.split("/").pop()}:${lineNumber + 1}`;
-    self.set(key, (self.get(key) ?? 0) + (hits.get(node.id) ?? 0) * interval);
-  }
-  return [...self.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, count)
-    .map(([key, us]) => `${Math.round(us / 1000)} ms ${key}`);
-}
-
 async function measureScreens(dataDir, { cpuProfileDir } = {}) {
   const appDir = appCopy();
   const { app, page } = await launch(appDir, dataDir);
@@ -712,73 +740,74 @@ function print(size, result) {
   console.log(lines.join("\n"));
 }
 
-function measureSearch() {
-  const cli = path.join(import.meta.dirname, "cli.mjs");
-  const env = {
-    ...process.env,
-    NESTOR_VERIFY_LABEL: `perf-search-${process.pid}`,
-  };
-  const run = (...args) =>
-    execFileSync(process.execPath, [cli, ...args], {
-      env,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "inherit"],
-    });
-  run("up", "--ai", "live");
-  try {
-    return JSON.parse(
-      run(
-        "drive",
-        "run",
-        path.join(import.meta.dirname, "../../journeys/search-memory.mjs"),
-      ),
-    );
-  } finally {
-    run("down");
-  }
-}
-
 const options = parseArgs(process.argv.slice(2));
 if (options.help) {
   console.log(HELP);
   process.exit(0);
 }
-if (options.search) {
+if (options.load || options.chromium || options.observe) {
+  const load = await import("./perf-load.mjs");
   mkdirSync(options.out, { recursive: true });
-  const result = measureSearch();
-  const types = Object.entries(result.peak?.byTypeMB ?? {})
-    .map(([k, v]) => `${k} ${v}`)
-    .join(", ");
-  console.log(
-    [
-      `search: ${Object.entries(result.stageMs)
-        .map(([k, v]) => `${k} ${v} ms`)
-        .join(", ")}`,
-      `  memory MB (working set): before ${result.beforeMB}, peak ${result.peak?.totalMB} (${types}; private ${result.peak?.privateMB}), 10 s after ${result.afterMB}`,
-      `  browser pages left open: ${result.pagesLeftOpen.length ? result.pagesLeftOpen.map((p) => `${p.type} ${p.url}`).join(", ") : "none"}`,
-    ].join("\n"),
-  );
+  const at = new Date().toISOString();
+  const results = [];
+  if (options.observe) {
+    results.push(await load.observe(options.observe, options.observeFor));
+    console.log(load.printObserved(results[0]));
+  }
+  if (options.load) {
+    if (options.load.some((k) => !["search", "apply"].includes(k)))
+      throw new Error("--load takes search, apply or search,apply");
+    const jobs = options.sizes.length === 2 ? 20000 : options.sizes[0];
+    for (const sites of options.sites ?? [900]) {
+      const profileDir = options.cpuProfile
+        ? mkdtempSync(path.join(options.out, `cpu-load-${sites}-`))
+        : undefined;
+      const memoryDir = options.memoryDetail
+        ? mkdtempSync(path.join(options.out, `heap-load-${sites}-`))
+        : undefined;
+      const result = await load.measureLoad({
+        memoryDir,
+        jobs,
+        sites,
+        kinds: options.load,
+        shortlistResumes: options.shortlistResumes,
+        profileDir,
+        seed,
+        appCopy,
+        launch,
+      });
+      results.push(result);
+      console.log(load.printLoad(result));
+    }
+  }
+  if (options.chromium) {
+    const realUrls = options.urls
+      ? readFileSync(options.urls, "utf8").split(/\r?\n/u).filter(Boolean)
+      : null;
+    results.push(
+      await load.measureNestorPages(options.chromium, realUrls, {
+        seed,
+        appCopy,
+        launch,
+      }),
+    );
+    console.log(load.printChromium(results.at(-1)));
+    results.push(
+      await load.measureChromium(
+        options.chromium,
+        options.urls
+          ? readFileSync(options.urls, "utf8").split(/\r?\n/u).filter(Boolean)
+          : null,
+      ),
+    );
+    console.log(load.printChromium(results.at(-1)));
+  }
   const file = path.join(
     options.out,
-    `perf-search-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+    `perf-load-${at.replace(/[:.]/g, "-")}.json`,
   );
-  writeFileSync(
-    file,
-    JSON.stringify({ at: new Date().toISOString(), search: result }, null, 2),
-  );
+  writeFileSync(file, JSON.stringify({ at, results }, null, 2));
   console.log(`\nfull results: ${file}`);
-  process.exit(0);
-}
-if (options.seedInto) {
-  mkdirSync(options.seedInto, { recursive: true });
-  const jobs = options.sizes[0];
-  console.log(
-    await seed(
-      options.seedInto,
-      jobs,
-      options.sites?.[0] ?? (jobs > 1000 ? 900 : 30),
-    ),
-  );
   process.exit(0);
 }
 if (!existsSync(path.join(desktopDir, "out", "main"))) {

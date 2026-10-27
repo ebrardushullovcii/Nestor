@@ -38,7 +38,18 @@ export async function seedPerfWorkspace(input: {
   file: string;
   jobs: number;
   sites: number;
-}): Promise<Record<string, number>> {
+  /** Job site URLs to add instead of invented example.test ones. */
+  siteUrls?: string[];
+  /** Replica application pages: one approved job each, for an Apply batch. */
+  applyUrls?: string[];
+  /**
+   * A hunt's shortlist has its resumes written already. "unwritten" leaves
+   * them for the resume writer, which then runs throughout.
+   */
+  shortlistResumes?: "written" | "unwritten";
+  /** A synthetic resume PDF Apply attaches, already in the data folder. */
+  resumeFile?: string;
+}): Promise<Record<string, number | number[]>> {
   const store = openJobStore(input.file);
   const started = performance.now();
   try {
@@ -55,6 +66,19 @@ export async function seedPerfWorkspace(input: {
         currentLocation: "Lisbon, Portugal",
         email: "riley.okafor@example.test",
         skills: ["TypeScript", "React", "Accessibility"],
+        ...(input.resumeFile
+          ? {
+              baseResume: {
+                ...fresh.baseResume,
+                fileName: "riley-okafor-resume.pdf",
+                storagePath: input.resumeFile,
+                uploadedAt: "2026-10-01T09:00:00.000Z",
+                textContent:
+                  "Riley Okafor\nFrontend engineer\nBuilds calm tools for busy teams.",
+                extractionStatus: "ready",
+              },
+            }
+          : {}),
       },
       JobSearchPreferencesSchema.parse({
         targetRoles: ["Frontend Engineer"],
@@ -89,13 +113,14 @@ export async function seedPerfWorkspace(input: {
     );
 
     const sites = createJobSitesStore(store);
-    for (let from = 0; from < input.sites; from += 200)
-      sites.add({
-        text: Array.from(
-          { length: Math.min(200, input.sites - from) },
-          (_, i) => `https://careers${from + i}.example.test/jobs`,
-        ).join("\n"),
-      });
+    const siteUrls =
+      input.siteUrls ??
+      Array.from(
+        { length: input.sites },
+        (_, i) => `https://careers${i}.example.test/jobs`,
+      );
+    for (let from = 0; from < siteUrls.length; from += 200)
+      sites.add({ text: siteUrls.slice(from, from + 200).join("\n") });
 
     const ids: number[] = [];
     for (let from = 0; from < input.jobs; from += 1000) {
@@ -158,6 +183,17 @@ export async function seedPerfWorkspace(input: {
     };
     move(hidden, "hidden");
     move(shortlisted, "shortlisted");
+    if (input.shortlistResumes !== "unwritten")
+      store.transaction(() => {
+        const now = Date.now();
+        for (const id of shortlisted)
+          store
+            .sql(
+              `INSERT INTO resumes (job_id, level, state, updated_at, approved_at, pdf_path)
+               VALUES (?, 'original', 'ready', ?, NULL, NULL)`,
+            )
+            .run(id, now);
+      });
     if (approved.length) {
       move(approved, "shortlisted");
       approveOriginalResumesForTests(store, approved);
@@ -165,9 +201,41 @@ export async function seedPerfWorkspace(input: {
     }
     if (applied.length) seedTrackerDemo(store, applied);
 
+    const applyIds: number[] = [];
+    if (input.applyUrls?.length) {
+      const saved = store.saveFoundJobs({
+        searchId: null,
+        jobs: input.applyUrls.map((url, i) => ({
+          title: `Frontend Engineer, replica ${i + 1}`,
+          company: `Replica Co ${i + 1}`,
+          location: "Remote",
+          workModes: ["remote"],
+          url,
+          applyUrl: url,
+          sourceId: "replica",
+          sourceLabel: new URL(url).host,
+          sourceJobId: `replica-${i + 1}`,
+          postedAt: "2026-10-20T08:00:00.000Z",
+          salaryText: null,
+          salaryMin: null,
+          salaryMax: null,
+          salaryCurrency: null,
+          seniority: null,
+          employmentType: "Full-time",
+          summary: "A replica application for a load run.",
+          description: description(i),
+        })),
+      });
+      store.moveJobs({ selection: { ids: saved.ids }, to: "shortlisted" });
+      approveOriginalResumesForTests(store, saved.ids);
+      store.setStage(saved.ids, "resume");
+      applyIds.push(...saved.ids);
+    }
+
     return {
       jobs: ids.length,
-      sites: input.sites,
+      sites: siteUrls.length,
+      applyIds,
       hidden: hidden.length,
       shortlisted: shortlisted.length,
       approved: approved.length,
