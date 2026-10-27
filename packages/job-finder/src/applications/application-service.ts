@@ -266,6 +266,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     row: ApplicationRow,
     settings: JobFinderSettings,
   ): Promise<ApplicationAutomationMode | null> {
+    // The person pressed Open to look: that refill never sends.
+    if (applications.isReviewRefill(row.id)) return "confirm_before_submit";
     const instruction = applications.instructionFor(row.id);
     if (instruction) {
       const requested = await deps.instructionMode?.({

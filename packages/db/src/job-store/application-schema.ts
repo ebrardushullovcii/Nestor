@@ -14,7 +14,9 @@ CREATE TABLE IF NOT EXISTS applications (
   submitted_at INTEGER,
   error TEXT,
   submission_outcome_id TEXT UNIQUE,
-  submission_outcome_json TEXT
+  submission_outcome_json TEXT,
+  -- 1 while Open refills a lost page: that run never sends.
+  review_refill INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS applications_by_updated ON applications(updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS applications_by_state ON applications(state, updated_at DESC, id DESC);
@@ -138,6 +140,12 @@ WHEN NEW.state IN ('stopped', 'failed', 'submitted', 'uncertain') BEGIN
       WHERE n.task_id = needs_you.id AND n.attempt = a.attempt
         AND a.state IN ('running', 'needs_you')
     );
+END;
+
+-- The refill ends with its run; a restart that requeues it keeps it.
+CREATE TRIGGER IF NOT EXISTS applications_review_refill_done AFTER UPDATE OF state ON applications
+WHEN NEW.review_refill = 1 AND NEW.state NOT IN ('queued', 'running') BEGIN
+  UPDATE applications SET review_refill = 0 WHERE id = NEW.id;
 END;
 
 CREATE TRIGGER IF NOT EXISTS applications_approval_removed AFTER UPDATE OF stage ON jobs

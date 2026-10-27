@@ -90,7 +90,7 @@ function ApplyActions(props: { details: ApplicationDetails }) {
               title:
                 kind === "open"
                   ? restoring
-                    ? "Restoring the form for your review. Apply won't send it."
+                    ? "Restoring the form for your review. Restoring it won't send it."
                     : "Opened the application page"
                   : "Stopped. Apply won't send it.",
             }
