@@ -142,12 +142,21 @@ function nativeFinishQuestion(
   item: string,
   observation: ApplyFormObservation | null,
   posting: ApplyAgentConfig["sources"]["posting"],
-): string {
+): string | string[] {
   const controls = (observation?.controls ?? []).filter(
     (control) => control.visible && !control.disabled,
   );
-  const referenced = controls.find((control) => control.ref === item.trim());
-  if (referenced) return questionPrompt(referenced);
+  // The tool parser groups overflow items with semicolons; preserve every
+  // field's identity there too, rather than making an extra free-text task.
+  const refs = item.split(";").map((ref) => ref.trim());
+  const referenced = refs.map((ref) =>
+    controls.find((control) => control.ref === ref),
+  );
+  if (referenced.some((control) => control !== undefined))
+    return refs.map((ref, index) => {
+      const control = referenced[index];
+      return control ? questionPrompt(control) : ref;
+    });
 
   // Compatibility with older finish messages that explicitly ask what value
   // to enter in a named field. Do not use a shared keyword as question identity.
@@ -1609,7 +1618,7 @@ async function runMeasuredApplyAgent(
           needsPerson: false,
         });
       case "finished": {
-        forPerson = (outcome.forPerson ?? []).map((item) =>
+        forPerson = (outcome.forPerson ?? []).flatMap((item) =>
           nativeFinishQuestion(
             item,
             pageTools.state.observation,

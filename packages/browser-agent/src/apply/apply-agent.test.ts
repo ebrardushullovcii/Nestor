@@ -8789,6 +8789,32 @@ describe("a finish that says needsPerson always ends paused", () => {
     expect(result.outcome).toBe("paused");
     expect(result.readyToSend).toBeNull();
     expect(finalPress).not.toHaveBeenCalled();
+    const answer = "+44 7700 900123";
+    input.sources.reusableAnswers = [
+      {
+        id: "application_phone",
+        kind: "other",
+        label: "Phone *",
+        question: "Phone *",
+        answer,
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
+    const continued = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "type", args: { ref: "c1", text: answer } },
+        {
+          name: "finish",
+          args: { reason: "The phone is filled; the form is ready." },
+        },
+      ]),
+    );
+    expect(phone.value).toBe(answer);
+    expect(continued.outcome).toBe("awaiting_your_review");
+    expect(continued.pauses).toEqual([]);
+    expect(finalPress).not.toHaveBeenCalled();
   });
 
   test("finish binds the field before its fresh read renumbers controls", async () => {
@@ -8810,6 +8836,41 @@ describe("a finish that says needsPerson always ends paused", () => {
     expect(handedOver(result)).toEqual(["Phone *"]);
     expect(result.outcome).toBe("paused");
   });
+
+  test.each([false, true])(
+    "field refs past twenty keep native questions and separate manual steps (%s)",
+    async (manualStep) => {
+      const labels = Array.from(
+        { length: 23 },
+        (_, index) => `Form question ${index + 1}`,
+      );
+      const result = await runApplyAgent(
+        config(
+          page({
+            controls: [
+              nameControl(),
+              ...labels.map((label, index) => field(index + 1, label)),
+            ],
+          }),
+          confirmFirst,
+        ),
+        repeatingModel("finish", {
+          reason: "These fields need the person.",
+          needsPerson: true,
+          forPerson: [
+            ...labels.map((_, index) => `c${index + 1}`),
+            ...(manualStep ? [mfa] : []),
+          ],
+        }),
+      );
+      expect(handedOver(result)).toEqual([
+        ...labels,
+        ...(manualStep ? [mfa] : []),
+      ]);
+      expect(result.outcome).toBe("paused");
+      expect(result.readyToSend).toBeNull();
+    },
+  );
 
   test("a wrapped confirmation keeps a filled choice field's native question key and options", async () => {
     const question = "Are you over the age of 21?";
