@@ -63,7 +63,7 @@ export function assessFitWorkLocation(
           ` ${normalized(name)} `,
         ),
     ) ||
-    /\b(worldwide|globally|global|anywhere in (?:the )?world|any country|all countries|europe|emea|apac|americas|asia|africa|oceania)\b/u.test(
+    /\b(worldwide|globally|global|anywhere in (?:the )?world|any country|all countries|europe(?:an(?!\s+(?:union|economic\s+area)\b))?|emea|apac|americas|asia|africa|oceania)\b/u.test(
       quote,
     ) ||
     (!foreign && /\banywhere\b/u.test(quote));

@@ -206,6 +206,47 @@ test("a response with no eligibility verdict cannot silently become Strong", asy
 });
 
 test.each([
+  "Work remotely from any European country, including non-EU countries",
+  "Work remotely from any European country",
+])("European remote hiring retains its compatible score: %s", async (quote) => {
+  const [fit] = await fitJobs({
+    profile,
+    jobs: [
+      {
+        ...job,
+        location: "Remote, Europe",
+        description:
+          "Work remotely from any European country, including non-EU countries.",
+      },
+    ],
+    goals: { targetRoles: ["Software Engineer"], locations: ["Europe"] },
+    client: {
+      chatWithTools: () =>
+        Promise.resolve({
+          content: JSON.stringify({
+            fits: [
+              {
+                id: job.id,
+                s: 96,
+                why: "Exact work with eligible European remote hiring",
+                r: ["strong", "Exact requested work"],
+                p: ["aligned", "European remote includes non-EU countries"],
+                c: ["strong", "Direct evidence"],
+                e: ["compatible", quote, "broader_remote", ""],
+              },
+            ],
+          }),
+        }),
+    },
+  });
+  expect(fit?.score).toBe(96);
+  expect(fit?.preferences).toEqual({
+    assessment: "aligned",
+    explanation: "European remote includes non-EU countries",
+  });
+});
+
+test.each([
   {
     location: "United States",
     description: "Build production software.",
