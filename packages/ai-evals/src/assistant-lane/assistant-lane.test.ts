@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { RESUME_COMMANDS, TRACKER_COMMANDS } from "@nestor/contracts";
+import {
+  APPLICATION_COMMANDS,
+  RESUME_COMMANDS,
+  TRACKER_COMMANDS,
+} from "@nestor/contracts";
 
 import { ASSISTANT_LANE_CASES, uncoveredInventoryEntries } from "./cases";
 import { runAssistantLaneCase } from "./run";
@@ -13,6 +17,9 @@ describe("assistant eval lane", () => {
         expect.arrayContaining([
           ...Object.keys(RESUME_COMMANDS),
           ...Object.keys(TRACKER_COMMANDS),
+          ...Object.entries(APPLICATION_COMMANDS)
+            .filter(([, command]) => command.effect === "read")
+            .map(([name]) => name),
         ]),
       );
     } finally {

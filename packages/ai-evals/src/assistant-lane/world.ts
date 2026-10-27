@@ -21,6 +21,7 @@ import {
   JOB_COMMANDS,
   RESUME_COMMANDS,
   TRACKER_COMMANDS,
+  APPLICATION_COMMANDS,
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
   ProfileSetupStateSchema,
@@ -34,6 +35,7 @@ import {
   type JobCommandOutputs,
   type ResumeCommandOutputs,
   type TrackerCommandOutputs,
+  type ApplicationCommandOutputs,
   type JobCommandName,
   type JobSearchPreferences,
   type SavedJob,
@@ -328,6 +330,7 @@ function recordingPorts(
     () => Promise.resolve(createResumeCommandReads(store, () => [])),
   );
   const tracker = createTrackerStore(store);
+  const applications = createApplicationStore(store);
   const runTrackerCommand = createTrackerCommandRunner(store);
   return {
     savePageJobs: (input) => Promise.resolve(savePageJobs(store, input)),
@@ -400,6 +403,45 @@ function recordingPorts(
         TRACKER_COMMANDS,
         runTrackerCommand,
         { group: "tracking" },
+      ),
+      ...assistantCommandTools<
+        Pick<typeof APPLICATION_COMMANDS, "list_application_work">,
+        Pick<ApplicationCommandOutputs, "list_application_work">
+      >(
+        { list_application_work: APPLICATION_COMMANDS.list_application_work },
+        (_name, input) => applications.listApplications(input),
+        { group: "applications" },
+      ),
+      ...assistantCommandTools<
+        Pick<typeof APPLICATION_COMMANDS, "applications_for_jobs">,
+        Pick<ApplicationCommandOutputs, "applications_for_jobs">
+      >(
+        { applications_for_jobs: APPLICATION_COMMANDS.applications_for_jobs },
+        (_name, input) => applications.forJobs(input.jobIds),
+        { group: "applications" },
+      ),
+      ...assistantCommandTools<
+        Pick<typeof APPLICATION_COMMANDS, "get_application_details">,
+        Pick<ApplicationCommandOutputs, "get_application_details">
+      >(
+        {
+          get_application_details: APPLICATION_COMMANDS.get_application_details,
+        },
+        (_name, { id }) => {
+          const application = applications.getApplication(id);
+          if (!application) return null;
+          const work = applications.getWork(id);
+          return {
+            application,
+            summary: work?.execution.summary ?? null,
+            detail: work?.execution.detail ?? null,
+            resumeFileName:
+              applications.getResumeArtifact(id)?.fileName ?? null,
+            reviewCard: work?.reviewCard ?? null,
+            receipt: applications.getSubmissionReceipt(id),
+          };
+        },
+        { group: "applications" },
       ),
       ...needsYouCommandTools(needsYou),
     ],
