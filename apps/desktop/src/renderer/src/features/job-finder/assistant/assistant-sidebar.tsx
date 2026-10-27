@@ -11,6 +11,7 @@ import {
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -40,6 +41,7 @@ import {
 
 import { cn } from "@renderer/lib/cn";
 import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
+import { useJobFinderOverlayOwnership } from "../lib/job-finder-overlay-ownership";
 import { describeScreen, screenForPathname } from "./assistant-context-capture";
 import {
   AssistantMessageParts,
@@ -219,8 +221,45 @@ function HistoryMenu(props: {
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
 }) {
   const [confirming, setConfirming] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const { onClose, triggerRef } = props;
+  const { isTopmost } = useJobFinderOverlayOwnership({
+    active: true,
+    close: onClose,
+  });
+  useEffect(() => {
+    const menu = menuRef.current;
+    (menu?.querySelector<HTMLButtonElement>("button") ?? menu)?.focus();
+    const outside = (event: MouseEvent | FocusEvent) => {
+      const target = event.target as Node | null;
+      if (!menu?.contains(target) && !triggerRef.current?.contains(target))
+        onClose();
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (
+        event.key !== "Escape" ||
+        event.defaultPrevented ||
+        isImeComposingEvent(event) ||
+        !isTopmost()
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("mousedown", outside);
+    document.addEventListener("focusin", outside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", outside);
+      document.removeEventListener("focusin", outside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [onClose, triggerRef, isTopmost]);
   const active = props.conversations.filter(
     (entry) => entry.status === "active",
   );
@@ -228,7 +267,7 @@ function HistoryMenu(props: {
     (entry) => entry.status === "archived",
   );
   const row = (conversation: AssistantConversation) => (
-    <li className="group flex items-center gap-1" key={conversation.id}>
+    <li className="group flex min-w-0 items-center gap-1" key={conversation.id}>
       <button
         aria-current={conversation.id === props.currentId ? "true" : undefined}
         className={cn(
@@ -236,6 +275,7 @@ function HistoryMenu(props: {
           conversation.id === props.currentId && "font-semibold",
         )}
         onClick={() => props.onSelect(conversation.id)}
+        title={conversation.title}
         type="button"
       >
         {conversation.title}
@@ -265,17 +305,12 @@ function HistoryMenu(props: {
   );
   return (
     <div
-      className="absolute right-2 top-11 z-10 grid max-h-[60vh] w-[min(320px,calc(100%-16px))] gap-2 overflow-y-auto rounded-(--radius-field) border border-(--control-border) bg-(--surface-panel) p-2 shadow-xl"
+      className="absolute right-2 top-11 z-10 grid max-h-[60vh] w-80 min-w-0 max-w-[calc(100%_-_1rem)] gap-2 overflow-x-hidden overflow-y-auto rounded-(--radius-field) border border-(--control-border) bg-(--surface-panel) p-2 shadow-xl"
       data-assistant-history
       role="dialog"
       aria-label="Chat history"
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          event.stopPropagation();
-          props.onClose();
-        }
-      }}
+      ref={menuRef}
+      tabIndex={-1}
     >
       {active.length === 0 && archived.length === 0 ? (
         <p className="px-2 py-1 text-[13px] text-muted-foreground">
@@ -283,14 +318,14 @@ function HistoryMenu(props: {
         </p>
       ) : null}
       {active.length > 0 ? (
-        <ul className="grid gap-0.5">{active.map(row)}</ul>
+        <ul className="grid min-w-0 gap-0.5">{active.map(row)}</ul>
       ) : null}
       {archived.length > 0 ? (
-        <div className="grid gap-0.5">
+        <div className="grid min-w-0 gap-0.5">
           <span className="px-2 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             Earlier chats
           </span>
-          <ul className="grid gap-0.5">{archived.map(row)}</ul>
+          <ul className="grid min-w-0 gap-0.5">{archived.map(row)}</ul>
         </div>
       ) : null}
     </div>
@@ -343,6 +378,8 @@ function AssistantSidebarPanel() {
   const [attachments, setAttachments] = useState<AssistantAttachment[]>([]);
   const [attachNote, setAttachNote] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const closeHistory = useCallback(() => setHistoryOpen(false), []);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionCandidates, setMentionCandidates] = useState<
     AssistantMentionCandidate[]
@@ -381,6 +418,12 @@ function AssistantSidebarPanel() {
   const width = assistant?.width ?? 400;
   const narrow = contentWidth - width < NARROW_CONTENT_MIN_WIDTH;
   const showPanel = open && (!narrow || assistant?.narrowView === "chat");
+  useEffect(() => {
+    if (showPanel) return;
+    setHistoryOpen(false);
+    setFindOpen(false);
+    setFindQuery("");
+  }, [showPanel]);
   const focusLabel = useFocusLabel(
     assistant?.peekFocus,
     showPanel,
@@ -419,7 +462,14 @@ function AssistantSidebarPanel() {
   // Focus the composer when the sidebar is opened.
   useEffect(() => {
     if (!assistant?.focusRequest) return;
-    const frame = requestAnimationFrame(() => textareaRef.current?.focus());
+    const frame = requestAnimationFrame(() => {
+      if (
+        historyButtonRef.current?.getAttribute("aria-expanded") === "true" ||
+        findRef.current
+      )
+        return;
+      textareaRef.current?.focus();
+    });
     return () => cancelAnimationFrame(frame);
   }, [assistant?.focusRequest]);
 
@@ -646,6 +696,7 @@ function AssistantSidebarPanel() {
   const onSidebarKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "f") {
       event.preventDefault();
+      setHistoryOpen(false);
       setFindOpen(true);
       requestAnimationFrame(() => findRef.current?.focus());
     }
@@ -834,7 +885,12 @@ function AssistantSidebarPanel() {
           <button
             aria-label="New chat"
             className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
-            onClick={() => void newChat()}
+            onClick={() => {
+              setHistoryOpen(false);
+              setFindOpen(false);
+              setFindQuery("");
+              void newChat();
+            }}
             title="New chat"
             type="button"
           >
@@ -844,7 +900,11 @@ function AssistantSidebarPanel() {
             aria-expanded={historyOpen}
             aria-label="Chat history"
             className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
-            onClick={() => setHistoryOpen((value) => !value)}
+            onClick={() => {
+              setFindOpen(false);
+              setHistoryOpen((value) => !value);
+            }}
+            ref={historyButtonRef}
             title="Chat history"
             type="button"
           >
@@ -852,8 +912,10 @@ function AssistantSidebarPanel() {
           </button>
           <button
             aria-label="Search this chat"
+            aria-expanded={findOpen}
             className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
             onClick={() => {
+              setHistoryOpen(false);
               setFindOpen((value) => !value);
               requestAnimationFrame(() => findRef.current?.focus());
             }}
@@ -875,10 +937,12 @@ function AssistantSidebarPanel() {
             <HistoryMenu
               conversations={state.conversations}
               currentId={state.conversationId}
-              onClose={() => setHistoryOpen(false)}
+              onClose={closeHistory}
+              triggerRef={historyButtonRef}
               onDelete={(id) => void deleteConversation(id)}
               onSelect={(id) => {
                 setHistoryOpen(false);
+                setFindQuery("");
                 void selectConversation(id);
               }}
             />
