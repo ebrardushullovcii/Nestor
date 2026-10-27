@@ -19,6 +19,7 @@ import {
 } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import {
+  allowPrepareOnlyRunNavigation,
   closePrepareOnlyIntermediateMutationWindow,
   createApplicationRunServiceWorkerSentinel,
   closePrepareOnlyFinalActionWindow,
@@ -265,6 +266,99 @@ const requestHitsFor = (
   hits.filter((hit) => hit.kind === "request" && hit.path === path);
 
 describe("Prepare-only guard real-Chromium fixtures", () => {
+  test("the site's own Cloudflare bot check goes out from page load, carrying no answer; nothing else under /cdn-cgi/ does", async () => {
+    // Workable: the fence refused the site's /cdn-cgi/challenge-platform/
+    // beacon on every load, and its Submit then waited on Turnstile for good.
+    const site = await startTrackedServer(),
+      other = await startTrackedServer();
+    site.registerHtml(
+      "/bot-check",
+      `<label>Name <input id="name"></label><output id="done"></output><script>
+      window.post = async (url, body) => {
+        try { await fetch(url, { method: "POST", body }); return "sent"; } catch { return "refused"; }
+      };</script>`,
+    );
+    const { page } = await newGuardedPage();
+    await page.goto(`${site.baseUrl}/bot-check`);
+    await page.fill("#name", realShapes.firstName);
+    await registerPrepareOnlyPreparedValue(page, realShapes.firstName);
+    const post = (url: string, body: string) =>
+      page.evaluate(
+        ({ url, body }) =>
+          (
+            window as unknown as {
+              post: (u: string, b: string) => Promise<string>;
+            }
+          ).post(url, body),
+        { url, body },
+      );
+    expect(
+      await post(
+        "/cdn-cgi/challenge-platform/h/b/jsd/oneshot/abc",
+        "fingerprint-abc",
+      ),
+    ).toBe("sent");
+    expect(await post("/cdn-cgi/rum", "fingerprint-abc")).toBe("refused");
+    expect(
+      await post(
+        "/cdn-cgi/challenge-platform/h/b/jsd/oneshot/abc",
+        `fingerprint ${realShapes.firstName}`,
+      ),
+    ).toBe("refused");
+    expect(
+      await post(
+        `${other.baseUrl}/cdn-cgi/challenge-platform/h/b/jsd/oneshot/abc`,
+        "fingerprint-abc",
+      ),
+    ).toBe("refused");
+    expect(
+      requestHitsFor(
+        site.hits,
+        "/cdn-cgi/challenge-platform/h/b/jsd/oneshot/abc",
+      ),
+    ).toHaveLength(1);
+    expect(requestHitsFor(site.hits, "/cdn-cgi/rum")).toHaveLength(0);
+    expect(other.hits.filter((hit) => hit.kind === "request")).toHaveLength(0);
+  });
+
+  test.each([false, true])(
+    "a native GET submission carrying answers that nothing authorized is refused (field saves allowed: %s)",
+    async (saves) => {
+      // Sol's reproduction: a completed form in a shadow root, whose GET put
+      // name, email and phone in the address, with no blocked attempt.
+      const site = await startTrackedServer();
+      site.registerHtml(
+        "/shadow-form",
+        `<role-form></role-form><script>customElements.define("role-form", class extends HTMLElement { connectedCallback() { this.attachShadow({ mode: "open" }).innerHTML = '<form action="/shadow-form/sent"><label>Name <input id="name" name="name"></label><button type="submit">Apply</button></form>'; } });</script>`,
+      );
+      site.registerHtml("/shadow-form/sent", "<h1>Thanks</h1>");
+      if (!browser) throw new Error("The fixture browser is not running.");
+      const context = await browser.newContext();
+      activeContexts.push(context);
+      const page = await context.newPage();
+      await ensurePrepareOnlyMutationGuard(page, saves);
+      await page.goto(`${site.baseUrl}/shadow-form`);
+      await page.fill("#name", realShapes.firstName);
+      await registerPrepareOnlyPreparedValue(page, realShapes.firstName);
+      await page.click("button");
+      await page.waitForTimeout(500);
+      expect(requestHitsFor(site.hits, "/shadow-form/sent")).toHaveLength(0);
+      expect(await getLatestBlockedPrepareOnlyAttempt(page)).toMatchObject({
+        kind: "network_request",
+        method: "GET",
+      });
+      // The person's own window lets it through. (The refused navigation
+      // left an error page: open the form again.)
+      allowPrepareOnlyRunNavigation(page, `${site.baseUrl}/shadow-form`);
+      await page.goto(`${site.baseUrl}/shadow-form`);
+      await page.fill("#name", realShapes.firstName);
+      await openPrepareOnlyFinalActionWindow(page, 10_000);
+      await page.click("button");
+      await page.waitForURL(/\/shadow-form\/sent/u);
+      expect(requestHitsFor(site.hits, "/shadow-form/sent")).toHaveLength(1);
+    },
+  );
+
   test("Fill: Greenhouse's real storage POST (encryption, 201, utf8 and token in the policy) gets through with its receipt", async () => {
     const site = await startTrackedServer(),
       storage = await startTrackedServer();

@@ -3,7 +3,9 @@ import { installMutationResponseBodyObserver } from "./mutation-response-body";
 import { installPageMessageRecorderInPage } from "./page-messages";
 import {
   CAPTCHA_VERIFICATION_REQUEST,
+  SITE_BOT_CHECK_PATH,
   isCaptchaVerificationRequest,
+  isSiteBotCheckRequest,
 } from "./captcha-verification";
 import {
   classifyAttachmentUpload,
@@ -511,6 +513,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
   pickerChoiceWindowMs: number;
   /** `CAPTCHA_VERIFICATION_REQUEST`, passed in for the same reason. */
   captchaVerificationSignal?: string;
+  /** `SITE_BOT_CHECK_PATH`, passed in for the same reason. */
+  siteBotCheckPath?: string;
 }): void {
   const { intermediateMutationsAuthorized } = guardInput;
   interface InternalGuardState extends PrepareOnlyGuardSnapshot {
@@ -955,6 +959,19 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       new RegExp(guardInput.captchaVerificationSignal, "iu").test(url)
     )
       return true;
+    // The site's own passive bot check (`isSiteBotCheckRequest`).
+    if (!carriesPrepared && url && guardInput.siteBotCheckPath) {
+      try {
+        const parsed = new URL(url, window.location.href);
+        if (
+          parsed.origin === window.location.origin &&
+          new RegExp(guardInput.siteBotCheckPath, "u").test(parsed.pathname)
+        )
+          return true;
+      } catch {
+        // An unreadable address is no bot check.
+      }
+    }
     if (carriesPrepared) {
       return (
         checksOnSameSite(normalized, url, bodyText) ||
@@ -1859,6 +1876,7 @@ async function ensureFramePrepareOnlyMutationGuard(
     finalActionSignal: FINAL_ACTION_SIGNAL.source,
     pickerChoiceWindowMs: PICKER_CHOICE_WINDOW_MS,
     captchaVerificationSignal: CAPTCHA_VERIFICATION_REQUEST.source,
+    siteBotCheckPath: SITE_BOT_CHECK_PATH.source,
   });
   // A page handed to the person had its guard opened for them; a run that
   // takes the page back shuts it again unless its own send window is open.
@@ -1945,7 +1963,11 @@ export async function ensurePrepareOnlyMutationGuard(
         request.isNavigationRequest() &&
         resourceType === "document" &&
         method === authorizedFormAction.method &&
-        request.url() === authorizedFormAction.url
+        // A GET form sends its fields as the address's query.
+        (method === "GET"
+          ? request.url().split(/[?#]/u)[0] ===
+            authorizedFormAction.url.split(/[?#]/u)[0]
+          : request.url() === authorizedFormAction.url)
       ) {
         authorizedFormAction.remainingRequests -= 1;
         await route.continue();
@@ -1967,6 +1989,34 @@ export async function ensurePrepareOnlyMutationGuard(
         await route.abort("blockedbyclient");
       };
 
+      // The site's own passive bot check (Cloudflare's, on its origin)
+      // runs from page load, any method, and carries none of the answers.
+      if (
+        isSiteBotCheckRequest(request.url(), requestFrameOrigin(request)) &&
+        !requestUrlCarriesPreparedValue(request.url(), [
+          ...networkGuardState!.preparedValues,
+        ]) &&
+        !carriesPreparedValue(request.postData(), [
+          ...networkGuardState!.preparedValues,
+        ])
+      ) {
+        await route.continue();
+        return;
+      }
+      // A form the page submitted natively (its GET puts the fields in the
+      // address) with answers in it, that nothing authorized above: refused
+      // like its POST would be, whatever pressed it.
+      if (
+        method === "GET" &&
+        request.isNavigationRequest() &&
+        !networkGuardState!.runNavigations.has(exactUrl(request.url())) &&
+        requestUrlCarriesPreparedValue(request.url(), [
+          ...networkGuardState!.preparedValues,
+        ])
+      ) {
+        await denyRequest();
+        return;
+      }
       // The site's CAPTCHA script and frames are reads it needs on the page
       // before Submit; its token requests wait for the final click (above).
       if (
@@ -2288,6 +2338,7 @@ export async function ensurePrepareOnlyMutationGuard(
       finalActionSignal: FINAL_ACTION_SIGNAL.source,
       pickerChoiceWindowMs: PICKER_CHOICE_WINDOW_MS,
       captchaVerificationSignal: CAPTCHA_VERIFICATION_REQUEST.source,
+      siteBotCheckPath: SITE_BOT_CHECK_PATH.source,
     });
     networkGuardState.initScriptInstalled = true;
   }
