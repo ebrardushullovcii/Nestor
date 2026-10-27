@@ -1,4 +1,8 @@
-import type { JobSelectionInput, ShortlistedRow } from "@nestor/contracts";
+import type {
+  JobSelectionInput,
+  ShortlistedPage,
+  ShortlistedRow,
+} from "@nestor/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 
@@ -29,6 +33,7 @@ import { describeResume, LEVEL_LABEL } from "./resume-format";
 import { ResumePane } from "./resume-pane";
 import { describeError, useResume } from "./use-resume";
 import { useAssistantListView } from "../job-lists/use-assistant-list-view";
+import { useEffectWhileKeptRouteShown } from "../job-finder/lib/kept-route-visibility";
 
 type Tab = "shortlisted" | "resume";
 
@@ -46,6 +51,7 @@ function needApproval(count: number): string {
 export function ShortlistedScreen() {
   const { showToast } = useToast();
   const [searchParams] = useSearchParams();
+  const navigationKey = useLocation().key;
   // `?tab=approved` opens the Approved list (Home's "Apply to approved jobs").
   const [tab, setTab] = useState<Tab>(() =>
     searchParams.get("tab") === "approved" ? "resume" : "shortlisted",
@@ -54,6 +60,14 @@ export function ShortlistedScreen() {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const [busy, setBusy] = useState<"approve" | "apply" | "move" | null>(null);
+  const approvalPending = useRef(false);
+  const requestedApproved = searchParams.get("tab") === "approved";
+  useEffectWhileKeptRouteShown(() => {
+    if (!requestedApproved) return;
+    setTab("resume");
+    setText("");
+    setSelection(NO_SELECTION);
+  }, [requestedApproved, navigationKey]);
   const view = useResume(activeId);
   const list = useStoreList<ShortlistedRow>({
     key: JSON.stringify([tab, text]),
@@ -71,8 +85,6 @@ export function ShortlistedScreen() {
   const selectedCount = countSelected(selection, list.total);
 
   // A job asked for by link (`?jobId=`) stays open in its own tab.
-  const navigationKey = useLocation().key;
-
   const linkedJob = Number(searchParams.get("jobId") ?? "");
   const pinnedId = useRef<number | null>(null);
   useEffect(() => {
@@ -127,8 +139,8 @@ export function ShortlistedScreen() {
     },
   });
 
-  const latest = useRef({ list, activeId, view, selection, tab, text });
-  latest.current = { list, activeId, view, selection, tab, text };
+  const latest = useRef({ list, activeId, view, selection, tab, text, busy });
+  latest.current = { list, activeId, view, selection, tab, text, busy };
   useAssistantContextSource("shortlisted", () => {
     const { list, activeId, view, selection, tab, text } = latest.current;
     return {
@@ -198,23 +210,57 @@ export function ShortlistedScreen() {
 
   /** Approves the open resume, or the ticked ones, and opens the next. */
   const approve = useCallback(async () => {
-    const { list, activeId, view, selection } = latest.current;
+    const { activeId, view, selection, tab, text, busy } = latest.current;
+    if (busy !== null || approvalPending.current) return;
     const ticked = selection.all || selection.ids.size > 0;
-    const ids = ticked
-      ? list.rows
-          .filter(
-            (row) =>
-              isSelected(selection, row.id) && row.resume?.state === "ready",
-          )
-          .map((row) => row.id)
-      : activeId !== null && view.resume?.state === "ready"
-        ? [activeId]
-        : [];
-    if (ids.length === 0) return;
+    if (!ticked && (activeId === null || view.resume?.state !== "ready"))
+      return;
+    approvalPending.current = true;
     setBusy("approve");
     const approved: number[] = [];
     try {
-      if (view.job && ids.includes(view.job.id)) await view.flush();
+      if (
+        view.job &&
+        (ticked ? isSelected(selection, view.job.id) : view.job.id === activeId)
+      )
+        await view.flush();
+      const ids: number[] = [];
+      if (selection.all) {
+        // Resolve the selection before any approval moves rows or changes a cursor.
+        let cursor: string | null = null;
+        do {
+          const page: ShortlistedPage = await window.nestor.resumes.run(
+            "list_shortlisted",
+            {
+              stage: tab,
+              text,
+              sort: "recent",
+              cursor,
+              limit: 200,
+            },
+          );
+          for (const row of page.rows)
+            if (isSelected(selection, row.id) && row.resume?.state === "ready")
+              ids.push(row.id);
+          cursor = page.nextCursor;
+        } while (cursor !== null);
+      } else if (ticked) {
+        for (const id of selection.ids) {
+          const candidate = await window.nestor.resumes.run("get_resume", {
+            jobId: id,
+          });
+          if (
+            candidate.job.stage === tab &&
+            candidate.resume?.state === "ready"
+          )
+            ids.push(id);
+        }
+      } else if (activeId !== null) ids.push(activeId);
+      if (ids.length === 0)
+        showToast({
+          title: "No resumes are ready to approve yet",
+          description: "They stay in To review.",
+        });
       for (const id of ids) {
         await window.nestor.resumes.run("approve_resume", { jobId: id });
         approved.push(id);
@@ -224,10 +270,11 @@ export function ShortlistedScreen() {
     } finally {
       const gone = new Set(approved);
       const next = nextAfter((id) => gone.has(id));
-      list.removeRows((id) => gone.has(id));
+      latest.current.list.removeRows((id) => gone.has(id));
       setActiveId(next?.id ?? null);
       setSelection(NO_SELECTION);
       setBusy(null);
+      approvalPending.current = false;
       if (approved.length > 0)
         showToast({
           id: "shortlisted-approve",
@@ -333,10 +380,16 @@ export function ShortlistedScreen() {
   });
   // Ctrl+Enter approves and opens the next one, even while editing: the edit
   // is saved first.
-  useEffect(() => {
+  useEffectWhileKeptRouteShown(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey)) return;
       if (latest.current.tab !== "shortlisted") return;
+      if (
+        event.target instanceof Element &&
+        event.target.closest("[data-assistant-sidebar]")
+      )
+        return;
       if (document.querySelector('[aria-modal="true"]')) return;
       event.preventDefault();
       void approve();
