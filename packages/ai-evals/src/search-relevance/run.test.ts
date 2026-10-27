@@ -51,6 +51,59 @@ describe("manual search relevance eval measurements", () => {
       medianTokensPerBoard: null,
     });
   });
+  it("keeps missing-usage estimates separate when totalling multiple boards", () => {
+    const boards = [
+      {
+        usage: {
+          inputTokens: 120,
+          outputTokens: 40,
+          cachedInputTokens: 80,
+          reasoningTokens: 20,
+        },
+      },
+      {
+        usage: {
+          inputTokens: 50,
+          outputTokens: 0,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+          estimated: {
+            calls: 1,
+            inputTokens: 0,
+            outputTokens: 3,
+            method: "utf8_bytes_div_4_visible_only" as const,
+          },
+        },
+      },
+      {
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+          estimated: {
+            calls: 2,
+            inputTokens: 70,
+            outputTokens: 5,
+            method: "utf8_bytes_div_4_visible_only" as const,
+          },
+        },
+      },
+    ];
+    const original = JSON.stringify(boards);
+    expect(tokenCostSummary(boards)).toEqual({
+      boards: 3,
+      totalTokens: 210,
+      medianTokensPerBoard: 50,
+      estimated: {
+        calls: 3,
+        inputTokens: 70,
+        outputTokens: 8,
+        method: "utf8_bytes_div_4_visible_only",
+      },
+    });
+    expect(JSON.stringify(boards)).toBe(original);
+  });
   it("ships a replay tape bound to the committed corpus", async () => {
     const directory = fileURLToPath(
       new URL("../../fixtures/search-relevance/", import.meta.url),

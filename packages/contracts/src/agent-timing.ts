@@ -5,8 +5,37 @@ export const ModelTokenUsageSchema = z.object({
   outputTokens: z.number().int().nonnegative(),
   cachedInputTokens: z.number().int().nonnegative(),
   reasoningTokens: z.number().int().nonnegative(),
+  // Separate from provider totals above. Absent on older or fully reported usage.
+  estimated: z
+    .object({
+      calls: z.number().int().nonnegative().default(0),
+      inputTokens: z.number().int().nonnegative().default(0),
+      outputTokens: z.number().int().nonnegative().default(0),
+      // Hidden reasoning, cache hits and provider billing cannot be inferred.
+      method: z.literal("utf8_bytes_div_4_visible_only"),
+    })
+    .optional(),
 });
 export type ModelTokenUsage = z.infer<typeof ModelTokenUsageSchema>;
+export interface ModelRequestUsage extends ModelTokenUsage {
+  requestId: string;
+  startedAt: string;
+  finishedAt: string;
+  provider: string;
+  model: string;
+  purpose: string;
+  attempt: number;
+  outcome: "completed" | "failed" | "cancelled";
+  httpStatus?: number;
+  providerTotalTokens?: number;
+  failureKind?:
+    | "network"
+    | "http_status"
+    | "timeout"
+    | "incomplete_stream"
+    | "other"
+    | "cancelled";
+}
 export interface ModelRequestAttempt {
   attempt: number;
   maxAttempts: number;
@@ -74,5 +103,8 @@ const ApplyAgentTimingRecordSchema = z.object({
 });
 export type ApplyAgentTiming = z.infer<typeof ApplyAgentTimingRecordSchema>;
 // Keep the timing schema from expanding through every workspace state schema.
-export const ApplyAgentTimingSchema: z.ZodType<ApplyAgentTiming> =
-  ApplyAgentTimingRecordSchema;
+export const ApplyAgentTimingSchema: z.ZodType<
+  ApplyAgentTiming,
+  z.ZodTypeDef,
+  z.input<typeof ApplyAgentTimingRecordSchema>
+> = ApplyAgentTimingRecordSchema;
