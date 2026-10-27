@@ -1,5 +1,6 @@
 import {
   isFreshStartCandidateProfile,
+  resolveResumeContactIdentity,
   type CandidateProfile,
   type ResumeIdentityOwnershipAcknowledgement,
   type ResumeImportFieldCandidate,
@@ -482,14 +483,7 @@ export function resolveResumeIdentity(
   // fixing "MARCUS BELL" to "Marcus Bell" in Basics used to leave the
   // resume header shouting, because fullName kept the imported spelling.
   const canonicalName = composedProfileName(profile) ?? clean(profile.fullName);
-  const identity: ResumeIdentityValues = {
-    fullName: clean(profile.preferredDisplayName) ?? canonicalName,
-    email:
-      clean(profile.applicationIdentity.preferredEmail) ?? clean(profile.email),
-    phone:
-      clean(profile.applicationIdentity.preferredPhone) ?? clean(profile.phone),
-    location: clean(profile.currentLocation),
-  };
+  const identity = resolveResumeContactIdentity(profile);
   const mismatchReasons: string[] = [];
   const derivedParts = canonicalName?.split(/\s+/).filter(Boolean) ?? [];
 

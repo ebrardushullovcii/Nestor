@@ -7,19 +7,23 @@ import type {
   ResumeRenderDocument,
   ResumeDraft,
   ResumeDraftBullet,
-  ResumeDraftIdentity,
   ResumeDraftOrigin,
   ResumeDraftSection,
   ResumeResearchArtifact,
   ResumeDraftSourceRef,
-  ResumePreviewIdentityField,
   ResumeTemplateId,
   SavedJob,
   TailoredAsset,
   TailoredResumeCoverageMetadata,
   WorkHistoryReviewAcknowledgment,
 } from "@nestor/contracts";
-import { ResumeDraftSchema } from "@nestor/contracts";
+import {
+  ResumeDraftSchema,
+  buildResumeDraftIdentity,
+  buildResumeContactItems,
+  buildResumeRenderHeader,
+} from "@nestor/contracts";
+export { buildResumeDraftIdentity } from "@nestor/contracts";
 import { fnv1a32 } from "@nestor/core";
 import {
   createBullet,
@@ -35,7 +39,6 @@ import {
 } from "./resume-entry-ordering";
 import { projectWorkHistoryReviewSuggestionIdentities } from "./resume-work-history-review-identity";
 import { buildJobContextText } from "./resume-workspace-primitives";
-import { resolveResumeIdentity } from "./resume-identity";
 import { normalizeText, uniqueStrings } from "./shared";
 
 function joinCompact(
@@ -120,57 +123,6 @@ function normalizeUrl(value: string | null | undefined): string | null {
   return trimmed || null;
 }
 
-function normalizeContactIdentity(value: string): string {
-  return normalizeText(
-    value
-      .replace(/^https?:\/\//i, "")
-      .replace(/^www\./i, "")
-      .replace(/\/$/, ""),
-  );
-}
-
-export function buildResumeDraftIdentity(
-  profile: CandidateProfile,
-): ResumeDraftIdentity {
-  const resolvedIdentity = resolveResumeIdentity(profile).identity;
-  const preferredLinks = profile.applicationIdentity.preferredLinkIds
-    .map((linkId) =>
-      profile.links.find((link) => link.id === linkId && link.url),
-    )
-    .filter((link): link is NonNullable<typeof link> => Boolean(link?.url));
-  const fallbackLinks = profile.links.filter(
-    (link) =>
-      link.url &&
-      ["portfolio", "github", "website", "case_study"].includes(
-        link.kind ?? "",
-      ) &&
-      !preferredLinks.some((preferredLink) => preferredLink.id === link.id),
-  );
-
-  return {
-    fullName: resolvedIdentity.fullName,
-    headline: profile.headline ?? null,
-    location: resolvedIdentity.location,
-    email: resolvedIdentity.email,
-    phone: resolvedIdentity.phone,
-    portfolioUrl: profile.portfolioUrl,
-    linkedinUrl: profile.linkedinUrl,
-    githubUrl: profile.githubUrl,
-    personalWebsiteUrl: profile.personalWebsiteUrl,
-    additionalLinks: [...preferredLinks, ...fallbackLinks]
-      .map((link) => link.url?.trim() ?? "")
-      .filter(Boolean)
-      .filter(
-        (value, index, values) =>
-          values.findIndex(
-            (entry) =>
-              normalizeContactIdentity(entry) ===
-              normalizeContactIdentity(value),
-          ) === index,
-      ),
-  };
-}
-
 // A listing title only becomes the resume headline when it reads like a
 // role. Board marketing ("FULL TIME: Software Engineer Position - React and
 // Rest", "URGENT hiring…") printed as the candidate's headline on an exported
@@ -205,44 +157,6 @@ function buildJobTargetedHeadline(
 
   const jobTitle = job.title.trim();
   return jobTitle && looksLikeCleanRoleTitle(jobTitle) ? jobTitle : null;
-}
-
-function buildResumeContactItems(
-  identity: ResumeDraftIdentity | null | undefined,
-): Array<{ field: ResumePreviewIdentityField; text: string }> {
-  if (!identity) {
-    return [];
-  }
-
-  const contactItems: Array<{
-    field: ResumePreviewIdentityField;
-    text: string | null;
-  }> = [
-    { field: "email", text: identity.email },
-    { field: "phone", text: identity.phone },
-    { field: "portfolioUrl", text: identity.portfolioUrl },
-    { field: "personalWebsiteUrl", text: identity.personalWebsiteUrl },
-    { field: "githubUrl", text: identity.githubUrl },
-    { field: "linkedinUrl", text: identity.linkedinUrl },
-    ...(identity.additionalLinks ?? []).map((text) => ({
-      field: "additionalLinks" as const,
-      text,
-    })),
-  ];
-
-  return contactItems
-    .flatMap((value) => {
-      const text = value.text?.trim();
-      return text ? [{ field: value.field, text }] : [];
-    })
-    .filter(
-      (value, index, values) =>
-        values.findIndex(
-          (entry) =>
-            normalizeContactIdentity(entry.text) ===
-            normalizeContactIdentity(value.text),
-        ) === index,
-    );
 }
 
 function pickProjectLink(
@@ -1379,14 +1293,10 @@ export function buildResumeRenderDocument(
   options?: ResumeRenderOptions,
 ): ResumeRenderDocument {
   const orderedDraft = normalizeResumeDraftEntryOrdering(draft);
-  const identity = orderedDraft.identity ?? buildResumeDraftIdentity(profile);
   const includePreviewAnchors = options?.includePreviewAnchors ?? false;
 
   return {
-    fullName: identity.fullName ?? profile.fullName ?? "",
-    headline: identity.headline ?? profile.headline ?? null,
-    location: identity.location ?? profile.currentLocation ?? null,
-    contactItems: buildResumeContactItems(identity),
+    ...buildResumeRenderHeader(profile, orderedDraft),
     ...(includePreviewAnchors ? { includePreviewAnchors } : {}),
     sections: [...orderedDraft.sections]
       .filter((section) => section.included)

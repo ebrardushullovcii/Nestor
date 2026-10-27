@@ -53,6 +53,7 @@ export * from "./startup-recovery";
 export * from "./agent-timing";
 export * from "./submission-confirmation";
 export * from "./resume-computation";
+export * from "./resume-render-identity";
 export * from "./workspace-query";
 export * from "./job-list-visibility";
 

@@ -1,4 +1,8 @@
-import { invalidateProfileResumes } from "./profile-effects";
+import {
+  invalidateProfileResumes,
+  invalidateChangedProfileResumes,
+  invalidateUnapprovedProfileResumes,
+} from "./profile-effects";
 import {
   createFreshStartCandidateProfile,
   followPrimaryContact,
@@ -10,6 +14,8 @@ import {
   ProfileRecordCollectionSchema,
   ProfileRecordSchema,
   ResumeSourceDocumentSchema,
+  ResumeRenderProfileSchema,
+  type ResumeRenderProfile,
   type PatchProfileInput,
   type StoredProfile,
   type ProfileLists,
@@ -99,7 +105,19 @@ function initializeProfileStore(store: JobStore) {
       flatten(empty, profileFields),
     ),
     items = createProfileItems(store),
-    records = createProfileRecords(store);
+    records = createProfileRecords(store, withResumeEffects);
+  function renderProfile(): ResumeRenderProfile {
+    return ResumeRenderProfileSchema.parse({
+      ...inflate({ ...fields(), ...lists() }),
+      links: records.all("links").map((row) => row.record),
+    });
+  }
+  function withResumeEffects<T>(write: () => T): T {
+    const before = renderProfile();
+    const result = write();
+    invalidateChangedProfileResumes(store, before, renderProfile());
+    return result;
+  }
   const source = createScalarValues(
     store,
     RESUME_TABLE,
@@ -276,6 +294,7 @@ function initializeProfileStore(store: JobStore) {
     patch(input: PatchProfileInput): ProfileOverview {
       const patch = PatchProfileInputSchema.parse(input);
       return store.transaction(() => {
+        const beforeRender = renderProfile();
         const before = values.read([
           "email",
           "phone",
@@ -317,10 +336,9 @@ function initializeProfileStore(store: JobStore) {
             patch.expectedLists?.[field as keyof typeof patch.expectedLists],
           );
           changed = touched || changed;
-          resumeChanged =
-            resumeChanged || (touched && !field.startsWith("workEligibility."));
+          resumeChanged ||= touched && !field.startsWith("workEligibility.");
         }
-        if (resumeChanged) invalidateProfileResumes(store);
+        if (resumeChanged) invalidateUnapprovedProfileResumes(store);
         if (changed)
           store.notify({
             cause: "profile",
@@ -328,9 +346,11 @@ function initializeProfileStore(store: JobStore) {
             ids: [],
             searchId: null,
           });
+        invalidateChangedProfileResumes(store, beforeRender, renderProfile());
         return overview();
       });
     },
+
     /** Accepted import facts only; file ownership stays at the main-process import boundary. */
     setResumeSource(
       document: ResumeSourceDocument,
