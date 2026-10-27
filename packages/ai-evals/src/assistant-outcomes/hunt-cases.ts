@@ -389,6 +389,21 @@ export function huntOutcomeCases(origin: string): BuiltAppBatch[] {
               ),
               equalOutcome(
                 "data",
+                "Search started successfully",
+                "jobs.search_status.search.state",
+                status.search !== null &&
+                  ["running", "done"].includes(status.search.state),
+                true,
+              ),
+              equalOutcome(
+                "data",
+                "Only the requested site was scheduled",
+                "jobs.search_status.search.sourcesTotal",
+                status.search?.sourcesTotal,
+                1,
+              ),
+              equalOutcome(
+                "data",
                 "Exact search choices",
                 "jobs.search_status.search.settings",
                 status.search?.settings,
