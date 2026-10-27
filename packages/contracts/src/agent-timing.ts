@@ -27,6 +27,7 @@ export interface ModelRequestUsage extends ModelTokenUsage {
   attempt: number;
   outcome: "completed" | "failed" | "cancelled";
   httpStatus?: number;
+  providerTotalTokens?: number;
   failureKind?:
     | "network"
     | "http_status"

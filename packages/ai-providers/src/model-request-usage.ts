@@ -124,7 +124,9 @@ export function createModelRequestUsage(
     ) {
       deltaBytes += bytes(payload.delta);
     }
-    const choices = Array.isArray(payload.choices) ? payload.choices : [];
+    const choices: unknown[] = Array.isArray(payload.choices)
+      ? payload.choices
+      : [];
     for (const choice of choices) {
       if (!record(choice) || !record(choice.delta)) continue;
       const delta = choice.delta;
@@ -198,6 +200,9 @@ export function createModelRequestUsage(
         payload,
         event: {
           ...normalizeModelUsage(payload),
+          ...(usage.total_tokens !== undefined
+            ? { providerTotalTokens: usage.total_tokens }
+            : {}),
           ...metadata,
           finishedAt: new Date().toISOString(),
           outcome,

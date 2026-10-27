@@ -1,4 +1,4 @@
-import type { JobPosting, ModelTokenUsage, ModelRequestAttempt } from '@nestor/contracts'
+import type { JobPosting, ModelTokenUsage, ModelRequestAttempt, ModelRequestUsage } from '@nestor/contracts'
 import type { AgentLoopToolDefinition } from '@nestor/agent-runtime'
 import type { AgentMessage, ToolCall } from '../types'
 
@@ -26,7 +26,7 @@ export interface LLMClient {
       reasoningTask?: BrowserAgentReasoningTask
       includeUsage?: boolean
       onRequestAttempt?: (event: ModelRequestAttempt) => void
-      onRequestUsage?: (usage: import('@nestor/contracts').ModelRequestUsage) => void
+      onRequestUsage?: (usage: ModelRequestUsage) => void
       jsonOutput?: boolean
       jsonSchema?: { name: string; schema: Record<string, unknown> }
     }

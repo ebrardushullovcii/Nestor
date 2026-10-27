@@ -90,6 +90,7 @@ const sse = (...events: unknown[]) =>
 const numbers = {
   input_tokens: 120,
   output_tokens: 40,
+  total_tokens: 160,
   input_tokens_details: { cached_tokens: 80 },
   output_tokens_details: { reasoning_tokens: 25 },
 };
@@ -160,6 +161,7 @@ test.each([false, true])(
         purpose: "apply:report_question_kinds",
         outcome: "failed",
         httpStatus: 200,
+        providerTotalTokens: 160,
       },
     ]);
     expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toMatch(
@@ -350,6 +352,34 @@ test("malformed output cannot discard a valid usage object", async () => {
     outputTokens: 40,
     cachedInputTokens: 80,
   });
+});
+
+test("explicit cache hit and miss counters remain provider numbers", async () => {
+  const scope = createModelUsageRecorder();
+  await scope.run(() =>
+    performModelRequest({
+      ...request,
+      fetchImpl: () =>
+        Promise.resolve(
+          json({
+            choices: [{ message: { content: "Done" } }],
+            usage: {
+              prompt_cache_hit_tokens: 60,
+              prompt_cache_miss_tokens: 40,
+              completion_tokens: 10,
+            },
+          }),
+        ),
+    }),
+  );
+  expect(scope.snapshot()).toMatchObject({
+    calls: 1,
+    unreportedCalls: 0,
+    inputTokens: 100,
+    outputTokens: 10,
+    cachedInputTokens: 60,
+  });
+  expect(scope.snapshot().estimated).toBeUndefined();
 });
 
 test("partial usage preserves real numbers, zero usage is real, and observer errors never trigger another request", async () => {

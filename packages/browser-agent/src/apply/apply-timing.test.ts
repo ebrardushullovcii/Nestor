@@ -1,11 +1,93 @@
 import { expect, test } from "vitest";
 import { writeFileSync } from "node:fs";
 import { ApplyAgentTimingSchema } from "@nestor/contracts";
-import type { RawApplyPage } from "@nestor/contracts";
+import type { RawApplyPage, ModelRequestUsage } from "@nestor/contracts";
 import type { ApplyPageHands } from "./types";
 import { buildApplyFormObservation } from "./page-hands";
 import recordedPage from "./synthetic-page.snapshot.json";
 import { createApplyTiming } from "./apply-timing";
+
+const requestUsage = (
+  patch: Partial<ModelRequestUsage> = {},
+): ModelRequestUsage => ({
+  requestId: "synthetic",
+  startedAt: "2026-10-01T00:00:00Z",
+  finishedAt: "2026-10-01T00:00:01Z",
+  provider: "https://model.example.test",
+  model: "synthetic-model",
+  purpose: "apply:report_question_kinds",
+  attempt: 0,
+  outcome: "completed",
+  inputTokens: 100,
+  outputTokens: 20,
+  cachedInputTokens: 60,
+  reasoningTokens: 5,
+  ...patch,
+});
+
+test("a rejected classification keeps usage reported before the client threw", async () => {
+  const timing = createApplyTiming(() => new Date(0));
+  const client = timing.model({
+    chatWithTools: (_messages, _tools, options) => {
+      options?.onRequestAttempt?.({ attempt: 0, maxAttempts: 1 });
+      options?.onRequestUsage?.(requestUsage({ outcome: "failed" }));
+      return Promise.reject(new Error("Incomplete response"));
+    },
+  });
+  await expect(client.chatWithTools([], [])).rejects.toThrow(
+    "Incomplete response",
+  );
+  expect(timing.snapshot().tokenUsage).toMatchObject({
+    reportedCalls: 1,
+    unreportedCalls: 0,
+    inputTokens: 100,
+    outputTokens: 20,
+  });
+});
+
+test("retry events separate estimated tokens and never add the final reply's usage twice", async () => {
+  const timing = createApplyTiming(() => new Date(0));
+  const client = timing.model({
+    chatWithTools: (_messages, _tools, options) => {
+      options?.onRequestAttempt?.({ attempt: 0, maxAttempts: 2 });
+      options?.onRequestUsage?.(
+        requestUsage({
+          outcome: "failed",
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedInputTokens: 0,
+          reasoningTokens: 0,
+          estimated: {
+            calls: 1,
+            inputTokens: 40,
+            outputTokens: 3,
+            method: "utf8_bytes_div_4_visible_only",
+          },
+        }),
+      );
+      options?.onRequestAttempt?.({ attempt: 1, maxAttempts: 2 });
+      options?.onRequestUsage?.(requestUsage({ attempt: 1 }));
+      return Promise.resolve({ usage: requestUsage() });
+    },
+  });
+  await client.chatWithTools([], [], { parallelToolCalls: true });
+  const first = timing.snapshot();
+  expect(first).toMatchObject({
+    modelTurns: 1,
+    transportCalls: 2,
+    transportRetries: 1,
+    tokenUsage: {
+      reportedCalls: 1,
+      unreportedCalls: 1,
+      inputTokens: 100,
+      outputTokens: 20,
+      estimated: { calls: 1, inputTokens: 40, outputTokens: 3 },
+    },
+  });
+  await client.chatWithTools([], [], { parallelToolCalls: true });
+  expect(timing.snapshot().tokenUsage?.estimated?.inputTokens).toBe(80);
+  expect(first.tokenUsage?.estimated?.inputTokens).toBe(40);
+});
 
 test("counts provider tokens for filling and checks, and exposes calls without usage", async () => {
   const timing = createApplyTiming(() => new Date(0));
