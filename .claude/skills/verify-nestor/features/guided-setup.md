@@ -4,7 +4,7 @@ A new person starts on Profile › Guided setup. They pick their resume file (or
 
 ## Sub-features
 
-- `setup-import-file`: "Recommended. Choose my resume file" opens the native picker; PDF, DOCX, TXT or Markdown; the Import step turns "Complete".
+- `setup-import-file`: "Recommended. Choose my resume file" opens the native picker; PDF, DOCX, TXT or Markdown; Basics and Work history then show "Ready to review".
 - `setup-manual`: "Enter details manually" skips the file.
 - `setup-basics`: name, headline, years, contact, location, links, summary; "Save and continue to Work history".
 - `setup-work-history`: one card per role, education, projects, links, languages, proof; "Save and continue to Job targets".
@@ -22,9 +22,9 @@ A new person starts on Profile › Guided setup. They pick their resume file (or
 
 Preconditions: baseline. Live AI is optional here; the deterministic import works.
 
-- **Import.** `$V/drive pick apps/desktop/test-fixtures/job-finder/resume-import-sample.txt`, then `$V/drive click "/Choose my resume file/"`, `$V/drive wait "Import Complete" 90`. Proof: Basics shows "Jamie", "Rivers", "Staff Frontend Engineer", `dialogs.jsonl` shows the picker returned that file, and `$V/db resume_import_runs 1` has the run.
-- **Basics and Work history.** `$V/drive click "Basics Ready to review"`, `$V/drive click "Save and continue to Work history"`, then `"Save and continue to Job targets"`. Proof: heading "Job targets setup step"; the step list shows the earlier steps saved.
-- **Job targets.** `$V/drive fill "Target roles" "Frontend Engineer"`, `press Enter`; `fill "Preferred job locations" "Remote"`, `press Enter`; `click "I can work in Germany"`; `click "No" --within "Would you need employer visa sponsorship?"`; `click Remote --role checkbox`; `click Full-time --role checkbox`. Add a source as in `job-sources.md`. Proof: "Everything required is in. You can finish setup."
+- **Import.** `$V/drive pick apps/desktop/test-fixtures/job-finder/resume-import-sample.txt`, then `$V/drive click "/Choose my resume file/"`, `$V/drive wait "/Basics.*Ready to review/" 90 --role button`. Proof: Basics shows "Jamie", "Rivers", "Staff Frontend Engineer", `dialogs.jsonl` shows the picker returned that file, and `$V/db profile_import_runs 1` has the run.
+- **Basics and Work history.** `$V/drive click "/Basics.*Ready to review/" --role button`, `$V/drive click "Save and continue to Work history"`, then `"Save and continue to Job targets"`. Proof: heading "Job targets setup step"; the step list shows the earlier steps saved.
+- **Job targets.** `$V/drive fill "Target roles" "Frontend Engineer"`, `press Enter`; `fill "Preferred job locations" "Remote"`, `press Enter`; `click "I can work in Germany"`; `click "No" --within "Would you need employer visa sponsorship?"`; `click Remote --role checkbox`. Add the source in the same step: `fill "Job site URLs" <replica>/board/`, `click "Add and turn on"`, `wait "/^Added and turned on 1 source/"`. Proof: "Everything required is in. You can finish setup."
 - **Finish.** `$V/drive click "Finish setup and find jobs"` lands on Find jobs and starts a search (live AI) or shows "Live search needs AI" (deterministic).
 - Whole flow: `$V/drive run .claude/skills/verify-nestor/journeys/job-finder-replica.mjs setup`.
 - Other formats: pick a persona from `resume-import-personas/`. PDF and DOCX use the parser sidecar that `bin/build` prepares; vision import needs `--ai live`.
