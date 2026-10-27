@@ -4011,6 +4011,33 @@ async function runMeasuredApplyAgent(
           data: {},
         };
       if (current?.blocker) return null;
+      // Empty optional wizard screens need no answer or model decision.
+      // Re-observe each local advance through the ordinary executor fence.
+      while (
+        current &&
+        !pressesFormButtons(runConfig) &&
+        config.hands.clickWithoutWrites &&
+        pendingQuestions.size === 0 &&
+        !deferredPress?.formSend &&
+        current.controls.every(
+          (control) => !control.visible || control.disabled || control.readOnly,
+        )
+      ) {
+        const emptyStep = current;
+        const advance = emptyStep.actions.find((action) =>
+          localStepPreflight(emptyStep, action.ref),
+        );
+        if (!advance) break;
+        const outcome = await runProposal(
+          { tool: "click", ref: advance.ref }, checkOne,
+        );
+        const reported = await outcomeToLoop(outcome, { withPage: false });
+        if (reported.kind === "finish") return reported.finish;
+        if (reported.kind === "stop")
+          return {reason: reported.reason, needsPerson: true, stuck: false, data: {}};
+        if (outcome.kind !== "moved") break;
+        current = pageTools.state.observation;
+      }
       // A saved picker rule is applied as soon as its question is on the
       // page; the picker itself says whether the choices are there.
       for (const control of current?.controls ?? []) {

@@ -439,6 +439,7 @@ test.each([false,true])("Fill completes four proven local steps after a finish, 
   const press=vi.fn(() => {
     step++;
     source.stepLabel=`Step ${step} of 4`;
+    source.controls[0].visible=step!==2;
     if(step===4) source.actions=[{index:0,label:"Send application",visible:true,disabled:false,inForm:true,submitsForm:true}];
     return Promise.resolve({ok:true as const,observedValue:"clicked"});
   });
@@ -448,6 +449,7 @@ test.each([false,true])("Fill completes four proven local steps after a finish, 
     chatWithTools:(messages,definitions) => {
       const check=supportedChecks(messages,definitions);
       if(check) return check;
+      expect(source.stepLabel).not.toBe("Step 2 of 4");
       turns++;
       source.loading=premature && turns===1;
       return Promise.resolve({toolCalls:[{id:`step_${turns}`,type:"function" as const,function:{name:source.loading?"click":"finish",arguments:JSON.stringify(source.loading?{ref:"a0"}:{reason:"This step is filled."})}}]});

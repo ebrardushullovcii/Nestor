@@ -1712,7 +1712,7 @@ export function pressOnSitePause(pressed: string, at: Date): ApplyPause {
     kind: "other" as const,
     answerControlType: "text" as const,
     isRequired: true,
-    note: "Job Finder filled what it could on this page. In Fill in for me it never presses the form's own buttons, because one of them could send your application.",
+    note: "Job Finder filled what it could on this page. It could not prove this control only changes a local, non-final step, so the press stays yours.",
     detectedAt: at.toISOString(),
     answerOptions: [],
     suggestedAnswers: [],
@@ -1727,7 +1727,7 @@ export function pressOnSitePause(pressed: string, at: Date): ApplyPause {
     blocker: {
       code: "site_saves_as_you_go",
       summary,
-      detail: `In Fill in for me Job Finder never presses the form's own buttons, because one of them could send your application. ${pressed} is yours to press.`,
+      detail: `Job Finder could not prove this control only changes a local, non-final step. ${pressed} is yours to press.`,
       nextActionLabel: `Press ${pressed} on the site, then continue`,
       host: null,
     },
