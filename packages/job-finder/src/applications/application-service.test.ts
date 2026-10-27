@@ -459,7 +459,7 @@ it.each(["paused", "failed"] as const)(
   },
 );
 
-it("Fill lets no save out, keeps uploading while another form saves unrelated answers, but vetoes changed Profile facts", async () => {
+it("Fill lets the form's own field saves out, keeps uploading while another form saves unrelated answers, but vetoes changed Profile facts", async () => {
   const f = await setup(1);
   await f.service.start();
   f.applications.applyJobs({ selection: { ids: f.ids } });
@@ -467,11 +467,11 @@ it("Fill lets no save out, keeps uploading while another form saves unrelated an
   const recheck =
     f.execute.mock.calls[0]![1].recheckIntermediateMutationAuthority!;
   expect(f.execute.mock.calls[0]![1]).toMatchObject({
-    intermediateMutationsAuthorized: false,
+    intermediateMutationsAuthorized: true,
     attachmentUploadsAuthorized: true,
     intermediateMutationAllowedOrigins: [],
   });
-  expect(await recheck("https://replica.test")).toBe(false);
+  expect(await recheck("https://replica.test")).toBe(true);
   expect(await recheck("https://replica.test", "attachment")).toBe(true);
   f.applications.needsYou.remember({
     key: "salary",
@@ -484,9 +484,10 @@ it("Fill lets no save out, keeps uploading while another form saves unrelated an
   expect(await recheck("https://replica.test", "attachment")).toBe(true);
   f.seed.profile.phone = "+447700900999";
   expect(await recheck("https://replica.test", "attachment")).toBe(false);
+  expect(await recheck("https://replica.test")).toBe(false);
 });
 
-it("without a send envelope Send for me fills strictly too: no saves, uploads frame-pinned", async () => {
+it("without a send envelope Send for me fills as Fill does: field saves, uploads frame-pinned", async () => {
   const f = await setup(1);
   f.seed.settings.applicationAutomationMode = "autonomous_submit";
   f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
@@ -495,7 +496,7 @@ it("without a send envelope Send for me fills strictly too: no saves, uploads fr
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
   const input = f.execute.mock.calls[0]![1];
   expect(input).toMatchObject({
-    intermediateMutationsAuthorized: false,
+    intermediateMutationsAuthorized: true,
     submitAuthorized: false,
     intermediateMutationAllowedOrigins: [],
   });
@@ -504,7 +505,7 @@ it("without a send envelope Send for me fills strictly too: no saves, uploads fr
       "https://replica.test",
       "answers",
     ),
-  ).toBe(false);
+  ).toBe(true);
   expect(
     await input.recheckIntermediateMutationAuthority!(
       "https://unrelated.test",

@@ -1481,7 +1481,9 @@ export function pressesFormButtons(
     "pressesFormButtons" | "intermediateWritesAuthorized"
   >,
 ): boolean {
-  return config.pressesFormButtons ?? config.intermediateWritesAuthorized === true;
+  return (
+    config.pressesFormButtons ?? config.intermediateWritesAuthorized === true
+  );
 }
 
 function afterWrite(deps: ApplyExecutorDeps, label: string | null): void {
