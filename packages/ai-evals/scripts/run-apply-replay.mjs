@@ -44,6 +44,7 @@ const groups = {
   cost: [
     "packages/browser-agent/src/apply/page-history.apply-replay.test.ts",
     "packages/browser-agent/src/apply/real-shape-cost.apply-replay.test.ts",
+    "packages/browser-agent/src/apply/turn-input-cost.apply-replay.test.ts",
     "packages/ai-providers/src/model-usage-scope.test.ts",
     "packages/job-finder/src/applications/apply-usage.test.ts",
     "packages/contracts/src/apply-usage-stored-json.test.ts",
