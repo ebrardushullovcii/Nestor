@@ -4990,6 +4990,7 @@ describe("picker replay: refused choices", () => {
     expect(guardState.pickerAttempts.get(pickerQuestionKey(control))).toEqual({
       question: pickerQuestionKey(control),
       tried: [pickerReplay.primary.toLowerCase()],
+      notOffered: [pickerReplay.primary.toLowerCase()],
       offeredOptions: pickerReplay.options,
     });
   });
@@ -5002,6 +5003,7 @@ describe("picker replay: refused choices", () => {
       {
         question: pickerQuestionKey(control),
         tried: ["unlisted territory", "another territory"],
+        notOffered: ["unlisted territory", "another territory"],
         offeredOptions: [...pickerReplay.options],
       },
     ];

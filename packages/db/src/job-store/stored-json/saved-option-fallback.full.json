@@ -1,0 +1,5 @@
+{
+  "primary": "Primary territory",
+  "fallback": "Fallback region",
+  "whenNeitherOffered": "skip_application"
+}

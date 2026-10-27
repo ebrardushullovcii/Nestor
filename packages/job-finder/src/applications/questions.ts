@@ -11,6 +11,7 @@ import type {
   CandidateReusableAnswer,
   CandidateAnswerKind,
   RememberFormAnswerInput,
+  SavedOptionFallback,
 } from "@nestor/contracts";
 
 export type FormQuestion = Pick<
@@ -135,6 +136,7 @@ export function toKnownFormAnswer(
     prompt: string;
     answer: string;
     local: boolean;
+    optionFallback?: SavedOptionFallback | null;
     kind?: CandidateAnswerKind;
     roleFamilies?: string[];
     proofEntryIds?: string[];
@@ -161,6 +163,7 @@ export function toKnownFormAnswer(
     label: input.prompt,
     question: input.prompt,
     answer: input.answer,
+    ...(input.optionFallback ? { optionFallback: input.optionFallback } : {}),
     kind: input.kind && input.kind !== "other" ? input.kind : kind,
     roleFamilies: input.roleFamilies ?? [],
     proofEntryIds: input.proofEntryIds ?? [],

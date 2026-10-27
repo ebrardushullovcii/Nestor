@@ -2308,15 +2308,20 @@ export type ApplyExecutionModelUse = z.infer<
 export const ApplyPickerAttemptSchema = z.object({
   question: z.string().min(1).max(2000),
   tried: z.array(z.string().max(300)).max(20),
+  /** The refused choices a list that finished loading said it does not have. */
+  notOffered: z.array(z.string().max(300)).max(20).default([]),
   offeredOptions: z.array(z.string().max(300)).max(500),
 });
 export type ApplyPickerAttempt = z.infer<typeof ApplyPickerAttemptSchema>;
+/** As stored by a run from before `notOffered` was kept. */
+export type StoredApplyPickerAttempt = z.input<typeof ApplyPickerAttemptSchema>;
 
 export const ApplyExecutionResultSchema = z.object({
   pickerAttempts: optionalStoredField(
     z.array(ApplyPickerAttemptSchema).max(200),
     [],
   ),
+  skipReason: optionalStoredField(z.string().min(1).max(2000).nullable(), null),
   questionContexts: optionalStoredField(
     z
       .array(

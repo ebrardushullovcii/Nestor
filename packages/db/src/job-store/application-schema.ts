@@ -1,5 +1,6 @@
 export const APPLICATION_SCHEMA = `
 CREATE TABLE IF NOT EXISTS applications (
+  disposition TEXT CHECK (disposition IN ('skipped', 'blocked')),
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
   mode TEXT NOT NULL CHECK (mode IN ('confirm_before_submit', 'autonomous_submit')),
@@ -147,6 +148,7 @@ END;
 -- Form answer memory belongs to Needs you, never Profile or a workspace blob.
 CREATE TABLE IF NOT EXISTS form_answer_undo (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, items_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS form_answers (
+  option_fallback_json TEXT,
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   answer_key TEXT NOT NULL,
   country TEXT NOT NULL,

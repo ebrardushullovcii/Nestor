@@ -1,0 +1,35 @@
+{
+  "provenance": "Synthetic shapes of the owner's country rule (\"if it has that do albania if not skip\") and the L1 review's cases: a fallback listed under its own-language name (Albania (Shqipëri)), which counts, while any other bracketed qualifier does not, a near-name that must not count, a State picker grouped under the saved question. No applicant data.",
+  "question": "Country of residence",
+  "primary": "Kosovo",
+  "fallback": "Albania",
+  "whenNeitherOffered": "skip_application",
+  "cases": [
+    {
+      "name": "primary offered",
+      "options": ["Kosovo", "Albania"],
+      "chosen": ["Kosovo"],
+      "expected": "Kosovo"
+    },
+    {
+      "name": "only the fallback offered",
+      "options": ["Albania", "Serbia"],
+      "chosen": ["Kosovo", "Albania"],
+      "expected": "Albania"
+    },
+    {
+      "name": "the fallback under its local name",
+      "options": ["Albania (Shqipëri)", "Serbia"],
+      "chosen": ["Kosovo", "Albania (Shqipëri)"],
+      "expected": "Albania (Shqipëri)"
+    },
+    {
+      "name": "neither offered",
+      "options": ["Serbia"],
+      "chosen": ["Kosovo", "Albania"],
+      "expected": null
+    }
+  ],
+  "nearName": "Kosovo and Metohija",
+  "groupedQuestion": { "groupLabel": "Country of residence", "label": "State" }
+}

@@ -62,6 +62,9 @@ export function assistantApplicationCommands() {
         ...tool,
         async execute(input: unknown, { session }: AssistantToolContext) {
           const { selection } = ApplyJobsInputSchema.parse(input);
+          // A filter expanded into ids is still a bulk choice: it must not
+          // bring back a job a saved rule skipped.
+          const bulk = !("ids" in selection);
           const ids = getApplicationStore().selectedJobIds(selection);
           const decisions = decideUnderGrants({
             grants: await session.grants.list(),
@@ -89,7 +92,10 @@ export function assistantApplicationCommands() {
               session.assertCurrent();
               const next = await runApplicationCommand(
                 "apply_to_jobs",
-                { selection: { ids: jobIds.slice(offset, offset + 5000) } },
+                {
+                  selection: { ids: jobIds.slice(offset, offset + 5000) },
+                  ...(bulk ? { bulk: true } : {}),
+                },
                 { conversationId: session.conversationId, mode },
               );
               result.queued += next.queued;

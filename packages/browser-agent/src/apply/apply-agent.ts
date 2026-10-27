@@ -81,6 +81,7 @@ import {
   type FileUploadProblem,
 } from "./submit-preflight";
 import { matchOption } from "./option-match";
+import { savedPickerRule } from "./option-fallback";
 import { createQuestionOccurrences } from "./question-occurrences";
 import {
   nationalityQuestionIdentity,
@@ -102,6 +103,8 @@ import {
   isSecurityChallengeControl,
   reportedSecurityChallenge,
 } from "./blockers";
+import { normalizeFormQuestionPrompt } from "@nestor/contracts";
+import { isControlAnswered } from "./control-classification";
 import type {
   ApplyAgentConfig,
   ApplyAgentResult,
@@ -353,6 +356,14 @@ async function runMeasuredApplyAgent(
   // only the part the agent could not do.
   let stuckFinishNudged = false;
   const guardState = createApplyGuardState(config.initialPickerAttempts);
+  // Pickers an earlier run left unanswered: a search the site restored into
+  // the box is not a choice, until this run chooses one.
+  const unconfirmedPickers = new Map(
+    (config.initialUnansweredPickerQuestions ?? []).map((question) => [
+      normalizeFormQuestionPrompt(question.prompt),
+      question.options,
+    ]),
+  );
   const questionOccurrences = createQuestionOccurrences(
     config.initialQuestionContexts,
   );
@@ -363,9 +374,19 @@ async function runMeasuredApplyAgent(
       const observation = await pageHands.observe();
       questionOccurrences.observe(observation);
       // A search left in a picker whose choice failed is not an answer.
-      for (const control of observation.controls)
-        if (guardState.openPickers.has(pickerQuestionKey(control)))
+      for (const control of observation.controls) {
+        const previousOptions =
+          control.kind === "combobox"
+            ? unconfirmedPickers.get(pickerQuestionKey(control))
+            : undefined;
+        if (
+          guardState.openPickers.has(pickerQuestionKey(control)) ||
+          previousOptions
+        )
           control.answered = false;
+        if (previousOptions && !control.options.length)
+          control.options = [...previousOptions];
+      }
       return observation;
     },
   };
@@ -459,6 +480,7 @@ async function runMeasuredApplyAgent(
       : {}),
   };
   let readyToSend: ApplyAgentResult["readyToSend"] = null;
+  let skipReason: string | null = null;
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const resumeText =
@@ -589,6 +611,8 @@ async function runMeasuredApplyAgent(
       (candidate) => candidate.ref === proposal.ref,
     );
     if (!control) return null;
+    if (savedPickerRule(control, questionPrompt(control), runConfig))
+      return null;
     if (
       heldAnswerKeys.has(pendingQuestionKey(control)) &&
       pendingQuestions.has(pendingQuestionKey(control))
@@ -1182,6 +1206,17 @@ async function runMeasuredApplyAgent(
   ): Promise<AgentLoopToolOutcome> => {
     const withPage = options.withPage === true;
     switch (outcome.kind) {
+      case "skipped":
+        skipReason = outcome.reason;
+        return {
+          kind: "finish",
+          finish: {
+            reason: outcome.reason,
+            stuck: false,
+            needsPerson: false,
+            data: {},
+          },
+        };
       case "observed":
         syncObservation(outcome.observation);
         return {
@@ -1791,6 +1826,7 @@ async function runMeasuredApplyAgent(
   };
 
   const domainTools: AgentLoopTool[] = [];
+  const handledPickerRules = new Set<string>();
   const completedControlWrites = new Set<string>();
   const controlWriteKey = (proposal: ApplyProposal): string | null => {
     if (
@@ -1884,6 +1920,22 @@ async function runMeasuredApplyAgent(
       },
     );
     const commitField = () => {
+      if (
+        (proposal.tool === "select" || proposal.tool === "type") &&
+        outcome.kind === "filled"
+      ) {
+        const chosen = outcome.observation.controls.find(
+          (control) =>
+            control.ref === proposal.ref &&
+            (control.kind === "select" || control.kind === "combobox"),
+        );
+        if (chosen) {
+          unconfirmedPickers.delete(
+            normalizeFormQuestionPrompt(questionPrompt(chosen)),
+          );
+          chosen.answered = isControlAnswered(chosen);
+        }
+      }
       if (isField && outcome.kind === "filled") {
         timingRecord.onFieldFilled();
         if (fromStoredFact) timingRecord.onStoredFactFilled();
@@ -2953,8 +3005,40 @@ async function runMeasuredApplyAgent(
     onToolTiming: timingRecord.onToolTiming,
     // Once every remaining field is held for the person, another model turn
     // cannot fill anything. This includes answer refusals, not just pickers.
-    beforeModelTurn: () => {
-      const current = pageTools.state.observation;
+    beforeModelTurn: async () => {
+      await refreshReusableAnswers();
+      let current = pageTools.state.observation;
+      if (current?.blocker) return null;
+      // A saved picker rule is applied as soon as its question is on the
+      // page; the picker itself says whether the choices are there.
+      for (const control of current?.controls ?? []) {
+        const key = pickerQuestionKey(control);
+        if (
+          handledPickerRules.has(key) ||
+          !savedPickerRule(control, questionPrompt(control), runConfig)
+        )
+          continue;
+        handledPickerRules.add(key);
+        const outcome = await runProposal(
+          { tool: "select", ref: control.ref, option: "" },
+          () =>
+            Promise.resolve({
+              supported: false,
+              reason:
+                "A saved picker rule answers from the person's own words.",
+            }),
+        );
+        const reported = await outcomeToLoop(outcome, { withPage: false });
+        if (reported.kind === "finish") return reported.finish;
+        if (reported.kind === "stop")
+          return {
+            reason: reported.reason,
+            needsPerson: true,
+            stuck: false,
+            data: {},
+          };
+      }
+      current = pageTools.state.observation;
       const answerHeld = [...heldAnswerKeys].some((key) =>
         pendingQuestions.has(key),
       );
@@ -3091,7 +3175,11 @@ async function runMeasuredApplyAgent(
       : null;
   let outcome: ApplyAgentResult["outcome"];
   let reason: string;
-  if (pauses.length > 0) {
+  if (skipReason) {
+    outcome = "paused";
+    reason = skipReason;
+    readyToSend = null;
+  } else if (pauses.length > 0) {
     outcome = "paused";
     reason = pauses[0]?.summary ?? loop.reason;
   } else if (
@@ -3175,7 +3263,8 @@ async function runMeasuredApplyAgent(
   const timing = `[apply] timing read=${agentTiming.pageReadMs}ms (${agentTiming.pageReads} reads) fill=${agentTiming.writeMs}ms upload=${agentTiming.uploadMs}ms tools=${agentTiming.toolMs}ms model=${agentTiming.modelTurns} turns ${agentTiming.modelMs}ms checks=${agentTiming.auxiliaryModelCalls} calls ${agentTiming.auxiliaryModelMs}ms total=${agentTiming.totalMs}ms fields_per_turn(filled/attempted)=[${fieldsPerTurn}] steps_advanced_per_turn=[${stepsPerTurn}] uploads_attached_per_turn=[${uploadsPerTurn}] stored_fact_fills_per_turn=[${storedPerTurn}] answers_waited_per_turn=[${waitedPerTurn}]`;
   return {
     outcome,
-    reason,
+    ...(skipReason ? { skipReason } : {}),
+    reason: skipReason ?? reason,
     steps: loop.steps,
     finalUrl: pageTools.state.observation?.url ?? null,
     filled,

@@ -19,7 +19,10 @@ import {
   normalizeFormQuestionPrompt,
   type ApplicationAttemptQuestion,
   type ApplyPickerAttempt,
+  type StoredApplyPickerAttempt,
   type ApplyWriteResult,
+  type CandidateReusableAnswer,
+  type SavedOptionFallback,
 } from "@nestor/contracts";
 
 import {
@@ -29,6 +32,7 @@ import {
 } from "./application-facts";
 import { normalizeSignal } from "./control-classification";
 import { matchOption } from "./option-match";
+import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { formatGithubAnswer } from "./github-username";
 import type { ApplyQuestionClassification } from "./question-classification";
 import {
@@ -87,6 +91,7 @@ import type {
  */
 
 export type ApplyExecutionOutcome =
+  | { kind: "skipped"; reason: string }
   | { kind: "observed"; observation: ApplyFormObservation }
   /** A read the model asked for. Carries no page change. */
   | { kind: "read"; text: string; observation: ApplyFormObservation }
@@ -192,11 +197,14 @@ export interface ApplyGuardState {
 }
 
 export function createApplyGuardState(
-  pickerAttempts: readonly ApplyPickerAttempt[] = [],
+  pickerAttempts: readonly StoredApplyPickerAttempt[] = [],
 ): ApplyGuardState {
   return {
     pickerAttempts: new Map(
-      pickerAttempts.map((attempt) => [attempt.question, attempt]),
+      pickerAttempts.map((attempt) => [
+        attempt.question,
+        { ...attempt, notOffered: attempt.notOffered ?? [] },
+      ]),
     ),
     openPickers: new Set(),
     repeatedPickers: new Set(),
@@ -247,6 +255,11 @@ function recordPickerFailure(
     tried: [
       ...(previous?.tried ?? []).filter((value) => value !== tried),
       tried,
+    ].slice(-20),
+    notOffered: [
+      ...(previous?.notOffered ?? []).filter((value) => value !== tried),
+      // A refusal proves absence only with the list it showed instead.
+      ...(offeredOptions?.length ? [tried] : []),
     ].slice(-20),
     offeredOptions: offeredOptions?.length
       ? offeredOptions.slice(0, 500)
@@ -299,6 +312,196 @@ function pickerHandover(
       answerOptions: [...offered],
     },
   };
+}
+
+function pickerRefused(
+  guardState: ApplyGuardState,
+  control: ApplyFormControl,
+  option: string,
+): boolean {
+  return (
+    guardState.pickerAttempts
+      .get(pickerQuestionKey(control))
+      ?.tried.includes(normalizeSignal(option)) ?? false
+  );
+}
+
+/** One choice put to the picker; a refusal is recorded with what its list offered. */
+async function choosePickerOption(
+  deps: ApplyExecutorDeps,
+  control: ApplyFormControl,
+  option: string,
+): Promise<ApplyWriteResult> {
+  const write = await writeUnderGuard(deps, {
+    declaredValue: option,
+    write: () => deps.config.hands.chooseOption(control.ref, option),
+  });
+  if (write.ok) deps.guardState.openPickers.delete(pickerQuestionKey(control));
+  else
+    recordPickerFailure(
+      deps.guardState,
+      control,
+      option,
+      write.reason === "option_not_offered"
+        ? (write.offeredOptions ?? [])
+        : undefined,
+    );
+  return write;
+}
+
+async function pickerFilled(
+  deps: ApplyExecutorDeps,
+  control: ApplyFormControl,
+  observation: ApplyFormObservation,
+  at: string,
+  answer: ApplyAnswer,
+): Promise<ApplyExecutionOutcome> {
+  afterWrite(deps, questionPrompt(control));
+  const stop = await guardStop(deps, observation.url);
+  if (stop) {
+    return { kind: "paused", pause: stop };
+  }
+  return {
+    kind: "filled",
+    filled: {
+      ref: control.ref,
+      label: questionPrompt(control),
+      questionKind: control.questionKind,
+      answer,
+      at,
+    },
+    observation: await deps.config.hands.observe(),
+  };
+}
+
+/**
+ * The person's ordered rule for one picker: their answer, then their fallback,
+ * then skip the application. Their answer is checked like any answer to this
+ * question, and the fallback goes in on that same answer. Each is matched to
+ * the spelling the form's list uses; a name that only resembles one is left to
+ * the person. The application is skipped only when a list that finished
+ * loading said it has neither; anything less goes to the person.
+ */
+async function applyPickerRule(input: {
+  deps: ApplyExecutorDeps;
+  control: ApplyFormControl;
+  observation: ApplyFormObservation;
+  at: string;
+  saved: CandidateReusableAnswer;
+  rule: SavedOptionFallback;
+}): Promise<ApplyExecutionOutcome> {
+  const { deps, control, observation, at, saved, rule } = input;
+  const key = pickerQuestionKey(control);
+  const offered = () =>
+    deps.guardState.pickerAttempts.get(key)?.offeredOptions ?? [];
+  // A skip rests only on what the list said in this run: the latest list it
+  // showed instead of a refused choice. Refusals remembered from an earlier
+  // run only stop a retry, and send the question to the person.
+  let listedNow: readonly string[] = [];
+  for (const [position, wanted] of [rule.primary, rule.fallback].entries()) {
+    // Each of the person's two answers is checked like any answer to this
+    // question before it goes in: the fallback as their saved answer too, so
+    // pay kept private or an eligibility answer still holds.
+    const choice = await decideAnswer({
+      deps:
+        position === 0
+          ? deps
+          : {
+              ...deps,
+              config: {
+                ...deps.config,
+                sources: {
+                  ...deps.config.sources,
+                  reusableAnswers: deps.config.sources.reusableAnswers.map(
+                    (answer) =>
+                      answer.id === saved.id
+                        ? { ...answer, answer: wanted }
+                        : answer,
+                  ),
+                },
+              },
+            },
+      control,
+      value: wanted,
+      storedFactId: `answerLibrary.${saved.id}`,
+      pageText: formWritingInstructions(observation),
+      controls: observation.controls,
+    });
+    if (choice.kind === "leave") {
+      return notEntered({ deps, control, observation, at, decision: choice });
+    }
+    // A second pass only when the list's reply spells the choice its own way.
+    for (let pass = 0; pass < 2; pass += 1) {
+      // Only the picker's own reply shows what it lacks; the list read with
+      // the page may stop before the plain name.
+      const fromList = strictOptionMatch(offered(), wanted);
+      const fromPage = strictOptionMatch(control.options, wanted);
+      if (fromList.kind === "ambiguous")
+        return pickerHandover(
+          deps,
+          observation,
+          control,
+          wanted,
+          `The list has names close to "${wanted}" (${fromList.candidates.slice(0, 6).join(", ")}) but none that is plainly it.`,
+          at,
+        );
+      const option =
+        fromList.kind === "match"
+          ? fromList.value
+          : fromPage.kind === "match"
+            ? fromPage.value
+            : wanted;
+      if (pickerRefused(deps.guardState, control, option)) break;
+      const write = await choosePickerOption(deps, control, option);
+      if (write.ok)
+        return pickerFilled(
+          deps,
+          control,
+          observation,
+          at,
+          position === 0
+            ? { ...choice.answer, value: option }
+            : {
+                ...choice.answer,
+                value: option,
+                sourceKind: "answer_library",
+                sourceId: `answerLibrary.${saved.id}#fallback`,
+                provenanceLabel: "your saved fallback for this question",
+                groundedIn: ["your saved fallback for this question"],
+              },
+        );
+      if (write.reason !== "option_not_offered") {
+        const after = await deps.config.hands.observe();
+        return pickerHandover(
+          deps,
+          after,
+          findControl(after, control.ref) ?? control,
+          option,
+          write.error,
+          at,
+        );
+      }
+      if (write.offeredOptions?.length) listedNow = write.offeredOptions;
+    }
+  }
+  // Judged on the latest list the picker settled on, for both choices: a
+  // choice refused earlier may be listed now.
+  const absent = (wanted: string) =>
+    listedNow.length > 0 &&
+    strictOptionMatch(listedNow, wanted).kind === "none";
+  if (absent(rule.primary) && absent(rule.fallback))
+    return {
+      kind: "skipped",
+      reason: `The form's list has neither ${rule.primary} nor ${rule.fallback}. Your saved rule says to skip this application.`,
+    };
+  return pickerHandover(
+    deps,
+    observation,
+    control,
+    rule.primary,
+    "The list's choices could not be confirmed, so the saved rule was not applied.",
+    at,
+  );
 }
 
 /**
@@ -555,6 +758,9 @@ async function withModelQuestionKinds(
           ? "other"
           : control.questionKind),
     attestationKind: classification.declarationKind,
+    // A label's asterisk is how many forms say required; the reading knows.
+    required: control.required || classification.required === true,
+    requiredOnPage: control.requiredOnPage ?? control.required,
     ...(typeof classification.asksHiringCountry === "boolean"
       ? { asksHiringCountry: classification.asksHiringCountry }
       : {}),
@@ -696,6 +902,7 @@ async function decideAnswer(input: {
       answer: value,
       pageInstructions: input.pageText,
       approvedAttestations: config.authority.preApprovedAttestationKinds,
+      application: config.application,
     });
     if (permission.kind === "needs_you")
       return {
@@ -2152,6 +2359,11 @@ export async function executeApplyProposal(
         };
       }
       const control = await withModelQuestionKinds(deps, observation, found);
+      // The person's saved rule for this exact question decides the order,
+      // whatever the model proposed.
+      const saved = savedPickerRule(control, questionPrompt(control), config);
+      if (saved)
+        return applyPickerRule({ deps, control, observation, at, ...saved });
       const choice = await decideAnswer({
         controls: observation.controls,
         deps,
@@ -2169,8 +2381,7 @@ export async function executeApplyProposal(
         matchOption(control.options, choice.answer.value) ??
         choice.answer.value;
       const key = pickerQuestionKey(control);
-      const attempts = deps.guardState.pickerAttempts.get(key);
-      if (attempts?.tried.includes(normalizeSignal(option))) {
+      if (pickerRefused(deps.guardState, control, option)) {
         deps.guardState.repeatedPickers.add(key);
         return pickerHandover(
           deps,
@@ -2194,19 +2405,8 @@ export async function executeApplyProposal(
           `This picker refused ${MAX_PICKER_ATTEMPTS} choices already.`,
           at,
         );
-      const write = await writeUnderGuard(deps, {
-        declaredValue: option,
-        write: () => config.hands.chooseOption(control.ref, option),
-      });
+      const write = await choosePickerOption(deps, control, option);
       if (!write.ok) {
-        recordPickerFailure(
-          deps.guardState,
-          control,
-          option,
-          write.reason === "option_not_offered"
-            ? write.offeredOptions
-            : undefined,
-        );
         const after = await config.hands.observe();
         return pickerHandover(
           deps,
@@ -2217,33 +2417,16 @@ export async function executeApplyProposal(
           at,
         );
       }
-      // Earlier refusals stay on record: a later success, perhaps with a
-      // substitute, does not make the refused choices available.
-      deps.guardState.openPickers.delete(key);
-      afterWrite(deps, questionPrompt(control));
-      const stop = await guardStop(deps, observation.url);
-      if (stop) {
-        return { kind: "paused", pause: stop };
-      }
-      return {
-        kind: "filled",
-        filled: {
-          ref: control.ref,
-          label: questionPrompt(control),
-          questionKind: control.questionKind,
-          answer:
-            choice.answer.sourceKind === "generated"
-              ? {
-                  ...choice.answer,
-                  value: option,
-                  sourceId: `chosen.${control.ref}`,
-                  provenanceLabel: "chosen on the form by Job Finder",
-                }
-              : { ...choice.answer, value: option },
-          at,
-        },
-        observation: await config.hands.observe(),
-      };
+      return pickerFilled(deps, control, observation, at, {
+        ...(choice.answer.sourceKind === "generated"
+          ? {
+              ...choice.answer,
+              sourceId: `chosen.${control.ref}`,
+              provenanceLabel: "chosen on the form by Job Finder",
+            }
+          : choice.answer),
+        value: option,
+      });
     }
 
     case "set_checkbox": {

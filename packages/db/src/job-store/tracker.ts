@@ -57,7 +57,7 @@ type EventRecord = {
 
 const ROW_COLUMNS = `t.job_id, j.title, j.company, j.location, t.status, t.status_at,
   t.applied_at, t.next_at, t.next_title,
-  CASE WHEN t.status = 'applying' THEN a.state END AS work,
+  CASE WHEN t.status = 'applying' THEN COALESCE(a.disposition,a.state) END AS work,
   CASE WHEN t.status = 'applying' THEN a.error END AS work_error`;
 
 /** Each order is an indexed column, then `job_id`, so a page position is exact. */

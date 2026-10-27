@@ -5,6 +5,7 @@ import {
   JobListingFactsSchema,
   JobSearchSettingsSchema,
   ResumeDraftSchema,
+  SavedOptionFallbackSchema,
   SubmissionOutcomeRecordSchema,
   TrackerFilterSchema,
   ProfileCopilotMessageSchema,
@@ -68,6 +69,7 @@ const STORED_JSON: Record<string, StoredJsonSchema> = {
   SubmissionArmedMarkerSchema,
   ApprovedApplicationAnswerSnapshotSchema,
   PreparedApplicationFormSchema,
+  SavedOptionFallbackSchema,
 };
 
 const FIXTURES: Record<string, string> = {
@@ -95,6 +97,7 @@ const FIXTURES: Record<string, string> = {
   ApprovedApplicationAnswerSnapshotSchema:
     "approved-application-answer-snapshot",
   PreparedApplicationFormSchema: "prepared-application-form",
+  SavedOptionFallbackSchema: "saved-option-fallback",
 };
 
 const fixtureDir = path.join(__dirname, "stored-json");

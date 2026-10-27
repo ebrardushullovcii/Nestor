@@ -549,6 +549,16 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       {
         ...facts,
         prepareApplicationForm: createApplyFormPreparer({
+          initialUnansweredPickerQuestions:
+            previous?.execution.questions
+              .filter(
+                (question) =>
+                  question.status === "detected" && !question.submittedAnswer,
+              )
+              .map((question) => ({
+                prompt: question.prompt,
+                options: question.answerOptions,
+              })) ?? [],
           ...(previous?.execution.questionContexts
             ? { initialQuestionContexts: previous.execution.questionContexts }
             : {}),
@@ -669,6 +679,22 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         state: "failed",
         error: result.detail,
       });
+      await closePage(row.id, row.attempt);
+      return;
+    }
+    if (result.skipReason) {
+      // Stop or a new attempt may have taken the row meanwhile; the skip is
+      // then theirs to decide. A row still this run's never stays running.
+      if (
+        !applications.skip(row.id, row.attempt, result.skipReason) &&
+        current(row)
+      )
+        applications.finishPreparation({
+          id: row.id,
+          attempt: row.attempt,
+          state: "failed",
+          error: result.skipReason,
+        });
       await closePage(row.id, row.attempt);
       return;
     }
@@ -881,6 +907,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               client && form
                 ? await checkClassifiedApplicationAnswers({
                     client,
+                    application: {
+                      jobId: String(job.id),
+                      applicationId: identity.resultId,
+                      resultId: identity.resultId,
+                      applicationRecordId: String(row.id),
+                      startingUrl: form.url ?? job.applyUrl ?? job.url,
+                    },
                     questionReadCacheScope: deps.aiClient,
                     approvedAttestations: AiBehaviorPreferenceSchema.parse(
                       settings.aiBehavior ?? {},
