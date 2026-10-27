@@ -474,6 +474,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             : "confirm_before_submit",
       submitAuthorized: sends && envelope !== null,
       applicationPageBindingKey: identity.resultId,
+      // The review card keeps what each run filled: a closed page comes back
+      // from it (no model call when the form still matches).
+      restorableByRefill: true,
       idempotencyKey: identity.resultId,
       ...(startingUrl ? { startingUrl } : {}),
       accountCreationAuthorized: false,

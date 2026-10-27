@@ -1413,6 +1413,8 @@ export function createBrowserAgentRuntime(
       guard: (page: Page) => Promise<unknown>;
       snapshot?: PreparedFormSnapshot;
       saved?: PreparedApplicationForm;
+      /** The caller can refill this form, so its page may close without a snapshot. */
+      refillable?: boolean;
     }
   >();
   const recoveryUnavailable = new Set<string>();
@@ -2536,7 +2538,7 @@ export function createBrowserAgentRuntime(
       if (
         !recovery ||
         recovery.snapshot ||
-        recoveryUnavailable.has(key) ||
+        (recoveryUnavailable.has(key) && !recovery.refillable) ||
         !page ||
         page.isClosed() ||
         pagesInUse.has(page) ||
@@ -2561,6 +2563,17 @@ export function createBrowserAgentRuntime(
             ),
           )
         ) {
+          // No exact snapshot here (a custom widget, a Needs-you form): the
+          // caller brings it back by refilling from what it kept. Close only
+          // a page nobody is using right now.
+          if (recovery.refillable && canDiscard() && !pagesInUse.has(page) && !preparedPagesWithPerson.has(key)) {
+            formRecovery.delete(key);
+            recoveryUnavailable.delete(key);
+            preparedApplicationPages.delete(key);
+            markedPreparedApplicationKeys.delete(key);
+            await page.close({ runBeforeUnload: false });
+            return true;
+          }
           recoveryUnavailable.add(key);
           return false;
         }
@@ -3342,6 +3355,26 @@ export function createBrowserAgentRuntime(
             await preparedFormStore.save(saved);
             formRecovery.get(key)!.saved = saved;
           }
+        }
+
+        // A Ready or Needs-you form the caller can refill may have its page
+        // closed to save memory, snapshot or not.
+        if (
+          input.applicationPageBindingKey &&
+          input.restorableByRefill === true &&
+          (executionResult.state === "ready" ||
+            executionResult.state === "paused") &&
+          preparedApplicationPages.has(input.applicationPageBindingKey)
+        ) {
+          const recovery = formRecovery.get(input.applicationPageBindingKey);
+          if (recovery) recovery.refillable = true;
+          else
+            formRecovery.set(input.applicationPageBindingKey, {
+              files: [],
+              attachments: [],
+              guard: (page) => ensurePrepareOnlyMutationGuard(page, false),
+              refillable: true,
+            });
         }
 
         if (

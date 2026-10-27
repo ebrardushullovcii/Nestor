@@ -117,6 +117,12 @@ export interface ExecuteApplicationFlowInput extends ExecuteEasyApplyInput {
    * hands must present the same key; it carries no permission by itself.
    */
   applicationPageBindingKey?: string;
+  /**
+   * The caller keeps what this run filled and can bring the form back by
+   * refilling it (a Ready or Needs-you form). Its page may then be closed to
+   * save memory even when the form cannot be snapshotted here.
+   */
+  restorableByRefill?: boolean;
   applicationAttachments?: readonly ApplicationAttachmentArtifact[];
   mode: ApplicationExecutionMode;
   /**
