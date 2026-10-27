@@ -287,16 +287,28 @@ export function ShortlistedScreen() {
     }
   }, [nextAfter, showToast]);
 
+  /**
+   * Applies the ticked jobs or the open one, every matching approved job, or
+   * the jobs shown on this page of the list.
+   */
   const apply = useCallback(
-    async (everything = false) => {
-      const input: JobSelectionInput | null = everything
-        ? { filter: { stage: "resume", text: latest.current.text }, except: [] }
-        : target();
-      if (!input) return;
+    async (scope: "target" | "all" | "page" = "target") => {
+      const input: JobSelectionInput | null =
+        scope === "all"
+          ? {
+              filter: { stage: "resume", text: latest.current.text },
+              except: [],
+            }
+          : scope === "page"
+            ? { ids: latest.current.list.rows.map((row) => row.id) }
+            : target();
+      if (!input || ("ids" in input && input.ids.length === 0)) return;
       setBusy("apply");
       try {
         const result = await window.nestor.jobFinder.applyJobs({
           selection: input,
+          // A page is a bulk choice: a job a saved rule skipped stays skipped.
+          ...(scope === "page" ? { bulk: true } : {}),
         });
         setSelection(NO_SELECTION);
         showToast({
@@ -414,16 +426,31 @@ export function ShortlistedScreen() {
           <PageHeader
             actions={
               tab === "resume" && list.total > 0 ? (
-                <Button
-                  disabled={busy !== null || list.loading}
-                  onClick={() => void apply(selectedCount === 0)}
-                  pending={busy === "apply"}
-                  size="toolbar"
-                >
-                  {selectedCount > 0
-                    ? `Apply to ${plural(selectedCount, "job")}`
-                    : `Apply to all ${list.totalCapped ? "matching jobs" : plural(list.total, "job")}`}
-                </Button>
+                <>
+                  {selectedCount === 0 && list.total > list.rows.length ? (
+                    // More jobs match than this page shows.
+                    <Button
+                      disabled={busy !== null || list.loading}
+                      onClick={() => void apply("page")}
+                      size="toolbar"
+                      variant="outline"
+                    >
+                      {`Apply to the ${plural(list.rows.length, "job")} on this page`}
+                    </Button>
+                  ) : null}
+                  <Button
+                    disabled={busy !== null || list.loading}
+                    onClick={() =>
+                      void apply(selectedCount === 0 ? "all" : "target")
+                    }
+                    pending={busy === "apply"}
+                    size="toolbar"
+                  >
+                    {selectedCount > 0
+                      ? `Apply to ${plural(selectedCount, "job")}`
+                      : `Apply to all ${list.totalCapped ? "matching jobs" : plural(list.total, "job")}`}
+                  </Button>
+                </>
               ) : null
             }
             description={
