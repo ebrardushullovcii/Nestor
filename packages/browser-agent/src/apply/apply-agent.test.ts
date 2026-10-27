@@ -6166,6 +6166,10 @@ test.each([
   { mode: "confirm_before_submit", handover: "none" },
   { mode: "autonomous_submit", handover: "none" },
   { mode: "confirm_before_submit", handover: "stale email" },
+  { mode: "confirm_before_submit", handover: "still needs person" },
+  { mode: "autonomous_submit", handover: "still needs person" },
+  { mode: "autonomous_submit", handover: "implicit finish" },
+  { mode: "autonomous_submit", handover: "text reply" },
   { mode: "confirm_before_submit", handover: "invalid email" },
   { mode: "confirm_before_submit", handover: "changed question" },
   { mode: "confirm_before_submit", handover: "stale email plus MFA" },
@@ -6234,6 +6238,22 @@ test.each([
                 ],
               },
             },
+            {
+              name: "finish",
+              args:
+                handover === "stale email"
+                  ? {
+                      reason: "The checked fields answer everything.",
+                      needsPerson: false,
+                    }
+                  : handover === "implicit finish"
+                    ? { reason: "The form is complete." }
+                    : {
+                        reason: "Email still needs the person's answer.",
+                        needsPerson: true,
+                        forPerson: ["c2"],
+                      },
+            },
           ]);
     let formTurns = 0;
     const client: LLMClient = {
@@ -6266,6 +6286,11 @@ test.each([
           if (handover === "changed question")
             email.hint = "Your professional reference's email address.";
         }
+        if (handover === "text reply" && formTurns > 2)
+          return Promise.resolve({
+            content: "Everything is complete.",
+            toolCalls: [],
+          });
         return model.chatWithTools(messages, tools, options);
       },
     };
@@ -6285,12 +6310,21 @@ test.each([
         ? ["Email *"]
         : handover === "stale email plus MFA"
           ? ["Enter the MFA code the site sent to your phone."]
-          : [],
+          : handover === "still needs person"
+            ? ["Review this application before sending."]
+            : handover === "implicit finish" || handover === "text reply"
+              ? [
+                  "Job Finder still needs you to review this application before it can finish.",
+                ]
+              : [],
     );
     expect(result.outcome).toBe(
       handover === "invalid email" ||
         handover === "changed question" ||
-        handover === "stale email plus MFA"
+        handover === "stale email plus MFA" ||
+        handover === "still needs person" ||
+        handover === "implicit finish" ||
+        handover === "text reply"
         ? "paused"
         : mode === "autonomous_submit"
           ? "ready_to_send"
@@ -6298,8 +6332,49 @@ test.each([
     );
     expect(finalClick).not.toHaveBeenCalled();
     expect(calls).toHaveBeenCalledTimes(
-      handover === "none" ? 2 : handover === "changed question" ? 4 : 3,
+      handover === "none"
+        ? 2
+        : handover === "changed question" ||
+            [
+              "stale email",
+              "still needs person",
+              "implicit finish",
+              "text reply",
+            ].includes(handover)
+          ? 4
+          : 3,
     );
+    if (
+      [
+        "stale email",
+        "still needs person",
+        "implicit finish",
+        "text reply",
+      ].includes(handover)
+    ) {
+      const nudges = calls.mock.calls
+        .flatMap(([messages]) => messages)
+        .filter(
+          (message) =>
+            message.role === "tool" &&
+            String(message.content).includes(
+              "These fields already have checked, still-valid answers",
+            ),
+        );
+      expect(nudges).toHaveLength(1);
+      expect(nudges[0]?.content).toContain(
+        '"question":"Email *","value":"robin@example.test"',
+      );
+      expect(nudges[0]?.content).toContain("finish with needsPerson: false");
+    }
+    if (
+      ["still needs person", "implicit finish", "text reply"].includes(handover)
+    ) {
+      expect(result.readyToSend).toBeNull();
+      expect(questions.some((question) => question.prompt === "Email *")).toBe(
+        false,
+      );
+    }
   },
 );
 

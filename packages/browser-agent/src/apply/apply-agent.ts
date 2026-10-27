@@ -837,6 +837,10 @@ async function runMeasuredApplyAgent(
   let staleResumeNudged = false;
   let optionalLetterNudged = false;
   let forPersonNudged = false;
+  // The one-time nudge does not clear the handover. Only the model's
+  // explicit finish(needsPerson: false) does; automatic completion cannot.
+  let needsPersonFinishPending = false;
+  let finishHasOnlyCheckedFields = false;
   // What the model's last finish named for the person, apart from its reason.
   let forPerson: string[] = [];
 
@@ -850,6 +854,16 @@ async function runMeasuredApplyAgent(
     control.choiceGroupKey
       ? `${control.kind}:${control.choiceGroupKey}`
       : control.ref;
+  const currentFieldAnswer = (control: ApplyFormControl): string =>
+    control.kind === "radio"
+      ? control.label || control.value
+      : control.kind === "checkbox"
+        ? control.answerControlType === "multi_choice"
+          ? control.label || control.value
+          : control.checked
+            ? "Yes"
+            : "No"
+        : control.selectedOptionLabel || control.value;
   const hasCheckedFieldAnswer = (
     control: ApplyFormControl,
     observation: ApplyFormObservation,
@@ -862,16 +876,7 @@ async function runMeasuredApplyAgent(
       control.credentialRole === "password"
     )
       return false;
-    const value =
-      control.kind === "radio"
-        ? control.label || control.value
-        : control.kind === "checkbox"
-          ? control.answerControlType === "multi_choice"
-            ? control.label || control.value
-            : control.checked
-              ? "Yes"
-              : "No"
-          : control.selectedOptionLabel || control.value;
+    const value = currentFieldAnswer(control);
     if (
       !value.trim() ||
       checkedFieldValues
@@ -1704,6 +1709,7 @@ async function runMeasuredApplyAgent(
           needsPerson: false,
         });
       case "finished": {
+        if (outcome.needsPerson) needsPersonFinishPending = true;
         forPerson = (outcome.forPerson ?? []).flatMap((item) =>
           nativeFinishQuestion(
             item,
@@ -1750,6 +1756,7 @@ async function runMeasuredApplyAgent(
           if (classification?.required) control.required = true;
         }
         const namedQuestions = forPerson.length;
+        const checkedFields = new Map<string, string>();
         forPerson = forPerson.filter((item) => {
           const matches = observation.controls.filter(
             (control) =>
@@ -1774,15 +1781,16 @@ async function runMeasuredApplyAgent(
                 questionClassificationKey(target, observation.controls),
               ) ?? classifications?.get(questionPrompt(target)))
             : undefined;
-          return (
+          if (
             !target ||
             !hasCheckedFieldAnswer(target, observation, reading?.answerTags)
-          );
+          )
+            return true;
+          checkedFields.set(questionPrompt(target), currentFieldAnswer(target));
+          return false;
         });
-        // A stale field request cannot recreate a handover after that exact
-        // answer passed the executor and is still valid on the live page.
-        if (namedQuestions > 0 && forPerson.length === 0)
-          outcome.needsPerson = false;
+        finishHasOnlyCheckedFields =
+          namedQuestions > 0 && forPerson.length === 0;
         const finishWithQuestions = (): AgentLoopToolOutcome => {
           // The model has already left questions for the person. One finish
           // hands back this step, including other visible required gaps;
@@ -1877,7 +1885,9 @@ async function runMeasuredApplyAgent(
           return {
             kind: "ok",
             content:
-              "needsPerson is set but forPerson names nothing. Finish again with each question or thing the person must do as its own forPerson item, or with needsPerson false if the form is complete.",
+              checkedFields.size > 0
+                ? `These fields already have checked, still-valid answers on the current page: ${JSON.stringify([...checkedFields].map(([question, value]) => ({ question, value })))}. If nothing else needs the person, call finish with needsPerson: false. Otherwise name only the remaining things the person must do in forPerson. needsPerson: true keeps the application handed over.`
+                : "needsPerson is set but forPerson names nothing. Finish again with each question or thing the person must do as its own forPerson item, or with needsPerson false if the form is complete.",
           };
         }
         // "Whenever there is room" covers optional letter fields too. Ask
@@ -2450,6 +2460,12 @@ async function runMeasuredApplyAgent(
         const parsed = parseApplyProposal(name, rawArguments);
         if (!parsed.ok)
           return { kind: "ok", status: "refused", content: parsed.error };
+        if (
+          parsed.proposal.tool === "finish" &&
+          parsed.proposal.needsPerson === false &&
+          parseToolArguments(rawArguments)?.needsPerson === false
+        )
+          needsPersonFinishPending = false;
         const writeKey = controlWriteKey(parsed.proposal);
         const proposedRef =
           "ref" in parsed.proposal ? parsed.proposal.ref : null;
@@ -4004,8 +4020,20 @@ async function runMeasuredApplyAgent(
   };
   // A finish that says needsPerson always ends paused, never ready to send:
   // what it names joins whatever the page left, in the same handover.
-  const finishNeedsPerson = !skipReason && loop.finish?.needsPerson === true;
-  if (finishNeedsPerson) addFinishItems(loop.finish!.reason, forPerson);
+  const finishNeedsPerson =
+    !skipReason &&
+    (needsPersonFinishPending || loop.finish?.needsPerson === true);
+  const finishReason =
+    needsPersonFinishPending && loop.finish?.needsPerson !== true
+      ? "Job Finder still needs you to review this application before it can finish."
+      : (loop.finish?.reason ?? loop.reason);
+  if (finishNeedsPerson)
+    addFinishItems(
+      finishHasOnlyCheckedFields
+        ? "Review this application before sending."
+        : finishReason,
+      forPerson,
+    );
   const pending = collectedQuestionsPause();
   const personOwnedBlocker =
     pageTools.state.observation?.blocker?.requiresPerson === true
@@ -4082,14 +4110,14 @@ async function runMeasuredApplyAgent(
     if (first)
       pauses.push({
         code: "question_needs_you",
-        summary: loop.finish!.reason,
+        summary: finishReason,
         question: first,
         questions: missing,
         blocker: null,
       });
     if (outcome !== "paused" && outcome !== "stuck") {
       outcome = "paused";
-      reason = pauses[0]?.summary ?? loop.finish!.reason;
+      reason = pauses[0]?.summary ?? finishReason;
     }
   }
   // Nothing waiting on the person, or a run that could not finish, is never
