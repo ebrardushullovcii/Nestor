@@ -1063,9 +1063,39 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             return applications.waitsOnFile(row.id)
               ? leaveForPerson(row)
               : undefined;
+          // The preparer understands which page actions are final. Pass their
+          // exact refs, rather than asking browser hands to guess from labels.
+          const finalPage = await browser
+            .readApplicationPageBinding?.("target_site", identity.resultId)
+            .catch(() => null);
+          const finalActionTargets = finalPage
+            ? buildApplyFormObservation(finalPage, new Date().toISOString())
+                .actions.filter(
+                  (action) =>
+                    action.kind === "final" &&
+                    action.visible &&
+                    !action.disabled,
+                )
+                .map((action) => ({ ref: action.ref, label: action.label }))
+            : undefined;
+          if (finalActionTargets && finalActionTargets.length !== 1)
+            return leaveForPerson(
+              row,
+              "The form does not expose exactly one final action. Review it before sending.",
+            );
           const runtime = {
-            observeApplicationForm:
-              browser.observeApplicationForm!.bind(browser),
+            observeApplicationForm: (
+              source: Parameters<
+                NonNullable<BrowserSessionRuntime["observeApplicationForm"]>
+              >[0],
+              options?: Parameters<
+                NonNullable<BrowserSessionRuntime["observeApplicationForm"]>
+              >[1],
+            ) =>
+              browser.observeApplicationForm!(source, {
+                ...options,
+                ...(finalActionTargets ? { finalActionTargets } : {}),
+              }),
             executeExactlyOneFinalAction: (
               source: Parameters<
                 NonNullable<

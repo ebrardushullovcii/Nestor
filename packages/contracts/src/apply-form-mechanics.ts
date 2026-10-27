@@ -95,6 +95,12 @@ export interface RawApplyAction extends RawApplyPlacement {
   pressed?: boolean;
 }
 
+/** Exact current page action identified as final by the application policy. */
+export interface ApplyFinalActionTarget {
+  ref: string;
+  label: string;
+}
+
 /**
  * One link on the page, as the browser resolved it.
  *

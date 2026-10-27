@@ -26,6 +26,7 @@ import { createApplicationStore } from "@nestor/db/applications";
 import {
   createJobSitesStore,
   createResumeStore,
+  createSendGuards,
   openJobStore,
 } from "@nestor/db/job-store";
 import { afterEach, expect, it, vi } from "vitest";
@@ -1658,3 +1659,147 @@ it.each([
     expect(f.onError).not.toHaveBeenCalled();
   },
 );
+
+it("Send for me resumes after two Needs-you answers and forwards only the final target once", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
+  let authority: ReturnType<typeof sendEnvelope> | null = null;
+  f.authorizeSending.mockImplementation(async ({ artifact, application }) => {
+    if (!authority) {
+      authority = {
+        ...sendEnvelope(application.jobId, artifact.sha256!),
+        mode: "autonomous_submit",
+      };
+      await guards.commitApplicationAuthorityEnvelope({
+        envelope: authority,
+        expectedRevision: null,
+      });
+    }
+    return authority;
+  });
+  const observation = {
+    identity: { id: "current-form", revision: 1, digest: "a".repeat(64) },
+    page: { origin: "https://replica.test", safePath: "/jobs/0" },
+    complete: true,
+    controls: [
+      {
+        identity: { ref: "final-control-5", signature: "c".repeat(64) },
+        ordinal: 5,
+        kind: "button" as const,
+        label: "Submit Application",
+        formIndex: -1,
+        action: { origin: "https://replica.test", safePath: "/jobs/0" },
+      },
+    ],
+  };
+  const observe = vi.fn<
+    NonNullable<BrowserSessionRuntime["observeApplicationForm"]>
+  >(() => Promise.resolve(observation));
+  const action = vi.fn<
+    NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>
+  >(async (_source, input) => {
+    const allowed = await input.veto({
+      observation,
+      control: observation.controls[0]!,
+    });
+    expect(allowed).toBe(true);
+    return {
+      outcome: "submitted",
+      reason: "employer_confirmation",
+      observation,
+      control: observation.controls[0]!,
+      facts: {
+        actionAttempted: true,
+        actionIssued: true,
+        actionCompleted: true,
+        pageBefore: observation.page,
+        pageAfter: observation.page,
+        urlChanged: false,
+        requestsObservedDuringAction: 1,
+      },
+      confirmation: {
+        observedAt: new Date().toISOString(),
+        destination: observation.page,
+        summary: "The employer confirmed receipt.",
+      },
+    };
+  });
+  Object.assign(f.browser, {
+    observeApplicationForm: observe,
+    executeExactlyOneFinalAction: action,
+  });
+  f.browser.readApplicationPageBinding.mockResolvedValue({
+    ...f.personPage,
+    bodyText: "Completed application",
+    actions: [
+      {
+        ref: "a0",
+        index: 0,
+        label: "Upload file",
+        visible: true,
+        disabled: false,
+      },
+      {
+        ref: "a5",
+        index: 5,
+        label: "Submit Application",
+        visible: true,
+        disabled: false,
+      },
+    ],
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "motivation",
+          prompt: "Why do you want to join us?",
+          kind: "other",
+          answerControlType: "text",
+          detectedAt: new Date().toISOString(),
+        },
+        {
+          id: "story",
+          prompt: "Tell us about a time you solved a problem",
+          kind: "other",
+          answerControlType: "text",
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    }),
+  );
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(2));
+  for (const task of f.applications.needsYou.list().rows)
+    f.applications.needsYou.answer({
+      id: task.id,
+      answer: "The person's unchanged recorded answer.",
+      remember: true,
+    });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("submitted"),
+  );
+  expect(observe).toHaveBeenCalledWith(
+    "target_site",
+    expect.objectContaining({
+      finalActionTargets: [{ ref: "a5", label: "Submit Application" }],
+    }),
+  );
+  expect(action).toHaveBeenCalledOnce();
+  expect(f.applications.needsYou.list().total).toBe(0);
+  f.service.stop();
+  const restarted = createApplicationService(f.deps);
+  cleanups.unshift(() => restarted.stop());
+  await restarted.start();
+  expect(action).toHaveBeenCalledOnce();
+  expect(f.onError).not.toHaveBeenCalled();
+});

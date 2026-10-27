@@ -328,7 +328,9 @@ describe("source-generic application browser hands", () => {
 
   test("reports not sent when the site refused the connection and nothing answered", async () => {
     const closed = http.createServer();
-    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      closed.listen(0, "127.0.0.1", resolve),
+    );
     const closedPort = (closed.address() as AddressInfo).port;
     await new Promise<void>((resolve) => closed.close(() => resolve()));
     const { page } = await createPage(
@@ -407,7 +409,9 @@ describe("source-generic application browser hands", () => {
       facts: { actionIssued: true, actionCompleted: true },
     });
     expect(
-      server.requests.filter((request) => request.includes("/submit-confirmed")),
+      server.requests.filter((request) =>
+        request.includes("/submit-confirmed"),
+      ),
     ).toHaveLength(1);
   });
 
@@ -589,3 +593,95 @@ test("waits for a delayed receipt before calling a final send uncertain", async 
     ).outcome,
   ).toBe("submitted");
 });
+
+test.each([true, false])(
+  "a policy-bound formless button issues one POST, confirmed=%s",
+  async (confirmed) => {
+    const path = confirmed ? "/submit-confirmed" : "/submit";
+    const { page, server } = await createPage(`<main>
+    <button>Upload file</button><button>Upload File</button><button>Yes</button><button>No</button><button aria-label="Open country list"></button>
+    <input name="name" value="Robin Example"><input name="email" value="robin@example.test">
+    <textarea name="motivation">The person's recorded answer.</textarea><textarea name="story">The person's recorded story.</textarea>
+    <input name="country" value="Germany"><input name="github" value="https://github.com/robin-example"><input name="linkedin" value="https://linkedin.com/in/robin-example">
+    <p>Resume attached: synthetic.pdf</p><button id="send" ${confirmed ? "" : 'type="button"'}>Submit Application</button>
+    <script>document.querySelector('#send').onclick=async()=>{const r=await fetch('${path}',{method:'POST',body:JSON.stringify({answers:7,resume:'synthetic.pdf'})});${confirmed ? "document.body.innerHTML=await r.text();" : "await r.text();"}};</script>
+  </main>`);
+    expect((await observeApplicationForm(page)).controls).toHaveLength(0);
+    const observation = await observeApplicationForm(page, {
+      finalActionTargets: [{ ref: "a5", label: "Submit Application" }],
+    });
+    expect(observation.complete).toBe(true);
+    expect(observation.controls).toHaveLength(1);
+    expect(observation.controls[0]).toMatchObject({
+      ordinal: 5,
+      formIndex: -1,
+      label: "Submit Application",
+    });
+    const input = {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      confirmationTimeoutMs: 200,
+      veto: () => true,
+    };
+    const result = await executeExactlyOneFinalAction(page, input);
+    expect(result.outcome).toBe(confirmed ? "submitted" : "outcome_uncertain");
+    await executeExactlyOneFinalAction(page, input);
+    expect(
+      server.requests.filter((request) => request === `POST ${path}`),
+    ).toHaveLength(1);
+  },
+);
+
+test.each(["two targets", "wrong label", "removed", "replaced after veto"])(
+  "formless final controls fail closed: %s",
+  async (shape) => {
+    const { page, server } =
+      await createPage(`<button id="one">Submit Application</button><button id="two">Send application</button>
+    <script>document.querySelectorAll('button').forEach(b=>b.onclick=()=>fetch('/submit-confirmed',{method:'POST'}));</script>`);
+    const targets =
+      shape === "two targets"
+        ? [
+            { ref: "a0", label: "Submit Application" },
+            { ref: "a1", label: "Send application" },
+          ]
+        : [
+            {
+              ref: "a0",
+              label:
+                shape === "wrong label"
+                  ? "Different action"
+                  : "Submit Application",
+            },
+          ];
+    const observation = await observeApplicationForm(page, {
+      finalActionTargets: targets,
+    });
+    if (shape === "removed")
+      await page.locator("#one").evaluate((element) => element.remove());
+    let calls = 0;
+    const result = await executeExactlyOneFinalAction(page, {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]?.identity ?? {
+        ref: "absent",
+        signature: "a".repeat(64),
+      },
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      confirmationTimeoutMs: 100,
+      veto: async () => {
+        if (++calls === 2 && shape === "replaced after veto")
+          await page.locator("#one").evaluate((element) => {
+            element.textContent = "Different action";
+          });
+        return true;
+      },
+    });
+    expect(result.outcome).toBe("not_submitted");
+    expect(result.facts.actionIssued).toBe(false);
+    expect(
+      server.requests.filter((request) => request.startsWith("POST ")),
+    ).toHaveLength(0);
+  },
+);

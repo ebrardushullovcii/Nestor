@@ -6,8 +6,10 @@ import {
   SubmissionObservationIdentitySchema,
   type SubmissionFinalControlIdentity,
   type SubmissionObservationIdentity,
+  type ApplyFinalActionTarget,
 } from "@nestor/contracts";
 import type { Page, Request } from "playwright";
+import { actionLocator } from "./apply-page-mechanics";
 
 import {
   closePrepareOnlyFinalActionWindow,
@@ -183,6 +185,8 @@ export type ApplicationFinalActionResult =
     };
 
 export interface ObserveApplicationFormOptions {
+  /** Policy-selected page actions, required for JavaScript forms without a form owner. */
+  readonly finalActionTargets?: readonly ApplyFinalActionTarget[];
   /** Optional cap against pathological pages; the default is intentionally bounded. */
   readonly maxControls?: number;
   /** Exact opaque preparation identity retained by the owning browser runtime. */
@@ -279,7 +283,7 @@ function isRawApplicationControl(
     isApplicationFinalControlKind(record.kind) &&
     typeof record.label === "string" &&
     Number.isInteger(record.formIndex) &&
-    (record.formIndex as number) >= 0 &&
+    (record.formIndex as number) >= -1 &&
     (typeof record.actionOrigin === "string" || record.actionOrigin === null) &&
     (typeof record.actionPath === "string" || record.actionPath === null)
   );
@@ -378,8 +382,43 @@ async function readRawApplicationFormSnapshot(
   page: Page,
   maxControls: number,
 ): Promise<RawApplicationFormSnapshot> {
+  const binding = finalActionTargets.get(page);
+  const targets: { ordinal: number; label: string }[] = [];
+  let targetsComplete = !binding || binding.url === page.url();
+  for (const target of binding?.targets ?? []) {
+    if (!target.label.trim()) {
+      targetsComplete = false;
+      continue;
+    }
+    if (targets.length >= DEFAULT_MAX_CONTROLS) {
+      targetsComplete = false;
+      break;
+    }
+    const locator = actionLocator(page, target.ref);
+    const ordinal = await locator
+      ?.evaluate(
+        (element, selector) => {
+          if (window !== window.top) return -1;
+          return Array.from(document.querySelectorAll(selector)).indexOf(
+            element,
+          );
+        },
+        APPLICATION_FINAL_CONTROL_SELECTOR,
+        { timeout: 250 },
+      )
+      .catch(() => -1);
+    if (
+      ordinal === undefined ||
+      ordinal < 0 ||
+      targets.some((entry) => entry.ordinal === ordinal)
+    ) {
+      targetsComplete = false;
+      continue;
+    }
+    targets.push({ ordinal, label: target.label });
+  }
   const raw: unknown = await page.evaluate(
-    ({ selector, limit }) => {
+    ({ selector, limit, targets, targetsComplete }) => {
       const normalize = (value: string): string =>
         value.replace(/\s+/gu, " ").trim().slice(0, 200);
       const isVisible = (element: Element): boolean => {
@@ -408,13 +447,15 @@ async function readRawApplicationFormSnapshot(
         );
       const pageUrl = new URL(window.location.href);
       const controls: RawApplicationControl[] = [];
-      let complete = true;
+      let complete = targetsComplete;
+      const matchedTargets = new Set<number>();
       const candidates = Array.from(
         document.querySelectorAll<HTMLElement>(selector),
       );
       candidates.forEach((element, ordinal) => {
         const form = (element as HTMLButtonElement | HTMLInputElement).form;
-        if (!form || !isVisible(element) || element.matches(":disabled")) {
+        const target = targets.find((entry) => entry.ordinal === ordinal);
+        if (!isVisible(element) || element.matches(":disabled")) {
           return;
         }
         if (element.getAttribute("aria-disabled") === "true") {
@@ -422,8 +463,31 @@ async function readRawApplicationFormSnapshot(
         }
         const tagName = element.tagName.toLowerCase();
         const type = (element.getAttribute("type") ?? "").toLowerCase();
+        const targetMatches =
+          !!target &&
+          [
+            [
+              element.getAttribute("aria-label"),
+              element.getAttribute("title"),
+              element.getAttribute("value"),
+              element.textContent,
+              element.getAttribute("name"),
+            ]
+              .filter((value) => typeof value === "string")
+              .join(" "),
+            element.getAttribute("aria-label") ?? "",
+            element.textContent ?? "",
+            element.getAttribute("value") ?? "",
+          ].some(
+            (label) =>
+              label.replace(/\s+/gu, " ").trim() ===
+              target.label.replace(/\s+/gu, " ").trim(),
+          );
+        if (targetMatches) matchedTargets.add(ordinal);
+        if (!form && !targetMatches) return;
         const kind: ApplicationFinalControlKind | null =
-          tagName === "button" && (type === "" || type === "submit")
+          tagName === "button" &&
+          (type === "" || type === "submit" || targetMatches)
             ? "button"
             : tagName === "input" && type === "submit"
               ? "input_submit"
@@ -441,7 +505,7 @@ async function readRawApplicationFormSnapshot(
         try {
           actionUrl = new URL(
             element.getAttribute("formaction") ??
-              form.getAttribute("action") ??
+              form?.getAttribute("action") ??
               pageUrl.href,
             document.baseURI,
           );
@@ -454,11 +518,12 @@ async function readRawApplicationFormSnapshot(
           ordinal,
           kind,
           label: labelFor(element),
-          formIndex: Array.from(document.forms).indexOf(form),
+          formIndex: form ? Array.from(document.forms).indexOf(form) : -1,
           actionOrigin: isHttpAction ? actionUrl.origin : null,
           actionPath: isHttpAction ? actionUrl.pathname : null,
         });
       });
+      if (matchedTargets.size !== targets.length) complete = false;
       return {
         pageOrigin:
           pageUrl.protocol === "http:" || pageUrl.protocol === "https:"
@@ -472,11 +537,22 @@ async function readRawApplicationFormSnapshot(
         controls,
       } satisfies RawApplicationFormSnapshot;
     },
-    { selector: APPLICATION_FINAL_CONTROL_SELECTOR, limit: maxControls },
+    {
+      selector: APPLICATION_FINAL_CONTROL_SELECTOR,
+      limit: maxControls,
+      targets,
+      targetsComplete,
+    },
   );
   assertRawApplicationFormSnapshot(raw);
   return raw;
 }
+
+// The host supplies policy; these page-local refs grant no authority themselves.
+const finalActionTargets = new WeakMap<
+  Page,
+  { url: string; targets: readonly ApplyFinalActionTarget[] }
+>();
 
 function emptyFacts(
   page: ApplicationSafePageUrl,
@@ -614,6 +690,11 @@ export async function observeApplicationForm(
   page: Page,
   options?: ObserveApplicationFormOptions,
 ): Promise<ApplicationFormObservation> {
+  if (options?.finalActionTargets !== undefined)
+    finalActionTargets.set(page, {
+      url: page.url(),
+      targets: options.finalActionTargets.map((target) => ({ ...target })),
+    });
   const requestedMaxControls = options?.maxControls;
   const maxControls =
     requestedMaxControls === undefined
@@ -846,89 +927,16 @@ export async function executeExactlyOneFinalAction(
       });
     }
 
-    const locator = page
-      .locator(APPLICATION_FINAL_CONTROL_SELECTOR)
-      .nth(finalControl.ordinal);
     let liveControlMatches = false;
     try {
-      const liveControl = await locator.evaluate(
-        (element, input): RawApplicationControl | null => {
-          if (!(element instanceof HTMLElement)) return null;
-          const form = (element as HTMLButtonElement | HTMLInputElement).form;
-          if (!form || element.matches(":disabled")) return null;
-          const isVisible = (candidate: Element): boolean => {
-            const style = window.getComputedStyle(candidate);
-            const rect = candidate.getBoundingClientRect();
-            return (
-              style.display !== "none" &&
-              style.visibility !== "hidden" &&
-              Number(style.opacity || "1") > 0 &&
-              rect.width > 0 &&
-              rect.height > 0
-            );
-          };
-          if (
-            !isVisible(element) ||
-            element.getAttribute("aria-disabled") === "true"
-          ) {
-            return null;
-          }
-          const candidates = Array.from(
-            document.querySelectorAll<HTMLElement>(input.selector),
-          );
-          if (candidates.indexOf(element) !== input.ordinal) return null;
-          const tagName = element.tagName.toLowerCase();
-          const type = (element.getAttribute("type") ?? "").toLowerCase();
-          const kind: ApplicationFinalControlKind | null =
-            tagName === "button" && (type === "" || type === "submit")
-              ? "button"
-              : tagName === "input" && type === "submit"
-                ? "input_submit"
-                : tagName === "input" && type === "image"
-                  ? "input_image"
-                  : null;
-          if (!kind) return null;
-          const normalize = (value: string): string =>
-            value.replace(/\s+/gu, " ").trim().slice(0, 200);
-          const label = normalize(
-            [
-              element.getAttribute("aria-label"),
-              element.getAttribute("title"),
-              element.getAttribute("value"),
-              element.textContent,
-              element.getAttribute("name"),
-            ]
-              .filter((value): value is string => typeof value === "string")
-              .join(" "),
-          );
-          const pageUrl = new URL(window.location.href);
-          let actionUrl: URL;
-          try {
-            actionUrl = new URL(
-              element.getAttribute("formaction") ??
-                form.getAttribute("action") ??
-                pageUrl.href,
-              document.baseURI,
-            );
-          } catch {
-            return null;
-          }
-          const isHttpAction =
-            actionUrl.protocol === "http:" || actionUrl.protocol === "https:";
-          return {
-            ordinal: input.ordinal,
-            kind,
-            label,
-            formIndex: Array.from(document.forms).indexOf(form),
-            actionOrigin: isHttpAction ? actionUrl.origin : null,
-            actionPath: isHttpAction ? actionUrl.pathname : null,
-          };
-        },
-        {
-          selector: APPLICATION_FINAL_CONTROL_SELECTOR,
-          ordinal: finalControl.ordinal,
-        },
+      const live = await readRawApplicationFormSnapshot(
+        page,
+        DEFAULT_MAX_CONTROLS,
       );
+      const liveControl =
+        live.complete && live.controls.length === 1
+          ? (live.controls[0] ?? null)
+          : null;
       liveControlMatches =
         liveControl !== null &&
         liveControl.ordinal === finalControl.ordinal &&

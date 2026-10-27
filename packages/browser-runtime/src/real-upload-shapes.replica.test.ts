@@ -6,6 +6,10 @@ import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
 import {
+  executeExactlyOneFinalAction,
+  observeApplicationForm,
+} from "./application-submission-browser-hands";
+import {
   allowPrepareOnlyRunNavigation,
   ensurePrepareOnlyMutationGuard,
   openPrepareOnlyIntermediateMutationWindow,
@@ -142,7 +146,67 @@ test("Ashby: the resume is stored and bound to its field; typed answers are not 
   ).toEqual([]);
 });
 
-test("Ashby with field saves: the person's own Submit gets every value Nestor typed", async () => {
+test("Ashby's no-type Submit is unchanged by a fenced Yes/No press", async () => {
+  const { page, session } = await fillPage("ashby-shape");
+  const finalState = () =>
+    page.locator("#send").evaluate((element) => ({
+      tag: element.tagName,
+      typeAttribute: element.getAttribute("type"),
+      type: (element as HTMLButtonElement).type,
+      form: (element as HTMLButtonElement).form,
+      forms: document.forms.length,
+    }));
+  const before = await finalState();
+  expect(before).toEqual({
+    tag: "BUTTON",
+    typeAttribute: null,
+    type: "submit",
+    form: null,
+    forms: 0,
+  });
+  expect((await observeApplicationForm(page)).controls).toHaveLength(0);
+  const actions = (await session.readPage()).actions;
+  const yes = actions.find(
+    (action) => action.pressed !== undefined && action.label === "Yes",
+  )!;
+  const savedResponses: number[] = [];
+  page.on("response", (response) => {
+    if (response.url().includes("op=ApiSetFormValue"))
+      savedResponses.push(response.status());
+  });
+  expect(
+    await session.setToggle(yes.ref ?? `a${yes.index}`, true),
+  ).toMatchObject({
+    ok: true,
+  });
+  await page.waitForFunction(() =>
+    document
+      .getElementById("toast")
+      ?.textContent?.includes("could not be saved"),
+  );
+  expect(savedResponses).toEqual([]);
+  expect(await finalState()).toEqual(before);
+  expect((await observeApplicationForm(page)).controls).toHaveLength(0);
+  const send = (await session.readPage()).actions.find(
+    (action) => action.label === "Submit Application",
+  )!;
+  const ready = await observeApplicationForm(page, {
+    finalActionTargets: [
+      { ref: send.ref ?? `a${send.index}`, label: send.label },
+    ],
+  });
+  expect(ready.complete).toBe(true);
+  expect(ready.controls).toHaveLength(1);
+  expect(ready.controls[0]).toMatchObject({
+    formIndex: -1,
+    label: "Submit Application",
+  });
+  expect(
+    posts().filter((post) => post.path === "/ashby-shape/apply/1"),
+  ).toEqual([]);
+});
+
+test("Ashby with field saves: guarded Submit sends once after the Yes/No presses", async () => {
   const { page, session } = await fillPage("ashby-shape", true);
   const controls = (await session.readPage()).controls;
   const ref = (id: string) => {
@@ -195,33 +259,39 @@ test("Ashby with field saves: the person's own Submit gets every value Nestor ty
   await uploadSettled(page);
   await page.waitForTimeout(500);
   expect(await page.locator("#toast").textContent()).toBe("");
-  // The person's click: Ashby's Submit carries only the form's identifiers.
-  const render = await page.locator("#application").getAttribute("data-render");
-  const submitted = await fetch(
-    `${base}/ashby-shape/api/non-user-graphql?op=ApiSubmitSingleApplicationFormAction`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        operationName: "ApiSubmitSingleApplicationFormAction",
-        variables: {
-          organizationHostedJobsPageName: "replica",
-          formRenderIdentifier: render,
-          jobPostingId: "replica-1",
-          actionIdentifier: "submit",
-        },
-      }),
-    },
-  ).then(
-    (response) =>
-      response.json() as Promise<{
-        data: { submitApplicationFormAction: unknown };
-      }>,
-  );
-  expect(submitted.data.submitApplicationFormAction).toEqual({
-    ok: true,
-    missing: [],
+  // The same no-type, formless final button as the real page. Resolve its
+  // exact action, then use the guarded one-shot boundary, never a direct POST.
+  const send = (await session.readPage()).actions.find(
+    (action) => action.label === "Submit Application",
+  )!;
+  const observation = await observeApplicationForm(page, {
+    finalActionTargets: [
+      { ref: send.ref ?? `a${send.index}`, label: send.label },
+    ],
   });
+  expect(observation.complete).toBe(true);
+  expect(observation.controls).toHaveLength(1);
+  const origin = new URL(page.url()).origin;
+  const finalInput = {
+    expectedObservation: observation.identity,
+    expectedControl: observation.controls[0]!.identity,
+    expectedPageOrigin: origin,
+    allowedOrigins: [origin],
+    veto: () => true,
+    confirmationTimeoutMs: 2_000,
+  };
+  const finalRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("op=ApiSubmitSingleApplicationFormAction"))
+      finalRequests.push(request.method());
+  });
+  expect(await executeExactlyOneFinalAction(page, finalInput)).toMatchObject({
+    outcome: "submitted",
+  });
+  expect(await executeExactlyOneFinalAction(page, finalInput)).toMatchObject({
+    outcome: "not_submitted",
+  });
+  expect(finalRequests).toEqual(["POST"]);
   const post = posts().find(
     (entry) =>
       entry.path === "/ashby-shape/apply/1" &&
