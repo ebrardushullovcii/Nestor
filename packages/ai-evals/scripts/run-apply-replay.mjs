@@ -37,6 +37,7 @@ const groups = {
     "packages/browser-agent/src/apply/apply-agent.test.ts",
   ],
   restart: [
+    "packages/browser-runtime/src/submission-confirmation-policy.test.ts",
     "packages/browser-runtime/src/application-submission-browser-hands.test.ts",
     "packages/db/src/job-store/applications.test.ts",
     "packages/db/src/job-store/stored-json.test.ts",

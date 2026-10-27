@@ -28,6 +28,26 @@ function startFixtureServer(): Promise<FixtureServer> {
   const server = http.createServer((request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
     requests.push(`${request.method ?? "GET"} ${requestUrl.pathname}`);
+    if (requestUrl.pathname === "/api/graphql") {
+      response.writeHead(
+        Number(requestUrl.searchParams.get("status") ?? "200"),
+        { "content-type": "application/json" },
+      );
+      response.end(
+        JSON.stringify({ data: { submitApplicationFormAction: { ok: true } } }),
+      );
+      return;
+    }
+    if (requestUrl.pathname === "/submit-state") {
+      response.writeHead(303, { location: "/application/confirmation" });
+      response.end();
+      return;
+    }
+    if (requestUrl.pathname === "/application/confirmation") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<h1>Your request is now in the queue.</h1>");
+      return;
+    }
     if (
       requestUrl.pathname === "/submit" ||
       requestUrl.pathname === "/submit-confirmed"
@@ -555,9 +575,13 @@ test.each([
     );
     // Fixing the field permits another deliberate attempt on the same form.
     await page.evaluate(() => {
-      document.querySelector<HTMLFormElement>("form")!.onsubmit = (event) => {
+      document.querySelector<HTMLFormElement>("form")!.onsubmit = async (
+        event,
+      ) => {
         event.preventDefault();
-        document.body.textContent = "We have received your application";
+        document.body.innerHTML = await (
+          await fetch("/submit-confirmed", { method: "POST" })
+        ).text();
       };
       document.getElementById("field-error")!.textContent = "";
     });
@@ -577,7 +601,8 @@ test.each([
 test("waits for a delayed receipt before calling a final send uncertain", async () => {
   const { page } =
     await createPage(`<form><button type="submit">Send application</button></form>
-    <script>document.querySelector('form').onsubmit = event => {event.preventDefault();
+    <script>document.querySelector('form').onsubmit = async event => {event.preventDefault();
+      await fetch('/submit-confirmed', {method:'POST'});
       setTimeout(() => {document.body.textContent = 'We have received your application';}, 1_300);};</script>`);
   const observation = await observeApplicationForm(page);
   expect(
@@ -633,6 +658,144 @@ test.each([true, false])(
     ).toHaveLength(1);
   },
 );
+
+test.each([
+  "confirmed",
+  "late final request",
+  "autosave only",
+  "failed final and successful analytics",
+  "response only",
+  "stale message",
+])(
+  "a JavaScript send needs its own successful final response and fresh page proof: %s",
+  async (shape) => {
+    const message =
+      "Your application was successfully submitted. We appreciate your patience as your application is under review.";
+    const field =
+      shape === "autosave only"
+        ? "setFormValue"
+        : "submitSingleApplicationFormAction";
+    const status =
+      shape === "failed final and successful analytics" ? 500 : 200;
+    const body = JSON.stringify({
+      operationName: "ApiSubmitSingleApplicationFormAction",
+      query: `mutation ApiSubmitSingleApplicationFormAction { ${field} { ok } }`,
+    });
+    const { page, server } =
+      await createPage(`<main>${shape === "stale message" ? `<p>${message}</p>` : ""}<button id="send">Submit Application</button></main>
+      <script>document.getElementById('send').onclick = async () => {
+        ${shape === "late final request" ? "await new Promise(resolve => setTimeout(resolve, 150));" : ""}
+        await fetch('/api/graphql?status=${status}', {method:'POST',headers:{'content-type':'application/json'},body:${JSON.stringify(body)}});
+        ${shape === "failed final and successful analytics" ? "await fetch('/events', {method:'POST'});" : ""}
+        ${shape !== "response only" ? `document.body.textContent = ${JSON.stringify(message)};` : ""}
+      };</script>`);
+    const observation = await observeApplicationForm(page, {
+      finalActionTargets: [{ ref: "a0", label: "Submit Application" }],
+    });
+    const input = {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      confirmationTimeoutMs: 600,
+      veto: () => true,
+    };
+    const result = await executeExactlyOneFinalAction(page, input);
+    expect(result.outcome).toBe(
+      ["confirmed", "late final request"].includes(shape)
+        ? "submitted"
+        : "outcome_uncertain",
+    );
+    await executeExactlyOneFinalAction(page, input);
+    expect(
+      server.requests.filter((request) => request === "POST /api/graphql"),
+    ).toHaveLength(1);
+  },
+);
+
+test("the final form response can move to an explicit confirmation state without a phrase match", async () => {
+  const { page, server } = await createPage(
+    "<form method=post action='/submit-state'><button>Submit Application</button></form>",
+  );
+  const observation = await observeApplicationForm(page);
+  const input = {
+    expectedObservation: observation.identity,
+    expectedControl: observation.controls[0]!.identity,
+    expectedPageOrigin: expectedOrigin(page),
+    allowedOrigins: [expectedOrigin(page)],
+    confirmationTimeoutMs: 1_000,
+    veto: () => true,
+  };
+  expect((await executeExactlyOneFinalAction(page, input)).outcome).toBe(
+    "submitted",
+  );
+  await executeExactlyOneFinalAction(page, input);
+  expect(
+    server.requests.filter((request) => request === "POST /submit-state"),
+  ).toHaveLength(1);
+});
+
+test.each([true, false])(
+  "a browser alert and a failed unrelated request do not decide submission: receipt=%s",
+  async (received) => {
+    const body = JSON.stringify({
+      operationName: "SubmitApplication",
+      query: "mutation SubmitApplication { submitApplication { ok } }",
+    });
+    const { page, server } =
+      await createPage(`<button id='send'>Submit Application</button><script>
+    document.getElementById('send').onclick = async () => {
+      await fetch('/verification-unavailable', {method:'POST'}).catch(() => alert('Cannot contact the verification service.'));
+      ${received ? `await fetch('/api/graphql', {method:'POST',body:${JSON.stringify(body)}}); document.body.textContent='Your application was successfully submitted';` : ""}
+    };</script>`);
+    await page.route("**/verification-unavailable", (route) =>
+      route.abort("connectionrefused"),
+    );
+    const observation = await observeApplicationForm(page, {
+      finalActionTargets: [{ ref: "a0", label: "Submit Application" }],
+    });
+    const input = {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      confirmationTimeoutMs: 700,
+      veto: () => true,
+    };
+    expect((await executeExactlyOneFinalAction(page, input)).outcome).toBe(
+      received ? "submitted" : "outcome_uncertain",
+    );
+    await executeExactlyOneFinalAction(page, input);
+    expect(
+      server.requests.filter((request) => request === "POST /api/graphql"),
+    ).toHaveLength(received ? 1 : 0);
+  },
+);
+
+test("a final response without a receipt cannot be retried because of later field feedback", async () => {
+  const { page, server } =
+    await createPage(`<form action='/submit'><label>Email<input id='email' value='robin@example.test'></label><button>Submit Application</button></form>
+    <script>document.querySelector('form').onsubmit = async event => {
+      event.preventDefault(); await fetch('/submit', {method:'POST'});
+      document.getElementById('email').setCustomValidity('Please check this field.');
+    };</script>`);
+  const observation = await observeApplicationForm(page);
+  const input = {
+    expectedObservation: observation.identity,
+    expectedControl: observation.controls[0]!.identity,
+    expectedPageOrigin: expectedOrigin(page),
+    allowedOrigins: [expectedOrigin(page)],
+    confirmationTimeoutMs: 500,
+    veto: () => true,
+  };
+  expect((await executeExactlyOneFinalAction(page, input)).outcome).toBe(
+    "outcome_uncertain",
+  );
+  await executeExactlyOneFinalAction(page, input);
+  expect(
+    server.requests.filter((request) => request === "POST /submit"),
+  ).toHaveLength(1);
+});
 
 test.each(["two targets", "wrong label", "removed", "replaced after veto"])(
   "formless final controls fail closed: %s",

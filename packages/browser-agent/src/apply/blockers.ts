@@ -1,4 +1,5 @@
 import { normalizeSignal } from "./control-classification";
+import { hasApplicationSubmissionConfirmation } from "@nestor/contracts";
 import type {
   ApplyBlocker,
   ApplyFormAction,
@@ -407,17 +408,6 @@ export function detectApplyBlocker(input: {
   return null;
 }
 
-const CONFIRMATION_SIGNALS = [
-  "application submitted",
-  "thank you for applying",
-  "thanks for applying",
-  "we have received your application",
-  "your application has been received",
-  "application received",
-  "successfully applied",
-  "application complete",
-];
-
 /**
  * Whether the page is showing the words a site uses after it takes an
  * application.
@@ -428,8 +418,7 @@ const CONFIRMATION_SIGNALS = [
  * Job Finder pressed send, rather than being left with nothing.
  */
 export function hasSubmissionConfirmationText(pageText: string): boolean {
-  const haystack = normalizeSignal(pageText);
-  return CONFIRMATION_SIGNALS.some((signal) => haystack.includes(signal));
+  return hasApplicationSubmissionConfirmation(pageText);
 }
 
 /** An absent wall is insufficient: a blank/error/auth callback page cannot resume Apply. */

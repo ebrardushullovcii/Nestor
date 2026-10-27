@@ -8,24 +8,18 @@ import {
   type SubmissionObservationIdentity,
   type ApplyFinalActionTarget,
 } from "@nestor/contracts";
-import type { Page, Request } from "playwright";
+import type { Page, Request, Response } from "playwright";
 import { actionLocator } from "./apply-page-mechanics";
+import {
+  employerPageConfirmsSubmission,
+  isFinalSubmissionRequest,
+  type SubmissionPageState,
+} from "./submission-confirmation-policy";
 
 import {
   closePrepareOnlyFinalActionWindow,
   openPrepareOnlyFinalActionWindow,
 } from "./playwright-application-flow";
-
-const SUBMISSION_CONFIRMATION_SIGNALS = [
-  "application submitted",
-  "thank you for applying",
-  "thanks for applying",
-  "we have received your application",
-  "your application has been received",
-  "application received",
-  "successfully applied",
-  "application complete",
-] as const;
 
 /** Read the site's explicit field feedback; do not infer rejection from page prose. */
 async function readApplicationValidationErrors(page: Page): Promise<string[]> {
@@ -70,11 +64,24 @@ async function readApplicationValidationErrors(page: Page): Promise<string[]> {
   });
 }
 
-function hasEmployerSubmissionConfirmation(pageText: string): boolean {
-  const normalized = pageText.toLowerCase().replace(/\s+/gu, " ").trim();
-  return SUBMISSION_CONFIRMATION_SIGNALS.some((signal) =>
-    normalized.includes(signal),
-  );
+async function readSubmissionPageState(
+  page: Page,
+): Promise<SubmissionPageState> {
+  return page.evaluate(() => ({
+    url: location.href,
+    text: document.body?.innerText ?? "",
+    ready: document.readyState !== "loading",
+    editableControls: [
+      ...document.querySelectorAll<HTMLElement>(
+        "input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select,[contenteditable=true]",
+      ),
+    ].filter(
+      (element) =>
+        !element.matches(":disabled") &&
+        element.getClientRects().length > 0 &&
+        getComputedStyle(element).visibility !== "hidden",
+    ).length,
+  }));
 }
 
 /**
@@ -971,6 +978,9 @@ export async function executeExactlyOneFinalAction(
       });
     }
 
+    const beforeConfirmation = await readSubmissionPageState(page).catch(
+      () => null,
+    );
     // Run the veto again after every awaited observation and live-control
     // check. The first veto above is allowed to trigger a rerender; this one
     // is the final positive authorization immediately before the click.
@@ -1073,34 +1083,74 @@ export async function executeExactlyOneFinalAction(
     // caller that happens to hold the same preflight.
     rememberIssuedAction(page, key);
     let requestsObservedDuringAction = 0;
-    const requestListener = (): void => {
+    const finalRequests = new Set<Request>();
+    const answeredFinalRequests = new Set<Request>();
+    const unreachableFinalRequests = new Set<Request>();
+    const successfulFinalRequests = new Set<Request>();
+    const originalRequest = (request: Request): Request => {
+      let original = request;
+      for (
+        let previous = original.redirectedFrom();
+        previous;
+        previous = original.redirectedFrom()
+      )
+        original = previous;
+      return original;
+    };
+    const requestListener = (request: Request): void => {
       requestsObservedDuringAction += 1;
+      try {
+        if (
+          !request.redirectedFrom() &&
+          isFinalSubmissionRequest({
+            url: request.url(),
+            method: request.method(),
+            body: request.postData(),
+            mainFrame: request.frame() === page.mainFrame(),
+            navigation: request.isNavigationRequest(),
+            allowedOrigins,
+            nativeAction:
+              postVetoControl.formIndex >= 0 ? postVetoControl.action : null,
+          })
+        )
+          finalRequests.add(request);
+      } catch {
+        /* A worker or unreadable request supplies no final evidence. */
+      }
     };
     page.on("request", requestListener);
-    // Kept through the confirmation wait: the form's own post starts after
-    // the click returns. Any response means something reached a server; a
-    // post that failed before connecting, with no response at all, did not.
-    let responsesAfterAction = 0;
-    let unreachableError: string | null = null;
-    const responseListener = (): void => {
-      responsesAfterAction += 1;
+    // Keep the exact final request through the confirmation wait: a site's
+    // submit may start after the click returns. Other requests and browser
+    // alerts are neither successful sends nor proof that the site was unreachable.
+    const responseListener = (response: Response): void => {
+      const request = originalRequest(response.request());
+      if (finalRequests.has(request)) answeredFinalRequests.add(request);
+      if (
+        finalRequests.has(request) &&
+        response.status() >= 200 &&
+        response.status() < 300
+      )
+        successfulFinalRequests.add(request);
     };
     const requestFailedListener = (request: Request): void => {
       const errorText = request.failure()?.errorText;
       if (
         isSiteUnreachableError(errorText) &&
-        (request.isNavigationRequest() || request.method() !== "GET")
+        finalRequests.has(originalRequest(request))
       )
-        unreachableError ??= errorText ?? null;
+        unreachableFinalRequests.add(originalRequest(request));
     };
     page.on("response", responseListener);
     page.on("requestfailed", requestFailedListener);
     const stopWatchingNetwork = (): void => {
+      page.off("request", requestListener);
       page.off("response", responseListener);
       page.off("requestfailed", requestFailedListener);
     };
     const siteNeverReached = (): boolean =>
-      unreachableError !== null && responsesAfterAction === 0;
+      finalRequests.size === 1 &&
+      unreachableFinalRequests.size === 1 &&
+      answeredFinalRequests.size === 0;
     let actionCompleted = false;
     // The prepare-only guard stays on the page from preparation; this is the
     // one press it is opened for.
@@ -1160,7 +1210,6 @@ export async function executeExactlyOneFinalAction(
         },
       };
     }
-    page.off("request", requestListener);
     const pageAfter = readSafePageUrl(page.url());
     const facts: ApplicationExternalActionFacts = {
       actionAttempted: true,
@@ -1179,9 +1228,18 @@ export async function executeExactlyOneFinalAction(
       if (input.signal?.aborted) break;
       if (siteNeverReached()) break;
       try {
-        const bodyText = await page.locator("body").innerText({ timeout: 250 });
-        if (hasEmployerSubmissionConfirmation(bodyText)) {
+        const currentPage = await readSubmissionPageState(page);
+        if (
+          finalRequests.size === 1 &&
+          successfulFinalRequests.size === 1 &&
+          employerPageConfirmsSubmission(
+            beforeConfirmation,
+            currentPage,
+            allowedOrigins,
+          )
+        ) {
           stopWatchingNetwork();
+          await closePrepareOnlyFinalActionWindow(page);
           return {
             outcome: "submitted",
             reason: "employer_confirmation",
@@ -1190,10 +1248,11 @@ export async function executeExactlyOneFinalAction(
             confirmation: {
               observedAt: new Date().toISOString(),
               destination: readSafePageUrl(page.url()),
-              summary: submissionConfirmationSummary(bodyText),
+              summary: submissionConfirmationSummary(currentPage.text),
             },
             facts: {
               ...facts,
+              requestsObservedDuringAction,
               pageAfter: readSafePageUrl(page.url()),
               urlChanged:
                 pageBefore.origin !== readSafePageUrl(page.url()).origin ||
@@ -1202,7 +1261,9 @@ export async function executeExactlyOneFinalAction(
           };
         }
         const validationErrors = await readApplicationValidationErrors(page);
-        if (validationErrors.length > 0) {
+        // Client validation can be corrected only before a final request
+        // leaves. Once one was issued, missing receipt evidence is uncertain.
+        if (validationErrors.length > 0 && finalRequests.size === 0) {
           stopWatchingNetwork();
           await closePrepareOnlyFinalActionWindow(page);
           forgetIssuedAction(page, key);
@@ -1235,7 +1296,11 @@ export async function executeExactlyOneFinalAction(
       reason: "confirmation_timeout",
       observation: finalObservation,
       control: finalControl,
-      facts,
+      facts: {
+        ...facts,
+        requestsObservedDuringAction,
+        pageAfter: readSafePageUrl(page.url()),
+      },
     };
   });
 }
