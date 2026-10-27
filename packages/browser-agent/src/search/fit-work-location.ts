@@ -63,9 +63,10 @@ export function assessFitWorkLocation(
           ` ${normalized(name)} `,
         ),
     ) ||
-    /\b(worldwide|globally|anywhere|any country|all countries|europe|emea|apac|americas|asia|africa|oceania)\b/u.test(
+    /\b(worldwide|globally|global|anywhere in (?:the )?world|any country|all countries|europe|emea|apac|americas|asia|africa|oceania)\b/u.test(
       quote,
-    );
+    ) ||
+    (!foreign && /\banywhere\b/u.test(quote));
   const workScope =
     /\b(hire|hiring|remote|remotely|based|reside|residents|candidates|applicants|eligible)\b|\bwork(?:ing)? (?:from|anywhere|throughout)\b/u.test(
       quote,

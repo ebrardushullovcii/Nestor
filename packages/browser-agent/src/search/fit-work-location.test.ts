@@ -61,6 +61,13 @@ const cases: Array<{
     expected: "review",
   },
   {
+    name: "a work-from-anywhere benefit cannot expand a published foreign country",
+    location: "United States",
+    body: "Work from anywhere – flexibility to fit your life.",
+    evidence: ["compatible", "Work from anywhere", "broader_remote", "US"],
+    expected: "review",
+  },
+  {
     name: "an invented global quote cannot override the published country",
     location: "United States",
     body: "Build production software.",
