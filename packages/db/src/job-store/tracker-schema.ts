@@ -22,6 +22,12 @@ CREATE INDEX IF NOT EXISTS tracker_by_status ON tracker (status, status_at DESC,
 CREATE INDEX IF NOT EXISTS tracker_by_recent ON tracker (status_at DESC, job_id DESC);
 CREATE INDEX IF NOT EXISTS tracker_by_applied ON tracker (applied_at DESC, job_id DESC);
 CREATE INDEX IF NOT EXISTS tracker_by_next ON tracker (next_at, job_id) WHERE next_at IS NOT NULL;
+-- The Applied and Next sorts order by these exact expressions (tracker.ts),
+-- so a page reads them in index order instead of sorting every row.
+CREATE INDEX IF NOT EXISTS tracker_by_applied_order ON tracker (COALESCE(applied_at, 0) DESC, job_id DESC);
+CREATE INDEX IF NOT EXISTS tracker_by_next_order ON tracker (COALESCE(next_at, 9007199254740991), job_id);
+CREATE INDEX IF NOT EXISTS tracker_by_status_applied ON tracker (status, COALESCE(applied_at, 0) DESC, job_id DESC);
+CREATE INDEX IF NOT EXISTS tracker_by_status_next ON tracker (status, COALESCE(next_at, 9007199254740991), job_id);
 
 CREATE TABLE IF NOT EXISTS tracker_counts (
   status TEXT PRIMARY KEY,

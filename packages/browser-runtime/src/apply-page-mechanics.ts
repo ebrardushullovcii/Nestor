@@ -240,7 +240,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               element instanceof HTMLTextAreaElement ||
               element instanceof HTMLSelectElement
                 ? element.form
-                : null;
+                : element.closest("form");
             const forms =
               root instanceof Document || root instanceof ShadowRoot
                 ? Array.from(root.querySelectorAll("form"))
@@ -1075,7 +1075,7 @@ export function collectApplyDocumentSnapshot(
         element instanceof HTMLTextAreaElement ||
         element instanceof HTMLSelectElement
           ? element.form
-          : null;
+          : element.closest("form");
       const forms =
         root instanceof Document || root instanceof ShadowRoot
           ? Array.from(root.querySelectorAll("form"))

@@ -137,6 +137,59 @@ import type {
 
 class QuestionReadUnavailableError extends Error {}
 
+/** Bind before the fresh finish read can change the page's control refs. */
+function nativeFinishQuestion(
+  item: string,
+  observation: ApplyFormObservation | null,
+  posting: ApplyAgentConfig["sources"]["posting"],
+): string | string[] {
+  const controls = (observation?.controls ?? []).filter(
+    (control) => control.visible && !control.disabled,
+  );
+  // The tool parser groups overflow items with semicolons; preserve every
+  // field's identity there too, rather than making an extra free-text task.
+  const refs = item.split(";").map((ref) => ref.trim());
+  const referenced = refs.map((ref) =>
+    controls.find((control) => control.ref === ref),
+  );
+  if (referenced.some((control) => control !== undefined))
+    return refs.map((ref, index) => {
+      const control = referenced[index];
+      return control ? questionPrompt(control) : ref;
+    });
+
+  // Compatibility with older finish messages that explicitly ask what value
+  // to enter in a named field. Do not use a shared keyword as question identity.
+  const request = item.match(
+    /^(?:what|which)\s+(.+?)\s+(?:should|can|do)\s+(?:i|we)\s+(?:enter|put|provide|select|choose|use)\s+(?:in|into|for)\s+(?:(?:the|your|required|optional)\s+)*(.+?)\s+field(.*)$/iu,
+  );
+  const [, requested, label, suffix] = request ?? [];
+  if (!requested || !label || suffix === undefined) return item;
+  const words = (value: string) =>
+    normalizeFormQuestionPrompt(preserveTechnologyTokens(value));
+  const target = words(label);
+  if (
+    !target ||
+    !` ${words(requested)} `.includes(` ${target} `) ||
+    ![
+      "",
+      ...["your", "the"].flatMap((owner) => [
+        `for ${owner} ${posting.title} application`,
+        ...["to", "at", "with"].map(
+          (preposition) =>
+            `for ${owner} ${posting.title} application ${preposition} ${posting.company}`,
+        ),
+      ]),
+    ].some((context) => words(context) === words(suffix))
+  )
+    return item;
+  const named = controls.filter((control) => words(control.label) === target);
+  const [field] = named;
+  return named.length === 1 && field && words(questionPrompt(field)) === target
+    ? questionPrompt(field)
+    : item;
+}
+
 const DEFAULT_MAX_STEPS = 200;
 // Long forms on a slow model took 16 minutes to reach the review step;
 // 15 minutes cut them off just before it.
@@ -1565,7 +1618,13 @@ async function runMeasuredApplyAgent(
           needsPerson: false,
         });
       case "finished": {
-        forPerson = outcome.forPerson ?? [];
+        forPerson = (outcome.forPerson ?? []).flatMap((item) =>
+          nativeFinishQuestion(
+            item,
+            pageTools.state.observation,
+            config.sources.posting,
+          ),
+        );
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();

@@ -1,7 +1,15 @@
 import { chromium, type Browser, type Locator } from "playwright";
+import {
+  CandidateProfileSchema,
+  type CandidateReusableAnswer,
+} from "@nestor/contracts";
 import menuReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/handover-options.json";
 import githubReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/github-username.json";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
+import {
+  buildApplyFormObservation,
+  checkClassifiedApplicationAnswers,
+} from "@nestor/browser-agent";
 
 import {
   createPlaywrightApplyPageMechanics,
@@ -63,6 +71,135 @@ describe("reading the choices of lists the page draws itself", () => {
   beforeAll(async () => {
     browser = await chromium.launch({ headless: true });
   }, 60_000);
+
+  test("Send keeps a div calling-code picker with the native phone in its form", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<form><label id="phone-label" for="input_phone">Phone</label>
+        <div id="calling-code" role="combobox" aria-labelledby="phone-label" aria-valuetext="United Kingdom +44" aria-expanded="false">+44</div>
+        <input id="input_phone" name="phone" type="tel" value="7700900123" required>
+        <label for="address">Address</label><input id="address" name="address" role="combobox" value="Munchen, Germany" required>
+      </form>`);
+      const sources = {
+        profile: CandidateProfileSchema.parse({
+          id: "synthetic",
+          phone: "+44 7700 900123",
+          currentCity: "München",
+          currentCountry: "Germany",
+          yearsExperience: 3,
+          baseResume: {
+            id: "resume",
+            fileName: "synthetic.txt",
+            uploadedAt: "2026-10-27T12:00:00.000Z",
+            extractionStatus: "ready",
+          },
+        }),
+        resumeText: null,
+        posting: {
+          title: "Engineer",
+          company: "Example",
+          location: "Remote",
+          description: "Build tools.",
+        },
+        reusableAnswers: [] as CandidateReusableAnswer[],
+        documents: [],
+      };
+      const client = {
+        chatWithTools: () =>
+          Promise.resolve({
+            toolCalls: [
+              {
+                id: "read",
+                type: "function" as const,
+                function: {
+                  name: "report_question_kinds",
+                  arguments: JSON.stringify({
+                    plainIndexes: [0, 1, 2],
+                    flagged: [],
+                    tags: [
+                      {
+                        index: 0,
+                        kind: "other",
+                        country: null,
+                        sourceId: null,
+                      },
+                      {
+                        index: 1,
+                        kind: "other",
+                        country: null,
+                        sourceId: "profile.phone",
+                      },
+                      {
+                        index: 2,
+                        kind: "other",
+                        country: null,
+                        sourceId: "profile.currentCity",
+                      },
+                    ],
+                  }),
+                },
+              },
+            ],
+          }),
+      };
+      const check = async (phone: string, address = "Munchen, Germany") => {
+        const raw = await readRawApplyPage(page);
+        const form = buildApplyFormObservation(raw, "2026-10-27T12:00:00.000Z");
+        return checkClassifiedApplicationAnswers({
+          client,
+          sources,
+          payDisclosed: false,
+          answers: [
+            { question: "Phone", answer: phone },
+            { question: "Address", answer: address },
+          ],
+          formControls: form.controls,
+          formContext: { pageText: raw.bodyText, fields: [] },
+        });
+      };
+      expect(
+        (await check("7700900123")).map((entry) => entry.supported),
+      ).toEqual([true, true]);
+      expect((await check("+44 7700 900123"))[0]?.supported).toBe(true);
+      expect((await check("7700900124"))[0]?.supported).toBe(false);
+      expect((await check("7700900123", "Munich, Germany"))[1]?.supported).toBe(
+        false,
+      );
+      sources.reusableAnswers = [
+        {
+          id: "confirmed-address",
+          kind: "other",
+          label: "Address",
+          question: "Address",
+          answer: "Munich, Germany",
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+      ];
+      expect((await check("7700900123", "Munich, Germany"))[1]?.supported).toBe(
+        true,
+      );
+      expect((await check("7700900123", "Munich, Germany"))[1]?.supported).toBe(
+        true,
+      );
+      expect((await check("7700900123", "Berlin, Germany"))[1]?.supported).toBe(
+        false,
+      );
+      await page
+        .locator("#calling-code")
+        .evaluate((element) =>
+          element.setAttribute("aria-valuetext", "France +33"),
+        );
+      expect((await check("7700900123"))[0]?.supported).toBe(false);
+      await page.locator("#calling-code").evaluate((element) => {
+        element.setAttribute("aria-valuetext", "United Kingdom +44");
+        document.body.append(element);
+      });
+      expect((await check("7700900123"))[0]?.supported).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
 
   test("a detached native read retains a checked challenge and never reads password or one-time-code values", async () => {
     const page = await browser.newPage();
@@ -972,11 +1109,13 @@ describe("reading the choices of lists the page draws itself", () => {
       <h1>Application</h1>
       <div id="shadow-host"></div>
       <div id="second-shadow-host"></div>
-      <iframe id="embedded" srcdoc='
+      <iframe id="embedded" srcdoc='<form>
         <label for="email">Email in frame</label>
         <input id="email" type="email" />
-        <button id="continue">Continue</button>
-      '></iframe>
+        <div id="frame-code" role="combobox" aria-label="Calling code" aria-valuetext="United Kingdom +44">+44</div>
+        <input id="frame-phone" type="tel" aria-label="Phone" value="7700900123" />
+        <button id="continue" type="button">Continue</button>
+      </form>'></iframe>
       <script>
         const root = document.getElementById("shadow-host").attachShadow({ mode: "open" });
         root.innerHTML = '<label for="name">Name in component</label><input id="name" /><input id="first-radio" type="radio" name="authorized" />';
@@ -1010,6 +1149,14 @@ describe("reading the choices of lists the page draws itself", () => {
     expect(shadowRef).toMatch(/^c\d+$/u);
     expect(frameControl?.ref).toMatch(/^f0c\d+$/u);
     expect(frameAction?.ref).toMatch(/^f0a\d+$/u);
+    expect(frameAction?.submitsForm).toBe(false);
+    expect(
+      observation.controls.find((control) => control.id === "frame-code")
+        ?.scopeKey,
+    ).toBe(
+      observation.controls.find((control) => control.id === "frame-phone")
+        ?.scopeKey,
+    );
     expect(
       observation.controls.find((control) => control.id === "first-radio")
         ?.scopeKey,
