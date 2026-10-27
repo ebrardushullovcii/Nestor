@@ -104,6 +104,9 @@ export interface AgentApplicationPreparationInput {
     typeof runApplyAgent
   >[0]["readReusableAnswers"];
   uploadsConfirmedByPerson?: readonly string[];
+  earlierAttachments?: Parameters<
+    typeof runApplyAgent
+  >[0]["earlierAttachments"];
   /**
    * Writes and renders the letter this application sends. Omitted when the
    * caller has no way to produce one, in which case a form that asks for a
@@ -629,6 +632,9 @@ export async function runAgentApplicationPreparation(
     ...(input.uploadsConfirmedByPerson?.length
       ? { uploadsConfirmedByPerson: input.uploadsConfirmedByPerson }
       : {}),
+    ...(input.earlierAttachments?.length
+      ? { earlierAttachments: input.earlierAttachments }
+      : {}),
     ...(input.initialUnansweredPickerQuestions
       ? {
           initialUnansweredPickerQuestions:
@@ -926,6 +932,7 @@ export function createApplyFormPreparer(input: {
   initialQuestionContexts?: AgentApplicationPreparationInput["initialQuestionContexts"];
   initialPickerAttempts?: AgentApplicationPreparationInput["initialPickerAttempts"];
   uploadsConfirmedByPerson?: readonly string[];
+  earlierAttachments?: AgentApplicationPreparationInput["earlierAttachments"];
   initialUnansweredPickerQuestions?: AgentApplicationPreparationInput["initialUnansweredPickerQuestions"];
   now?: () => Date;
 }): NonNullable<ExecuteApplicationFlowInput["prepareApplicationForm"]> {
@@ -990,6 +997,9 @@ export function createApplyFormPreparer(input: {
         : {}),
       ...(input.uploadsConfirmedByPerson?.length
         ? { uploadsConfirmedByPerson: input.uploadsConfirmedByPerson }
+        : {}),
+      ...(input.earlierAttachments?.length
+        ? { earlierAttachments: input.earlierAttachments }
         : {}),
       ...(input.initialUnansweredPickerQuestions
         ? {
