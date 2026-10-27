@@ -3499,11 +3499,13 @@ describe("managed context active service worker gate", () => {
   );
 
   test.each([
-    ["can be refilled", true, true],
-    ["cannot be refilled", false, false],
+    ["can be refilled", true, true, 2],
+    ["cannot be refilled", false, false, 2],
+    // One frame: the exact snapshot is attempted and fails to read the page.
+    ["can be refilled, though reading it fails", true, true, 1],
   ])(
     "a waiting form that cannot be snapshotted closes to save memory only when it %s",
-    async (_label, restorableByRefill, closes) => {
+    async (_label, restorableByRefill, closes, frames) => {
       const userDataDir = await mkdtemp(
         join(tmpdir(), "nestor-runtime-hibernate-refill-"),
       );
@@ -3511,7 +3513,9 @@ describe("managed context active service worker gate", () => {
         const debugPort = await reserveFreePort();
         const harness = createGateHarness({ activeServiceWorkers: () => [] });
         // More than one frame: the exact snapshot refuses this form.
-        Object.assign(harness.fakePage, { frames: () => [{}, {}] });
+        Object.assign(harness.fakePage, {
+          frames: () => Array.from({ length: frames }, () => ({})),
+        });
         const runtime = await createGatedRuntime({
           userDataDir,
           debugPort,
