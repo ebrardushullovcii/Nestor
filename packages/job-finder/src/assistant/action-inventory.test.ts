@@ -43,6 +43,11 @@ describe("assistant action inventory", () => {
       "resume_studio",
       "discovery",
       "profile",
+      "setup",
+      "applications",
+      "actions",
+      "settings",
+      "browser",
     ] as const) {
       const tools = buildAssistantToolCatalog({
         commands,
@@ -125,10 +130,25 @@ describe("assistant action inventory", () => {
       false,
     );
     expect(after.some((tool) => tool.name === "edit_profile")).toBe(false);
-    // Domain loading still reaches the other Profile actions when requested.
-    await after
+    // Group discovery never brings a broad edit schema into the next step.
+    const discovered = await after
       .find((tool) => tool.name === "load_tools")!
       .execute({ groups: ["profile"], names: [] }, {} as never);
+    expect(discovered.data).toMatchObject({
+      names: [],
+      availableTools: expect.arrayContaining([
+        expect.objectContaining({ name: "edit_profile" }),
+      ]),
+    });
+    expect(catalog("profile").map((tool) => tool.name)).toEqual(
+      after.map((tool) => tool.name),
+    );
+    await after
+      .find((tool) => tool.name === "load_tools")!
+      .execute(
+        { groups: [], names: commands.map((tool) => tool.name) },
+        {} as never,
+      );
     const all = catalog("profile");
     for (const command of commands)
       expect(

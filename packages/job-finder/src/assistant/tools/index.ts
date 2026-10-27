@@ -1,10 +1,6 @@
 import type { AssistantScreen } from "@nestor/contracts";
 import { z } from "zod";
-import type {
-  AssistantToolContext,
-  AssistantToolDefinition,
-  AssistantToolGroup,
-} from "../tool-kit";
+import type { AssistantToolDefinition, AssistantToolGroup } from "../tool-kit";
 import { assistantToolGroupValues, defineTool, json } from "../tool-kit";
 import { applicationTools } from "./application-tools";
 import { browserTools } from "./browser-tools";
@@ -71,13 +67,32 @@ const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
   applications: ["list_applications", "applications_for_jobs"],
   actions: ["get_need"],
   settings: ["get_settings"],
+  browser: ["browser_observe"],
 };
+
+function toolLoadResult(
+  names: readonly string[],
+  menu: readonly AssistantToolDefinition[],
+) {
+  return {
+    summary: names.length
+      ? `Loaded schemas: ${names.join(", ")}.`
+      : "No schemas loaded. Call already offered tools directly, or choose exact names from the menu.",
+    data: {
+      names: [...names],
+      availableTools: menu.map(({ name, description }) => ({
+        name,
+        description: description.slice(0, 100),
+      })),
+    },
+  };
+}
 
 export const loadToolsTool = defineTool({
   name: "load_tools",
   group: "workspace",
   description:
-    "Load tools for any task, regardless of the current screen: profile (profile/preferences edits, Undo, setup), files (library, import, exports), resume (write, edit, approve, history, PDF), jobs (find, shortlist, hide, sources), applications (queues, prepare, send with grants, forms, letters), tracking (Applications statuses, notes, replies, reminders, interviews, tags, saved views, CSV export and Undo), settings (applying policy, AI behavior, theme, zoom, reset), browser (read and work in a lent tab), workspace (summary, questions, navigation). Loaded groups stay available this turn.",
+    "Call tools already offered directly. Load schemas with names; groups only discover a menu of tool names and short descriptions. Domains: profile (profile/preferences edits, Undo, setup), files (library, import, exports), resume (write, edit, approve, history, PDF), jobs (find, shortlist, hide, sources), applications (queues, prepare, send with grants, forms, letters), tracking (Applications statuses, notes, replies, reminders, interviews, tags, saved views, CSV export and Undo), settings (applying policy, AI behavior, theme, zoom, reset), browser (read and work in a lent tab), workspace (summary, questions, navigation). Only schemas requested by exact name stay available this turn.",
   parameters: json.object({
     groups: json.array(json.enumOf(assistantToolGroupValues)),
     names: json.ids(
@@ -91,20 +106,12 @@ export const loadToolsTool = defineTool({
   label: () => "Loading more tools",
   effect: "read",
   execute(input) {
-    return Promise.resolve({
-      summary: `Loaded: ${[...input.groups, ...(input.names ?? [])].join(", ")}. They are available from your next step.`,
-      data: {
-        groups: input.groups,
-        names: [
-          ...new Set([
-            ...input.groups.flatMap((group) =>
-              ASSISTANT_TOOL_GROUPS[group].map((tool) => tool.name),
-            ),
-            ...(input.names ?? []),
-          ]),
-        ],
-      },
-    });
+    return Promise.resolve(
+      toolLoadResult(
+        input.names ?? [],
+        input.groups.flatMap((group) => ASSISTANT_TOOL_GROUPS[group]),
+      ),
+    );
   },
 });
 
@@ -114,7 +121,6 @@ export function buildAssistantToolCatalog(options: {
   browserAvailable: boolean;
   screen?: AssistantScreen | null;
   loadedGroups?: readonly AssistantToolGroup[];
-  onLoadGroups?: (groups: readonly AssistantToolGroup[]) => void;
   loadedToolNames?: readonly string[];
   onLoadToolNames?: (names: readonly string[]) => void;
 }): AssistantToolDefinition[] {
@@ -134,7 +140,6 @@ export function buildAssistantToolCatalog(options: {
     return assistantToolGroupValues.filter(include).flatMap(groupTools);
   }
   const groups = new Set(options.loadedGroups ?? []);
-  if (options.screen === "browser") groups.add("browser");
   const initialNames = new Set([
     ...COMMON_TOOLS,
     ...(SCREEN_TOOLS[options.screen ?? "other"] ?? []),
@@ -151,10 +156,7 @@ export function buildAssistantToolCatalog(options: {
     ...tools,
     {
       ...loadToolsTool,
-      execute(
-        input: z.infer<typeof loadToolsTool.input>,
-        context: AssistantToolContext,
-      ) {
+      execute(input: z.infer<typeof loadToolsTool.input>) {
         const available = new Set(
           assistantToolGroupValues
             .filter(include)
@@ -166,17 +168,10 @@ export function buildAssistantToolCatalog(options: {
         );
         if (unknown.length)
           throw new Error(`Unknown tools: ${unknown.join(", ")}`);
-        const names = [
-          ...new Set([
-            ...(input.names ?? []),
-            ...input.groups.flatMap((group) =>
-              groupTools(group).map((tool) => tool.name),
-            ),
-          ]),
-        ];
-        options.onLoadGroups?.(input.groups);
+        const names = [...new Set(input.names ?? [])];
         options.onLoadToolNames?.(names);
-        return loadToolsTool.execute({ groups: [], names }, context);
+        const menu = input.groups.filter(include).flatMap(groupTools);
+        return Promise.resolve(toolLoadResult(names, menu));
       },
     },
   ];

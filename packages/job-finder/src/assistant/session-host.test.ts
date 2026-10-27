@@ -256,7 +256,9 @@ describe("assistant session host", () => {
             const actions = [
               {
                 name: "load_tools",
-                arguments: JSON.stringify({ groups: ["profile", "files"] }),
+                arguments: JSON.stringify({
+                  names: ["edit_profile", "import_resume"],
+                }),
               },
               {
                 name: "edit_profile",
@@ -312,10 +314,9 @@ describe("assistant session host", () => {
     expect(change?.type).toBe("change");
     if (change?.type !== "change") throw new Error("Expected Undo receipt");
     await world.host.undoChange(sent.conversationId, change.receiptId);
-    expect(
-      (await world.harness.service.read()).profile
-        .headline,
-    ).not.toBe("Synthetic engineer");
+    expect((await world.harness.service.read()).profile.headline).not.toBe(
+      "Synthetic engineer",
+    );
   });
 
   it.each(["candidate-assets:delete", "reset-workspace"])(
@@ -535,9 +536,9 @@ describe("assistant session host", () => {
       change!.type === "change" ? change!.receiptId : "",
     );
     expect(undo.receipt.status).toBe("undone");
-    expect(
-      (await harness.service.read()).profile.headline,
-    ).toBe("Senior systems designer");
+    expect((await harness.service.read()).profile.headline).toBe(
+      "Senior systems designer",
+    );
   });
 
   it("undoes the middle of three changes and keeps the other two", async () => {
@@ -566,8 +567,7 @@ describe("assistant session host", () => {
       .flatMap((part) => (part.type === "change" ? [part.receiptId] : []));
     expect(receipts).toHaveLength(3);
     await host.undoChange(first.conversationId, receipts[1]!);
-    const profile = (await harness.service.read())
-      .profile;
+    const profile = (await harness.service.read()).profile;
     expect(profile.headline).toBe("First headline");
     expect(profile.skills).toContain("Figma");
     expect(profile.professionalSummary.fullSummary).not.toBe("A new summary.");
@@ -583,8 +583,7 @@ describe("assistant session host", () => {
     const change = reply(view.messages).parts.find(
       (part) => part.type === "change",
     );
-    const current = (await harness.service.read())
-      .profile;
+    const current = (await harness.service.read()).profile;
     await harness.service.saveProfile({
       ...current,
       headline: "My own headline",
@@ -594,9 +593,9 @@ describe("assistant session host", () => {
       change!.type === "change" ? change!.receiptId : "",
     );
     expect(undo.message).toMatch(/Headline/u);
-    expect(
-      (await harness.service.read()).profile.headline,
-    ).toBe("My own headline");
+    expect((await harness.service.read()).profile.headline).toBe(
+      "My own headline",
+    );
   });
 
   it("returns the accepted message for a repeated send", async () => {
@@ -678,9 +677,9 @@ describe("assistant session host", () => {
       kind: "stopped",
     });
     await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(
-      (await harness.service.read()).profile.headline,
-    ).toBe("Senior systems designer");
+    expect((await harness.service.read()).profile.headline).toBe(
+      "Senior systems designer",
+    );
     // The stopped request is closed in the history the next turn reads, so
     // a later message is not answered with the stopped work.
     const transcript = await repository.listTranscript(result.conversationId, {
@@ -1187,8 +1186,7 @@ describe("assistant session host", () => {
   });
 
   it("keeps working after forced compaction, and the summary keeps the person's words", async () => {
-    const fixedSnapshot =
-      await createProfileServiceHarness().service.read();
+    const fixedSnapshot = await createProfileServiceHarness().service.read();
     const fixedPromptTokens = estimateTokens([
       {
         role: "system",

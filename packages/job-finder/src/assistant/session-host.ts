@@ -68,7 +68,6 @@ import {
   type AssistantToolOutputs,
   type AssistantTurnSession,
   assistantToolGroupValues,
-  type AssistantToolGroup,
 } from "./tool-kit";
 import {
   buildAssistantToolCatalog,
@@ -697,7 +696,6 @@ export class AssistantSessionHost {
 
     const session = this.createTurnSession(live, handle);
     const catalogMode = this.options.catalogMode ?? "grouped";
-    const loadedGroups = new Set<AssistantToolGroup>();
     const loadedToolNames = new Set<string>();
     const catalogOptions = {
       commands: this.ports.commands ?? [],
@@ -706,9 +704,6 @@ export class AssistantSessionHost {
       screen: live.sourceMessage?.context?.screen ?? null,
       onLoadToolNames: (names: readonly string[]) => {
         for (const name of names) loadedToolNames.add(name);
-      },
-      onLoadGroups: (groups: readonly AssistantToolGroup[]) => {
-        for (const group of groups) loadedGroups.add(group);
       },
     };
     const allTools = buildAssistantToolCatalog({
@@ -737,7 +732,6 @@ export class AssistantSessionHost {
     const definitions = () =>
       buildAssistantToolCatalog({
         ...catalogOptions,
-        loadedGroups: [...loadedGroups],
         loadedToolNames: [...loadedToolNames],
       }).map(assistantModelToolDefinition);
     let lastEstimate = 0;
