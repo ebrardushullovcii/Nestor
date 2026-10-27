@@ -29,7 +29,11 @@ import {
   type ListSelection,
 } from "@renderer/features/job-lists";
 
-import { describeResume, LEVEL_LABEL } from "./resume-format";
+import {
+  APPLICATION_BADGE,
+  describeResume,
+  LEVEL_LABEL,
+} from "./resume-format";
 import { ResumePane } from "./resume-pane";
 import { describeError, useResume } from "./use-resume";
 import { ListEmpty } from "../job-lists/list-empty";
@@ -488,6 +492,9 @@ export function ShortlistedScreen() {
         }}
         detail={
           <ResumePane
+            application={
+              list.rows.find((row) => row.id === activeId)?.application ?? null
+            }
             applying={busy === "apply"}
             approving={busy === "approve"}
             onApply={() => void apply()}
@@ -560,7 +567,9 @@ export function ShortlistedScreen() {
             onLoadMore={() => void list.loadMore()}
             onSelectAll={() => setSelection(selectAll())}
             renderRow={(row, state) => {
-              const status = describeResume(row.resume);
+              const status = row.application
+                ? APPLICATION_BADGE[row.application.status]
+                : describeResume(row.resume);
               return (
                 <ListRowFrame
                   active={state.active}

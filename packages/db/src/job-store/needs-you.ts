@@ -1165,8 +1165,13 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
 
     /** Oldest first: newly arriving cards never insert above the one being answered. */
     list(input: NeedsYouListQuery = {}): NeedsYouPage {
-      const { after, limit, kind, text } = NeedsYouListQuerySchema.parse(input);
-      const { where, params } = selectionFilter("tasks", text, kind);
+      const { after, limit, kind, group, text } =
+        NeedsYouListQuerySchema.parse(input);
+      const filter = selectionFilter("tasks", text, kind);
+      const where = group
+        ? `${filter.where} AND id ${group === "sites" ? "IN" : "NOT IN"} (SELECT task_id FROM source_needs_you)`
+        : filter.where;
+      const { params } = filter;
       const records = sql(
         `SELECT t.*, s.id AS source_id, s.label AS source_label, s.url AS source_url,
            w.company AS waiting_company, w.title AS waiting_title,
@@ -1183,18 +1188,19 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       ).all(...params, after, limit + 1) as Task[];
       const rows = records.slice(0, limit).map(toTask);
       const countsNow = counts();
-      const total = text
-        ? (
-            sql(
-              `SELECT count(*) AS n FROM (SELECT id FROM needs_you WHERE ${where} LIMIT ?)`,
-            ).get(...params, totalCap + 1) as { n: number }
-          ).n
-        : kind
-          ? countsNow[kind]
-          : countsNow.question +
-            countsNow.sign_in +
-            countsNow.captcha +
-            countsNow.mfa;
+      const total =
+        text || group
+          ? (
+              sql(
+                `SELECT count(*) AS n FROM (SELECT id FROM needs_you WHERE ${where} LIMIT ?)`,
+              ).get(...params, totalCap + 1) as { n: number }
+            ).n
+          : kind
+            ? countsNow[kind]
+            : countsNow.question +
+              countsNow.sign_in +
+              countsNow.captcha +
+              countsNow.mfa;
       return {
         rows,
         nextCursor: records.length > limit ? rows.at(-1)!.id : null,

@@ -2,6 +2,7 @@ import { ToastProvider } from "@renderer/components/ui/toast";
 // @vitest-environment jsdom
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -15,6 +16,7 @@ import type {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BrowserPeek } from "./browser-peek";
+import { workThrough } from "../../needs-you/work-through";
 
 const staleAttentionState: DesktopBrowserState = {
   revision: 4,
@@ -236,4 +238,236 @@ it("shows a dismissible recording prompt for an unbound send without blocking br
       value: previous,
     });
   }
+});
+
+function peekBridge(state: DesktopBrowserState) {
+  let listener: ((next: DesktopBrowserState) => void) | null = null;
+  const command = vi.fn().mockResolvedValue(state);
+  return {
+    command,
+    emit: (next: DesktopBrowserState) => listener?.(next),
+    browser: {
+      getState: vi.fn().mockResolvedValue(state),
+      command,
+      setViewport: vi.fn().mockResolvedValue(undefined),
+      captureActivePage: vi.fn().mockResolvedValue({ dataUrl: null }),
+      listImportSources: vi.fn().mockResolvedValue({ sources: [], note: null }),
+      onStateChanged: (next: (value: DesktopBrowserState) => void) => {
+        listener = next;
+        return () => undefined;
+      },
+      onFocusAddress: () => () => undefined,
+    },
+  };
+}
+
+const openPage: DesktopBrowserState = {
+  ...staleAttentionState,
+  phase: "ready",
+  attention: null,
+  presentation: "peek",
+  activeTabId: "form",
+  tabs: [
+    {
+      id: "form",
+      title: "Apply · Lantern Services",
+      url: "http://127.0.0.1:47950/lever/apply/7",
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+    },
+  ],
+};
+
+describe("BrowserPeek after the person's own Send", () => {
+  it("says the application was sent and links to it, without an empty browser grabbing focus", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const previous = window.nestor;
+    const peek = peekBridge(openPage);
+    Object.defineProperty(window, "nestor", {
+      configurable: true,
+      value: { browser: peek.browser },
+    });
+    const onOpenApplication = vi.fn();
+    try {
+      render(
+        <ToastProvider>
+          <BrowserPeek onOpenApplication={onOpenApplication} />
+        </ToastProvider>,
+      );
+      await screen.findByRole("dialog");
+      // The sent form's tab closes while the peek is still open: the page
+      // goes blank, and the address bar must not take focus by itself.
+      act(() =>
+        peek.emit({
+          ...openPage,
+          revision: 6,
+          tabs: [],
+          activeTabId: null,
+          sentNotice: {
+            id: "sent_1",
+            applicationId: 3,
+            jobId: 42,
+            company: "Lantern Services",
+            title: "Backend Engineer",
+          },
+        }),
+      );
+      expect(
+        await screen.findByText("Sent: Backend Engineer at Lantern Services"),
+      ).toBeTruthy();
+      expect(screen.getByText("Moved to Applied.")).toBeTruthy();
+      expect(document.activeElement).not.toBe(
+        screen.getByRole("textbox", { name: "Website address" }),
+      );
+      // One Escape hides the empty browser.
+      fireEvent.keyDown(
+        screen.getByRole("textbox", { name: "Website address" }),
+        { key: "Escape" },
+      );
+      expect(peek.command).toHaveBeenCalledWith({ type: "minimize" });
+      peek.command.mockClear();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open in Applications" }),
+      );
+      expect(onOpenApplication).toHaveBeenCalledWith(42);
+      expect(peek.command).toHaveBeenCalledWith({ type: "minimize" });
+    } finally {
+      cleanup();
+      Object.defineProperty(window, "nestor", {
+        configurable: true,
+        value: previous,
+      });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("focuses the address bar when the person opens an empty browser, and one Escape hides it", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const previous = window.nestor;
+    const peek = peekBridge({ ...openPage, tabs: [], activeTabId: null });
+    Object.defineProperty(window, "nestor", {
+      configurable: true,
+      value: { browser: peek.browser },
+    });
+    try {
+      render(<BrowserPeek />);
+      const address = await screen.findByRole("textbox", {
+        name: "Website address",
+      });
+      await waitFor(() => expect(document.activeElement).toBe(address));
+      fireEvent.keyDown(address, { key: "Escape" });
+      expect(peek.command).toHaveBeenCalledExactlyOnceWith({
+        type: "minimize",
+      });
+    } finally {
+      cleanup();
+      Object.defineProperty(window, "nestor", {
+        configurable: true,
+        value: previous,
+      });
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("BrowserPeek during a walk through sign-ins", () => {
+  afterEach(() => workThrough.reset());
+
+  it("shows where the walk is, checks a site on Done and pauses when hidden", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const previous = window.nestor;
+    const peek = peekBridge(openPage);
+    const needsYou = vi.fn().mockResolvedValue(true);
+    const jobs = vi.fn((name: string) =>
+      Promise.resolve(
+        name === "retry_source"
+          ? { search: { id: "search_1", state: "running" }, sources: [] }
+          : { rows: [], nextCursor: null, total: 0 },
+      ),
+    );
+    Object.defineProperty(window, "nestor", {
+      configurable: true,
+      value: {
+        browser: peek.browser,
+        needsYou: { run: needsYou },
+        jobs: { run: jobs, onSearchStatus: () => () => undefined },
+      },
+    });
+    const site = (id: number, label: string) => ({
+      id,
+      kind: "site" as const,
+      label,
+      taskIds: [id],
+      sources: [{ id: id * 10, url: `https://${label}.example.test/jobs` }],
+    });
+    try {
+      render(<BrowserPeek />);
+      // Needs you's sign-in tab carries its own "then Retry" banner.
+      act(() =>
+        peek.emit({
+          ...openPage,
+          revision: 5,
+          phase: "needs_you",
+          attention: {
+            kind: "sign_in",
+            title: "Sign in to continue: scale-853",
+            detail:
+              "Finish sign-in or verification here, then Retry in Needs you.",
+          },
+        }),
+      );
+      act(() => workThrough.start([site(1, "scale-853"), site(2, "orbit")]));
+      expect(needsYou).toHaveBeenCalledWith("open_need", { id: 1 });
+      const bar = () =>
+        document.querySelector("[data-browser-walk]")?.textContent ?? "";
+      await waitFor(() => expect(bar()).toContain("scale-853 · 1 of 2"));
+      // The walk's bar replaces it rather than contradicting Done.
+      expect(screen.queryByText(/then Retry in Needs you/)).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Done, next site" }));
+      await waitFor(() =>
+        expect(jobs).toHaveBeenCalledWith("retry_source", { id: 10 }),
+      );
+      expect(needsYou).toHaveBeenCalledWith("open_need", { id: 2 });
+      expect(bar()).toContain("orbit · 2 of 2");
+      act(() =>
+        peek.emit({ ...openPage, revision: 9, presentation: "minimized" }),
+      );
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      // Hiding the browser paused the walk: reopened, it waits for Continue.
+      act(() => peek.emit({ ...openPage, revision: 10 }));
+      await screen.findByRole("dialog");
+      expect(bar()).toBe("");
+      act(() => workThrough.resume());
+      expect(bar()).toContain("orbit · 2 of 2");
+      fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+      expect(bar()).toBe("");
+      expect(peek.command).toHaveBeenCalledWith({ type: "minimize" });
+    } finally {
+      cleanup();
+      Object.defineProperty(window, "nestor", {
+        configurable: true,
+        value: previous,
+      });
+      vi.unstubAllGlobals();
+    }
+  });
 });

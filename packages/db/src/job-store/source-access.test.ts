@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "vitest";
 import { createApplicationStore } from "./applications";
 import { createJobSitesStore } from "./job-sites";
-import { openJobStore } from "./job-store";
+import { approveOriginalResumesForTests, openJobStore } from "./job-store";
 import { createSourceAccessStore } from "./source-access";
 
 const store = openJobStore(":memory:");
@@ -49,4 +49,63 @@ test("editing a URL or removing a site retires its old access item without touch
   );
   sites.remove(id);
   expect(inbox.list().rows).toHaveLength(0);
+});
+test("Needs you lists application items and site sign-ins as separate groups", () => {
+  const sites = createJobSitesStore(store),
+    access = createSourceAccessStore(store),
+    inbox = createApplicationStore(store).needsYou;
+  const site = sites.add({
+    text: "https://jobs.example.test/gated",
+  }).firstAddedId!;
+  const sign = access.request(site, "Sign in.")!;
+  const { added } = store.saveFoundJobs({
+    searchId: null,
+    jobs: [
+      {
+        title: "Engineer",
+        company: "Employer",
+        location: "Remote",
+        workModes: ["remote"],
+        url: "https://apply.example.test/1",
+        applyUrl: null,
+        sourceId: "board",
+        sourceLabel: "Board",
+        sourceJobId: "1",
+        postedAt: null,
+        salaryText: null,
+        salaryMin: null,
+        salaryMax: null,
+        salaryCurrency: null,
+        seniority: null,
+        employmentType: null,
+        summary: null,
+        description: "Synthetic job",
+      },
+    ],
+  });
+  approveOriginalResumesForTests(store, added);
+  const applications = createApplicationStore(store);
+  applications.applyJobs({ selection: { ids: added } });
+  const running = applications.claimNext()!;
+  const blocked = inbox.request({
+    applicationId: running.id,
+    attempt: running.attempt,
+    fieldKey: "login",
+    key: "login",
+    scope: { siteOrigin: "https://apply.example.test" },
+    prompt: "Sign in to continue",
+    kind: "sign_in",
+    input: "text",
+    options: [],
+  });
+  if (blocked.status !== "needs_you") throw new Error("Missing item");
+  expect(inbox.list({ group: "sites" })).toMatchObject({
+    rows: [{ id: sign, source: { id: site } }],
+    total: 1,
+  });
+  expect(inbox.list({ group: "applications" })).toMatchObject({
+    rows: [{ id: blocked.task.id }],
+    total: 1,
+  });
+  expect(inbox.list().rows).toHaveLength(2);
 });

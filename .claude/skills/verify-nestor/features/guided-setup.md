@@ -8,7 +8,7 @@ A new person starts on Profile › Guided setup. They pick their resume file (or
 - `setup-manual`: "Enter details manually" skips the file.
 - `setup-basics`: name, headline, years, contact, location, links, summary; "Save and continue to Work history".
 - `setup-work-history`: one card per role, education, projects, links, languages, proof; "Save and continue to Job targets".
-- `setup-job-targets`: target roles, related areas, preferred locations, job sources (see `job-sources.md`), countries where you can work, visa sponsorship, work modes, hours.
+- `setup-job-targets`: four blocks. "What to look for" (target roles, related areas, preferred locations, work modes, hours); "Where to look" (job sources, see `job-sources.md`); "Two answers every application asks" (Required: countries where you can work, visa sponsorship); "More about you (optional)", folded (relocation, remote, travel).
 - `setup-finish`: "Finish setup and find jobs" once "Everything required is in. You can finish setup." shows.
 - `setup-resume`: leaving and coming back resumes at the same step (Home shows "Continue setup").
 

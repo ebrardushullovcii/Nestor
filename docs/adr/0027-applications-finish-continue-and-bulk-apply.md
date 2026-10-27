@@ -1,6 +1,6 @@
 # ADR 0027: Applications that finish, continue, and apply in bulk with one press
 
-Status: accepted (2026-09-20); amended (2026-10-01).
+Status: accepted (2026-09-20); amended (2026-10-01, 2026-10-27).
 
 ## Context
 
@@ -20,7 +20,7 @@ The Applications rows also used an older vocabulary ("Needs recovery", "Waiting 
 - Apply to all is one press. Starting a batch approves it in the same call; the batch runs in the mode chosen in Settings, and every sentence about it says so instead of promising that nothing is sent.
 - Applications rows read one of the five states (Filling in, Ready to send, Applied, Needs you, Could not apply) from the newest run result. A run that handed back questions is Needs you, not Could not apply. When two or more applications could not be applied and a fresh run could differ, one control tries them all again.
 - Application documents the run creates for a form (cover letter, motivation letter, supporting statement) can be PDF, Word or plain text, whichever the form accepts.
-- A form worked to the end with nothing left for the person is recorded as `ready`, not `paused`. Only a run that handed back a question, or met a wall, is waiting on the person; a form that is filled in and left for them to send is Ready to send and is not counted under Waiting on you or Needs you.
+- A form worked to the end with nothing left for the person is recorded as `ready`, not `paused`. Only a run that handed back a question, or met a wall, is waiting on the person; a form that is filled in and left for them to send is Ready to send and is not counted under Waiting on you or Needs you. Needs you lists it in its own "Ready for you to send" group (see the 2026-10-27 update).
 - A run the model or browser dropped (a provider that went silent, a page read that threw) is a `failed` attempt with Try again, never Needs you. Needs you is reserved for a run that handed back a question the person can answer.
 - Hidden file inputs stay in the observation. Lever, Greenhouse and Workday hide the resume input behind a styled "Attach" button; attaching works on the hidden input, and without it the run could never attach a resume.
 - A page a site shows while it checks the browser by itself ("Just a moment", "Performing security verification") is a fact handed to the model with the advice to wait, up to about two minutes, before reporting it; a wait may last thirty seconds. Only a box to tick or a puzzle to solve is the person's.
@@ -48,3 +48,7 @@ Rejected alternatives: pre-approving every declaration kind by default (backgrou
 ## Update (2026-10-01)
 
 Background-check consent now joins the routine declarations that are on by default: the answers are true, the privacy notice and the site's terms. The agent may tick declarations the person agrees to, and the person can turn any off in Settings. Self-identification and marketing contact stay off by default. These permissions avoid leaving routine declarations for the person on every application; they do not grant final submission authority (ADR 0012, ADR 0024).
+
+## Update (2026-10-27)
+
+Needs you lists filled forms waiting for the person's Send in their own group, "Ready for you to send", below what is blocked. The owner approved this after testers saw "You're all caught up" while a form waited for Send. The group is not counted in Needs you, Home or the navigation badge, because nothing is blocked. Each row opens the filled form to review and send. When nothing is blocked and a form is waiting, the empty list says so and offers "Review and send".

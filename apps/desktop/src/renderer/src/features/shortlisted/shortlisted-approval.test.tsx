@@ -11,8 +11,10 @@ import {
   openJobStore,
   type JobStore,
 } from "@nestor/db/job-store";
+import { createApplicationStore } from "@nestor/db/applications";
 import { createResumeCommandReads } from "@nestor/job-finder/resumes";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -172,4 +174,35 @@ it("does not approve when another control has handled Ctrl+Enter", async () => {
   window.dispatchEvent(event);
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(approve).not.toHaveBeenCalled();
+});
+
+it("shows an approved job's running application instead of offering Apply again", async () => {
+  approveOriginalResumesForTests(store, ids.slice(0, 2));
+  const applications = createApplicationStore(store);
+  applications.applyJobs({ selection: { ids: [ids[0]!] } });
+  const running = applications.claimNext()!;
+  show();
+  fireEvent.click(
+    screen.getByRole("link", { name: "Open approved from Home" }),
+  );
+  const list = await screen.findByRole("region", { name: "Approved resumes" });
+  const row = await within(list).findByRole("button", { name: /Designer 1\b/ });
+  expect(row.textContent).toContain("Applying…");
+  fireEvent.click(row);
+  await screen.findByRole("heading", { name: "Designer 1" });
+  expect(
+    screen.getByRole("button", { name: "Applying · Open in Applications" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
+  act(() => {
+    applications.finishPreparation({
+      id: running.id,
+      attempt: running.attempt,
+      state: "ready",
+    });
+  });
+  await waitFor(() => expect(row.textContent).toContain("Ready to send"));
+  expect(
+    await screen.findByRole("button", { name: "Review and send" }),
+  ).toBeTruthy();
 });

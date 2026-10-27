@@ -1,6 +1,15 @@
 import { CreateAnswerPane } from "./create-answer-pane";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { ChevronRight } from "lucide-react";
 import type {
+  ApplicationRow,
   NeedsYouCounts,
   NeedsYouKind,
   NeedsYouTask,
@@ -31,8 +40,33 @@ import { TaskPane, describeError } from "./task-pane";
 import { SavedAnswerPane } from "./saved-answer-pane";
 import { SourceNeedPane } from "./source-need-pane";
 import { useNeedsSelection } from "./use-needs-selection";
+import {
+  currentWorkItem,
+  siteCheck,
+  useWorkThrough,
+  workThrough,
+  type WorkItem,
+} from "./work-through";
+import { openPreparedApplication } from "@renderer/features/applications/open-application";
+import {
+  jobFinderListRowClassName,
+  jobFinderListRowLinesClassName,
+  jobFinderListRowMetaClassName,
+  jobFinderListRowStatusClassName,
+  jobFinderListRowTitleClassName,
+} from "@renderer/features/job-finder/components/list-row";
+import { cn } from "@renderer/lib/cn";
 
-type Item = NeedsYouTask | SavedFormAnswerSummary;
+/** Job sites on one host share one sign-in, so they are one row. */
+interface SiteRow {
+  /** The first task's id: the row's id in the list and the selection. */
+  id: number;
+  host: string;
+  label: string;
+  tasks: NeedsYouTask[];
+}
+type Item = NeedsYouTask | SiteRow | SavedFormAnswerSummary;
+const isSite = (row: Item): row is SiteRow => "tasks" in row;
 const EMPTY_COUNTS: NeedsYouCounts = {
   question: 0,
   sign_in: 0,
@@ -72,6 +106,126 @@ function siteName(url: string | null | undefined): string | undefined {
   } catch {
     return url;
   }
+}
+
+function mergeSites(tasks: readonly NeedsYouTask[]): SiteRow[] {
+  const byHost = new Map<string, SiteRow>();
+  for (const task of tasks) {
+    if (!task.source) continue;
+    const host = siteName(task.source.url) ?? task.source.url;
+    const row = byHost.get(host);
+    if (row) row.tasks.push(task);
+    else
+      byHost.set(host, {
+        id: task.id,
+        host,
+        label: task.source.label,
+        tasks: [task],
+      });
+  }
+  return [...byHost.values()];
+}
+
+function toWorkItem(row: NeedsYouTask | SiteRow): WorkItem {
+  return isSite(row)
+    ? {
+        id: row.id,
+        kind: "site",
+        label: row.label,
+        taskIds: row.tasks.map((task) => task.id),
+        sources: row.tasks.flatMap((task) =>
+          task.source ? [{ id: task.source.id, url: task.source.url }] : [],
+        ),
+      }
+    : {
+        id: row.id,
+        kind: "task",
+        label: row.prompt,
+        taskIds: [row.id],
+        sources: [],
+      };
+}
+
+const plural = (count: number, one: string, many: string) =>
+  `${count.toLocaleString()} ${count === 1 ? one : many}`;
+
+/**
+ * Filled forms waiting for the person's Send. They are not blocked, so they
+ * are not counted in Needs you; they are listed so nothing waits unseen.
+ */
+function useReadyForms() {
+  const [ready, setReady] = useState<{
+    rows: ApplicationRow[];
+    more: boolean;
+  }>({ rows: [], more: false });
+  useEffect(() => {
+    let live = true;
+    const read = async () => {
+      try {
+        const page = await window.nestor.jobFinder.listApplications({
+          state: "ready",
+          limit: 50,
+        });
+        if (live) setReady({ rows: page.rows, more: page.nextCursor !== null });
+      } catch {
+        /* Keep the last list; the next change reads again. */
+      }
+    };
+    const unsubscribe = window.nestor.jobs.onChange((change) => {
+      if (change.cause === "application") void read();
+    });
+    void read();
+    return () => {
+      live = false;
+      unsubscribe();
+    };
+  }, []);
+  return ready;
+}
+
+/** A group's heading row: what the group is, how many, and its one action. */
+function GroupHeader(props: {
+  inList?: boolean;
+  label: string;
+  group: string;
+  open?: boolean;
+  onToggle?: () => void;
+  action?: { label: string; onClick: () => void } | null;
+}) {
+  const Wrapper = props.inList ? "li" : "div";
+  return (
+    <Wrapper
+      className="flex min-h-10 items-center gap-2 border-b border-(--surface-panel-border) py-1.5 pr-3 pl-4"
+      data-needs-group={props.group}
+    >
+      {props.onToggle ? (
+        <button
+          aria-expanded={props.open}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-(length:--text-small) font-medium text-foreground"
+          onClick={props.onToggle}
+          type="button"
+        >
+          <ChevronRight
+            aria-hidden
+            className={cn(
+              "size-4 shrink-0 transition-transform",
+              props.open && "rotate-90",
+            )}
+          />
+          <span className="truncate">{props.label}</span>
+        </button>
+      ) : (
+        <h3 className="min-w-0 flex-1 truncate text-(length:--text-small) font-medium text-foreground">
+          {props.label}
+        </h3>
+      )}
+      {props.action ? (
+        <Button onClick={props.action.onClick} size="toolbar" variant="outline">
+          {props.action.label}
+        </Button>
+      ) : null}
+    </Wrapper>
+  );
 }
 
 export function NeedsYouScreen() {
@@ -138,6 +292,7 @@ export function NeedsYouScreen() {
           limit,
           text,
           kind,
+          group: "applications",
         });
         return {
           ...page,
@@ -156,18 +311,66 @@ export function NeedsYouScreen() {
       };
     },
   });
+  // Sign-ins for job sites search could not read, after the items holding
+  // up applications; sites on one host merge into one row.
+  const sites = useStoreList<NeedsYouTask, NeedsYouCounts>({
+    key: JSON.stringify([tab, text, kind, "sites"]),
+    emptyCounts: EMPTY_COUNTS,
+    pauseUpdates: editing,
+    refreshOn: (change) => change.cause === "application",
+    load: async ({ cursor, limit }) => {
+      if (tab !== "tasks")
+        return {
+          rows: [],
+          nextCursor: null,
+          total: 0,
+          totalCapped: false,
+          counts: EMPTY_COUNTS,
+        };
+      const page = await window.nestor.needsYou.run("list_needs_you", {
+        after: cursor ? Number(cursor) : 0,
+        limit,
+        text,
+        kind,
+        group: "sites",
+      });
+      return {
+        ...page,
+        nextCursor: page.nextCursor === null ? null : String(page.nextCursor),
+      };
+    },
+  });
+  const siteRows = useMemo(
+    () => (tab === "tasks" ? mergeSites(sites.rows) : []),
+    [tab, sites.rows],
+  );
+  const [sitesExpanded, setSitesExpanded] = useState<boolean | null>(null);
+  const appsLoaded = !list.loading && list.nextCursor === null;
+  const sitesOpen = sitesExpanded ?? (appsLoaded && list.rows.length === 0);
+  const showSites = tab === "tasks" && appsLoaded && sitesOpen;
+  const rows: readonly Item[] = useMemo(
+    () => (showSites ? [...list.rows, ...siteRows] : list.rows),
+    [showSites, list.rows, siteRows],
+  );
+  const siteCount = sites.nextCursor === null ? siteRows.length : sites.total;
+  const ready = useReadyForms();
+  const { walk, checks } = useWorkThrough();
+  const walkItem = currentWorkItem(walk);
+  const walkThroughState = useRef(walk);
+  walkThroughState.current = walk;
   useEffect(() => {
     setActiveId(null);
     setSelection(NO_SELECTION);
     setEditing(false);
     setCreating(false);
+    setSitesExpanded(null);
     pinned.current = null;
   }, [tab, text, kind]);
   useEffect(() => {
     if (
       pinned.current !== null &&
       pinned.current === activeId &&
-      !list.rows.some((row) => row.id === activeId)
+      !rows.some((row) => row.id === activeId)
     )
       return;
     pinned.current = null;
@@ -175,10 +378,10 @@ export function NeedsYouScreen() {
       !creating &&
       !editing &&
       !list.loading &&
-      (activeId === null || !list.rows.some((row) => row.id === activeId))
+      (activeId === null || !rows.some((row) => row.id === activeId))
     )
-      setActiveId(list.rows[0]?.id ?? null);
-  }, [activeId, creating, editing, list.loading, list.rows]);
+      setActiveId(rows[0]?.id ?? null);
+  }, [activeId, creating, editing, list.loading, rows]);
 
   const activate = useCallback((id: number) => {
     setEditing(false);
@@ -210,48 +413,63 @@ export function NeedsYouScreen() {
         );
     },
   });
+  // A walk's question opens in the detail pane; its sites open in the browser.
+  const walkTaskId =
+    walkItem?.kind === "task" && !walk?.paused ? walkItem.id : null;
+  useEffect(() => {
+    if (walkTaskId === null) return;
+    activate(walkTaskId);
+    pinned.current = walkTaskId;
+  }, [walkTaskId, activate]);
   const toggle = (id: number, shift: boolean) =>
-    setSelection((value) => toggleSelection(value, id, shift, list.rows));
+    setSelection((value) => toggleSelection(value, id, shift, rows));
   const resolvedSelection = useNeedsSelection({
     selection,
     setSelection,
-    rows: list.rows,
+    rows,
     loading: list.loading,
     tab,
     text,
     kind,
   });
   const visibleSelection = resolvedSelection.selection;
-  const selectedCount = countSelected(visibleSelection, list.total);
+  const total = list.total + (tab === "tasks" ? sites.total : 0);
+  const selectedCount = countSelected(visibleSelection, total);
   const missing = useCallback((id: number) => {
     if (pinned.current === id) pinned.current = null;
     setActiveId((current) => (current === id ? null : current));
   }, []);
-  const active = list.rows.find((row) => row.id === activeId);
-  const source = active && "source" in active ? active.source : undefined;
+  const active =
+    rows.find((row) => row.id === activeId) ??
+    siteRows.find((row) => row.id === activeId);
+  const site = active && isSite(active) ? active : undefined;
   useListKeys({
-    rows: list.rows,
+    rows,
     activeId,
     setActiveId: activate,
     toggle,
     selectAll: () => setSelection(selectAll()),
     clearSelection: () => setSelection(NO_SELECTION),
-    loadMore: () => void list.loadMore(),
+    loadMore: () =>
+      void (list.nextCursor !== null || !showSites
+        ? list.loadMore()
+        : sites.loadMore()),
     filterSelector: "#needs-you-filter",
   });
-  const latest = useRef({ list, selection: visibleSelection, activeId });
-  latest.current = { list, selection: visibleSelection, activeId };
+  const latest = useRef({ list, rows, selection: visibleSelection, activeId });
+  latest.current = { list, rows, selection: visibleSelection, activeId };
   const resolved = useCallback(
     (id: number, message: string) => {
-      const { list, selection } = latest.current;
+      const { list, rows, selection } = latest.current;
       const next =
-        list.rows.find(
-          (row) => row.id !== id && isSelected(selection, row.id),
-        ) ??
-        list.rows.find((row) => row.id > id) ??
-        list.rows.find((row) => row.id !== id);
+        rows.find((row) => row.id !== id && isSelected(selection, row.id)) ??
+        rows.find((row) => row.id > id) ??
+        rows.find((row) => row.id !== id);
       list.removeRows((value) => value === id);
-      setActiveId(next?.id ?? null);
+      // A walk on this question moves on to its own next item.
+      if (currentWorkItem(walkThroughState.current)?.id === id)
+        workThrough.finished(id);
+      else setActiveId(next?.id ?? null);
       setEditing(false);
       setSelection((value) =>
         value.all
@@ -283,6 +501,83 @@ export function NeedsYouScreen() {
   }
   const totalTasks =
     counts.question + counts.sign_in + counts.captcha + counts.mfa;
+  const openReady = (id: number) =>
+    void openPreparedApplication(id, showToast)
+      .then((opened) => {
+        if (!opened)
+          showToast({
+            title: "This form is no longer open. Find it in Applications.",
+            tone: "warning",
+          });
+      })
+      .catch((error: unknown) =>
+        showToast({ title: describeError(error), tone: "warning" }),
+      );
+  const readyCount = ready.rows.length;
+  const readyLabel = `${readyCount}${ready.more ? "+" : ""}`;
+  const walkSites = () =>
+    workThrough.start(siteRows.map((row) => toWorkItem(row)));
+  const sitesHeader = (inList: boolean) => (
+    <GroupHeader
+      action={walk ? null : { label: "Sign in to each", onClick: walkSites }}
+      group="sites"
+      inList={inList}
+      label={`${plural(siteCount, "job site needs", "job sites need")} you to sign in`}
+      onToggle={() => setSitesExpanded(!sitesOpen)}
+      open={sitesOpen}
+    />
+  );
+  const showGroups = tab === "tasks" && !text;
+  const footer =
+    tab !== "tasks" ? null : (
+      <>
+        {appsLoaded && !sitesOpen && siteRows.length > 0
+          ? sitesHeader(false)
+          : null}
+        {readyCount > 0 ? (
+          <section aria-label="Ready for you to send" data-needs-group="ready">
+            <GroupHeader
+              group="ready"
+              label={`Ready for you to send (${readyLabel})`}
+            />
+            <ul className="m-0 grid list-none p-0">
+              {ready.rows.map((row) => (
+                <li className="pl-10" key={row.id}>
+                  <button
+                    className={cn(
+                      jobFinderListRowClassName,
+                      "w-full text-left hover:bg-(--accent)",
+                    )}
+                    onClick={() => openReady(row.id)}
+                    title="Open the filled form to review and send"
+                    type="button"
+                  >
+                    <span className={jobFinderListRowLinesClassName}>
+                      <strong className={jobFinderListRowTitleClassName}>
+                        {row.title}
+                      </strong>
+                      <span className={jobFinderListRowMetaClassName}>
+                        {[row.company, row.location]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                      <span
+                        className={cn(
+                          jobFinderListRowStatusClassName,
+                          "text-foreground-soft",
+                        )}
+                      >
+                        Filled in. Review it and send.
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+      </>
+    );
   return (
     <LockedScreenLayout
       lockContentHeight
@@ -339,6 +634,45 @@ export function NeedsYouScreen() {
               </Button>
             </p>
           ) : null}
+          {walk && walkItem ? (
+            <p
+              className="flex flex-wrap items-center gap-2 text-sm text-foreground-soft"
+              data-needs-walk
+              role="status"
+            >
+              {walk.paused ? (
+                <>
+                  Paused at {walk.index + 1} of {walk.items.length}
+                  <Button onClick={() => workThrough.resume()} size="toolbar">
+                    Continue
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span>
+                    {walkItem.kind === "site"
+                      ? `Signing in · ${walkItem.label} · `
+                      : "Working through "}
+                    {walk.index + 1} of {walk.items.length}
+                  </span>
+                  <Button
+                    onClick={() => workThrough.skip()}
+                    size="toolbar"
+                    variant="outline"
+                  >
+                    Skip
+                  </Button>
+                </>
+              )}
+              <Button
+                onClick={() => workThrough.stop()}
+                size="toolbar"
+                variant="ghost"
+              >
+                Stop
+              </Button>
+            </p>
+          ) : null}
           {list.error ? <p role="alert">{list.error}</p> : null}
           {resolvedSelection.error ? (
             <p role="alert">{resolvedSelection.error}</p>
@@ -354,12 +688,21 @@ export function NeedsYouScreen() {
               tab === "tasks" ? "Things needing you" : "Saved form answers"
             }
             noun={tab === "tasks" ? "item" : "answer"}
-            rows={list.rows}
-            total={list.total}
-            totalCapped={list.totalCapped}
+            rows={rows}
+            total={total}
+            totalCapped={list.totalCapped || sites.totalCapped}
             loading={list.loading}
-            hasMore={!editing && list.nextCursor !== null}
-            onLoadMore={() => void list.loadMore()}
+            hasMore={
+              !editing &&
+              (list.nextCursor !== null ||
+                (sitesOpen && sites.nextCursor !== null))
+            }
+            onLoadMore={() =>
+              void (list.nextCursor !== null || !showSites
+                ? list.loadMore()
+                : sites.loadMore())
+            }
+            footer={footer}
             selection={visibleSelection}
             selectedCount={selectedCount}
             onSelectAll={() => setSelection(selectAll())}
@@ -380,10 +723,11 @@ export function NeedsYouScreen() {
                 <Button
                   size="toolbar"
                   onClick={() => {
-                    const first = list.rows.find((row) =>
-                      isSelected(selection, row.id),
-                    );
-                    if (first) activate(first.id);
+                    const items = [...list.rows, ...siteRows]
+                      .filter((row) => isSelected(selection, row.id))
+                      .map((row) => toWorkItem(row as NeedsYouTask | SiteRow));
+                    setSelection(NO_SELECTION);
+                    workThrough.start(items);
                   }}
                 >
                   Work through selected
@@ -423,46 +767,110 @@ export function NeedsYouScreen() {
               )
             }
             empty={
-              text
-                ? "No matching questions or answers."
-                : tab === "tasks"
-                  ? "You're all caught up. Applications keep running in the background."
-                  : "No saved answers yet. Choose Save this answer for next time when a form needs you."
+              text ? (
+                "No matching questions or answers."
+              ) : tab === "tasks" && readyCount > 0 ? (
+                <div
+                  className="grid justify-items-start gap-3"
+                  data-needs-ready-summary
+                >
+                  <p>
+                    Nothing is blocked.{" "}
+                    {readyCount === 1 && !ready.more
+                      ? "1 application is"
+                      : `${readyLabel} applications are`}{" "}
+                    filled in and waiting for your Send.
+                  </p>
+                  <Button
+                    onClick={() => openReady(ready.rows[0]!.id)}
+                    size="sm"
+                  >
+                    Review and send
+                  </Button>
+                </div>
+              ) : tab === "tasks" ? (
+                "You're all caught up. Applications keep running in the background."
+              ) : (
+                "No saved answers yet. Choose Save this answer for next time when a form needs you."
+              )
             }
-            renderRow={(row, state) => (
-              <ListRowFrame
-                key={row.id}
-                {...state}
-                id={row.id}
-                title={row.prompt}
-                meta={
-                  "source" in row && row.source
-                    ? row.source.label
-                    : "waitingFor" in row && row.waitingFor
-                      ? waitingLabel(row.waitingFor)
-                      : [row.scope.country, row.scope.siteOrigin]
-                          .filter(Boolean)
-                          .join(" · ") ||
-                        ("preview" in row ? "Reusable answer" : "Application")
-                }
-                trailing={
-                  "preview" in row
-                    ? undefined
-                    : siteName(row.source?.url ?? row.scope.siteOrigin)
-                }
-                status={
-                  "preview" in row
-                    ? row.needsConfirmation
-                      ? "Review saved answer"
-                      : row.preview
-                    : row.blockedUrl
-                      ? "Blocked"
-                      : KIND[row.kind]
-                }
-                onActivate={activate}
-                onToggle={toggle}
-              />
-            )}
+            renderRow={(row, state) =>
+              isSite(row) ? (
+                <Fragment key={row.id}>
+                  {row.id === siteRows[0]?.id ? sitesHeader(true) : null}
+                  <ListRowFrame
+                    {...state}
+                    id={row.id}
+                    title={`Sign in to ${row.label}`}
+                    meta={
+                      row.tasks.length > 1
+                        ? `${row.host} · ${row.tasks.length} sites`
+                        : row.host
+                    }
+                    status={
+                      {
+                        checking: "Checking…",
+                        still: "Still can't read it",
+                        none: "Search couldn't read this site",
+                      }[
+                        siteCheck(
+                          checks,
+                          row.tasks.map((task) => task.id),
+                        ) ?? "none"
+                      ]
+                    }
+                    onActivate={activate}
+                    onToggle={toggle}
+                  />
+                </Fragment>
+              ) : (
+                <Fragment key={row.id}>
+                  {showGroups &&
+                  siteRows.length > 0 &&
+                  row.id === list.rows[0]?.id ? (
+                    <GroupHeader
+                      group="applications"
+                      inList
+                      label={`Holding up applications (${list.total.toLocaleString()})`}
+                    />
+                  ) : null}
+                  <ListRowFrame
+                    key={row.id}
+                    {...state}
+                    id={row.id}
+                    title={row.prompt}
+                    meta={
+                      "source" in row && row.source
+                        ? row.source.label
+                        : "waitingFor" in row && row.waitingFor
+                          ? waitingLabel(row.waitingFor)
+                          : [row.scope.country, row.scope.siteOrigin]
+                              .filter(Boolean)
+                              .join(" · ") ||
+                            ("preview" in row
+                              ? "Reusable answer"
+                              : "Application")
+                    }
+                    trailing={
+                      "preview" in row
+                        ? undefined
+                        : siteName(row.source?.url ?? row.scope.siteOrigin)
+                    }
+                    status={
+                      "preview" in row
+                        ? row.needsConfirmation
+                          ? "Review saved answer"
+                          : row.preview
+                        : row.blockedUrl
+                          ? "Blocked"
+                          : KIND[row.kind]
+                    }
+                    onActivate={activate}
+                    onToggle={toggle}
+                  />
+                </Fragment>
+              )
+            }
           />
         }
         detail={
@@ -485,14 +893,22 @@ export function NeedsYouScreen() {
             >
               Choose an item to see it here.
             </section>
-          ) : tab === "tasks" && source ? (
+          ) : tab === "tasks" && site ? (
             <section
               id="list-detail"
               aria-label="Source sign-in"
               data-needs-detail-id={activeId}
               className="surface-panel-shell overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
             >
-              <SourceNeedPane key={source.id} source={source} />
+              <SourceNeedPane
+                key={site.id}
+                check={siteCheck(
+                  checks,
+                  site.tasks.map((task) => task.id),
+                )}
+                host={site.host}
+                site={toWorkItem(site)}
+              />
             </section>
           ) : tab === "tasks" ? (
             <TaskPane
