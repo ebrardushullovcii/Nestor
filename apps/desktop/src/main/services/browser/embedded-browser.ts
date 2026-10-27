@@ -482,6 +482,9 @@ export class EmbeddedBrowser {
           !this.parkedTabs.has(id) &&
           !this.personTabs.has(id) &&
           !this.personInputTabs.has(id) &&
+          // A Send the person pressed keeps the page until its outcome is
+          // read, even after the page moved on and lost its own record.
+          !this.personSendPressedAt.has(id) &&
           !this.lentTabs.has(id) &&
           !(
             this.activeTabId === id &&
