@@ -1114,7 +1114,7 @@ describe("reading the choices of lists the page draws itself", () => {
         <input id="email" type="email" />
         <div id="frame-code" role="combobox" aria-label="Calling code" aria-valuetext="United Kingdom +44">+44</div>
         <input id="frame-phone" type="tel" aria-label="Phone" value="7700900123" />
-        <button id="continue">Continue</button>
+        <button id="continue" type="button">Continue</button>
       </form>'></iframe>
       <script>
         const root = document.getElementById("shadow-host").attachShadow({ mode: "open" });
@@ -1149,6 +1149,7 @@ describe("reading the choices of lists the page draws itself", () => {
     expect(shadowRef).toMatch(/^c\d+$/u);
     expect(frameControl?.ref).toMatch(/^f0c\d+$/u);
     expect(frameAction?.ref).toMatch(/^f0a\d+$/u);
+    expect(frameAction?.submitsForm).toBe(false);
     expect(
       observation.controls.find((control) => control.id === "frame-code")
         ?.scopeKey,
