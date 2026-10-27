@@ -18,7 +18,15 @@ export function applicationAnswerDependencies(
   context: CandidateReusableAnswer[],
 ) {
   const seen = new Map<string, ApplicationAnswerDependencies["form"][number]>();
+  const contextSeen = new Map<string, CandidateReusableAnswer>();
+  const includeContext = (answers: CandidateReusableAnswer[]) => {
+    for (const answer of answers)
+      contextSeen.set(JSON.stringify(answer), answer);
+    return answers;
+  };
+  includeContext(context);
   return {
+    includeContext,
     read(questions: FormAnswerLookup[]) {
       const matches = memory.answersForQuestions(
         applicationId,
@@ -43,7 +51,7 @@ export function applicationAnswerDependencies(
     snapshot(): ApplicationAnswerDependencies {
       return {
         form: [...seen.values()],
-        context: context.map((answer) => ({
+        context: [...contextSeen.values()].map((answer) => ({
           id: Number(answer.id.replace(/^form_answer_/u, "")),
           kind: answer.kind,
           answer: answer.answer,

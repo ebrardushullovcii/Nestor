@@ -26,6 +26,118 @@ import {
 const stores: JobStore[] = [];
 const folders: string[] = [];
 
+it("a refused write preserves the answered link and an open task cannot hide it after restart", () => {
+  const folder = mkdtempSync(path.join(tmpdir(), "nestor-answer-replay-"));
+  folders.push(folder);
+  const file = path.join(folder, "jobs.sqlite");
+  const { jobs, applications } = open(file);
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!;
+  const input = {
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "authorization",
+    kind: "question" as const,
+    key: "auth",
+    scope: {},
+    prompt: "Can you work here?",
+    input: "boolean" as const,
+    options: ["Yes", "No"],
+  };
+  const first = applications.needsYou.request(input);
+  if (first.status !== "needs_you")
+    throw new Error("Expected the original question");
+  applications.needsYou.answer({
+    id: first.task.id,
+    answer: "Yes",
+    remember: false,
+  });
+  const next = applications.claimNext()!;
+  const reason = {
+    kind: "page_refused" as const,
+    check: "choice_retention",
+    detail: "The page cleared the selected option.",
+  };
+  applications.needsYou.request(
+    { ...input, attempt: next.attempt, askReason: reason },
+    { reuseAnswers: false },
+  );
+  expect(
+    jobs
+      .sql(
+        "SELECT task_id FROM application_needs_you WHERE application_id=? ORDER BY task_id",
+      )
+      .all(row.id),
+  ).toHaveLength(2);
+  expect(
+    applications.needsYou.answersForQuestions(
+      row.id,
+      [{ key: "auth", prompt: input.prompt, reusePrompt: false }],
+      "https://replica.test",
+    )[0]?.answer,
+  ).toBe("Yes");
+  jobs.close();
+  const reopened = open(file);
+  expect(reopened.applications.needsYou.list().rows[0]?.askReason).toEqual(
+    reason,
+  );
+  expect(
+    reopened.applications.needsYou.answersForQuestions(
+      row.id,
+      [{ key: "auth", prompt: input.prompt, reusePrompt: false }],
+      "https://replica.test",
+    )[0]?.answer,
+  ).toBe("Yes");
+});
+
+it("an unresolved local task does not suppress a saved answer and model context stays origin-scoped", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!;
+  applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "email",
+    kind: "question",
+    key: "email",
+    scope: {},
+    prompt: "Email",
+    input: "text",
+    options: [],
+  });
+  for (const [key, siteOrigin] of [
+    ["email", ""],
+    ["site", "https://replica.test"],
+    ["other", "https://other.test"],
+  ])
+    applications.needsYou.remember({
+      key: key!,
+      scope: { siteOrigin },
+      prompt: key!,
+      answer: "alex@example.test",
+      input: "text",
+      options: [],
+    });
+  // Simulate a formerly opened unresolved task coexisting with the saved row.
+  jobs
+    .sql(
+      "UPDATE needs_you SET answer=NULL,resolved_at=NULL WHERE answer_key='email'",
+    )
+    .run();
+  expect(
+    applications.needsYou.answersForQuestions(
+      row.id,
+      [{ key: "email", prompt: "Email", reusePrompt: false }],
+      "https://replica.test",
+    )[0]?.answer,
+  ).toBe("alex@example.test");
+  expect(
+    readSavedApplicationAnswers(jobs, undefined, "https://replica.test")
+      .map((answer) => answer.question)
+      .sort(),
+  ).toEqual(["email", "site"]);
+});
+
 it("search reads only confirmed global country-list rules for the person's saved country", () => {
   const { jobs, applications } = open();
   const rule = {
@@ -1066,7 +1178,7 @@ describe("applications on the job store", () => {
         ],
         "https://jobs.example.test",
       ),
-    ).toEqual([]);
+    ).toEqual([expect.objectContaining({ answer: "50000" })]);
     expect(applications.getApplication(retry.id)?.state).toBe("needs_you");
     applications.needsYou.answer({
       id: again.task.id,

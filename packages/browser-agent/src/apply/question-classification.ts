@@ -47,6 +47,7 @@ interface QuestionReadInput {
     hint?: string;
     placeholder?: string;
     required?: boolean;
+    sectionPath?: readonly string[];
   }>;
   pageInstructions?: string;
   sources?: readonly {
@@ -288,6 +289,7 @@ async function readApplicationQuestions(
           placeholder: question.placeholder ?? "",
           options: question.options.slice(0, 12),
           nativeRequired: question.required ?? false,
+          sections: question.sectionPath ?? [],
         })),
       ),
     },
@@ -416,6 +418,7 @@ export function questionClassificationKey(
     control.hint ?? "",
     control.placeholder,
     control.urlInput ?? false,
+    control.sectionPath ?? [],
   ]);
 }
 
@@ -425,6 +428,7 @@ function classifiableQuestions(controls: readonly ApplyFormControl[]) {
       controls
         .filter(
           (control) =>
+            !control.credentialRole &&
             (control.visible || control.kind === "file") &&
             questionPrompt(control),
         )
@@ -440,6 +444,7 @@ function classifiableQuestions(controls: readonly ApplyFormControl[]) {
                 placeholder: control.placeholder,
                 options: [...control.options],
                 required: control.required,
+                sectionPath: control.sectionPath ?? [],
               },
             ] as const,
         ),

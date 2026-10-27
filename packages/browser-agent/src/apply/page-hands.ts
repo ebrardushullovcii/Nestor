@@ -203,18 +203,31 @@ export function buildApplyFormObservation(
   observedAt: string,
 ): ApplyFormObservation {
   const raw = withToggleChoices(page);
+  const signInContext =
+    raw.controls.some(
+      (control) =>
+        control.visible &&
+        !control.disabled &&
+        control.inputType.toLowerCase() === "password",
+    ) || /\b(?:sign[ -]?in|log[ -]?in)\b/iu.test(`${raw.title} ${raw.url}`);
   const controls: ApplyFormControl[] = raw.controls.map((rawControl) => {
     const kind = toControlKind(rawControl);
     const inputType = rawControl.inputType.toLowerCase();
     const credentialRole =
       inputType === "password"
         ? ("password" as const)
-        : inputType === "email" ||
-            /\b(?:email|e-mail|username|user name|user id)\b/iu.test(
-              `${rawControl.label} ${rawControl.placeholder} ${rawControl.autocomplete}`,
+        : /(?:^|\s)one-time-code(?:\s|$)/iu.test(rawControl.autocomplete) ||
+            /\b(?:otp|one[ -]?time (?:code|password)|verification code)\b/iu.test(
+              rawControl.label,
             )
-          ? ("identifier" as const)
-          : null;
+          ? ("one_time_code" as const)
+          : signInContext &&
+              (inputType === "email" ||
+                /\b(?:email|e-mail|username|user name|user id)\b/iu.test(
+                  `${rawControl.label} ${rawControl.placeholder} ${rawControl.autocomplete}`,
+                ))
+            ? ("identifier" as const)
+            : null;
     const base: Omit<
       ApplyFormControl,
       "questionKind" | "answerControlType" | "attestationKind" | "answered"
@@ -222,6 +235,9 @@ export function buildApplyFormObservation(
       ref: rawControl.ref ?? `c${rawControl.index}`,
       kind,
       ...(rawControl.scopeKey ? { scopeKey: rawControl.scopeKey } : {}),
+      ...(rawControl.rowScopeKey
+        ? { rowScopeKey: rawControl.rowScopeKey }
+        : {}),
       ...(inputType === "tel" ? { telInput: true } : {}),
       ...(inputType === "tel" && rawControl.phoneCallingCode
         ? { phoneCallingCode: rawControl.phoneCallingCode }
@@ -253,6 +269,12 @@ export function buildApplyFormObservation(
       label: rawControl.label.trim(),
       ...(rawControl.hint?.trim() ? { hint: rawControl.hint.trim() } : {}),
       groupLabel: rawControl.groupLabel.trim(),
+      sectionPath:
+        rawControl.sectionPath ??
+        rawControl.groupLabel
+          .split(" — ")
+          .map((part) => part.trim())
+          .filter(Boolean),
       ...(kind === "radio" || (kind === "checkbox" && !rawControl.required)
         ? {
             choiceGroupKey: rawControl.name.trim()
@@ -267,7 +289,10 @@ export function buildApplyFormObservation(
       visible: rawControl.visible,
       // A task-local password can be present long enough to submit a sign-in
       // form, but it must never enter the observation/model/tool trace.
-      value: credentialRole === "password" ? "" : rawControl.value,
+      value:
+        credentialRole === "password" || credentialRole === "one_time_code"
+          ? ""
+          : rawControl.value,
       credentialRole,
       checked: rawControl.checked,
       options: rawControl.options,
@@ -286,7 +311,7 @@ export function buildApplyFormObservation(
     return {
       ...control,
       answered:
-        credentialRole === "password"
+        credentialRole === "password" || credentialRole === "one_time_code"
           ? rawControl.value.length > 0
           : isControlAnswered(control),
     };

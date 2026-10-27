@@ -917,18 +917,23 @@ export function readSavedCountryOptionFallbacks(
 export function readSavedApplicationAnswers(
   store: JobStore,
   kinds?: readonly CandidateAnswerKind[],
+  siteOrigin?: string,
 ): CandidateReusableAnswer[] {
   const rows = store
     .sql(
-      `SELECT id,kind,label,prompt,answer,role_families_json,proof_entry_ids_json,option_fallback_json
-    FROM form_answers WHERE needs_confirmation=0 ${kinds ? "AND kind IN (SELECT value FROM json_each(?))" : ""} ORDER BY id`,
+      `SELECT id,kind,label,prompt,answer,country,role_families_json,proof_entry_ids_json,option_fallback_json
+    FROM form_answers WHERE needs_confirmation=0 ${kinds ? "AND kind IN (SELECT value FROM json_each(?))" : ""} ${siteOrigin ? "AND site_origin IN ('', ?)" : ""} ORDER BY id`,
     )
-    .all(...(kinds ? [JSON.stringify(kinds)] : [])) as Array<{
+    .all(
+      ...(kinds ? [JSON.stringify(kinds)] : []),
+      ...(siteOrigin ? [siteOrigin] : []),
+    ) as Array<{
     id: number;
     kind: CandidateAnswerKind;
     label: string;
     prompt: string;
     answer: string;
+    country: string;
     option_fallback_json: string | null;
     role_families_json: string;
     proof_entry_ids_json: string;
@@ -939,6 +944,15 @@ export function readSavedApplicationAnswers(
     label: row.label || row.prompt,
     question: row.prompt,
     answer: row.answer,
+    ...(row.country
+      ? {
+          applicationScope: {
+            location: row.country,
+            applicationRecordId: null,
+            resultId: null,
+          },
+        }
+      : {}),
     optionFallback: row.option_fallback_json
       ? SavedOptionFallbackSchema.parse(
           JSON.parse(row.option_fallback_json) as unknown,

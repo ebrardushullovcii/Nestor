@@ -4,6 +4,7 @@ import {
 } from "./agent-timing";
 import { ApplicationAnswerDependenciesSchema } from "./application-answer-dependencies";
 import { z } from "zod";
+import { ApplicationQuestionAskReasonSchema } from "./application-question-reason";
 
 import { ApplicationAutomationModeSchema } from "./application-authority";
 
@@ -2077,6 +2078,7 @@ export const ApplicationQuestionInputConstraintsSchema = z.object({
 });
 
 export const ApplicationAttemptQuestionSchema = z.object({
+  askReason: ApplicationQuestionAskReasonSchema.optional(),
   id: NonEmptyStringSchema,
   prompt: NonEmptyStringSchema,
   repeatedAtDifferentStep: optionalStoredField(z.boolean(), false),

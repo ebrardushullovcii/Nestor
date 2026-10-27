@@ -75,6 +75,9 @@ export interface ApplyFormControl {
   /** Help text beside the field, such as the format it asks for. */
   hint?: string;
   groupLabel: string;
+  /** Named ancestors, outermost first; the last choice-group name is its question. */
+  sectionPath?: readonly string[];
+  rowScopeKey?: string;
   /** A repeated question whose section did not distinguish two form steps. */
   repeatedQuestion?: { prompt: string; step: string };
   /** Stable identity shared by controls that belong to one choice group. */
@@ -92,7 +95,7 @@ export interface ApplyFormControl {
   visible: boolean;
   value: string;
   /** Credential meaning without exposing the secret value to the model. */
-  credentialRole?: "identifier" | "password" | null;
+  credentialRole?: "identifier" | "password" | "one_time_code" | null;
   checked: boolean;
   options: string[];
   selectedOptionLabel: string;
@@ -547,6 +550,8 @@ export type ApplyProposal =
     };
 
 export interface ApplyAgentConfig {
+  /** Host-only semantic matches that passed the independent grounding check. */
+  matchedAnswers?: ReadonlyMap<string, string>;
   initialQuestionContexts?: ReadonlyArray<{ prompt: string; step: string }>;
   /** What earlier runs of this application learned about its pickers. */
   initialPickerAttempts?: readonly StoredApplyPickerAttempt[];

@@ -78,6 +78,73 @@ function decide(
   });
 }
 
+test("a host semantic match preserves reference, own-words, country and history guards", () => {
+  const sources = source();
+  const field = {
+    ...control("Contact identity"),
+    groupLabel: "Professional reference",
+  };
+  const run = (
+    target: ApplyFormControl,
+    kind: ApplyAnswerTags["kind"],
+    sourceId: string,
+    answer: string,
+  ) =>
+    classifyAnswerPermission({
+      sources,
+      control: target,
+      controls: [target],
+      tags: { kind, sourceId: null, country: "GB" },
+      matchedSourceId: sourceId,
+      answer,
+      pageInstructions: "",
+    });
+  expect(run(field, "other", "profile.fullName", "Alex Vanguard").kind).toBe(
+    "needs_you",
+  );
+  expect(
+    run(
+      control("Use your own words"),
+      "own_words",
+      "profile.fullName",
+      "Alex Vanguard",
+    ).kind,
+  ).toBe("needs_you");
+  expect(
+    run(
+      control(),
+      "work_auth",
+      "profile.workEligibility.authorizedWorkCountries.0",
+      "Yes",
+    ).kind,
+  ).toBe("needs_you");
+  sources.profile = CandidateProfileSchema.parse({
+    ...sources.profile,
+    experiences: [
+      { id: "one", companyName: "First", title: "Engineer" },
+      { id: "two", companyName: "Second", title: "Designer" },
+    ],
+  });
+  const title = { ...control("Position"), groupLabel: "Work history 1" };
+  const company = {
+    ...control("Company"),
+    ref: "company",
+    groupLabel: "Work history 1",
+    value: "First",
+  };
+  expect(
+    classifyAnswerPermission({
+      sources,
+      control: title,
+      controls: [title, company],
+      tags: { kind: "other", country: null, sourceId: null },
+      matchedSourceId: "profile.experiences.two.title",
+      answer: "Designer",
+      pageInstructions: "",
+    }).kind,
+  ).toBe("needs_you");
+});
+
 test("plain applicant identity binds to its own exact Profile value when the model omits a source", () => {
   const sources = source();
   sources.profile.firstName = "Alex";
@@ -115,6 +182,160 @@ test("plain applicant identity binds to its own exact Profile value when the mod
   }
 });
 
+test("Atlas Application ancestors do not reject contact leaves or turn a reference into the applicant", () => {
+  const sources = source();
+  sources.profile.email = "alex@example.test";
+  for (const [label, value] of [
+    ["Full name *", "Alex Vanguard"],
+    ["Email *", "alex@example.test"],
+  ]) {
+    const field = {
+      ...control(label),
+      groupLabel: "Application",
+      sectionPath: ["Application"],
+    };
+    expect(
+      decide(
+        sources,
+        field,
+        { kind: "other", sourceId: null, country: null },
+        value,
+      ).kind,
+    ).toBe("literal");
+    expect(
+      decide(
+        sources,
+        { ...field, sectionPath: ["Application", "Professional reference"] },
+        { kind: "other", sourceId: null, country: null },
+        value,
+      ).kind,
+    ).toBe("needs_you");
+  }
+});
+
+test("Brindle nested numbered work-history rows retain employer/title/date binding", () => {
+  const sources = source();
+  sources.profile = CandidateProfileSchema.parse({
+    ...sources.profile,
+    experiences: [
+      {
+        id: "one",
+        companyName: "First Company",
+        title: "Engineer",
+        startDate: "2020-01",
+      },
+      {
+        id: "two",
+        companyName: "Second Company",
+        title: "Designer",
+        startDate: "2024-02",
+      },
+    ],
+  });
+  const row = (label: string, ref: string, value = "") => ({
+    ...control(label),
+    ref,
+    value,
+    groupLabel: "Step 3 of 4: Work history (optional) — Work history 1",
+    sectionPath: ["Step 3 of 4: Work history (optional)", "Work history 1"],
+  });
+  const employer = row("Company", "company", "First Company");
+  const title = row("Job title", "title");
+  const date = {
+    ...row("From", "from"),
+    kind: "date" as const,
+    dateInputType: "month" as const,
+  };
+  expect(
+    decide(
+      sources,
+      title,
+      {
+        kind: "other",
+        country: null,
+        sourceId: "profile.experiences.one.title",
+      },
+      "Engineer",
+      [employer, title, date],
+    ).kind,
+  ).toBe("literal");
+  expect(
+    decide(
+      sources,
+      date,
+      {
+        kind: "other",
+        country: null,
+        sourceId: "profile.experiences.one.startDate",
+      },
+      "2020-01",
+      [employer, title, date],
+    ).kind,
+  ).toBe("literal");
+  expect(
+    decide(
+      sources,
+      title,
+      {
+        kind: "other",
+        country: null,
+        sourceId: "profile.experiences.two.title",
+      },
+      "Designer",
+      [employer, title, date],
+    ).kind,
+  ).toBe("needs_you");
+});
+
+test.each([
+  ["Are you authorized to work in the job's country?", "work_auth", "Yes"],
+  ["Will you need visa sponsorship?", "sponsorship", "No"],
+] as const)(
+  "replica eligibility meaning binds to the job country: %s",
+  (question, kind, answer) => {
+    const sources = source();
+    sources.posting.location = "Berlin, Germany";
+    const yes = {
+      ...control("Yes"),
+      groupLabel: `Application — ${question}`,
+      sectionPath: ["Application", question],
+      choiceGroupKey: "eligible",
+      kind: "radio" as const,
+      answerControlType: "single_choice" as const,
+      options: ["Yes", "No"],
+    };
+    const no = { ...yes, ref: "c1", label: "No" };
+    expect(
+      decide(
+        sources,
+        answer === "Yes" ? yes : no,
+        { kind, country: "DE", sourceId: null },
+        answer,
+        [yes, no],
+      ).kind,
+    ).toBe("literal");
+    expect(
+      decide(sources, yes, { kind, country: "GB", sourceId: null }, answer, [
+        yes,
+        no,
+      ]).kind,
+    ).toBe("needs_you");
+    sources.profile.workEligibility.limitedWorkPermissions = [
+      {
+        country: "Germany",
+        conditions: "20 hours during term",
+        requiresFutureSponsorship: true,
+      },
+    ];
+    expect(
+      decide(sources, yes, { kind, country: "DE", sourceId: null }, answer, [
+        yes,
+        no,
+      ]).kind,
+    ).toBe("needs_you");
+  },
+);
+
 test("a missing identity source does not fill a reference, qualified question or ambiguous target", () => {
   const sources = source();
   const tags = { kind: "other", country: null, sourceId: null } as const;
@@ -143,6 +364,38 @@ test("a missing identity source does not fill a reference, qualified question or
   ).toBe("needs_you");
   sources.profile.fullName = "";
   expect(decide(sources, field, tags, "Alex Vanguard").kind).toBe("needs_you");
+});
+
+test("relocation choice groups use the question leaf, and unknown relocation or age stays unknown", () => {
+  const sources = source();
+  const field = {
+    ...control("No"),
+    kind: "radio" as const,
+    choiceGroupKey: "relocation",
+    groupLabel: "Application — Are you willing to relocate?",
+    sectionPath: ["Application", "Are you willing to relocate?"],
+    options: ["Yes", "No"],
+  };
+  const tags = {
+    kind: "other",
+    country: null,
+    sourceId: "profile.workEligibility.willingToRelocate",
+  } as const;
+  expect(decide(sources, field, tags, "No").kind).toBe("needs_you");
+  sources.profile.workEligibility.willingToRelocate = false;
+  expect(decide(sources, field, tags, "No").kind).toBe("literal");
+  expect(
+    decide(
+      sources,
+      {
+        ...field,
+        groupLabel: "Application — Are you over 18?",
+        sectionPath: ["Application", "Are you over 18?"],
+      },
+      tags,
+      "No",
+    ).kind,
+  ).toBe("needs_you");
 });
 
 test.each(["profile.githubUrl", "profile.links.code"])(
@@ -808,6 +1061,53 @@ test("limited permission is not unconditional authorization or sponsorship", () 
       country: "DE",
       sourceId: "profile.workEligibility.authorizedWorkCountries.0",
     }).kind,
+  ).toBe("needs_you");
+});
+
+test("a limited permit must fit the job hours and future sponsorship remains affirmative", () => {
+  const sources = source();
+  sources.posting.location = "Germany";
+  sources.posting.description = "This role requires 20 hours per week.";
+  sources.profile.workEligibility.limitedWorkPermissions = [
+    {
+      country: "Germany",
+      conditions: "Maximum 20 hours per week",
+      requiresFutureSponsorship: true,
+    },
+  ];
+  expect(
+    decide(
+      sources,
+      control("Are you authorized to work in the job's country?"),
+      { kind: "work_auth", country: "DE", sourceId: null },
+      "Yes",
+    ).kind,
+  ).toBe("literal");
+  const sponsorship = control("Will you need visa sponsorship?");
+  expect(
+    decide(
+      sources,
+      sponsorship,
+      { kind: "sponsorship", country: "DE", sourceId: null },
+      "No",
+    ).kind,
+  ).toBe("needs_you");
+  expect(
+    decide(
+      sources,
+      sponsorship,
+      { kind: "sponsorship", country: "DE", sourceId: null },
+      "Yes",
+    ).kind,
+  ).toBe("literal");
+  sources.posting.description = "This role requires 40 hours per week.";
+  expect(
+    decide(
+      sources,
+      control(),
+      { kind: "work_auth", country: "DE", sourceId: null },
+      "Yes",
+    ).kind,
   ).toBe("needs_you");
 });
 

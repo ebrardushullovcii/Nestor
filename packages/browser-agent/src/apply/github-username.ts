@@ -75,11 +75,11 @@ const HANDLE_ONLY_NO_ADDRESS =
 export function fieldNamesAnotherPerson(
   control: Pick<
     ApplyFormControl,
-    "label" | "groupLabel" | "placeholder" | "hint"
+    "label" | "groupLabel" | "placeholder" | "hint" | "sectionPath"
   >,
 ): boolean {
   return /\b(?:references?|referees?|emergency contacts?|another person|other person|someone else|spouse|partner)\b/iu.test(
-    `${control.groupLabel} ${control.label} ${control.hint ?? ""} ${control.placeholder}`,
+    `${control.sectionPath?.join(" ") ?? ""} ${control.groupLabel} ${control.label} ${control.hint ?? ""} ${control.placeholder}`,
   );
 }
 
@@ -100,7 +100,9 @@ export function asksGithubUsername(
   const placeholder = clean(control.placeholder);
   const instructions = [clean(control.groupLabel), label, hint, placeholder];
   if (fieldNamesAnotherPerson(control)) return false;
-  if (![clean(control.groupLabel), label, hint].some((text) => GITHUB.test(text)))
+  if (
+    ![clean(control.groupLabel), label, hint].some((text) => GITHUB.test(text))
+  )
     return false;
   if (
     instructions.some(

@@ -6,8 +6,29 @@ import {
   serializeApplicationData,
   storedFactFor,
   storedFacts,
+  relevantSavedAnswers,
 } from "./application-facts";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
+
+test("saved-answer model context is bounded and brings exact visible questions first", () => {
+  const answers = Array.from({ length: 200 }, (_, index) => ({
+    id: `saved_${index}`,
+    kind: "other" as const,
+    label: `Question ${index}`,
+    question: `Question ${index}`,
+    answer: "A recorded answer. ".repeat(30),
+    roleFamilies: [],
+    proofEntryIds: [],
+  }));
+  const selected = relevantSavedAnswers(answers, ["Question 199"]);
+  expect(selected[0]?.id).toBe("saved_199");
+  expect(
+    JSON.stringify(
+      selected.map(({ id, question, answer }) => ({ id, question, answer })),
+    ).length,
+  ).toBeLessThan(12500);
+  expect(selected.length).toBeLessThan(answers.length);
+});
 
 test.each(meanings.cases)(
   "current-form saved-meaning replay: $asked",

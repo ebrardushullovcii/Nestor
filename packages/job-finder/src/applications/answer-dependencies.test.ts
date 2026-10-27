@@ -28,6 +28,20 @@ const adult = {
   options: [],
 };
 
+it("tracks newly offered saved-answer context and cannot bless a changed fact by refreshing it", () => {
+  const facts = applicationAnswerDependencies(memory, 1, origin, []);
+  memory.remember(adult);
+  facts.includeContext(readSavedApplicationAnswers(jobs, undefined, origin));
+  expect(applicationAnswersUnchanged(memory, 1, origin, facts.snapshot())).toBe(
+    true,
+  );
+  memory.remember({ ...adult, answer: "No" });
+  facts.includeContext(readSavedApplicationAnswers(jobs, undefined, origin));
+  expect(applicationAnswersUnchanged(memory, 1, origin, facts.snapshot())).toBe(
+    false,
+  );
+});
+
 it("vetoes a prepared answer when its saved fallback changes", () => {
   const rule = {
     primary: "Primary territory",

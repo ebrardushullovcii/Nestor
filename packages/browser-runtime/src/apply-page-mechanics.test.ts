@@ -72,6 +72,46 @@ describe("reading the choices of lists the page draws itself", () => {
     browser = await chromium.launch({ headless: true });
   }, 60_000);
 
+  test("replica Application and nested history markup retains ancestry and distinct row identities", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<form><fieldset><legend>Application</legend>
+        <section><h2>Contact details</h2><label for="email">Email *</label><input id="email" type="email" required></section>
+        <section><h2>Work history (optional)</h2>
+          <fieldset><legend>Work history 1</legend><label>Company<input name="work1Company" required></label><label>Job title<input name="work1Title" required></label><label>From<input name="work1From" type="month" required></label></fieldset>
+          <fieldset><legend>Work history 2</legend><label>Company<input name="work2Company" required></label><label>Job title<input name="work2Title" required></label></fieldset>
+        </section>
+        <section><h2>Eligibility questions</h2><fieldset class="choices"><legend>Are you authorized to work in the job's country? *</legend><label><input type="radio" name="authorized" value="Yes" required>Yes</label><label><input type="radio" name="authorized" value="No" required>No</label></fieldset></section>
+      </fieldset></form>`);
+      const raw = await readRawApplyPage(page);
+      const email = raw.controls.find((control) => control.id === "email")!;
+      expect(email.sectionPath).toEqual(["Application", "Contact details"]);
+      const one = raw.controls.find(
+        (control) => control.name === "work1Company",
+      )!;
+      const title = raw.controls.find(
+        (control) => control.name === "work1Title",
+      )!;
+      const two = raw.controls.find(
+        (control) => control.name === "work2Company",
+      )!;
+      expect(one.sectionPath).toEqual([
+        "Application",
+        "Work history (optional)",
+        "Work history 1",
+      ]);
+      expect(one.rowScopeKey).toBe(title.rowScopeKey);
+      expect(one.rowScopeKey).not.toBe(two.rowScopeKey);
+      expect(
+        buildApplyFormObservation(raw, "2026-10-27T10:00:00Z").controls.find(
+          (control) => control.label === "Email *",
+        )?.credentialRole,
+      ).toBeNull();
+    } finally {
+      await page.close();
+    }
+  });
+
   test("Send keeps a div calling-code picker with the native phone in its form", async () => {
     const page = await browser.newPage();
     try {

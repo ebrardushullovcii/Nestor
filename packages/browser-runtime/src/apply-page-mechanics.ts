@@ -1117,6 +1117,28 @@ export function collectApplyDocumentSnapshot(
         ? group.getAttribute("aria-label")?.trim() || referencedText(group)
         : "";
     };
+    const sectionPath = (element: Element): string[] => {
+      const names: string[] = [];
+      for (
+        let parent = element.parentElement;
+        parent;
+        parent = parent.parentElement
+      ) {
+        const name = parent.matches("fieldset")
+          ? labelText(parent.querySelector(":scope > legend"))
+          : parent.matches(
+                "section, form, [role='group'], [role='radiogroup'], [role='region']",
+              )
+            ? parent.getAttribute("aria-label")?.trim() ||
+              referencedText(parent) ||
+              labelText(
+                parent.querySelector(":scope > h1, :scope > h2, :scope > h3"),
+              )
+            : "";
+        if (name && !names.includes(name)) names.unshift(name);
+      }
+      return names;
+    };
     const customOptions = (element: HTMLElement): string[] => {
       // Only a list this control says is its own. Reaching into the
       // nearest listbox in the DOM is how a phone number field ended up
@@ -1150,6 +1172,13 @@ export function collectApplyDocumentSnapshot(
           ? Array.from(root.querySelectorAll("form"))
           : [];
       return `r${rootIndex}${form ? `form${forms.indexOf(form)}` : "root"}`;
+    };
+    const rowScopeKeyFor = (element: Element): string | undefined => {
+      const root = element.getRootNode();
+      const row = element.closest("fieldset, [role='group'], section");
+      if (!row || !(root instanceof Document || root instanceof ShadowRoot))
+        return undefined;
+      return `${scopeKeyFor(element)}:group:${Array.from(root.querySelectorAll("fieldset, [role='group'], section")).indexOf(row)}`;
     };
     const phoneCallingCodeFor = (element: Element): string | undefined => {
       if (!(element instanceof HTMLInputElement) || element.type !== "tel")
@@ -1315,6 +1344,7 @@ export function collectApplyDocumentSnapshot(
       const html = element as HTMLElement;
       const input = element instanceof HTMLInputElement ? element : null;
       const phoneCallingCode = phoneCallingCodeFor(element);
+      const rowScopeKey = rowScopeKeyFor(element);
       const textarea = element instanceof HTMLTextAreaElement ? element : null;
       const select = element instanceof HTMLSelectElement ? element : null;
       const role = element.getAttribute("role")?.toLowerCase() ?? "";
@@ -1344,6 +1374,8 @@ export function collectApplyDocumentSnapshot(
         label: directLabel(element),
         hint: hintFor(element, directLabel(element)),
         groupLabel: groupLabel(element),
+        ...(rowScopeKey ? { rowScopeKey } : {}),
+        sectionPath: sectionPath(element),
         placeholder: input?.placeholder ?? textarea?.placeholder ?? "",
         autocomplete: input?.autocomplete ?? textarea?.autocomplete ?? "",
         required:
