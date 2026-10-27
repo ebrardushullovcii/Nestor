@@ -175,6 +175,18 @@ export interface RawApplyPage {
    * its input with the file's name once the upload lands).
    */
   uploads?: RawApplyUploadOutcome[];
+  /**
+   * What the page said through its own alert, confirm or prompt. Nestor
+   * dismisses those and never shows them as a window; their text is here.
+   */
+  pageMessages?: RawApplyPageMessage[];
+}
+
+export interface RawApplyPageMessage {
+  kind: "alert" | "confirm" | "prompt";
+  text: string;
+  /** When the page said it, in epoch milliseconds. */
+  at: number;
 }
 
 export interface RawApplyUploadOutcome {

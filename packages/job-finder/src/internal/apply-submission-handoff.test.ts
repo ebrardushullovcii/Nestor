@@ -256,24 +256,22 @@ describe("the safety net on a preparation result", () => {
       "autonomous_submit",
     ] as const) {
       expect(() =>
-        enforceResolvedApplyAuthorityResult(
-          { mode },
-          {
-            state: "submitted",
-            summary: "Sent",
-            detail: "Sent",
-            submittedAt: NOW,
-            outcome: "submitted",
-            questions: [],
-            blocker: null,
-            consentDecisions: [],
-            replay: {},
-            visualEvidence: [],
-            visualObservationSets: [],
-            visualCheckpoints: [],
-            nextActionLabel: null,
-            checkpoints: [],
-          } as never),
+        enforceResolvedApplyAuthorityResult({ mode }, {
+          state: "submitted",
+          summary: "Sent",
+          detail: "Sent",
+          submittedAt: NOW,
+          outcome: "submitted",
+          questions: [],
+          blocker: null,
+          consentDecisions: [],
+          replay: {},
+          visualEvidence: [],
+          visualObservationSets: [],
+          visualCheckpoints: [],
+          nextActionLabel: null,
+          checkpoints: [],
+        } as never),
       ).toThrow(/Preparation never sends anything/iu);
     }
   });
@@ -509,6 +507,7 @@ it.each([
   {
     status: "recorded_not_submitted",
     reason: "form_validation_failed",
+    said: "Select at least one skill.",
     detail: "Select at least one skill.",
     summary: "Not sent: correct the marked fields",
     nextActionLabel: "Correct the fields in the browser",
@@ -516,17 +515,28 @@ it.each([
   {
     status: "outcome_uncertain",
     reason: "confirmation_timeout",
+    said: undefined,
     detail:
       "127.0.0.1 did not confirm receipt in time. Check this application on the site before trying again.",
     summary: "Send attempted; confirmation timed out",
     nextActionLabel: "Check the site and confirm",
   },
+  {
+    // The page's own alert after the click, shown in Nestor's words.
+    status: "outcome_uncertain",
+    reason: "confirmation_timeout",
+    said: "Cannot contact reCAPTCHA. Check your connection and try again.",
+    detail:
+      "127.0.0.1 did not confirm receipt in time. Its page showed this message: “Cannot contact reCAPTCHA. Check your connection and try again.” Check this application on the site before trying again.",
+    summary: "Send attempted; confirmation timed out",
+    nextActionLabel: "Check the site and confirm",
+  },
 ])(
   "explains $reason without claiming a send",
-  ({ status, reason, detail, summary, nextActionLabel }) => {
+  ({ status, reason, said, detail, summary, nextActionLabel }) => {
     const result = {
       status,
-      outcome: { browserAction: { reason, detail } },
+      outcome: { browserAction: { reason, detail: said } },
     } as unknown as Parameters<typeof describeSubmissionOutcome>[0]["result"];
     expect(
       describeSubmissionOutcome({ result, siteLabel: "127.0.0.1" }),

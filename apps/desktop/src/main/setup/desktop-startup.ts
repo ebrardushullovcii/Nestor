@@ -3,6 +3,7 @@ import { loadDesktopEnvironment } from "./env";
 import {
   configureDesktopUserDataDirectory,
   getDesktopStartupDiagnosticsPath,
+  nameDesktopApp,
 } from "./user-data-directory";
 
 loadDesktopEnvironment();
@@ -10,5 +11,6 @@ loadDesktopEnvironment();
 app.commandLine.appendSwitch("disk-cache-size", String(64 * 1024 * 1024));
 // userData is settled before its lock is taken.
 configureDesktopUserDataDirectory(app);
+nameDesktopApp(app);
 export const hasSingleInstanceLock = app.requestSingleInstanceLock();
 export const startupDiagnosticsPath = getDesktopStartupDiagnosticsPath();

@@ -125,6 +125,9 @@ function mapBrowserActionResult(input: {
     input.result.validationErrors?.length
       ? { detail: input.result.validationErrors.join(" ").slice(0, 500) }
       : {}),
+    ...(input.result.outcome === "outcome_uncertain" && input.result.siteMessage
+      ? { detail: input.result.siteMessage.slice(0, 500) }
+      : {}),
     actionAttempted: input.result.facts.actionAttempted,
     actionIssued: input.result.facts.actionIssued,
     actionCompleted: input.result.facts.actionCompleted,

@@ -21,6 +21,12 @@ import type {
 import { describeBrowserError, isPageReplacedError } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
 import { readPageLinkedText } from "./page-linked-text";
+import { readPageMessages } from "./page-messages";
+export {
+  installPageMessageRecorderInPage,
+  PAGE_MESSAGE_CONSOLE_PREFIX,
+  pageMessageReadsAsFailure,
+} from "./page-messages";
 import {
   rememberAttachedFile,
   watchAttachmentUploads,
@@ -86,6 +92,19 @@ async function settlePage(page: Page, timeout = 4_000): Promise<void> {
 }
 
 export async function readRawApplyPage(page: Page): Promise<RawApplyPage> {
+  return withPageMessages(page, await readRawApplyPageContent(page));
+}
+
+/** Adds what the page said through its own alert, confirm or prompt. */
+async function withPageMessages(
+  page: Page,
+  raw: RawApplyPage,
+): Promise<RawApplyPage> {
+  const pageMessages = await readPageMessages(page);
+  return pageMessages.length ? { ...raw, pageMessages } : raw;
+}
+
+async function readRawApplyPageContent(page: Page): Promise<RawApplyPage> {
   watchAttachmentUploads(page);
   await settlePage(page);
   try {
