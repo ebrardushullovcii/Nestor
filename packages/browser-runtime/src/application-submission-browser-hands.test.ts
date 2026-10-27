@@ -877,3 +877,66 @@ test.each(["two targets", "wrong label", "removed", "replaced after veto"])(
     ).toHaveLength(0);
   },
 );
+
+test("an uncertain send keeps each request after the click: method, host, path, status and which one was the submit", async () => {
+  // Workable's shape: the submit, the site's bot check beside it, and a
+  // request that never got an answer; then no confirmation on the page.
+  const closed = http.createServer();
+  await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+  const closedPort = (closed.address() as AddressInfo).port;
+  await new Promise<void>((resolve) => closed.close(() => resolve()));
+  const body = JSON.stringify({
+    operationName: "ApiSubmitSingleApplicationFormAction",
+    query:
+      "mutation ApiSubmitSingleApplicationFormAction { submitSingleApplicationFormAction { ok } }",
+  });
+  const { page } =
+    await createPage(`<main><button id="send">Submit Application</button></main>
+    <script>document.getElementById('send').onclick = async () => {
+      await fetch('/api/graphql?status=200&token=fixture-secret', {method:'POST',headers:{'content-type':'application/json'},body:${JSON.stringify(body)}});
+      await fetch('/cdn-cgi/challenge-platform/h/g/jsd/oneshot/abc', {method:'POST',body:'fp'});
+      await fetch('http://127.0.0.1:${closedPort}/events', {method:'POST',body:'x'}).catch(() => undefined);
+    };</script>`);
+  const observation = await observeApplicationForm(page, {
+    finalActionTargets: [{ ref: "a0", label: "Submit Application" }],
+  });
+  const result = await executeExactlyOneFinalAction(page, {
+    expectedObservation: observation.identity,
+    expectedControl: observation.controls[0]!.identity,
+    expectedPageOrigin: expectedOrigin(page),
+    allowedOrigins: [expectedOrigin(page)],
+    confirmationTimeoutMs: 800,
+    veto: () => true,
+  });
+  expect(result.outcome).toBe("outcome_uncertain");
+  const host = new URL(page.url()).host;
+  expect(result.facts.requestsAfterClick).toEqual([
+    {
+      method: "POST",
+      host,
+      path: "/api/graphql",
+      status: 200,
+      failure: null,
+      finalSubmit: true,
+    },
+    {
+      method: "POST",
+      host,
+      path: "/cdn-cgi/challenge-platform/h/g/jsd/oneshot/abc",
+      status: 200,
+      failure: null,
+      finalSubmit: false,
+    },
+    {
+      method: "POST",
+      host: `127.0.0.1:${closedPort}`,
+      path: "/events",
+      status: null,
+      failure: "net::ERR_CONNECTION_REFUSED",
+      finalSubmit: false,
+    },
+  ]);
+  expect(result.facts.requestsObservedDuringAction).toBe(3);
+  // The query string never reaches the record: it can carry answers.
+  expect(JSON.stringify(result.facts)).not.toContain("fixture-secret");
+});

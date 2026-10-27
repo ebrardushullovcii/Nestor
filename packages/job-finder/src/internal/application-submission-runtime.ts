@@ -133,6 +133,7 @@ function mapBrowserActionResult(input: {
     actionCompleted: input.result.facts.actionCompleted,
     requestsObservedDuringAction:
       input.result.facts.requestsObservedDuringAction,
+    requestsAfterClick: [...input.result.facts.requestsAfterClick],
   };
   if (input.result.outcome === "submitted") {
     const { destination, observedAt, summary } = input.result.confirmation;

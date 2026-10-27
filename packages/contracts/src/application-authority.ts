@@ -1167,6 +1167,27 @@ export type SubmissionOutcomeRetryEligibility = z.infer<
   typeof SubmissionOutcomeRetryEligibilitySchema
 >;
 
+/**
+ * One request the page made from the final click on, as it ended. No query
+ * string: it can carry answers. Evidence for the record, never confirmation.
+ */
+export const SubmissionActionRequestSchema = z
+  .object({
+    method: NonEmptyStringSchema.max(16),
+    host: NonEmptyStringSchema.max(253),
+    path: NonEmptyStringSchema.max(500),
+    /** The site's HTTP status; null when no answer came. */
+    status: z.number().int().min(0).max(999).nullable(),
+    /** The browser's reason when it ended without an answer. */
+    failure: NonEmptyStringSchema.max(120).nullable(),
+    /** The request the final control sends the application with. */
+    finalSubmit: z.boolean(),
+  })
+  .strict();
+export type SubmissionActionRequest = z.infer<
+  typeof SubmissionActionRequestSchema
+>;
+
 /** Browser execution diagnostics are not employer confirmation evidence. */
 export const SubmissionBrowserActionDiagnosticsSchema = z
   .object({
@@ -1176,6 +1197,11 @@ export const SubmissionBrowserActionDiagnosticsSchema = z
     actionIssued: z.boolean().optional(),
     actionCompleted: z.boolean().optional(),
     requestsObservedDuringAction: z.number().int().nonnegative().optional(),
+    /** Each request from the click on (the first 50); see the count above. */
+    requestsAfterClick: z
+      .array(SubmissionActionRequestSchema)
+      .max(50)
+      .optional(),
   })
   .strict();
 export type SubmissionBrowserActionDiagnostics = z.infer<

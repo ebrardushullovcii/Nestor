@@ -152,7 +152,28 @@ export interface ApplicationExternalActionFacts {
   readonly urlChanged: boolean;
   /** Network observation is descriptive only and never proves submission. */
   readonly requestsObservedDuringAction: number;
+  /**
+   * Each request the page made from the click on, as it ended: the evidence
+   * an uncertain outcome comes with. Never proof of submission either.
+   */
+  readonly requestsAfterClick: readonly ApplicationActionRequest[];
 }
+
+/** One request after the final click. No query string: it can carry answers. */
+export interface ApplicationActionRequest {
+  readonly method: string;
+  readonly host: string;
+  readonly path: string;
+  /** The site's HTTP status; null when no answer came. */
+  readonly status: number | null;
+  /** The browser's reason when it ended without an answer. */
+  readonly failure: string | null;
+  /** True for the request the final control sends the application with. */
+  readonly finalSubmit: boolean;
+}
+
+/** The most requests a receipt keeps; the count still says how many there were. */
+const ACTION_REQUESTS_KEPT = 50;
 
 export type ApplicationFinalActionResult =
   | {
@@ -575,6 +596,7 @@ function emptyFacts(
     pageAfter: page,
     urlChanged: false,
     requestsObservedDuringAction: 0,
+    requestsAfterClick: [],
   };
 }
 
@@ -1086,6 +1108,16 @@ export async function executeExactlyOneFinalAction(
     // caller that happens to hold the same preflight.
     rememberIssuedAction(page, key);
     let requestsObservedDuringAction = 0;
+    const requestLog = new Map<
+      Request,
+      {
+        method: string;
+        host: string;
+        path: string;
+        status: number | null;
+        failure: string | null;
+      }
+    >();
     const finalRequests = new Set<Request>();
     const answeredFinalRequests = new Set<Request>();
     const unreachableFinalRequests = new Set<Request>();
@@ -1102,6 +1134,20 @@ export async function executeExactlyOneFinalAction(
     };
     const requestListener = (request: Request): void => {
       requestsObservedDuringAction += 1;
+      if (!request.redirectedFrom() && requestLog.size < ACTION_REQUESTS_KEPT)
+        try {
+          const url = new URL(request.url());
+          if (url.protocol === "http:" || url.protocol === "https:")
+            requestLog.set(request, {
+              method: request.method(),
+              host: url.host,
+              path: url.pathname.slice(0, 500),
+              status: null,
+              failure: null,
+            });
+        } catch {
+          /* An unreadable address is left out of the record. */
+        }
       try {
         if (
           !request.redirectedFrom() &&
@@ -1127,6 +1173,8 @@ export async function executeExactlyOneFinalAction(
     // alerts are neither successful sends nor proof that the site was unreachable.
     const responseListener = (response: Response): void => {
       const request = originalRequest(response.request());
+      const logged = requestLog.get(request);
+      if (logged) logged.status = response.status();
       if (finalRequests.has(request)) answeredFinalRequests.add(request);
       if (
         finalRequests.has(request) &&
@@ -1137,6 +1185,9 @@ export async function executeExactlyOneFinalAction(
     };
     const requestFailedListener = (request: Request): void => {
       const errorText = request.failure()?.errorText;
+      const logged = requestLog.get(originalRequest(request));
+      if (logged && logged.status === null)
+        logged.failure = (errorText ?? "failed").slice(0, 120);
       if (
         isSiteUnreachableError(errorText) &&
         finalRequests.has(originalRequest(request))
@@ -1145,6 +1196,11 @@ export async function executeExactlyOneFinalAction(
     };
     page.on("response", responseListener);
     page.on("requestfailed", requestFailedListener);
+    const requestsAfterClick = (): ApplicationActionRequest[] =>
+      [...requestLog].map(([request, logged]) => ({
+        ...logged,
+        finalSubmit: finalRequests.has(request),
+      }));
     const stopWatchingNetwork = (): void => {
       page.off("request", requestListener);
       page.off("response", responseListener);
@@ -1193,6 +1249,7 @@ export async function executeExactlyOneFinalAction(
             pageAfter: pageAfterError,
             urlChanged: false,
             requestsObservedDuringAction,
+            requestsAfterClick: requestsAfterClick(),
           },
         });
       }
@@ -1211,6 +1268,7 @@ export async function executeExactlyOneFinalAction(
             pageBefore.origin !== pageAfterError.origin ||
             pageBefore.safePath !== pageAfterError.safePath,
           requestsObservedDuringAction,
+          requestsAfterClick: requestsAfterClick(),
         },
       };
     }
@@ -1225,6 +1283,7 @@ export async function executeExactlyOneFinalAction(
         pageBefore.origin !== pageAfter.origin ||
         pageBefore.safePath !== pageAfter.safePath,
       requestsObservedDuringAction,
+      requestsAfterClick: [],
     };
     const confirmationDeadline =
       Date.now() + (input.confirmationTimeoutMs ?? 15_000);
@@ -1257,6 +1316,7 @@ export async function executeExactlyOneFinalAction(
             facts: {
               ...facts,
               requestsObservedDuringAction,
+              requestsAfterClick: requestsAfterClick(),
               pageAfter: readSafePageUrl(page.url()),
               urlChanged:
                 pageBefore.origin !== readSafePageUrl(page.url()).origin ||
@@ -1277,7 +1337,12 @@ export async function executeExactlyOneFinalAction(
             observation: finalObservation,
             control: finalControl,
             validationErrors,
-            facts: { ...facts, pageAfter: readSafePageUrl(page.url()) },
+            facts: {
+              ...facts,
+              requestsObservedDuringAction,
+              requestsAfterClick: requestsAfterClick(),
+              pageAfter: readSafePageUrl(page.url()),
+            },
           };
         }
       } catch {
@@ -1292,7 +1357,12 @@ export async function executeExactlyOneFinalAction(
         reason: "site_unreachable",
         observation: finalObservation,
         control: finalControl,
-        facts: { ...facts, pageAfter: readSafePageUrl(page.url()) },
+        facts: {
+          ...facts,
+          requestsObservedDuringAction,
+          requestsAfterClick: requestsAfterClick(),
+          pageAfter: readSafePageUrl(page.url()),
+        },
       });
     }
     // What the page said through its own alert after the click (dismissed,
@@ -1307,6 +1377,7 @@ export async function executeExactlyOneFinalAction(
       facts: {
         ...facts,
         requestsObservedDuringAction,
+        requestsAfterClick: requestsAfterClick(),
         pageAfter: readSafePageUrl(page.url()),
       },
       ...(said ? { siteMessage: said } : {}),

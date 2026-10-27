@@ -2025,6 +2025,7 @@ it("Send for me resumes after two Needs-you answers and forwards only the final 
         pageAfter: observation.page,
         urlChanged: false,
         requestsObservedDuringAction: 1,
+        requestsAfterClick: [],
       },
       confirmation: {
         observedAt: new Date().toISOString(),

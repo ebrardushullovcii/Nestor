@@ -96,6 +96,15 @@ const OBSERVATION: ApplicationFormObservation = {
   controls: [CONTROL],
 };
 
+const SUBMIT_REQUEST = {
+  method: "POST",
+  host: new URL(ORIGIN).host,
+  path: "/apply",
+  status: 200,
+  failure: null,
+  finalSubmit: true,
+};
+
 function emptyFacts(): ApplicationFinalActionResult["facts"] {
   return {
     actionAttempted: false,
@@ -105,6 +114,7 @@ function emptyFacts(): ApplicationFinalActionResult["facts"] {
     pageAfter: PAGE,
     urlChanged: false,
     requestsObservedDuringAction: 0,
+    requestsAfterClick: [],
   };
 }
 
@@ -199,6 +209,8 @@ function buildBrowserRuntime(
           actionAttempted: true,
           actionIssued: true,
           actionCompleted: true,
+          requestsObservedDuringAction: 1,
+          requestsAfterClick: [SUBMIT_REQUEST],
         },
       };
     },
@@ -281,9 +293,7 @@ async function createHarness(input: {
   };
 }
 
-async function commitConfirmGrant(
-  repository: SendGuards,
-): Promise<void> {
+async function commitConfirmGrant(repository: SendGuards): Promise<void> {
   const preflight = buildSubmissionPreflightRecord({
     id: "preflight_1",
     idempotencyKey: "idempotency_1",
@@ -358,6 +368,9 @@ describe("composed application submission runtime", () => {
         actionAttempted: true,
         actionIssued: true,
         actionCompleted: true,
+        // An uncertain outcome comes with what left after the click.
+        requestsObservedDuringAction: 1,
+        requestsAfterClick: [SUBMIT_REQUEST],
       },
     });
   });
