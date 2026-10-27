@@ -28,6 +28,8 @@ export interface RawApplyControl {
   name: string;
   /** Transient identity of the containing form/root within this page read. */
   scopeKey?: string;
+  /** Current visible calling code on this tel input's own collapsed country button. */
+  phoneCallingCode?: string;
   label: string;
   /** Help text beside the field, besides its label. */
   hint?: string;

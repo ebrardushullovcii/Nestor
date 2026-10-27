@@ -61,6 +61,8 @@ export interface ApplyFormControl {
   urlInput?: boolean;
   /** Native phone metadata and form/root identity, retained for calling-code binding. */
   telInput?: boolean;
+  /** Current calling code read from this tel input's own native country button. */
+  phoneCallingCode?: string;
   scopeKey?: string;
   inputConstraints?: {
     type: "number" | "date" | "month";
