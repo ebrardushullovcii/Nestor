@@ -300,6 +300,20 @@ export function buildCanonicalAwareProfilePayload(input: {
   latestResumeImportReviewCandidates: readonly ResumeImportFieldCandidateSummary[];
   profile: CandidateProfile;
 }) {
+  // Permissions are one compared-and-replaced value, not id-bearing records.
+  // RHF can mark removal of its last row with an empty dirty array; preserve
+  // that structural edit instead of adopting the saved list again.
+  let dirtyFields = input.dirtyFields;
+  if (
+    isRecord(dirtyFields) &&
+    isRecord(dirtyFields.eligibility) &&
+    Array.isArray(dirtyFields.eligibility.limitedWorkPermissions)
+  ) {
+    dirtyFields = {
+      ...dirtyFields,
+      eligibility: { ...dirtyFields.eligibility, limitedWorkPermissions: true },
+    };
+  }
   // Saving only sources must preserve the profile's exact saved values.
   // Round-tripping untouched editor fields can normalize resume inputs.
   const hasDirtyField = (value: unknown): boolean =>
@@ -307,14 +321,14 @@ export function buildCanonicalAwareProfilePayload(input: {
     (typeof value === "object" &&
       value !== null &&
       Object.values(value).some(hasDirtyField));
-  if (!hasDirtyField(input.dirtyFields)) return { payload: input.profile };
+  if (!hasDirtyField(dirtyFields)) return { payload: input.profile };
   const mergeOutcome = mergeDirtyEditorValues(
     createProfileEditorValues(
       input.profile,
       input.latestResumeImportReviewCandidates,
     ),
     input.draftValues,
-    input.dirtyFields,
+    dirtyFields,
   );
 
   return buildProfilePayload(

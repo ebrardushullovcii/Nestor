@@ -199,6 +199,27 @@ describe("mergeDirtyEditorValues identity-safe arrays", () => {
 });
 
 describe("canonical-aware profile saves", () => {
+  it("persists removal of the last conditional permission with an empty dirty marker", () => {
+    const saved = CandidateProfileSchema.parse({
+      ...profile,
+      workEligibility: {
+        limitedWorkPermissions: [
+          { country: "Germany", conditions: "Up to 20 hours weekly" },
+        ],
+      },
+    });
+    const draftValues = createProfileEditorValues(saved);
+    draftValues.eligibility.limitedWorkPermissions = [];
+    const result = buildCanonicalAwareProfilePayload({
+      draftValues,
+      dirtyFields: { eligibility: { limitedWorkPermissions: [] } },
+      latestResumeImportReviewCandidates: [],
+      profile: saved,
+    });
+
+    expect(result.payload?.workEligibility.limitedWorkPermissions).toEqual([]);
+  });
+
   it("keeps an assistant-updated canonical field while applying a real manual edit", () => {
     const draftValues = createProfileEditorValues(profile);
     draftValues.identity.headline = "Manual headline edit";
