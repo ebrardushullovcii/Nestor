@@ -117,12 +117,15 @@ export function SpeedTip() {
           className="mt-0.5 size-4 shrink-0 text-foreground-soft"
         />
         <div className="grid min-w-0 flex-1 gap-0.5">
-          <h2 className="font-medium" id="speed-tip-title">
+          {/* A side note's title: body size, not the screen heading's. */}
+          <h2
+            className="font-sans text-sm font-medium leading-5 text-foreground"
+            id="speed-tip-title"
+          >
             This PC can run more at once
           </h2>
           <p className="leading-5 text-foreground-soft">
-            A faster Speed searches and applies to more jobs together, using
-            more memory and AI limits.{" "}
+            A faster Speed does more at once, using more memory and AI limits.{" "}
             <button
               className="font-medium text-(--link) underline underline-offset-2 hover:text-(--link-hover)"
               onClick={() => {
