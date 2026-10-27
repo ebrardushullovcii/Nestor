@@ -32,6 +32,7 @@ const groups = {
     "packages/browser-runtime/src/playwright-application-flow.strict-fill.test.ts",
   ],
   "needs-you": [
+    "packages/browser-agent/src/apply/approved-answer-reuse.apply-replay.test.ts",
     "packages/browser-agent/src/apply/question-occurrences.apply-replay.test.ts",
     "packages/job-finder/src/applications/questions.test.ts",
     "packages/browser-agent/src/apply/apply-agent.test.ts",
