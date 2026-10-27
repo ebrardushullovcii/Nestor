@@ -93,7 +93,14 @@ function runNavigationSignal(url: URL): string {
 }
 
 /** Words that make an address a write, wherever they appear in it. */
-const WRITE_WORDS = /save|submit|apply|update|create|complete|send|post/iu;
+/**
+ * A write named as a whole word, camel case split first: "saveDraft" and
+ * "/apply" name one, Ashby's "ApiAutocompleteGeoLocation" does not.
+ */
+const WRITE_WORD =
+  /(?:^|[^a-z])(?:save|submit|apply|update|create|complete|send|post)(?:[^a-z]|$)/iu;
+const namesWrite = (text: string) =>
+  WRITE_WORD.test(text.replace(/([a-z\d])([A-Z])/gu, "$1 $2"));
 
 /**
  * A read that loads the list depending on a picker choice the run just made
@@ -116,7 +123,7 @@ function loadsDependentList(
     input.method === "GET" &&
     SCRIPTED_RESOURCE_TYPES.has(input.resourceType) &&
     url.origin === input.frameOrigin &&
-    !WRITE_WORDS.test(`${decoded(url.pathname)} ${decoded(url.search)}`) &&
+    !namesWrite(`${decoded(url.pathname)} ${decoded(url.search)}`) &&
     chosen.length > 0 &&
     carriesAnswer(url, chosen) &&
     !carriesAnswer(
@@ -162,16 +169,26 @@ export function classifyStrictFillRead(input: {
       ? readGraphQlRequest(input.bodyText)
       : null;
   if (graphQl?.every((operation) => operation.type === "query")) {
-    if (
-      carriesAnswer(url, input.preparedValues) ||
-      carriesPreparedValue(input.bodyText, input.preparedValues) ||
+    const carries = (values: readonly string[]) =>
+      carriesAnswer(url, values) ||
+      carriesPreparedValue(input.bodyText, values) ||
       graphQl.some((operation) =>
         valuesCarryPreparedValue(
           [...operation.literals, ...variableStrings(operation.variables)],
-          input.preparedValues,
+          values,
         ),
-      )
-    )
+      );
+    // A picker's own search on the form's site (Ashby's location list)
+    // carries what was typed into it, the choice the run is making now,
+    // and nothing else of the person's.
+    const chosen = input.pickerChoices ?? [];
+    const pickerSearch =
+      chosen.length > 0 &&
+      url.origin === input.frameOrigin &&
+      !namesWrite(`${decoded(url.pathname)} ${decoded(url.search)}`) &&
+      carries(chosen) &&
+      !carries(input.preparedValues.filter((value) => !chosen.includes(value)));
+    if (!pickerSearch && carries(input.preparedValues))
       return { allowed: false, reason: "carries_answer" };
     if (
       FINAL_ACTION_SIGNAL.test(
@@ -179,7 +196,10 @@ export function classifyStrictFillRead(input: {
       )
     )
       return { allowed: false, reason: "final_signal" };
-    return { allowed: true, reason: "graphql_query" };
+    return {
+      allowed: true,
+      reason: pickerSearch ? "dependent_list" : "graphql_query",
+    };
   }
   if (!READ_METHODS.has(method))
     return { allowed: false, reason: "not_a_read" };

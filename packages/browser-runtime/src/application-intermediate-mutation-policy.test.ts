@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import finalMutationReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/intermediate-final-mutations.json";
 import {
   classifyIntermediateMutationRequest,
+  FINAL_ACTION_SIGNAL,
   type IntermediateMutationRequestInput,
 } from "./application-intermediate-mutation-policy";
 
@@ -202,4 +203,15 @@ describe("the second net refuses the Apply agent's completion probes in a Send f
         ).toBe(false);
     },
   );
+});
+
+test("an autocomplete search is not a final step; completing or submitting still is", () => {
+  const named = (operation: string) =>
+    FINAL_ACTION_SIGNAL.test(
+      `{"operationName":"${operation}","query":"query ${operation}($text: String!) { x }"}`,
+    );
+  expect(named("ApiAutocompleteGeoLocation")).toBe(false);
+  expect(named("ApiSubmitSingleApplicationFormAction")).toBe(true);
+  expect(named("completeApplication")).toBe(true);
+  expect(named("ApiCompleteStep")).toBe(true);
 });

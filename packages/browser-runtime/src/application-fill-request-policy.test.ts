@@ -314,4 +314,37 @@ describe("Fill in for me: a list that depends on a picker choice", () => {
     expect(dependent(url, { resourceType: "image" })).toBe("beacon_query");
     expect(dependent(url, { method: "POST" })).toBe("not_a_read");
   });
+
+  test("a picker's own GraphQL search may carry its choice, and nothing else", () => {
+    // Ashby's location picker searches what was typed with a query whose
+    // name and fragments say "Autocomplete".
+    const search = (text: string, operation = "ApiAutocompleteGeoLocation") =>
+      dependent(
+        `https://jobs.example.test/api/non-user-graphql?op=${operation}`,
+        {
+          method: "POST",
+          pickerChoices: ["Kosovo"],
+          preparedValues: [...prepared, "Kosovo"],
+          bodyText: JSON.stringify({
+            operationName: operation,
+            variables: { text, locationTypes: ["Country"] },
+            query: `query ${operation}($text: String!, $locationTypes: [GeoLocationType!]) {
+  result: autocompleteGeoLocation(text: $text, locationTypes: $locationTypes) {
+    ...AutocompleteLocationResultParts
+  }
+}
+
+fragment AutocompleteLocationResultParts on AutocompleteLocationResult {
+  suggestions {
+    name
+  }
+}`,
+          }),
+        },
+      );
+    expect(search("Kosovo")).toBe("dependent_list");
+    expect(search("")).toBe("graphql_query");
+    expect(search("Kosovo robin@example.test")).toBe("carries_answer");
+    expect(search("Kosovo", "ApiSaveLocation")).toBe("carries_answer");
+  });
 });
