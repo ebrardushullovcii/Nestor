@@ -41,9 +41,11 @@ function toControlKind(raw: RawApplyControl): ApplyControlKind {
   if (raw.tagName === "select") {
     return "select";
   }
-  if (raw.tagName === "textarea" || raw.tagName === "contenteditable") {
+  if (raw.tagName === "textarea") {
     return "long_text";
   }
+  // A div with a checkbox, radio or combobox role reads as "contenteditable";
+  // its role says what it is.
   if (raw.role === "combobox") {
     return "combobox";
   }
@@ -52,6 +54,9 @@ function toControlKind(raw: RawApplyControl): ApplyControlKind {
   }
   if (raw.role === "radio" || type === "radio") {
     return "radio";
+  }
+  if (raw.tagName === "contenteditable") {
+    return "long_text";
   }
   if (type === "file") {
     return "file";
