@@ -44,6 +44,42 @@ afterEach(() => {
 });
 
 describe("job store", () => {
+  it("tells where a job was first seen and why it sits in its stage, as getJob does", () => {
+    const store = open();
+    const { added } = store.saveFoundJobs({
+      searchId: "first",
+      jobs: [
+        found(1),
+        found(2, { hiddenReason: "Closed: applications ended" }),
+      ],
+    });
+    store.saveFoundJobs({
+      searchId: "second",
+      jobs: [
+        found(1, {
+          url: "https://other.example.test/jobs/1",
+          sourceId: "other",
+        }),
+      ],
+    });
+    const origins = store.jobOrigins([...added, 999]);
+    for (const id of added) {
+      const job = store.getJob(id)!;
+      expect(origins.get(id)).toEqual({
+        sourceId: job.sightings[0]?.sourceId ?? null,
+        stageNote: job.stageNote ?? null,
+      });
+    }
+    expect(origins.has(999)).toBe(false);
+  });
+
+  it("gives its page cache back without losing anything", () => {
+    const store = open();
+    const { added } = store.saveFoundJobs({ searchId: "s", jobs: [found(1)] });
+    store.releaseMemory();
+    expect(store.getJob(added[0]!)?.title).toBe("Frontend Engineer 1");
+  });
+
   it("recognizes saved listing aliases and hidden jobs before another search reads them", () => {
     const store = open();
     const first = found(1);

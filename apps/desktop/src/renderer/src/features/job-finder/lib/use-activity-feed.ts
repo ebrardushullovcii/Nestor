@@ -33,13 +33,18 @@ function read(): void {
   );
 }
 
+// A search changes the store several times a second; reading the feed after
+// each burst kept main busy enough to hold screens back. Once a second is
+// still live for the counts and progress it shows.
+const REFRESH_GAP_MS = 1000;
+
 /** Reads again soon; a burst of changes becomes one read. */
 export function refreshActivityFeed(): void {
   if (pending !== null) return;
   pending = setTimeout(() => {
     pending = null;
     read();
-  }, 250);
+  }, REFRESH_GAP_MS);
 }
 
 function start(): void {

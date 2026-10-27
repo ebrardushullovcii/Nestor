@@ -292,10 +292,17 @@ function readLocation(node: JsonRecord): {
   };
 }
 
+// toLocaleString builds a formatter on every call in Electron's main process;
+// a 900-site search spent about 270 ms of main's time on salary amounts.
+const wholeAmount = new Intl.NumberFormat("en-US");
+const fractionalAmount = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 2,
+});
+
 function formatAmount(value: number): string {
-  return Number.isInteger(value)
-    ? value.toLocaleString("en-US")
-    : value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return (Number.isInteger(value) ? wholeAmount : fractionalAmount).format(
+    value,
+  );
 }
 
 function readSalary(node: JsonRecord): string | null {

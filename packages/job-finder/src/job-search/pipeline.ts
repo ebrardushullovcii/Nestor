@@ -61,10 +61,13 @@ export function createSearchPipeline(input: {
       added: saved.added.length,
       merged: saved.merged.length,
     });
+    // Only where each job was seen and its stage note: reading whole
+    // listings back here cost a 900-site search half a second of main.
+    const savedIds = [...saved.added, ...saved.hidden, ...saved.merged];
+    const origins = deps.store.jobOrigins(savedIds);
     for (const id of saved.added.concat(saved.hidden)) {
-      const job = deps.store.getJob(id)!;
-      const sighting = job.sightings[0];
-      const source = sighting ? sources.get(sighting.sourceId) : undefined;
+      const sourceId = origins.get(id)?.sourceId;
+      const source = sourceId ? sources.get(sourceId) : undefined;
       if (source) {
         if (saved.hidden.includes(id)) source.row.hidden++;
         else source.row.added++;
@@ -72,8 +75,8 @@ export function createSearchPipeline(input: {
     }
     // Every sighting above is merged before a fit request gets its job id.
     input.fits.enqueue(
-      [...saved.added, ...saved.hidden, ...saved.merged].filter(
-        (id) => !deps.store.getJob(id)?.stageNote?.startsWith("Closed:"),
+      savedIds.filter(
+        (id) => !origins.get(id)?.stageNote?.startsWith("Closed:"),
       ),
     );
   };

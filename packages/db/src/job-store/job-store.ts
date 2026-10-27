@@ -87,6 +87,13 @@ export interface JobStore {
 
   listJobs(query: JobListQueryInput): JobListPage;
   getJob(id: number): JobDetail | null;
+  /**
+   * Where each saved job was first seen and why it sits in its stage, without
+   * reading its whole listing: a search asks this for every job it saves.
+   */
+  jobOrigins(
+    ids: readonly number[],
+  ): Map<number, { sourceId: string | null; stageNote: string | null }>;
   stageCounts(): JobStageCounts;
 
   /** Triage: moves jobs between found, hidden and shortlisted, with Undo. */
@@ -95,6 +102,11 @@ export interface JobStore {
   /** For the flows that own later stages; no Undo record. */
   setStage(ids: readonly number[], to: JobStage): number;
 
+  /**
+   * Hands the page cache back to the system once a burst of work (a search)
+   * is over; later reads warm it again.
+   */
+  releaseMemory(): void;
   close(): void;
 }
 
@@ -392,6 +404,29 @@ export function openJobStore(filePath: string): JobStore {
         });
         return outcome.moved;
       });
+    },
+
+    jobOrigins(ids) {
+      const origins = new Map<
+        number,
+        { sourceId: string | null; stageNote: string | null }
+      >();
+      for (const id of ids) {
+        const row = sql(
+          `SELECT j.stage_note AS stageNote,
+             (SELECT s.source_id FROM job_sightings s WHERE s.job_id = j.id
+              ORDER BY s.seen_at LIMIT 1) AS sourceId
+           FROM jobs j WHERE j.id = ?`,
+        ).get(id) as
+          | { sourceId: string | null; stageNote: string | null }
+          | undefined;
+        if (row) origins.set(id, row);
+      }
+      return origins;
+    },
+
+    releaseMemory() {
+      if (db.isOpen && !db.isTransaction) db.exec("PRAGMA shrink_memory");
     },
 
     close() {
