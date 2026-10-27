@@ -106,7 +106,7 @@ export async function checkClassifiedApplicationAnswers(input: {
           ...control,
           attestationKind: reading?.declarationKind ?? control.attestationKind,
         },
-        controls,
+        controls: contextControls,
         tags: reading?.answerTags,
         approvedAttestations: input.approvedAttestations ?? [],
         sources: input.sources,

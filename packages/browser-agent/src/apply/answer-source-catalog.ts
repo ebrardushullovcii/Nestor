@@ -17,6 +17,7 @@ import {
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
 import { currentTimezoneAnswer } from "./current-timezone";
+import { phoneAnswerMatches, phoneLabels } from "./phone-answer";
 import {
   fullProfileUrl,
   isProfileUrlSource,
@@ -203,7 +204,7 @@ const contactLabels: Record<string, readonly string[]> = {
   "profile.middleName": ["middle name"],
   "profile.lastName": ["last name", "surname", "family name"],
   "profile.email": ["email", "email address", "your email"],
-  "profile.phone": ["phone", "phone number", "telephone", "telephone number"],
+  "profile.phone": phoneLabels,
   "profile.currentCity": [
     "city",
     "current city",
@@ -302,7 +303,12 @@ function knownLiteralField(
   const aliases = contactLabels[source.id];
   if (!aliases) return false;
   return (
-    applicantContactGroup(control) &&
+    (applicantContactGroup(control) ||
+      (source.id === "profile.phone" &&
+        phoneLabels.some(
+          (label) => label === normalizeFormQuestionPrompt(control.groupLabel),
+        ))) &&
+    (source.id !== "profile.phone" || !fieldNamesAnotherPerson(control)) &&
     aliases.includes(normalizeFormQuestionPrompt(control.label))
   );
 }
@@ -345,7 +351,10 @@ function literalValueMatches(
   source: ClassifiedAnswerSource,
   control: ApplyFormControl,
   answer: string,
+  controls: readonly ApplyFormControl[] = [],
 ): boolean {
+  if (source.id === "profile.phone")
+    return phoneAnswerMatches(source.value, answer, control, controls);
   if (isProfileUrlSource(source.id) && wantsProfileUrl(control)) {
     const expected = fullProfileUrl(source.value);
     return expected !== null && answer.trim() === expected;
@@ -597,6 +606,37 @@ export function classifyAnswerPermission(input: {
     );
     if (human && (!legal || human.country === target)) source = human;
   }
+  // A saved "Phone" answer may omit the repeated Phone group in its key.
+  // Bind it to the Profile only when that is independently the same number
+  // and exactly one applicant phone field can use it. Unrelated sources stay out.
+  const profilePhone = catalog.find((row) => row.id === "profile.phone");
+  if (
+    tags.kind === "other" &&
+    source?.purpose === "saved" &&
+    profilePhone &&
+    normalizeFormQuestionPrompt(source.question ?? "") ===
+      normalizeFormQuestionPrompt(input.control.label) &&
+    knownLiteralField(profilePhone, input.control) &&
+    input.controls.filter(
+      (control) =>
+        control.visible &&
+        !control.disabled &&
+        knownLiteralField(profilePhone, control),
+    ).length === 1 &&
+    phoneAnswerMatches(
+      profilePhone.value,
+      source.value,
+      input.control,
+      input.controls,
+    ) &&
+    phoneAnswerMatches(
+      profilePhone.value,
+      input.answer,
+      input.control,
+      input.controls,
+    )
+  )
+    source = profilePhone;
   // Formatting an explicitly selected profile URL may use only that same
   // account's derived username. A null or unrelated source grants nothing.
   if (
@@ -689,6 +729,18 @@ export function classifyAnswerPermission(input: {
       input.controls,
     ) ?? pickerRule?.saved;
   let savedValueMatches = source.value === input.answer;
+  if (
+    saved &&
+    tags.kind === "other" &&
+    knownLiteralField({ ...source, id: "profile.phone" }, input.control) &&
+    phoneAnswerMatches(
+      source.value,
+      input.answer,
+      input.control,
+      input.controls,
+    )
+  )
+    savedValueMatches = true;
   if (saved && pickerRule?.saved.id === saved.id) {
     const primary = strictOptionMatch(
       input.control.options,
@@ -880,7 +932,7 @@ export function classifyAnswerPermission(input: {
   if (
     tags.kind === "other" &&
     source.purpose === "profile" &&
-    literalValueMatches(source, input.control, input.answer) &&
+    literalValueMatches(source, input.control, input.answer, input.controls) &&
     knownLiteralField(source, input.control)
   )
     return { kind: "literal", source };

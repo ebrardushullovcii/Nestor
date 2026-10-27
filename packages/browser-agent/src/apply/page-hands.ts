@@ -216,6 +216,8 @@ export function buildApplyFormObservation(
     > = {
       ref: rawControl.ref ?? `c${rawControl.index}`,
       kind,
+      ...(rawControl.scopeKey ? { scopeKey: rawControl.scopeKey } : {}),
+      ...(inputType === "tel" ? { telInput: true } : {}),
       ...(inputType === "url" ? { urlInput: true } : {}),
       ...(inputType === "month" || inputType === "date"
         ? { dateInputType: inputType }
