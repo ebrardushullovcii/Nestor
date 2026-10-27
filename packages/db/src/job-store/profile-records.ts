@@ -1,4 +1,3 @@
-import { invalidateProfileResumes } from "./profile-effects";
 import {
   ProfileRecordSchema,
   ProfileRecordQuerySchema,
@@ -109,8 +108,15 @@ export const PROFILE_RECORDS_SCHEMA = Object.entries(definitions)
    .join("\n")}`;
   })
   .join("\n");
-export function createProfileRecords(store: JobStore) {
+export function createProfileRecords(
+  store: JobStore,
+  withResumeEffects: <T>(write: () => T) => T,
+) {
   const items = createProfileItems(store);
+  const transaction = <T>(kind: ProfileRecordCollection, write: () => T) =>
+    store.transaction(() =>
+      kind === "links" ? withResumeEffects(write) : write(),
+    );
   const rows = (
     kind: ProfileRecordCollection,
     records: Record<string, unknown>[],
@@ -170,12 +176,12 @@ export function createProfileRecords(store: JobStore) {
         rows[index]!.id === id ? [] : [{ id, seq: rows[index]!.seq }],
       );
       if (!changed.length) return;
-      store.transaction(() => {
+      transaction(kind, () => {
         for (const row of changed)
           store.sql(`UPDATE ${name} SET seq=-seq WHERE id=?`).run(row.id);
         for (const row of changed)
           store.sql(`UPDATE ${name} SET seq=? WHERE id=?`).run(row.seq, row.id);
-        invalidateProfileResumes(store);
+        invalidateUnapprovedProfileResumes(store);
         store.notify({ cause: "profile", ids: [], stages: [], searchId: null });
       });
     },
@@ -251,7 +257,7 @@ export function createProfileRecords(store: JobStore) {
         spec: Definition = definitions[kind],
         record = parsed.record as unknown as Record<string, unknown>,
         name = table(kind);
-      return store.transaction(() => {
+      return transaction(kind, () => {
         const fields = spec.text.concat(spec.bool),
           values = Object.fromEntries(
             fields.map((field) => [field, record[field]]),
@@ -294,7 +300,7 @@ export function createProfileRecords(store: JobStore) {
               field,
               record[field] as string[],
             ) || changed;
-        if (changed) invalidateProfileResumes(store);
+        if (changed) invalidateUnapprovedProfileResumes(store);
         if (changed)
           store.notify({
             cause: "profile",
@@ -306,7 +312,7 @@ export function createProfileRecords(store: JobStore) {
       });
     },
     remove(kind: ProfileRecordCollection, id: string): boolean {
-      return store.transaction(() => {
+      return transaction(kind, () => {
         const removed = store
           .sql(`DELETE FROM ${table(kind)} WHERE id=?`)
           .run(id).changes;
@@ -314,10 +320,11 @@ export function createProfileRecords(store: JobStore) {
         store
           .sql("DELETE FROM profile_items WHERE scope=? AND owner=?")
           .run(kind, id);
-        invalidateProfileResumes(store);
+        invalidateUnapprovedProfileResumes(store);
         store.notify({ cause: "profile", stages: [], ids: [], searchId: null });
         return true;
       });
     },
   };
 }
+import { invalidateUnapprovedProfileResumes } from "./profile-effects";

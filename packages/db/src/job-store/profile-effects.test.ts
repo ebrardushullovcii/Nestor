@@ -1,12 +1,15 @@
 import { afterEach, expect, test } from "vitest";
 import {
   CandidateExperienceSchema,
+  CandidateLinkSchema,
+  ResumeDraftIdentitySchema,
   ResumeDraftSchema,
 } from "@nestor/contracts";
 import { openJobStore, type JobStore } from "./job-store";
 import { createProfileStore } from "./profile-store";
 import { createPreferencesStore } from "./preferences-store";
 import { createResumeStore } from "./resumes";
+import { createApplicationStore } from "./applications";
 const stores: JobStore[] = [];
 afterEach(() => {
   for (const store of stores.splice(0)) store.close();
@@ -53,6 +56,182 @@ function setup() {
   return { store, profile, preferences, resumes };
 }
 
+test.each([null, "github.com/riley-synthetic"])(
+  "adding https to GitHub keeps Original and tailored approvals and waiting applications (saved link: %s)",
+  (githubUrl) => {
+    const { store, profile, resumes } = setup();
+    profile.patch({ fields: { githubUrl: "github.com/riley-synthetic" } });
+    store.sql("UPDATE jobs SET stage='shortlisted' WHERE id IN (1,3)").run();
+    store.sql("DELETE FROM resumes WHERE job_id IN (1,3)").run();
+    resumes.startWriting(1, "original");
+    resumes.finishWriting(1, null);
+    resumes.approve(1, null);
+    resumes.startWriting(3, "tailored");
+    resumes.finishWriting(
+      3,
+      ResumeDraftSchema.parse({
+        id: "snapshot",
+        jobId: "3",
+        status: "needs_review",
+        templateId: "classic_ats",
+        identity: {
+          fullName: "Riley Okafor",
+          headline: "Analyst",
+          location: "Berlin",
+          githubUrl,
+        },
+        sections: [],
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+      }),
+    );
+    resumes.approve(3, "C:/synthetic/approved.pdf");
+    const applications = createApplicationStore(store);
+    applications.applyJobs({ selection: { ids: [1, 3] } });
+    for (let i = 0; i < 2; i++) {
+      const work = applications.claimNext()!;
+      applications.needsYou.request({
+        applicationId: work.id,
+        attempt: work.attempt,
+        fieldKey: "notice",
+        key: "notice",
+        kind: "question",
+        prompt: "Notice period?",
+        input: "text",
+        options: [],
+        scope: {},
+      });
+    }
+    const before = [resumes.get(1), resumes.get(3)];
+    const waiting = applications.listApplications({ state: "needs_you" });
+    const tasks = applications.needsYou.list();
+    expect(waiting.rows).toHaveLength(2);
+    expect(tasks.rows).toHaveLength(1);
+
+    profile.patch({
+      fields: { githubUrl: "https://github.com/riley-synthetic" },
+    });
+
+    expect([resumes.get(1), resumes.get(3)]).toEqual(before);
+    expect([store.getJob(1)?.stage, store.getJob(3)?.stage]).toEqual([
+      "resume",
+      "resume",
+    ]);
+    expect(applications.listApplications({ state: "needs_you" })).toEqual(
+      waiting,
+    );
+    expect(applications.needsYou.list()).toEqual(tasks);
+    const answered = applications.needsYou.answer({
+      id: tasks.rows[0]!.id,
+      answer: "Two weeks",
+      remember: false,
+    });
+    expect(answered).toEqual({ resolved: true, queued: 2 });
+    expect(applications.claimNext()).not.toBeNull();
+  },
+);
+
+test("a live Profile fallback revokes only the resume whose printed header changes", () => {
+  const { store, profile, resumes } = setup();
+  profile.patch({ fields: { headline: "Analyst" } });
+  for (const id of [1, 3]) {
+    resumes.startWriting(id, "tailored");
+    resumes.finishWriting(
+      id,
+      ResumeDraftSchema.parse({
+        id: "draft-" + id,
+        jobId: String(id),
+        status: "needs_review",
+        templateId: "classic_ats",
+        identity: id === 1 ? null : { headline: "Reviewed headline" },
+        sections: [],
+        createdAt: "2026-10-26T00:00:00.000Z",
+        updatedAt: "2026-10-26T00:00:00.000Z",
+      }),
+    );
+    resumes.approve(id, "C:/synthetic/approved.pdf");
+  }
+  const kept = resumes.get(3);
+  const applications = createApplicationStore(store);
+  applications.applyJobs({ selection: { ids: [1, 3] } });
+  const running = [applications.claimNext()!, applications.claimNext()!];
+  const affected = running.find((row) => row.jobId === 1)!;
+  const unaffected = running.find((row) => row.jobId === 3)!;
+  profile.patch({ fields: { headline: "Senior Analyst" } });
+  expect(resumes.get(1)?.approvedAt).toBeNull();
+  expect(store.getJob(1)?.stage).toBe("shortlisted");
+  expect(resumes.get(3)).toEqual(kept);
+  expect(store.getJob(3)?.stage).toBe("resume");
+  expect(applications.getApplication(affected.id)?.state).toBe("stopped");
+  expect(applications.getApplication(unaffected.id)?.state).toBe("running");
+});
+
+test("saved identity fields stay fixed; null header fields still follow Profile", () => {
+  const { profile, resumes } = setup();
+  const draft = resumes.get(1)!.draft!;
+  resumes.setLevel(1, "tailored");
+  resumes.startWriting(1, "tailored");
+  resumes.finishWriting(1, {
+    ...draft,
+    identity: ResumeDraftIdentitySchema.parse({
+      fullName: "Reviewed Name",
+      githubUrl: "github.com/reviewed",
+    }),
+  });
+  resumes.approve(1, "C:/synthetic/approved.pdf");
+  const before = resumes.get(1);
+  profile.patch({
+    fields: {
+      fullName: "Updated Name",
+      githubUrl: "https://github.com/updated",
+    },
+  });
+  expect(resumes.get(1)).toEqual(before);
+  profile.patch({ fields: { headline: "A new fallback headline" } });
+  expect(resumes.get(1)?.approvedAt).toBeNull();
+});
+
+test("Profile links affect only live contact fallbacks, not reviewed snapshots", () => {
+  const { profile, resumes } = setup();
+  const before = resumes.get(1);
+  profile.records.upsert({
+    collection: "links",
+    record: CandidateLinkSchema.parse({
+      id: "github",
+      kind: "github",
+      url: "https://github.com/riley-synthetic",
+    }),
+  });
+  expect(resumes.get(1)?.approvedAt).toBeNull();
+  resumes.startWriting(1, "tailored");
+  resumes.finishWriting(1, before!.draft);
+  resumes.approve(1, "C:/synthetic/approved.pdf");
+  profile.records.remove("links", "github");
+  expect(resumes.get(1)?.approvedAt).toBeNull();
+});
+
+test("Profile body edits restart unreviewed writing while an approved Original stays fixed", () => {
+  const { profile, resumes } = setup();
+  resumes.setLevel(1, "original");
+  resumes.startWriting(1, "original");
+  resumes.finishWriting(1, null);
+  resumes.approve(1, null);
+  const original = resumes.get(1);
+  resumes.startWriting(3, "tailored");
+  profile.patch({ fields: { summary: "New evidence for the writer" } });
+  expect(resumes.get(3)?.state).toBe("queued");
+  expect(resumes.get(1)).toEqual(original);
+  profile.records.upsert({
+    collection: "experiences",
+    record: CandidateExperienceSchema.parse({
+      id: "work",
+      title: "Analyst",
+      companyName: "Synthetic",
+    }),
+  });
+  expect(resumes.get(1)).toEqual(original);
+});
+
 test("changing remote location policy retires active fit scores without changing drafts or applied history", () => {
   const { store, preferences, resumes } = setup();
   store.setFit(
@@ -86,7 +265,7 @@ test("changing remote location policy retires active fit scores without changing
   expect(resumes.get(1)).toEqual(draft);
 });
 
-test("every Profile fact writer invalidates active approval atomically while submitted history stays intact", () => {
+test("a changed live header invalidates approval atomically; snapshot history stays intact", () => {
   const { store, profile, resumes } = setup();
   expect(() =>
     store.transaction(() => {
@@ -119,6 +298,7 @@ test("every Profile fact writer invalidates active approval atomically while sub
     }),
   );
   resumes.approve(1, "C:/synthetic/new.pdf");
+  const before = resumes.get(1);
   profile.records.upsert({
     collection: "experiences",
     record: CandidateExperienceSchema.parse({
@@ -128,7 +308,7 @@ test("every Profile fact writer invalidates active approval atomically while sub
       workMode: [],
     }),
   });
-  expect(resumes.get(1)?.approvedAt).toBeNull();
+  expect(resumes.get(1)).toEqual(before);
 });
 
 test.each([
