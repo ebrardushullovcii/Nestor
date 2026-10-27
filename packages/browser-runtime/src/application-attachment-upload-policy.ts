@@ -20,6 +20,13 @@ export interface AttachmentUploadWindow {
   presignEndpoint?: string;
   /** The handles and keys the presign's answer handed out. */
   handles?: string[];
+  /**
+   * Long strings the site's own answers handed out while the window was
+   * open (a presign's policy, bucket or key). A storage field that repeats
+   * one exactly echoes the site's word back, so it is not read for answers:
+   * a last name that is also a word in the bucket's name is no leak.
+   */
+  issued?: string[];
   /** Set to one once the storage took the file: the one bind that may follow. */
   bindsRemaining?: number;
   /** When the request carrying the file was answered, whatever the answer. */
@@ -368,6 +375,7 @@ export async function classifyAttachmentUpload(input: {
     const files = [...form.values()].filter(
       (value) => typeof value !== "string",
     );
+    const issued = new Set([...(grant.issued ?? []), ...(grant.handles ?? [])]);
     if (
       files.length !== 1 ||
       !sameAttachmentName(files[0]!.name, grant.fileName) ||
@@ -392,12 +400,13 @@ export async function classifyAttachmentUpload(input: {
           url.origin === grant.sourceOrigin,
         ) ||
         value.length > 8192 ||
-        decoded.some((text) =>
-          containsPreparedAnswer(
-            withoutAttachmentName(text, grant.fileName),
-            preparedAnswers,
-          ),
-        ) ||
+        (!issued.has(value) &&
+          decoded.some((text) =>
+            containsPreparedAnswer(
+              withoutAttachmentName(text, grant.fileName),
+              preparedAnswers,
+            ),
+          )) ||
         finalSignal.test(splitCase(`${key} ${value}`))
       )
         return { allowed: false, containsFile: true };
@@ -462,6 +471,30 @@ export function uploadHandlesIn(
   };
   visit(parsed, 0);
   return [...handles].slice(0, 32);
+}
+
+/**
+ * The strings a site's JSON answer hands out (a policy, a bucket, a key),
+ * for AttachmentUploadWindow.issued: single words, never free text.
+ */
+export function issuedStringsIn(text: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const strings = new Set<string>();
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 8 || strings.size >= 64) return;
+    if (typeof value === "string") {
+      if (value.length >= 3 && value.length <= 8_192 && !/\s/u.test(value))
+        strings.add(value);
+    } else if (value && typeof value === "object")
+      for (const item of Object.values(value)) visit(item, depth + 1);
+  };
+  visit(parsed, 0);
+  return [...strings];
 }
 
 /**

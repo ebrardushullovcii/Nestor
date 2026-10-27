@@ -121,6 +121,42 @@ test("Greenhouse: the resume reaches storage, with a name filled in", async () =
   ).toEqual([]);
 });
 
+test.each([
+  [false, "127.0.0.1"],
+  [true, "localhost"],
+])(
+  "Greenhouse: a last name that is also a word in the storage bucket's name still lets the resume through (field saves %s, on %s)",
+  async (fieldSaves, host) => {
+    // The replica's bucket is "synthetic-greenhouse-files"; the presign
+    // hands out the policy that names it, and the page sends it back as is.
+    const { page, session } = await fillPage(
+      "greenhouse-shape",
+      fieldSaves,
+      host,
+    );
+    const controls = (await session.readPage()).controls;
+    const ref = (id: string) => {
+      const control = controls.find((entry) => entry.id === id)!;
+      return control.ref ?? `c${control.index}`;
+    };
+    const stored = posts().filter(
+      (post) => post.path === "/greenhouse-shape/storage",
+    ).length;
+    await registerPrepareOnlyPreparedValue(page, "Synthetic");
+    await session.fillText(ref("last_name"), "Synthetic");
+    await session.uploadFile(ref("resume"), resume);
+    await page.waitForFunction(
+      () => (document.getElementById("resume_url") as HTMLInputElement).value,
+    );
+    expect(
+      posts().filter((post) => post.path === "/greenhouse-shape/storage"),
+    ).toHaveLength(stored + 1);
+    expect(
+      posts().filter((post) => post.path === "/greenhouse-shape/apply/1"),
+    ).toEqual([]);
+  },
+);
+
 test("Workable: the resume reaches the storage its presign named, with an empty utf8 field", async () => {
   const { page, session } = await fillPage("workable-shape");
   const controls = (await session.readPage()).controls;
