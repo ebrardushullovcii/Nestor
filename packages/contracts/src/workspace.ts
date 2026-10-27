@@ -481,6 +481,9 @@ export type UpdateAiBehaviorInput = z.infer<typeof UpdateAiBehaviorInputSchema>;
 export const DesktopPlatformPingSchema = z.object({
   ok: z.literal(true),
   platform: z.enum(["darwin", "win32", "linux"]),
+  /** The computer's memory and logical cores, for the one-time Speed tip. */
+  memoryGb: z.number().nonnegative().optional(),
+  cores: z.number().int().nonnegative().optional(),
 });
 export type DesktopPlatformPing = z.infer<typeof DesktopPlatformPingSchema>;
 

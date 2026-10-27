@@ -2,6 +2,7 @@ import { lazy, Suspense, type CSSProperties, type ReactNode } from "react";
 import { animateIn, ENTER_FROM_BELOW } from "@renderer/lib/motion";
 import { BrowserPeek } from "./browser-peek";
 import { AssistantSidebarSlot } from "../assistant/assistant-sidebar-slot";
+import { SpeedTip } from "./speed-tip";
 import { AssistantToggle } from "../assistant/assistant-toggle";
 import { useAssistant } from "../assistant/assistant-provider";
 import { useAssistantSideMenuCollapse } from "../assistant/use-assistant-side-menu-collapse";
@@ -1914,6 +1915,7 @@ export function JobFinderShell({
       {/* The assistant docks on the right; the content gives it its width
           instead of being covered (ADR 0037). */}
       <AssistantSidebarSlot />
+      <SpeedTip />
       <div
         className={SHELL_CONTENT_CLASS}
         data-job-finder-shell-content
