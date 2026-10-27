@@ -38,6 +38,9 @@ interface ActiveSearch {
   enqueue?: (target: JobDiscoveryTarget, force: boolean) => void;
 }
 
+/** How long site progress gathers before it commits in one write. */
+const SOURCE_WRITE_GATHER_MS = 200;
+
 export function createJobSearchRunner(
   deps: JobSearchRunnerDeps,
 ): JobSearchRunner {
@@ -171,11 +174,27 @@ export function createJobSearchRunner(
     });
     const current = (source: SourceWork) =>
       !signal.aborted && states.get(source.target.id) === source;
-    const write = (source: SourceWork) => {
-      if (!current(source)) return;
-      resultRows.put(run.record!.id, source.row);
+    // Each site's progress used to commit on its own, several times per
+    // site; a 900-site search kept main busy enough to hold screens back.
+    // Changes now gather for a moment and commit together.
+    const dirty = new Set<SourceWork>();
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      if (flushTimer) clearTimeout(flushTimer);
+      flushTimer = null;
+      const rows = [...dirty].filter(current);
+      dirty.clear();
+      if (rows.length === 0) return;
+      deps.store.transaction(() => {
+        for (const source of rows) resultRows.put(run.record!.id, source.row);
+      });
       revision++;
       notify();
+    };
+    const write = (source: SourceWork) => {
+      if (!current(source)) return;
+      dirty.add(source);
+      flushTimer ??= setTimeout(flush, SOURCE_WRITE_GATHER_MS);
     };
     const markDone = (source: SourceWork) => {
       if (
@@ -423,6 +442,7 @@ export function createJobSearchRunner(
       // One transaction for the initial rows; no 900-site status array crosses IPC.
       deps.store.transaction(() => {
         for (const target of targets) enqueue(target, target.id === forced);
+        flush();
       });
       run.enqueue = enqueue;
       run.setReady(fits);
@@ -437,6 +457,7 @@ export function createJobSearchRunner(
         if (!http.active && !browser.active) break;
       }
       signal.throwIfAborted();
+      flush();
       const progress = resultRows.compact(run.record!.id).progress;
       const failed = progress?.failed ?? 0,
         needsYou = progress?.needsYou ?? 0;
@@ -459,6 +480,7 @@ export function createJobSearchRunner(
           : fitError,
       );
     } catch (error) {
+      flush();
       finish(
         run,
         signal.aborted ? "stopped" : "failed",
