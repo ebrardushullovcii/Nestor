@@ -12,6 +12,7 @@ import {
 } from "@renderer/components/ui/popover";
 
 import { useSitePage } from "@renderer/features/job-lists/use-site-page";
+import { JOB_FINDER_ROUTE_PATHS } from "@renderer/features/job-finder/lib/job-finder-route-hrefs";
 
 /**
  * Which sites a search looks at: all of them, or the ones ticked. Only the
@@ -106,7 +107,9 @@ export function SitePicker(props: {
           <div className="grid gap-2 text-(length:--text-small) text-foreground-soft">
             <p>Add the job sites you use, and searches look at them.</p>
             <Button
-              onClick={() => void navigate("/job-finder/profile")}
+              onClick={() =>
+                void navigate(JOB_FINDER_ROUTE_PATHS.profileSources)
+              }
               size="sm"
               type="button"
               variant="outline"
