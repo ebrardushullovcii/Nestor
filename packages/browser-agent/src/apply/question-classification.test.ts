@@ -193,6 +193,151 @@ test("a truncated report can recover on its single larger retry", async () => {
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
 
+test("retries only unread questions and retains complete readings", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [
+      { index: 0, kind: "other", country: null, sourceId: "profile.email" },
+    ],
+  });
+  vi.mocked(client.chatWithTools).mockResolvedValueOnce({
+    toolCalls: [
+      {
+        id: "partial",
+        type: "function",
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({
+            plainIndexes: [0],
+            flagged: [],
+            tags: [
+              {
+                index: 0,
+                kind: "other",
+                country: null,
+                sourceId: "profile.fullName",
+              },
+            ],
+          }),
+        },
+      },
+    ],
+  });
+  const result = await classifyApplicationQuestions({
+    client,
+    sources: [],
+    questions: ["Full name", "Email"].map((prompt) => ({
+      prompt,
+      kind: "text",
+      options: [],
+    })),
+  });
+  expect(result.get("Full name")?.answerTags?.sourceId).toBe(
+    "profile.fullName",
+  );
+  expect(result.get("Email")?.answerTags?.sourceId).toBe("profile.email");
+  expect(
+    JSON.parse(vi.mocked(client.chatWithTools).mock.calls[1][0][1].content),
+  ).toEqual([expect.objectContaining({ index: 0, question: "Email" })]);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("an unread remainder is handed over without discarding a read question", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [],
+    flagged: [],
+    tags: [],
+  });
+  vi.mocked(client.chatWithTools).mockResolvedValueOnce({
+    toolCalls: [
+      {
+        id: "partial",
+        type: "function",
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({
+            plainIndexes: [0],
+            flagged: [],
+            tags: [
+              {
+                index: 0,
+                kind: "other",
+                country: null,
+                sourceId: "profile.fullName",
+              },
+            ],
+          }),
+        },
+      },
+    ],
+  });
+  const result = await classifyApplicationQuestions({
+    client,
+    sources: [],
+    questions: ["Full name", "Passport country"].map((prompt) => ({
+      prompt,
+      kind: "text",
+      options: [],
+    })),
+  });
+  expect(result.get("Full name")?.answerTags?.sourceId).toBe(
+    "profile.fullName",
+  );
+  expect(result.get("Passport country")).toMatchObject({
+    readFailed: true,
+    answerTags: null,
+  });
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("filled data and chosen options do not reread the page, but new instructions do", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [],
+  });
+  const page = controls("Country of residence", ["Germany", "France"]);
+  const classify = createQuestionClassifier({ client });
+  const context = (text: string) => JSON.stringify({ instructions: text });
+  await classify(page, context("Application\nCountry of residence"));
+  page[0].value = "Germany";
+  page[0].selectedOptionLabel = "Germany";
+  const filled = context("Application\nCountry of residence\nGermany\nFrance");
+  expect(classify.settled(page, filled)).toBeDefined();
+  await classify(page, filled);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  page[0].value = "France";
+  await classify(page, context("Application\nCountry of residence\nFrance"));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  await classify(
+    page,
+    context("Application\nCountry of residence\nFrance\nWrite this yourself"),
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  // Instructions are retained even if an entered value repeats them.
+  page[0].value = "Write this yourself";
+  await classify(
+    page,
+    context("Application\nCountry of residence\nWrite this yourself"),
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  page[0].hint = "Only answer if you are a resident";
+  await classify(page, filled);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+  // Matching a value inside a larger sentence cannot erase a site condition.
+  await classify(
+    page,
+    context(
+      "Application\nCountry of residence\nFrance is required for this role",
+    ),
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+  expect(
+    JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[3][0]),
+  ).toContain("France is required for this role");
+});
+
 test("gives a large page enough output budget to classify every question", async () => {
   const client = clientReplying([]);
   await classifyApplicationQuestions({

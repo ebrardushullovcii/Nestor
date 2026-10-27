@@ -11,6 +11,7 @@ import type { AgentLoopToolDefinition } from "@nestor/agent-runtime";
 import type { LLMClient } from "../agent/contracts";
 import { questionPrompt } from "./policy-executor";
 import type { ApplyFormControl } from "./types";
+import { requiresOwnWords } from "./own-words";
 
 /**
  * What a form question asks, as the model reads it (ADR 0041). Two of the
@@ -61,32 +62,79 @@ interface QuestionReadInput {
 export async function classifyApplicationQuestions(
   input: QuestionReadInput,
 ): Promise<Map<string, ApplyQuestionClassification>> {
+  const result = new Map<string, ApplyQuestionClassification>();
+  let missing = [...input.questions];
   for (let attempt = 0; attempt < 2; attempt += 1) {
     input.signal?.throwIfAborted();
     try {
-      const readings = await readApplicationQuestions(input, attempt);
-      if (
-        input.questions.every((question) => {
-          const reading = readings.get(question.identity ?? question.prompt);
-          return reading && (input.sources === undefined || reading.answerTags);
-        })
-      )
-        return readings;
+      const readings = await readApplicationQuestions(
+        { ...input, questions: missing },
+        attempt,
+      );
+      missing = missing.filter((question) => {
+        const key = question.identity ?? question.prompt;
+        const reading = readings.get(key);
+        if (!reading || (input.sources !== undefined && !reading.answerTags))
+          return true;
+        result.set(key, reading);
+        return false;
+      });
+      if (!missing.length) return result;
     } catch {
       input.signal?.throwIfAborted();
     }
   }
-  return new Map(
-    input.questions.map((question) => [
-      question.identity ?? question.prompt,
-      {
-        asksAboutPay: false,
-        declarationKind: null,
-        answerTags: null,
-        readFailed: true,
-      },
-    ]),
-  );
+  for (const question of missing)
+    result.set(question.identity ?? question.prompt, {
+      asksAboutPay: false,
+      declarationKind: null,
+      answerTags: null,
+      readFailed: true,
+    });
+  return result;
+}
+
+/** Field data echoed as its own page-text line is not a new site instruction. */
+function questionReadInstructions(
+  controls: readonly ApplyFormControl[],
+  contextText?: string,
+): string {
+  let text = "";
+  try {
+    const context = JSON.parse(contextText ?? "{}") as {
+      instructions?: unknown;
+    };
+    if (typeof context.instructions === "string") text = context.instructions;
+  } catch {
+    /* Legacy step keys carry no instructions. */
+  }
+  const fieldData = new Set<string>();
+  const instructions = new Set<string>();
+  for (const control of controls) {
+    for (const instruction of [control.label, control.groupLabel, control.hint])
+      for (const line of instruction?.split(/\r?\n/u) ?? [])
+        if (line.trim()) instructions.add(line.trim());
+    for (const value of [
+      control.value,
+      control.selectedOptionLabel,
+      ...control.options,
+    ])
+      if (value?.trim()) fieldData.add(value.trim());
+    if (control.kind === "file" && control.value)
+      fieldData.add(control.value.split(/[\\/]/u).at(-1)!);
+  }
+  return text
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const value = line.trim();
+      return (
+        value &&
+        (!fieldData.has(value) ||
+          instructions.has(value) ||
+          requiresOwnWords(value))
+      );
+    })
+    .join("\n");
 }
 
 async function readApplicationQuestions(
@@ -438,16 +486,7 @@ export function createQuestionClassifier(input: {
           ? input.signal.reason
           : new Error("The question read was stopped."),
       );
-    let pageInstructions = "";
-    try {
-      const context = JSON.parse(contextText ?? "{}") as {
-        instructions?: unknown;
-      };
-      if (typeof context.instructions === "string")
-        pageInstructions = context.instructions;
-    } catch {
-      /* Legacy step keys carry no instructions. */
-    }
+    const pageInstructions = questionReadInstructions(controls, contextText);
     const sources = input.sources?.() ?? [];
     const contextKey = createHash("sha256")
       .update(
@@ -540,16 +579,7 @@ export function createQuestionClassifier(input: {
   };
   return Object.assign(classify, {
     settled: (controls: readonly ApplyFormControl[], contextText?: string) => {
-      let pageInstructions = "";
-      try {
-        const context = JSON.parse(contextText ?? "{}") as {
-          instructions?: unknown;
-        };
-        if (typeof context.instructions === "string")
-          pageInstructions = context.instructions;
-      } catch {
-        /* Legacy step key. */
-      }
+      const pageInstructions = questionReadInstructions(controls, contextText);
       const contextKey = createHash("sha256")
         .update(
           JSON.stringify({
