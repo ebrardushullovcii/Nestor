@@ -1,0 +1,10 @@
+{
+  "id": "ashby-upload-bind",
+  "provenance": "Ashby's public hosted-jobs client (October 2026): a file field asks ApiCreateFileUploadHandle for a handle, posts Content-Type, the signing fields and the file to the handle's storage URL with fetch, and only then binds the file to the form with ApiSetFormValueToFile carrying that handle. Every other answer is saved with ApiSetFormValue. Synthetic handle and values; no applicant data.",
+  "handle": "c3ludGhldGljLWZpbGUtaGFuZGxlLTAwMDE=",
+  "path": "_systemfield_resume",
+  "formRenderIdentifier": "4f3c1c2e-0000-4000-8000-000000000001",
+  "formDefinitionIdentifier": "4f3c1c2e-0000-4000-8000-000000000002",
+  "bindQuery": "mutation ApiSetFormValueToFile($organizationHostedJobsPageName: String!, $formRenderIdentifier: String!, $path: String!, $fileHandle: String, $formDefinitionIdentifier: String) {\n  setFormValueToFile(organizationHostedJobsPageName: $organizationHostedJobsPageName, formRenderIdentifier: $formRenderIdentifier, path: $path, fileHandle: $fileHandle, formDefinitionIdentifier: $formDefinitionIdentifier) {\n    id\n    __typename\n  }\n}",
+  "saveQuery": "mutation ApiSetFormValue($organizationHostedJobsPageName: String!, $formRenderIdentifier: String!, $path: String!, $value: JSON, $formDefinitionIdentifier: String) {\n  setFormValue(organizationHostedJobsPageName: $organizationHostedJobsPageName, formRenderIdentifier: $formRenderIdentifier, path: $path, value: $value, formDefinitionIdentifier: $formDefinitionIdentifier) {\n    id\n    __typename\n  }\n}"
+}

@@ -16,6 +16,12 @@ export interface AttachmentUploadWindow {
   remainingRequests: number;
   /** The file input's own name or id, when it has one. */
   field?: string | null;
+  /** Where the presign was asked: the bind goes back to the same place. */
+  presignEndpoint?: string;
+  /** The handles and keys the presign's answer handed out. */
+  handles?: string[];
+  /** Set to one once the storage took the file: the one bind that may follow. */
+  bindsRemaining?: number;
 }
 
 const uploadSignal =
@@ -146,6 +152,9 @@ function storageMetadata(
       return value === String(grant.byteLength);
     case "success_action_status":
       return ["200", "201", "204"].includes(value);
+    // Greenhouse's storage asks for encryption at rest.
+    case "x-amz-server-side-encryption":
+      return ["AES256", "aws:kms", "aws:kms:dsse"].includes(value);
     case "x-amz-algorithm":
       return value === "AWS4-HMAC-SHA256";
     case "x-goog-algorithm":
@@ -199,7 +208,9 @@ function storageMetadata(
               condition.length === 3 &&
               ["eq", "starts-with"].includes(String(condition[0])) &&
               typeof condition[1] === "string" &&
-              /^\$(?:key|bucket|acl|Content-Type|x-amz-[\w-]+|x-goog-[\w-]+)$/iu.test(
+              // Greenhouse's policy also names the form's own `utf8` and
+              // `authenticity_token` fields, and only says how they start.
+              /^\$(?:key|bucket|acl|Content-Type|success_action_status|utf8|authenticity_token|x-amz-[\w-]+|x-goog-[\w-]+)$/iu.test(
                 condition[1],
               ) &&
               typeof condition[2] === "string" &&
@@ -229,6 +240,27 @@ function storageMetadata(
     default:
       return false;
   }
+}
+
+/** Every string in a decoded storage policy; unreadable is one opaque string. */
+function policyStrings(json: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return [json];
+  }
+  const strings: string[] = [];
+  const visit = (value: unknown) => {
+    if (typeof value === "string") strings.push(value);
+    else if (value && typeof value === "object")
+      for (const [key, item] of Object.entries(value)) {
+        strings.push(key);
+        visit(item);
+      }
+  };
+  visit(parsed);
+  return strings;
 }
 
 /** No form answers: one exact selected file and bounded upload metadata only. */
@@ -322,10 +354,12 @@ export async function classifyAttachmentUpload(input: {
       if (typeof value !== "string") continue;
       // Storage signing fields have constrained values. They are never an
       // escape hatch for a form answer, including inside a decoded policy.
+      // A policy is read value by value: run together, its words make up
+      // answers that are not there ("credential" + "EXAMPLE" holds "Alex").
       const decoded =
         key.toLowerCase() === "policy"
-          ? Buffer.from(value, "base64").toString("utf8")
-          : value;
+          ? policyStrings(Buffer.from(value, "base64").toString("utf8"))
+          : [value];
       if (
         !storageMetadata(
           key,
@@ -334,9 +368,11 @@ export async function classifyAttachmentUpload(input: {
           url.origin === grant.sourceOrigin,
         ) ||
         value.length > 8192 ||
-        containsPreparedAnswer(
-          withoutAttachmentName(decoded, grant.fileName),
-          preparedAnswers,
+        decoded.some((text) =>
+          containsPreparedAnswer(
+            withoutAttachmentName(text, grant.fileName),
+            preparedAnswers,
+          ),
         ) ||
         finalSignal.test(splitCase(`${key} ${value}`))
       )
@@ -362,4 +398,111 @@ export async function classifyAttachmentUpload(input: {
       createHash("sha256").update(fileBytes).digest("hex") === grant.sha256,
     containsFile: true,
   };
+}
+
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * The handles and keys a presign's answer hands out (Ashby's
+ * `fileUploadHandle.handle`, a storage key): long strings with no spaces.
+ */
+export function uploadHandlesIn(
+  text: string,
+  grant: Pick<AttachmentUploadWindow, "fileName">,
+): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const handles = new Set<string>();
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 8) return;
+    if (typeof value === "string") {
+      if (
+        value.length >= 16 &&
+        value.length <= 2_048 &&
+        !/\s/u.test(value) &&
+        value !== grant.fileName
+      )
+        handles.add(value);
+    } else if (value && typeof value === "object")
+      for (const item of Object.values(value)) visit(item, depth + 1);
+  };
+  visit(parsed, 0);
+  return [...handles].slice(0, 32);
+}
+
+/**
+ * The one request that binds the uploaded file to the form (Ashby's
+ * `ApiSetFormValueToFile`): sent after the storage took the file, to the
+ * endpoint the presign went to, naming a handle the presign handed out, and
+ * carrying no answer and no final action. One per uploaded file.
+ */
+export function classifyUploadBind(input: {
+  window: AttachmentUploadWindow | null;
+  nowMs: number;
+  method: string;
+  url: string;
+  contentType: string;
+  body: string | null;
+  preparedValues?: readonly string[];
+}): boolean {
+  const grant = input.window;
+  const body = input.body;
+  if (
+    !grant?.presignEndpoint ||
+    !grant.handles?.length ||
+    (grant.bindsRemaining ?? 0) < 1 ||
+    input.nowMs > grant.expiresAtMs ||
+    input.method.toUpperCase() !== "POST" ||
+    !/\bapplication\/json\b/iu.test(input.contentType) ||
+    !body ||
+    body.length > 16_384
+  )
+    return false;
+  let url: URL;
+  try {
+    url = new URL(input.url);
+  } catch {
+    return false;
+  }
+  const preparedAnswers = (input.preparedValues ?? []).filter(
+    (value) => value !== grant.fileName,
+  );
+  // Ashby names the operation in the address (`?op=ApiSetFormValueToFile`).
+  if (
+    `${url.origin}${url.pathname}` !== grant.presignEndpoint ||
+    requestUrlCarriesPreparedValue(url.href, preparedAnswers) ||
+    finalSignal.test(splitCase(safeDecodeURIComponent(url.search)))
+  )
+    return false;
+  if (!grant.handles.some((handle) => body.includes(handle))) return false;
+  const operations = readGraphQlRequest(body);
+  if (
+    operations &&
+    (operations.length !== 1 ||
+      operations[0]!.type !== "mutation" ||
+      operations[0]!.rootFields.length !== 1)
+  )
+    return false;
+  let rest = withoutAttachmentName(body, grant.fileName);
+  for (const handle of grant.handles) rest = rest.split(handle).join("");
+  if (finalSignal.test(splitCase(rest))) return false;
+  return !(
+    containsPreparedAnswer(rest, preparedAnswers) ||
+    (operations?.[0] &&
+      variableStrings(operations[0].variables).some(
+        (value) =>
+          !grant.handles!.includes(value) &&
+          containsPreparedAnswer(value, preparedAnswers),
+      ))
+  );
 }

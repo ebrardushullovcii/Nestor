@@ -4,6 +4,8 @@ import finalMutationReplay from "../../../apps/desktop/test-fixtures/job-finder/
 import responseTypesReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/mutation-response-types.json";
 import responseReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/mutation-response.json";
 import realShapes from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/real-upload-shapes.json";
+import ashbyBind from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/ashby-upload-bind.json";
+import greenhouseS3 from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/greenhouse-s3-post.json";
 import { inspectPageMutationResponse } from "./mutation-response-body";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -262,6 +264,165 @@ const requestHitsFor = (
   hits.filter((hit) => hit.kind === "request" && hit.path === path);
 
 describe("Prepare-only guard real-Chromium fixtures", () => {
+  test("Fill: Greenhouse's real storage POST (encryption, 201, utf8 and token in the policy) gets through with its receipt", async () => {
+    const site = await startTrackedServer(),
+      storage = await startTrackedServer();
+    const policy = Buffer.from(JSON.stringify(greenhouseS3.policy)).toString(
+      "base64",
+    );
+    site.registerJson("/uncacheable_attributes/presigned_fields", {
+      url: storage.baseUrl + "/storage",
+      resume: {
+        key: greenhouseS3.keyTemplate,
+        fields: { ...greenhouseS3.fields, policy },
+      },
+    });
+    storage.registerResponse("/storage", {
+      status: 201,
+      type: "application/xml",
+      body: greenhouseS3.receipt.replace("STORAGE", storage.baseUrl),
+    });
+    site.registerHtml(
+      "/greenhouse",
+      `<label>First Name<input id="first"></label><label for="resume">Attach</label><input id="resume" type="file"><output id="result"></output><script>
+      document.getElementById('resume').addEventListener('change', async function () {
+        const file = this.files[0];
+        const signed = await (await fetch('/uncacheable_attributes/presigned_fields?fields[]=resume')).json();
+        const body = new FormData();
+        body.append('utf8', '✓');
+        for (const key in signed.resume.fields) body.append(key, signed.resume.fields[key]);
+        body.append('key', signed.resume.key.replace('{timestamp}', String(Date.now())).replace('{unique_id}', 'abc123'));
+        body.append('authenticity_token', '1234');
+        body.append('Content-Type', 'application/octet-stream');
+        body.append('file', file);
+        this.value = '';
+        const status = await new Promise((resolve) => { const xhr = new XMLHttpRequest(); xhr.open('POST', signed.url); xhr.onloadend = () => resolve(xhr.status); xhr.send(body); });
+        document.getElementById('result').textContent = String(status);
+      });</script>`,
+    );
+    const { page } = await newGuardedPage();
+    await page.goto(`${site.baseUrl}/greenhouse`);
+    const session = createPlaywrightApplyPageSession({ page });
+    await session.installPrepareOnlyGuard({
+      intermediateMutationsAuthorized: false,
+      attachmentUploadsAuthorized: true,
+      allowedOrigins: [],
+    });
+    await page.fill("#first", realShapes.firstName);
+    await registerPrepareOnlyPreparedValue(page, realShapes.firstName);
+    const resume = (await session.readPage()).controls.find(
+      (field) => field.inputType === "file",
+    )!;
+    const response = page
+      .waitForResponse(`${storage.baseUrl}/storage`)
+      .catch(() => null);
+    await session.uploadFile(resume.ref ?? `c${resume.index}`, {
+      name: realShapes.fileName,
+      mimeType: "application/pdf",
+      bytes: new TextEncoder().encode("%PDF-1.4 synthetic upload bytes"),
+    });
+    await page.waitForFunction(
+      () => !!document.getElementById("result")?.textContent,
+    );
+    expect(await page.locator("#result").textContent()).toBe("201");
+    expect(requestHitsFor(storage.hits, "/storage")).toHaveLength(1);
+    const observed = await response;
+    if (!observed) throw Error("No upload response");
+    expect(await inspectPageMutationResponse(page, observed)).toMatchObject({
+      accepted: true,
+    });
+  });
+
+  test("Fill: Ashby's upload binds the stored file to the form once, and no answer leaves", async () => {
+    const site = await startTrackedServer(),
+      storage = await startTrackedServer();
+    const key = realShapes.keyPrefix + realShapes.fileName;
+    const policy = Buffer.from(
+      JSON.stringify({
+        ...replay.policy,
+        conditions: [...replay.policy.conditions, { key }],
+      }),
+    ).toString("base64");
+    site.registerJson("/api/non-user-graphql", {
+      data: {
+        fileUploadHandle: {
+          handle: ashbyBind.handle,
+          url: storage.baseUrl + "/storage",
+          fields: { ...replay.fields, key, Policy: policy },
+        },
+      },
+    });
+    storage.registerJson("/storage", { uploaded: true });
+    site.registerHtml(
+      "/ashby",
+      `<label>Name<input id="name"></label><label>Resume<input id="resume" type="file"></label><output id="result"></output><script>
+      const bind = ${JSON.stringify(ashbyBind)};
+      const shapes = ${JSON.stringify({ presignQuery: realShapes.presignQuery })};
+      const graphql = (operationName, variables, query) =>
+        fetch('/api/non-user-graphql', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ operationName, variables, query }) }).then((r) => r.ok, () => false);
+      const ids = { organizationHostedJobsPageName: 'synthetic', formRenderIdentifier: bind.formRenderIdentifier, formDefinitionIdentifier: bind.formDefinitionIdentifier };
+      document.getElementById('resume').addEventListener('change', async function () {
+        const file = this.files[0];
+        const signed = (await (await fetch('/api/non-user-graphql', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ operationName: 'ApiCreateFileUploadHandle', variables: { organizationHostedJobsPageName: 'synthetic', fileUploadContext: 'NonUserFormEngine', filename: file.name, contentType: file.type, contentLength: file.size }, query: shapes.presignQuery }) })).json()).data.fileUploadHandle;
+        const body = new FormData();
+        body.append('Content-Type', file.type);
+        for (const [key, value] of Object.entries(signed.fields)) body.append(key, value);
+        body.append('file', file);
+        const stored = await fetch(signed.url, { method: 'POST', body }).then((r) => r.ok, () => false);
+        const name = document.getElementById('name').value;
+        const result = {
+          stored,
+          smuggled: await graphql('ApiSetFormValueToFile', { ...ids, path: name, fileHandle: signed.handle }, bind.bindQuery),
+          bound: await graphql('ApiSetFormValueToFile', { ...ids, path: bind.path, fileHandle: signed.handle }, bind.bindQuery),
+          again: await graphql('ApiSetFormValueToFile', { ...ids, path: bind.path, fileHandle: signed.handle }, bind.bindQuery),
+          saved: await graphql('ApiSetFormValue', { ...ids, path: '_systemfield_name', value: name }, bind.saveQuery),
+        };
+        document.getElementById('result').textContent = JSON.stringify(result);
+      });</script>`,
+    );
+    const { page } = await newGuardedPage();
+    await page.goto(`${site.baseUrl}/ashby`);
+    const session = createPlaywrightApplyPageSession({ page });
+    await session.installPrepareOnlyGuard({
+      intermediateMutationsAuthorized: false,
+      attachmentUploadsAuthorized: true,
+      allowedOrigins: [],
+    });
+    await page.fill("#name", realShapes.name);
+    await registerPrepareOnlyPreparedValue(page, realShapes.name);
+    const resume = (await session.readPage()).controls.find(
+      (field) => field.inputType === "file",
+    )!;
+    await session.uploadFile(resume.ref ?? `c${resume.index}`, {
+      name: realShapes.fileName,
+      mimeType: "application/pdf",
+      bytes: new TextEncoder().encode("%PDF-1.4 synthetic upload bytes"),
+    });
+    await page.waitForFunction(
+      () => !!document.getElementById("result")?.textContent,
+    );
+    expect(
+      JSON.parse((await page.locator("#result").textContent()) ?? "{}"),
+    ).toEqual({
+      stored: true,
+      smuggled: false,
+      bound: true,
+      again: false,
+      saved: false,
+    });
+    expect(requestHitsFor(storage.hits, "/storage")).toHaveLength(1);
+    const graphqlBodies = requestHitsFor(site.hits, "/api/non-user-graphql")
+      .filter((hit) => hit.method === "POST")
+      .map((hit) => JSON.parse(hit.body) as { operationName: string });
+    expect(graphqlBodies.map((body) => body.operationName)).toEqual([
+      "ApiCreateFileUploadHandle",
+      "ApiSetFormValueToFile",
+    ]);
+    expect(JSON.stringify(graphqlBodies)).not.toContain(realShapes.name);
+  });
+
   test.each(["ashby", "greenhouse"] as const)(
     "scrubbed real %s request shape uploads after Name is filled",
     async (shape) => {
