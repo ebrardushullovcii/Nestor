@@ -1457,6 +1457,17 @@ export function createBrowserAgentRuntime(
   const recoveryUnavailable = new Set<string>();
   const recoveringForms = new Map<string, Promise<void>>();
 
+  async function saveReviewedPreparedForm(key: string, page: Page): Promise<void> {
+    const recovery = formRecovery.get(key);
+    if (!preparedFormStore || !recovery?.saved || page.isClosed()) return;
+    const snapshot = await capturePreparedForm(page).catch(() => null);
+    const attachments = snapshot && describePreparedFormAttachments(snapshot, recovery.attachments);
+    if (!snapshot || !attachments) return;
+    recovery.snapshot = snapshot;
+    recovery.saved = {...recovery.saved, snapshot, attachments, reason: null, savedAt: new Date().toISOString()};
+    await preparedFormStore.save(recovery.saved);
+  }
+
   async function loadSavedForm(key: string): Promise<PreparedApplicationForm | null> {
     const saved = await preparedFormStore?.get(key) ?? null;
     if (saved?.snapshot && !formRecovery.has(key)) {
@@ -2779,6 +2790,7 @@ export function createBrowserAgentRuntime(
         preparedApplicationPages,
         pageBindingKey,
       );
+      await saveReviewedPreparedForm(pageBindingKey, page);
       await openPrepareOnlyFinalActionWindow(page, PERSON_HANDOFF_WINDOW_MS);
       preparedPagesWithPerson.add(pageBindingKey);
     },
@@ -2852,16 +2864,7 @@ export function createBrowserAgentRuntime(
         const result = await operation();
         // The final Ready check can tick approved declarations after the
         // preparer saved its checkpoint. Persist the actual reviewed form.
-        const recovery = formRecovery.get(pageBindingKey);
-        if (preparedFormStore && recovery?.saved && !page.isClosed()) {
-          const snapshot = await capturePreparedForm(page).catch(() => null);
-          const attachments = snapshot && describePreparedFormAttachments(snapshot, recovery.attachments);
-          if (snapshot && attachments) {
-            recovery.snapshot = snapshot;
-            recovery.saved = {...recovery.saved, snapshot, attachments, reason: null, savedAt: new Date().toISOString()};
-            await preparedFormStore.save(recovery.saved);
-          }
-        }
+        await saveReviewedPreparedForm(pageBindingKey, page);
         return result;
       } finally {
         releasePageUse();

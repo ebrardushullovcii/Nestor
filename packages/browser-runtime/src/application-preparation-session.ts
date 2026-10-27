@@ -36,6 +36,9 @@ export function guardApplicationPreparationSession(
     followLink: (ref) => guard(() => session.followLink(ref)),
     navigate: (url) => guard(() => session.navigate(url), url),
     clickElement: (ref) => guard(() => session.clickElement(ref)),
+    ...(session.clickWithoutWrites
+      ? {clickWithoutWrites: (expected: Parameters<NonNullable<ApplyPageSession["clickWithoutWrites"]>>[0]) => guard(() => session.clickWithoutWrites!(expected))}
+      : {}),
     pressKey: (ref, key) => guard(() => session.pressKey(ref, key)),
     scroll: (direction) => guard(() => session.scroll(direction)),
     wait: (milliseconds) => guard(() => session.wait(milliseconds)),

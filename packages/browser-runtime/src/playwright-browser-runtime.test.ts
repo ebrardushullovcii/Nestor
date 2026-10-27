@@ -3461,6 +3461,9 @@ describe("managed context active service worker gate", () => {
         return Promise.resolve("ready");
       });
       expect(save.mock.calls.at(-1)?.[0].snapshot?.fields[0]?.checked).toBe(true);
+      snapshot.fields[0]!.checked = false;
+      await runtime.handApplicationPageToPerson!("target_site", "ready");
+      expect(save.mock.calls.at(-1)?.[0].snapshot?.fields[0]?.checked).toBe(false);
     } finally {
       vi.doUnmock("./prepared-form-recovery");
       await rm(userDataDir, {recursive: true, force: true});
