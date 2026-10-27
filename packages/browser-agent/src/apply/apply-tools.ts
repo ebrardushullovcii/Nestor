@@ -470,10 +470,14 @@ export function parseApplyProposal(
         : needsRef();
     case "finish": {
       const reason = asString(args.reason) ?? "Finished without saying why.";
-      const forPerson = (asStringArray(args.forPerson) ?? [])
+      const named = (asStringArray(args.forPerson) ?? [])
         .map((item) => item.trim())
-        .filter(Boolean)
-        .slice(0, 20);
+        .filter(Boolean);
+      // Past twenty, the rest go together as one more item: none is dropped.
+      const forPerson =
+        named.length > 20
+          ? [...named.slice(0, 20), named.slice(20).join("; ")]
+          : named;
       return {
         ok: true,
         proposal: {
