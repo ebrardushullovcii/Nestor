@@ -413,16 +413,16 @@ export function ShortlistedScreen() {
         <div className="grid gap-3">
           <PageHeader
             actions={
-              tab === "resume" && approved > 0 ? (
+              tab === "resume" && list.total > 0 ? (
                 <Button
-                  disabled={busy !== null}
+                  disabled={busy !== null || list.loading}
                   onClick={() => void apply(selectedCount === 0)}
                   pending={busy === "apply"}
                   size="toolbar"
                 >
                   {selectedCount > 0
                     ? `Apply to ${plural(selectedCount, "job")}`
-                    : `Apply to all ${plural(approved, "job")}`}
+                    : `Apply to all ${list.totalCapped ? "matching jobs" : plural(list.total, "job")}`}
                 </Button>
               ) : null
             }
