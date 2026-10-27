@@ -73,6 +73,32 @@ test("on a strong computer at Standard, the tip opens the Speed setting once", a
   expect(screen.queryByText(/can run more at once/u)).toBeNull();
 });
 
+test("the tip goes twelve seconds after it shows, unless the person is on it", async () => {
+  install({ memoryGb: 31.8, cores: 16 });
+  renderTip();
+  await waitForTip();
+  const tip = () => screen.queryByText(/can run more at once/u);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+  expect(tip()).toBeTruthy();
+  const aside = tip()!.closest("aside")!;
+  fireEvent.mouseEnter(aside);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  expect(tip()).toBeTruthy();
+  fireEvent.mouseLeave(aside);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(11_000);
+  });
+  expect(tip()).toBeTruthy();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_000);
+  });
+  expect(tip()).toBeNull();
+});
+
 test("dismissing the tip ends it for good", async () => {
   install({ memoryGb: 31.8, cores: 16 });
   renderTip();
