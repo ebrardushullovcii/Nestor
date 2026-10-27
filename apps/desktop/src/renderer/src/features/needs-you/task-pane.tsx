@@ -16,7 +16,7 @@ import { useToast } from "@renderer/components/ui/toast";
 import { openPreparedApplication } from "@renderer/features/applications/open-application";
 import { AnswerField } from "./answer-field";
 import { SourceNeedPane } from "./source-need-pane";
-import { useWorkThrough } from "./work-through";
+import { siteCheck, useWorkThrough } from "./work-through";
 
 /** A site as a person names it: its host, without "www.". */
 function siteHost(url: string): string {
@@ -205,7 +205,7 @@ export function TaskPane(props: {
         <p>This item is no longer waiting for you.</p>
       ) : task.source ? (
         <SourceNeedPane
-          check={checks.get(task.id)}
+          check={siteCheck(checks, [task.id])}
           host={siteHost(task.source.url)}
           site={{
             id: task.id,

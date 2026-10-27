@@ -26,8 +26,24 @@ interface Walk {
 
 interface Snapshot {
   walk: Walk | null;
-  /** By Needs you row id: a site checked after sign-in. */
+  /**
+   * By Needs you task id: a site checked after sign-in. Keyed by task, not
+   * row, because a merged row's id moves when one of its sites closes.
+   */
   checks: ReadonlyMap<number, SiteCheck>;
+}
+
+/** What a row's check says: Checking… while any of its sites is checked. */
+export function siteCheck(
+  checks: ReadonlyMap<number, SiteCheck>,
+  taskIds: readonly number[],
+): SiteCheck | undefined {
+  const found = taskIds.map((id) => checks.get(id));
+  return found.includes("checking")
+    ? "checking"
+    : found.includes("still")
+      ? "still"
+      : undefined;
 }
 
 let snapshot: Snapshot = { walk: null, checks: new Map() };
@@ -84,10 +100,9 @@ const TERMINAL = new Set<JobSearchSourceRow["state"]>([
 /** A site still unread this long after its check reads as not working. */
 const CHECK_LIMIT_MS = 4 * 60_000;
 
-function setCheck(id: number, check: SiteCheck | null) {
+function setCheck(item: WorkItem, check: SiteCheck) {
   const checks = new Map(snapshot.checks);
-  if (check) checks.set(id, check);
-  else checks.delete(id);
+  for (const id of item.taskIds) checks.set(id, check);
   set({ checks });
 }
 
@@ -98,7 +113,7 @@ function setCheck(id: number, check: SiteCheck | null) {
  */
 async function checkSite(item: WorkItem) {
   watchers.get(item.id)?.();
-  setCheck(item.id, "checking");
+  setCheck(item, "checking");
   let searchId: string | null = null;
   try {
     for (const source of item.sources) {
@@ -108,7 +123,7 @@ async function checkSite(item: WorkItem) {
       searchId = status.search?.id ?? searchId;
     }
   } catch {
-    setCheck(item.id, "still");
+    setCheck(item, "still");
     return;
   }
   const seenWorking = new Set<number>();
@@ -157,7 +172,7 @@ async function checkSite(item: WorkItem) {
     if (!stopped && finished.size === item.sources.length) {
       stop();
       // A site that now reads has already left the list with its task.
-      setCheck(item.id, "still");
+      setCheck(item, "still");
     }
   };
   const unsubscribe = window.nestor.jobs.onSearchStatus(
@@ -165,7 +180,7 @@ async function checkSite(item: WorkItem) {
   );
   const timer = setTimeout(() => {
     stop();
-    setCheck(item.id, "still");
+    setCheck(item, "still");
   }, CHECK_LIMIT_MS);
   watchers.set(item.id, stop);
   void read();

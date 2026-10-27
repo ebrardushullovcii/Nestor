@@ -42,6 +42,7 @@ import { SourceNeedPane } from "./source-need-pane";
 import { useNeedsSelection } from "./use-needs-selection";
 import {
   currentWorkItem,
+  siteCheck,
   useWorkThrough,
   workThrough,
   type WorkItem,
@@ -807,11 +808,16 @@ export function NeedsYouScreen() {
                         : row.host
                     }
                     status={
-                      checks.get(row.id) === "checking"
-                        ? "Checking…"
-                        : checks.get(row.id) === "still"
-                          ? "Still can't read it"
-                          : "Search couldn't read this site"
+                      {
+                        checking: "Checking…",
+                        still: "Still can't read it",
+                        none: "Search couldn't read this site",
+                      }[
+                        siteCheck(
+                          checks,
+                          row.tasks.map((task) => task.id),
+                        ) ?? "none"
+                      ]
                     }
                     onActivate={activate}
                     onToggle={toggle}
@@ -896,7 +902,10 @@ export function NeedsYouScreen() {
             >
               <SourceNeedPane
                 key={site.id}
-                check={checks.get(site.id)}
+                check={siteCheck(
+                  checks,
+                  site.tasks.map((task) => task.id),
+                )}
                 host={site.host}
                 site={toWorkItem(site)}
               />

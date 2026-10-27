@@ -974,7 +974,7 @@ it("works through selected items: a question in place, then each site in the bro
     },
   });
   const question = ask(0);
-  gatedSites();
+  const [scaleCareers] = gatedSites();
   show();
   fireEvent.click(
     await screen.findByRole("checkbox", { name: "Select all 4 items" }),
@@ -1008,6 +1008,15 @@ it("works through selected items: a question in place, then each site in the bro
     }),
   );
   expect(await screen.findByText("Checking…")).toBeTruthy();
+  // One of the host's two sites now reads: its row moves to the other site's
+  // task and keeps the check it started under the first.
+  act(() => {
+    createSourceAccessStore(jobs).complete(scaleCareers!);
+  });
+  const scaleRow = await screen.findByRole("button", {
+    name: /scale-853\.example\.test(?! · 2 sites)/u,
+  });
+  expect(scaleRow.textContent).toContain("Checking…");
   act(() => workThrough.pause());
   await waitFor(() => expect(walk()).toContain("Paused at 3 of 3"));
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
