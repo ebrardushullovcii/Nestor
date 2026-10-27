@@ -374,3 +374,42 @@ describe("Applications", () => {
     ).toBeNull();
   });
 });
+
+describe("saved application views", () => {
+  it("opens a single saved view directly instead of a one-option dropdown", async () => {
+    renderScreen();
+    const filter = screen.getByRole<HTMLInputElement>("searchbox", {
+      name: "Find an application",
+    });
+    fireEvent.change(filter, { target: { value: "Northfield 1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save view" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name this view" }), {
+      target: { value: "My first view" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Saved the view My first view");
+    const open = await screen.findByRole("button", {
+      name: "Open view My first view",
+    });
+    expect(screen.queryByRole("combobox", { name: "Saved views" })).toBeNull();
+    fireEvent.change(filter, { target: { value: "" } });
+    fireEvent.click(open);
+    expect(filter.value).toBe("Northfield 1");
+  });
+
+  it("can visibly cancel naming a saved view without saving it", async () => {
+    renderScreen();
+    fireEvent.click(screen.getByRole("button", { name: "Save view" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name this view" }), {
+      target: { value: "A cancelled view" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.queryByRole("textbox", { name: "Name this view" }),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Save view" })).toBeTruthy();
+    expect(await window.nestor.tracker.run("list_views", {})).toEqual({
+      views: [],
+    });
+  });
+});

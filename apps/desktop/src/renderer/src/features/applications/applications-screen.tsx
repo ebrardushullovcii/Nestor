@@ -318,6 +318,7 @@ export function ApplicationsScreen() {
   const counts = list.counts;
   const total = trackerStatusValues.reduce((sum, s) => sum + counts[s], 0);
   const showColumns = prefs.columns;
+  const singleView = views.length === 1 ? (views[0] ?? null) : null;
 
   const filters = (
     <div className="flex flex-wrap items-center gap-2">
@@ -379,7 +380,18 @@ export function ApplicationsScreen() {
           ))}
         </select>
       ) : null}
-      {views.length > 0 ? (
+      {singleView ? (
+        <Button
+          aria-label={`Open view ${singleView.name}`}
+          className="max-w-56 min-w-0"
+          onClick={() => applyView(singleView)}
+          size="toolbar"
+          title={singleView.name}
+          variant="outline"
+        >
+          <span className="truncate">{singleView.name}</span>
+        </Button>
+      ) : views.length > 1 ? (
         <select
           aria-label="Saved views"
           className="h-8 rounded-(--radius-field) border border-(--control-border) bg-card px-2 text-xs"
@@ -423,6 +435,14 @@ export function ApplicationsScreen() {
           />
           <Button disabled={!naming.trim()} size="toolbar" type="submit">
             Save
+          </Button>
+          <Button
+            onClick={() => setNaming(null)}
+            size="toolbar"
+            type="button"
+            variant="ghost"
+          >
+            Cancel
           </Button>
         </form>
       )}
