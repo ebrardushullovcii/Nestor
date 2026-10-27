@@ -4,7 +4,7 @@ import type {
   ShortlistedRow,
 } from "@nestor/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
@@ -32,6 +32,7 @@ import {
 import { describeResume, LEVEL_LABEL } from "./resume-format";
 import { ResumePane } from "./resume-pane";
 import { describeError, useResume } from "./use-resume";
+import { ListEmpty } from "../job-lists/list-empty";
 import { useAssistantListView } from "../job-lists/use-assistant-list-view";
 import { useEffectWhileKeptRouteShown } from "../job-finder/lib/kept-route-visibility";
 
@@ -404,6 +405,11 @@ export function ShortlistedScreen() {
     );
   const toReview = list.counts.shortlisted;
   const approved = list.counts.resume;
+  const navigate = useNavigate();
+  const findJobs = {
+    label: "Find jobs",
+    onClick: () => void navigate("/job-finder/discovery"),
+  };
 
   return (
     <LockedScreenLayout
@@ -488,11 +494,35 @@ export function ShortlistedScreen() {
               </>
             }
             empty={
-              text
-                ? "No shortlisted job matches."
-                : tab === "shortlisted"
-                  ? "Nothing to review. Shortlist jobs in Find jobs and their resumes start writing here."
-                  : "No approved resumes yet. Approve one in To review."
+              text ? (
+                <ListEmpty title="No shortlisted job matches." />
+              ) : tab === "shortlisted" ? (
+                <ListEmpty
+                  action={
+                    approved > 0
+                      ? {
+                          label: `See ${plural(approved, "approved job")}`,
+                          onClick: () => setTab("resume"),
+                        }
+                      : findJobs
+                  }
+                  detail="Shortlist jobs in Find jobs and their resumes start writing here."
+                  title="Nothing to review"
+                />
+              ) : (
+                <ListEmpty
+                  action={
+                    toReview > 0
+                      ? {
+                          label: `Review ${plural(toReview, "resume")}`,
+                          onClick: () => setTab("shortlisted"),
+                        }
+                      : findJobs
+                  }
+                  detail="Approve a resume in To review and it waits here for Apply."
+                  title="No approved resumes yet"
+                />
+              )
             }
             hasMore={list.nextCursor !== null}
             label={
