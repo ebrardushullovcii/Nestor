@@ -144,11 +144,13 @@ describe("manual search relevance eval measurements", () => {
       "Job 9",
     ]);
   });
-  it("rejects complete coverage with zero reads or zero vacancies", () => {
+  it("requires observed vacancies or explicit empty evidence for complete coverage", () => {
     expect(coverageHonest(true, 0, 10)).toBe(false);
     expect(coverageHonest(true, 2, 0)).toBe(false);
     expect(coverageHonest(false, 2, 0)).toBe(true);
     expect(coverageHonest(true, 2, 10)).toBe(true);
+    expect(coverageHonest(true, 2, 0, true)).toBe(true);
+    expect(coverageHonest(true, 0, 0, true)).toBe(false);
   });
   it("cannot reuse a recorded model answer after a prompt or route change", () => {
     const request = [{ role: "user" as const, content: "Original" }];
