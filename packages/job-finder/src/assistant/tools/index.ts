@@ -73,13 +73,19 @@ const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
 function toolLoadResult(
   names: readonly string[],
   menu: readonly AssistantToolDefinition[],
+  unknownNames: readonly string[] = [],
 ) {
   return {
-    summary: names.length
-      ? `Loaded schemas: ${names.join(", ")}.`
-      : "No schemas loaded. Call already offered tools directly, or choose exact names from the menu.",
+    summary:
+      (names.length
+        ? `Loaded schemas: ${names.join(", ")}.`
+        : "No schemas loaded. Call already offered tools directly, or choose exact names from the menu.") +
+      (unknownNames.length
+        ? ` Unavailable names: ${unknownNames.join(", ")}. Use the matching names below; valid names in this request were still loaded.`
+        : ""),
     data: {
       names: [...names],
+      unknownNames: [...unknownNames],
       availableTools: menu.map(({ name, description }) => ({
         name,
         description: description.slice(0, 100),
@@ -92,7 +98,7 @@ export const loadToolsTool = defineTool({
   name: "load_tools",
   group: "workspace",
   description:
-    "Call tools already offered directly. Load schemas with names; groups only discover a menu of tool names and short descriptions. Domains: profile (profile/preferences edits, Undo, setup), files (library, import, exports), resume (write, edit, approve, history, PDF), jobs (find, shortlist, hide, sources), applications (queues, prepare, send with grants, forms, letters), tracking (Applications statuses, notes, replies, reminders, interviews, tags, saved views, CSV export and Undo), settings (applying policy, AI behavior, theme, zoom, reset), browser (read and work in a lent tab), workspace (summary, questions, navigation). Only schemas requested by exact name stay available this turn.",
+    "Call tools already offered directly. Load schemas with names. Groups load small catalogs directly; large groups return a menu for choosing exact names. Unknown names return matching names without discarding valid requests. Domains: profile (profile/preferences edits, Undo, setup), files (library, import, exports), resume (write, edit, approve, history, PDF), jobs (find, shortlist, hide, sources), applications (queues, prepare, send with grants, forms, letters), tracking (Applications statuses, notes, replies, reminders, interviews, tags, saved views, CSV export and Undo), settings (applying policy, AI behavior, theme, zoom, reset), browser (read and work in a lent tab), workspace (summary, questions, navigation). Loaded schemas stay available this turn.",
   parameters: json.object({
     groups: json.array(json.enumOf(assistantToolGroupValues)),
     names: json.ids(
@@ -157,21 +163,57 @@ export function buildAssistantToolCatalog(options: {
     {
       ...loadToolsTool,
       execute(input: z.infer<typeof loadToolsTool.input>) {
-        const available = new Set(
-          assistantToolGroupValues
-            .filter(include)
-            .flatMap(groupTools)
-            .map((tool) => tool.name),
-        );
+        const all = assistantToolGroupValues
+          .filter(include)
+          .flatMap(groupTools);
+        const available = new Set(all.map((tool) => tool.name));
         const unknown = (input.names ?? []).filter(
           (name) => !available.has(name),
         );
-        if (unknown.length)
-          throw new Error(`Unknown tools: ${unknown.join(", ")}`);
-        const names = [...new Set(input.names ?? [])];
+        const discovered = input.groups.filter(include).flatMap(groupTools);
+        const smallGroups = input.groups.filter(include).flatMap((group) => {
+          const catalog = groupTools(group);
+          // Bound schema expansion, including the large complete-draft schema.
+          const bytes = JSON.stringify(
+            catalog.map(({ name, description, parameters }) => ({
+              name,
+              description,
+              parameters,
+            })),
+          ).length;
+          return bytes <= 12_000 ? catalog.map((tool) => tool.name) : [];
+        });
+        const names = [
+          ...new Set([
+            ...(input.names ?? []).filter((name) => available.has(name)),
+            ...smallGroups,
+          ]),
+        ];
         options.onLoadToolNames?.(names);
-        const menu = input.groups.filter(include).flatMap(groupTools);
-        return Promise.resolve(toolLoadResult(names, menu));
+        const matches = unknown.flatMap((query) => {
+          const words = query
+            .toLowerCase()
+            .split(/[^a-z0-9]+/u)
+            .filter(Boolean);
+          return all
+            .map((tool) => ({
+              tool,
+              score: words.filter((word) => tool.name.includes(word)).length,
+            }))
+            .filter(({ score }) => score > 0)
+            .sort(
+              (a, b) =>
+                b.score - a.score || a.tool.name.localeCompare(b.tool.name),
+            )
+            .slice(0, 5)
+            .map(({ tool }) => tool);
+        });
+        const menu = [
+          ...new Map(
+            [...discovered, ...matches].map((tool) => [tool.name, tool]),
+          ).values(),
+        ];
+        return Promise.resolve(toolLoadResult(names, menu, unknown));
       },
     },
   ];

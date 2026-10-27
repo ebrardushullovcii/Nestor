@@ -2,7 +2,10 @@ import {
   assistantJobListPage,
   createResumeCommandReads,
   createResumeCommandRunner,
+  createResumeService,
+  type ResumeService,
 } from "@nestor/job-finder/resumes";
+import { createTrackerCommandRunner } from "@nestor/job-finder/tracker-commands";
 import { createApplicationStore } from "@nestor/db/applications";
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
 import {
@@ -17,6 +20,7 @@ import { createStubBrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   JOB_COMMANDS,
   RESUME_COMMANDS,
+  TRACKER_COMMANDS,
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
   ProfileSetupStateSchema,
@@ -29,6 +33,7 @@ import {
   type CandidateProfile,
   type JobCommandOutputs,
   type ResumeCommandOutputs,
+  type TrackerCommandOutputs,
   type JobCommandName,
   type JobSearchPreferences,
   type SavedJob,
@@ -88,6 +93,7 @@ export interface AssistantLaneRecorder {
 
 export interface AssistantLaneWorld {
   host: AssistantSessionHost;
+  commandNames: readonly string[];
   recorder: AssistantLaneRecorder;
   events: AssistantEvent[];
   snapshot(): Promise<AssistantLaneSnapshot>;
@@ -314,13 +320,15 @@ function recordingPorts(
   store: JobStore,
   needsYou: RunNeedsYouCommand,
   repository: JobFinderRepository,
+  resumes: ResumeService,
 ): AssistantHostPorts {
   const runJobCommand = createJobCommandRunner({ store });
   const runResumeCommand = createResumeCommandRunner(
-    () => Promise.reject(new Error("Writing is not part of this eval world.")),
+    () => Promise.resolve(resumes),
     () => Promise.resolve(createResumeCommandReads(store, () => [])),
   );
   const tracker = createTrackerStore(store);
+  const runTrackerCommand = createTrackerCommandRunner(store);
   return {
     savePageJobs: (input) => Promise.resolve(savePageJobs(store, input)),
     readCommand: async (name, input) => {
@@ -387,7 +395,12 @@ function recordingPorts(
         RESUME_COMMANDS,
         runResumeCommand,
         { group: "resume" },
-      ).filter((tool) => tool.effect === "read"),
+      ),
+      ...assistantCommandTools<typeof TRACKER_COMMANDS, TrackerCommandOutputs>(
+        TRACKER_COMMANDS,
+        runTrackerCommand,
+        { group: "tracking" },
+      ),
       ...needsYouCommandTools(needsYou),
     ],
     checkSource: () => Promise.resolve(),
@@ -464,11 +477,31 @@ export async function createAssistantLaneWorld(
     check: () => Promise.resolve(false),
   });
   const events: AssistantEvent[] = [];
+  const resumes = createResumeService({
+    store: jobs.store,
+    aiClient: createDeterministicJobFinderAiClient(),
+    documentManager: laneDocumentManager(),
+    readInputs: async () => ({
+      profile: await repository.getProfile(),
+      searchPreferences: await repository.getSearchPreferences(),
+      settings: await repository.getSettings(),
+    }),
+    fetchListingHtml: () =>
+      Promise.reject(new Error("No network in the assistant lane.")),
+  });
+  resumes.start();
+  const ports = recordingPorts(
+    recorder,
+    jobs.store,
+    needsYou,
+    repository,
+    resumes,
+  );
   const resolution = resolveLaneModel(model);
   const host: AssistantSessionHost = new AssistantSessionHost({
     repository: createAssistantRepository({ filePath: ":memory:" }),
     service,
-    ports: recordingPorts(recorder, jobs.store, needsYou, repository),
+    ports,
     resolveModel: () => resolution,
     publish: (event) => {
       events.push(event);
@@ -501,6 +534,7 @@ export async function createAssistantLaneWorld(
   });
   return {
     host,
+    commandNames: (ports.commands ?? []).map((tool) => tool.name),
     recorder,
     events,
     jobs: LANE_JOBS,
@@ -516,6 +550,7 @@ export async function createAssistantLaneWorld(
       try {
         await host.shutdown();
       } finally {
+        resumes.stop();
         jobs.store.close();
       }
     },

@@ -17,7 +17,7 @@ export interface AssistantLaneCaseResult {
   asked: boolean;
   failures: string[];
   replyText: string;
-  toolRuns: { toolName: string; outcome: string }[];
+  toolRuns: { toolName: string; outcome: string; detail: string | null }[];
   durationMs: number;
   inputs: AssistantLaneWorld["recorder"]["inputs"];
   error: string | null;
@@ -56,6 +56,7 @@ function observe(
         ? part.entries.map((entry) => ({
             toolName: entry.toolName,
             outcome: entry.outcome,
+            detail: entry.detail,
           }))
         : [],
     ),

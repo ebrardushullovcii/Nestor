@@ -25,7 +25,11 @@ export interface AssistantLaneObservation {
   stageOf(laneJobId: string): string;
   messages: readonly AssistantMessage[];
   replyText: string;
-  toolRuns: readonly { toolName: string; outcome: string }[];
+  toolRuns: readonly {
+    toolName: string;
+    outcome: string;
+    detail: string | null;
+  }[];
   changes: readonly {
     summary: string;
     fields: readonly string[];

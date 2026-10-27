@@ -19,6 +19,66 @@ import { ACTION_INVENTORY } from "./action-inventory";
 import { buildAssistantToolCatalog, listAllAssistantToolNames } from "./tools";
 
 describe("assistant action inventory", () => {
+  it("loads valid names beside a near miss and returns matching names without executing them", async () => {
+    const commands = assistantCommandTools(
+      RESUME_COMMANDS,
+      () => Promise.reject(new Error("Catalog only")),
+      { group: "resume" },
+    );
+    const loaded: string[] = [];
+    const catalog = buildAssistantToolCatalog({
+      commands,
+      mode: "grouped",
+      browserAvailable: false,
+      onLoadToolNames: (names) => loaded.push(...names),
+    });
+    const result = await catalog
+      .find((tool) => tool.name === "load_tools")!
+      .execute(
+        { groups: [], names: ["get_resume", "write_resume"] },
+        {} as never,
+      );
+    expect(loaded).toEqual(["get_resume"]);
+    expect(result.data).toHaveProperty("unknownNames", ["write_resume"]);
+    expect(result.data).toHaveProperty(
+      "availableTools",
+      expect.arrayContaining([
+        expect.objectContaining({ name: "rewrite_resume" }),
+      ]),
+    );
+  });
+
+  it("loads the small tracker group directly while keeping it out of the starting catalog", async () => {
+    const commands = assistantCommandTools(
+      TRACKER_COMMANDS,
+      () => Promise.reject(new Error("Catalog only")),
+      { group: "tracking" },
+    );
+    const loaded: string[] = [];
+    const options = {
+      commands,
+      mode: "grouped" as const,
+      browserAvailable: false,
+      onLoadToolNames: (names: readonly string[]) => loaded.push(...names),
+    };
+    const initial = buildAssistantToolCatalog(options);
+    expect(initial.some((tool) => tool.name === "set_status")).toBe(false);
+    await initial
+      .find((tool) => tool.name === "load_tools")!
+      .execute(
+        { groups: ["tracking"], names: ["applications_for_jobs"] },
+        {} as never,
+      );
+    expect(loaded).toEqual(
+      expect.arrayContaining(["list_applications", "set_status", "add_event"]),
+    );
+    expect(
+      buildAssistantToolCatalog({ ...options, loadedToolNames: loaded }).map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(expect.arrayContaining(["set_status", "add_event"]));
+  });
+
   it("measures desktop command schemas per screen", () => {
     const reject = () => Promise.reject(new Error("Catalog only"));
     const commands = [
