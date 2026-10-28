@@ -9,6 +9,7 @@ import {
   laneContext,
   type AssistantLaneRecorder,
   type AssistantLaneSnapshot,
+  type AssistantLaneScenario,
 } from "./world";
 
 /**
@@ -49,12 +50,17 @@ export interface AssistantLaneCase {
   /** Inventory entries this case exercises. */
   inventory: readonly string[];
   scripted: boolean;
-  scenario?: "ready_resume";
+  scenario?: AssistantLaneScenario;
   inputTokenBudget?: number;
   turns: readonly AssistantLaneTurn[];
   /** Returns what went wrong; empty means the case passed. */
   check(observation: AssistantLaneObservation): string[];
 }
+
+// The indexed job store assigns these numeric ids in seed order. Context and
+// tool results must name the same jobs, including instruction-grant targets.
+const storedJobId = (laneId: string): string =>
+  String(LANE_JOBS.findIndex((job) => job.id === laneId) + 1);
 
 const discoveryList = (
   focusId: string | null = null,
@@ -62,20 +68,20 @@ const discoveryList = (
   laneContext({
     screen: "discovery",
     route: focusId
-      ? `/job-finder/discovery?jobId=${focusId}`
+      ? `/job-finder/discovery?jobId=${storedJobId(focusId)}`
       : "/job-finder/discovery",
     focus: focusId
       ? {
           kind: "job",
-          id: focusId,
+          id: storedJobId(focusId),
           label: LANE_JOBS.find((job) => job.id === focusId)?.title ?? null,
         }
       : null,
     list: {
       listKind: "jobs",
-      selectedIds: focusId ? [focusId] : [],
-      displayedIds: LANE_JOBS.map((job) => job.id),
-      filteredIds: LANE_JOBS.map((job) => job.id),
+      selectedIds: focusId ? [storedJobId(focusId)] : [],
+      displayedIds: LANE_JOBS.map((_job, index) => String(index + 1)),
+      filteredIds: LANE_JOBS.map((_job, index) => String(index + 1)),
       totalFilteredCount: LANE_JOBS.length,
       filterSummary: null,
       campaignId: null,
@@ -561,21 +567,72 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "browser.apply_here": "Apply on the page that's open in the browser.",
 };
 
+const INVENTORY_SCENARIOS: Partial<Record<string, AssistantLaneScenario>> = {
+  "apply.send": "ready_application",
+  "tracking.commands": "tracked_application",
+  "settings.applying": "send_by_default",
+};
+
 const INVENTORY_CASES: AssistantLaneCase[] = ACTION_INVENTORY.flatMap(
   (entry): AssistantLaneCase[] => {
     if (entry.coverage.kind !== "tools") return [];
     const request = INVENTORY_REQUESTS[entry.id];
     if (!request) return [];
     const tools = entry.coverage.tools;
+    const scenario = INVENTORY_SCENARIOS[entry.id];
     return [
       {
         id: `inventory.${entry.id}`,
         title: `${entry.screen}: ${entry.action}`,
         inventory: [entry.id],
         scripted: false,
+        ...(scenario ? { scenario } : {}),
         turns: [{ text: request, context: discoveryList() }],
-        check: (o) =>
-          expect(
+        check: (o) => {
+          if (entry.id === "apply.send")
+            return [
+              ...expect(
+                o.recorder.sends.length === 1 &&
+                  o.recorder.sends[0]?.[0] === "1",
+                "the ready Northwind application was not sent exactly once",
+              ),
+              ...expect(
+                usedTool(o, "record_instruction"),
+                "no send instruction was recorded",
+              ),
+              ...expect(
+                usedTool(o, "send_application"),
+                "send_application did not run",
+              ),
+            ];
+          if (entry.id === "settings.applying")
+            return [
+              ...expect(
+                o.snapshot.settings.applicationAutomationMode ===
+                  "confirm_before_submit",
+                "default Apply mode did not change to Fill in for me",
+              ),
+              ...expect(
+                usedTool(o, "update_apply_settings"),
+                "update_apply_settings did not run",
+              ),
+            ];
+          if (entry.id === "tracking.commands")
+            return [
+              ...expect(
+                o.snapshot.northwindTracking?.row.status === "interview",
+                "Northwind did not move to Interview",
+              ),
+              ...expect(
+                o.snapshot.northwindTracking?.events.some(
+                  (event) =>
+                    event.kind === "note" &&
+                    /first call on Monday/iu.test(event.title),
+                ) ?? false,
+                "the tracker note was not saved",
+              ),
+            ];
+          return expect(
             usedTool(o, ...tools) ||
               usedTool(o, "report_missing_capability") ||
               // A clarifying question is not a fake success; the report
@@ -585,7 +642,8 @@ const INVENTORY_CASES: AssistantLaneCase[] = ACTION_INVENTORY.flatMap(
                 o.replyText,
               ),
             `none of ${tools.join(", ")} ran, no question was asked, and the reply did not say why`,
-          ),
+          );
+        },
       },
     ];
   },

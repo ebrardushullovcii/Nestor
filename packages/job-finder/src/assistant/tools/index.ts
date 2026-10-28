@@ -49,8 +49,8 @@ const COMMON_TOOLS = [
   "undo_change",
   "list_jobs",
 ];
-// Read-only orientation stays small. Edits and large resume schemas load by
-// exact name once the person's request needs them; navigation alone is free.
+// Keep orientation and the current screen's small actions available. Large
+// edit schemas load by exact name once the person's request needs them.
 const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
   home: ["get_workspace_summary"],
   profile: [
@@ -64,7 +64,12 @@ const SCREEN_TOOLS: Partial<Record<AssistantScreen, string[]>> = {
   discovery: ["list_sites", "search_status"],
   review_queue: ["get_resume"],
   resume_studio: ["get_resume"],
-  applications: ["list_applications", "applications_for_jobs"],
+  applications: [
+    "list_applications",
+    "list_application_work",
+    "applications_for_jobs",
+    "send_application",
+  ],
   actions: ["get_need"],
   settings: ["get_settings"],
   browser: ["browser_observe"],

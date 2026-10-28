@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   assistantJobListPage,
   createResumeCommandReads,
@@ -10,6 +11,8 @@ import { createApplicationStore } from "@nestor/db/applications";
 import { createNeedsYouCommandRunner } from "@nestor/job-finder/applications";
 import {
   needsYouCommandTools,
+  decideUnderGrants,
+  AssistantToolError,
   type RunNeedsYouCommand,
 } from "@nestor/job-finder";
 import {
@@ -27,6 +30,11 @@ import {
   ProfileSetupStateSchema,
   SavedJobSchema,
   ResumeDraftSchema,
+  ApplicationResumeArtifactSchema,
+  ApplicationReviewCardSchema,
+  ApplyExecutionResultSchema,
+  SubmissionOutcomeRecordSchema,
+  CandidateAssetSchema,
   createFreshStartCandidateProfile,
   type AssistantContextReference,
   type AssistantEvent,
@@ -38,6 +46,7 @@ import {
   type ApplicationCommandOutputs,
   type JobCommandName,
   type JobSearchPreferences,
+  type JobFinderSettings,
   type SavedJob,
 } from "@nestor/contracts";
 import {
@@ -49,6 +58,8 @@ import {
   openJobStore,
   createTrackerStore,
   createResumeStore,
+  approveOriginalResumesForTests,
+  seedTrackerDemo,
   type JobStore,
 } from "@nestor/db/job-store";
 import {
@@ -74,11 +85,18 @@ import {
  */
 
 export type AssistantLaneModel = "scripted" | "live";
+export type AssistantLaneScenario =
+  | "ready_resume"
+  | "ready_application"
+  | "tracked_application"
+  | "send_by_default";
 
 /** The person and goals the assistant may have changed. */
 export interface AssistantLaneSnapshot {
   profile: CandidateProfile;
   searchPreferences: JobSearchPreferences;
+  settings: JobFinderSettings;
+  northwindTracking: TrackerCommandOutputs["get_application"];
 }
 
 export interface AssistantLaneRecorder {
@@ -96,6 +114,7 @@ export interface AssistantLaneRecorder {
 export interface AssistantLaneWorld {
   host: AssistantSessionHost;
   commandNames: readonly string[];
+  commands: NonNullable<AssistantHostPorts["commands"]>;
   recorder: AssistantLaneRecorder;
   events: AssistantEvent[];
   snapshot(): Promise<AssistantLaneSnapshot>;
@@ -334,6 +353,8 @@ function recordingPorts(
   const runTrackerCommand = createTrackerCommandRunner(store);
   return {
     savePageJobs: (input) => Promise.resolve(savePageJobs(store, input)),
+    resolveApprovedJobs: (selection) =>
+      Promise.resolve(applications.selectedJobIds(selection)),
     readCommand: async (name, input) => {
       if (name === "list_applications")
         return tracker.list(input as never) as never;
@@ -387,10 +408,18 @@ function recordingPorts(
         {
           group: "jobs",
           results: {
-            list_jobs: (page) => ({
-              summary: `${page.total} jobs match.`,
-              data: assistantJobListPage(store, page),
-            }),
+            list_jobs: async (page, _input, { session }) => {
+              await session.createResultSet({
+                kind: "jobs",
+                label: "Matching jobs",
+                itemIds: page.rows.map((job) => String(job.id)),
+                source: "tool_query",
+              });
+              return {
+                summary: `${page.total} jobs match.`,
+                data: assistantJobListPage(store, page),
+              };
+            },
           },
         },
       ),
@@ -444,10 +473,120 @@ function recordingPorts(
         { group: "applications" },
       ),
       ...needsYouCommandTools(needsYou),
+      ...assistantCommandTools<
+        Pick<typeof APPLICATION_COMMANDS, "send_application">,
+        Pick<ApplicationCommandOutputs, "send_application">
+      >(
+        { send_application: APPLICATION_COMMANDS.send_application },
+        (_name, { id }) => {
+          const row = applications.getApplication(id)!;
+          if (!applications.beginSubmission(id, row.attempt)) return false;
+          // A recording fake, never a browser send or employer receipt.
+          const at = new Date().toISOString();
+          const recorded = applications.recordSubmission(
+            id,
+            row.attempt,
+            SubmissionOutcomeRecordSchema.parse({
+              id: `lane_receipt_${id}`,
+              preflightId: "lane_preflight",
+              idempotencyKey: `lane_send_${id}`,
+              authorityEnvelopeId: "lane_permission",
+              authorityRevision: 1,
+              jobId: String(row.jobId),
+              applicationRecordId: `application_${id}`,
+              runId: `application_run_${id}`,
+              resultId: `application_${id}_attempt_${row.attempt}`,
+              outcome: "submitted",
+              attemptedAt: at,
+              verifiedAt: at,
+              evidence: [
+                {
+                  id: "lane_confirmation",
+                  kind: "employer_site_state",
+                  observedAt: at,
+                  destination: {
+                    origin: "http://127.0.0.1:47950",
+                    safePath: "/thanks",
+                  },
+                  artifactRefId: null,
+                  summary: "Synthetic eval confirmation; no site contacted.",
+                },
+              ],
+              retry: { eligible: false, blockReason: "submission_confirmed" },
+            }),
+          );
+          if (recorded) recorder.sends.push([String(row.jobId)]);
+          return recorded;
+        },
+        {
+          group: "applications",
+          before: {
+            send_application: async ({ id }, { session }) => {
+              const row = applications.getApplication(id);
+              if (!row)
+                throw new AssistantToolError(
+                  "not_found",
+                  "That application no longer exists.",
+                );
+              if ((await repository.getActivityControl()).paused)
+                throw new AssistantToolError(
+                  "refused",
+                  "Background work is paused.",
+                );
+              const currentMode = (await repository.getSettings())
+                .applicationAutomationMode;
+              const [decision] = decideUnderGrants({
+                grants: await session.grants.list(),
+                jobIds: [String(row.jobId)],
+                action: "send",
+                savedMode:
+                  row.mode === "autonomous_submit" &&
+                  currentMode === "autonomous_submit"
+                    ? "autonomous_submit"
+                    : "confirm_before_submit",
+              });
+              if (!decision?.allowed)
+                throw new AssistantToolError(
+                  "refused",
+                  decision?.reason ?? "Record a send instruction first.",
+                );
+            },
+          },
+          results: {
+            send_application: (sent) => ({
+              summary: sent
+                ? "The synthetic eval recorded the send; no site was contacted."
+                : "Nothing was sent.",
+              data: sent,
+            }),
+          },
+        },
+      ),
     ],
     checkSource: () => Promise.resolve(),
-    listDocuments: () => Promise.resolve([]),
-    readDocumentText: () => Promise.resolve(null),
+    listDocuments: async () => {
+      const { baseResume } = await repository.getProfile();
+      return [
+        CandidateAssetSchema.parse({
+          id: "original_resume",
+          kind: "resume",
+          originalName: baseResume.fileName,
+          mime: "text/plain",
+          byteSize: Buffer.byteLength(baseResume.textContent ?? ""),
+          sha256: createHash("sha256")
+            .update(baseResume.textContent ?? "")
+            .digest("hex"),
+          createdAt: NOW,
+          sensitivity: "standard",
+          consentScope: "job_application_attachment",
+          retention: "until_deleted",
+        }),
+      ];
+    },
+    readDocumentText: async (id) =>
+      id === "original_resume"
+        ? (await repository.getProfile()).baseResume.textContent
+        : null,
     loadDocumentFile: () =>
       Promise.reject(new Error("No files in the assistant lane.")),
     importResumeDocument: () => Promise.resolve(),
@@ -472,11 +611,61 @@ export function resolveLaneModel(
 
 export async function createAssistantLaneWorld(
   model: AssistantLaneModel,
-  scenario?: "ready_resume",
+  scenario?: AssistantLaneScenario,
 ): Promise<AssistantLaneWorld> {
   const jobs = laneJobStore();
   const repository = createJobFinderRepository(jobs.store);
   await seedLaneProfile(repository);
+  if (scenario === "tracked_application") {
+    seedTrackerDemo(jobs.store, [jobs.ids.get("job_lane_1")!]);
+  }
+  if (scenario === "send_by_default") {
+    await repository.saveSettings({
+      ...(await repository.getSettings()),
+      applicationAutomationMode: "autonomous_submit",
+    });
+  }
+  if (scenario === "ready_application") {
+    const jobId = jobs.ids.get("job_lane_1")!;
+    approveOriginalResumesForTests(jobs.store, [jobId]);
+    const applications = createApplicationStore(jobs.store);
+    applications.applyJobs(
+      { selection: { ids: [jobId] } },
+      "confirm_before_submit",
+    );
+    const row = applications.claimNext()!;
+    applications.saveWork(row.id, {
+      attempt: row.attempt,
+      resumeArtifact: ApplicationResumeArtifactSchema.parse({
+        id: "lane_resume_artifact",
+        jobId: String(jobId),
+        source: "original_upload",
+        fileName: "riley-okafor.txt",
+        filePath: "/tmp/nestor-assistant-lane/riley-okafor.txt",
+        approvedAt: NOW,
+      }),
+      execution: ApplyExecutionResultSchema.parse({
+        state: "ready",
+        summary: "Northwind application is filled and ready to send.",
+        detail: "Synthetic prepared application; no site contacted.",
+        submittedAt: null,
+        outcome: null,
+        nextActionLabel: "Send",
+      }),
+      reviewCard: ApplicationReviewCardSchema.parse({
+        siteLabel: "Lane replica",
+        pageUrl: LANE_JOBS[0]!.applicationUrl,
+        preparedAt: NOW,
+      }),
+      authorityEnvelopeId: null,
+      profileDigest: "lane_profile",
+    });
+    applications.finishPreparation({
+      id: row.id,
+      attempt: row.attempt,
+      state: "ready",
+    });
+  }
   if (scenario === "ready_resume") {
     const id = jobs.ids.get("job_lane_1")!;
     jobs.store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
@@ -577,12 +766,18 @@ export async function createAssistantLaneWorld(
   return {
     host,
     commandNames: (ports.commands ?? []).map((tool) => tool.name),
+    commands: ports.commands ?? [],
     recorder,
     events,
     jobs: LANE_JOBS,
     snapshot: async () => ({
       profile: await repository.getProfile(),
       searchPreferences: await repository.getSearchPreferences(),
+      settings: await repository.getSettings(),
+      northwindTracking: await createTrackerCommandRunner(jobs.store)(
+        "get_application",
+        { jobId: jobs.ids.get("job_lane_1")! },
+      ),
     }),
     stageOf: (laneJobId) => {
       const id = jobs.ids.get(laneJobId);

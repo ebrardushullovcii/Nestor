@@ -19,6 +19,40 @@ import { ACTION_INVENTORY } from "./action-inventory";
 import { buildAssistantToolCatalog, listAllAssistantToolNames } from "./tools";
 
 describe("assistant action inventory", () => {
+  it("offers Apply work reads and Send on Applications, and loads them by name elsewhere", async () => {
+    const commands = assistantCommandTools(
+      APPLICATION_COMMANDS,
+      () => {
+        throw new Error("Catalog only");
+      },
+      { group: "applications" },
+    );
+    const names = [
+      "list_application_work",
+      "applications_for_jobs",
+      "send_application",
+    ];
+    const options = {
+      commands,
+      mode: "grouped" as const,
+      browserAvailable: false,
+    };
+    expect(
+      buildAssistantToolCatalog({ ...options, screen: "applications" }).map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(expect.arrayContaining(names));
+    const loaded: string[] = [];
+    const discovery = buildAssistantToolCatalog({
+      ...options,
+      screen: "discovery",
+      onLoadToolNames: (next) => loaded.push(...next),
+    });
+    await discovery
+      .find((tool) => tool.name === "load_tools")!
+      .execute({ groups: [], names }, {} as never);
+    expect(loaded).toEqual(expect.arrayContaining(names));
+  });
   it("loads valid names beside a near miss and returns matching names without executing them", async () => {
     const commands = assistantCommandTools(
       RESUME_COMMANDS,
