@@ -39,6 +39,7 @@ import {
   type AssistantContextReference,
   type AssistantEvent,
   type AssistantMessage,
+  type AssistantNavigationDisplay,
   type CandidateProfile,
   type JobCommandOutputs,
   type ResumeCommandOutputs,
@@ -89,7 +90,8 @@ export type AssistantLaneScenario =
   | "ready_resume"
   | "ready_application"
   | "tracked_application"
-  | "send_by_default";
+  | "send_by_default"
+  | "navigation";
 
 /** The person and goals the assistant may have changed. */
 export interface AssistantLaneSnapshot {
@@ -117,6 +119,10 @@ export interface AssistantLaneWorld {
   commands: NonNullable<AssistantHostPorts["commands"]>;
   recorder: AssistantLaneRecorder;
   events: AssistantEvent[];
+  /** Routes the assistant opened, in order. */
+  navigations: string[];
+  /** The screen the person is on for the next message, as the renderer sees it. */
+  show(context: AssistantContextReference): void;
   snapshot(): Promise<AssistantLaneSnapshot>;
   jobs: readonly SavedJob[];
   /** Where a lane job sits in the job store: found, hidden, shortlisted... */
@@ -333,6 +339,63 @@ function laneJobStore(): { store: JobStore; ids: Map<string, number> } {
   return {
     store,
     ids: new Map(LANE_JOBS.map((job, index) => [job.id, added[index]!])),
+  };
+}
+
+/**
+ * Bluebird and Quartz shortlisted, Northwind sent through Apply so it sits in
+ * Applications as applied; the rest are found.
+ */
+function seedNavigationWorkspace(store: JobStore, ids: Map<string, number>) {
+  store.setStage(
+    [ids.get("job_lane_2")!, ids.get("job_lane_3")!],
+    "shortlisted",
+  );
+  const sent = ids.get("job_lane_1")!;
+  approveOriginalResumesForTests(store, [sent]);
+  createApplicationStore(store).applyJobs(
+    { selection: { ids: [sent] } },
+    "confirm_before_submit",
+  );
+  const at = Date.parse(NOW);
+  store
+    .sql(
+      "UPDATE applications SET state = 'submitted', submitted_at = ?, updated_at = ? WHERE job_id = ?",
+    )
+    .run(at, at, sent);
+}
+
+/**
+ * What the renderer acknowledges after an open_in_app request: the route is
+ * displayed, unless the person has unsaved Profile typing and the route
+ * leaves Profile, where the app's leave dialog holds the page.
+ */
+function laneDisplay(
+  route: string,
+  showing: AssistantContextReference | null,
+): AssistantNavigationDisplay {
+  const next = new URL(route, "https://nestor.local");
+  const leavesUnsavedProfile =
+    showing?.editor?.editor === "profile" &&
+    showing.editor.dirtyFields.length > 0 &&
+    next.pathname !== "/job-finder/profile";
+  if (leavesUnsavedProfile)
+    return {
+      displayedRoute: showing.route,
+      section: null,
+      overlay: "dialog",
+      status: "blocked",
+      reason: "The requested page has not been displayed.",
+    };
+  return {
+    displayedRoute: route,
+    section:
+      next.pathname === "/job-finder/settings"
+        ? next.hash.slice(1) || null
+        : next.searchParams.get("section"),
+    overlay: "none",
+    status: "displayed",
+    reason: null,
   };
 }
 
@@ -616,6 +679,7 @@ export async function createAssistantLaneWorld(
   const jobs = laneJobStore();
   const repository = createJobFinderRepository(jobs.store);
   await seedLaneProfile(repository);
+  if (scenario === "navigation") seedNavigationWorkspace(jobs.store, jobs.ids);
   if (scenario === "tracked_application") {
     seedTrackerDemo(jobs.store, [jobs.ids.get("job_lane_1")!]);
   }
@@ -728,6 +792,8 @@ export async function createAssistantLaneWorld(
     repository,
     resumes,
   );
+  const navigations: string[] = [];
+  let showing: AssistantContextReference | null = null;
   const resolution = resolveLaneModel(model);
   const host: AssistantSessionHost = new AssistantSessionHost({
     repository: createAssistantRepository({ filePath: ":memory:" }),
@@ -736,26 +802,20 @@ export async function createAssistantLaneWorld(
     resolveModel: () => resolution,
     publish: (event) => {
       events.push(event);
-      // This world records navigation rather than opening a window. Give the
-      // host the same completion signal as the renderer; built-app checks
-      // separately prove that the requested screen actually appears.
-      if (
-        event.payload.type === "open_route" &&
-        event.payload.navigationRequestId
-      ) {
-        host.acknowledgeNavigation({
-          conversationId: event.conversationId,
-          navigationRequestId: event.payload.navigationRequestId,
-          displayedRoute: event.payload.route,
-          section: new URL(
-            event.payload.route,
-            "http://lane.test",
-          ).searchParams.get("section"),
-          overlay: "none",
-          status: "displayed",
-          reason: null,
-        });
-      }
+      const payload = event.payload;
+      if (payload.type !== "open_route") return;
+      navigations.push(payload.route);
+      const display = laneDisplay(payload.route, showing);
+      if (display.status === "displayed" && showing)
+        showing = { ...showing, route: payload.route, editor: null };
+      if (payload.navigationRequestId)
+        setTimeout(() =>
+          host.acknowledgeNavigation({
+            ...display,
+            conversationId: event.conversationId,
+            navigationRequestId: payload.navigationRequestId!,
+          }),
+        );
     },
     stallAfterMs: 60_000,
     log: (message, detail) => {
@@ -769,6 +829,10 @@ export async function createAssistantLaneWorld(
     commands: ports.commands ?? [],
     recorder,
     events,
+    navigations,
+    show: (context) => {
+      showing = context;
+    },
     jobs: LANE_JOBS,
     snapshot: async () => ({
       profile: await repository.getProfile(),
