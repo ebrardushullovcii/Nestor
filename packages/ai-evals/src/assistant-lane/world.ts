@@ -44,6 +44,10 @@ import {
   type AssistantMessage,
   type AssistantNavigationDisplay,
   type CandidateProfile,
+  type SavedFormAnswer,
+  type JobSearchSettings,
+  type JobSearchStatus,
+  WriteClipboardTextInputSchema,
   type JobCommandOutputs,
   type ResumeCommandOutputs,
   type TrackerCommandOutputs,
@@ -61,6 +65,7 @@ import {
   createJobFinderRepository,
   openJobStore,
   createTrackerStore,
+  createJobSitesStore,
   createResumeStore,
   approveOriginalResumesForTests,
   seedTrackerDemo,
@@ -92,6 +97,7 @@ type ResumeCommands = typeof ASSISTANT_RESUME_COMMANDS;
 
 export type AssistantLaneModel = "scripted" | "live";
 export type AssistantLaneScenario =
+  | "no_sites"
   | "ready_resume"
   | "ready_application"
   | "tracked_application"
@@ -105,6 +111,7 @@ export interface AssistantLaneSnapshot {
   searchPreferences: JobSearchPreferences;
   settings: JobFinderSettings;
   northwindTracking: TrackerCommandOutputs["get_application"];
+  savedAnswers: SavedFormAnswer[];
 }
 
 export interface AssistantLaneRecorder {
@@ -115,6 +122,7 @@ export interface AssistantLaneRecorder {
     reportedInputTokens: number | null;
   }[];
   searches: string[];
+  clipboard: string[];
   applications: { jobIds: string[]; mode: string }[];
   sends: string[][];
 }
@@ -413,7 +421,56 @@ function recordingPorts(
   repository: JobFinderRepository,
   resumes: ResumeService,
 ): AssistantHostPorts {
-  const runJobCommand = createJobCommandRunner({ store });
+  const sites = createJobSitesStore(store);
+  let searchStatus: JobSearchStatus = {
+    search: null,
+    sources: [],
+    progress: null,
+    sourceRevision: 0,
+  };
+  const search = {
+    start: (settings: JobSearchSettings) => {
+      const selected = sites
+        .list({ filter: "enabled" })
+        .rows.filter((site) =>
+          "ids" in settings.sites
+            ? settings.sites.ids.includes(site.id)
+            : !settings.sites.except.includes(site.id),
+        );
+      if (!selected.length)
+        return Promise.reject(
+          new Error("Add or enable a job source before searching."),
+        );
+      recorder.searches.push(JSON.stringify(settings));
+      searchStatus = {
+        ...searchStatus,
+        search: {
+          id: `synthetic_search_${recorder.searches.length}`,
+          state: "done",
+          settings,
+          startedAt: NOW,
+          finishedAt: NOW,
+          sourcesTotal: selected.length,
+          sourcesDone: selected.length,
+          found: 0,
+          added: 0,
+          merged: 0,
+          scored: 0,
+          error: null,
+        },
+      };
+      return Promise.resolve();
+    },
+    stop: () => {},
+    retrySource: () => Promise.resolve(),
+    scoreUnscored: () => Promise.resolve(0),
+    status: () => searchStatus,
+  };
+  const runJobCommand = createJobCommandRunner({
+    store,
+    search: () => Promise.resolve(search),
+    currentSearch: () => search,
+  });
   const runResumeCommand = createResumeCommandRunner(
     () => Promise.resolve(resumes),
     () => Promise.resolve(createResumeCommandReads(store, () => [])),
@@ -457,7 +514,7 @@ function recordingPorts(
         latestResumeImportRun,
         latestResumeImportReviewCandidates: [],
         latestResumeImportBundle: null,
-        enabledSiteCount: 0,
+        enabledSiteCount: sites.list({ filter: "enabled" }).enabledTotal,
         resumeImportActive: false,
         availableResumeTemplates: [],
         generatedAt: NOW,
@@ -467,44 +524,32 @@ function recordingPorts(
       ...assistantCommandTools<
         typeof ASSISTANT_JOB_COMMANDS,
         JobCommandOutputs
-      >(
-        ASSISTANT_JOB_COMMANDS,
-        (name, input) => {
-          if (name === "start_search") {
-            recorder.searches.push(JSON.stringify(input).slice(0, 400));
-            return Promise.reject(
-              new Error("Searching is not part of this eval world."),
-            );
-          }
-          return runJobCommand(name, input);
-        },
-        {
-          group: "jobs",
-          results: {
-            stage_counts: (counts) => ({
-              summary: "Current job counts.",
-              data: assistantJobCounts(counts),
-            }),
-            count_jobs: (_value, input) => ({
-              summary: "Matching jobs.",
-              data: { total: countAssistantJobs(store, input) },
-            }),
-            list_jobs: async (_page, input, { session }) => {
-              const page = readAssistantJobs(store, input);
-              await session.createResultSet({
-                kind: "jobs",
-                label: "Matching jobs",
-                itemIds: page.rows.map((job) => String(job.id)),
-                source: "tool_query",
-              });
-              return {
-                summary: `${page.total} jobs match.`,
-                data: assistantJobListPage(store, page),
-              };
-            },
+      >(ASSISTANT_JOB_COMMANDS, runJobCommand, {
+        group: "jobs",
+        results: {
+          stage_counts: (counts) => ({
+            summary: "Current job counts.",
+            data: assistantJobCounts(counts),
+          }),
+          count_jobs: (_value, input) => ({
+            summary: "Matching jobs.",
+            data: { total: countAssistantJobs(store, input) },
+          }),
+          list_jobs: async (_page, input, { session }) => {
+            const page = readAssistantJobs(store, input);
+            await session.createResultSet({
+              kind: "jobs",
+              label: "Matching jobs",
+              itemIds: page.rows.map((job) => String(job.id)),
+              source: "tool_query",
+            });
+            return {
+              summary: `${page.total} jobs match.`,
+              data: assistantJobListPage(store, page),
+            };
           },
         },
-      ),
+      }),
       ...assistantCommandTools<ResumeCommands, ResumeCommandOutputs>(
         ASSISTANT_RESUME_COMMANDS,
         runResumeCommand,
@@ -656,6 +701,16 @@ function recordingPorts(
         },
       ),
     ],
+    executeAction: (actionId, input) => {
+      if (actionId !== "write-clipboard-text")
+        return Promise.reject(
+          new Error(
+            `Action ${actionId} is not implemented in this eval world.`,
+          ),
+        );
+      recorder.clipboard.push(WriteClipboardTextInputSchema.parse(input).text);
+      return Promise.resolve();
+    },
     checkSource: () => Promise.resolve(),
     listDocuments: async () => {
       const { baseResume } = await repository.getProfile();
@@ -709,6 +764,10 @@ export async function createAssistantLaneWorld(
   const jobs = laneJobStore();
   const repository = createJobFinderRepository(jobs.store);
   await seedLaneProfile(repository);
+  if (scenario !== "no_sites")
+    createJobSitesStore(jobs.store).add({
+      text: "https://synthetic.example.test/jobs",
+    });
   if (scenario === "approved_shortlist")
     approveOriginalResumesForTests(jobs.store, [1, 2, 3]);
   if (scenario === "navigation") seedNavigationWorkspace(jobs.store, jobs.ids);
@@ -794,6 +853,7 @@ export async function createAssistantLaneWorld(
   const recorder: AssistantLaneRecorder = {
     inputs: [],
     searches: [],
+    clipboard: [],
     applications: [],
     sends: [],
   };
@@ -870,6 +930,12 @@ export async function createAssistantLaneWorld(
       profile: await repository.getProfile(),
       searchPreferences: await repository.getSearchPreferences(),
       settings: await repository.getSettings(),
+      savedAnswers: applications.needsYou
+        .listAnswers({})
+        .rows.flatMap((row) => {
+          const answer = applications.needsYou.savedAnswer(row.id);
+          return answer ? [answer] : [];
+        }),
       northwindTracking: await createTrackerCommandRunner(jobs.store)(
         "get_application",
         { jobId: jobs.ids.get("job_lane_1")! },

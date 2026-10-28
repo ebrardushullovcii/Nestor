@@ -782,7 +782,7 @@ describe("assistant session host", () => {
     expect(release).toHaveBeenCalledWith("Switching browser tabs");
   });
 
-  it("does not reopen the screen the person is already looking at", async () => {
+  it("always asks the renderer to acknowledge navigation, even for the send-time route", async () => {
     const screens = ["shortlisted", "applications"];
     let step = 0;
     const { host, events } = setup({
@@ -842,12 +842,12 @@ describe("assistant session host", () => {
     } finally {
       clearInterval(acknowledge);
     }
-    // Shortlisted was already showing; only Applications was opened.
+    // The renderer, not the stale send-time context, decides what is showing.
     expect(
       events.flatMap((event) =>
         event.payload.type === "open_route" ? [event.payload.route] : [],
       ),
-    ).toEqual(["/job-finder/applications"]);
+    ).toEqual(["/job-finder/review-queue", "/job-finder/applications"]);
   });
 
   it("R3-169 waits for Browser to minimize before emitting the route", async () => {

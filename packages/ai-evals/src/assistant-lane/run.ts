@@ -71,7 +71,14 @@ function observe(
   );
   const questions = messages.reduce(
     (count, message) =>
-      count + message.parts.filter((part) => part.type === "question").length,
+      count +
+      message.parts.filter((part) => part.type === "question").length +
+      (message.role === "assistant" &&
+      message.parts.some(
+        (part) => part.type === "text" && part.text.trim().endsWith("?"),
+      )
+        ? 1
+        : 0),
     0,
   );
   return { replyText, toolRuns, changes, questions };
