@@ -70,7 +70,7 @@ describe("ATS resume rendering", () => {
   });
 });
 
-it.each(["classic_ats", "modern_professional", "compact_technical"])(
+it.each(["classic_ats", "modern_split", "technical_matrix"])(
   "keeps translated skill and language labels in %s",
   (templateId) => {
     const translated = structuredClone(document);
