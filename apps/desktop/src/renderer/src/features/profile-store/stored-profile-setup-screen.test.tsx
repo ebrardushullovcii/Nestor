@@ -264,7 +264,7 @@ test("setup remains editable while deferred vision is active and saves only the 
   expect(save.hasAttribute("disabled")).toBe(false);
   fireEvent.click(save);
   await waitFor(() =>
-    expect(createProfileStore(store).overview().fields.personalWebsiteUrl).toBe(
+    expect(createProfileStore(store).overview().fields.portfolioUrl).toBe(
       "https://synthetic.example.test",
     ),
   );
