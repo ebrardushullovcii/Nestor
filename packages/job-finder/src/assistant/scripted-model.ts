@@ -174,7 +174,7 @@ function plan(messages: readonly AgentLoopMessage[]): Step {
       return {
         toolCalls: [
           call("action_write_clipboard_text", {
-            text: String(basics.headline ?? ""),
+            text: typeof basics.headline === "string" ? basics.headline : "",
           }),
         ],
       };
