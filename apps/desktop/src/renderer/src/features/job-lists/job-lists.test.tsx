@@ -277,4 +277,39 @@ describe("adding job sites", () => {
     });
     expect(screen.getByText("1 address")).toBeTruthy();
   });
+
+  it("inserts typed lines in one edit at the caret", () => {
+    render(<AddSites alwaysOpen />);
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Job site URLs",
+    });
+    fireEvent.change(box, { target: { value: "https://first.example.test" } });
+    box.setSelectionRange(box.value.length, box.value.length);
+    const lines = Array.from(
+      { length: 900 },
+      (_, i) => `https://careers-${i}.example.test/jobs`,
+    );
+    const typed = new InputEvent("beforeinput", {
+      inputType: "insertText",
+      data: `\n${lines.join("\n")}`,
+      cancelable: true,
+    });
+    act(() => {
+      box.dispatchEvent(typed);
+    });
+    expect(typed.defaultPrevented).toBe(true);
+    expect(box.value.split("\n")).toEqual([
+      "https://first.example.test",
+      ...lines,
+    ]);
+    expect(screen.getByText("901 addresses")).toBeTruthy();
+    // One line typed is left to the browser.
+    const key = new InputEvent("beforeinput", {
+      inputType: "insertText",
+      data: "x",
+      cancelable: true,
+    });
+    box.dispatchEvent(key);
+    expect(key.defaultPrevented).toBe(false);
+  });
 });

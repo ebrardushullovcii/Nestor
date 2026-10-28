@@ -53,6 +53,35 @@ export function AddSites(props: {
     props.registerFlush?.(() => addRef.current());
     return () => props.registerFlush?.(null);
   }, [props.registerFlush]);
+  const edit = (value: string) => {
+    setText(value);
+    setMessage(null);
+    setDuplicateUrls([]);
+  };
+  const editRef = useRef(edit);
+  editRef.current = edit;
+  const box = useRef<HTMLTextAreaElement>(null);
+  // Chromium types inserted text (dictation, an input method, automation) one
+  // line at a time with a layout per line: 900 addresses held the window for
+  // about 1.8 s. A paste is already one edit; insert typed lines in one too.
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const insertLines = (event: InputEvent) => {
+      if (event.inputType !== "insertText" || !event.data?.includes("\n"))
+        return;
+      event.preventDefault();
+      element.setRangeText(
+        event.data,
+        element.selectionStart,
+        element.selectionEnd,
+        "end",
+      );
+      editRef.current(element.value);
+    };
+    element.addEventListener("beforeinput", insertLines);
+    return () => element.removeEventListener("beforeinput", insertLines);
+  }, [open]);
   return (
     <div className="grid gap-3">
       {!props.alwaysOpen ? (
@@ -73,6 +102,7 @@ export function AddSites(props: {
           {/* No spellcheck or wrapping: checking and laying out a paste of
               900 addresses froze the window for seconds. */}
           <ProfileTextarea
+            ref={box}
             id="job-site-urls"
             aria-describedby="job-site-urls-count"
             aria-label="Job site URLs"
@@ -81,11 +111,7 @@ export function AddSites(props: {
             value={text}
             wrap="off"
             placeholder="Paste careers or job-board URLs, one per line"
-            onChange={(event) => {
-              setText(event.target.value);
-              setMessage(null);
-              setDuplicateUrls([]);
-            }}
+            onChange={(event) => edit(event.target.value)}
           />
           <p
             className="text-(length:--text-small) text-foreground-soft tabular-nums"
