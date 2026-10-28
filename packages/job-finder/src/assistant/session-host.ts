@@ -1687,8 +1687,7 @@ export class AssistantSessionHost {
             ),
             overlay: "none",
             status: "displayed",
-            reason:
-              "The person was already on this screen when they wrote, so nothing moved. Say it is on screen.",
+            reason: "Already on this screen; nothing moved.",
           };
         live.navigated = true;
         await this.ports.prepareAppNavigation?.();
