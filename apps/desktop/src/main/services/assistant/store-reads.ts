@@ -65,7 +65,11 @@ export const readAssistantPersonalState: AssistantHostPorts["readPersonalState"]
       ...personal,
       enabledSiteCount: sites.enabledTotal,
       availableResumeTemplates: listLocalResumeTemplates(),
-      resumeImportActive: isDesktopResumeImportActive(),
+      resumeImportActive:
+        isDesktopResumeImportActive() ||
+        (
+          await (await import("../job-finder/runtime")).getProfileService()
+        ).isResumeImportActive(),
       generatedAt: new Date().toISOString(),
     };
   };

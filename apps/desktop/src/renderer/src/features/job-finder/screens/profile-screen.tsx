@@ -520,7 +520,7 @@ export function ProfileScreen(props: {
         : null,
     // Keep the preserved draft until text AND deferred visual writes finish.
     // The form hook rebases disjoint changes and still flags true overlaps.
-    blocked: hasBackgroundConflict || isResumeImportProcessing,
+    blocked: hasBackgroundConflict || importPending,
     preserve: props.onPreserveEdits
       ? ({ profile, goals, baseline }) =>
           props.onPreserveEdits!(profile, goals, baseline)
