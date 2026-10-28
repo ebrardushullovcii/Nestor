@@ -10,8 +10,11 @@ export function getRunningResumeImportProgress(
   if (
     !run ||
     (!["queued", "parsing", "extracting", "reconciling"].includes(run.status) &&
-      !Object.values(run.modelRoles ?? {}).some(
-        (role) => role.status === "running",
+      !(
+        ["applied", "review_ready"].includes(run.status) &&
+        Object.values(run.modelRoles ?? {}).some(
+          (role) => role.status === "running",
+        )
       ))
   )
     return null;
