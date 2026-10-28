@@ -9,16 +9,18 @@ export function getRunningResumeImportProgress(
 ): ResumeImportProgressEvent | null {
   if (
     !run ||
-    !["queued", "parsing", "extracting", "reconciling"].includes(run.status)
+    (!["queued", "parsing", "extracting", "reconciling"].includes(run.status) &&
+      !Object.values(run.modelRoles ?? {}).some(
+        (role) => role.status === "running",
+      ))
   )
     return null;
   return {
-    stage:
-      run.status === "reconciling"
-        ? "saving_results"
-        : run.status === "extracting"
-          ? "building_profile"
-          : "reading_document",
+    stage: ["reconciling", "applied", "review_ready"].includes(run.status)
+      ? "saving_results"
+      : run.status === "extracting"
+        ? "building_profile"
+        : "reading_document",
     message: "The latest resume import is still in progress.",
     occurredAt: run.startedAt,
   };
