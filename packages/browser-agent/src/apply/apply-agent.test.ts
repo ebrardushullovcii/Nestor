@@ -9556,6 +9556,107 @@ describe("a closed form comes back without the model", () => {
     },
   );
 
+  test.each(["Worldwide", ""])(
+    "Needs-you eligibility answers are written and advance with location %j",
+    async (location) => {
+      const questions = [
+        "Are you authorized to work in the job's country? *",
+        "Will you need visa sponsorship? *",
+      ];
+      const source = page({
+        stepLabel: "Step 3 of 4: Eligibility",
+        controls: questions.flatMap((question, group) =>
+          (["Yes", "No"] as const).map((label, option) => ({
+            ...workAuthorizationRadio(group * 2 + option, label),
+            name: `eligibility-${group}`,
+            groupLabel: question,
+          })),
+        ),
+        actions: [{ index: 0, label: "Next", visible: true, disabled: false }],
+      });
+      const input = config(source, { modelQuestionClassification: true });
+      input.application.applicationRecordId = "application_1";
+      input.application.resultId = "application_1_attempt_2";
+      input.sources.posting.location = location;
+      input.replay = { answers: [], attachments: [], path: [] };
+      input.initialUnansweredPickerQuestions = questions.map((prompt) => ({
+        prompt,
+        options: ["Yes", "No"],
+      }));
+      input.readReusableAnswers = () =>
+        Promise.resolve(
+          questions.map((question, index) => ({
+            id: `application_${index + 31}`,
+            kind: "other" as const,
+            label: question,
+            question,
+            answer: index === 0 ? "Yes" : "No",
+            roleFamilies: [],
+            proofEntryIds: [],
+            applicationScope: {
+              applicationRecordId: "application_1",
+              resultId: null,
+              location: location || null,
+            },
+          })),
+        );
+      const writes = liveHands(source, input);
+      input.hands.clickElement = vi.fn(() => {
+        expect(writes).toEqual(["c0=true", "c3=true"]);
+        source.controls = [nameControl()];
+        source.stepLabel = "Step 4 of 4: Review";
+        source.actions = [
+          {
+            index: 0,
+            label: "Submit application",
+            visible: true,
+            disabled: false,
+          },
+        ];
+        return Promise.resolve({ ok: true as const, observedValue: "Review" });
+      });
+      const model = scriptedModel([
+        { name: "click", args: { ref: "a0" } },
+        { name: "finish", args: { reason: "Ready for review." } },
+      ]);
+      const result = await runApplyAgent(input, {
+        chatWithTools: (messages, definitions, options) => {
+          if (definitions[0]?.function.name === "report_question_kinds")
+            return Promise.resolve({
+              toolCalls: [
+                {
+                  id: "read",
+                  type: "function" as const,
+                  function: {
+                    name: "report_question_kinds",
+                    arguments: JSON.stringify({
+                      plainIndexes: [],
+                      flagged: [],
+                      tags: source.controls.map((_, index) => ({
+                        index,
+                        kind: source.stepLabel?.includes("Review")
+                          ? "other"
+                          : index < 2
+                            ? "work_auth"
+                            : "sponsorship",
+                        country: null,
+                        sourceId: null,
+                      })),
+                    }),
+                  },
+                },
+              ],
+            });
+          return model.chatWithTools(messages, definitions, options);
+        },
+      });
+      expect(writes).toEqual(["c0=true", "c3=true"]);
+      expect(input.hands.clickElement).toHaveBeenCalledTimes(1);
+      expect(result.outcome).toBe("prepared");
+      expect(result.pauses).toEqual([]);
+    },
+  );
+
   test("a saved radio answer the page refuses carries the attempted-write reason", async () => {
     const question = "Are you legally authorized to work in this country?";
     const source = page({

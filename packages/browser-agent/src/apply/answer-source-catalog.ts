@@ -632,6 +632,26 @@ export function classifyAnswerPermission(input: {
   // unconditional profile fact. Neither a model suggestion nor residence
   // supplies this fact. This also survives old prompt-only saved keys.
   const legal = tags.kind === "work_auth" || tags.kind === "sponsorship";
+  // The person's answer to this application's question is the fact. Country
+  // and permit checks below govern reuse elsewhere, not their own decision.
+  // Keep the exact question/value and lineage binding at Fill and Send alike.
+  const localScope = matchingSaved?.applicationScope;
+  if (
+    legal &&
+    matchingSaved?.id.startsWith("application_") &&
+    matchingSaved.answer === input.answer &&
+    input.application &&
+    ((input.application.applicationRecordId &&
+      localScope?.applicationRecordId ===
+        input.application.applicationRecordId) ||
+      (input.application.resultId &&
+        localScope?.resultId === input.application.resultId))
+  ) {
+    const human = catalog.find(
+      (row) => row.id === `answerLibrary.${matchingSaved.id}`,
+    );
+    if (human) return { kind: "literal", source: human };
+  }
   const namedCountries = countriesIn(
     input.control.groupLabel + " " + input.control.label,
   );
