@@ -401,7 +401,7 @@ describe("enrichSavedJobListingDetails", () => {
     // summary is the opening paragraph rather than the whole body.
     expect(next.description).toContain("5+ years with .NET Core and REST APIs");
     expect(next.company).toBe("Garner Health");
-    expect(next.location).toBe("New York, NY, US");
+    expect(next.location).toBe("New York, NY, United States");
     expect(next.salaryText).toBe("USD 180,000 – 220,000 / year");
     expect(next.normalizedCompensation.minAnnualUsd).toBe(180000);
     expect(next.postedAt).toBe("2026-08-30T00:00:00.000Z");
@@ -531,7 +531,7 @@ describe("enrichSavedJobListingDetails", () => {
     });
 
     expect(result.jobs[0]?.company).toBe("Garner Health");
-    expect(result.jobs[0]?.location).toBe("New York, NY, US");
+    expect(result.jobs[0]?.location).toBe("New York, NY, United States");
   });
 
   it("skips jobs that do not need a read and caps how many it reads", async () => {

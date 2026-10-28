@@ -229,6 +229,15 @@ function readOrganizationName(value: unknown): string | null {
   return readString(value);
 }
 
+const regionNames = new Intl.DisplayNames(["en"], { type: "region" });
+
+function locationCountry(value: unknown): string | null {
+  const country = readString(value);
+  return country && /^[a-z]{2}$/iu.test(country)
+    ? (regionNames.of(country.toUpperCase()) ?? country)
+    : country;
+}
+
 function readLocation(node: JsonRecord): {
   location: string | null;
   workModeHints: string[];
@@ -254,7 +263,7 @@ function readLocation(node: JsonRecord): {
     const parts = [
       readString(address.addressLocality),
       readString(address.addressRegion),
-      readString(address.addressCountry),
+      locationCountry(address.addressCountry),
     ].filter((part): part is string => Boolean(part));
     const label = parts.length > 0 ? parts.join(", ") : readString(entry.name);
     if (label) {

@@ -1116,3 +1116,57 @@ test("zero cards can never inherit complete coverage from browser navigation", a
   expect(inventory.complete).toBe(false);
   expect(inventory.notes.join(" ")).toContain("No listings were read");
 });
+
+test("unlabelled paragraphs after a card title are not location evidence", () => {
+  const html =
+    '<article><h2><a href="/jobs/1">Junior Data Analyst</a></h2><p>Example Analytics</p><p>Berlin, Germany</p><p>20 hours per week</p></article>';
+  const cards = readInventoryHtml(html, source.url, source).cards;
+  expect(cards).toHaveLength(1);
+  expect(cards[0]?.locationHint).toBeUndefined();
+});
+
+test("a vacancy's published address overrides an incorrect card location hint", async () => {
+  const title = "Junior Data Analyst";
+  const html = `<script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title, description: "Build SQL and Python dashboards with the analytics team in Berlin.", hiringOrganization: { name: "Example Analytics" }, jobLocation: { address: { addressLocality: "Berlin", addressCountry: "DE" } } })}</script><main><h1>${title}</h1><p>Example Analytics</p><p>Berlin, Germany</p><p>Build SQL and Python dashboards with the analytics team in Berlin.</p></main>`;
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.reject(Error("Published facts need no model call")),
+    ),
+  };
+  const result = await readListings({
+    cards: [{ ...card(title), locationHint: "Example Analytics" }],
+    readPage: (url) => Promise.resolve({ html, finalUrl: url }),
+    client,
+  });
+  expect(result.failures).toEqual([]);
+  expect(result.jobs).toHaveLength(1);
+  expect(result.jobs[0]).toMatchObject({
+    company: "Example Analytics",
+    location: "Berlin, Germany",
+  });
+  expect(client.chatWithTools).not.toHaveBeenCalled();
+});
+
+test("an employer-before-title card keeps its separate location without structured data", async () => {
+  const html =
+    '<article><p>Example Analytics</p><h2><a href="/jobs/1">Junior Data Analyst</a></h2><p>Berlin, Germany</p></article>';
+  const cards = readInventoryHtml(html, source.url, source).cards;
+  expect(cards[0]).toMatchObject({
+    companyHint: "Example Analytics",
+    locationHint: "Berlin, Germany",
+  });
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.reject(Error("Corroborated facts need no model call")),
+    ),
+  };
+  const detail =
+    "<main><h1>Junior Data Analyst</h1><p>Example Analytics</p><p>Berlin, Germany</p><p>Build SQL and Python dashboards with the analytics team.</p></main>";
+  const result = await readListings({
+    cards,
+    readPage: (url) => Promise.resolve({ html: detail, finalUrl: url }),
+    client,
+  });
+  expect(result.jobs[0]?.location).toBe("Berlin, Germany");
+  expect(client.chatWithTools).not.toHaveBeenCalled();
+});

@@ -39,7 +39,7 @@ describe("extractListingDetailFromHtml", () => {
     expect(detail?.method).toBe("json_ld");
     expect(detail?.title).toBe("Senior Software Engineer");
     expect(detail?.company).toBe("Garner Health");
-    expect(detail?.location).toBe("New York, NY, US");
+    expect(detail?.location).toBe("New York, NY, United States");
     expect(detail?.workModeHints).toContain("remote");
     expect(detail?.salaryText).toBe("USD 180,000 – 220,000 / year");
     expect(detail?.employmentType).toBe("Full-Time");
