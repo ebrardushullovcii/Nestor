@@ -701,10 +701,10 @@ for (const operation of [
       systemPrompt: "Read all evidence",
       modelContextWindowTokens: 196000,
       payload: { documentBundle: { blocks }, candidates },
-      fetch: async (_prompt, payload) => {
+      fetch: (_prompt, payload) => {
         calls++;
         expect(payload).toEqual({ documentBundle: { blocks }, candidates });
-        return { candidates: [] };
+        return Promise.resolve({ candidates: [] });
       },
     });
     expect(calls).toBe(1);
@@ -720,14 +720,14 @@ for (const operation of [
       systemPrompt: "Read all evidence",
       modelContextWindowTokens: 20000,
       payload: { documentBundle: { blocks } },
-      fetch: async (_prompt, payload) => {
+      fetch: (_prompt, payload) => {
         const chunk = payload as { documentBundle: { blocks: typeof blocks } };
         seen.push(...chunk.documentBundle.blocks.map((b) => b.id));
-        return {
+        return Promise.resolve({
           candidates: chunk.documentBundle.blocks.map((b) => ({
             value: b.text,
           })),
-        };
+        });
       },
     });
     expect(seen).toEqual(blocks.map((b) => b.id));
