@@ -89,3 +89,5 @@ At the observed cohort mean, 897 sites project to **7,570,680** high-volume toke
 or **5,776,680** close-match tokens. These are projections from a small stratified
 sample; the actual 897-site total will be measured later during the owner's full
 search in the real hunt. Live retries and a different listing volume can change it.
+
+Label correction (2026-10-29): the PostHog Product Engineer posting has USA address metadata, but its text does not state an Americas/Europe hiring area. Grafana 6130907004 specifies US/Canada candidates with an EST-time-zone qualification; Chicago is Central and the text does not offer hours overlap as an alternative. It needs clarification for these personas. The default fit-quality tape was rebound to the corrected label manifest; its 51 model turns and route are unchanged. Location-guard changes replay those exact answers without fresh AI calls.
