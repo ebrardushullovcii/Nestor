@@ -731,9 +731,10 @@ export async function readListings(
       continue;
     }
     const company = read.structured?.company || read.card.companyHint;
+    // The vacancy's own published address outranks a list-card hint.
     const location =
-      read.card.locationHint?.split("·")[0]?.trim() ||
-      read.structured?.location;
+      read.structured?.location ||
+      read.card.locationHint?.split("·")[0]?.trim();
     const name = company?.trim().toLowerCase();
     const conflictingEmployer =
       read.structured?.company &&

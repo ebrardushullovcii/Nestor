@@ -370,9 +370,15 @@ export function readInventoryHtml(
           attr(child, "class"),
         ),
       ) ??
-      paragraphs.find(
-        (child) => children.indexOf(child) > children.indexOf(heading),
-      );
+      // Without an employer before the title, this could be the employer.
+      (companyNode && children.indexOf(companyNode) < children.indexOf(heading)
+        ? paragraphs.find(
+            (child) =>
+              children.indexOf(child) > children.indexOf(heading) &&
+              child !== companyNode &&
+              text(child) !== companyHint,
+          )
+        : undefined);
     const publishedTime = children.find(
       (child) => child.tagName === "time" && attr(child, "datetime"),
     );
