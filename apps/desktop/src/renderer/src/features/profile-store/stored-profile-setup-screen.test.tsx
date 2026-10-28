@@ -12,6 +12,7 @@ import { RouterProvider, createMemoryRouter } from "react-router-dom";
 import {
   CandidateExperienceSchema,
   ProfileSetupStateSchema,
+  ResumeImportRunSchema,
   type DesktopJobsBridge,
   type DesktopProfileWorkflowBridge,
   type ProfileWorkflowCommand,
@@ -239,4 +240,32 @@ test("a held-back background change is not overwritten: no deleted record comes 
   // The refusal shows on the step, not only on the import screen.
   expect(screen.getByRole("alert").textContent).not.toBe("");
   expect(state.profileSetupState.currentStep).toBe("background");
+});
+
+test("setup remains editable while deferred vision is active and saves only the changed field", async () => {
+  state.resumeImportActive = true;
+  state.latestResumeImportRun = ResumeImportRunSchema.parse({
+    id: "deferred",
+    sourceResumeId: "synthetic",
+    sourceResumeFileName: "long.pdf",
+    trigger: "import",
+    status: "applied",
+    startedAt: "2026-10-29T00:00:00Z",
+    modelRoles: { vision: { status: "running" } },
+  });
+  renderSetup();
+  const website = await screen.findByLabelText("Website");
+  fireEvent.change(website, {
+    target: { value: "https://synthetic.example.test" },
+  });
+  const save = screen.getByRole("button", {
+    name: "Save and continue to Work history",
+  });
+  expect(save.hasAttribute("disabled")).toBe(false);
+  fireEvent.click(save);
+  await waitFor(() =>
+    expect(createProfileStore(store).overview().fields.personalWebsiteUrl).toBe(
+      "https://synthetic.example.test",
+    ),
+  );
 });
