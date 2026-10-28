@@ -1,5 +1,6 @@
 /** A full read cannot omit supplied evidence to fit the model budget. */
 export class FullFitEvidenceBudgetError extends Error {}
+export class ResumeImportBudgetError extends Error {}
 
 const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 196_000;
 const APPROX_CHARS_PER_TOKEN = 3;
@@ -656,6 +657,16 @@ export function compactOpenAiCompatibleUserPayload(input: {
 
   const charBudget = computeUserPayloadCharBudget(input);
   const originalSize = estimateSerializedLength(parsedPayload.data);
+
+  if (
+    input.operation === "extractResumeImportStage" ||
+    input.operation === "adjudicateResumeImportCandidates"
+  ) {
+    if (originalSize <= charBudget) return parsedPayload.data;
+    throw new ResumeImportBudgetError(
+      "Resume import must be chunked to fit the model input budget.",
+    );
+  }
 
   if (input.preserveFullPayload) {
     if (originalSize <= charBudget) return parsedPayload.data;

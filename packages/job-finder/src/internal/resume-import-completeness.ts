@@ -55,7 +55,10 @@ function parseResumeDate(value: string): {
   const monthYear = /^([A-Za-z]+)\s+(\d{4})$/u.exec(trimmed);
   if (monthYear) {
     const month = MONTHS[monthYear[1]!.toLowerCase()];
-    return { date: month ? `${monthYear[2]}-${month}` : monthYear[2]!, current: false };
+    return {
+      date: month ? `${monthYear[2]}-${month}` : monthYear[2]!,
+      current: false,
+    };
   }
   const numericMonth = /^(\d{1,2})\/(\d{4})$/u.exec(trimmed);
   if (numericMonth) {
@@ -75,7 +78,19 @@ function sourceLines(bundle: ResumeDocumentBundle): string[] {
       .sort((left, right) => left.readingOrder - right.readingOrder)
       .map((block) => block.text)
       .join("\n");
-  return text.split(/\r?\n/u).map((line) => line.trim());
+  return text
+    .split(/\r?\n/u)
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^#{1,6}\s+/u, "")
+        .replace(/\s+#+$/u, "")
+        .replace(/\*\*(.*?)\*\*|__(.*?)__/gu, "$1$2")
+        .replace(/^\*([^*].*?)\*$/u, "$1")
+        .replace(/^_([^_].*?)_$/u, "$1")
+        .trim(),
+    )
+    .filter(Boolean);
 }
 
 function blockIdsFor(
@@ -103,12 +118,9 @@ function suggestMissingExperienceRoles(input: {
   candidates: readonly ResumeImportFieldCandidate[];
 }): ResumeImportFieldCandidate[] {
   const lines = sourceLines(input.bundle);
-  const start = lines.findIndex((line) => EXPERIENCE_HEADING.test(line));
-  if (start === -1) return [];
-  const end = lines.findIndex(
-    (line, index) => index > start && OTHER_SECTION_HEADING.test(line),
-  );
-  const section = lines.slice(start + 1, end === -1 ? undefined : end);
+  const section = lines;
+  let sectionKind: "experience" | "education" | "volunteer" | "break" | null =
+    null;
   const known = new Set(
     [
       ...input.profile.experiences.map(
@@ -143,50 +155,113 @@ function suggestMissingExperienceRoles(input: {
   const suggestions: ResumeImportFieldCandidate[] = [];
   for (let index = 0; index < section.length; index += 1) {
     const header = section[index]!;
+    if (EXPERIENCE_HEADING.test(header)) {
+      sectionKind = "experience";
+      continue;
+    }
+    if (/^education(?:\s+and\s+qualifications)?$/iu.test(header)) {
+      sectionKind = "education";
+      continue;
+    }
+    if (/^volunteer(?:ing|\s+experience)?$/iu.test(header)) {
+      sectionKind = "volunteer";
+      continue;
+    }
+    if (/^career\s+breaks?$/iu.test(header)) {
+      sectionKind = "break";
+      continue;
+    }
+    if (OTHER_SECTION_HEADING.test(header)) {
+      sectionKind = null;
+      continue;
+    }
+    if (!sectionKind) continue;
     if (/^[-•*]/u.test(header) || DATE_RANGE.test(header)) continue;
     const match = ROLE_HEADER.exec(header);
-    if (!match) continue;
+    if (!match && sectionKind !== "break") continue;
     const dateLine = section[index + 1];
     const dates = dateLine ? DATE_RANGE.exec(dateLine) : null;
     if (!dates) continue;
-    const title = match[1]!.trim();
-    const companyName = match[2]!.trim();
-    const key = `${normalizeRoleKey(title)}|${normalizeRoleKey(companyName)}`;
-    if (known.has(key)) continue;
+    const title = match?.[1]?.trim() ?? header;
+    const companyName = match?.[2]?.trim() ?? null;
+    const key = `${normalizeRoleKey(title)}|${normalizeRoleKey(companyName ?? "")}`;
+    const educationKnown =
+      sectionKind === "education" &&
+      [
+        ...input.profile.education,
+        ...input.candidates
+          .filter((candidate) => candidate.target.section === "education")
+          .map((candidate) => candidate.value),
+      ].some(
+        (value) =>
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          "schoolName" in value &&
+          "degree" in value &&
+          normalizeRoleKey(String(value.schoolName ?? "")) ===
+            normalizeRoleKey(companyName ?? "") &&
+          normalizeRoleKey(String(value.degree ?? "")) ===
+            normalizeRoleKey(title),
+      );
+    if (known.has(key) || educationKnown) continue;
     known.add(key);
     const startDate = parseResumeDate(dates[1]!);
     const endDate = parseResumeDate(dates[2]!);
     const achievements: string[] = [];
-    for (let bulletIndex = index + 2; bulletIndex < section.length; bulletIndex += 1) {
+    for (
+      let bulletIndex = index + 2;
+      bulletIndex < section.length;
+      bulletIndex += 1
+    ) {
       const line = section[bulletIndex]!;
-      if (ROLE_HEADER.test(line) && DATE_RANGE.test(section[bulletIndex + 1] ?? "")) {
+      if (
+        OTHER_SECTION_HEADING.test(line) ||
+        EXPERIENCE_HEADING.test(line) ||
+        /^(?:volunteer|career break)/iu.test(line)
+      )
+        break;
+      if (
+        ROLE_HEADER.test(line) &&
+        DATE_RANGE.test(section[bulletIndex + 1] ?? "")
+      ) {
         break;
       }
       const bullet = /^[-•*]\s*(.+)$/u.exec(line)?.[1]?.trim();
       if (bullet) achievements.push(bullet);
     }
-    const value = {
-      title,
-      companyName,
-      startDate: startDate.date,
-      endDate: endDate.date,
-      isCurrent: endDate.current,
-      summary: null,
-      achievements,
-      skills: [],
-      domainTags: [],
-    };
+    const value =
+      sectionKind === "education"
+        ? {
+            degree: title,
+            schoolName: companyName,
+            startDate: startDate.date,
+            endDate: endDate.date,
+            summary: achievements.join("\n") || null,
+          }
+        : {
+            title,
+            companyName,
+            startDate: startDate.date,
+            endDate: endDate.date,
+            isCurrent: endDate.current,
+            summary: sectionKind === "break" ? header : null,
+            employmentType: sectionKind === "volunteer" ? "Volunteer" : null,
+            achievements,
+            skills: [],
+            domainTags: [],
+          };
     const evidenceText = [header, dateLine, ...achievements].join("\n");
-    const id = `resume_import_suggested_experience_${suggestions.length + 1}`;
+    const id = `resume_import_suggested_entry_${index}`;
     suggestions.push({
       id,
       runId: input.candidates[0]?.runId ?? "resume_import_completeness",
       target: {
-        section: "experience",
+        section: sectionKind === "education" ? "education" : "experience",
         key: "record",
-        recordId: `experience_suggested_${suggestions.length + 1}`,
+        recordId: `completeness_suggested_${index}`,
       },
-      label: "Work history",
+      label: sectionKind === "education" ? "Education" : "Work history",
       sourceKind: "parser_literal",
       value,
       normalizedValue: value,
@@ -195,7 +270,7 @@ function suggestMissingExperienceRoles(input: {
       sourceBlockIds: blockIdsFor(input.bundle, [header, dateLine ?? ""]),
       confidence: 0.72,
       notes: [
-        "Added from the resume text because the import missed this role. Review and edit before using.",
+        "Added from the resume text because the import missed this entry. Review and edit before using.",
       ],
       alternatives: [],
       conflictChoices: [],
@@ -327,7 +402,7 @@ export function completeResumeImport(input: {
   if (missingRoles.length > 0) {
     candidates.push(...missingRoles);
     warnings.push(
-      `${missingRoles.length} older role${missingRoles.length === 1 ? "" : "s"} in your resume were added for review because the import missed ${missingRoles.length === 1 ? "it" : "them"}.`,
+      `${missingRoles.length} missing work history or education entries (including older roles) were added for review.`,
     );
   }
   return { candidates, warnings };
