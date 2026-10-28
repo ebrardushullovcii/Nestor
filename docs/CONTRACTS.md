@@ -1,6 +1,6 @@
 # Contracts
 
-Cross-package contract rules and the invariants a future agent is most likely to "fix" by mistake. Field-level detail lives in `packages/contracts` (JSDoc and README).
+Cross-package contract rules and the invariants a future agent is most likely to "fix" by mistake. Field-level detail lives in `packages/contracts`.
 
 ## Rules
 
@@ -16,60 +16,46 @@ Each line names the symbol or file to check before changing the behavior. If the
 
 ### Candidate assets and profile
 
-- Raw paths, bytes, extracted text, and byte loaders never cross the renderer boundary; application upload receives a main-process-only `loadVerifiedBytes` capability and calls it immediately before upload (`workspace-application-attachments.ts`, `playwright-application-flow.ts`).
+- Candidate-asset paths, bytes and loaders stay in main; Profile resume metadata omits `storagePath` and `textContent`. Application attachments receive a main-process-only `loadVerifiedBytes` capability (`profile-store.ts`, `workspace-application-attachments.ts`, `agent-application-preparation.ts`).
 - Compensation matching compares only the saved minimum, and only when explicit currencies match; a null range maximum is not a ceiling, and missing or different currencies stay neutral and never infer an exchange rate (`matching-compensation.ts`).
 - The fresh-start seed persists no fake facts: identity strings stay null and placeholder strings are never counted as real (`createFreshStartCandidateProfile`, `hasProfileSetupPlaceholderValue`).
-- Setup readiness has one canonical rule and requires a runnable enabled public source, not an explicit target title (`evaluateProfileSetupReadiness`, `isRunnableJobDiscoveryTarget`).
-- Long-running profile flows commit through the revision CAS boundary and retry a stale commit exactly once before surfacing a typed error (`commitMergedProfileUpdateWithStaleRetry`, `MAX_PROFILE_COMMIT_ATTEMPTS`).
+- Setup readiness requires a name, one contact method and an enabled site, not an explicit target title (`evaluateProfileSetupReadiness`).
+- Profile copilot commits use the revision CAS boundary and retry a stale commit exactly once before surfacing `ProfileCommitStaleError` (`commitProfileCopilotStateWithStaleRetry`, `MAX_PROFILE_COMMIT_ATTEMPTS`).
 
 ### Resume export and approval
 
-- Approved resume exports are written only through `approveResumeExport()`; both repositories throw on `upsertResumeExportArtifact` with `isApproved: true`, on purpose.
-- Resume export intent is `approval | download`; `approval` renders and verifies without a native Save dialog (`ResumePdfExportIntentSchema`, `routes/job-finder.ts`).
-- One rule decides whether a resume claim blocks export, and assistant proposals are gated by it before display (`isBlockingResumeClaimAssessment`, `evaluateResumeProposalGrounding`).
-- Repositories retain only the newest revisions per draft and drop older ones deliberately (`MAX_RESUME_DRAFT_REVISIONS_PER_DRAFT`).
-- Apply refuses a missing or stale approved resume and re-verifies file existence plus SHA-256 before any browser work (`workspace-apply-run-support.ts`).
+- Approval checks the saved resume's `updatedAt` before recording approval and moving a shortlisted job to `resume`; an edit or level change clears approval (`resumes/resume-service.ts`, `job-store/resumes.ts`).
+- Download PDF uses the native Save dialog and neither approves nor saves unsaved typing (`ResumePdfExportInputSchema`, `routes/resumes.ts`).
+- Apply requires an approved, ready resume and checks the file's SHA-256 before browser preparation, then rechecks it at upload (`applications/application-service.ts`, `applications/resume-artifacts.ts`).
 - The approved answer-snapshot digest excludes lifecycle timestamps and the Profile revision so unrelated Profile writes cannot stale unchanged answers (`serializeApprovedApplicationAnswerSnapshotForDigest`).
 
-### Discovery and ledger
+### Discovery
 
-- Only a `complete` inventory observation may transition a prior ledger identity to inactive (`inventoryCompleteness`, `collectionSupportsInactiveMarking` in `workspace-discovery-methods.ts`).
-- `DiscoveryJobView.listingActivity` is snapshot-only; `SavedJob` deliberately does not persist it (`DiscoveryJobViewSchema = SavedJobSchema.and(...)`, `listing-activity.ts`).
-- Service shortlist, product-action, and application gates each reject `listingActivity.status === "closed"` independently so stale UI cannot bypass closure; inactive and stale stay advisory.
-- Identity resolution is collision-safe: zero, multiple, or conflicting candidates are no match, and title + company + location + date is a possible alias that never auto-merges (`job-identity.ts`).
-- Compact observation refs are stale unless observation id and revision both match; payloads carrying selectors or handles fail closed (`DiscoveryCompactObservationControlRefSchema`).
-- Discovery, source-debug, and apply consume the latest `draft` instruction artifact, otherwise the latest `validated` (`resolveActiveSourceInstructionArtifact`).
-- A failed source-debug run keeps the previously verified guidance and its provenance instead of refreshing them (`preservedRouteHintArtifact` in `workspace-source-debug-workflow.ts`).
-- Newest sorting uses `postedAt`, then `firstSeenAt`, then `discoveredAt`, never application workflow timestamps (`discovery-ordering.ts`).
-- `dismissedDiscoveryJobs` is a separate projection that never enters ranking; restore returns a job to its recorded `priorStatus`.
-- A discovery run result is `{ outcome: "completed" | "cancelled", snapshot }` and the snapshot is required in both variants (`JobFinderAgentDiscoveryResultSchema`).
-- Company job ownership requires an exact canonical name or an alias with `identityAuthority: "user_approved_merge"`; legacy aliases default to `unknown`, and a domain corroborates but never owns jobs or scopes an exclusion (`company-intelligence-operations.ts`, `employer-exclusion.ts`).
-- Application effort is explanation-only: Easy Apply lowers estimated effort, but `matching.ts` never reads `applicationEffort` into the score or ordering.
+- Repeated discovery merges jobs by normalized URL or source identity and preserves their stage; title, company and location may merge sightings across sites (`job-store/found-jobs.ts`).
+- Page actions use the current observed refs and reject a changed page signature; raw selectors are not a substitute (`page-tools.ts`).
+- Apply and source-debug prefer the site's referenced draft instruction, then its referenced validated instruction (`resolveActiveSourceInstructionArtifact`); search prefers the referenced validated instruction, then the draft (`job-search/engine.ts`).
+- A source check that fails verification keeps the referenced validated instruction and saves its new guidance as a draft (`preserveExistingValidatedInstruction` in `workspace-source-debug-workflow.ts`).
+- `newest` sorts by `found_at`, `posted` by `posted_at` then `found_at`, and `recent` by `stage_at`; every order ends in `id` (`job-store/job-list.ts`).
+- Hidden jobs stay out of Find jobs ranking; triage moves and Undo operate on stored stages (`job-store/job-moves.ts`).
 
 ### Persistence and revisions
 
-- `singleton_state.revision` only moves forward; unconditional saves increment it in the same upsert (`incrementSingletonRevision`, migration `singleton_state_revision`).
-- The profile revision is a shared epoch: search-preferences and profile-setup-state saves also increment the `profile` revision, on purpose (`file-repository.ts`).
+- `profile_revision.version` advances once per transaction that reports a profile change; profile, goals and setup share that CAS epoch (`job-store/job-store.ts`, `job-store/profile-workspace.ts`).
 - `commitProfileUpdate(updater, { expectedRevision })` checks the revision inside the write transaction and returns the current profile without writing on mismatch.
-- `listSavedJobs` is unbounded unless the caller passes `limit`/`offset`; `commitSavedJobDelta` is row-local, and full-replacement methods must never receive a page.
-- There is no silent fresh start: an unrecoverable workspace fails with `WorkspaceDatabaseRecoveryRequiredError`, and `<workspace>.reset-backup` is deliberately excluded from automatic candidates (`file-repository-recovery.ts`).
-- A migration error on a clean-integrity database is classified `not-corruption`: nothing is quarantined or rewritten.
-- SQLite runs WAL with `synchronous = NORMAL`; close snapshots use `VACUUM INTO` and are database-only, so never describe them as full-workspace or zero-loss backups (`migrations.ts`, `file-repository-backup.ts`).
+- Job lists are cursor pages, defaulting to 50 and capped at 200; mutations use ids or a filter selection, never a page as a replacement collection (`JobListQuerySchema`, `JobSelectionSchema`).
+- The job store uses WAL with `synchronous = NORMAL` and additive schema changes. Only a file older than `JOB_STORE_KEPT_FROM_VERSION` is deleted and recreated (`job-store/job-store.ts`).
 - The close-guard discard approval is a single-use, generation-bound token invalidated by crash, reload, or re-attach (`main-window-close-guard.ts`).
 
 ### Applications and safety
 
-- Sending is envelope-bound: saved mode `prepare_only` never authorizes final submission, `ApplicationAutomationMode` is a distinct axis from `ApplyRunMode`, and `application-submission-runtime-main` has no production caller (`application-submission-policy.ts`).
+- Sending is envelope-bound: saved mode `prepare_only` never authorizes final submission, `ApplicationAutomationMode` is a distinct axis from `ApplyRunMode`, and the application service calls the submission runtime through preflight and idempotency guards (`applications/application-service.ts`, `application-submission-runtime.ts`).
 - Submission evidence kinds are external only (`submissionOutcomeEvidenceKindValues`); there is no click or intent field, so intent can never prove submission.
-- `outcome_uncertain` permanently blocks automatic retry and forbids `finalSubmitOccurred` (`SubmissionOutcomeRecordSchema`, `application-submission-orchestrator.ts`).
-- `applicationPreparationStartedAt` and `applicationPreparationStartedLocalDate` are a pair: both absent is legacy unknown, both null is explicitly not begun (`apply.ts` refinement).
-- One run prepares at most `MAX_EMPLOYER_APPLICATION_JOBS_PER_RUN` jobs; there is no daily limit.
-- `intermediateMutationsAuthorized` never authorizes final submission and requires exactly one job, one origin, and one resume digest (`application-authority-management.ts`).
-- `externalWrites` records a write only after an authorized request receives a 2xx/3xx response; filled answers stay `answered` until an actual submission (`playwright-application-flow.ts`).
-- Only login, signup, email-verification, and MFA blockers may resolve through source-access verification (`workspace-application-user-action.ts`); CAPTCHA and the rest wait for a capability-specific probe.
-- User-owned blockers are not technical-failure evidence (`isUserOwnedBlockerEvidence`).
-- The product-action registry exposes exactly the eight tools in `jobFinderProductActionToolNameValues`; none submits, creates accounts, or navigates arbitrarily.
-- Visual snapshots are evidence-only: `visual.ts` rejects selectors and directives, and capture requires the explicit `captureVisualSnapshots` opt-in rather than inference from a visual-capable client.
+- `outcome_uncertain` blocks automatic retry and forbids `finalSubmitOccurred` (`SubmissionOutcomeRecordSchema`, `application-submission-orchestrator.ts`).
+- `intermediateMutationsAuthorized` never authorizes final submission. A saved autosave grant requires explicit jobs or a campaign, at least one resume digest and an expiry; grants may cover multiple jobs and origins (`application-authority-management.ts`).
+- Preparation records filled fields and attachment activity in `externalWrites` with `verified: false`; this is not proof of a server save or submission (`toExternalWrites` in `agent-application-preparation.ts`).
+- Access blockers become typed sign-in, CAPTCHA or MFA tasks; continuation re-observes the retained application page (`accessKind`, `checkApplicationAccess` in `applications/application-service.ts`).
+- Open form questions and remembered answers belong to Needs you; answering queues only waiting attempts whose remaining tasks are resolved, without granting send authority (`job-store/needs-you.ts`).
+- Visual observations are evidence-only: `visual.ts` rejects selectors and directives. Apply visual diagnostics require explicit capture and analysis callbacks (`buildApplyVisualDiagnostics` in `playwright-browser-runtime.ts`).
 
 ### AI providers and Live Assistant
 

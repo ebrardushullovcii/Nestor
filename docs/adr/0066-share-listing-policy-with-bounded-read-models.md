@@ -1,6 +1,6 @@
 # ADR 0066: Share listing policy with bounded read models
 
-Status: accepted (2026-10-24).
+Status: partly superseded: job-store indexed columns and direct list queries replace the legacy scalar read index, TEMP activity projection and locale-rank tables (db925711, 145ad266). The separate job-list-policy package remains for shared policy helpers.
 
 The query list matched the legacy list's IDs and counts but differed in complete
 ordering, activity and row facts. A screen cannot switch while those differ.

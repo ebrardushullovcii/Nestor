@@ -1,6 +1,6 @@
 # ADR 0024: Job Finder browser harness and three apply modes
 
-Status: accepted
+Status: partly superseded by ADRs 0025 (saved search behavior), 0029 (setup eligibility), 0034 (tab takeover) and 0041 (ordinary discovery). Job-store Apply replaces batch overrides with a mode captured per queued application (0b25b734); the 2026-10-27 safe-step amendment and submission boundaries remain accepted.
 
 Date: 2026-09-16
 

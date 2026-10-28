@@ -1,6 +1,6 @@
 # ADR 0060: Screens query columns and follow committed row changes
 
-Status: accepted (2026-10-24).
+Status: partly superseded: bounded indexed reads remain, but JobListPage and post-commit JobChange notifications replace WorkspaceJobListRow, workspace_changes and cursor replay; the old query bridge and full-workspace API are retired (db925711, 145ad266).
 
 ## Decision
 

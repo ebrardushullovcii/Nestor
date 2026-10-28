@@ -83,18 +83,17 @@ for Live Assistant audio.
 
 Muse Spark Contributor is the product route for shared text, tool-based agent
 work, and image-capable surfaces. Muse Contributor accepts image input on this
-route, so Luna is not needed (the block below shows the 1.2 ids; 1.3 is the
-current default):
+route; the defaults are:
 
 ```dotenv
 NESTOR_AI_API_KEY=your-opencode-go-key
 NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
-NESTOR_AI_MODEL=muse-spark-1.2-contributor
+NESTOR_AI_MODEL=muse-spark-1.3-contributor
 NESTOR_AI_API_MODE=responses
 NESTOR_AI_REASONING_EFFORT=xhigh
 
 NESTOR_AI_VISION_BASE_URL=https://opencode.ai/zen/go/v1
-NESTOR_AI_VISION_MODEL=muse-spark-1.2-contributor
+NESTOR_AI_VISION_MODEL=muse-spark-1.3-contributor
 NESTOR_AI_VISION_API_MODE=responses
 NESTOR_AI_VISION_REASONING_EFFORT=xhigh
 ```
@@ -106,13 +105,13 @@ analysis, and Live Assistant screenshot analysis unless a narrower override
 is present. Audio transcription remains local Whisper or a separately
 configured audio model.
 
-OpenCode Go serves `muse-spark-1.2-contributor` on the Responses API
+OpenCode Go serves `muse-spark-1.3-contributor` on the Responses API
 (`https://opencode.ai/zen/go/v1/responses`). Chat Completions is the wrong
-transport for this model and can drop tool-call streams. This is a temporary
-dogfood override, not an end-to-end capability, quality, privacy, or release
+transport for this model and can drop tool-call streams. This is the default
+route (ADR 0019), not an end-to-end capability, quality, privacy, or release
 acceptance result.
 
-`muse-spark-1.2-contributor` is the discounted Go contributor model, not the
+`muse-spark-1.3-contributor` is the discounted Go contributor model, not the
 zero-cost Zen route `muse-spark-1.2-contributor-free`. OpenCode's published
 terms state that prompts and completions on the contributor route may be used
 to train future Meta models. Do not send a private resume, credentials,
@@ -129,11 +128,8 @@ Live Job Finder search during a desktop test-API session also requires
 can finish with zero-new / already-saved results when that scan finds listings;
 model escalation is unavailable until live AI is enabled.
 
-ADR 0010 remains the accepted production route until synthetic capability
-tests, privacy review, and owner acceptance justify a new routing decision.
-If Muse Contributor on Go is adopted beyond temporary dogfood, update ADR 0010
-(or supersede it), the recommended production setup above, `.env.example`, and
-provider acceptance evidence together.
+ADR 0019 supersedes ADR 0010 for model selection; the independent text and
+vision configuration remains.
 
 ## Manual Zen fallback when Go quota is exhausted
 
@@ -157,10 +153,10 @@ Keep Go with Muse Contributor on the Responses API:
 
 ```dotenv
 NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
-NESTOR_AI_MODEL=muse-spark-1.2-contributor
+NESTOR_AI_MODEL=muse-spark-1.3-contributor
 NESTOR_AI_API_MODE=responses
 NESTOR_AI_VISION_BASE_URL=https://opencode.ai/zen/go/v1
-NESTOR_AI_VISION_MODEL=muse-spark-1.2-contributor
+NESTOR_AI_VISION_MODEL=muse-spark-1.3-contributor
 NESTOR_AI_VISION_API_MODE=responses
 ```
 
@@ -221,10 +217,10 @@ NESTOR_INTERVIEW_TEST_USE_LIVE_AI=1
 
 Production runs with the test API absent keep configured behavior unchanged,
 and explicitly configured local STT commands stay available under the test API
-because they execute offline. The Job Finder
-resume benchmarks keep their own documented `--use-configured-ai`
-`NESTOR_TEST_API_USE_LIVE_AI` exceptions; this Live Assistant switch is
-separate and narrower.
+because they execute offline. Job Finder uses
+`NESTOR_TEST_API_USE_LIVE_AI=1`; the retained resume-import benchmark also
+accepts `--use-configured-ai`. The old resume-quality benchmark hook was
+removed; use the resume lane in `docs/TESTING.md`.
 
 ## Local Codex subscription proxy
 
@@ -274,8 +270,8 @@ A legacy provider can still be used explicitly:
 NESTOR_AI_API_MODE=chat_completions
 ```
 
-That mode is now the intended DeepSeek text route. Keep Luna image work on the
-separate Responses route.
+That mode is the dedicated aggressive DeepSeek route. Keep Muse image work
+on the separate Responses route.
 
 ## Reliability on slow or dropping connections
 
@@ -298,9 +294,9 @@ browser vision) goes through one transport
 - `NESTOR_AI_STREAMING=0` sends plain JSON requests; use it only for a
   gateway that rejects `stream: true`, since it removes the liveness signal.
 
-When a call still fails, the deterministic fallback runs and the note says
-"timed out after Ns" (budget exhausted) or "of silence" (the service went
-quiet), so the cause is visible in the studio and in import notes.
+When a call still fails, the error says "timed out after Ns" (budget
+exhausted) or "of silence" (the service went quiet). Resume writing and import
+report failure rather than silently substituting a rule-made result.
 
 ## Verification
 
@@ -308,8 +304,8 @@ With a configured OpenCode Go key:
 
 1. confirm `GET https://opencode.ai/zen/go/v1/models` is reachable;
 2. run `pnpm validate:package ai-providers`;
-3. open Settings and confirm the normal provider reports
-   `deepseek-v4-flash`;
+3. check the resolved route against `muse-spark-1.3-contributor`
+   (or the explicit environment override); Settings has no model picker;
 4. use synthetic candidate data for the first resume, vision, and tool-loop
    smoke checks;
 5. preserve the application safety boundary: final submission authorization

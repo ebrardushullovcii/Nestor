@@ -1,6 +1,6 @@
 # Shortlist and resume
 
-The person shortlists the jobs they want. With "Write resumes when I shortlist" on (the default, under Settings › Resume look), each shortlisted job gets a resume written at its level (Original, Light, Tailored, Aggressive). On Shortlisted › To review the person reads it, edits it or picks another level, then approves it. Approved resumes wait under Approved for Apply.
+The person shortlists the jobs they want. With "Write resumes when I shortlist" on (the default, under Settings › Resume look), each shortlisted job gets a resume written at its Profile level (Light, Tailored, Aggressive); Original uses the imported file unchanged and still needs approval. On Shortlisted › To review the person reads it, edits it or picks another level, then approves it. Approved resumes wait under Approved for Apply.
 
 ## Sub-features
 

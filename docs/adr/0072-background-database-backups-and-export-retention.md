@@ -1,6 +1,6 @@
 # ADR 0072: Background database backups and generated export retention
 
-Status: accepted (2026-10-24).
+Status: partly superseded: the old workspace's daily VACUUM INTO backup helper, recovery rotation and WAL checkpoint machinery were retired (145ad266). Generated-resume file pruning, temporary-render cleanup and the Chromium cache cap remain.
 
 ## Decision
 

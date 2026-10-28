@@ -1,6 +1,6 @@
 # ADR 0027: Applications that finish, continue, and apply in bulk with one press
 
-Status: accepted (2026-09-20); amended (2026-10-01, 2026-10-27).
+Status: partly superseded: the five-state, newest-run projection is replaced by indexed application work states and the tracker (0b053477, 7fd1f246); unanswered questions and reusable answers live in Needs you (49cec8a9). Same-page continuation, guarded sending and the 2026-10-27 ready-forms group remain accepted.
 
 ## Context
 

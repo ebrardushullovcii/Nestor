@@ -1,6 +1,6 @@
 # ADR 0064: One list of Job Finder actions
 
-Status: accepted (2026-10-24).
+Status: partly superseded: application starts use indexed application rows and shared store commands rather than a durable singleton queue of ten-job runs (0b053477, c303086d). The action registry, on-demand tools, grants and Undo boundaries remain accepted.
 
 ## Context
 

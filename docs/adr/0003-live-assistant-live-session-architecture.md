@@ -1,6 +1,6 @@
 # Live Assistant Live-Session Architecture
 
-Status: accepted
+Status: partly superseded by [ADR 0008](0008-visible-first-live-assistant.md): visible main-window chat replaces overlay-only presentation; user-started sessions, capture boundaries and adapter ownership remain accepted.
 
 Live Assistant live assistance is built around an explicit user-started Interview live session rather than ambient background listening, with a setup gate, rehearsal checklist, dual microphone plus meeting/system audio transcription, conservative cue triggers, temporary screenshot batches, two screen-share-private overlays, structured retention, and post-session review. We chose this shape because the feature needs low-latency help during interviews while keeping capture boundaries visible, auditable, adapter-owned, recoverable across Windows, macOS, and Linux, and intentionally open to future authorized full capture exclusion without baking hiding behavior into session logic.
 

@@ -1,6 +1,6 @@
 # ADR 0050: One selection model for job lists
 
-Status: accepted (2026-10-15). Amends the "Choose jobs" selection in [ADR 0035](0035-selected-resume-batches.md).
+Status: partly superseded: shared job lists use filter-wide select-all with exclusions and virtualized rows rather than page-only selection and pagers (a87c505b, cec85075). Shared checkbox, range and keyboard selection remain accepted.
 
 ## Context
 

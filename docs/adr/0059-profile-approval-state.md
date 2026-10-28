@@ -1,6 +1,6 @@
 # ADR 0059: Profile saves reuse resume bodies and commit approval changes
 
-Status: accepted (2026-10-23).
+Status: partly superseded: job-store profile changes invalidate resume approvals and PDFs directly in resume rows, replacing approval overlays and downgrade folds (145ad266). Fact writes and approval invalidation remain atomic, with submitted applications protected.
 
 ## Decision
 

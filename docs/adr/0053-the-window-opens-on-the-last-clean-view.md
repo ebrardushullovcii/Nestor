@@ -1,6 +1,6 @@
 # ADR 0053: The window opens on the view the last clean close saved
 
-Status: accepted (2026-10-21).
+Status: superseded by ADR 0071 for the saved startup view and ADR 0072 for close-backup timing; the remaining legacy startup and clean-close machinery was retired with the old workspace (145ad266).
 
 Amended by [ADR 0071](0071-store-evidence-once-and-query-startup-facts.md): startup views and validation marks are removed; typed app-owned rows are trusted on read. Canonical storage is normalized without changing repository contracts.
 

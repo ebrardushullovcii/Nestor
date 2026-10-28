@@ -55,7 +55,7 @@ The raw Playwright/Electron tools still work with test hooks disabled.
 await qa.page.locator("body").ariaSnapshot();
 await qa.page.getByRole("button", { name: "Home", exact: true }).click();
 await qa.capture("home");
-await qa.page.evaluate(() => window.nestor.jobFinder.getWorkspace());
+await qa.page.evaluate(() => window.nestor.launchContext());
 await qa.page.evaluate(() => Object.keys(window.nestor.jobFinder.test));
 qa.context.pages().map((p) => p.url());
 await qa.app.evaluate(({ app }) => app.getAppMetrics());
@@ -103,16 +103,16 @@ or a local model-server stub. There is no custom scenario language or assertion 
 ## Test the right thing
 
 - **Setup and backend:** use existing test APIs and contract schemas for synthetic
-  seeds. Assert the hydrated workspace before testing. Match seeded
+  seeds. Inspect the relevant store rows before testing. Match seeded
   titles, companies and locations to the selected local site's actual listing.
 - **User flows:** press real controls for Apply, search and save. Raw preload calls
-  can skip consumption of returned snapshots and produce false stale-UI findings.
+  can skip screen state updates and produce false stale-UI findings.
   Test flags also change some behavior, such as Settings diagnostics cancellation.
   Read the current accessible tree before choosing controls. Include retrying an
   existing application and following the resulting next screen when testing Apply;
   a new seeded record alone does not cover that path.
-- **Failures:** use `qa.context.route(...)`, `setOffline(...)` and existing hooks
-  such as `window.nestor.jobFinder.test.failNextSave('profile')`. Chromium
+- **Failures:** use `qa.context.route(...)`, `setOffline(...)` and service-level
+  fault injection. The old `failNextSave` test hook is gone. Chromium
   network controls do not affect Node-side AI requests; use a local HTTP stub or
   service-level inspection for that layer. Verify recovery as well as the error.
 - **Local sites:** `qa.sites.url` is a private random-port fixture server;

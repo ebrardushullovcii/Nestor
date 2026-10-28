@@ -1,6 +1,6 @@
 # ADR 0022: Two apply modes, one or two clicks
 
-Status: accepted
+Status: superseded by [ADR 0024](0024-job-finder-browser-harness-and-three-apply-modes.md); Needs you questions and saved answers now live in the application store (49cec8a9).
 
 ## Context
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Partly superseded by ADR 0019 for model selection and ADR 0012 for user-scoped submission authority; the contract-first capability and temporary-draft boundaries remain accepted.
 
 ## Context
 

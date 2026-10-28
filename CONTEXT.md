@@ -5,8 +5,9 @@ Nestor is an agent-first desktop product for job search, resume preparation, saf
 ## Job Finder Language
 
 **Application automation mode**:
-The user's selected authority level for one application scope: prepare only,
-confirm before submit, or autonomous submit.
+The user's selected authority level for an application: confirm before submit
+(Fill in for me) or autonomous submit (Send for me). Prepare only is internal
+execution and never grants a final send.
 _Avoid_: hidden auto-apply flag, implicit submit permission
 
 **Application authority envelope**:
@@ -60,7 +61,7 @@ _Avoid_: board-specific screenshot rule, visual shortcut
 ## Live Assistant Language
 
 **Interview live session**:
-A user-started Live Assistant session where listening, transcript context, captures, overlays, and model suggestions are active under explicit user control.
+A user-started Live Assistant session where listening, transcript context, captures, and model suggestions are active under explicit user control. Overlays require the advanced-surfaces opt-in.
 _Avoid_: background listening, ambient interview mode
 
 **Live-session setup gate**:
@@ -111,7 +112,7 @@ _Avoid_: raw recording archive, full capture dump
 
 - A **Resume coverage policy** uses **Career-family fit** to decide whether a work-history record is omitted, compact, or detailed.
 - A **Weak-fit work-history record** can become a **Gap-coverage role** when omitting it creates a meaningful continuity problem.
-- **Resume review guidance** is shown inside the app and must not be rendered into exported resume content.
+- **Resume review guidance** belongs to draft metadata and must not be rendered into exported resume content.
 - **Functional layout variety** is the priority for resume templates; color changes alone do not justify a new apply-safe template.
 - An **Apply visual checkpoint** and a **Source-generic visual snapshot** provide structured evidence only; browser actions, selectors, and workflow rules remain owned by typed workflow logic.
 - An **Interview live session** starts only from an explicit user action and is guarded by a **Live-session setup gate**.

@@ -1,6 +1,6 @@
 # ADR 0056: Resume autosaves share a history step
 
-Status: accepted (2026-10-23). Superseded on 2026-10-25 by Shortlisted on the job store: resumes live in a `resumes` table beside `jobs` and are written by `packages/job-finder/src/resumes`, up to six at once, as soon as a job is shortlisted; approving one moves its job to the `resume` stage that Apply reads.
+Status: superseded: Shortlisted's job-store editor autosaves without Resume Studio history groups or the old resume-computation worker (2581847a, 28b98333).
 
 ## Decision
 

@@ -1,6 +1,6 @@
 # ADR 0067: Read screens outside the main event loop
 
-Status: accepted (2026-10-24).
+Status: superseded: job-store reads run through typed main-process commands; the utility reader, private MessagePort and startup migration worker were removed with the old workspace (145ad266).
 
 After evidence conversion and inventory removal, a clean 12k launch still delayed
 ready query replies by about 1.26 seconds while main opened its canonical service.

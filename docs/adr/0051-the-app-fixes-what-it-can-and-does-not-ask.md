@@ -1,6 +1,6 @@
 # ADR 0051: The app fixes what it can and does not ask the person to manage its rules
 
-Status: accepted (2026-10-17). Amends ADR 0018, ADR 0026, ADR 0041 and ADR 0049.
+Status: partly superseded for Aggressive resumes: local number checks replace model claim verdicts (588a399e), and local rules add listing skills, remove generic or repeated prose and prioritize metric bullets (fef8af09). Automatic settlement, non-blocking stretches and the person's review remain accepted.
 
 ## Context
 

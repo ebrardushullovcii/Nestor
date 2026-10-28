@@ -1,6 +1,6 @@
 # ADR 0016: Listing bodies are prepared over plain HTTP during collection
 
-Status: accepted (2026-09-05); collection overlap trial backed out and buffered read-ahead adopted (2026-10-23).
+Status: partly superseded by [ADR 0041](0041-the-model-reads-the-page.md): collection, full listing reads and merged-job fit now use the job-store pipeline (a1cdeb6b), replacing buffered read-ahead and the final scoring pass; source-generic HTTP reads remain.
 
 ## Context
 

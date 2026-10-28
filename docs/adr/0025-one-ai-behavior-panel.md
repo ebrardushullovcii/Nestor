@@ -1,6 +1,6 @@
 # ADR 0025: One AI behavior panel
 
-Status: accepted (2026-09-20).
+Status: partly superseded: choices autosave through scoped settings writes; pickiness lives on Find jobs and application writing under Applying rather than one AI-behavior draft and Save (142ef55e). Pickiness is a display fit floor, not strict collection or plan breadth (ADR 0041, a1cdeb6b). Saved behavior and writing permissions remain accepted.
 
 ## Context
 

@@ -1,6 +1,6 @@
 # ADR 0032: Search settings change what a search keeps
 
-Status: accepted (2026-09-23). Builds on ADR 0025.
+Status: partly superseded by [ADR 0041](0041-the-model-reads-the-page.md): pickiness filters displayed fit scores rather than discarding related listings, and search plans are retired (a1cdeb6b, 242cc067). The saved remote-location preference still affects fit.
 
 ## Context
 

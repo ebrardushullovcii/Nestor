@@ -1,6 +1,6 @@
 # ADR 0070: Read original rows while startup conversion runs
 
-Status: accepted (2026-10-24).
+Status: superseded: ADR 0074 removes the original-row fallback; job-store opening replaces the remaining canonical-writer and evidence-conversion gates (145ad266).
 
 The original-row read fallback below is superseded by ADR 0074. Earlier writer
 readiness and the evidence-conversion rules remain accepted.

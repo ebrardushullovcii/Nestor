@@ -1,6 +1,6 @@
 # ADR 0069: Convert evidence in slices and retain screen facts
 
-Status: accepted (2026-10-24).
+Status: superseded: job-store storage replaces legacy evidence conversion and scalar-index preparation; sliced converters, temporary startup worker and their readiness gates were removed (145ad266).
 
 ## Decision
 

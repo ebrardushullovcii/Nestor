@@ -1,6 +1,6 @@
 # ADR 0071: Store evidence once and query startup facts
 
-Status: accepted (2026-10-24).
+Status: superseded: the job store replaces legacy relational evidence interning, plan/source versions, migration 26–28 decoders and whole-domain repository reads; the old workspace and migration machinery were removed (145ad266).
 
 ## Decision
 

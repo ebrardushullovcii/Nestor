@@ -34,7 +34,6 @@ apps/desktop/test-fixtures/local/
 .claude/*
 !.claude/skills/
 docs/reviews/*.txt
-docs/audits/evidence/
 .codex/
 .vscode/
 /job-finder-workspace.sqlite*

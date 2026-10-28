@@ -1,6 +1,6 @@
 # ADR 0023: Agent-owned runs
 
-Status: accepted
+Status: partly superseded by [ADR 0041](0041-the-model-reads-the-page.md): ordinary search collects mechanically and judges merged jobs, rather than giving the model ownership of every search run (a1cdeb6b). Apply, source-check and browser fallback still use the shared agent loop.
 
 Date: 2026-09-14
 

@@ -1,6 +1,6 @@
 # ADR 0041: AI judgment with mechanical collection of published job data
 
-Status: accepted (2026-10-02); fit, application answers and resume import added the same day; apply facts, failures without stand-ins and site learning added 2026-10-03; fit judged during the search, for every kept job, 2026-10-13; job-board feeds screened by the model 2026-10-21; long results pages read in parts 2026-10-21; identical linked parts reused across filter routes and eight parallel page reads 2026-10-23. Amended by [ADR 0051](0051-the-app-fixes-what-it-can-and-does-not-ask.md): a line the fact check has not checked no longer waits for the person.
+Status: accepted with amendments (2026-10-02 through 2026-10-25); ADR 0051 removes unchecked-line approval gates. Partly superseded for Aggressive resumes: local number checks replace model claim checks (588a399e), and code adds listing skills and cleans repeated or generic prose (fef8af09). Other levels retain model claim checks; the discovery decision below remains accepted.
 
 Discovery amended by the owner's rewrite request (2026-10-25): deterministic collection is the default; AI owns profession screening, uncertain interpretation and fit. This supersedes the earlier ban on mechanical card collection and the earlier repeated fit passes.
 

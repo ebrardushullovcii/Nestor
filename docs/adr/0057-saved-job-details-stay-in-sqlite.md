@@ -1,6 +1,6 @@
 # ADR 0057: Saved-job detail evidence stays in SQLite
 
-Status: accepted (2026-10-23).
+Status: partly superseded: ADR 0071 removes read-time validation and saved startup views; job-store jobs/job_details replace SavedJobListFacts, lazy compatibility projections and SQLite TEMP evidence versions (db925711, 145ad266). Large listing details still stay in SQLite and are read by id.
 
 Amended by [ADR 0071](0071-store-evidence-once-and-query-startup-facts.md): startup views and validation marks are removed; typed app-owned rows are trusted on read. Canonical storage is normalized without changing repository contracts.
 

@@ -1,6 +1,6 @@
 # ADR 0018: Aggressive tailoring may round years up by one and name listing technologies, at the user's own risk
 
-Status: accepted (2026-09-06). Amended by ADR 0041 (2026-10-03): the model's fact check, not the rule classifier, now decides what is a stretch; listing technologies are no longer added to the skills section by code. The intent stands: in aggressive mode a small stretch is the person's call and goes to them to confirm. Amended by ADR 0051 (2026-10-17): choosing Aggressive is that call; stretches are no longer confirmed line by line.
+Status: partly superseded: Aggressive uses local number checks rather than the model's line-by-line claim check (588a399e), and adds listing skills in code (fef8af09), replacing those ADR 0041 amendments. Choosing Aggressive still accepts stretches without line-by-line confirmation (ADR 0051).
 
 ## Context
 
