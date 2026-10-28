@@ -157,6 +157,131 @@ function reader(tags: unknown[]): LLMClient {
 }
 test.each([
   {
+    kind: "work_auth",
+    question: "Are you authorized to work in the job's country?",
+    answer: "Yes",
+  },
+  {
+    kind: "sponsorship",
+    question: "Will you need visa sponsorship?",
+    answer: "No",
+  },
+])(
+  "send-time eligibility uses only this application's unchanged answer: $kind",
+  async ({ kind, question, answer }) => {
+    const controls = buildApplyFormObservation(
+      {
+        url: "https://example.test/apply",
+        title: "Apply",
+        bodyText: "Review",
+        controls: ["Yes", "No"].map((label, index) => ({
+          index,
+          tagName: "input",
+          inputType: "radio",
+          role: "",
+          id: `f${index}`,
+          name: "eligibility",
+          label,
+          groupLabel: question,
+          placeholder: "",
+          autocomplete: "",
+          required: true,
+          invalid: false,
+          validationMessage: "",
+          disabled: false,
+          readOnly: false,
+          visible: true,
+          value: label,
+          checked: label === answer,
+          multiple: false,
+          options: [],
+          selectedOptionLabel: "",
+        })),
+        actions: [],
+        links: [],
+        headings: [],
+        clickables: [],
+        openedTabs: [],
+        loading: false,
+        validationErrors: [],
+        stepLabel: null,
+      },
+      "2026-10-28T00:00:00.000Z",
+    ).controls;
+    for (const variant of [
+      "local",
+      "result",
+      "other_application",
+      "remembered",
+      "changed_value",
+      "changed_question",
+      "unconfirmed",
+    ] as const) {
+      const checks = await checkClassifiedApplicationAnswers({
+        client: reader(
+          controls.map((_, index) => ({
+            index,
+            kind,
+            country: null,
+            sourceId: null,
+          })),
+        ),
+        sources: {
+          ...sources,
+          posting: { ...sources.posting, location: "Worldwide" },
+          reusableAnswers: [
+            {
+              id: variant === "remembered" ? "remembered_31" : "application_31",
+              kind: "other",
+              label: question,
+              question:
+                variant === "changed_question"
+                  ? "Different question"
+                  : question,
+              answer:
+                variant === "changed_value"
+                  ? answer === "Yes"
+                    ? "No"
+                    : "Yes"
+                  : answer,
+              needsConfirmation: variant === "unconfirmed",
+              roleFamilies: [],
+              proofEntryIds: [],
+              applicationScope: {
+                applicationRecordId:
+                  variant === "result"
+                    ? null
+                    : variant === "other_application"
+                      ? "application_2"
+                      : "application_1",
+                resultId:
+                  variant === "result" ? "application_1_attempt_2" : null,
+                // A location hint cannot override the person's decision for this application.
+                location: "Germany",
+              },
+            },
+          ],
+        },
+        application: {
+          jobId: "job_1",
+          applicationId: "run_1",
+          applicationRecordId: "application_1",
+          resultId: "application_1_attempt_2",
+          startingUrl: "https://example.test/apply",
+        },
+        payDisclosed: false,
+        answers: [{ question, answer }],
+        formControls: controls,
+        formContext: { pageText: "Review", fields: [] },
+      });
+      expect(checks[0]?.supported, variant).toBe(
+        variant === "local" || variant === "result",
+      );
+    }
+  },
+);
+test.each([
+  {
     label: "GitHub",
     hint: "Please provide your GitHub username, if you have one.",
     answer: "synthetic-alex",
