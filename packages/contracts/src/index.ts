@@ -78,3 +78,4 @@ export * from "./apply-answer-tags";
 export { preserveTechnologyTokens } from "./technology-text";
 export * from "./form-question-meaning";
 export * from "./application-question-reason";
+export * from "./assistant-job-list";

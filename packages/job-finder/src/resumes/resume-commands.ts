@@ -9,6 +9,8 @@ import {
   type ResumeCommandName,
   type ResumeCommandOutputs,
   type ResumePdfExportResult,
+  type AssistantJobListPage,
+  type JobListPage,
 } from "@nestor/contracts";
 import type { z } from "zod";
 
@@ -16,6 +18,40 @@ import type { ResumeService } from "./resume-service";
 interface ResumeCommandReads {
   list(query: JobListQueryInput): ShortlistedPage;
   get(jobId: number): ResumeCommandOutputs["get_resume"];
+}
+
+/** The same indexed status lookup as Shortlisted, bounded to this chat page. */
+export function assistantJobListPage(
+  store: JobStore,
+  page: JobListPage,
+): AssistantJobListPage {
+  const statuses = createResumeStore(store).statuses(
+    page.rows.map((row) => row.id),
+  );
+  const { resume: approvedResumes, ...counts } = page.counts;
+  return {
+    ...page,
+    counts: { ...counts, approvedResumes },
+    rows: page.rows.map(({ id, stage, title, company, location, fitScore }) => {
+      const resume = statuses.get(id);
+      return {
+        id,
+        stage,
+        title,
+        company,
+        location,
+        fitScore,
+        resumeStatus: resume?.approvedAt
+          ? "approved"
+          : resume?.state === "ready"
+            ? "to_review"
+            : resume?.state === "queued" || resume?.state === "writing"
+              ? "writing"
+              : "none",
+        resumeError: resume?.error?.slice(0, 300) ?? null,
+      };
+    }),
+  };
 }
 
 type Handlers = {

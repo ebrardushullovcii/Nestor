@@ -40,6 +40,7 @@ import {
 
 /** Resumes written at once; it drops toward two when the AI says it is busy. */
 const MAX_WRITERS = 6;
+const AUTOMATIC_START_DELAY_MS = 1_500;
 /** How long a write the AI turned away waits before the queue tries again. */
 const BUSY_RETRY_MS = 30_000;
 /** Below this the listing is a card, and the resume reads the posting first. */
@@ -96,6 +97,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
     min: 2,
   });
   const running = new Map<number, AbortController>();
+  const scheduled = new Map<number, ReturnType<typeof setTimeout>>();
   const fetchHtml = deps.fetchListingHtml ?? createDefaultListingHtmlFetcher();
   const readPage = createModelListingPageReader(deps.aiClient);
   let stopped = true;
@@ -115,6 +117,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
     if (job.description.trim().length >= THIN_LISTING_CHARS) return job;
     try {
       const page = await fetchHtml(job.url, { signal });
+      signal.throwIfAborted();
       if (page.status >= 400) return job;
       const detail =
         (await readListingDetail({
@@ -151,6 +154,12 @@ export function createResumeService(deps: ResumeServiceDeps) {
       if (stopped || signal.aborted) return;
       const readAtRevision = profileRevision;
       const inputs = await deps.readInputs();
+      if (
+        stopped ||
+        signal.aborted ||
+        store.getJob(jobId)?.stage !== "shortlisted"
+      )
+        return;
       if (!hasResumeWriterEvidence(inputs.profile)) {
         if (readAtRevision === profileRevision) waitingForProfile = true;
         return;
@@ -165,13 +174,24 @@ export function createResumeService(deps: ResumeServiceDeps) {
           level === "original"
             ? requireJob(jobId)
             : await withListing(requireJob(jobId), signal);
+        if (
+          stopped ||
+          signal.aborted ||
+          store.getJob(jobId)?.stage !== "shortlisted"
+        )
+          return;
         const draft = await writeResume(deps, {
           ...inputs,
           job,
           level,
           signal,
         });
-        if (stopped) return;
+        if (
+          stopped ||
+          signal.aborted ||
+          store.getJob(jobId)?.stage !== "shortlisted"
+        )
+          return;
         resumes.finishWriting(jobId, draft);
         writers.recordSuccess();
       } catch (error) {
@@ -194,24 +214,49 @@ export function createResumeService(deps: ResumeServiceDeps) {
         }
       }
     } finally {
+      if (!stopped && signal.aborted) resumes.requeue(jobId);
       release();
       running.delete(jobId);
       if (!retryTimer && !waitingForProfile) pump();
     }
   }
 
-  function pump() {
+  function launch(jobId: number) {
+    scheduled.delete(jobId);
+    if (
+      stopped ||
+      running.has(jobId) ||
+      store.getJob(jobId)?.stage !== "shortlisted"
+    )
+      return;
+    const controller = new AbortController();
+    running.set(jobId, controller);
+    void write(jobId, controller);
+  }
+
+  function pump(immediateId?: number) {
     if (stopped || waitingForProfile) return;
     for (const jobId of resumes.listUnwritten(50)) {
       if (running.has(jobId)) continue;
-      const controller = new AbortController();
-      running.set(jobId, controller);
-      void write(jobId, controller);
+      if (jobId === immediateId) {
+        clearTimeout(scheduled.get(jobId));
+        launch(jobId);
+      } else if (!scheduled.has(jobId)) {
+        scheduled.set(
+          jobId,
+          setTimeout(() => launch(jobId), AUTOMATIC_START_DELAY_MS),
+        );
+      }
     }
   }
 
   /** A job moved off Shortlisted mid-write stops writing; it resumes if it comes back. */
   function stopWritesThatLeft() {
+    for (const [jobId, timer] of scheduled) {
+      if (store.getJob(jobId)?.stage === "shortlisted") continue;
+      clearTimeout(timer);
+      scheduled.delete(jobId);
+    }
     if (running.size === 0) return;
     const shortlisted = new Set(
       store
@@ -238,7 +283,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
       resumes.finishWriting(jobId, null);
       return resumes.get(jobId)!;
     });
-    pump();
+    pump(jobId);
     return resume;
   }
 
@@ -287,6 +332,8 @@ export function createResumeService(deps: ResumeServiceDeps) {
       unsubscribe = null;
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = null;
+      for (const timer of scheduled.values()) clearTimeout(timer);
+      scheduled.clear();
       for (const controller of running.values()) controller.abort();
     },
 
@@ -342,7 +389,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
     rewrite(jobId: number) {
       const level = resumes.get(jobId)?.level;
       if (!level) {
-        pump();
+        pump(jobId);
         return null;
       }
       return setLevel(jobId, level);

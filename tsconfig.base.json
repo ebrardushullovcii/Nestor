@@ -55,6 +55,9 @@
       "@nestor/job-finder/job-commands": [
         "packages/job-finder/src/job-commands.ts"
       ],
+      "@nestor/job-finder/tracker-commands": [
+        "packages/job-finder/src/tracker-commands.ts"
+      ],
       "@nestor/job-finder/resumes": [
         "packages/job-finder/src/resumes/index.ts"
       ],

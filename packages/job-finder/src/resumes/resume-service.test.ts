@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSeed } from "../test-fixtures";
 import { createResumeService, type ResumeServiceDeps } from "./resume-service";
+import { assistantJobListPage } from "./resume-commands";
 import { writeResume } from "./write-resume";
 
 function found(n: number): FoundJob {
@@ -95,13 +96,157 @@ function setup(
   return { store, service, id: id!, renderResumeArtifact, close };
 }
 
+const waitFor = (assertion: () => void) =>
+  vi.waitFor(assertion, { timeout: 5_000 });
+
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it("reports a ready unapproved draft separately from approved-stage counts", async () => {
+    const { store, service, id } = setup();
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    const page = assistantJobListPage(
+      store,
+      store.listJobs({ stage: "shortlisted" }),
+    );
+    expect(page.rows[0]).toMatchObject({
+      id,
+      resumeStatus: "to_review",
+      resumeError: null,
+    });
+    expect(page.counts.approvedResumes).toBe(0);
+    expect(page.counts).not.toHaveProperty("resume");
+    await service.approve(id);
+    expect(
+      assistantJobListPage(store, store.listJobs({ stage: "resume" })).rows[0]
+        ?.resumeStatus,
+    ).toBe("approved");
+  });
+  it("spends zero provider calls for a shortlist undone inside the grace period", async () => {
+    vi.useFakeTimers();
+    const base = createDeterministicJobFinderAiClient();
+    const createResumeDraft = vi.fn(
+      (input: Parameters<typeof base.createResumeDraft>[0]) =>
+        base.createResumeDraft(input),
+    );
+    const { store, id, service } = setup({
+      aiClient: { ...base, createResumeDraft },
+    });
+    try {
+      const move = store.moveJobs({
+        selection: { ids: [id] },
+        to: "shortlisted",
+      });
+      await vi.advanceTimersByTimeAsync(900);
+      store.undoMove(move.moveId!);
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(createResumeDraft).not.toHaveBeenCalled();
+      expect(service.get(id).resume).toBeNull();
+    } finally {
+      service.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("rechecks shortlisting after waiting for the profile before any provider request", async () => {
+    vi.useFakeTimers();
+    const base = createDeterministicJobFinderAiClient();
+    const createResumeDraft = vi.fn(
+      (input: Parameters<typeof base.createResumeDraft>[0]) =>
+        base.createResumeDraft(input),
+    );
+    let release!: (
+      value: Awaited<ReturnType<ResumeServiceDeps["readInputs"]>>,
+    ) => void;
+    const readInputs = () =>
+      new Promise<Awaited<ReturnType<ResumeServiceDeps["readInputs"]>>>(
+        (resolve) => {
+          release = resolve;
+        },
+      );
+    const { store, service, id } = setup({
+      aiClient: { ...base, createResumeDraft },
+      readInputs,
+    });
+    try {
+      const move = store.moveJobs({
+        selection: { ids: [id] },
+        to: "shortlisted",
+      });
+      await vi.advanceTimersByTimeAsync(1500);
+      store.undoMove(move.moveId!);
+      release(createSeed());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(createResumeDraft).not.toHaveBeenCalled();
+      expect(service.get(id).resume).toBeNull();
+    } finally {
+      service.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a later Undo and ignores even a provider that returns after cancellation", async () => {
+    vi.useFakeTimers();
+    const base = createDeterministicJobFinderAiClient();
+    let signal: AbortSignal | undefined;
+    let finish!: () => void;
+    const createResumeDraft: typeof base.createResumeDraft = async (input) => {
+      signal = input.signal;
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return base.createResumeDraft({
+        ...input,
+        signal: new AbortController().signal,
+      });
+    };
+    const { store, id, service } = setup({
+      aiClient: { ...base, createResumeDraft },
+    });
+    try {
+      const move = store.moveJobs({
+        selection: { ids: [id] },
+        to: "shortlisted",
+      });
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(signal).toBeDefined();
+      store.undoMove(move.moveId!);
+      expect(signal?.aborted).toBe(true);
+      finish();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(service.get(id).resume?.draft).toBeNull();
+      expect(service.get(id).resume?.approvedAt).toBeNull();
+    } finally {
+      service.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts an explicit rewrite immediately during the automatic grace period", async () => {
+    vi.useFakeTimers();
+    const base = createDeterministicJobFinderAiClient();
+    const createResumeDraft = vi.fn(
+      (input: Parameters<typeof base.createResumeDraft>[0]) =>
+        base.createResumeDraft(input),
+    );
+    const { store, id, service } = setup({
+      aiClient: { ...base, createResumeDraft },
+    });
+    try {
+      store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+      service.rewrite(id);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(createResumeDraft).toHaveBeenCalledOnce();
+    } finally {
+      service.stop();
+      vi.useRealTimers();
+    }
+  });
   it("keeps the last tailored approval available to Undo after choosing Original", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const before = await service.approve(id);
     const original = service.setLevel(id, "original");
     expect(original).toMatchObject({
@@ -134,7 +279,7 @@ describe("resumes on the store", () => {
       aiClient: { ...base, createResumeDraft },
     });
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(writeSignal).toBeDefined());
+    await waitFor(() => expect(writeSignal).toBeDefined());
 
     expect(service.setLevel(id, "original")).toMatchObject({
       level: "original",
@@ -276,9 +421,7 @@ describe("resumes on the store", () => {
       );
       const { store, service, id } = setup({ readInputs });
       store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-      await vi.waitFor(() =>
-        expect(service.get(id).resume?.state).toBe("ready"),
-      );
+      await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
       const before = service.get(id).resume!.draft!;
       await service.approve(id);
       expect(service.get(id).resume?.approvedAt).not.toBeNull();
@@ -287,7 +430,7 @@ describe("resumes on the store", () => {
       const profileStore = createProfileStore(store);
       readInputs.mockClear();
       service.start();
-      await vi.waitFor(() => expect(readInputs).toHaveBeenCalled());
+      await waitFor(() => expect(readInputs).toHaveBeenCalled());
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(service.get(id).resume).toMatchObject({
         state: "queued",
@@ -316,9 +459,7 @@ describe("resumes on the store", () => {
         };
         profileStore.setResumeSource(profile.baseResume);
       }
-      await vi.waitFor(() =>
-        expect(service.get(id).resume?.state).toBe("ready"),
-      );
+      await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
       expect(readInputs.mock.calls.length).toBeGreaterThan(1);
     },
   );
@@ -326,7 +467,7 @@ describe("resumes on the store", () => {
   it("edits one summary without reproducing or dropping the rest, with an exact Undo", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const before = service.get(id).resume!;
     const summary = before.draft!.sections.find(
       (section) => section.kind === "summary",
@@ -350,7 +491,7 @@ describe("resumes on the store", () => {
   it("rejects partial full-draft saves and nonexistent edit targets without changing the resume", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const before = service.get(id).resume!;
     expect(() =>
       service.saveDraft(
@@ -374,7 +515,7 @@ describe("resumes on the store", () => {
     const filePath = path.join(directory, "jobs.sqlite");
     const { store, service, id, close } = setup({}, filePath);
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const firstApproval = await service.approve(id);
     service.undoChange(id, firstApproval.undoId!);
     expect(store.getJob(id)?.stage).toBe("shortlisted");
@@ -404,7 +545,7 @@ describe("resumes on the store", () => {
   it("refuses an older edit Undo after another save or a later job move", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const before = service.get(id).resume!;
     const first = service.saveDraft(
       id,
@@ -428,7 +569,7 @@ describe("resumes on the store", () => {
   it("undoes approval and then its preceding edit, each against the exact restored version", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const before = service.get(id).resume!;
     const edit = service.saveDraft(
       id,
@@ -445,9 +586,7 @@ describe("resumes on the store", () => {
     async (sameClock) => {
       const { store, service, id } = setup();
       store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-      await vi.waitFor(() =>
-        expect(service.get(id).resume?.state).toBe("ready"),
-      );
+      await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
       const approved = await service.approve(id);
       const edit = service.saveDraft(
         id,
@@ -484,7 +623,7 @@ describe("resumes on the store", () => {
   it("does not approve a draft edited while its PDF is rendering", async () => {
     const { store, service, id, renderResumeArtifact } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const before = service.get(id).resume!;
     renderResumeArtifact.mockImplementationOnce(() => {
       service.saveDraft(
@@ -511,10 +650,10 @@ describe("resumes on the store", () => {
   it("also keeps a level Undo from restoring approval across a triage round trip", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     await service.approve(id);
     const level = service.setLevel(id, "light");
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     store.moveJobs({ selection: { ids: [id] }, to: "found" });
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
     const current = service.get(id);
@@ -528,10 +667,10 @@ describe("resumes on the store", () => {
   it("keeps each level Undo bound to its own change after writing finishes", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const original = service.get(id).resume!.level;
     const first = service.setLevel(id, "aggressive");
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     expect(service.undoLevel(id, first.levelChangeId!)).toMatchObject({
       level: original,
     });
@@ -546,9 +685,9 @@ describe("resumes on the store", () => {
   it("keeps a later editor save when an older level change is undone", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const changed = service.setLevel(id, "light");
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     const current = service.get(id).resume!;
     const { undoId: _undoId, ...saved } = service.saveDraft(
       id,
@@ -562,12 +701,12 @@ describe("resumes on the store", () => {
     expect(service.get(id).resume).toEqual(saved);
   });
 
-  it("writes a resume the moment a job is shortlisted, and approving it hands the job to Apply", async () => {
+  it("writes a resume after the shortlist Undo grace period, and approving it hands the job to Apply", async () => {
     const { store, service, id } = setup();
     expect(service.get(id).resume).toBeNull();
 
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     expect(service.get(id).resume?.draft?.sections.length).toBeGreaterThan(0);
 
     const approved = await service.approve(id);
@@ -580,7 +719,7 @@ describe("resumes on the store", () => {
   it("puts an approved resume back, approval included, when a level change is undone", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
     await service.approve(id);
     const level = service.get(id).resume!.level;
 
@@ -614,17 +753,13 @@ describe("resumes on the store", () => {
     };
     const { store, service, id } = setup({ aiClient: slowClient as never });
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() =>
-      expect(service.get(id).resume?.state).toBe("writing"),
-    );
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("writing"));
 
     store.moveJobs({ selection: { ids: [id] }, to: "found" });
-    await vi.waitFor(() =>
-      expect(service.get(id).resume?.state).toBe("queued"),
-    );
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("queued"));
 
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() => expect(started).toBe(2));
+    await waitFor(() => expect(started).toBe(2));
   });
 
   it("says why a resume could not be written, and writes it again on request", async () => {
@@ -641,15 +776,13 @@ describe("resumes on the store", () => {
     };
     const { store, service, id } = setup({ aiClient: flaky as never });
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
-    await vi.waitFor(() =>
-      expect(service.get(id).resume?.state).toBe("failed"),
-    );
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("failed"));
     expect(service.get(id).resume?.error).toContain(
       "The model returned nothing.",
     );
 
     fail = false;
     service.rewrite(id);
-    await vi.waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
+    await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
   });
 });

@@ -21,6 +21,40 @@ describe("ProfileImportSuggestionList", () => {
     root = null;
   });
 
+  it.each(["preferredLinkUrls", "preferredLinkIds"])(
+    "labels %s with application-facing copy",
+    (key) => {
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() =>
+        root?.render(
+          <ProfileImportSuggestionList
+            onReviewCandidate={vi.fn()}
+            candidates={[
+              ResumeImportFieldCandidateSummarySchema.parse({
+                id: "links",
+                target: {
+                  section: "application_identity",
+                  key,
+                  recordId: null,
+                },
+                label: "Preferred link ids",
+                value: ["https://example.test/portfolio"],
+                confidence: 0.9,
+                resolution: "needs_review",
+                notes: [],
+              }),
+            ]}
+          />,
+        ),
+      );
+      expect(container.textContent).toContain(
+        "Links to include in applications",
+      );
+      expect(container.textContent).not.toContain("Preferred link ids");
+    },
+  );
   it("turns imported record JSON into human-readable suggestion cards", () => {
     container = document.createElement("div");
     document.body.appendChild(container);

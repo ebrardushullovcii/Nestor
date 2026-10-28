@@ -3,6 +3,7 @@ import type {
   AgentLoopToolCall,
   ConversationModel,
 } from "@nestor/agent-runtime";
+import { AssistantJobListPageSchema } from "@nestor/contracts";
 
 /**
  * A deterministic stand-in for the sidebar's model, used when no live AI is
@@ -125,6 +126,28 @@ function plan(messages: readonly AgentLoopMessage[]): Step {
   const last = results.at(-1);
   const context = lastContextBlock(messages);
 
+  if (/Has a resume been written for my shortlisted/iu.test(text)) {
+    if (!last)
+      return {
+        toolCalls: [call("list_jobs", { stage: "shortlisted", limit: 10 })],
+      };
+    const data = AssistantJobListPageSchema.safeParse(jsonOf(last.content));
+    return {
+      content:
+        data.success &&
+        data.data.rows.some((row) => row.resumeStatus === "to_review")
+          ? "Your resume draft is ready to review."
+          : "No resume has been written yet.",
+    };
+  }
+  if (/show my shortlisted jobs/iu.test(text)) {
+    if (!last)
+      return {
+        toolCalls: [call("list_jobs", { stage: "shortlisted", limit: 10 })],
+      };
+    return { content: "Here are your shortlisted jobs." };
+  }
+
   // Job Finder's own note about a finished run.
   if (/^\[Job Finder, not the person\]/u.test(text)) {
     if (
@@ -244,9 +267,7 @@ function plan(messages: readonly AgentLoopMessage[]): Step {
   if (match && !/apply/iu.test(text)) {
     if (!last) {
       return {
-        toolCalls: [
-          call("start_search", { note: match[1] }),
-        ],
+        toolCalls: [call("start_search", { note: match[1] })],
       };
     }
     return {
@@ -287,8 +308,7 @@ function plan(messages: readonly AgentLoopMessage[]): Step {
             call("read_result", { resultSetId: resultSet, limit: 50 }),
           ],
         };
-      if (focused)
-        return { toolCalls: [shortlist([Number(focused)])] };
+      if (focused) return { toolCalls: [shortlist([Number(focused)])] };
       return { content: "Which jobs? Select them on Find jobs first." };
     }
     if (last.name === "read_result") {

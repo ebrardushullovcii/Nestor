@@ -1334,6 +1334,8 @@ function promoteImportCandidatesIntoEmptyProfile(
   const resolvedAt = new Date().toISOString();
 
   return candidates.map((candidate) => {
+    if (candidate.resolutionReason === "grounded_completeness_suggestion")
+      return candidate;
     // The composite score measures native parser/text-block quality, which is
     // low for a scanned PDF even when the visual pass reads it clearly. Such
     // evidence may fill missing fields without changing the saved score or
@@ -1965,6 +1967,8 @@ function shouldAutoApply(
   searchPreferences: JobSearchPreferences,
   candidate: ResumeImportFieldCandidate,
 ): boolean {
+  if (candidate.resolutionReason === "grounded_completeness_suggestion")
+    return false;
   if (
     shouldAutoApplyPlaceholderReplacement(profile, searchPreferences, candidate)
   ) {
@@ -2477,7 +2481,10 @@ function applyCandidateResolution(
         : candidate.confidence,
     resolution,
     resolutionReason:
-      resolutionReasonOverride ??
+      (resolution === "needs_review" &&
+      candidate.resolutionReason === "grounded_completeness_suggestion"
+        ? candidate.resolutionReason
+        : resolutionReasonOverride) ??
       resolutionReasonForCandidate(
         profile,
         searchPreferences,

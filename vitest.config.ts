@@ -74,6 +74,10 @@ export default defineConfig({
         currentDir,
         "packages/job-finder/src/job-commands.ts",
       ),
+      "@nestor/job-finder/tracker-commands": path.resolve(
+        currentDir,
+        "packages/job-finder/src/tracker-commands.ts",
+      ),
       "@nestor/job-finder/resumes": path.resolve(
         currentDir,
         "packages/job-finder/src/resumes/index.ts",

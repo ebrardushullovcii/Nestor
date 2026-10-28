@@ -48,7 +48,7 @@ export function describeResume(
         detail:
           resume.level === "original"
             ? null
-            : `Writing at ${LEVEL_LABEL[resume.level]}. This takes under a minute.`,
+            : `Writing at ${LEVEL_LABEL[resume.level]}. You can keep browsing while it finishes.`,
       };
     case "failed":
       return { label: "Not written", tone: "warning", detail: resume.error };

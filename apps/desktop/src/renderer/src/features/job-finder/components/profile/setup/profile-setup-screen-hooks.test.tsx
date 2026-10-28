@@ -93,6 +93,47 @@ function createInput(
 }
 
 describe("useProfileSetupForms background-snapshot durability", () => {
+  it.each([false, true])(
+    "adopts imported sponsorship only when the setup answer is untouched (edited=%s)",
+    (edited) => {
+      const initial = createInput({
+        profile: {
+          ...profile,
+          workEligibility: {
+            ...profile.workEligibility,
+            requiresVisaSponsorship: null,
+          },
+        },
+      });
+      const { result, rerender } = renderHook(
+        (input: ProfileSetupFormProps) => useProfileSetupForms(input),
+        { initialProps: initial },
+      );
+      if (edited)
+        act(() =>
+          result.current.profileForm.setValue(
+            "eligibility.requiresVisaSponsorship",
+            "no",
+            { shouldDirty: true },
+          ),
+        );
+      rerender({
+        ...initial,
+        profile: {
+          ...initial.profile,
+          workEligibility: {
+            ...initial.profile.workEligibility,
+            requiresVisaSponsorship: true,
+          },
+        },
+      });
+      expect(
+        result.current.profileForm.getValues(
+          "eligibility.requiresVisaSponsorship",
+        ),
+      ).toBe(edited ? "no" : "yes");
+    },
+  );
   it("keeps corrections and removed rows through step changes until the finish save", () => {
     const initial = createInput({
       searchPreferences: {

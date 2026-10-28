@@ -368,7 +368,17 @@ it("discovers a newly registered command without another Assistant schema or too
       onLoadToolNames: (names) => loaded.push(...names),
     });
     const load = tools.find((tool) => tool.name === "load_tools")!;
-    await load.execute({ groups: ["jobs"] }, ctx);
+    const menu = await load.execute({ groups: ["jobs"] }, ctx);
+    expect(menu.data).toHaveProperty(
+      "names",
+      expect.arrayContaining(["test_count"]),
+    );
+    expect(menu.data).toHaveProperty(
+      "availableTools",
+      expect.arrayContaining([expect.objectContaining({ name: "test_count" })]),
+    );
+    expect(loaded).toContain("test_count");
+    await load.execute({ groups: [], names: ["test_count"] }, ctx);
     expect(loaded).toContain("test_count");
     const tool = mcp.tools.find((tool) => tool.name === "test_count")!;
     expect(tool.description).toBe(catalog.test_count.description);
