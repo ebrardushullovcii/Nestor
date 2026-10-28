@@ -105,7 +105,14 @@ export function toFilterSql(filter: JobFilter): FilterSql {
  * the jobs the filter leaves out, however many there are (schema.ts indexes
  * jobs_by_fit and jobs_by_mode_*).
  */
-export function toFilterRanges(filter: JobFilter): FilterSql[] {
+export function toFilterRanges(
+  filter: JobFilter,
+  additionalStages: readonly JobStage[] = [],
+): FilterSql[] {
+  if (additionalStages.length)
+    return [filter.stage, ...additionalStages].flatMap((stage) =>
+      toFilterRanges({ ...filter, stage }),
+    );
   const shared = sharedFilterSql(filter);
   const modes: ([string, SQLInputValue] | null)[] =
     filter.workModes.length > 0
@@ -228,12 +235,16 @@ interface Sql {
  * cap, reading that order's index and skipping jobs below the floor ends
  * sooner.
  */
-export function jobPageSql(query: JobListQuery, matches: number): Sql {
+export function jobPageSql(
+  query: JobListQuery,
+  matches: number,
+  additionalStages: readonly JobStage[] = [],
+): Sql {
   const columns = SORT_COLUMNS[query.sort];
   const after = readCursor(query.cursor, columns.length);
   const floorApart = query.minFit !== null && query.sort !== "best_fit";
   const sortMatches = floorApart && matches <= JOB_TOTAL_CAP;
-  const arms = toFilterRanges(query).map((range) => ({
+  const arms = toFilterRanges(query, additionalStages).map((range) => ({
     sql: `SELECT ${ROW_COLUMNS} FROM jobs j WHERE ${range.where}${
       after
         ? ` AND (${columns.map((c) => `j.${c}`).join(", ")}) < (${columns.map(() => "?").join(", ")})`
@@ -255,8 +266,12 @@ export function jobPageSql(query: JobListQuery, matches: number): Sql {
  * How many jobs match, up to one past the cap (`exact` counts them all):
  * each range counted apart.
  */
-export function jobCountSql(filter: JobFilter, exact = false): Sql {
-  const ranges = toFilterRanges(filter);
+export function jobCountSql(
+  filter: JobFilter,
+  exact = false,
+  additionalStages: readonly JobStage[] = [],
+): Sql {
+  const ranges = toFilterRanges(filter, additionalStages);
   return {
     sql: `SELECT count(*) AS n FROM (${ranges
       .map((range) => `SELECT 1 FROM jobs j WHERE ${range.where}`)
@@ -269,9 +284,12 @@ export function jobCountSql(filter: JobFilter, exact = false): Sql {
  * Scored jobs under the fit floor that the rest of the filter keeps, up to
  * one past the cap, from the same index ranges; null without a floor.
  */
-export function belowFloorSql(filter: JobFilter): Sql | null {
+export function belowFloorSql(
+  filter: JobFilter,
+  additionalStages: readonly JobStage[] = [],
+): Sql | null {
   if (filter.minFit === null) return null;
-  const ranges = toFilterRanges({ ...filter, minFit: null });
+  const ranges = toFilterRanges({ ...filter, minFit: null }, additionalStages);
   return {
     sql: `SELECT count(*) AS n FROM (${ranges
       .map(
@@ -284,23 +302,40 @@ export function belowFloorSql(filter: JobFilter): Sql | null {
 }
 
 /** Every job the filter matches, counted exactly however many there are. */
-export function countJobs(sql: Statements, filter: JobFilter): number {
-  if (toFilterSql(filter).stageOnly) return readStageCounts(sql)[filter.stage];
-  const count = jobCountSql(filter, true);
+export function countJobs(
+  sql: Statements,
+  filter: JobFilter,
+  additionalStages: readonly JobStage[] = [],
+): number {
+  if (toFilterSql(filter).stageOnly) {
+    const counts = readStageCounts(sql);
+    return [filter.stage, ...additionalStages].reduce(
+      (sum, stage) => sum + counts[stage],
+      0,
+    );
+  }
+  const count = jobCountSql(filter, true, additionalStages);
   return (sql(count.sql).get(...count.params) as { n: number }).n;
 }
 
-export function listJobs(sql: Statements, query: JobListQuery): JobListPage {
+export function listJobs(
+  sql: Statements,
+  query: JobListQuery,
+  additionalStages: readonly JobStage[] = [],
+): JobListPage {
   const columns = SORT_COLUMNS[query.sort];
   const counts = readStageCounts(sql);
   const { stageOnly } = toFilterSql(query);
-  const countSql = jobCountSql(query);
+  const countSql = jobCountSql(query, false, additionalStages);
   const total = stageOnly
-    ? counts[query.stage]
+    ? [query.stage, ...additionalStages].reduce(
+        (sum, stage) => sum + counts[stage],
+        0,
+      )
     : (sql(countSql.sql).get(...countSql.params) as { n: number }).n;
-  const pageSql = jobPageSql(query, total);
+  const pageSql = jobPageSql(query, total, additionalStages);
   const records = sql(pageSql.sql).all(...pageSql.params) as RowRecord[];
-  const below = belowFloorSql(query);
+  const below = belowFloorSql(query, additionalStages);
   const belowFloor = below
     ? (sql(below.sql).get(...below.params) as { n: number }).n
     : null;

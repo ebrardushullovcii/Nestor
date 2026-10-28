@@ -10,13 +10,19 @@ import {
   createResumeStore,
   createProfileStore,
   openJobStore,
+  approveOriginalResumesForTests,
   type JobStore,
 } from "@nestor/db/job-store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSeed } from "../test-fixtures";
 import { createResumeService, type ResumeServiceDeps } from "./resume-service";
-import { assistantJobListPage } from "./resume-commands";
+import {
+  assistantJobListPage,
+  assistantJobCounts,
+  readAssistantJobs,
+  countAssistantJobs,
+} from "./resume-commands";
 import { writeResume } from "./write-resume";
 
 function found(n: number): FoundJob {
@@ -102,6 +108,43 @@ const waitFor = (assertion: () => void) =>
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it("reads and paginates the whole Shortlisted screen, with approved as a subset", () => {
+    const { store, id } = setup();
+    const added = store.saveFoundJobs({
+      searchId: null,
+      jobs: [found(2), found(3), found(4), found(5)],
+    }).added;
+    store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });
+    approveOriginalResumesForTests(store, added.slice(0, 2));
+    store.setStage([added[2]!], "applied");
+    const seen: number[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = assistantJobListPage(
+        store,
+        readAssistantJobs(store, { stage: "shortlisted", limit: 1, cursor }),
+      );
+      expect(page.total).toBe(3);
+      expect(page.counts).toMatchObject({ shortlisted: 3, approvedResumes: 2 });
+      seen.push(...page.rows.map((row) => row.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(seen.sort()).toEqual([id, ...added.slice(0, 2)].sort());
+    expect(countAssistantJobs(store, { stage: "shortlisted" })).toBe(3);
+    expect(
+      countAssistantJobs(store, { stage: "shortlisted", text: "Systems 2" }),
+    ).toBe(1);
+    expect(
+      readAssistantJobs(store, { stage: "shortlisted", text: "Systems 2" })
+        .rows[0],
+    ).toMatchObject({ id: added[0], stage: "resume" });
+    expect(assistantJobCounts(store.stageCounts())).toMatchObject({
+      shortlisted: 3,
+      approvedResumes: 2,
+    });
+    expect(store.listJobs({ stage: "shortlisted" }).total).toBe(1);
+    expect(readAssistantJobs(store, { stage: "resume" }).total).toBe(2);
+  });
   it("reports a ready unapproved draft separately from approved-stage counts", async () => {
     const { store, service, id } = setup();
     store.moveJobs({ selection: { ids: [id] }, to: "shortlisted" });

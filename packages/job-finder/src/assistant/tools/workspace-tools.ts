@@ -1,3 +1,4 @@
+import { assistantJobCounts } from "../../resumes/resume-commands";
 import { getAssistantSearchReadiness } from "../prompt";
 import type { AssistantTaskPlan } from "@nestor/contracts";
 import {
@@ -39,9 +40,9 @@ export const getWorkspaceSummaryTool = defineTool({
       ports.readPersonalState(),
     ]);
     return {
-      summary: `${counts.found} found, ${counts.hidden} hidden, ${counts.shortlisted} shortlisted, ${counts.resume} approved, ${counts.applied} applied.`,
+      summary: `${counts.found} found, ${counts.hidden} hidden, ${counts.shortlisted + counts.resume} shortlisted, ${counts.resume} approved, ${counts.applied} applied.`,
       data: {
-        jobs: counts,
+        jobs: assistantJobCounts(counts),
         search: { ...search, ...getAssistantSearchReadiness(personal) },
         applications: tracker.counts,
         profile: {

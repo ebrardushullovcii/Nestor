@@ -1,7 +1,5 @@
 import {
-  JOB_COMMANDS,
   PROFILE_COMMANDS,
-  RESUME_COMMANDS,
   TRACKER_COMMANDS,
   TRACKER_STATUS_LABEL,
   type JobCommandOutputs,
@@ -24,10 +22,19 @@ import {
 import { runNeedsYouCommand } from "../../routes/needs-you";
 import { runJobCommand } from "../job-commands";
 import { getJobStore } from "../job-store";
-import { assistantJobListPage } from "@nestor/job-finder/resumes";
+import {
+  ASSISTANT_JOB_COMMANDS,
+  ASSISTANT_RESUME_COMMANDS,
+  assistantJobListPage,
+  assistantJobCounts,
+  readAssistantJobs,
+  countAssistantJobs,
+} from "@nestor/job-finder/resumes";
 import { runResumeCommand } from "../../routes/resumes";
 import { runTrackerCommand } from "../../routes/tracker";
 import { assistantApplicationCommands } from "./application-commands";
+
+type ResumeCommands = typeof ASSISTANT_RESUME_COMMANDS;
 
 async function trackerChange<T extends TrackerChange>(
   value: T,
@@ -163,8 +170,8 @@ export function assistantAppCommands() {
         },
       },
     ),
-    ...assistantCommandTools<typeof JOB_COMMANDS, JobCommandOutputs>(
-      JOB_COMMANDS,
+    ...assistantCommandTools<typeof ASSISTANT_JOB_COMMANDS, JobCommandOutputs>(
+      ASSISTANT_JOB_COMMANDS,
       runJobCommand,
       {
         group: (name) =>
@@ -189,6 +196,15 @@ export function assistantAppCommands() {
         },
         results: {
           ...profilePatchReceiptsForCommands.results,
+          stage_counts: (counts) => ({
+            summary: "Current job counts.",
+            data: assistantJobCounts(counts),
+          }),
+          count_jobs: (_value, input) => ({
+            summary: "Matching jobs.",
+            data: { total: countAssistantJobs(getJobStore(), input) },
+          }),
+
           list_sites: (page) => ({
             summary: `${page.total} job sites match; ${page.enabledTotal} turned on in total.`,
             data: {
@@ -240,7 +256,8 @@ export function assistantAppCommands() {
             data: value,
           }),
 
-          list_jobs: async (page, _input, { session }) => {
+          list_jobs: async (_page, input, { session }) => {
+            const page = readAssistantJobs(getJobStore(), input);
             await session.createResultSet({
               kind: "jobs",
               label: "Jobs",
@@ -305,8 +322,8 @@ export function assistantAppCommands() {
         },
       },
     ),
-    ...assistantCommandTools<typeof RESUME_COMMANDS, ResumeCommandOutputs>(
-      RESUME_COMMANDS,
+    ...assistantCommandTools<ResumeCommands, ResumeCommandOutputs>(
+      ASSISTANT_RESUME_COMMANDS,
       runResumeCommand,
       {
         group: "resume",
@@ -344,7 +361,8 @@ export function assistantAppCommands() {
               data: value,
             };
           },
-          list_shortlisted: async (page, _input, { session }) => {
+          list_shortlisted: async (_page, input, { session }) => {
+            const page = readAssistantJobs(getJobStore(), input);
             await session.createResultSet({
               kind: "jobs",
               label: "Shortlisted",
@@ -352,19 +370,8 @@ export function assistantAppCommands() {
               source: "tool_query",
             });
             return {
-              summary: `${page.rows.length} shortlisted jobs on this page; ${page.total}${page.totalCapped ? "+" : ""} match.`,
-              data: {
-                ...page,
-                rows: page.rows.map(
-                  ({ id, stage, title, company, resume }) => ({
-                    id,
-                    stage,
-                    title,
-                    company,
-                    resume,
-                  }),
-                ),
-              },
+              summary: `${page.total} jobs match.`,
+              data: assistantJobListPage(getJobStore(), page),
             };
           },
           get_resume: (value) => ({
