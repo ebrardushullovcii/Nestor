@@ -265,7 +265,7 @@ function suggestMissingExperienceRoles(input: {
       sourceKind: "parser_literal",
       value,
       normalizedValue: value,
-      valuePreview: `${title} at ${companyName}`,
+      valuePreview: companyName ? `${title} at ${companyName}` : title,
       evidenceText,
       sourceBlockIds: blockIdsFor(input.bundle, [header, dateLine ?? ""]),
       confidence: 0.72,
