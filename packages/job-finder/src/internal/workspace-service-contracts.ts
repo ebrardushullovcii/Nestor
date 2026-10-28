@@ -23,6 +23,7 @@ export interface RenderedResumeArtifact {
   intermediateFileName?: string | null;
   intermediateStoragePath?: string | null;
   pageCount?: number | null;
+  lastPageFillRatio?: number | null;
   warnings?: readonly string[];
 }
 

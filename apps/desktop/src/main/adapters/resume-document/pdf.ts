@@ -377,3 +377,29 @@ export async function getPdfPageCount(filePath: string): Promise<number> {
     await document.destroy()
   }
 }
+
+
+/** Measure actual printed text, including Chromium's page breaks. */
+export async function inspectPdfLayout(filePath: string): Promise<{
+  pageCount: number
+  lastPageFillRatio: number
+}> {
+  ensurePdfJsRuntimePolyfills()
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  configurePdfJsWorker(pdfjs)
+  const task = pdfjs.getDocument({ data: new Uint8Array(await readFile(filePath)), useWorkerFetch: false, isEvalSupported: false })
+  const document = await task.promise
+  try {
+    const page = await document.getPage(document.numPages)
+    const viewport = page.getViewport({ scale: 1 })
+    const text = await page.getTextContent()
+    // Templates use 0.4–0.64 inch vertical margins; half an inch is a
+    // deliberately approximate common printable area, not a word-count guess.
+    const margin = 36
+    const bottom = text.items.filter(isPdfTextItem).filter((item) => item.str.trim()).reduce((extent, item) =>
+      Math.max(extent, viewport.height - (item.transform[5] ?? 0)), margin)
+    return { pageCount: document.numPages, lastPageFillRatio: Math.max(0, Math.min(1, (bottom - margin) / (viewport.height - 2 * margin))) }
+  } finally {
+    await document.destroy()
+  }
+}

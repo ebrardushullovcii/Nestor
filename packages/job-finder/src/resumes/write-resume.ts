@@ -37,6 +37,7 @@ import {
   collectResumeLanguageFields,
 } from "../internal/resume-workspace-language";
 import { looksLikeCleanRoleTitle } from "../internal/resume-workspace-structure";
+import { balanceResumePages } from "./balance-resume-pages";
 import type { JobFinderDocumentManager } from "../internal/workspace-service-contracts";
 
 /** What every resume is written from: the person's profile and settings. */
@@ -589,8 +590,7 @@ export async function writeResume(
                       // rather than exporting a title with no bullets. Two
                       // source bullets are enough to avoid an empty role; the
                       // page-fill pass can show more when there is room.
-                      ...(section.included === false ||
-                      entry.included === false
+                      ...(section.included === false || entry.included === false
                         ? {
                             summary: entry.summary ?? null,
                             bullets: entry.bullets.map((bullet, index) => ({
@@ -745,7 +745,7 @@ export async function writeResume(
       if (
         pageCount === null ||
         initial.targetPageCount <= 1 ||
-        pageCount < initial.targetPageCount
+        pageCount <= initial.targetPageCount
       ) {
         break;
       }
@@ -763,7 +763,28 @@ export async function writeResume(
     input.level === "aggressive" && alignedDraft.targetPageCount > 1
       ? await trimOverTargetPages(alignedDraft)
       : alignedDraft;
-  return { ...finalDraft, status: "draft" };
+  const balanced = !templates.some(isResumeTemplateApplyEligible)
+    ? finalDraft
+    : await balanceResumePages({
+        draft:
+          input.level === "tailored"
+            ? prioritizeMetricBullets(finalDraft)
+            : finalDraft,
+        profile,
+        measure: async (draft) => {
+          const rendered = await deps.documentManager.renderResumeArtifact({
+            ...(signal ? { signal } : {}),
+            job,
+            profile,
+            renderDocument: buildResumeRenderDocument(profile, draft),
+            templateId: draft.templateId,
+            settings,
+          });
+          await deps.documentManager.discardResumeArtifact?.(rendered);
+          return rendered;
+        },
+      });
+  return { ...balanced, status: "draft" };
 }
 
 /**

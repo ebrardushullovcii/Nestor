@@ -1465,7 +1465,20 @@ export function buildResumeDraftFromTailoredDraft(input: {
         sharedRefs,
         importedResumeEvidenceRefs: importedResumeEvidenceRefs.slice(1),
       }),
-      targetPageCount: (input.profile?.yearsExperience ?? 0) >= 5 ? 2 : 1,
+      targetPageCount:
+        input.profile &&
+        input.profile.experiences.reduce(
+          (count, role) => count + role.achievements.length,
+          0,
+        ) +
+          input.profile.projects.reduce(
+            (count, project) =>
+              count + (project.summary ? 1 : 0) + (project.outcome ? 1 : 0),
+            0,
+          ) >=
+          12
+          ? 2
+          : 1,
       generationMethod,
       approvedAt: null,
       approvedExportId: null,
