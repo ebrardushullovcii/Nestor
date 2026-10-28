@@ -749,37 +749,38 @@ function renderInlineSection(input: {
     return "";
   }
 
+  // One paragraph for the whole line: separate <p> blocks let a PDF parser
+  // read the last core skill and the first additional skill as one phrase.
+  const values = groups.flatMap((group) =>
+    group.values.map((value) => ({
+      value,
+      sectionId: group.sectionId ?? null,
+    })),
+  );
+
   return `
     <section class="section-block inline-section${input.className ? ` ${input.className}` : ""}">
       <h3>${escapeHtml(input.title)}</h3>
       <div class="inline-lines">
-        ${groups
+        <p${renderPreviewAttributes({
+          ...withPreviewSelection({
+            mode: input.mode ?? "export",
+            sectionId: values[0]?.sectionId ?? null,
+          }),
+        })}>${values
           .map(
-            (group) =>
-              `<p${renderPreviewAttributes({
+            ({ value, sectionId }, index) =>
+              `<span${renderPreviewAttributes({
                 ...withPreviewSelection({
                   mode: input.mode ?? "export",
-                  sectionId: group.sectionId ?? null,
+                  sectionId,
+                  targetId: sectionId
+                    ? getResumeSectionBulletTargetId(sectionId, value.id)
+                    : null,
                 }),
-              })}>${group.label ? `<strong>${escapeHtml(group.label)}:</strong> ` : ""}${group.values
-                .map(
-                  (value, index) =>
-                    `<span${renderPreviewAttributes({
-                      ...withPreviewSelection({
-                        mode: input.mode ?? "export",
-                        sectionId: group.sectionId ?? null,
-                        targetId: group.sectionId
-                          ? getResumeSectionBulletTargetId(
-                              group.sectionId,
-                              value.id,
-                            )
-                          : null,
-                      }),
-                    })}>${escapeHtml(value.text)}</span>${index < group.values.length - 1 ? ", " : ""}`,
-                )
-                .join("")}</p>`,
+              })}>${escapeHtml(value.text)}</span>${index < values.length - 1 ? ", " : ""}`,
           )
-          .join("")}
+          .join("")}</p>
       </div>
     </section>
   `;
@@ -869,18 +870,19 @@ function renderSkillGroups(
   values: ReadonlyArray<{ id: string; text: string }>;
   sectionId?: string | null;
 }> {
+  // ATS parsers read the skills list, not the app's internal Core/Additional
+  // grouping. Leaving the labels off keeps "Skills" as one plain
+  // comma-separated block while the two sections stay separately editable.
   return [
     {
-      label: "Core",
       values: coreSkillsSection?.bullets ?? [],
       sectionId: coreSkillsSection?.id ?? null,
     },
     {
-      label: "Additional",
       values: additionalSkillsSection?.bullets ?? [],
       sectionId: additionalSkillsSection?.id ?? null,
     },
-  ];
+  ].filter((group) => group.values.length > 0);
 }
 
 interface SectionCatalog {
@@ -1914,11 +1916,11 @@ export function renderResumeTemplateHtml(
     .theme-modern_split .name { font-size: 1.92rem; letter-spacing: -0.04em; }
     .theme-modern_split h3 { border-bottom: 0; border-left: 0.04in solid var(--accent); padding: 0 0 0 0.14rem; letter-spacing: 0.1em; }
     .theme-technical_matrix .name { font-size: 1.62rem; letter-spacing: -0.015em; }
-    .theme-technical_matrix h3 { color: var(--accent); border-bottom: 2px solid var(--accent); font-size: 0.72rem; letter-spacing: 0.11em; }
+    .theme-technical_matrix h3 { color: var(--accent); border-bottom: 2px solid var(--accent); font-size: 0.72rem; letter-spacing: 0.04em; }
     .theme-technical_matrix .skill-pill-list li { font-size: 0.79rem; }
     .theme-technical_matrix .skill-group { border-top: 1px solid var(--line); padding-top: 0.12rem; }
     .theme-project_showcase .name { font-size: 1.96rem; letter-spacing: -0.04em; }
-    .theme-project_showcase h3 { border-top: 1px solid var(--accent); border-bottom: 0; padding-top: 0.1rem; padding-bottom: 0; letter-spacing: 0.11em; }
+    .theme-project_showcase h3 { border-top: 1px solid var(--accent); border-bottom: 0; padding-top: 0.1rem; padding-bottom: 0; letter-spacing: 0.04em; }
     .theme-project_showcase .section-project-spotlight .entry-block:first-of-type { margin-top: 0; }
     .theme-credentials_focus .name { font-family: Georgia, 'Times New Roman', serif; font-size: 1.8rem; font-weight: 600; letter-spacing: -0.01em; }
     .theme-credentials_focus h3 { font-family: Georgia, 'Times New Roman', serif; color: var(--accent); font-size: 0.82rem; letter-spacing: 0.045em; text-transform: none; border-bottom-color: var(--accent); }

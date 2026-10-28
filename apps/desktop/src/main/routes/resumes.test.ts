@@ -96,7 +96,7 @@ it("reports a failed export instead of claiming a file was saved", async () => {
 });
 
 it.each(["original", "light", "tailored", "aggressive"])(
-  "names a %s PDF after its saved level",
+  "names a %s PDF for the job, never after the internal level",
   async (level) => {
     get.mockReturnValueOnce({
       job: { title: "Designer", company: "Example" },
@@ -104,9 +104,7 @@ it.each(["original", "light", "tailored", "aggressive"])(
     });
     await runResumeCommand("export_resume_pdf", { jobId: 12 });
     expect(defaultPath).toHaveBeenLastCalledWith(
-      level === "original"
-        ? "Resume"
-        : `${level[0]!.toUpperCase()}${level.slice(1)} Resume`,
+      "Resume",
       "Designer",
       "Example",
     );

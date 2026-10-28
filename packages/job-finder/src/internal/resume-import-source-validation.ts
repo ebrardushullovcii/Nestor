@@ -19,7 +19,7 @@ import {
 } from "./resume-role-title";
 
 const headingPattern =
-  /^(?:(?:work|professional|relevant|employment|career)(?: work)? (?:experience|history|background)|experience|employment|education(?: and training)?|(?:technical|core|key|additional) skills|skills|projects?|project experience|certifications?|certificates?|languages?|language skills|(?:career )?objective|target roles|(?:work|employment) preferences|(?:extracurricular )?activities|extracurricular|volunteer(?:ing| experience)?|summary|profile|about me|references|disclaimer)\s*[:–—-]?$/i;
+  /^(?:(?:work|professional|relevant|employment|career|selected|additional)(?: work)? (?:experience|history|background)|experience|employment|work history|employment history|career history|professional background|education(?:\s*(?:,|&|and)?\s*(?:training|certifications?|certificates?))?|academic background|training(?: (?:and|&) education)?|(?:technical|core|key|additional) skills|skills|projects?|project experience|certifications?|certificates?|languages?|language skills|(?:career )?objective|target roles|(?:work|employment) preferences|(?:extracurricular )?activities|extracurricular|volunteer(?:ing| experience)?|summary|profile|about me|references|disclaimer)\s*[:–—-]?$/i;
 const activityPattern =
   /^(?:(?:extracurricular )?activities|extracurricular|volunteer(?:ing| experience)?)\s*[:–—-]?$/i;
 const proficiencyPattern =

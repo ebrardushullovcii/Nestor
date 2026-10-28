@@ -94,6 +94,51 @@ describe("resume import completeness", () => {
         .candidates,
     ).toHaveLength(result.candidates.length);
   });
+  it("adds older roles the model left out as review candidates", () => {
+    const source = input();
+    const bundle = {
+      ...source.bundle,
+      fullText: [
+        "EXPERIENCE",
+        "Product Designer - Signal Systems",
+        "March 2021-Present",
+        "- Designed accessible tools.",
+        "Senior Designer - Older Studio",
+        "June 2017-February 2021",
+        "- Built the first design system.",
+        "Junior Designer - First Studio",
+        "July 2014-May 2017",
+        "- Made wireframes.",
+        "EDUCATION",
+        "BSc Design",
+        "2008-2012",
+      ].join("\n"),
+    };
+    const result = completeResumeImport({ ...source, bundle });
+    const roles = result.candidates.filter(
+      (candidate) =>
+        candidate.target.section === "experience" &&
+        candidate.resolutionReason === "grounded_completeness_suggestion",
+    );
+    expect(
+      roles.map((candidate) => (candidate.value as { title?: string }).title),
+    ).toEqual(["Senior Designer", "Junior Designer"]);
+    expect(roles.every((candidate) => candidate.resolution === "needs_review"))
+      .toBe(true);
+    expect(result.warnings.join(" ")).toContain("older role");
+    expect(
+      completeResumeImport({
+        ...source,
+        bundle,
+        candidates: result.candidates,
+      }).candidates.filter(
+        (candidate) =>
+          candidate.resolutionReason === "grounded_completeness_suggestion" &&
+          candidate.target.section === "experience",
+      ),
+    ).toHaveLength(2);
+  });
+
   it("names the required missing headline when no grounded suggestion is possible", () => {
     const result = completeResumeImport({ ...input(), candidates: [] });
     expect(result.candidates).toEqual([]);

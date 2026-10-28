@@ -52,7 +52,8 @@ const fold = (text: string) =>
     .replace(/\s+/gu, " ")
     .trim();
 
-const NUMBER = /\d[\d,]*(?:\.\d+)?%?/gu;
+const NUMBER =
+  /(?<![\p{L}\p{N}])\d[\d,]*(?:\.\d+)?%?(?![\p{L}\p{N}])/gu;
 const numbersIn = (text: string) =>
   (text.match(NUMBER) ?? []).map((value) => value.replace(/,/gu, ""));
 

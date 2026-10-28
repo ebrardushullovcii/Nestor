@@ -396,9 +396,13 @@ describe("resumes on the store", () => {
           startDate: role.startDate,
           endDate: role.endDate,
           isCurrent: role.isCurrent,
-          summary: null,
+          summary: role.summary?.trim() || null,
         });
-        expect(entry?.bullets.some((bullet) => bullet.included)).toBe(false);
+        expect(
+          entry?.bullets
+            .filter((bullet) => bullet.included)
+            .map((bullet) => bullet.text),
+        ).toEqual(role.achievements.slice(0, 2));
       }
     },
   );
@@ -449,6 +453,40 @@ describe("resumes on the store", () => {
       ).toBe(keep ? text : profile.summary);
     },
   );
+
+  it("keeps a real skill that contains a number in Aggressive", async () => {
+    const seed = createSeed();
+    const base = createDeterministicJobFinderAiClient();
+    const { store, id } = setup();
+    const draft = await writeResume(
+      {
+        aiClient: {
+          ...base,
+          createResumeDraft: async (input) => {
+            const written = await base.createResumeDraft(input);
+            return {
+              ...written,
+              coreSkills: [...written.coreSkills, "SCORM 1.2"],
+            };
+          },
+        },
+        documentManager: {
+          listResumeTemplates: () => [],
+          renderResumeArtifact: () =>
+            Promise.reject(new Error("No preview needed")),
+        },
+      },
+      { ...seed, job: store.getJob(id)!, level: "aggressive" },
+    );
+    const skills = draft?.sections
+      .filter((section) => section.kind === "skills")
+      .flatMap((section) =>
+        section.bullets
+          .filter((bullet) => bullet.included)
+          .map((bullet) => bullet.text),
+      );
+    expect(skills).toContain("SCORM 1.2");
+  });
 
   it.each(["profile facts", "resume source"] as const)(
     "keeps revoked drafts queued through an empty Profile cutover, then wakes on %s",

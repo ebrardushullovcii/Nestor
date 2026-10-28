@@ -684,16 +684,23 @@ describe("resume generation quality", () => {
     });
 
     for (const result of [aggressiveResult]) {
-      expect(result.experienceEntries).toEqual([]);
+      // Aggressive keeps the full history visible for continuity; hiding a
+      // role either removed real experience or exported a title with no
+      // bullets. The role stays compact instead.
+      expect(
+        result.experienceEntries.map((entry) => entry.profileRecordId),
+      ).toEqual(["experience_technical_support", "experience_call_center"]);
       expect(result.coverageMetadata).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             profileRecordId: "experience_technical_support",
-            classification: "suggested_hidden",
+            classification: "compact",
+            careerFamilyFit: "weak",
           }),
           expect.objectContaining({
             profileRecordId: "experience_call_center",
-            classification: "suggested_hidden",
+            classification: "compact",
+            careerFamilyFit: "unrelated",
           }),
         ]),
       );
@@ -889,19 +896,17 @@ describe("resume generation quality", () => {
       const visibleRecordIds = result.experienceEntries.map(
         (entry) => entry.profileRecordId,
       );
-      if (tailoringMode !== "aggressive") {
-        expect(visibleRecordIds).toEqual(expectedRecordIds);
-      } else {
-        expect(visibleRecordIds).toEqual(expectedRecordIds.slice(0, 4));
+      expect(visibleRecordIds).toEqual(expectedRecordIds);
+      if (tailoringMode === "aggressive") {
         expect(result.coverageMetadata).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
               profileRecordId: "experience_operations",
-              classification: "suggested_hidden",
+              classification: "compact",
             }),
             expect.objectContaining({
               profileRecordId: "experience_retail",
-              classification: "suggested_hidden",
+              classification: "compact",
             }),
           ]),
         );
