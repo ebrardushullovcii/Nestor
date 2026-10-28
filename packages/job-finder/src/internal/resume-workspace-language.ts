@@ -5,6 +5,7 @@ import {
 import {
   ResumeLanguageTranslationSchema,
   type ResumeDraft,
+  type CandidateProfile,
   type ResumeDraftSourceRef,
   type SavedJob,
   type AgentTaskValidationIssue,
@@ -23,6 +24,7 @@ export async function writeResumeLanguage(input: {
   aiClient: Pick<JobFinderAiClient, "chatWithTools">;
   draft: ResumeDraft;
   job: SavedJob;
+  signal?: AbortSignal;
 }): Promise<ResumeDraft> {
   if (!input.aiClient.chatWithTools) {
     throw new Error(
@@ -53,6 +55,7 @@ export async function writeResumeLanguage(input: {
     ],
     [],
     {
+      ...(input.signal ? { signal: input.signal } : {}),
       maxOutputTokens: 16_000,
       conversationKey: `resume-language:${input.draft.jobId}`,
     },
@@ -216,4 +219,48 @@ export function applyResumeLanguage(
     claimConfirmations: [],
     issueApprovals: [],
   };
+}
+
+/** Source prose restored after writing must share the translated document's language. */
+export function hasUntranslatedResumeSourceProse(
+  draft: ResumeDraft,
+  profile: CandidateProfile,
+): boolean {
+  if (!draft.writtenLanguage) return false;
+  const refs = draft.sections.flatMap((section) => [
+    ...section.sourceRefs,
+    ...section.bullets.flatMap((bullet) => bullet.sourceRefs),
+    ...section.entries.flatMap((entry) => [
+      ...entry.sourceRefs,
+      ...entry.bullets.flatMap((bullet) => bullet.sourceRefs),
+    ]),
+  ]);
+  // The language writer leaves original-field provenance whenever it changes
+  // prose or a title. No guessed language names, scripts or word dictionaries.
+  if (!refs.some((ref) => ref.sourceId?.startsWith(`draft:${draft.id}:field:`)))
+    return false;
+  const originals = [
+    profile.summary,
+    ...profile.experiences.flatMap((entry) => [
+      entry.summary,
+      ...entry.achievements,
+    ]),
+    ...profile.projects.flatMap((entry) => [entry.summary, entry.outcome]),
+  ].filter((text): text is string => Boolean(text && text.trim().length >= 16));
+  const visible = draft.sections
+    .filter((section) => section.included)
+    .flatMap((section) => [
+      section.text,
+      ...section.bullets.filter((b) => b.included).map((b) => b.text),
+      ...section.entries
+        .filter((entry) => entry.included)
+        .flatMap((entry) => [
+          entry.summary,
+          ...entry.bullets.filter((b) => b.included).map((b) => b.text),
+        ]),
+    ]);
+  return visible.some(
+    (text) =>
+      text && originals.some((original) => text.includes(original.trim())),
+  );
 }
