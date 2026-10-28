@@ -174,7 +174,7 @@ export const NAVIGATION_CASES: AssistantLaneCase[] = [
     [{ text: "can you pull up my resume?", context: HOME }],
     opens(
       { path: "/job-finder/profile", or: ["/job-finder/review-queue"] },
-      /resume/iu,
+      /resume|riley-okafor/iu,
     ),
   ),
   navCase(
