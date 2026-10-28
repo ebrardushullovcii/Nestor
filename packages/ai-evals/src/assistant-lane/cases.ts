@@ -11,6 +11,7 @@ import {
   type AssistantLaneSnapshot,
   type AssistantLaneScenario,
 } from "./world";
+import { NAVIGATION_CASES } from "./navigation-cases";
 
 /**
  * Assistant eval cases (plan §15). Each case sends one or more sidebar
@@ -31,6 +32,8 @@ export interface AssistantLaneObservation {
     outcome: string;
     detail: string | null;
   }[];
+  /** Routes the assistant opened in the app, in order. */
+  navigations: readonly string[];
   changes: readonly {
     summary: string;
     fields: readonly string[];
@@ -652,6 +655,7 @@ const INVENTORY_CASES: AssistantLaneCase[] = ACTION_INVENTORY.flatMap(
 export const ASSISTANT_LANE_CASES: readonly AssistantLaneCase[] = [
   ...OUTCOME_CASES,
   ...INVENTORY_CASES,
+  ...NAVIGATION_CASES,
 ];
 
 /** Inventory entries mapped to tools that no case exercises. */

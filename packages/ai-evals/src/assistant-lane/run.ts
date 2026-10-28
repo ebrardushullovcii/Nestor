@@ -18,6 +18,7 @@ export interface AssistantLaneCaseResult {
   failures: string[];
   replyText: string;
   toolRuns: { toolName: string; outcome: string; detail: string | null }[];
+  navigations: string[];
   durationMs: number;
   inputs: AssistantLaneWorld["recorder"]["inputs"];
   error: string | null;
@@ -86,6 +87,8 @@ export async function runAssistantLaneCase(
   try {
     let conversationId: string | null = null;
     for (const [index, turn] of evalCase.turns.entries()) {
+      const context = turn.context ?? laneContext();
+      world.show(context);
       const result = await world.host.sendMessage({
         conversationId,
         clientMessageId: `lane_${evalCase.id}_${index}`.replace(
@@ -93,7 +96,7 @@ export async function runAssistantLaneCase(
           "_",
         ),
         text: turn.text,
-        context: turn.context ?? laneContext(),
+        context,
       });
       conversationId = result.conversationId;
       await waitForIdle(
@@ -110,6 +113,7 @@ export async function runAssistantLaneCase(
       recorder: world.recorder,
       stageOf: world.stageOf,
       messages: view.messages,
+      navigations: [...world.navigations],
       ...observe(view.messages),
     };
     const failures = evalCase.check(observation);
@@ -137,6 +141,7 @@ export async function runAssistantLaneCase(
       failures,
       replyText: observation.replyText.slice(0, 600),
       toolRuns: [...observation.toolRuns],
+      navigations: [...observation.navigations],
       durationMs: Date.now() - started,
       inputs: world.recorder.inputs,
       error: null,
@@ -150,6 +155,7 @@ export async function runAssistantLaneCase(
       failures: [],
       replyText: "",
       toolRuns: [],
+      navigations: [],
       durationMs: Date.now() - started,
       inputs: world.recorder.inputs,
       error: error instanceof Error ? error.message : String(error),
@@ -178,6 +184,7 @@ export async function runAssistantLane(
 export function formatAssistantLaneReport(
   model: string,
   results: readonly AssistantLaneCaseResult[],
+  repeat = 1,
 ): string {
   const passed = results.filter((result) => result.passed).length;
   const asked = results.filter(
@@ -189,6 +196,13 @@ export function formatAssistantLaneReport(
     `${passed} of ${results.length} cases passed; ${asked} of those passed by asking the person a question.`,
     "",
   ];
+  if (repeat > 1) {
+    const tally = new Map<string, number>();
+    for (const result of results)
+      tally.set(result.id, (tally.get(result.id) ?? 0) + Number(result.passed));
+    for (const [id, count] of tally) lines.push(`- ${count}/${repeat} ${id}`);
+    lines.push("");
+  }
   for (const result of results) {
     lines.push(
       `- ${result.passed ? (result.asked ? "PASS (asked)" : "PASS") : "FAIL"} ${result.id} (${Math.round(result.durationMs / 100) / 10}s): ${result.title}`,
@@ -199,6 +213,8 @@ export function formatAssistantLaneReport(
     for (const failure of result.failures) lines.push(`  - ${failure}`);
     if (result.error) lines.push(`  - error: ${result.error}`);
     if (!result.passed) {
+      if (result.navigations.length)
+        lines.push(`  - opened: ${result.navigations.join(", ")}`);
       lines.push(
         `  - tools: ${result.toolRuns.map((run) => `${run.toolName}:${run.outcome}`).join(", ") || "none"}`,
       );

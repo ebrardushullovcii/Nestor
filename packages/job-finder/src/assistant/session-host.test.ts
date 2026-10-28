@@ -782,6 +782,74 @@ describe("assistant session host", () => {
     expect(release).toHaveBeenCalledWith("Switching browser tabs");
   });
 
+  it("does not reopen the screen the person is already looking at", async () => {
+    const screens = ["shortlisted", "applications"];
+    let step = 0;
+    const { host, events } = setup({
+      modelHandle: {
+        ...createScriptedAssistantModelHandle(),
+        createModel: () => ({
+          chatWithTools: () => {
+            const screen = screens[step++];
+            return Promise.resolve(
+              screen
+                ? {
+                    content: "",
+                    toolCalls: [
+                      {
+                        id: `open_${step}`,
+                        type: "function" as const,
+                        function: {
+                          name: "open_in_app",
+                          arguments: JSON.stringify({ screen }),
+                        },
+                      },
+                    ],
+                  }
+                : { content: "Done." },
+            );
+          },
+        }),
+      },
+    });
+    const acknowledged = new Set<string>();
+    const acknowledge = setInterval(() => {
+      for (const event of events) {
+        const id =
+          event.payload.type === "open_route"
+            ? event.payload.navigationRequestId
+            : null;
+        if (!id || acknowledged.has(id) || event.payload.type !== "open_route")
+          continue;
+        acknowledged.add(id);
+        host.acknowledgeNavigation({
+          conversationId: event.conversationId,
+          navigationRequestId: id,
+          displayedRoute: event.payload.route,
+          section: null,
+          overlay: "none",
+          status: "displayed",
+          reason: null,
+        });
+      }
+    }, 5);
+    try {
+      await sendAndWait(
+        host,
+        "Show my shortlisted jobs, then my applications",
+        context({ screen: "review_queue", route: "/job-finder/review-queue" }),
+      );
+    } finally {
+      clearInterval(acknowledge);
+    }
+    // Shortlisted was already showing; only Applications was opened.
+    expect(
+      events.flatMap((event) =>
+        event.payload.type === "open_route" ? [event.payload.route] : [],
+      ),
+    ).toEqual(["/job-finder/applications"]);
+  });
+
   it("R3-169 waits for Browser to minimize before emitting the route", async () => {
     const { host, ports, events } = setup();
     let finish!: () => void;
