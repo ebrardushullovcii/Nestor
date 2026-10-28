@@ -199,10 +199,12 @@ function suggestMissingExperienceRoles(input: {
           !Array.isArray(value) &&
           "schoolName" in value &&
           "degree" in value &&
-          normalizeRoleKey(String(value.schoolName ?? "")) ===
-            normalizeRoleKey(companyName ?? "") &&
-          normalizeRoleKey(String(value.degree ?? "")) ===
-            normalizeRoleKey(title),
+          normalizeRoleKey(
+            typeof value.schoolName === "string" ? value.schoolName : "",
+          ) === normalizeRoleKey(companyName ?? "") &&
+          normalizeRoleKey(
+            typeof value.degree === "string" ? value.degree : "",
+          ) === normalizeRoleKey(title),
       );
     if (known.has(key) || educationKnown) continue;
     known.add(key);
