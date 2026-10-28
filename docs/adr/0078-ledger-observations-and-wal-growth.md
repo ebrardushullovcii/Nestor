@@ -1,6 +1,6 @@
 # ADR 0078: Ledger observations use columns and checkpoints follow WAL growth
 
-Status: accepted (2026-10-24).
+Status: superseded: job-store search/sighting rows replace discovery_ledger_observations (76ca0c67); the old workspace's WAL-growth checkpoint worker was retired (145ad266).
 
 ## Context
 

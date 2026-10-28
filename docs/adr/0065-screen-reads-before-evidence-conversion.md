@@ -1,6 +1,6 @@
 # ADR 0065: Prepare screen reads before converting evidence
 
-Status: accepted (2026-10-24).
+Status: superseded: job-store opening and per-screen reads replace the temporary migration worker, evidence conversion gates and per-window legacy projections; their startup machinery was removed (145ad266).
 
 The first launch after an update spent tens of seconds converting stored search
 runs, resumes and job evidence on Electron's main thread. None of that evidence

@@ -1,6 +1,6 @@
 # ADR 0077: Home opens on a first view before the full snapshot
 
-Status: accepted (2026-10-24). Builds on [ADR 0065](0065-screen-reads-before-evidence-conversion.md).
+Status: superseded: Home, Shortlisted and Applications read their own job-store queries; getWorkspaceHome, deferred discovery arrays and the later full-snapshot gate were removed (145ad266).
 
 ## Context
 

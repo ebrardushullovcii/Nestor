@@ -1,6 +1,6 @@
 # ADR 0062: Keep prepared discovery fingerprints with saved jobs
 
-Status: accepted (2026-10-24).
+Status: partly superseded: job-store job_keys and seen_cards replace saved_job_discovery_fingerprints and its repository readers/writers (145ad266). The contracts-owned discoveryPreparation symbol and typed in-memory helpers remain for posting consumers.
 
 `packages/contracts` owns the enumerable `Symbol.for("nestor.discoveryPreparation")`
 slot and its typed preparation helpers. Spreads and `copyView` carry the slot;

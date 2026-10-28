@@ -1,6 +1,6 @@
 # ADR 0076: Write a resume when a job is shortlisted
 
-Status: accepted (2026-10-24). Amends [ADR 0045](0045-resume-batches-continue-after-restart.md) for these resumes; keeps [ADR 0048](0048-shortlisted-resume-pipeline.md)'s limits. Superseded on 2026-10-25 by Shortlisted on the job store: resumes live in a `resumes` table beside `jobs` and are written by `packages/job-finder/src/resumes`, up to six at once, as soon as a job is shortlisted; approving one moves its job to the `resume` stage that Apply reads.
+Status: superseded: shortlisting queues job-store resume rows for up to six adaptive writers, replacing intelligence.resumeOnShortlistJobIds and the old batch pipeline (588a399e, 28b98333).
 
 ## Context
 

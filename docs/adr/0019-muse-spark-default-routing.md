@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted; supersedes the model selection in ADR 0010. The separate text and
+Partly superseded by ADR 0037 for the sidebar assistant's default route (DeepSeek V4.1 Flash; packages/ai-providers/src/assistant-model.ts). Muse text/vision defaults, the aggressive-resume route and independent overrides remain accepted; the 2026-10-23 resume-writer reasoning amendment still applies. The separate text and
 vision route configuration from ADR 0010 stays.
 
 Amended 2026-10-23: Muse resume writing has its own smaller reasoning budget.

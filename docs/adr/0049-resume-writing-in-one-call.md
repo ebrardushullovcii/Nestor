@@ -1,6 +1,6 @@
 # ADR 0049: A resume is written in one model call, checked, and repaired only when flagged
 
-Status: accepted (2026-10-15). Amended by [ADR 0051](0051-the-app-fixes-what-it-can-and-does-not-ask.md): flagged lines are settled during generation instead of waiting for the person, and the writer decides what each resume shows. Amended 2026-10-21: a flagged render no longer goes back to the writer; the check's own fixes settle those lines.
+Status: partly superseded: Aggressive uses local number checks instead of the model claim-check/re-check path (588a399e); job-store resume failures are per job rather than pausing a generation batch. One-call proposals and model claim checks for other levels remain accepted; ADR 0051 still governs settling flagged lines.
 
 ## Context
 

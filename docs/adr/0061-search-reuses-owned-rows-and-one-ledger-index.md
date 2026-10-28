@@ -1,6 +1,6 @@
 # ADR 0061: Search reuses owned rows and one ledger index
 
-Status: accepted (2026-10-24). Amends ADR 0046's validation of internal updates.
+Status: partly superseded: indexed job-store identities and seen cards replace run-owned ledger indexes, borrowed workspace projections and durable legacy-row preparation; plans and old discovery storage are removed (242cc067, 76ca0c67, 145ad266). Shared posting-preparation helpers remain for domain consumers.
 
 ## Context
 

@@ -1,6 +1,6 @@
 # ADR 0031: A rate-limited listing read waits only as long as the site asked
 
-Status: accepted (2026-09-23). Amends the retry timing in ADR 0016.
+Status: partly superseded: search HTTP reads use host-scoped Retry-After pauses and up to three retries (b2338ff9), replacing the two-retry, 40-total, 90-second pass limits and 30-second deferral rule. Server-requested backoff remains.
 
 ## Context
 

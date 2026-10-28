@@ -1,6 +1,6 @@
 # ADR 0046: Discovery history is stored as rows
 
-Status: accepted (2026-10-13)
+Status: superseded: job-store searches, search sources and seen cards replace the discovery singleton, ledger, checkpoints and canonical whole-discovery reads; the old discovery storage was removed (76ca0c67).
 
 ## Context
 

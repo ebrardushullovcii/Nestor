@@ -1,6 +1,6 @@
 # ADR 0017: Embedded Job Finder browser
 
-Status: accepted
+Status: partly superseded by [ADR 0034](0034-stepping-in-hands-over-one-tab.md) for tab-scoped takeover and [ADR 0055](0055-reclaim-verified-prepared-forms.md) for prepared-form reclamation; embedded-browser isolation and sign-in ownership remain accepted.
 
 ## Context
 

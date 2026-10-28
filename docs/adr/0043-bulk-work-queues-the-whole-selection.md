@@ -1,6 +1,6 @@
 # ADR 0043: Bulk work queues the whole selection; Undo stays long enough to use
 
-Status: accepted (2026-10-05). Shortlisted concurrency is superseded by [ADR 0048](0048-shortlisted-resume-pipeline.md).
+Status: partly superseded: resume-generation batches are replaced by Shortlisted on the job store (2581847a, 588a399e), and Apply queues selected rows without ten-job runs (0b053477). Whole-selection accounting and longer action toasts remain accepted.
 
 ## Context
 

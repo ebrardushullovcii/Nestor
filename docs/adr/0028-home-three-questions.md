@@ -1,6 +1,6 @@
 # ADR 0028: Home answers three questions, and the person's files live in Profile
 
-Status: accepted (2026-09-23); amended (2026-10-01). The Home layout is superseded by the 2026-10-25 scope in `docs/PRODUCT.md`: Home becomes a dashboard with charts. The count-owner rule and Profile › Files stand.
+Status: partly superseded: Home is a job-store dashboard with charts and several next steps (424992b9), replacing the single-card layout, workspace task model and batch controls. Counts still come from their stores and files remain under Profile.
 
 ## Context
 

@@ -23,7 +23,7 @@ The maintained list of what a person can do in Nestor, and how to prove each one
 
 ## Feature entry contract
 
-Each file has an H1, one paragraph on the user-visible behavior, then exactly four H2s in this order: `Sub-features`, `How to get to it (user POV)`, `Driving it with verify-nestor`, `Gotchas`.
+Each recipe starts with an H1 and a paragraph on user-visible behavior, then covers: `Sub-features`, `How to get to it (user POV)`, `Driving it with verify-nestor`, `Gotchas`.
 
 ## Features
 
@@ -31,8 +31,8 @@ Each file has an H1, one paragraph on the user-visible behavior, then exactly fo
 - [Job sources](./job-sources.md): add, turn on and off, and edit the sites Job Finder searches. The setup step is proven; Profile › Job sources is not yet.
 - [Search and fit](./search-and-fit.md): Find jobs searches the enabled sources; each result carries the model's fit verdict and its reasons. Proven with live AI 2026-10-17 (`search` stage).
 - [Shortlist and tailored resume](./shortlist-and-resume.md): shortlist a job, pick a resume level, create the resume, review it. Proven 2026-10-17 (`shortlist`, `resume` stages); Edit resume and the other levels are not yet.
-- [Apply and send](./apply-and-send.md): Apply prepares the application in the in-app browser and stops before sending; the person sends on the site; Applications tracks it. Proven against the replica `/board/` 2026-10-17 (`apply`, `send` stages); Send for me and the other replica sites are not yet.
+- [Apply and send](./apply-and-send.md): Fill in for me prepares the form for the person to send; Send for me can send through the guards. Applications tracks the work. Proven against the replica `/board/` 2026-10-17 (`apply`, `send` stages); Send for me and the other replica sites are not yet.
 - [Live Assistant](./live-assistant.md): notices, quick check, a live session with typed questions and popups, post-session review. Proven text-only 2026-10-17 (`journeys/live-assistant-session.mjs`); audio and screenshots are not.
 - [Website](./website.md): the public landing page, signup and tour at desktop and phone widths. Proven 2026-10-17 (`journeys/website.mjs`).
 
-Not mapped yet: the app-wide assistant sidebar, Safeguards, Settings (apply mode, themes), the Needs you inbox, workspace search, the Companies view, and Live Assistant settings. Add a file when a change touches one.
+Not mapped yet: the assistant outside the source/apply recipes, Settings beyond apply mode, workspace search, and Live Assistant settings. Add a file when a change touches one.

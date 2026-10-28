@@ -1,6 +1,6 @@
 # ADR 0054: A build skips validating rows it already validated
 
-Status: accepted (2026-10-21).
+Status: superseded by [ADR 0071](0071-store-evidence-once-and-query-startup-facts.md): read-time validation marks, build digests and background validation were removed; the old workspace storage was later retired (145ad266).
 
 Amended by [ADR 0071](0071-store-evidence-once-and-query-startup-facts.md): startup views and validation marks are removed; typed app-owned rows are trusted on read. Canonical storage is normalized without changing repository contracts.
 

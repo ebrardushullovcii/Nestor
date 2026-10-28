@@ -1,6 +1,6 @@
 # ADR 0068: Discovery commands return run facts
 
-Status: accepted (2026-10-24).
+Status: partly superseded: job-store search commands expose current search records instead of the legacy terminal run-facts contract, and deferred whole-projection refreshes are retired (770b41ce, 145ad266). Commands still avoid constructing a workspace snapshot.
 
 Find jobs follows committed row changes. Search and Stop therefore expose typed
 command replies containing only the terminal outcome, run identity, new-job

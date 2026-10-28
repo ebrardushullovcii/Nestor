@@ -1,6 +1,6 @@
 # ADR 0036: Parallel application preparation
 
-Status: accepted (2026-09-26).
+Status: partly superseded: indexed application rows replace ten-job runs and default to four preparation workers (0b053477, d2456bca); prepared-page capacity and reclamation follow ADR 0055, and mode is captured when queued (ADR 0024, 1f3d95d3). Per-site ownership and serialized, guarded sends remain accepted.
 
 Amended 2026-10-23 for the owner's Apply speed work: preparation uses up to 16
 workers, bounded by the browser's working-tab capacity. The environment override

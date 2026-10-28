@@ -21,7 +21,7 @@ Use this instance's replica URLs only. A synthetic profile may be seeded when im
 
 ## Counts
 
-Per-source inventory notes report listings observed on the site. The old source-health result is a retained count and says `jobs kept`; it must not claim that is the board's total listing count.
+Find jobs > What each site found reports listings observed, new jobs and jobs saved hidden. These are search-run counts, not the board's total inventory.
 
 ## Gotchas
 

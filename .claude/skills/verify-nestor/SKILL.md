@@ -11,7 +11,7 @@ Proof means using the app the way a person would, action by action, and keeping 
 
 - **Isolated instance only.** Every `up` makes a fresh `/tmp/nestor-verify-<label>-*` user-data folder (`%TEMP%\nestor-verify-<label>-*` on Windows) and refuses anything else. Never point an instance at the default data location (`~/Library/Application Support/@nestor/desktop`, `%APPDATA%\@nestor\desktop` on Windows, or the older `@nordri/desktop` that the owner's next normal start migrates). Never attach to, drive or stop the owner's `pnpm desktop:dev`.
 - **Synthetic data only.** Use the resumes in `apps/desktop/test-fixtures/job-finder/` (`resume-import-sample.txt`, `resume-import-personas/`). Never a real resume, real credentials or a signed-in browser state, in the instance or in the evidence.
-- **Send only to the replica sites.** Each instance runs its own copy of `apps/desktop/test-fixtures/job-sites` on a free port. A send guard inside the app refuses every request to a non-loopback host (`--net replica`, the default) and logs it to `blocked-requests.jsonl`; `up` proves the guard with a self-test before anyone drives. Add only replica URLs as job sources. With `--net web` the app can read real sites, but every non-GET request to them is still refused, so a real employer gets nothing: anything outside the replica stays `prepare_only` (ADR 0012, 0024, `docs/TESTING.md`).
+- **Send only to the replica sites.** Each instance runs its own copy of `apps/desktop/test-fixtures/job-sites` on a free port. A send guard inside the app refuses every request to a non-loopback host (`--net replica`, the default) and logs it to `blocked-requests.jsonl`; `up` proves the guard with a self-test before anyone drives. Add only replica URLs as job sources. With `--net web` the app can read real sites, but every request to them other than GET, HEAD or OPTIONS is still refused, so a real employer gets nothing: anything outside the replica stays `prepare_only` (ADR 0012, 0024, `docs/TESTING.md`).
 - **Kill only what the run started.** `down` stops the recorded driver, Electron and replica-site PIDs (checked against their recorded start times) with their children, plus any process holding this instance's own data folder. Never `pkill`, `killall` or kill an Electron found by name.
 - **Never build in the main checkout** (`~/Projects/Personal/Nestor` on the Mac, `D:\Projects-Personal\Nestor` on the Windows PC; `NESTOR_VERIFY_MAIN_CHECKOUT` overrides): its `out/` feeds the owner's dev instance. `bin/build` refuses there. Driving from it is fine.
 - **Machine load.** The Mac is shared with NEX. One build or full suite at a time; a few instances side by side are fine.
@@ -22,7 +22,7 @@ Proof means using the app the way a person would, action by action, and keeping 
 ```sh
 V=.claude/skills/verify-nestor/bin
 export NESTOR_VERIFY_LABEL=<ticket-or-topic>   # names the instance and its evidence folder
-$V/build                                        # once per source change: pnpm build + a stamp of the commit
+$V/build                                        # once per source change: desktop build + a source stamp
 $V/up                                           # deterministic AI
 $V/up --ai live                                 # the app's real AI (needed for search, fit, resume, apply)
 ```
@@ -34,7 +34,7 @@ On Windows the `bin/` scripts run from Git Bash as written. From PowerShell, cal
 Options: `--ai deterministic|live`, `--net replica|web`, `--video` (Playwright video of every window into `videos/`), `--no-test-api` (production preload, no `window.nestor.*.test`), `--reuse-data` (start on the folder a previous `down --keep-data` kept, for example to keep a passed Cloudflare check), `--allow-stale` (run a build that does not match the source; say so in the proof).
 
 - `up` refuses when the build's stamp differs from the current commit or uncommitted app changes (`apps/desktop`, `packages`). Rebuild with `$V/build`. It copies `apps/desktop/out` into the instance, so a later build never changes a running instance.
-- `--ai live` reads `NESTOR_*` keys from this checkout's `.env.local`/`.env` (root and `apps/desktop`), then from the main checkout's, without printing them. Deterministic mode blanks every key. Deterministic AI cannot search (`AI client does not support tool calling`), so Job Finder search and everything after it needs `--ai live`. Each live search, resume and apply is a real model call.
+- `--ai live` reads `NESTOR_*` keys from this checkout's `.env.local`/`.env` (root and `apps/desktop`), then from the main checkout's, without printing them. Deterministic mode blanks every key. Deterministic mode can collect compact listings, but cannot prove model-based search, fit, resume or apply quality; use `--ai live` for that journey. Each live search, resume and apply is a real model call.
 - Side by side: give each instance its own `NESTOR_VERIFY_LABEL`. Each gets its own data folder, replica-sites port, driver port and Playwright debug ports. Measured: two instances (one live, one deterministic) running journeys at the same time on 2026-10-17.
 - Default label: `verify-<checkout folder name>`.
 
@@ -59,7 +59,7 @@ $V/drive click "/^Shortlist /"                 # /regex/ works wherever a name d
 $V/drive fill "Job site URLs" "http://127.0.0.1:<port>/board/"
 $V/drive press Enter
 $V/drive wait Search 600 --role button --within "/^Search$/"   # wait up to 600 s for something visible
-$V/drive pick test-fixtures/x.pdf              # the next native open dialog returns these files (paths resolve from the cwd)
+$V/drive pick apps/desktop/test-fixtures/job-finder/resume-import-sample.txt  # the next native open dialog returns this file
 $V/drive shot search-results                   # shots/NNN-search-results.png + .aria.txt (main window)
 $V/drive shot form --target browser --url /apply/   # an in-app browser page
 $V/drive shot popups --target overlay          # Live Assistant answer and transcript popups
@@ -71,7 +71,7 @@ $V/drive restart                               # close and relaunch on the same 
 $V/drive status
 ```
 
-Handles: accessible names from `drive see`. They match the app's `aria-label`s and headings. Navigation is by the sidebar buttons ("Home", "Profile", "Find jobs", "Shortlisted", "Applications", "Safeguards", "Settings"); the module switch is the banner button "Job Finder, switch module" and then the menu item "Open Live Assistant". Setting `location.hash` from a script does not navigate like a click does; use the controls.
+Handles: accessible names from `drive see`. They match the app's `aria-label`s and headings. Navigation is by the sidebar buttons ("Home", "Profile", "Find jobs", "Shortlisted", "Applications", "Needs you", "Settings"); the module switch is the banner button "Job Finder, switch module" and then the menu item "Open Live Assistant". Setting `location.hash` from a script does not navigate like a click does; use the controls.
 
 `eval` and journeys get the same helpers: `page` (the current main window, looked up again on every command because the app can replace it), `app` (Playwright `ElectronApplication`; `app.evaluate` runs in the main process), `click`, `fill`, `press`, `waitFor`, `see`, `shot(name, { target, url })`, `pick(...files)`, `note(...)` (a line in `steps.log`), `db(table, { limit, pattern, name })` (newest rows, also saved as evidence), `tables()`, `pageFor({ page: "browser", url })`, `browserPages()`, `sites` (`url`, `log`, `submissions()`), `userDataDir`, `evidenceDir`, `desktopDir`, `checkout`, `ai`, `args`, `sleep`.
 
@@ -167,8 +167,7 @@ Internals, for fixing the helpers: `bin/lib/cli.mjs` (commands), `bin/lib/driver
 - **Unfocused means backstage.** While a run is going and the window is unfocused, the embedded browser parks its pages in a hidden panel window (by design). `shot --target browser` still captures them through `capturePage`.
 - **`navigator.webdriver` is true** in the in-app browser under Playwright. Google sign-in rejects at the email step and Cloudflare challenges it. Neither matters for the replica sites; do not conclude a real site is broken from this.
 - **The Job Finder browser peek is a modal.** After "Open application" it covers the app; `drive press Escape` closes it before you click elsewhere.
-- **A shortlisted job may already be `drafting`**: shortlisting can start the resume draft in the background.
+- **A shortlisted resume may already be `writing`**: shortlisting can start the resume in the background; the job stays `shortlisted` until approval.
 - **Restarts close browser pages.** Open restores a saved Ready form when it can verify the fields and attachments. Otherwise it queues a fresh Fill-only preparation for review. A waiting sign-in card reopens the original application entry; credentials, CAPTCHA and MFA stay with the person.
-- **After an "Apply to all" batch** (seen 2026-09-23), a pending quality sample review in Safeguards blocks every later search with "Something unexpected stopped this search". Mark it in Safeguards first.
 - **Cold first `up`** after a reboot or Electron upgrade takes about 20 s; warm ones about 2 s.
 - **`pnpm --filter @nestor/desktop qa`** (docs/AGENT_QA.md) is the repo's one-shot Playwright session. It takes an exclusive lease per checkout, keeps its artifacts in `/tmp`, has no focus patch, and treats a running verify instance in the same checkout as a conflict. Use one or the other per checkout at a time.

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. The campaign part of this decision (search plans) is cut by the 2026-10-25 scope in `docs/PRODUCT.md`; the tracker part stands.
+Partly superseded: campaigns/search plans are retired (242cc067), and the application-record tracker payload is replaced by job-store tracker/events/tags rows without the old contacts, file-reference or compensation/offer-detail fields (7fd1f246). Manual tracker stages still do not manufacture browser submission truth.
 
 ## Context
 

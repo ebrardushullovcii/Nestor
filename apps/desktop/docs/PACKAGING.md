@@ -48,5 +48,5 @@ On 2026-08-19, `electron-builder --dir` produced and inspected a Windows x64
 bundle containing `Nestor.exe`, `resources/app.asar`, the tracked icon, and
 the complete resume-parser sidecar manifest and executable. The inspected
 unpacked directory was 585,084,836 bytes. It was not Authenticode-signed.
-Regenerate the bundle after the final CSP metadata cleanup and repeat the
-isolated packaged-app smoke before treating it as an external release artifact.
+Regenerate the bundle from the code being released and repeat the isolated
+packaged-app smoke before treating it as an external release artifact.

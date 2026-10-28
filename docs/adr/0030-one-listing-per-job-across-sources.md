@@ -1,6 +1,6 @@
 # ADR 0030: A job seen on several sources shows the employer's own listing
 
-Status: accepted (2026-09-23).
+Status: partly superseded: job-store deduplication keeps sightings but retains the first job URL, fills missing scalar facts and may keep a longer description (db925711), replacing employer-route selection and whole-sighting display facts. Cross-source identity merging remains.
 
 ## Context
 

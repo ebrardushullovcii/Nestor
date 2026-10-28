@@ -33,11 +33,3 @@ pnpm lsp:typescript
 pnpm knip
 pnpm desktop:dev
 ```
-
-## Guidance Maintenance
-
-```bash
-pnpm agents:sync
-pnpm agents:check
-pnpm docs:check
-```
