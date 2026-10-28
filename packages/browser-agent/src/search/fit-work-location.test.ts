@@ -374,7 +374,7 @@ test("work from wherever is corroborated by a global remote location", () => {
   const job = {
     location: "Global Remote",
     description: "Work from wherever you want.",
-    workModes: ["remote"],
+    workModes: ["remote" as const],
   };
   for (const countries of ["", "US"])
     expect(
