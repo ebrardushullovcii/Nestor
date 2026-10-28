@@ -9601,7 +9601,7 @@ describe("a closed form comes back without the model", () => {
           })),
         );
       const writes = liveHands(source, input);
-      input.hands.clickElement = vi.fn(async () => {
+      input.hands.clickElement = vi.fn(() => {
         expect(writes).toEqual(["c0=true", "c3=true"]);
         source.controls = [nameControl()];
         source.stepLabel = "Step 4 of 4: Review";
@@ -9613,7 +9613,7 @@ describe("a closed form comes back without the model", () => {
             disabled: false,
           },
         ];
-        return { ok: true as const, observedValue: "Review" };
+        return Promise.resolve({ ok: true as const, observedValue: "Review" });
       });
       const model = scriptedModel([
         { name: "click", args: { ref: "a0" } },
