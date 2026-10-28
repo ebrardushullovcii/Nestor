@@ -567,7 +567,8 @@ export const openInAppTool = defineTool({
     return {
       summary:
         display?.status === "displayed"
-          ? `The renderer confirms ${display.displayedRoute}${display.section ? ` (${display.section})` : ""} is displayed with no covering overlay.`
+          ? (display.reason ??
+            `The renderer confirms ${display.displayedRoute}${display.section ? ` (${display.section})` : ""} is displayed with no covering overlay.`)
           : `Navigation was not confirmed: ${display?.reason ?? "no renderer acknowledgment"}. Do not claim the destination is visible.`,
       data: { route, requested: true, display: display ?? null },
     };

@@ -141,6 +141,8 @@ interface LiveTurn {
   outputs: AssistantToolOutputs;
   lastPersistedDraftAt: number;
   runsStarted: AssistantRunRef[];
+  /** This turn asked the app to open a screen; the message's screen is stale. */
+  navigated?: boolean;
 }
 
 interface RunWatch {
@@ -220,6 +222,16 @@ function titleFrom(text: string): string {
   return clean.length > 60
     ? `${clean.slice(0, 57).trimEnd()}…`
     : clean || "New chat";
+}
+
+/** The same screen and view, whatever the query parameter order. */
+function sameRoute(left: string, right: string): boolean {
+  const [a, b] = [left, right].map((route) => {
+    const url = new URL(route, "https://nestor.local");
+    url.searchParams.sort();
+    return `${url.pathname}${url.search}${url.hash}`;
+  });
+  return a === b;
 }
 
 export class AssistantSessionHost {
@@ -1659,6 +1671,26 @@ export class AssistantSessionHost {
       },
       openInApp: async (route) => {
         session.assertCurrent();
+        // The person is already looking at exactly this screen, with nothing
+        // open on it: opening it again would only reset their view.
+        const showing = live.navigated ? null : live.sourceMessage?.context;
+        if (
+          showing?.route &&
+          !showing.focus &&
+          !showing.browser &&
+          sameRoute(route, showing.route)
+        )
+          return {
+            displayedRoute: showing.route,
+            section: new URL(route, "https://nestor.local").searchParams.get(
+              "section",
+            ),
+            overlay: "none",
+            status: "displayed",
+            reason:
+              "The person was already on this screen when they wrote, so nothing moved. Say it is on screen.",
+          };
+        live.navigated = true;
         await this.ports.prepareAppNavigation?.();
         session.assertCurrent();
         const navigationRequestId = randomUUID();
