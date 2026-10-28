@@ -404,3 +404,93 @@ test("regional authorization stays with the model rather than an ISO country loo
   });
   expect(fit?.score).toBe(90);
 });
+
+test("different fit batches retain the exact context prefix and response schema", async () => {
+  const requests: Parameters<LLMClient["chatWithTools"]>[] = [];
+  const client: LLMClient = {
+    chatWithTools: (...args) => {
+      requests.push(args);
+      const { listings } = JSON.parse(args[0][1].content) as {
+        listings: { id: number }[];
+      };
+      return Promise.resolve({
+        content: JSON.stringify({
+          fits: listings.map(({ id }) => ({
+            id,
+            s: 90,
+            why: "Matching work",
+            r: ["strong", "Direct work"],
+            p: ["aligned", "Remote"],
+            c: ["strong", "Evidence"],
+            e: ["compatible", "Worldwide remote", "broader_remote", ""],
+          })),
+        }),
+      });
+    },
+  };
+  for (const ids of [[1], [20, 21]]) {
+    await fitJobs({
+      client,
+      profile,
+      goals: { targetRoles: ["Software Engineer"], locations: ["Europe"] },
+      countryOptionFallbacks: [
+        {
+          primary: "Kosovo",
+          fallback: "Albania",
+          whenNeitherOffered: "skip_application",
+        },
+      ],
+      request: "Hands-on product work",
+      jobs: ids.map((id) => ({
+        ...job,
+        id,
+        description: `Complete listing ${id}. Worldwide remote.`,
+      })),
+    });
+  }
+  expect(requests[0][0][0]).toEqual(requests[1][0][0]);
+  expect(requests[0][2]?.jsonSchema).toEqual(requests[1][2]?.jsonSchema);
+  const prefixes = requests.map(
+    ([messages]) => messages[1].content.split(',"passages":')[0],
+  );
+  expect(prefixes[0]).toBe(prefixes[1]);
+  expect(Object.keys(JSON.parse(requests[0][0][1].content) as object)).toEqual([
+    "assessmentDate",
+    "person",
+    "goals",
+    "countryOptionFallbacks",
+    "request",
+    "passages",
+    "listings",
+  ]);
+  expect(requests[0][0][1].content).not.toBe(requests[1][0][1].content);
+});
+
+test("a stable schema still rejects a verdict for a job outside the batch", async () => {
+  let calls = 0;
+  const fits = await fitJobs({
+    profile,
+    jobs: [job],
+    goals: { targetRoles: [], locations: [] },
+    client: {
+      chatWithTools: () =>
+        Promise.resolve({
+          content: JSON.stringify({
+            fits: [
+              {
+                id: ++calls === 1 ? 999 : job.id,
+                s: 90,
+                why: "Matching work",
+                r: ["strong", "Work"],
+                p: ["aligned", "Remote"],
+                c: ["strong", "Evidence"],
+                e: ["compatible", "Worldwide", "broader_remote", ""],
+              },
+            ],
+          }),
+        }),
+    },
+  });
+  expect(calls).toBe(2);
+  expect(fits.map(({ id }) => id)).toEqual([job.id]);
+});
