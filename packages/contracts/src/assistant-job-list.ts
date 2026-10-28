@@ -17,6 +17,8 @@ export const AssistantJobListPageSchema = JobListPageSchema.extend({
     }),
   ),
   counts: JobStageCountsSchema.omit({ resume: true }).extend({
+    /** All jobs on Shortlisted, including the approved subset. */
+    shortlisted: z.number().int().nonnegative(),
     approvedResumes: z.number().int().nonnegative(),
   }),
 });

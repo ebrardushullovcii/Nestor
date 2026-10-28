@@ -1,5 +1,10 @@
 export {
+  ASSISTANT_JOB_COMMANDS,
+  ASSISTANT_RESUME_COMMANDS,
   assistantJobListPage,
+  assistantJobCounts,
+  readAssistantJobs,
+  countAssistantJobs,
   createResumeCommandRunner,
   type RunResumeCommand,
 } from "./resume-commands";

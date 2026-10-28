@@ -101,9 +101,15 @@ export interface JobStore {
   ): SeenListingCard[];
   rememberSeenCards(cards: readonly SeenListingCard[]): void;
 
-  listJobs(query: JobListQueryInput): JobListPage;
+  listJobs(
+    query: JobListQueryInput,
+    additionalStages?: readonly JobStage[],
+  ): JobListPage;
   /** Every job a filter matches, with no cap. */
-  countJobs(filter: JobFilterInput): number;
+  countJobs(
+    filter: JobFilterInput,
+    additionalStages?: readonly JobStage[],
+  ): number;
   getJob(id: number): JobDetail | null;
   /**
    * Where each saved job was first seen and why it sits in its stage, without
@@ -452,8 +458,10 @@ export function openJobStore(filePath: string): JobStore {
       ).map((row) => row.id),
     searches,
 
-    listJobs: (query) => listJobs(sql, JobListQuerySchema.parse(query)),
-    countJobs: (filter) => countJobs(sql, JobFilterSchema.parse(filter)),
+    listJobs: (query, stages) =>
+      listJobs(sql, JobListQuerySchema.parse(query), stages),
+    countJobs: (filter, stages) =>
+      countJobs(sql, JobFilterSchema.parse(filter), stages),
     getJob: (id) => getJob(sql, id),
     stageCounts: () => readStageCounts(sql),
 

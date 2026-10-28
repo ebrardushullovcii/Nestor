@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import {
+  ASSISTANT_JOB_COMMANDS,
+  ASSISTANT_RESUME_COMMANDS,
   assistantJobListPage,
+  assistantJobCounts,
+  readAssistantJobs,
+  countAssistantJobs,
   createResumeCommandReads,
   createResumeCommandRunner,
   createResumeService,
@@ -21,8 +26,6 @@ import {
 } from "@nestor/ai-providers";
 import { createStubBrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
-  JOB_COMMANDS,
-  RESUME_COMMANDS,
   TRACKER_COMMANDS,
   APPLICATION_COMMANDS,
   JobFinderSettingsSchema,
@@ -78,6 +81,8 @@ import {
   type AssistantModelResolution,
 } from "@nestor/job-finder";
 
+type ResumeCommands = typeof ASSISTANT_RESUME_COMMANDS;
+
 /**
  * One isolated Job Finder workspace with the assistant attached, built from
  * synthetic data only. Background work (searches, applications, sends) goes
@@ -91,7 +96,8 @@ export type AssistantLaneScenario =
   | "ready_application"
   | "tracked_application"
   | "send_by_default"
-  | "navigation";
+  | "navigation"
+  | "approved_shortlist";
 
 /** The person and goals the assistant may have changed. */
 export interface AssistantLaneSnapshot {
@@ -363,6 +369,7 @@ function seedNavigationWorkspace(store: JobStore, ids: Map<string, number>) {
       "UPDATE applications SET state = 'submitted', submitted_at = ?, updated_at = ? WHERE job_id = ?",
     )
     .run(at, at, sent);
+  store.setStage([sent], "applied");
 }
 
 /**
@@ -457,8 +464,11 @@ function recordingPorts(
       };
     },
     commands: [
-      ...assistantCommandTools<typeof JOB_COMMANDS, JobCommandOutputs>(
-        JOB_COMMANDS,
+      ...assistantCommandTools<
+        typeof ASSISTANT_JOB_COMMANDS,
+        JobCommandOutputs
+      >(
+        ASSISTANT_JOB_COMMANDS,
         (name, input) => {
           if (name === "start_search") {
             recorder.searches.push(JSON.stringify(input).slice(0, 400));
@@ -471,7 +481,16 @@ function recordingPorts(
         {
           group: "jobs",
           results: {
-            list_jobs: async (page, _input, { session }) => {
+            stage_counts: (counts) => ({
+              summary: "Current job counts.",
+              data: assistantJobCounts(counts),
+            }),
+            count_jobs: (_value, input) => ({
+              summary: "Matching jobs.",
+              data: { total: countAssistantJobs(store, input) },
+            }),
+            list_jobs: async (_page, input, { session }) => {
+              const page = readAssistantJobs(store, input);
               await session.createResultSet({
                 kind: "jobs",
                 label: "Matching jobs",
@@ -486,10 +505,21 @@ function recordingPorts(
           },
         },
       ),
-      ...assistantCommandTools<typeof RESUME_COMMANDS, ResumeCommandOutputs>(
-        RESUME_COMMANDS,
+      ...assistantCommandTools<ResumeCommands, ResumeCommandOutputs>(
+        ASSISTANT_RESUME_COMMANDS,
         runResumeCommand,
-        { group: "resume" },
+        {
+          group: "resume",
+          results: {
+            list_shortlisted: (_page, input) => ({
+              summary: "Matching shortlisted jobs.",
+              data: assistantJobListPage(
+                store,
+                readAssistantJobs(store, input),
+              ),
+            }),
+          },
+        },
       ),
       ...assistantCommandTools<typeof TRACKER_COMMANDS, TrackerCommandOutputs>(
         TRACKER_COMMANDS,
@@ -679,6 +709,8 @@ export async function createAssistantLaneWorld(
   const jobs = laneJobStore();
   const repository = createJobFinderRepository(jobs.store);
   await seedLaneProfile(repository);
+  if (scenario === "approved_shortlist")
+    approveOriginalResumesForTests(jobs.store, [1, 2, 3]);
   if (scenario === "navigation") seedNavigationWorkspace(jobs.store, jobs.ids);
   if (scenario === "tracked_application") {
     seedTrackerDemo(jobs.store, [jobs.ids.get("job_lane_1")!]);

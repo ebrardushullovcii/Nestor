@@ -122,6 +122,60 @@ function expect(condition: boolean, failure: string): string[] {
 }
 
 const OUTCOME_CASES: AssistantLaneCase[] = [
+  ...["count", "show"].map(
+    (kind): AssistantLaneCase => ({
+      id: `jobs.approved_shortlist.${kind}`,
+      title: `Approved jobs remain shortlisted: ${kind}`,
+      inventory: [],
+      scripted: false,
+      scenario: "approved_shortlist",
+      turns: [
+        {
+          text:
+            kind === "count"
+              ? "How many jobs are shortlisted?"
+              : "Show me my shortlisted jobs",
+          context: laneContext({
+            screen: "applications",
+            route: "/job-finder/applications",
+          }),
+        },
+      ],
+      check: (o) => [
+        ...expect(
+          /\b(?:3|three)\b/iu.test(o.replyText),
+          `did not report three shortlisted jobs: ${o.replyText}`,
+        ),
+        ...expect(
+          !/\b(?:zero|no jobs|nothing|empty)\b/iu.test(o.replyText),
+          "denied the approved shortlist",
+        ),
+        ...expect(o.changes.length === 0, "changed the workspace"),
+        ...(kind === "show"
+          ? [
+              ...expect(
+                ["northwind", "bluebird", "quartz"].every((name) =>
+                  o.replyText.toLowerCase().includes(name),
+                ),
+                "did not name all three shortlisted jobs",
+              ),
+              ...expect(
+                o.navigations.at(-1)?.startsWith("/job-finder/review-queue") ===
+                  true,
+                "did not open Shortlisted",
+              ),
+              ...expect(
+                /approved/iu.test(o.replyText),
+                "did not report resume approval",
+              ),
+            ]
+          : expect(
+              o.navigations.length === 0,
+              "navigated for a count question",
+            )),
+      ],
+    }),
+  ),
   {
     id: "jobs.ready_resume",
     // A runaway alarm, not a target: about twice a normal answer. Wording that

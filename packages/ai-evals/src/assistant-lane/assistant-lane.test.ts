@@ -11,6 +11,42 @@ import { runAssistantLaneCase } from "./run";
 import { createAssistantLaneWorld } from "./world";
 
 describe("assistant eval lane", () => {
+  it("reports approved Shortlisted jobs through every chat list and count", async () => {
+    const world = await createAssistantLaneWorld(
+      "scripted",
+      "approved_shortlist",
+    );
+    const context = {
+      session: { assertCurrent() {}, createResultSet: () => Promise.resolve() },
+    } as never;
+    const run = (name: string, input: unknown) =>
+      world.commands
+        .find((tool) => tool.name === name)!
+        .execute(input, context);
+    try {
+      for (const name of ["list_jobs", "list_shortlisted"]) {
+        const result = await run(name, { stage: "shortlisted" });
+        expect(result.data).toMatchObject({
+          total: 3,
+          counts: { shortlisted: 3, approvedResumes: 3 },
+          rows: [
+            { resumeStatus: "approved" },
+            { resumeStatus: "approved" },
+            { resumeStatus: "approved" },
+          ],
+        });
+      }
+      expect((await run("stage_counts", {})).data).toMatchObject({
+        shortlisted: 3,
+        approvedResumes: 3,
+      });
+      expect((await run("count_jobs", { stage: "shortlisted" })).data).toEqual({
+        total: 3,
+      });
+    } finally {
+      await world.shutdown();
+    }
+  });
   it("offers the desktop resume and tracker command sets, including writes", async () => {
     const world = await createAssistantLaneWorld("scripted");
     try {

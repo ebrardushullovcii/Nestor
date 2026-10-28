@@ -1,6 +1,7 @@
 import { createResumeStore, type JobStore } from "@nestor/db/job-store";
 import {
   RESUME_COMMANDS,
+  JOB_COMMANDS,
   JobListQuerySchema,
   isResumeTemplateApplyEligible,
   type ResumeTemplateDefinition,
@@ -11,6 +12,9 @@ import {
   type ResumePdfExportResult,
   type AssistantJobListPage,
   type JobListPage,
+  type JobStageCounts,
+  JobFilterSchema,
+  type JobFilterInput,
 } from "@nestor/contracts";
 import type { z } from "zod";
 
@@ -18,6 +22,67 @@ import type { ResumeService } from "./resume-service";
 interface ResumeCommandReads {
   list(query: JobListQueryInput): ShortlistedPage;
   get(jobId: number): ResumeCommandOutputs["get_resume"];
+}
+
+/** Chat uses screen names; the preload commands retain exact stored stages. */
+export const ASSISTANT_JOB_COMMANDS = {
+  ...JOB_COMMANDS,
+  list_jobs: {
+    ...JOB_COMMANDS.list_jobs,
+    description:
+      "One page of jobs with resumeStatus and current counts. stage shortlisted lists all Shortlisted jobs, including writing, to-review and approved resumes. stage resume lists only approved jobs. Other stages: found (Find jobs), hidden, applied. Filters and nextCursor paginate the combined list.",
+  },
+  count_jobs: {
+    ...JOB_COMMANDS.count_jobs,
+    description:
+      "Exact matching count. stage shortlisted includes approved jobs on Shortlisted; stage resume counts only approved jobs. Move selections still use exact stored stages.",
+  },
+  stage_counts: {
+    ...JOB_COMMANDS.stage_counts,
+    description:
+      "Current screen counts: shortlisted includes writing, to-review and approved jobs; approvedResumes is its approved subset.",
+  },
+};
+
+export const ASSISTANT_RESUME_COMMANDS = {
+  ...RESUME_COMMANDS,
+  list_shortlisted: {
+    ...RESUME_COMMANDS.list_shortlisted,
+    description:
+      ASSISTANT_JOB_COMMANDS.list_jobs.description +
+      " Use get_resume for the full draft, level and edit revision.",
+  },
+};
+
+/** Shortlisted includes both the review and approved tabs; approval is a subset. */
+export function assistantJobCounts({
+  resume: approvedResumes,
+  ...counts
+}: JobStageCounts) {
+  return {
+    ...counts,
+    shortlisted: counts.shortlisted + approvedResumes,
+    approvedResumes,
+  };
+}
+
+export function readAssistantJobs(
+  store: JobStore,
+  input: JobListQueryInput,
+): JobListPage {
+  const query = JobListQuerySchema.parse(input);
+  return store.listJobs(query, query.stage === "shortlisted" ? ["resume"] : []);
+}
+
+export function countAssistantJobs(
+  store: JobStore,
+  input: JobFilterInput,
+): number {
+  const filter = JobFilterSchema.parse(input);
+  return store.countJobs(
+    filter,
+    filter.stage === "shortlisted" ? ["resume"] : [],
+  );
 }
 
 /** The same indexed status lookup as Shortlisted, bounded to this chat page. */
@@ -28,10 +93,9 @@ export function assistantJobListPage(
   const statuses = createResumeStore(store).statuses(
     page.rows.map((row) => row.id),
   );
-  const { resume: approvedResumes, ...counts } = page.counts;
   return {
     ...page,
-    counts: { ...counts, approvedResumes },
+    counts: assistantJobCounts(page.counts),
     rows: page.rows.map(({ id, stage, title, company, location, fitScore }) => {
       const resume = statuses.get(id);
       return {
