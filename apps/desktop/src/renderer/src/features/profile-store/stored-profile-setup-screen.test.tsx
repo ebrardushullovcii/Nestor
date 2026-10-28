@@ -256,7 +256,7 @@ test("setup remains editable while deferred vision is active and saves only the 
   renderSetup();
   const website = await screen.findByLabelText("Website");
   fireEvent.change(website, {
-    target: { value: "https://synthetic.example.test" },
+    target: { value: "https://synthetic.example.test/" },
   });
   const save = screen.getByRole("button", {
     name: "Save and continue to Work history",
@@ -265,7 +265,7 @@ test("setup remains editable while deferred vision is active and saves only the 
   fireEvent.click(save);
   await waitFor(() =>
     expect(createProfileStore(store).overview().fields.portfolioUrl).toBe(
-      "https://synthetic.example.test",
+      "https://synthetic.example.test/",
     ),
   );
 });
