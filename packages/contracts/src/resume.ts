@@ -19,8 +19,6 @@ export const ResumeBatchProviderBlockSchema: z.ZodType<ResumeBatchProviderBlock>
     })
     .strict();
 
-const ProbabilitySchema = z.number().min(0).max(1);
-
 export const resumeExportFormatValues = ["html", "pdf"] as const;
 
 export const ResumeExportFormatSchema = z.enum(resumeExportFormatValues);
