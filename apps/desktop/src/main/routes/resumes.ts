@@ -36,16 +36,13 @@ async function exportResumePdf(
   jobId: number,
   sender: WebContents | null = null,
 ): Promise<ResumePdfExportResult> {
-  const { job, resume } = service.get(jobId);
+  const { job } = service.get(jobId);
   const target = await chooseResumeExportPath(
     sender,
-    buildResumeExportDefaultPath(
-      resume?.level === "original"
-        ? "Resume"
-        : `${resume?.level === "light" ? "Light" : resume?.level === "aggressive" ? "Aggressive" : "Tailored"} Resume`,
-      job.title,
-      job.company,
-    ),
+    // The file an employer sees carries the person's name and the job, never
+    // the internal resume level. "Aggressive Resume - .pdf" told a recruiter
+    // how the document was made before they read it.
+    buildResumeExportDefaultPath("Resume", job.title, job.company),
   );
   if (!target) return { outputPath: null };
   return { outputPath: await service.exportPdf(jobId, target) };

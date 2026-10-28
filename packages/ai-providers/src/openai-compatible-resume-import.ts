@@ -19,8 +19,13 @@ import { buildCandidateConfidenceBreakdown } from "./resume-import-helpers";
 import type { OpenAiCompatibleJsonOperation } from "./openai-compatible-request-compaction";
 import type { ModelReasoningEffort } from "./openai-compatible-transport";
 
-const ADJUDICATION_BLOCK_LIMIT = 80;
-const ADJUDICATION_CANDIDATE_LIMIT = 24;
+// Long resumes (seven or more roles plus education) crossed the old 80-block
+// limit and lost the later roles and the education section before the model
+// ever saw them. The context window has room for the whole document; keep the
+// limits high enough for a multi-page resume and warn if a document still
+// exceeds them.
+const ADJUDICATION_BLOCK_LIMIT = 240;
+const ADJUDICATION_CANDIDATE_LIMIT = 80;
 // Post-adjudication confidence weighting: adjudicated candidates are assigned a lower
 // normalization risk and higher conflict risk compared with extract-path defaults,
 // reflecting the pro-normalization review pass that produced them.
@@ -286,6 +291,7 @@ export function buildResumeImportStageInstructions(
     case "experience":
       return [
         "Return only experience record candidates.",
+        "Record every role in the document, including short older roles, internships and dated volunteer roles. Do not stop after the most recent five and do not merge separate roles.",
         "Valid target section: experience.",
         "Use target.key = 'record' and a stable recordId like experience_1, experience_2. Compare each role with existingProfile.experiences, including partial records with missing title or dates. When the employer and available details identify the same role, use that saved record's id as target.recordId so review can complete it without creating a duplicate. Missing details are not contradictions; if multiple saved roles could match, abstain from choosing one and explain the ambiguity in notes.",
         "Each value must be a structured object matching one resume experience record with exactly these keys: companyName, companyUrl, title, employmentType, location, workMode (array), startDate, endDate, isCurrent (boolean), summary, achievements (array of strings), skills (array), domainTags (array).",

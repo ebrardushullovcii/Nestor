@@ -839,9 +839,10 @@ export function describeAggressiveResumeEditPolicy(
   }
   return [
     "This draft uses aggressive tailoring to help the resume clear screening for a first interview.",
-    "Keep bounded stretches of saved evidence: you may state evidenced years of experience one year higher when the listing itself asks for that figure, and you may name any technology, library, framework, or tool the listing asks for — required or preferred, including technologies named only in qualifications — in both the prose and the skills section, whenever the saved evidence shows professional technical experience.",
-    "Never invent employers, dates, titles, credentials, seniority, leadership, or a technology absent from both the saved evidence and the job listing.",
-    "The candidate confirms every stretch before export; state what you changed plainly and do not lecture.",
+    "Keep bounded stretches of saved evidence: you may state evidenced years of experience one year higher when the listing itself asks for that figure, and you may name an adjacent technology, library, framework, or tool the listing asks for — required or preferred, including technologies named only in qualifications — in both the prose and the skills section, whenever the saved evidence shows professional experience in the same field and the candidate's stack makes it credible.",
+    "Never move the person into a different profession, claim licensed, clinical, or safety-critical duties, give a student or junior a director-level title, or invent employers, dates, past-role titles, degrees, credentials, certifications, licenses, team size, leadership, or a technology absent from both the saved evidence and the job listing.",
+    "Keep every real role with at least one real bullet, keep the person's real skills and languages alongside the job's, and use a posting phrase once rather than in every bullet.",
+    "The candidate reviews and takes responsibility for every stretch before export; state what you changed plainly, do not remove a stretch the person chose, and do not lecture.",
   ].join(" ");
 }
 

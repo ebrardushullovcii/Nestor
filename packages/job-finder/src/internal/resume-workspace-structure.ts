@@ -1160,32 +1160,22 @@ function buildDraftSectionsFromStructuredTailoredDraft(input: {
     ...draftSkills.additionalSkills,
   ]);
   if (additionalSkills.length > 0) {
-    // The chosen additional skills are shown; every other saved skill stays
-    // listed but hidden, for the person to show again.
-    const chosenSkills = new Set(
-      draft.additionalSkills.map((skill) => normalizeText(skill)),
-    );
-    const section = createSection({
-      id: "section_additional_skills",
-      kind: "skills",
-      label: "Additional Skills",
-      bullets: additionalSkills,
-      updatedAt: createdAt,
-      origin,
-      sortOrder: sections.length,
-      sourceRefs: skillSourceRefs,
-    });
+    // Every saved skill stays visible. Hiding the ones the writer did not pick
+    // removed real languages and frameworks from the export, especially in
+    // Aggressive where the writer chooses harder. The cap keeps a very long
+    // skills list from crowding the page; the person's own skills come first.
+    const visibleAdditionalSkills = additionalSkills.slice(0, 30);
     sections.push(
-      chosenSkills.size === 0
-        ? section
-        : {
-            ...section,
-            bullets: section.bullets.map((bullet) =>
-              chosenSkills.has(normalizeText(bullet.text))
-                ? bullet
-                : { ...bullet, included: false },
-            ),
-          },
+      createSection({
+        id: "section_additional_skills",
+        kind: "skills",
+        label: "Additional Skills",
+        bullets: visibleAdditionalSkills,
+        updatedAt: createdAt,
+        origin,
+        sortOrder: sections.length,
+        sourceRefs: skillSourceRefs,
+      }),
     );
   }
 

@@ -579,25 +579,21 @@ export function deriveResumeCoveragePlan(input: {
       reasons.push(
         "further from this job, but the technical detail is backed by your saved evidence",
       );
-      classification =
-        input.searchPreferences.tailoringMode === "aggressive"
-          ? "suggested_hidden"
-          : "compact";
+      classification = "compact";
     } else if (entry.careerFamilyFit === "weak") {
       reasons.push(
         "further from this job, with little role-specific detail saved",
       );
+      // Aggressive keeps the role visible for continuity; hiding it left the
+      // person's real experience off the resume or showed a title with no
+      // bullets. Length is settled by bullets, not by dropping the role.
       classification = hasUsableWorkHistory(entry.experience)
-        ? input.searchPreferences.tailoringMode === "aggressive"
-          ? "suggested_hidden"
-          : "compact"
+        ? "compact"
         : "omitted";
     } else {
       reasons.push("not close to this job and not needed to cover a gap");
       classification = hasUsableWorkHistory(entry.experience)
-        ? input.searchPreferences.tailoringMode === "aggressive"
-          ? "suggested_hidden"
-          : "compact"
+        ? "compact"
         : "omitted";
     }
 

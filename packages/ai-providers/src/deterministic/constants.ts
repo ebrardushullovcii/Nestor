@@ -150,10 +150,10 @@ export const headlineKeywordPattern =
   /\b(software|full-stack|frontend|backend|web|react|node|\.net|chief)?\s*(engineer|developer|designer|manager|lead|architect|specialist|consultant|analyst|officer)\b/i;
 
 export const experienceSectionHeadingPattern =
-  /^(?:(?:(?:relevant|professional|full[- ]?time|work|employment|career|industry)(?:\s+(?:work|professional))?\s+(?:experience|history|background))|(?:internships?|intern)\s+experience|(?:relevant\s+)?experience|employment|background|internships?)\s*[:\-–—]?\s*$/i;
+  /^(?:(?:(?:relevant|professional|full[- ]?time|work|employment|career|industry|selected|additional)(?:\s+(?:work|professional))?\s+(?:experience|history|background))|(?:internships?|intern)\s+experience|(?:relevant\s+)?experience|employment|background|work\s+history|employment\s+history|career\s+history|professional\s+background|internships?)\s*[:\-–—]?\s*$/i;
 
 export const nonExperienceSectionHeadingPattern =
-  /^(?:about(?:\s+myself|\s+me)?|summary|profile|professional\s+profile|(?:technical|core|key|additional)?\s*skills?|projects?|project\s+experience|education(?:\s+(?:and|&)\s+training)?|language(?:\s+skills?)?|languages?|certifications?|certificates?|publications?|awards?|honors?|(?:extracurricular\s+)?activities|extracurricular|volunteer(?:ing|\s+experience)?|(?:work|employment)\s+preferences|(?:career\s+)?objective|disclaimer|references)\s*[:\-–—]?\s*$|^preferred\s+locations?\s*:\s*.+$/i;
+  /^(?:about(?:\s+myself|\s+me)?|summary|profile|professional\s+profile|(?:technical|core|key|additional)?\s*skills?|projects?|project\s+experience|education(?:\s*(?:,|&|and)?\s*(?:training|certifications?|certificates?))?|academic\s+background|training(?:\s+(?:and|&)\s+education)?|language(?:\s+skills?)?|languages?|certifications?|certificates?|publications?|awards?|honors?|(?:extracurricular\s+)?activities|extracurricular|volunteer(?:ing|\s+experience)?|(?:work|employment)\s+preferences|(?:career\s+)?objective|disclaimer|references)\s*[:\-–—]?\s*$|^preferred\s+locations?\s*:\s*.+$/i;
 
 export const skillCategoryHeadingPattern =
   /^(frameworks|programming languages|languages|databases|tools|security(?:\s*&\s*authentication)?|soft skills)$/i;
