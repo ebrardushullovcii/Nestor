@@ -10,7 +10,7 @@ import {
 } from "./application-facts";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 
-test("saved-answer model context is bounded and brings exact visible questions first", () => {
+test("saved-answer model context keeps every confirmed answer and brings exact visible questions first", () => {
   const answers = Array.from({ length: 200 }, (_, index) => ({
     id: `saved_${index}`,
     kind: "other" as const,
@@ -20,14 +20,16 @@ test("saved-answer model context is bounded and brings exact visible questions f
     roleFamilies: [],
     proofEntryIds: [],
   }));
-  const selected = relevantSavedAnswers(answers, ["Question 199"]);
+  const selected = relevantSavedAnswers(
+    [
+      ...answers,
+      { ...answers[0], id: "unconfirmed", needsConfirmation: true },
+    ],
+    ["Question 199"],
+  );
   expect(selected[0]?.id).toBe("saved_199");
-  expect(
-    JSON.stringify(
-      selected.map(({ id, question, answer }) => ({ id, question, answer })),
-    ).length,
-  ).toBeLessThan(12500);
-  expect(selected.length).toBeLessThan(answers.length);
+  expect(selected).toHaveLength(answers.length);
+  expect(selected.some((answer) => answer.id === "unconfirmed")).toBe(false);
 });
 
 test.each(meanings.cases)(

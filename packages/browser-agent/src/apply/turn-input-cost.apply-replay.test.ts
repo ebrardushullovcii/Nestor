@@ -113,19 +113,10 @@ test("the smaller model catalog preserves every fact, source id and record relat
     ),
   );
   const selected = relevantSavedAnswers(input.reusableAnswers);
-  expect(selected.length).toBeLessThan(input.reusableAnswers.length);
-  expect(
-    selected.reduce(
-      (sum, answer) =>
-        sum +
-        JSON.stringify({
-          id: answer.id,
-          question: answer.question,
-          answer: answer.answer,
-        }).length,
-      0,
-    ),
-  ).toBeLessThanOrEqual(12000);
+  // Every confirmed saved answer reaches the model; none is cut for length.
+  expect(selected).toHaveLength(
+    input.reusableAnswers.filter((answer) => !answer.needsConfirmation).length,
+  );
   const original = storedFacts(
     { ...input, reusableAnswers: selected },
     { payDisclosed: true },
