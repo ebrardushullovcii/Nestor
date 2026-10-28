@@ -32,7 +32,8 @@ Each recipe starts with an H1 and a paragraph on user-visible behavior, then cov
 - [Search and fit](./search-and-fit.md): Find jobs searches the enabled sources; each result carries the model's fit verdict and its reasons. Proven with live AI 2026-10-17 (`search` stage).
 - [Shortlist and tailored resume](./shortlist-and-resume.md): shortlist a job, pick a resume level, create the resume, review it. Proven 2026-10-17 (`shortlist`, `resume` stages); Edit resume and the other levels are not yet.
 - [Apply and send](./apply-and-send.md): Fill in for me prepares the form for the person to send; Send for me can send through the guards. Applications tracks the work. Proven against the replica `/board/` 2026-10-17 (`apply`, `send` stages); Send for me and the other replica sites are not yet.
+- [Sidebar assistant](./sidebar-assistant.md): navigation acknowledgement after the person changes screens while a reply is running; same-screen requests keep the current view. Other assistant actions use their feature recipes.
 - [Live Assistant](./live-assistant.md): notices, quick check, a live session with typed questions and popups, post-session review. Proven text-only 2026-10-17 (`journeys/live-assistant-session.mjs`); audio and screenshots are not.
 - [Website](./website.md): the public landing page, signup and tour at desktop and phone widths. Proven 2026-10-17 (`journeys/website.mjs`).
 
-Not mapped yet: the assistant outside the source/apply recipes, Settings beyond apply mode, workspace search, and Live Assistant settings. Add a file when a change touches one.
+Not mapped yet: assistant actions outside navigation and the source/apply recipes, Settings beyond apply mode, workspace search, and Live Assistant settings. Add a file when a change touches one.
