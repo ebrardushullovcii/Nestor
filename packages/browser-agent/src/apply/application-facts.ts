@@ -92,7 +92,11 @@ export function serializeApplicationData(
   );
 }
 
-/** Roughly four thousand tokens, with exact questions and local answers first. */
+/**
+ * Every saved answer the person confirmed, with this application's own
+ * answers and exact visible questions first. Nothing is dropped for length:
+ * a missing saved answer is a question asked again.
+ */
 export function relevantSavedAnswers(
   answers: readonly CandidateReusableAnswer[],
   questions: readonly string[] = [],
@@ -111,20 +115,9 @@ export function relevantSavedAnswers(
       question.split(" ").filter((word) => words.has(word)).length
     );
   };
-  let remaining = 12000;
   return [...answers]
     .filter((answer) => !answer.needsConfirmation)
-    .sort((left, right) => score(right) - score(left))
-    .filter((answer) => {
-      const size = JSON.stringify({
-        id: answer.id,
-        question: answer.question,
-        answer: answer.answer,
-      }).length;
-      if (size > remaining) return false;
-      remaining -= size;
-      return true;
-    });
+    .sort((left, right) => score(right) - score(left));
 }
 
 /**

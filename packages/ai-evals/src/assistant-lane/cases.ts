@@ -124,9 +124,9 @@ function expect(condition: boolean, failure: string): string[] {
 const OUTCOME_CASES: AssistantLaneCase[] = [
   {
     id: "jobs.ready_resume",
-    // The named job may need list_jobs followed by get_resume; allow three
-    // bounded model steps while the simple shortlist list stays below 14k.
-    inputTokenBudget: 22_000,
+    // A runaway alarm, not a target: about twice a normal answer. Wording that
+    // helps the assistant answer well is never trimmed to fit it.
+    inputTokenBudget: 45_000,
     title: "A shortlisted job with an unapproved draft is ready to review",
     inventory: [],
     scripted: true,
@@ -159,8 +159,10 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
   },
   {
     id: "jobs.shortlisted_budget",
-    inputTokenBudget: 14_000,
-    title: "Show shortlisted jobs with a bounded input budget",
+    // A runaway alarm at what this turn cost before the smaller tool catalog,
+    // not a target to trim prompt wording against.
+    inputTokenBudget: 30_000,
+    title: "Show shortlisted jobs without a runaway input cost",
     inventory: [],
     scripted: true,
     turns: [
