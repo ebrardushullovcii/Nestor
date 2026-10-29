@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import replay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/mutation-response.json";
 import typesReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/mutation-response-types.json";
+import resumeReceipt from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/resume-storage-receipt.json";
 import {
   inspectMutationResponse as inspectStructuralResponse,
   type MutationResponsePermit,
@@ -34,6 +35,42 @@ const inspectMutationResponse = (
     { ...response, url: () => endpoint, request: () => carrier },
     { permit },
   );
+
+test("a resume parser's returned storage handle confirms the exact permitted file carrier", async () => {
+  const url = `https://form.example.test${resumeReceipt.request.path}`;
+  const request = { ...carrier, url: () => url };
+  const response = {
+    status: () => 200,
+    headers: () => ({ "content-type": "application/json" }),
+    url: () => url,
+    request: () => request,
+    text: () => Promise.resolve(JSON.stringify(resumeReceipt.response)),
+  };
+  const confirmation = {
+    permit: { ...permit, endpoint: url, authorizedCarrier: request },
+  };
+  expect(
+    (await inspectStructuralResponse(response, confirmation)).judgment,
+  ).toBe("accepted");
+  expect((await inspectStructuralResponse(response)).judgment).toBe(
+    "unconfirmed",
+  );
+  for (const body of [
+    { ...resumeReceipt.response, resumeStorageId: undefined },
+    { ...resumeReceipt.response, resumeStorageId: "" },
+    { ...resumeReceipt.response, status: "processing" },
+    { ...resumeReceipt.response, error: "Upload rejected" },
+  ]) {
+    expect(
+      (
+        await inspectStructuralResponse(
+          { ...response, text: () => Promise.resolve(JSON.stringify(body)) },
+          confirmation,
+        )
+      ).accepted,
+    ).toBe(false);
+  }
+});
 
 test.each(replay.refused)(
   "a successful HTTP status cannot override refusal %j",
