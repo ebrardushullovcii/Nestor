@@ -198,6 +198,20 @@ export const JOB_FINDER_ACTIONS = {
     "local",
     "Copy text to the clipboard.",
   ),
+  "browser-list-import-sources": desktopAction(
+    "browser-list-import-sources",
+    empty,
+    "browser",
+    "read",
+    "List the browsers and profiles on this device that sign-ins can be brought over from, and whether each can be read here.",
+  ),
+  "browser-import-signins": desktopAction(
+    "browser-import-signins",
+    C.ImportBrowserSignInsInputSchema,
+    "browser",
+    "local",
+    "When the person asks, bring their site sign-ins over from a browser on this device into the Job Finder browser. Name a profile if it has several. Pauses running browser work.",
+  ),
   "reveal-saved-file": desktopAction(
     "reveal-saved-file",
     C.RevealSavedFileInputSchema,

@@ -13,18 +13,7 @@ import {
 } from "@nestor/job-finder";
 import { ACTION_INVENTORY } from "./inventory";
 
-// These are product gaps, not exclusions or passing outcome cases. Keep the
-// outstanding names explicit so adding another orphan fails this cheap check.
-const knownMissing = [
-  "action_browser_import_signins",
-  "action_browser_list_import_sources",
-  "action_dismiss_startup_database_recovery_notice",
-  "action_get_performance_snapshot",
-  "browser_control",
-  "control_app",
-];
-
-test("checks every detailed action mapping, retaining known gaps and rejecting new orphan names", async () => {
+test("every detailed action mapping names a tool the assistant can discover", async () => {
   const reject = () => Promise.reject(new Error("Catalog only"));
   const commands = [
     ...assistantCommandTools(JOB_COMMANDS, reject, {
@@ -80,5 +69,5 @@ test("checks every detailed action mapping, retaining known gaps and rejecting n
         ).toBe(true);
     }
   }
-  expect([...missing].sort()).toEqual(knownMissing);
+  expect([...missing].sort()).toEqual([]);
 });

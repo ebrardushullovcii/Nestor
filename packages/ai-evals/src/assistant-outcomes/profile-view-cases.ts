@@ -19,7 +19,7 @@ const definitions = [
   ["proofBank", "Proof", "background", "proof", "title"],
 ] as const;
 
-/** More than two actual pages make Previous and First distinct outcomes. */
+/** More records than one page holds, so focus reaches an unloaded record. */
 export function profileViewOutcomeCases(): BuiltAppBatch[] {
   return definitions.flatMap(
     ([collection, label, section, elementPrefix, labelField]) => {
@@ -35,8 +35,6 @@ export function profileViewOutcomeCases(): BuiltAppBatch[] {
         return ProfileRecordSchema.parse({ collection, record });
       });
       let seeded = false;
-      const nav = (page: Page) =>
-        page.getByRole("navigation", { name: `${label} pages`, exact: true });
       const filter = (page: Page) =>
         page.getByRole("textbox", {
           name: `Filter ${label.toLowerCase()}`,
@@ -181,54 +179,6 @@ export function profileViewOutcomeCases(): BuiltAppBatch[] {
             },
           ],
         },
-        ...(["next", "previous", "first"] as const).map(
-          (direction): BuiltAppBatch => ({
-            id: `profile-page-${direction}-${collection}`,
-            prepare: async (page) => {
-              await open(page, query);
-              if (direction !== "next") {
-                await nav(page)
-                  .getByRole("button", { name: "Next", exact: true })
-                  .click();
-                await page.locator(`#${cardId(fixtures[25]!)}`).waitFor();
-              }
-              if (direction === "first") {
-                await nav(page)
-                  .getByRole("button", { name: "Next", exact: true })
-                  .click();
-                await page.locator(`#${cardId(fixtures[50]!)}`).waitFor();
-              }
-            },
-            request: `Show the ${direction} page of Profile ${label} records, keeping the current "${query}" filter. Do not change records.`,
-            actions: [
-              {
-                actionId: `profile.record.${collection}.${direction}`,
-                observe: async (page) => [
-                  equalOutcome(
-                    "visible_state",
-                    "Actual paged records",
-                    `${label} rendered card IDs`,
-                    await currentIds(page),
-                    fixtures
-                      .slice(
-                        direction === "next" ? 25 : 0,
-                        direction === "next" ? 50 : 25,
-                      )
-                      .map(cardId),
-                  ),
-                  equalOutcome(
-                    "visible_state",
-                    "Filter retained",
-                    `Filter ${label.toLowerCase()} input`,
-                    await filter(page).inputValue(),
-                    query,
-                  ),
-                  await preserve(page),
-                ],
-              },
-            ],
-          }),
-        ),
       ];
     },
   );

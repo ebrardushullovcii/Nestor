@@ -68,6 +68,19 @@ export async function executeDesktopJobFinderAction(
     return { outcome: "revealed" };
   }
   if (actionId === "reset-browser") return resetJobFinderBrowser();
+  if (actionId === "browser-list-import-sources")
+    return (
+      await import("../browser/browser-profile-import")
+    ).listSignInSourcesByName();
+  if (actionId === "browser-import-signins") {
+    const choice = C.ImportBrowserSignInsInputSchema.parse(input);
+    const [{ importSignInsByName }, { loadEmbeddedBrowser }] =
+      await Promise.all([
+        import("../browser/browser-profile-import"),
+        import("../browser/load-embedded-browser"),
+      ]);
+    return importSignInsByName(await loadEmbeddedBrowser(), choice);
+  }
   if (actionId.startsWith("candidate-assets:"))
     return executeCandidateAssetAction(actionId, input);
   if (actionId === "stop-search")
