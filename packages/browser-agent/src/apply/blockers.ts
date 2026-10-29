@@ -435,7 +435,10 @@ export function canContinueApplicationAfterAccess(
     page.loading ||
     page.blocker ||
     page.controls.some(
-      (control) => control.visible && control.credentialRole === "password",
+      (control) =>
+        control.visible &&
+        (control.credentialRole === "password" ||
+          control.credentialRole === "one_time_code"),
     )
   )
     return false;

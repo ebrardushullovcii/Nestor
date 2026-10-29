@@ -52,3 +52,12 @@ Background-check consent now joins the routine declarations that are on by defau
 ## Update (2026-10-27)
 
 Needs you lists filled forms waiting for the person's Send in their own group, "Ready for you to send", below what is blocked. The owner approved this after testers saw "You're all caught up" while a form waited for Send. The group is not counted in Needs you, Home or the navigation badge, because nothing is blocked. Each row opens the filled form to review and send. When nothing is blocked and a form is waiting, the empty list says so and offers "Review and send".
+
+## Update (2026-10-29)
+
+The instruction above that only the person may tick a security-check box or
+solve a puzzle now describes the default. The person may opt in to CAPTCHA
+interaction in Settings > AI behavior > In-app browser. Website sign-in and
+account creation have separate opt-ins. An enabled attempt can still need the
+person; no option changes MFA handling, application sending authority or the
+requirement to observe the result. See ADR 0012's 2026-10-29 update.

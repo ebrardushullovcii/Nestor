@@ -370,10 +370,13 @@ export async function openPrepareOnlyAuthorizedFormActionWindow(
   locator: Locator,
   durationMs: number | null = 20_000,
 ): Promise<void> {
-  const networkGuardState = prepareOnlyNetworkGuardStates.get(page);
-  if (!networkGuardState) {
-    throw new Error("Prepare-only network guard is not installed.");
+  // Search pages do not necessarily arrive through an application session.
+  // Install the same closed guard before granting this single form request;
+  // preserve an existing session's independently authorized write settings.
+  if (!prepareOnlyNetworkGuardStates.has(page)) {
+    await ensurePrepareOnlyMutationGuard(page, false);
   }
+  const networkGuardState = prepareOnlyNetworkGuardStates.get(page)!;
   const expiresAtMs =
     durationMs === null ? Number.MAX_SAFE_INTEGER : Date.now() + durationMs;
   const token = `authorized-form-action-${Date.now()}-${Math.random()

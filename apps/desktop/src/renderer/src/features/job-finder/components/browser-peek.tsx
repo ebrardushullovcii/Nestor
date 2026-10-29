@@ -54,6 +54,10 @@ import {
   workThrough,
 } from "../../needs-you/work-through";
 import "./browser-peek.css";
+import {
+  BrowserPasswordOffer,
+  BrowserPasswordPanel,
+} from "./browser-passwords";
 
 const initialState: DesktopBrowserState = {
   revision: 0,
@@ -234,6 +238,7 @@ export function BrowserPeek(props: {
   const [address, setAddress] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [passwordPanel, setPasswordPanel] = useState(false);
   // App chrome cannot paint above the native page view, so while a menu or
   // picker is open the page is hidden behind a still of itself (Arc-style).
   const [pageHidden, setPageHidden] = useState(false);
@@ -264,7 +269,7 @@ export function BrowserPeek(props: {
     state.phase === "needs_you" && props.hasUnresolvedAttention !== false;
   const paused = state.automationPaused;
   const blank = !active || active.url === "about:blank";
-  const overlayRequested = menuOpen || importPanel !== null;
+  const overlayRequested = menuOpen || importPanel !== null || passwordPanel;
   const accept = useCallback(
     (next: DesktopBrowserState) =>
       setState((current) =>
@@ -388,7 +393,8 @@ export function BrowserPeek(props: {
       if (event.defaultPrevented || event.isComposing || !isTopmost()) return;
       if (event.key === "Escape") {
         event.preventDefault();
-        if (importPanel) setImportPanel(null);
+        if (passwordPanel) setPasswordPanel(false);
+        else if (importPanel) setImportPanel(null);
         else if (menuOpen) setMenuOpen(false);
         else minimize();
       }
@@ -420,7 +426,7 @@ export function BrowserPeek(props: {
       if (root) root.inert = wasInert;
       triggerRef.current?.focus();
     };
-  }, [shown, blank, isTopmost, minimize, importPanel, menuOpen]);
+  }, [shown, blank, isTopmost, minimize, importPanel, menuOpen, passwordPanel]);
   // The address bar takes focus when the person opens an empty browser, not
   // whenever the page goes blank under them (a sent form's tab closing).
   const wasShown = useRef(false);
@@ -445,6 +451,7 @@ export function BrowserPeek(props: {
   useEffect(() => {
     if (!shown) {
       setMenuOpen(false);
+      setPasswordPanel(false);
       setImportPanel(null);
     }
   }, [shown]);
@@ -452,6 +459,7 @@ export function BrowserPeek(props: {
   async function openImportPicker() {
     if (!bridge) return;
     setMenuOpen(false);
+    setPasswordPanel(false);
     setImportPanel({ step: "loading" });
     try {
       const listed = await bridge.listImportSources();
@@ -690,6 +698,18 @@ export function BrowserPeek(props: {
                       Resume agent
                     </button>
                   )}
+                  <button
+                    type="button"
+                    title="Saved passwords"
+                    aria-label="Saved passwords"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setImportPanel(null);
+                      setPasswordPanel((open) => !open);
+                    }}
+                  >
+                    <KeyRound size={16} />
+                  </button>
                   <div className="browser-menu" ref={menuRef}>
                     <button
                       type="button"
@@ -916,6 +936,14 @@ export function BrowserPeek(props: {
                   ) : null}
                 </div>
               )}
+              {state.passwordPrompt && bridge && (
+                <BrowserPasswordOffer
+                  key={state.passwordPrompt.id}
+                  prompt={state.passwordPrompt}
+                  bridge={bridge}
+                  message={setMessage}
+                />
+              )}
               <div
                 ref={viewportRef}
                 className={`browser-page-viewport ${blank ? "is-blank" : ""} ${pageHidden && !blank ? "is-covered" : ""}`}
@@ -929,7 +957,14 @@ export function BrowserPeek(props: {
                     draggable={false}
                   />
                 )}
-                {blank && !importPanel && (
+                {passwordPanel && bridge && (
+                  <BrowserPasswordPanel
+                    bridge={bridge}
+                    tabId={state.activeTabId}
+                    close={() => setPasswordPanel(false)}
+                  />
+                )}
+                {blank && !importPanel && !passwordPanel && (
                   <div className="browser-welcome">
                     <div className="browser-welcome-icon">
                       <BrowserGlyph size={30} />

@@ -28,6 +28,11 @@ import {
 import { withReasoningTask, type LLMClient } from "../agent/contracts";
 import { createPageTools } from "../page-tools";
 import {
+  browserInteractionKind,
+  currentBrowserPermissions,
+  withBrowserPermissions,
+} from "../browser-permission-policy";
+import {
   createApplySystemPrompt,
   createApplyUserPrompt,
   describeObservation,
@@ -133,6 +138,7 @@ import type {
   ApplyAgentConfig,
   ApplyAgentResult,
   ApplyAttachedDocument,
+  ApplyBlocker,
   ApplyFilledControl,
   ApplyFormObservation,
   ApplyFormControl,
@@ -411,7 +417,10 @@ export async function runApplyAgent(
   const timing = createApplyTiming(config.now ?? (() => new Date()));
   try {
     return await runMeasuredApplyAgent(
-      { ...config, hands: timing.hands(config.hands) },
+      {
+        ...config,
+        hands: timing.hands(withBrowserPermissions(config.hands, config)),
+      },
       // Form turns are short; answer checks name their own task.
       timing.model(withReasoningTask(llmClient, "apply")),
       timing,
@@ -1220,10 +1229,9 @@ async function runMeasuredApplyAgent(
     );
     // Classify the page's questions now, while the model reads the page, so
     // the first answer does not wait for it. Writes await the same result.
-    void classifyQuestions?.(
-      next.controls,
-      questionReadContext(next),
-    ).catch(() => undefined);
+    void classifyQuestions?.(next.controls, questionReadContext(next)).catch(
+      () => undefined,
+    );
     // A person or a later page write may have answered a previously pending
     // question. Keep the live controls authoritative when continuing.
     // Refs are page-local. Retain only questions that still describe an
@@ -1781,6 +1789,61 @@ async function runMeasuredApplyAgent(
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();
+        if (
+          (observation.blocker &&
+            [
+              "site_login_required",
+              "account_creation_required",
+              "multi_factor_required",
+              "security_challenge",
+            ].includes(observation.blocker.code)) ||
+          (!observation.blocker &&
+            observation.controls.some(
+              (control) =>
+                control.visible &&
+                !control.disabled &&
+                (control.credentialRole === "password" ||
+                  control.credentialRole === "one_time_code") &&
+                (control.required || outcome.needsPerson),
+            ))
+        ) {
+          // Credentials and verification belong on the website. Even with an
+          // enabled permission, a step the agent could not finish is an access
+          // handoff, never a saved-answer question asking for a password/code.
+          pendingQuestions.clear();
+          forPerson = [];
+          const blocker: ApplyBlocker = observation.blocker
+            ? { ...observation.blocker, requiresPerson: true }
+            : {
+                code: observation.controls.some(
+                  (control) => control.visible && control.credentialRole === "one_time_code",
+                )
+                  ? "multi_factor_required"
+                  : "site_login_required",
+                requiresPerson: true,
+                summary:
+                  "Complete the password or verification step on the website, then continue.",
+                detail:
+                  "Enter credentials only on the website. They must never be entered as saved answers in Nestor.",
+                nextActionLabel: "Open the website",
+              };
+          pageTools.state.observation = { ...observation, blocker };
+          pauses.push({
+            code: "page_blocked",
+            summary: blocker.summary,
+            question: null,
+            blocker,
+          });
+          return {
+            kind: "finish",
+            finish: {
+              reason: outcome.reason,
+              stuck: outcome.stuck,
+              needsPerson: true,
+              data: {},
+            },
+          };
+        }
         // An upload still on its way gets a bounded wait before the run
         // decides; one that never finishes becomes the person's upload item.
         syncObservation(observation);
@@ -3857,10 +3920,7 @@ async function runMeasuredApplyAgent(
       { role: "system", content: createApplySystemPrompt(runConfig) },
       {
         role: "user",
-        content: applicationModelFactsMessage(
-          runConfig.sources,
-          payDisclosed,
-        ),
+        content: applicationModelFactsMessage(runConfig.sources, payDisclosed),
       },
       { role: "user", content: createApplyUserPrompt(runConfig) },
       {
@@ -3902,7 +3962,19 @@ async function runMeasuredApplyAgent(
                     ? args.url
                     : ""
                   : (link?.href ?? "");
-              if (!fillMayOpen(config, seen?.url ?? null, href)) {
+              const accessKind =
+                seen && name === "follow_link" && typeof args.ref === "string"
+                  ? browserInteractionKind(seen, args.ref)
+                  : null;
+              const browserPermissions =
+                await currentBrowserPermissions(config);
+              const enabledAccessLink =
+                (accessKind === "signIn" || accessKind === "createAccounts") &&
+                browserPermissions[accessKind];
+              if (
+                !enabledAccessLink &&
+                !fillMayOpen(config, seen?.url ?? null, href)
+              ) {
                 const pause = pressOnSitePause(
                   link?.label ? `"${link.label}"` : href || "that link",
                   now(),
@@ -4000,12 +4072,18 @@ async function runMeasuredApplyAgent(
         );
         if (!advance) break;
         const outcome = await runProposal(
-          { tool: "click", ref: advance.ref }, checkOne,
+          { tool: "click", ref: advance.ref },
+          checkOne,
         );
         const reported = await outcomeToLoop(outcome, { withPage: false });
         if (reported.kind === "finish") return reported.finish;
         if (reported.kind === "stop")
-          return {reason: reported.reason, needsPerson: true, stuck: false, data: {}};
+          return {
+            reason: reported.reason,
+            needsPerson: true,
+            stuck: false,
+            data: {},
+          };
         if (outcome.kind !== "moved") break;
         current = pageTools.state.observation;
       }

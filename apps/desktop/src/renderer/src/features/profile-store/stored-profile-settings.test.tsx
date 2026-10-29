@@ -355,6 +355,35 @@ test("Settings saves Apply mode and appearance independently and follows other w
   );
 });
 
+test("Settings saves one in-app browser permission without touching the others", async () => {
+  const preferences = createPreferencesStore(store);
+  render(
+    <MemoryRouter>
+      <StoredSettingsScreen />
+    </MemoryRouter>,
+  );
+  fireEvent.click(
+    await screen.findByRole("switch", { name: "Sign in to websites" }),
+  );
+  await waitFor(() =>
+    expect(preferences.settings.read().aiBehavior?.browserPermissions).toEqual({
+      solveCaptchas: false,
+      signIn: true,
+      createAccounts: false,
+    }),
+  );
+  expect(
+    calls
+      .filter((call) => call.name === "patch_settings")
+      .map((call) => call.input),
+  ).toEqual([
+    {
+      fields: { "aiBehavior.browserPermissions.signIn": true },
+      expected: { "aiBehavior.browserPermissions.signIn": false },
+    },
+  ]);
+});
+
 test("Reset everything clears the workspace and opens guided setup", async () => {
   const resetWorkspace = vi.fn(() => Promise.resolve());
   Object.assign(window.nestor, { jobFinder: { resetWorkspace } });

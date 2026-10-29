@@ -30,7 +30,7 @@ Each recipe starts with an H1 and a paragraph on user-visible behavior, then cov
 The whole journey at once: `journeys/full-check.mjs` runs the features below in a person's order on one live-AI instance (see the Saved journeys table in `../SKILL.md`). Use a single feature's recipe to prove one change.
 
 - [Guided setup and resume import](./guided-setup.md): import a resume through the picker, review Basics and Work history, set job targets and work eligibility, finish setup. Proven 2026-10-17 (`journeys/job-finder-replica.mjs setup`).
-- [Job sources](./job-sources.md): add, turn on and off, and edit the sites Job Finder searches. The setup step is proven; Profile › Job sources is not yet.
+- [Job sources](./job-sources.md): add, turn on and off, and edit the sites Job Finder searches; browser permissions and saved-password save/import/autofill. The setup step is proven; Profile › Job sources is not yet.
 - [Search and fit](./search-and-fit.md): Find jobs searches the enabled sources; each result carries the model's fit verdict and its reasons. Proven with live AI 2026-10-17 (`search` stage).
 - [Shortlist and tailored resume](./shortlist-and-resume.md): shortlist a job, pick a resume level, create the resume, review it. Proven 2026-10-17 (`shortlist`, `resume` stages); Edit resume and the other levels are not yet.
 - [Apply and send](./apply-and-send.md): Fill in for me prepares the form for the person to send; Send for me can send through the guards. Applications tracks the work. Proven against the replica `/board/` 2026-10-17 (`apply`, `send` stages); Send for me and the other replica sites are not yet.
@@ -38,4 +38,4 @@ The whole journey at once: `journeys/full-check.mjs` runs the features below in 
 - [Live Assistant](./live-assistant.md): notices, quick check, a live session with typed questions and popups, post-session review. Proven text-only 2026-10-17 (`journeys/live-assistant-session.mjs`); audio and screenshots are not.
 - [Website](./website.md): the public landing page, signup and tour at desktop and phone widths. Proven 2026-10-17 (`journeys/website.mjs`).
 
-Not mapped yet: assistant actions outside navigation and the source/apply recipes, Settings beyond apply mode, workspace search, and Live Assistant settings. Add a file when a change touches one.
+Not mapped yet: assistant actions outside navigation and the source/apply recipes, Settings beyond apply mode and browser permissions, workspace search, and Live Assistant settings. Add a file when a change touches one.

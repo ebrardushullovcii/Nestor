@@ -1,3 +1,4 @@
+import { browserAgentPermissionsOf } from "@nestor/contracts";
 import {
   createJobFinderRepository,
   createJobSitesStore,
@@ -455,6 +456,8 @@ async function createJobFinderRuntime(
               store,
               profile.currentCountry,
             ),
+            browserPermissions: browserAgentPermissionsOf(settings),
+            readBrowserPermissions: () => browserAgentPermissionsOf(searchPreferencesStore.settings.read()),
             remoteCountsAsAnyLocation:
               settings.aiBehavior?.jobSearch.remoteCountsAsAnyLocation ?? true,
           };

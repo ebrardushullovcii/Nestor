@@ -213,21 +213,30 @@ export function buildApplyFormObservation(
   const controls: ApplyFormControl[] = raw.controls.map((rawControl) => {
     const kind = toControlKind(rawControl);
     const inputType = rawControl.inputType.toLowerCase();
-    const credentialRole =
-      inputType === "password"
+    const oneTimeCode =
+      /(?:^|\s)one-time-code(?:\s|$)/iu.test(rawControl.autocomplete) ||
+      /\b(?:otp|one[ -]?time (?:code|password)|verification code)\b/iu.test(
+        rawControl.label,
+      );
+    const password =
+      inputType === "password" ||
+      /(?:^|\s)(?:current-password|new-password)(?:\s|$)/iu.test(
+        rawControl.autocomplete,
+      ) ||
+      /\b(?:password|passwd)\b/iu.test(
+        `${rawControl.label} ${rawControl.placeholder} ${rawControl.name} ${rawControl.id}`,
+      );
+    const credentialRole = oneTimeCode
+      ? ("one_time_code" as const)
+      : password
         ? ("password" as const)
-        : /(?:^|\s)one-time-code(?:\s|$)/iu.test(rawControl.autocomplete) ||
-            /\b(?:otp|one[ -]?time (?:code|password)|verification code)\b/iu.test(
-              rawControl.label,
-            )
-          ? ("one_time_code" as const)
-          : signInContext &&
-              (inputType === "email" ||
-                /\b(?:email|e-mail|username|user name|user id)\b/iu.test(
-                  `${rawControl.label} ${rawControl.placeholder} ${rawControl.autocomplete}`,
-                ))
-            ? ("identifier" as const)
-            : null;
+        : signInContext &&
+            (inputType === "email" ||
+              /\b(?:email|e-mail|username|user name|user id)\b/iu.test(
+                `${rawControl.label} ${rawControl.placeholder} ${rawControl.autocomplete}`,
+              ))
+          ? ("identifier" as const)
+          : null;
     const base: Omit<
       ApplyFormControl,
       "questionKind" | "answerControlType" | "attestationKind" | "answered"
@@ -455,8 +464,14 @@ export function createApplyPageHands(
         await mechanics.readPage(),
         now().toISOString(),
       ),
+    ...(mechanics.prepareBrowserCredentials
+      ? { prepareBrowserCredentials: mechanics.prepareBrowserCredentials }
+      : {}),
     navigate: (url) => mechanics.navigate(url),
     clickElement: (ref) => mechanics.clickElement(ref),
+    ...(mechanics.clickAuthorizedFormAction
+      ? { clickAuthorizedFormAction: mechanics.clickAuthorizedFormAction }
+      : {}),
     ...(mechanics.clickWithoutWrites
       ? { clickWithoutWrites: mechanics.clickWithoutWrites }
       : {}),

@@ -47,3 +47,15 @@ Job Finder must work for both selective searches and the owner's primary high-vo
 - ADR 0013's model-escalated discovery wording is obsolete where ADR 0023 gives the model ownership of search and source-check runs. Deterministic extraction, canonical merge, deduplication, receipts and policy execution remain tools and safety boundaries, not workflow policy.
 - ADR 0017's embedded-browser isolation remains. Task-owned popup adoption and reviewed cross-origin navigation do not expose Electron or Node primitives to remote pages.
 - Large live-site runs remain bounded by practical concurrency, time ceilings and durable progress. Synthetic scale tests prove scheduling and list behavior, not universal site compatibility.
+
+## Update (2026-10-29): optional browser access steps
+
+The person can now opt in separately to CAPTCHA solving, website sign-in and
+account creation under Settings > AI behavior > In-app browser. Each is off by
+default. This replaces the unconditional person-owned wording above for an
+explicitly enabled step; MFA and missing credentials still require the person.
+The same action policy applies to search/source checks and application
+preparation. A password may be filled from the main-owned exact-site vault or
+entered by the person on the website; it is never given to the model. Sending
+still uses the existing independent permission, preflight and outcome checks
+(see the 2026-10-29 updates to ADRs 0012 and 0017).

@@ -91,6 +91,22 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   },
   // Empty means Standard (speedLevelOf), as in a file that never had it.
   { table: "profile_settings", column: "speed_level", definition: "TEXT" },
+  // Empty means off, as in a file from before the browser permissions.
+  {
+    table: "profile_settings",
+    column: "ai_behavior_browser_permissions_solve_captchas",
+    definition: "INTEGER",
+  },
+  {
+    table: "profile_settings",
+    column: "ai_behavior_browser_permissions_sign_in",
+    definition: "INTEGER",
+  },
+  {
+    table: "profile_settings",
+    column: "ai_behavior_browser_permissions_create_accounts",
+    definition: "INTEGER",
+  },
 ];
 
 const JOBS = `

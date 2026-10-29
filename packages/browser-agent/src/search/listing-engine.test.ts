@@ -1170,3 +1170,71 @@ test("an employer-before-title card keeps its separate location without structur
   expect(result.jobs[0]?.location).toBe("Berlin, Germany");
   expect(client.chatWithTools).not.toHaveBeenCalled();
 });
+
+test.each([401, 403])(
+  "an opted-in access wall at HTTP %s reaches the browser agent, while the default hands it over",
+  async (status) => {
+    const readPage = () => Promise.reject(new DiscoveryPageReadError(status));
+    const fallback = vi.fn(() =>
+      Promise.resolve({
+        cards: [card("Platform engineer")],
+        complete: true,
+        pagesRead: 1,
+        notes: [],
+      }),
+    );
+    const ordinary = await collectSource({
+      source,
+      lane: "browser",
+      readPage,
+      navigateFallback: fallback,
+    });
+    expect(ordinary.needsYou).toBe(true);
+    expect(fallback).not.toHaveBeenCalled();
+    const http = await collectSource({
+      source,
+      lane: "http",
+      readPage,
+      browserAccessAuthorized: true,
+    });
+    expect(http.requiresBrowser).toBe(true);
+    expect(http.accessBlocked).not.toBe(true);
+    const optedIn = await collectSource({
+      source,
+      lane: "browser",
+      readPage,
+      browserAccessAuthorized: true,
+      navigateFallback: fallback,
+    });
+    expect(optedIn.complete).toBe(true);
+    expect(optedIn.notes.join(" ")).not.toContain(`HTTP ${status}`);
+    expect(optedIn.cards).toHaveLength(1);
+    expect(fallback).toHaveBeenCalledTimes(1);
+  },
+);
+
+test("a successful access step rechecks rendered inventory before claiming coverage", async () => {
+  const readPage = vi
+    .fn()
+    .mockRejectedValueOnce(new DiscoveryPageReadError(401))
+    .mockResolvedValue({
+      html: '<main><h1>Open jobs</h1><article><h2><a href="/jobs/1">Platform engineer</a></h2><p>Example Company</p><p>Berlin</p></article></main>',
+      finalUrl: source.url,
+    });
+  const result = await collectSource({
+    source,
+    lane: "browser",
+    readPage,
+    browserAccessAuthorized: true,
+    navigateFallback: () =>
+      Promise.resolve({
+        cards: [card("Platform engineer")],
+        complete: false,
+        pagesRead: 1,
+        notes: [],
+      }),
+  });
+  expect(readPage).toHaveBeenCalledTimes(2);
+  expect(result.complete).toBe(true);
+  expect(result.notes.join(" ")).not.toContain("HTTP 401");
+});

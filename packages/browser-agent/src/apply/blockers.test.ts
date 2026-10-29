@@ -238,6 +238,12 @@ test("access continuation needs an actual form or application entry, never just 
     ],
   };
   expect(canContinue(entry)).toBe(true);
+  const codePage = buildApplyFormObservation(entry, new Date().toISOString());
+  codePage.controls = [{
+    ...checkbox(false), kind: "text", label: "Code", groupLabel: "",
+    credentialRole: "one_time_code",
+  }];
+  expect(canContinueApplicationAfterAccess(codePage)).toBe(false);
   expect(
     canContinue({
       ...entry,

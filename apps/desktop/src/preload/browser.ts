@@ -1,6 +1,8 @@
 import { ipcRenderer } from "electron";
 import type {
   AddBrowserJobResult,
+  BrowserPasswordsList,
+  BrowserPasswordImportResult,
   DesktopBrowserBridge,
   DesktopBrowserImportResult,
   DesktopBrowserImportSources,
@@ -11,6 +13,34 @@ import type {
 // Main checks every input and result against its schema; the bridge passes
 // them through, so the preload builds no schema when the window opens.
 export const browserBridge: DesktopBrowserBridge = {
+  passwords: {
+    list: (input) =>
+      ipcRenderer.invoke(
+        "browser-passwords:list",
+        input,
+      ) as Promise<BrowserPasswordsList>,
+    save: async (input) => {
+      await ipcRenderer.invoke("browser-passwords:save", input);
+    },
+    dismiss: async (input) => {
+      await ipcRenderer.invoke("browser-passwords:dismiss", input);
+    },
+    autofill: async (input) => {
+      await ipcRenderer.invoke("browser-passwords:autofill", input);
+    },
+    delete: async (input) => {
+      await ipcRenderer.invoke("browser-passwords:delete", input);
+    },
+    importCsv: () =>
+      ipcRenderer.invoke(
+        "browser-passwords:import-csv",
+      ) as Promise<BrowserPasswordImportResult>,
+    importFromBrowser: (input) =>
+      ipcRenderer.invoke(
+        "browser-passwords:import-browser",
+        input,
+      ) as Promise<BrowserPasswordImportResult>,
+  },
   addCurrentJob: (input) =>
     ipcRenderer.invoke(
       "browser:add-job",

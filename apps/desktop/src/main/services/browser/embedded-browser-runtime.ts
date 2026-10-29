@@ -62,6 +62,21 @@ export function withEmbeddedBrowserActivity(
   browser: EmbeddedBrowser,
 ): BrowserSessionRuntime {
   const applicationSources = new Map<string, JobSource>();
+  const prepareOwnedCredentials = async (
+    claimedTabs: () => Promise<string[]>,
+    url: string,
+  ): Promise<boolean> => {
+    const owned = new Set(await claimedTabs());
+    const matches = browser
+      .getState()
+      .tabs.filter((tab) => owned.has(tab.id) && tab.url === url);
+    if (matches.length !== 1) return false;
+    return (
+      browser.prepareAgentCredentials?.(matches[0]!.id).catch(() => false) ??
+      false
+    );
+  };
+
   if (
     runtime.forgetClosedApplicationPage ||
     runtime.clearApplicationPageRecovery
@@ -409,6 +424,11 @@ export function withEmbeddedBrowserActivity(
                 prepareApplicationForm: (formInput) =>
                   input.prepareApplicationForm({
                     ...formInput,
+                    session: {
+                      ...formInput.session,
+                      prepareBrowserCredentials: (url) =>
+                        prepareOwnedCredentials(claimedTabs, url),
+                    },
                     onProgress: (progress) =>
                       updateActivity(
                         `Preparing application: ${describeApplicationPreparationProgress(progress.note)}`,
@@ -475,6 +495,8 @@ export function withEmbeddedBrowserActivity(
                 );
                 return runtime.runAgentDiscovery!(source, {
                   ...options,
+                  prepareBrowserCredentials: (url) =>
+                    prepareOwnedCredentials(claimedTabs, url),
                   protectedPages,
                   signal,
                   onAutomationPage: async (page) => {

@@ -1,3 +1,4 @@
+import { browserAgentPermissionsOf } from "@nestor/contracts";
 import { createHash } from "node:crypto";
 import { createModelUsageRecorder } from "@nestor/ai-providers";
 import { accumulateApplyUsage } from "./apply-usage";
@@ -10,6 +11,7 @@ import {
 } from "./resume-artifacts";
 import {
   buildApplyFormObservation,
+  browserStepReadyForAgent,
   canContinueApplicationAfterAccess,
   checkClassifiedApplicationAnswers,
   inferQuestionKind,
@@ -178,6 +180,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   const resumes = createResumeStore(jobs);
   const active = new Map<number, AbortController>();
   const waiting = new Map<number, number>();
+  const browserStepReadiness = new Map<string, boolean>();
   /**
    * Applications the person sent on the site themselves, kept Uncertain until
    * the site confirms it: attempt, and how long their page is watched for it.
@@ -216,6 +219,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
 
   async function closePage(id: number, attempt: number): Promise<void> {
     waiting.delete(id);
+    browserStepReadiness.delete(applicationIdentity(id, attempt).resultId);
     await browser.releaseApplicationPageBinding?.(
       "target_site",
       applicationIdentity(id, attempt).resultId,
@@ -546,7 +550,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       restorableByRefill: true,
       idempotencyKey: identity.resultId,
       ...(startingUrl ? { startingUrl } : {}),
-      accountCreationAuthorized: false,
+      accountCreationAuthorized: browserAgentPermissionsOf(settings).createAccounts,
+      readBrowserPermissions: async () => browserAgentPermissionsOf((await deps.readInputs()).settings),
       // The form's own field saves go out as the run fills, as they do when
       // a person fills the form by hand (Ashby keeps the form only in what
       // it saved). Fill in for me still presses no form button and sends
@@ -1653,7 +1658,17 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         .catch(() => null));
     if (!raw || raw.loading || !current(row)) return;
     const page = buildApplyFormObservation(raw, new Date().toISOString());
-    const kind = accessKind(page.blocker);
+    const readyForAgent = browserStepReadyForAgent(
+      page,
+      browserAgentPermissionsOf((await deps.readInputs()).settings),
+    );
+    if (!current(row)) return;
+    // A newly entered password or newly enabled visible challenge can resume
+    // the same handoff. An unchanged, unsuccessful account action cannot loop.
+    const resumeEnabledStep =
+      readyForAgent && browserStepReadiness.get(key) === false;
+    browserStepReadiness.set(key, readyForAgent);
+    const kind = resumeEnabledStep ? null : accessKind(page.blocker);
     if (kind) {
       if (
         row.state === "needs_you" &&
@@ -1677,7 +1692,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
     const job = jobs.getJob(row.jobId);
     const destination = page.origin;
-    if (!job || !destination || !canContinueApplicationAfterAccess(page))
+    if (
+      !job ||
+      !destination ||
+      !(resumeEnabledStep || canContinueApplicationAfterAccess(page))
+    )
       return;
     for (const task of access) {
       if (
@@ -1687,6 +1706,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         continue;
       applications.needsYou.completeAccess(task.id, row.id);
     }
+    browserStepReadiness.delete(key);
   }
 
   /** The person fixed the upload on the page: drop its item, finish the rest. */

@@ -40,3 +40,4 @@ export {
   type AssistantTranscriptItem,
 } from "./assistant-repository";
 export { readPersonalWorkspaceState } from "./personal-workspace-reader";
+export * from "./browser-password-repository";

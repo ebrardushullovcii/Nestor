@@ -1,3 +1,4 @@
+import type { BrowserAgentPermissions } from "@nestor/contracts";
 import type {
   CandidateProfile,
   JobDiscoveryTarget,
@@ -13,6 +14,10 @@ import type { JobStore } from "@nestor/db/job-store";
 import type { JobSearchEngine } from "./engine";
 
 export interface JobSearchContext {
+  browserPermissions?: BrowserAgentPermissions;
+  readBrowserPermissions?: () =>
+    | BrowserAgentPermissions
+    | Promise<BrowserAgentPermissions>;
   profile: CandidateProfile;
   searchPreferences: JobSearchPreferences;
   sources: readonly JobDiscoveryTarget[];

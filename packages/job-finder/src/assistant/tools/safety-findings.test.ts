@@ -4,6 +4,7 @@ import {
   AiBehaviorPreferenceSchema,
   AssistantResultSetSchema,
   AssistantMessageSchema,
+  browserAgentPermissionsOf,
   type RawApplyPage,
 } from "@nestor/contracts";
 import { describe, expect, it, vi } from "vitest";
@@ -441,10 +442,9 @@ describe("R3 assistant safety findings", () => {
       ctx,
     );
     expect(result.data).toMatchObject({ defaultResumeLevel: "tailored" });
-    expect(
-      (await ctx.service.read()).searchPreferences
-        .tailoringMode,
-    ).toBe("balanced");
+    expect((await ctx.service.read()).searchPreferences.tailoringMode).toBe(
+      "balanced",
+    );
     // Reset the selected seed job to a discovered job before shortlisting under the saved default.
     const seed = createSeed();
     seed.savedJobs = [
@@ -653,6 +653,44 @@ it("partial AI settings never restore withdrawn declaration approvals", async ()
     (await ctx.service.read()).settings.aiBehavior?.applying
       .preApprovedDeclarations,
   ).toEqual([]);
+});
+
+it("browser permissions start off and save one at a time without touching other AI settings", async () => {
+  const ctx = world();
+  const before = await ctx.service.read();
+  expect(browserAgentPermissionsOf(before.settings)).toEqual({
+    solveCaptchas: false,
+    signIn: false,
+    createAccounts: false,
+  });
+  await ctx.service.updateAiBehavior({
+    aiBehavior: { browserPermissions: { solveCaptchas: true } },
+  });
+  await ctx.service.updateAiBehavior({
+    aiBehavior: {
+      browserPermissions: { createAccounts: true },
+      applying: { coverLetterPolicy: "when_possible" },
+    },
+  });
+  const after = await ctx.service.read();
+  expect(browserAgentPermissionsOf(after.settings)).toEqual({
+    solveCaptchas: true,
+    signIn: false,
+    createAccounts: true,
+  });
+  expect(after.settings.aiBehavior?.applying.preApprovedDeclarations).toEqual(
+    before.settings.aiBehavior?.applying.preApprovedDeclarations,
+  );
+  expect(after.settings.aiBehavior?.profileAssistant).toEqual(
+    before.settings.aiBehavior?.profileAssistant,
+  );
+  // An edit to another group never turns a permission back off.
+  await ctx.service.updateAiBehavior({
+    aiBehavior: { jobSearch: { remoteCountsAsAnyLocation: false } },
+  });
+  expect(
+    browserAgentPermissionsOf((await ctx.service.read()).settings),
+  ).toEqual({ solveCaptchas: true, signIn: false, createAccounts: true });
 });
 
 it("refuses unmentioned jobs in second person without echoing internal ids", async () => {

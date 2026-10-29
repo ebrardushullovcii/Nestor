@@ -1,3 +1,4 @@
+import type { BrowserAgentPermissions } from "@nestor/contracts";
 import type {
   ApplicationPageState,
   ApplicationPageReopenProgress,
@@ -110,6 +111,11 @@ export interface ApplicationAttachmentArtifact {
 }
 
 export interface ExecuteApplicationFlowInput extends ExecuteEasyApplyInput {
+  /** Main-owned exact-site autofill; returns no credentials. */
+  prepareBrowserCredentials?: (url: string) => Promise<boolean>;
+  readBrowserPermissions?: () =>
+    | BrowserAgentPermissions
+    | Promise<BrowserAgentPermissions>;
   /** Recorded listing provenance; never inferred from the application host. */
   listingDiscovery?: { label: string; url: string };
   /**
@@ -467,6 +473,12 @@ export interface BrowserApplicationExecutionOptions {
 }
 
 export interface AgentDiscoveryOptions {
+  /** Main-owned exact-site autofill; returns no credentials. */
+  prepareBrowserCredentials?: (url: string) => Promise<boolean>;
+  browserPermissions?: BrowserAgentPermissions;
+  readBrowserPermissions?: () =>
+    | BrowserAgentPermissions
+    | Promise<BrowserAgentPermissions>;
   /** Browser fallback collects cards; the new engine screens and reads them. */
   inventoryOnly?: boolean;
   lookupKnownUrls?: KnownJobUrlLookup;

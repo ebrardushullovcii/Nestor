@@ -636,6 +636,17 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
 }
 
 /* Import picker */
+.browser-password-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+}
+.browser-password-help {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .browser-import {
   position: absolute;
   inset: 0;

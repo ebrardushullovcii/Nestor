@@ -433,6 +433,21 @@ function scriptedModel(
   };
 }
 
+test.each(["Sign in", "Create account", "Continue"])("an enabled %s handoff never asks for credentials as saved-answer questions", async (label) => {
+  const source = page({
+    title: label, bodyText: label,
+    controls: [{ ...nameControl(), label: "Password", inputType: "password", value: "" }],
+    actions: [{ index: 0, label, visible: true, disabled: false }],
+  });
+  const result = await runApplyAgent(config(source, { browserPermissions: { signIn: true, createAccounts: true, solveCaptchas: true } }), scriptedModel([
+    { name: "finish", args: { reason: "Enter the password on the site", needsPerson: true, forPerson: ["Password"] } },
+  ]));
+  expect(result.pauses).toHaveLength(1);
+  expect(result.pauses[0]).toMatchObject({ code: "page_blocked", question: null });
+  if (label !== "Continue") expect(result.pauses[0]?.blocker).toMatchObject({ code: label === "Sign in" ? "site_login_required" : "account_creation_required", requiresPerson: true });
+  expect(result.pauses[0]?.questions ?? []).toEqual([]);
+});
+
 test.each([false,true])("Fill completes four proven local steps after a finish, including an earlier premature Next: %s", async premature => {
   const source=page({stepLabel:"Step 1 of 4",actions:[{index:0,label:"Next",visible:true,disabled:false,inForm:true,submitsForm:false}]});
   let step=1,turns=0;

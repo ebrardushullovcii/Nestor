@@ -1,3 +1,4 @@
+import { browserAgentPermissionsOf } from "@nestor/contracts";
 import { jobSiteTarget } from "@nestor/contracts";
 import {
   SharedAgentCompactionPolicySchema,
@@ -588,6 +589,8 @@ export async function runSourceDebugWorkflow(
         const debugResult = await ctx.browserRuntime.runAgentDiscovery?.(
           adapterKind,
           {
+            browserPermissions: browserAgentPermissionsOf(await ctx.repository.getSettings()),
+            readBrowserPermissions: async () => browserAgentPermissionsOf(await ctx.repository.getSettings()),
             userProfile: profile,
             searchPreferences: {
               targetRoles:

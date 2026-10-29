@@ -162,6 +162,8 @@ export async function collectSource(
     source: { id: string; label: string; url: string };
     onPage?: (cards: ListingCard[]) => Promise<void> | void;
     navigateFallback?: (url?: string) => Promise<SourceInventory>;
+    /** Opt-in permits the browser agent to attempt a sign-in or verification wall. */
+    browserAccessAuthorized?: boolean;
     lane?: "http" | "browser";
   },
 ): Promise<SourceInventory> {
@@ -275,7 +277,7 @@ export async function collectSource(
       }
     });
   }
-  if (needsAccess && input.lane === "browser")
+  if (needsAccess && input.lane === "browser" && !input.browserAccessAuthorized)
     return {
       cards: [...cards.values()],
       lane: "browser",
@@ -284,8 +286,34 @@ export async function collectSource(
       needsYou: true,
       notes,
     };
-  if ((!recognized || !complete) && input.navigateFallback && !httpError) {
-    const fallback = await input.navigateFallback([...visited].at(-1));
+  if (
+    (!recognized || !complete) &&
+    input.navigateFallback &&
+    (!httpError || (needsAccess && input.browserAccessAuthorized))
+  ) {
+    let fallback = await input.navigateFallback([...visited].at(-1));
+    if (
+      needsAccess &&
+      !fallback.needsYou &&
+      !fallback.complete &&
+      fallback.cards.length
+    ) {
+      // Signing in changes the browser session. Re-read the inventory through
+      // that session to prove coverage; the agent's collected cards alone do
+      // not establish that every page was read.
+      const recovered = await collectSource({
+        source: input.source,
+        readPage: input.readPage,
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.lane ? { lane: input.lane } : {}),
+        browserAccessAuthorized: true,
+      });
+      if (recovered.complete)
+        fallback = {
+          ...recovered,
+          notes: [...fallback.notes, ...recovered.notes],
+        };
+    }
     for (const card of fallback.cards) cards.set(card.url, card);
     return {
       cards: [...cards.values()],
@@ -298,7 +326,9 @@ export async function collectSource(
         ? { emptyConfirmed: true }
         : {}),
       notes: [
-        ...notes,
+        ...(needsAccess && fallback.complete
+          ? ["Browser access was verified after the initial access check."]
+          : notes),
         ...fallback.notes,
         ...(cards.size || (fallback.complete && fallback.emptyConfirmed)
           ? []
@@ -317,7 +347,9 @@ export async function collectSource(
     cards: [...cards.values()],
     lane: input.lane ?? "http",
     requiresBrowser: !recognized || !complete,
-    ...(needsAccess ? { accessBlocked: true } : {}),
+    ...(needsAccess && !input.browserAccessAuthorized
+      ? { accessBlocked: true }
+      : {}),
     pagesRead: visited.size,
     complete: covered,
     ...(!cards.size && emptyConfirmed ? { emptyConfirmed: true } : {}),

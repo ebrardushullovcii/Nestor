@@ -15,6 +15,7 @@ import {
   listSignInSourcesByName,
   readChromiumCookies,
   readFirefoxCookies,
+  readBrowserPasswords,
   type ImportEnvironment,
 } from "./browser-profile-import";
 
@@ -32,6 +33,53 @@ function encrypt(plain: Buffer, key: Buffer): Buffer {
     cipher.final(),
   ]);
 }
+
+test("imports only explicitly chosen synthetic Chromium passwords and reports Windows CSV fallback", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "nestor-password-import-"));
+  temporary.push(home);
+  const directory = path.join(home, ".config/google-chrome/Default");
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, "Cookies"), "synthetic-placeholder");
+  const db = new DatabaseSync(path.join(directory, "Login Data"));
+  db.exec(
+    "CREATE TABLE logins (origin_url TEXT, action_url TEXT, username_value TEXT, password_value BLOB, blacklisted_by_user INTEGER)",
+  );
+  const key = deriveChromiumKey("peanuts", 1);
+  const insert = db.prepare("INSERT INTO logins VALUES (?, ?, ?, ?, 0)");
+  insert.run(
+    "https://example.test/login",
+    "https://example.test/session",
+    "synthetic",
+    encrypt(Buffer.from("synthetic-only"), key),
+  );
+  insert.run(
+    "http://remote.test",
+    "http://remote.test",
+    "synthetic",
+    encrypt(Buffer.from("synthetic-only"), key),
+  );
+  insert.run(
+    "https://example.test",
+    "https://foreign.test",
+    "synthetic",
+    encrypt(Buffer.from("synthetic-only"), key),
+  );
+  db.close();
+  const env: ImportEnvironment = { platform: "linux", home };
+  const source = (await listBrowserImportSources(env)).sources[0]!;
+  const result = await readBrowserPasswords(source.id, env);
+  expect(result.values.length).toBe(1);
+  expect(result.values[0]?.password === "synthetic-only").toBe(true);
+  expect(result.skipped).toBe(2);
+  expect(result.unsupported).toBe(false);
+  const fallback = await readBrowserPasswords(source.id, {
+    platform: "win32",
+    home,
+    localAppData: home,
+    appData: home,
+  });
+  expect(fallback).toEqual({ values: [], skipped: 0, unsupported: true });
+});
 
 describe("browser profile import", () => {
   test("decrypts a v10 cookie and strips the schema-24 host digest", () => {
