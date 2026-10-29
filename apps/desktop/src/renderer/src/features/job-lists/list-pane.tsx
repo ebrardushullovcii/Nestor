@@ -74,7 +74,8 @@ export function ListDetailLayout(props: {
 
 /**
  * One row: a tick box, then title (with one badge slot), meta and status
- * lines. Selection never changes the row's size.
+ * lines. Selection never changes the row's size, and an empty meta or status
+ * line keeps its height, so every row of a windowed list is the same height.
  */
 export const ListRowFrame = memo(function ListRowFrame(
   props: ListRowState & {
@@ -94,7 +95,14 @@ export const ListRowFrame = memo(function ListRowFrame(
 ) {
   return (
     <li
-      className="relative min-w-0 pl-10 [contain-intrinsic-size:auto_92px] [content-visibility:auto]"
+      className={cn(
+        "relative min-w-0 pl-10",
+        // A windowed list draws only nearby rows already. Skipped rendering
+        // there made the rows above the view report the 92px placeholder
+        // instead of their own height.
+        props.index === undefined &&
+          "[contain-intrinsic-size:auto_92px] [content-visibility:auto]",
+      )}
       data-list-row-id={props.id}
       {...listRowPlacement(props)}
     >
@@ -135,10 +143,13 @@ export const ListRowFrame = memo(function ListRowFrame(
               </div>
             ) : null}
           </div>
-          <span className={jobFinderListRowMetaClassName} title={props.meta}>
+          <span
+            className={cn(jobFinderListRowMetaClassName, "min-h-[1lh]")}
+            title={props.meta}
+          >
             {props.meta}
           </span>
-          <div className="flex min-w-0 items-baseline gap-3">
+          <div className="flex min-h-5 min-w-0 items-baseline gap-3 leading-5">
             <span
               className={cn(
                 jobFinderListRowStatusClassName,
@@ -243,14 +254,33 @@ export function ListPane<Row extends { id: number }>(props: {
   const { onLoadMore, hasMore, rows } = props;
   const windowed = props.windowed ?? false;
 
-  // Rows share one height (each line is cut to one line): the first one
-  // drawn gives it, so a denser list or a larger font still lines up.
+  // Rows share one height (each line is cut to one line), taken from the
+  // tallest row drawn, so a denser list or a larger font still lines up. It
+  // only grows until the window or text size changes. Taking it from the
+  // first drawn row flipped it between a shorter and a taller row while
+  // scrolling; each flip laid the list out again until React stopped the
+  // loop (error #185), and rows taller than the measured one overlapped.
   const [rowHeight, setRowHeight] = useState(ROW_HEIGHT);
+  const measured = useRef(0);
+  const [, remeasure] = useState(0);
+  useEffect(() => {
+    if (!windowed) return undefined;
+    const reset = () => {
+      measured.current = 0;
+      remeasure((n) => n + 1);
+    };
+    window.addEventListener("resize", reset);
+    return () => window.removeEventListener("resize", reset);
+  }, [windowed]);
   useLayoutEffect(() => {
     if (!windowed) return;
-    const first = listRef.current?.firstElementChild;
-    const height = first instanceof HTMLElement ? first.offsetHeight : 0;
-    if (height > 0 && height !== rowHeight) setRowHeight(height);
+    let tallest = 0;
+    for (const row of listRef.current?.children ?? [])
+      if (row instanceof HTMLElement)
+        tallest = Math.max(tallest, row.offsetHeight);
+    if (tallest <= measured.current) return;
+    measured.current = tallest;
+    if (tallest !== rowHeight) setRowHeight(tallest);
   });
 
   const activeIndex =
