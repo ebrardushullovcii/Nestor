@@ -1263,3 +1263,81 @@ test("own-words text is used unchanged from the exact saved question", () => {
     "needs_you",
   );
 });
+
+test("total experience brackets format the recorded total without lending it to a skill", () => {
+  const sources = source();
+  sources.profile.yearsExperience = 8;
+  const field = {
+    ...control("Years of Experience*"),
+    kind: "select" as const,
+    options: ["0-2", "3-5", "6-10", "11+", "7 or more years"],
+  };
+  const tags = {
+    kind: "other",
+    country: null,
+    sourceId: "profile.yearsExperience",
+  } as const;
+  expect(decide(sources, field, tags, "6-10").kind).toBe("literal");
+  expect(decide(sources, field, tags, "7 or more years").kind).toBe("literal");
+  for (const answer of ["3-5", "11+", "7-9"])
+    expect(decide(sources, field, tags, answer).kind).toBe("needs_you");
+  expect(
+    decide(
+      sources,
+      { ...field, label: "Years of Rust experience" },
+      tags,
+      "6-10",
+    ).kind,
+  ).toBe("needs_you");
+});
+
+test("country of residence selects the legal jurisdiction but never proves permission", () => {
+  const sources = source();
+  sources.posting.location = "EMEA Remote";
+  const field = control("Are you authorized to work in country of residence?*");
+  const tags = { kind: "work_auth", country: "DE", sourceId: null } as const;
+  expect(decide(sources, field, tags).kind).toBe("literal");
+  sources.profile.workEligibility.authorizedWorkCountries = [];
+  expect(decide(sources, field, tags).kind).toBe("needs_you");
+});
+
+test("an explicit saved international phone supplies its code, not residence or another person's code", () => {
+  const sources = source();
+  sources.profile.phone = "+49 555 0000000";
+  sources.profile.currentCountry = "Portugal";
+  const field = {
+    ...control("Phone country code"),
+    kind: "select" as const,
+    options: ["+1", "+44", "+49", "+351"],
+  };
+  const tags = {
+    kind: "other",
+    country: null,
+    sourceId: "profile.phone#callingCode",
+  } as const;
+  expect(decide(sources, field, tags, "+49").kind).toBe("literal");
+  expect(decide(sources, field, tags, "+351").kind).toBe("needs_you");
+  expect(
+    decide(
+      sources,
+      { ...field, groupLabel: "Professional reference" },
+      tags,
+      "+49",
+    ).kind,
+  ).toBe("needs_you");
+  sources.profile.phone = "0555 0000000";
+  expect(decide(sources, field, tags, "+49").kind).toBe("needs_you");
+});
+
+test("explicit residence country can be read from a saved full location, never from the city alone", () => {
+  const sources = source();
+  sources.profile.currentCountry = null;
+  sources.profile.currentLocation = "Lisbon, Portugal";
+  sources.profile.workEligibility.authorizedWorkCountries = ["Portugal"];
+  sources.posting.location = "EMEA Remote";
+  const field = control("Are you authorized to work in country of residence?");
+  const tags = { kind: "work_auth", country: "PT", sourceId: null } as const;
+  expect(decide(sources, field, tags).kind).toBe("literal");
+  sources.profile.currentLocation = "Lisbon";
+  expect(decide(sources, field, tags).kind).toBe("needs_you");
+});
