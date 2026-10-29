@@ -16,16 +16,13 @@ import {
   type ResumeImportStageExtractionResult,
 } from "./resume-import";
 import { buildCandidateConfidenceBreakdown } from "./resume-import-helpers";
-import type { OpenAiCompatibleJsonOperation } from "./openai-compatible-request-compaction";
+import {
+  compactOpenAiCompatibleUserPayload,
+  ResumeImportBudgetError,
+  type OpenAiCompatibleJsonOperation,
+} from "./openai-compatible-request-compaction";
 import type { ModelReasoningEffort } from "./openai-compatible-transport";
 
-// Long resumes (seven or more roles plus education) crossed the old 80-block
-// limit and lost the later roles and the education section before the model
-// ever saw them. The context window has room for the whole document; keep the
-// limits high enough for a multi-page resume and warn if a document still
-// exceeds them.
-const ADJUDICATION_BLOCK_LIMIT = 240;
-const ADJUDICATION_CANDIDATE_LIMIT = 80;
 // Post-adjudication confidence weighting: adjudicated candidates are assigned a lower
 // normalization risk and higher conflict risk compared with extract-path defaults,
 // reflecting the pro-normalization review pass that produced them.
@@ -334,6 +331,101 @@ export function buildResumeImportStageInstructions(
   }
 }
 
+/** Full documents bypass lossy compaction; oversized documents are read in explicit chunks. */
+export async function fetchCompleteResumeImportJson(input: {
+  operation: "extractResumeImportStage" | "adjudicateResumeImportCandidates";
+  systemPrompt: string;
+  payload: Record<string, unknown> & {
+    documentBundle: Record<string, unknown> & {
+      blocks: { id: string; text: string }[];
+      fullText?: string | null;
+    };
+  };
+  modelContextWindowTokens: number | null;
+  chunkPath?: string;
+  fetch: (prompt: string, payload: unknown) => Promise<unknown>;
+}): Promise<unknown> {
+  try {
+    compactOpenAiCompatibleUserPayload({
+      operation: input.operation,
+      systemPrompt: input.systemPrompt,
+      userPayload: input.payload,
+      modelContextWindowTokens: input.modelContextWindowTokens,
+    });
+  } catch (error) {
+    if (!(error instanceof ResumeImportBudgetError)) throw error;
+    const { blocks, fullText } = input.payload.documentBundle;
+    const candidates = Array.isArray(input.payload.candidates)
+      ? input.payload.candidates
+      : [];
+    const blockSize = JSON.stringify(blocks).length;
+    let parts: (typeof input.payload)[];
+    if (
+      candidates.length > 1 &&
+      JSON.stringify(candidates).length > blockSize
+    ) {
+      const middle = Math.ceil(candidates.length / 2);
+      parts = [candidates.slice(0, middle), candidates.slice(middle)].map(
+        (part) => ({ ...input.payload, candidates: part }),
+      );
+    } else if (blocks.length > 1) {
+      const middle = Math.ceil(blocks.length / 2);
+      parts = [blocks.slice(0, middle), blocks.slice(middle)].map((part) => ({
+        ...input.payload,
+        documentBundle: { ...input.payload.documentBundle, blocks: part },
+      }));
+    } else if (blocks.length === 1 && blocks[0]!.text.length > 1000) {
+      const block = blocks[0]!;
+      const middle = Math.ceil(block.text.length / 2);
+      parts = [block.text.slice(0, middle), block.text.slice(middle)].map(
+        (text) => ({
+          ...input.payload,
+          documentBundle: {
+            ...input.payload.documentBundle,
+            blocks: [{ ...block, text }],
+          },
+        }),
+      );
+    } else if (!blocks.length && fullText && fullText.length > 1000) {
+      const middle = Math.ceil(fullText.length / 2);
+      parts = [fullText.slice(0, middle), fullText.slice(middle)].map(
+        (text) => ({
+          ...input.payload,
+          documentBundle: { ...input.payload.documentBundle, fullText: text },
+        }),
+      );
+    } else {
+      throw new Error(
+        "The saved resume context exceeds the model input budget even after document chunking. Use a model with a larger context window.",
+      );
+    }
+    const results: Record<string, unknown>[] = [];
+    for (const [index, payload] of parts.entries()) {
+      const result = await fetchCompleteResumeImportJson({
+        ...input,
+        payload,
+        chunkPath: `${input.chunkPath ?? ""}${index + 1}_`,
+        systemPrompt: `${input.systemPrompt} This is document chunk ${index + 1} of 2. Extract only facts supported here; missing context is unknown. Prefix NEW record ids with chunk_${input.chunkPath ?? ""}${index + 1}_; preserve existing saved record ids.`,
+      });
+      if (result && typeof result === "object" && !Array.isArray(result))
+        results.push(result as Record<string, unknown>);
+      else
+        throw new Error(
+          "A resume chunk did not return a candidate envelope; retry the import.",
+        );
+    }
+    return Object.fromEntries(
+      ["candidates", "notes", "warnings"].map((key) => [
+        key,
+        results.flatMap((result) =>
+          Array.isArray(result[key]) ? (result[key] as unknown[]) : [],
+        ),
+      ]),
+    );
+  }
+  return input.fetch(input.systemPrompt, input.payload);
+}
+
 export async function extractOpenAiCompatibleResumeImportStage(input: {
   stageInput: ExtractResumeImportStageInput;
   status: AgentProviderStatus;
@@ -356,9 +448,15 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
       left.pageNumber - right.pageNumber ||
       left.readingOrder - right.readingOrder,
   );
-  const payload = await input.fetchModelJson(
-    "extractResumeImportStage",
-    [
+  const payload = await fetchCompleteResumeImportJson({
+    operation: "extractResumeImportStage",
+    modelContextWindowTokens: input.status.modelContextWindowTokens,
+    fetch: (prompt, payload) =>
+      input.fetchModelJson("extractResumeImportStage", prompt, payload, {
+        timeoutMs: input.timeoutMs,
+        reasoningEffort: input.reasoningEffort,
+      }),
+    systemPrompt: [
       "You extract structured resume import candidates from parsed document blocks.",
       'Return JSON only, as one object: {"candidates":[...],"notes":[...]}. Never return a bare candidate or a bare array.',
       "Use only the provided document as evidence.",
@@ -371,7 +469,7 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
       buildResumeImportStageInstructions(input.stageInput.stage),
       "Abstain instead of guessing.",
     ].join(" "),
-    {
+    payload: {
       stage: input.stageInput.stage,
       existingProfile: compactSavedContext({
         ...input.stageInput.existingProfile,
@@ -400,8 +498,7 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
         })),
       },
     },
-    { timeoutMs: input.timeoutMs, reasoningEffort: input.reasoningEffort },
-  );
+  });
 
   // Models sometimes answer with one bare candidate (or a bare array)
   // instead of the {"candidates":[...]} envelope — observed verbatim from
@@ -463,9 +560,17 @@ export async function adjudicateOpenAiCompatibleResumeImportCandidates(input: {
   ) => Promise<unknown>;
   timeoutMs: number;
 }): Promise<ResumeImportAdjudicationResult> {
-  const payload = await input.fetchModelJson(
-    "adjudicateResumeImportCandidates",
-    [
+  const payload = await fetchCompleteResumeImportJson({
+    operation: "adjudicateResumeImportCandidates",
+    modelContextWindowTokens: input.status.modelContextWindowTokens,
+    fetch: (prompt, payload) =>
+      input.fetchModelJson(
+        "adjudicateResumeImportCandidates",
+        prompt,
+        payload,
+        { timeoutMs: input.timeoutMs },
+      ),
+    systemPrompt: [
       "You adjudicate conflicting resume import candidates produced by document text extraction and visual scan extraction.",
       "Return JSON only with candidates, notes, and warnings arrays.",
       "Use Pro-style normalization only: produce validated import candidate drafts when a safer normalized value can be grounded in the supplied candidates and document blocks.",
@@ -474,7 +579,7 @@ export async function adjudicateOpenAiCompatibleResumeImportCandidates(input: {
       "Each candidate target must be an object, not a string.",
       'Example candidate: {"target":{"section":"experience","key":"record","recordId":"experience_1"},"label":"Current role","value":{"title":"Engineer"},"confidence":0.9,"evidenceText":"Senior Engineer at Acme","sourceBlockIds":["b1"],"notes":[],"alternatives":[],"conflictChoices":[{"id":"c1","sourceLabel":"Text extraction","sourceKind":"document_text","confidence":0.85,"valuePreview":"Engineer","recommended":true}],"visualEvidence":[]}',
     ].join(" "),
-    {
+    payload: {
       existingProfile: input.adjudicationInput.existingProfile,
       existingSearchPreferences:
         input.adjudicationInput.existingSearchPreferences,
@@ -483,40 +588,20 @@ export async function adjudicateOpenAiCompatibleResumeImportCandidates(input: {
         sourceFileKind: input.adjudicationInput.documentBundle.sourceFileKind,
         quality: input.adjudicationInput.documentBundle.quality ?? null,
         warnings: input.adjudicationInput.documentBundle.warnings,
-        blocks: input.adjudicationInput.documentBundle.blocks
-          .slice(0, ADJUDICATION_BLOCK_LIMIT)
-          .map((block) => ({
-            id: block.id,
-            pageNumber: block.pageNumber,
-            sectionHint: block.sectionHint,
-            kind: block.kind,
-            text: block.text,
-          })),
+        ...(input.adjudicationInput.documentBundle.blocks.length === 0
+          ? { fullText: input.adjudicationInput.documentBundle.fullText }
+          : {}),
+        blocks: input.adjudicationInput.documentBundle.blocks.map((block) => ({
+          id: block.id,
+          pageNumber: block.pageNumber,
+          sectionHint: block.sectionHint,
+          kind: block.kind,
+          text: block.text,
+        })),
       },
-      candidates: input.adjudicationInput.candidates.slice(
-        0,
-        ADJUDICATION_CANDIDATE_LIMIT,
-      ),
+      candidates: input.adjudicationInput.candidates,
     },
-    { timeoutMs: input.timeoutMs },
-  );
-
-  const truncationWarnings: string[] = [];
-  if (
-    input.adjudicationInput.documentBundle.blocks.length >
-    ADJUDICATION_BLOCK_LIMIT
-  ) {
-    truncationWarnings.push(
-      `Adjudication input truncated: ${input.adjudicationInput.documentBundle.blocks.length} blocks (>${ADJUDICATION_BLOCK_LIMIT} limit)`,
-    );
-  }
-  if (
-    input.adjudicationInput.candidates.length > ADJUDICATION_CANDIDATE_LIMIT
-  ) {
-    truncationWarnings.push(
-      `Adjudication input truncated: ${input.adjudicationInput.candidates.length} candidates (>${ADJUDICATION_CANDIDATE_LIMIT} limit)`,
-    );
-  }
+  });
 
   const normalizedPayload =
     payload && typeof payload === "object" && !Array.isArray(payload)
@@ -551,9 +636,6 @@ export async function adjudicateOpenAiCompatibleResumeImportCandidates(input: {
   return ResumeImportAdjudicationResultSchema.parse({
     candidates,
     notes: toStringArray(normalizedPayload.notes),
-    warnings: [
-      ...truncationWarnings,
-      ...toStringArray(normalizedPayload.warnings),
-    ],
+    warnings: [...toStringArray(normalizedPayload.warnings)],
   });
 }

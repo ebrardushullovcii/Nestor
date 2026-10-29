@@ -1,0 +1,99 @@
+Alex Vale
+Synthetic test persona
+alex.vale@example.test
+Berlin, Germany
+
+## Experience
+
+### **Engineer 9 - Example Studio 9**
+*January 2025 - December 2026*
+
+- Built accessible interfaces with TypeScript.
+- Reviewed code and mentored colleagues.
+- Improved automated checks.
+- Maintained product documentation.
+- Partnered with product designers.
+
+### **Engineer 8 - Example Studio 8**
+*January 2023 - December 2024*
+
+- Built accessible interfaces with TypeScript.
+- Reviewed code and mentored colleagues.
+- Improved automated checks.
+- Maintained product documentation.
+- Partnered with product designers.
+
+### **Engineer 7 - Example Studio 7**
+*January 2021 - December 2022*
+
+- Built accessible interfaces with TypeScript.
+- Reviewed code and mentored colleagues.
+- Improved automated checks.
+- Maintained product documentation.
+- Partnered with product designers.
+
+### **Engineer 6 - Example Studio 6**
+*January 2019 - December 2020*
+
+- Built accessible interfaces with TypeScript.
+- Reviewed code and mentored colleagues.
+- Improved automated checks.
+- Maintained product documentation.
+- Partnered with product designers.
+
+### **Engineer 5 - Example Studio 5**
+*January 2017 - December 2018*
+
+- Built accessible interfaces with TypeScript.
+- Reviewed code and mentored colleagues.
+- Improved automated checks.
+- Maintained product documentation.
+- Partnered with product designers.
+
+### **Engineer 4 - Example Studio 4**
+*January 2015 - December 2016*
+
+- Built accessible interfaces with TypeScript.
+- Reviewed code and mentored colleagues.
+- Improved automated checks.
+- Maintained product documentation.
+- Partnered with product designers.
+
+### **Engineer 3 - Example Studio 3**
+*January 2013 - December 2014*
+
+- Built accessible interfaces with TypeScript.
+- Reviewed code and mentored colleagues.
+- Improved automated checks.
+- Maintained product documentation.
+- Partnered with product designers.
+
+### **Engineer 2 - Example Studio 2**
+*January 2011 - December 2012*
+
+- Built accessible interfaces with TypeScript.
+- Reviewed code and mentored colleagues.
+- Improved automated checks.
+- Maintained product documentation.
+- Partnered with product designers.
+
+### **Engineer 1 - Example Studio 1**
+*January 2009 - December 2010*
+
+- Built accessible interfaces with TypeScript.
+- Reviewed code and mentored colleagues.
+- Improved automated checks.
+- Maintained product documentation.
+- Partnered with product designers.
+
+## Education
+### **BSc Computing - Example University**
+*2004 - 2008*
+
+## Volunteering
+### **Mentor - Example Coding Club**
+*2009 - 2010*
+
+## Career breaks
+Family care
+*2011 - 2012*

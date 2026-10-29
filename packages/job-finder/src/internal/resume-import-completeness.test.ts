@@ -123,8 +123,9 @@ describe("resume import completeness", () => {
     expect(
       roles.map((candidate) => (candidate.value as { title?: string }).title),
     ).toEqual(["Senior Designer", "Junior Designer"]);
-    expect(roles.every((candidate) => candidate.resolution === "needs_review"))
-      .toBe(true);
+    expect(
+      roles.every((candidate) => candidate.resolution === "needs_review"),
+    ).toBe(true);
     expect(result.warnings.join(" ")).toContain("older role");
     expect(
       completeResumeImport({
@@ -163,4 +164,49 @@ describe("resume import completeness", () => {
     });
     expect(result.candidates).toEqual([role]);
   });
+});
+
+it("offers dated Markdown education, volunteering and career breaks for review across blank lines", () => {
+  const source = input();
+  const fullText = [
+    "## Experience",
+    "### **Designer - Studio**",
+    "",
+    "*2018 - 2020*",
+    "",
+    "## Education",
+    "### **BSc Design - Example University**",
+    "",
+    "2010 - 2014",
+    "",
+    "## Volunteering",
+    "### Mentor - Design Club",
+    "",
+    "2015 - 2017",
+    "## Career breaks",
+    "Family care",
+    "",
+    "2020 - 2021",
+  ].join("\n");
+  const result = completeResumeImport({
+    ...source,
+    candidates: [],
+    bundle: { ...source.bundle, fullText },
+  });
+  const entries = result.candidates.filter((c) => c.target.key === "record");
+  expect(entries.map((c) => c.target.section)).toEqual([
+    "experience",
+    "education",
+    "experience",
+    "experience",
+  ]);
+  expect(entries.every((c) => c.resolution === "needs_review")).toBe(true);
+  const again = completeResumeImport({
+    ...source,
+    candidates: result.candidates,
+    bundle: { ...source.bundle, fullText },
+  });
+  expect(
+    again.candidates.filter((c) => c.target.key === "record"),
+  ).toHaveLength(4);
 });

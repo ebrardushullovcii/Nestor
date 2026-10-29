@@ -5,7 +5,10 @@ import type {
 } from "@nestor/contracts";
 import { CandidateExperienceSchema } from "@nestor/contracts";
 import { createPreferences, createProfile } from "./test-fixtures";
-import { extractOpenAiCompatibleResumeImportStage } from "./openai-compatible-resume-import";
+import {
+  fetchCompleteResumeImportJson,
+  extractOpenAiCompatibleResumeImportStage,
+} from "./openai-compatible-resume-import";
 
 const status: AgentProviderStatus = {
   kind: "openai_compatible",
@@ -681,3 +684,53 @@ test("compact rows keep non-ASCII source values and reject generated unknown str
         .candidates,
     ).toEqual([]);
 });
+
+for (const operation of [
+  "extractResumeImportStage",
+  "adjudicateResumeImportCandidates",
+] as const) {
+  test(`${operation} preserves every block and candidate within budget`, async () => {
+    const blocks = Array.from({ length: 300 }, (_, i) => ({
+      id: `b${i}`,
+      text: `Evidence ${i}`,
+    }));
+    const candidates = Array.from({ length: 100 }, (_, i) => ({ value: i }));
+    let calls = 0;
+    await fetchCompleteResumeImportJson({
+      operation,
+      systemPrompt: "Read all evidence",
+      modelContextWindowTokens: 196000,
+      payload: { documentBundle: { blocks }, candidates },
+      fetch: (_prompt, payload) => {
+        calls++;
+        expect(payload).toEqual({ documentBundle: { blocks }, candidates });
+        return Promise.resolve({ candidates: [] });
+      },
+    });
+    expect(calls).toBe(1);
+  });
+  test(`${operation} reads oversized documents in chunks without losing the tail`, async () => {
+    const blocks = Array.from({ length: 80 }, (_, i) => ({
+      id: `b${i}`,
+      text: `${i}: ` + "evidence ".repeat(100),
+    }));
+    const seen: string[] = [];
+    const result = await fetchCompleteResumeImportJson({
+      operation,
+      systemPrompt: "Read all evidence",
+      modelContextWindowTokens: 20000,
+      payload: { documentBundle: { blocks } },
+      fetch: (_prompt, payload) => {
+        const chunk = payload as { documentBundle: { blocks: typeof blocks } };
+        seen.push(...chunk.documentBundle.blocks.map((b) => b.id));
+        return Promise.resolve({
+          candidates: chunk.documentBundle.blocks.map((b) => ({
+            value: b.text,
+          })),
+        });
+      },
+    });
+    expect(seen).toEqual(blocks.map((b) => b.id));
+    expect((result as { candidates: unknown[] }).candidates).toHaveLength(80);
+  });
+}
