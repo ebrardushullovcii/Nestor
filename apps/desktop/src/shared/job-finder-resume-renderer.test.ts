@@ -105,5 +105,15 @@ it.each(["classic_ats", "modern_split", "technical_matrix"] as const)(
     expect(html).not.toContain("Power BI.");
     expect(html).not.toContain("Excel.");
     expect(html).not.toContain("Deutsch — C2.");
+    translated.sections = translated.sections.filter(
+      (section) => section.id !== "section_core_skills",
+    );
+    const additionalOnly = renderResumeTemplateHtml({
+      renderDocument: translated,
+      settings,
+      templateId,
+    });
+    expect(additionalOnly).toContain("<h3>Weitere Kenntnisse</h3>");
+    expect(additionalOnly).not.toContain("Additional Skills");
   },
 );

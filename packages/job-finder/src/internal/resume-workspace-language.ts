@@ -211,6 +211,24 @@ export function applyResumeLanguage(
     if (!target) continue;
     if (translation.text !== target.text) target.write(translation.text);
   }
+  // Choosing core skills can create an additional-skills section after the
+  // writer received its language fields. Both render as one skills list;
+  // reuse its translated heading rather than introducing an English label.
+  const skills = draft.sections.find(
+    (section) => section.id === "section_skills",
+  );
+  const additional = draft.sections.find(
+    (section) => section.id === "section_additional_skills",
+  );
+  if (
+    additional?.label === "Additional Skills" &&
+    !seen.has("section_additional_skills:label") &&
+    skills &&
+    seen.has("section_skills:label") &&
+    skills.label !== "Core Skills"
+  ) {
+    additional.label = skills.label;
+  }
   return {
     ...draft,
     writtenLanguage: result.language,

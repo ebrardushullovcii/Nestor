@@ -277,6 +277,50 @@ describe("summary deduplication", () => {
   });
 });
 
+it.each(["Kenntnisse", "Compétences", "スキル"])(
+  "carries %s to a skills section created during writing",
+  async (label) => {
+    const { applyResumeLanguage, collectResumeLanguageFields } =
+      await import("../internal/resume-workspace-language");
+    const { seedResumeDraft } =
+      await import("../internal/resume-workspace-structure");
+    const seed = createSeed();
+    const draft = seedResumeDraft({
+      profile: seed.profile,
+      job: seed.savedJobs[0]!,
+      templateId: seed.settings.resumeTemplateId,
+    });
+    const skills = draft.sections.find(
+      (section) => section.id === "section_skills",
+    )!;
+    draft.sections = draft.sections.filter(
+      (section) => section.id !== "section_additional_skills",
+    );
+    draft.sections.push({
+      ...structuredClone(skills),
+      id: "section_additional_skills",
+      label: "Additional Skills",
+    });
+    expect(collectResumeLanguageFields(draft)).toContainEqual({
+      id: "section_additional_skills:label",
+      text: "Additional Skills",
+    });
+    const result = applyResumeLanguage(draft, {
+      language: label,
+      translations: [{ id: "section_skills:label", text: label }],
+    });
+    expect(result.sections.at(-1)!.label).toBe(label);
+    const explicit = applyResumeLanguage(draft, {
+      language: label,
+      translations: [
+        { id: "section_skills:label", text: label },
+        { id: "section_additional_skills:label", text: `${label} +` },
+      ],
+    });
+    expect(explicit.sections.at(-1)!.label).toBe(`${label} +`);
+  },
+);
+
 it("detects restored source prose beside translated fields without assuming a language or script", async () => {
   const { hasUntranslatedResumeSourceProse } =
     await import("../internal/resume-workspace-language");
