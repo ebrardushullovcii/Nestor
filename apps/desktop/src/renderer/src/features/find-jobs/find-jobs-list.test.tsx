@@ -183,3 +183,30 @@ it("keeps the open row drawn when the person scrolls far from it", () => {
   expect(rowNamed("Designer 1").getAttribute("aria-posinset")).toBe("1");
   expect(items().length).toBeLessThan(40);
 });
+
+it("lays mixed-height rows out at the tallest, so none overlaps the next", () => {
+  // A row with an empty line was shorter. The height used to come from the
+  // first drawn row, here the short open row, so every taller row spilled
+  // into the next one. While scrolling it also flipped between heights and
+  // moved the window each time, until React stopped (error #185).
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(
+    function (this: HTMLElement) {
+      const id = Number(this.getAttribute("data-list-row-id"));
+      return id > 0 ? (id % 2 ? 98 : 100) : 0;
+    },
+  );
+  const rows = Array.from({ length: 2000 }, (_, i) => row(i + 1));
+  render(<FoundJobs rows={rows} />);
+  const scroller = document.querySelector<HTMLElement>(
+    "[data-locked-pane-scroll-region]",
+  )!;
+  for (const top of [5000, 5098, 12000, 12345, 30000]) {
+    act(() => {
+      scroller.scrollTop = top;
+      fireEvent.scroll(scroller);
+    });
+  }
+  const list = screen.getByRole("list", { name: "Found jobs" });
+  expect(list.style.height).toBe(`${2000 * 100}px`);
+  expect(items().length).toBeLessThan(40);
+});
