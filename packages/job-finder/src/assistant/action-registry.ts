@@ -210,7 +210,7 @@ export const JOB_FINDER_ACTIONS = {
     C.ImportBrowserSignInsInputSchema,
     "browser",
     "local",
-    "Only when the person asks: bring their site sign-ins over from a browser on this device into the Job Finder browser, so sites they are signed in to there stay signed in here. Name a profile when that browser has several. Running browser work pauses while it copies. Report the returned message as it is.",
+    "When the person asks, bring their site sign-ins over from a browser on this device into the Job Finder browser. Name a profile if it has several. Pauses running browser work.",
   ),
   "reveal-saved-file": desktopAction(
     "reveal-saved-file",

@@ -16,6 +16,8 @@ describe("registered user actions", () => {
     "%s has a validated input and a reachable tool",
     (_name, action) => {
       expect(action.input.safeParse(null).success).toBe(false);
+      // The description is also the chat's step label, stored up to 200.
+      expect(action.description.length).toBeLessThanOrEqual(200);
       expect(["read", "local", "confirm", "application"]).toContain(
         action.safety,
       );
