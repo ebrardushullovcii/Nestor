@@ -1,6 +1,6 @@
+import { createHash } from "node:crypto";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import { countriesIn } from "./concrete-answer-claims";
-import { knownLiteralField } from "./answer-source-catalog";
 import {
   ApplicationAttestationKindSchema,
   ApplyAnswerTagsSchema,
@@ -577,6 +577,15 @@ export function createQuestionClassifier(input: {
     controls: readonly ApplyFormControl[],
     context?: string,
   ) => {
+    // A changed applicant must get a new source selection, including at Send.
+    // Keep only a digest in the key; no fact values go to the model or reading.
+    const profileKey = createHash("sha256")
+      .update(
+        JSON.stringify(
+          (input.sources?.() ?? []).filter((row) => row.purpose === "profile"),
+        ),
+      )
+      .digest("hex");
     // Unknown prose is retained conservatively. Only observed chrome, field/value
     // echoes and instructions already attached to the question are removed.
     return classifiableQuestions(controls).map((question) => {
@@ -592,7 +601,11 @@ export function createQuestionClassifier(input: {
       return {
         ...question,
         instructions,
-        cacheIdentity: JSON.stringify([question.identity, instructions]),
+        cacheIdentity: JSON.stringify([
+          question.identity,
+          instructions,
+          profileKey,
+        ]),
       };
     });
   };
@@ -611,55 +624,35 @@ export function createQuestionClassifier(input: {
       );
       tags.country = countries.size === 1 ? ([...countries][0] ?? null) : null;
     }
-    const exactSaved = sources.filter(
-      (row) =>
-        row.purpose === "saved" &&
-        normalizeFormQuestionPrompt(row.question ?? "") ===
-          normalizeFormQuestionPrompt(questionPrompt(control)),
-    );
-    const legal = tags.kind === "work_auth" || tags.kind === "sponsorship";
-    const literal =
-      tags.kind === "other"
+    const selected = meaning.source;
+    const exactSaved =
+      selected?.purpose === "saved"
         ? sources.filter(
             (row) =>
-              row.purpose === "profile" && knownLiteralField(row, control),
+              row.purpose === "saved" &&
+              row.country === selected.country &&
+              normalizeFormQuestionPrompt(row.question ?? "") ===
+                normalizeFormQuestionPrompt(selected.question ?? "") &&
+              normalizeFormQuestionPrompt(row.question ?? "") ===
+                normalizeFormQuestionPrompt(questionPrompt(control)),
           )
         : [];
     const source =
       exactSaved.length === 1
         ? exactSaved[0]
-        : legal
-          ? sources.find(
-              (row) =>
-                row.purpose === tags.kind && row.country === tags.country,
-            )
-          : tags.kind === "residence_country"
-            ? sources.find((row) => row.id === "profile.currentCountry")
-            : tags.kind === "motivation" || tags.kind === "factual_summary"
-              ? (sources.find((row) => row.id === "resume.text") ??
-                sources.find(
-                  (row) =>
-                    row.id ===
-                    (tags.kind === "motivation"
-                      ? "posting.description"
-                      : "profile.summary"),
-                ))
-              : literal.length === 1
-                ? literal[0]
-                : meaning.source &&
-                  sources.find(
-                    (row) =>
-                      row.id === meaning.source!.id &&
-                      row.purpose === meaning.source!.purpose &&
-                      row.country === meaning.source!.country &&
-                      // Saved answers and history/array records need their current exact
-                      // question/row binding, not an old application's selected record.
-                      row.purpose !== "saved" &&
-                      !/^profile\.(?:experiences|education|skills|links)\./u.test(
-                        row.id,
-                      ),
-                  );
+        : selected &&
+          sources.find(
+            (row) =>
+              row.id === selected.id &&
+              row.purpose === selected.purpose &&
+              row.country === selected.country &&
+              ((tags.kind !== "work_auth" && tags.kind !== "sponsorship") ||
+                row.country === tags.country) &&
+              row.question === selected.question,
+          );
     tags.sourceId = source?.id ?? null;
+    // A kind is not a source selection. In particular, never replace null or
+    // an unrelated source with a plausible phone, residence or writing source.
     // Existing permission, permit, declaration and writing checks run on every
     // write, with the current catalog. A cache hit grants no permission.
     return reading;
@@ -689,7 +682,7 @@ export function createQuestionClassifier(input: {
   const classify = (
     controls: readonly ApplyFormControl[],
     context?: string,
-  ) => {
+  ): ReturnType<QuestionClassifier> => {
     if (input.signal?.aborted)
       return Promise.reject(
         input.signal.reason instanceof Error
@@ -772,7 +765,14 @@ export function createQuestionClassifier(input: {
         return promise ? [promise] : [];
       }),
     )
-      .then(() => resultFor(questions, controls)!)
+      // Facts may have changed while the model was reading. Resolve against
+      // the current key too, rather than lending that earlier source selection
+      // to a different applicant before the next call can invalidate it.
+      .then(
+        () =>
+          resultFor(questionsFor(controls, context), controls) ??
+          classify(controls, context),
+      )
       .finally(() => inFlight.delete(setKey));
     inFlight.set(setKey, result);
     return result;

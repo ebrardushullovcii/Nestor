@@ -307,11 +307,11 @@ test("a requested LinkedIn URL fills from Profile and passes Send", async () => 
           }),
         );
       const payload = JSON.parse(messages.at(-1)!.content) as {
-        sources: { id: string; value: string }[];
+        sources: { id: string; purpose: string }[];
       };
       const literal = payload.sources.find(
         (source) =>
-          source.id === "profile.linkedinUrl" && source.value === expected,
+          source.id === "profile.linkedinUrl" && source.purpose === "profile",
       );
       return Promise.resolve(
         call("report_question_kinds", {

@@ -1011,9 +1011,31 @@ test("a GitHub help-text change is read again instead of reusing the URL reading
 test("shares individual meanings across changed batches and rebinds current saved answers", async () => {
   const client: LLMClient = {
     chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) =>
-      Promise.resolve(
-        reportFor(JSON.parse(messages[1].content) as { question: string }[]),
-      ),
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: "read",
+            type: "function" as const,
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({
+                plainIndexes: [0],
+                flagged: [],
+                tags: [
+                  {
+                    index: 0,
+                    kind: "other",
+                    country: null,
+                    sourceId: messages[1].content.includes('"Email"')
+                      ? "answerLibrary.old"
+                      : null,
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
     ),
   };
   const cacheScope = {};
@@ -1099,6 +1121,175 @@ test("classification receives descriptors, never resume, posting or scalar fact 
   expect(sent).not.toContain("FULL SYNTHETIC RESUME");
   expect(sent).not.toContain("FULL POSTING EVIDENCE");
   expect(sent).not.toContain("synthetic@example.test");
+});
+
+test.each([
+  ["Phone", "other", null],
+  ["Phone", "other", "profile.email"],
+  ["País de residencia", "residence_country", null],
+  ["Why this role?", "motivation", null],
+  ["Summarize your experience", "factual_summary", null],
+] as const)(
+  "fresh and cached %s readings preserve their selected source: %s / %s",
+  async (label, kind, sourceId) => {
+    const client = clientReplyingSparse({
+      plainIndexes: [0],
+      flagged: [],
+      tags: [{ index: 0, kind, country: null, sourceId }],
+    });
+    const cacheScope = {};
+    const sources = () => [
+      {
+        id: "profile.phone",
+        value: "+44 7700 900123",
+        purpose: "profile",
+        country: null,
+      },
+      {
+        id: "profile.email",
+        value: "synthetic@example.test",
+        purpose: "profile",
+        country: null,
+      },
+      {
+        id: "profile.currentCountry",
+        value: "Germany",
+        purpose: "profile",
+        country: null,
+      },
+      {
+        id: "resume.text",
+        value: "Synthetic experience",
+        purpose: "writing",
+        country: null,
+      },
+      {
+        id: "answerLibrary.exact",
+        value: "Saved answer",
+        purpose: "saved",
+        country: null,
+        question: label,
+      },
+    ];
+    const page = controls(label, []);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const classify = createQuestionClassifier({
+        client,
+        cacheScope,
+        sources,
+      });
+      const readings = await classify(page);
+      expect(readings.get(label)?.answerTags?.sourceId).toBe(sourceId);
+      expect(classify.settled(page)?.get(label)?.answerTags?.sourceId).toBe(
+        sourceId,
+      );
+    }
+    expect(client.chatWithTools).toHaveBeenCalledOnce();
+  },
+);
+
+test("a changed applicant rereads contacts and cannot recover the earlier source selection", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [
+      { index: 0, kind: "other", country: null, sourceId: "profile.phone" },
+    ],
+  });
+  const sources = [
+    {
+      id: "profile.fullName",
+      value: "Jamie Rivers",
+      purpose: "profile",
+      country: null,
+    },
+    {
+      id: "profile.phone",
+      value: "+44 7700 900123",
+      purpose: "profile",
+      country: null,
+    },
+  ];
+  const classify = createQuestionClassifier({
+    client,
+    cacheScope: {},
+    sources: () => sources,
+  });
+  const page = controls("Phone", []);
+  expect((await classify(page)).get("Phone")?.answerTags?.sourceId).toBe(
+    "profile.phone",
+  );
+  sources[0].value = "Another Applicant";
+  expect(classify.settled(page)).toBeUndefined();
+  vi.mocked(client.chatWithTools).mockResolvedValue({
+    toolCalls: [
+      {
+        id: "read",
+        type: "function",
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({
+            plainIndexes: [0],
+            flagged: [],
+            tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
+          }),
+        },
+      },
+    ],
+  });
+  expect((await classify(page)).get("Phone")?.answerTags?.sourceId).toBeNull();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("a profile change during a pending read cannot borrow its source selection", async () => {
+  const report = (sourceId: string | null) => ({
+    toolCalls: [
+      {
+        id: "read",
+        type: "function" as const,
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({
+            plainIndexes: [0],
+            flagged: [],
+            tags: [{ index: 0, kind: "other", country: null, sourceId }],
+          }),
+        },
+      },
+    ],
+  });
+  let finish!: (value: ReturnType<typeof report>) => void;
+  const client: LLMClient = {
+    chatWithTools: vi
+      .fn<LLMClient["chatWithTools"]>()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValue(report(null)),
+  };
+  const sources = [
+    {
+      id: "profile.fullName",
+      value: "Jamie Rivers",
+      purpose: "profile",
+      country: null,
+    },
+    {
+      id: "profile.phone",
+      value: "+44 7700 900123",
+      purpose: "profile",
+      country: null,
+    },
+  ];
+  const classify = createQuestionClassifier({ client, sources: () => sources });
+  const result = classify(controls("Phone", []));
+  sources[0].value = "Another Applicant";
+  finish(report("profile.phone"));
+  expect((await result).get("Phone")?.answerTags?.sourceId).toBeNull();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
 
 test("cached legal meaning rebinds country and evidence without inheriting permission", async () => {
