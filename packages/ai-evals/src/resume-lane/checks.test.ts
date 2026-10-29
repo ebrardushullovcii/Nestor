@@ -2,7 +2,11 @@ import { ResumeDraftSchema } from "@nestor/contracts";
 import { resumeClaimContentHash } from "@nestor/job-finder/resumes";
 import { describe, expect, it } from "vitest";
 
-import { RESUME_LANE_CASES } from "./cases";
+import {
+  RESUME_LANE_CASES,
+  readPersonaResume,
+  readRecordedListings,
+} from "./cases";
 
 import type { EvalHttpCapture } from "../contracts";
 import {
@@ -12,8 +16,10 @@ import {
   levelVerdicts,
   levelShape,
   workHistoryProblem,
+  writingProblems,
 } from "./checks";
 import {
+  formatResumeLaneReport,
   rescoreResumeLane,
   scoreCase,
   stretchCheckReport,
@@ -553,4 +559,301 @@ it("rescoring an empty or singleton released recording is idempotent", () => {
     },
   ]);
   expect(rescoreResumeLane(rescoreResumeLane(rows))).toEqual(rows);
+});
+
+describe("writing problems", () => {
+  const roles = [
+    { title: "Operations Manager", company: "Atlântico Logística" },
+    { title: "Working Student, Data Analytics", company: "Mobilo GmbH" },
+  ];
+  const section = (
+    kind: string,
+    label: string,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    id: kind,
+    kind,
+    label,
+    origin: "ai_generated",
+    sortOrder: 0,
+    updatedAt: AT,
+    ...extra,
+  });
+  const bullets = (...texts: string[]) =>
+    texts.map((text, index) => ({
+      id: `${text}-${index}`,
+      text,
+      origin: "ai_generated",
+      updatedAt: AT,
+    }));
+  const project = (summary: string, label = "Projects") =>
+    section("projects", label, {
+      entries: [
+        {
+          id: "p1",
+          entryType: "project",
+          title: "Community event",
+          summary,
+          origin: "ai_generated",
+          sortOrder: 0,
+          updatedAt: AT,
+        },
+      ],
+    });
+  const written = (...sections: ReturnType<typeof section>[]) =>
+    ResumeDraftSchema.parse({
+      id: "draft",
+      jobId: "1",
+      status: "draft",
+      templateId: "classic_ats",
+      sections,
+      createdAt: AT,
+      updatedAt: AT,
+    });
+  const problems = (
+    draft: ReturnType<typeof written>,
+    options: { level?: "light" | "aggressive"; language?: string } = {},
+  ) =>
+    writingProblems({
+      draft,
+      level: options.level ?? "light",
+      roles,
+      language: options.language,
+    });
+
+  it("flags a summary that only restates a role, in English or German, but not a real summary", () => {
+    for (const label of [
+      "Operations Manager at Atlântico Logística.",
+      "Working Student, Data Analytics at Mobilo GmbH.",
+      "Werkstudent bei Mobilo GmbH.",
+      "Operations Manager",
+    ])
+      expect(
+        problems(written(section("summary", "Summary", { text: label }))),
+      ).toEqual([`summary is only a role label: ${label}`]);
+    for (const text of [
+      "Operations manager with ten years of experience leading service teams at Atlântico Logística.",
+      "Led a 24-person team. Reduced missed appointments at Atlântico Logística.",
+      "Data analytics student who built dashboards for a logistics team.",
+    ])
+      expect(
+        problems(written(section("summary", "Summary", { text }))),
+      ).toEqual([]);
+  });
+
+  it("flags a project line that starts a sentence with Technologies:, and accepts the neutral label", () => {
+    expect(
+      problems(
+        written(
+          project(
+            "Organized a community event. Technologies: writing, event timetable.",
+          ),
+        ),
+      ),
+    ).toEqual([
+      'project line starts with "Technologies:": Organized a community event. Technologies: writing, event timetable.',
+    ]);
+    expect(
+      problems(written(project("Technologies: Microsoft Excel."))),
+    ).toHaveLength(1);
+    expect(
+      problems(
+        written(
+          project(
+            "Organized a community event. Skills used: writing, planning.",
+          ),
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      problems(
+        written(
+          section("summary", "Summary", {
+            text: "Built tools. Technologies: React.",
+          }),
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags section headings and project labels left in English in a non-English case only", () => {
+    const draft = written(
+      section("skills", "SKILLS", { bullets: bullets("Power BI") }),
+      section("keywords", "KERNKOMPETENZEN", {
+        bullets: bullets("Terminplanung"),
+      }),
+      section("experience", "Work Experience"),
+      project(
+        "Organisierte eine Veranstaltung. Skills used: Planung.",
+        "Projekte",
+      ),
+    );
+    expect(problems(draft, { language: "German" })).toEqual([
+      "skills heading left in English: SKILLS",
+      "experience heading left in English: Work Experience",
+      "project label left in English (skills used): Organisierte eine Veranstaltung. Skills used: Planung.",
+    ]);
+    expect(problems(draft)).toEqual([]);
+    expect(problems(draft, { language: "English" })).toEqual([]);
+    expect(
+      problems(
+        written(
+          section("skills", "Kenntnisse", { bullets: bullets("Power BI") }),
+          section("experience", "Berufserfahrung"),
+        ),
+        { language: "German" },
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags a skill item that ends with a full stop, and keeps names like Node.js", () => {
+    expect(
+      problems(
+        written(
+          section("skills", "Skills", {
+            text: "React, TypeScript.",
+            bullets: bullets("Power BI.", "Node.js", "Excel"),
+          }),
+        ),
+      ),
+    ).toEqual([
+      "skill item ends with a full stop: TypeScript.",
+      "skill item ends with a full stop: Power BI.",
+    ]);
+  });
+
+  it("does not judge Aggressive, a hidden section or an Original that sent the file unchanged", () => {
+    const bad = written(
+      section("summary", "Summary", { text: "Operations Manager" }),
+      section("skills", "SKILLS", { bullets: bullets("Power BI.") }),
+    );
+    expect(problems(bad, { level: "aggressive", language: "German" })).toEqual(
+      [],
+    );
+    expect(
+      problems(
+        written(
+          section("skills", "SKILLS", {
+            included: false,
+            bullets: bullets("Power BI."),
+          }),
+        ),
+        { language: "German" },
+      ),
+    ).toEqual([]);
+    expect(writingProblems({ draft: null, level: "original", roles })).toEqual(
+      [],
+    );
+  });
+
+  it("reports findings with the score instead of failing it, Aggressive's stretches untouched", () => {
+    const evalCase = RESUME_LANE_CASES.find(
+      (candidate) => candidate.id === "claims-german",
+    )!;
+    const value = written(
+      section("summary", "Summary", {
+        text: "Healthcare Administrative Assistant",
+      }),
+      section("skills", "SKILLS", { bullets: bullets("Terminplanung.") }),
+    );
+    const scored = (levels: readonly ("light" | "aggressive")[]) =>
+      scoreCase(
+        evalCase,
+        levels.map((level) => ({
+          level,
+          draft: value,
+          error: null,
+          seconds: 0,
+          modelCalls: 0,
+          promptTokens: 0,
+          completionTokens: 0,
+        })),
+      );
+    const rows = scored(["light", "aggressive"]);
+    expect(rows[0]!.writingProblems).toEqual([
+      "summary is only a role label: Healthcare Administrative Assistant",
+      "summary heading left in English: Summary",
+      "skills heading left in English: SKILLS",
+      "skill item ends with a full stop: Terminplanung.",
+    ]);
+    expect(rows[1]!.writingProblems).toEqual([]);
+    expect(rows[1]!.stretches).toEqual(scored(["aggressive"])[0]!.stretches);
+    expect(rows[1]!.inventedFacts).toEqual(
+      scored(["aggressive"])[0]!.inventedFacts,
+    );
+  });
+});
+
+describe("resume lane report", () => {
+  const rowsFor = (caseId: string) =>
+    scoreCase(RESUME_LANE_CASES.find((candidate) => candidate.id === caseId)!, [
+      {
+        level: "original",
+        draft: null,
+        error: null,
+        seconds: 0,
+        modelCalls: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+      },
+    ]);
+
+  it("counts writing problems per level and tells that translated cases are not comparable by words", () => {
+    const german = formatResumeLaneReport("model", rowsFor("claims-german"));
+    expect(german).toContain("| Flags left | Writing problems |");
+    expect(german).toContain("Translated cases (claims-german: German)");
+    expect(
+      formatResumeLaneReport("model", rowsFor("frontend-staff")),
+    ).not.toContain("Translated cases");
+  });
+});
+
+describe("resume lane cases", () => {
+  const normalized = (text: string) =>
+    text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+
+  it("pairs every case with a persona and a recorded public posting whose reviewed terms it names", () => {
+    const listings = readRecordedListings();
+    expect(new Set(RESUME_LANE_CASES.map((evalCase) => evalCase.id)).size).toBe(
+      RESUME_LANE_CASES.length,
+    );
+    for (const evalCase of RESUME_LANE_CASES) {
+      const listing = listings.get(evalCase.listingId);
+      expect(listing, evalCase.id).toBeDefined();
+      expect(readPersonaResume(evalCase.persona), evalCase.id).toContain(
+        "EXPERIENCE",
+      );
+      expect(listing!.url, evalCase.id).toMatch(/^https:\/\//u);
+      expect(listing!.recordedAt, evalCase.id).toMatch(/^2026-\d\d-\d\dT/u);
+      const posting = normalized(`${listing!.title} ${listing!.description}`);
+      const terms = [
+        ...(listing!.technologies ?? []),
+        // Credentials of a translated posting are spelled out in each form.
+        ...(evalCase.language ? [] : (listing!.credentials ?? [])),
+      ];
+      for (const term of terms)
+        expect(posting, `${evalCase.id}: ${term}`).toContain(normalized(term));
+    }
+  });
+
+  it("covers a keyword-heavy posting, two non-software fields, a long career and a German posting", () => {
+    expect(RESUME_LANE_CASES.map((evalCase) => evalCase.id)).toEqual(
+      expect.arrayContaining([
+        "support-tool-list",
+        "hotel-to-support",
+        "payroll-specialist",
+        "retail-to-customer-care",
+        "claims-german",
+      ]),
+    );
+    expect(
+      readRecordedListings().get("brex-developer-support")!.technologies!
+        .length,
+    ).toBeGreaterThanOrEqual(20);
+    expect(
+      RESUME_LANE_CASES.filter((evalCase) => evalCase.language).map(
+        (evalCase) => [evalCase.id, evalCase.language],
+      ),
+    ).toEqual([["claims-german", "German"]]);
+  });
 });
