@@ -7,7 +7,6 @@ import type { AssistantToolContext, AssistantTurnSession } from "./tool-kit";
 import { buildAssistantToolCatalog } from "./tools";
 import { executeRegisteredAssistantAction } from "./tools/registered-action-tools";
 
-
 describe("registered user actions", () => {
   const catalog = buildAssistantToolCatalog({
     mode: "flat",
@@ -70,6 +69,8 @@ describe("registered user actions", () => {
   );
 
   it.each([
+    ["get-home-summary", { utcOffsetMinutes: 60 }],
+    ["get-activity", {}],
     ["candidate-assets:list", {}],
     ["candidate-assets:delete", { assetId: "file" }],
     [

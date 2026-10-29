@@ -2,6 +2,8 @@ import * as C from "@nestor/contracts";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import { app, clipboard, shell } from "electron";
+import { createActivityStore, createHomeStore } from "@nestor/db/job-store";
+import { getJobStore } from "../job-store";
 
 import { executeCandidateAssetAction } from "../../routes/candidate-assets";
 import { buildDiagnosticsFileExport } from "../job-finder/diagnostics-export";
@@ -22,6 +24,12 @@ export async function executeDesktopJobFinderAction(
   actionId: string,
   input: unknown,
 ): Promise<unknown> {
+  if (actionId === "get-home-summary")
+    return createHomeStore(getJobStore()).summary(
+      C.HomeSummaryInputSchema.parse(input),
+    );
+  if (actionId === "get-activity")
+    return createActivityStore(getJobStore()).feed();
   if (
     actionId.includes("application-authority-") ||
     actionId === "approve-current-application-answers" ||

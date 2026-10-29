@@ -75,6 +75,22 @@ function desktopAction<S extends ZodTypeAny>(
  * `assistantTool` binds them instead of exposing a second, weaker path.
  */
 export const JOB_FINDER_ACTIONS = {
+  "get-home-summary": desktopAction(
+    "get-home-summary",
+    C.HomeSummaryInputSchema,
+    "workspace",
+    "read",
+    "Read the actual Home dashboard: totals, dated sent/replies chart, weekly changes, response rate, interviews and reminders. Supply the person's UTC offset in minutes.",
+    { name: "get_home_summary" },
+  ),
+  "get-activity": desktopAction(
+    "get-activity",
+    empty,
+    "workspace",
+    "read",
+    "Read the complete Activity feed, including running work, progress and finished or failed tasks. Does not clear or change activity.",
+    { name: "get_activity" },
+  ),
   "get-application-authority-readiness": desktopAction(
     "get-application-authority-readiness",
     C.GetApplicationAuthorityReadinessInputSchema,

@@ -47,6 +47,31 @@ describe("assistant eval lane", () => {
       await world.shutdown();
     }
   });
+  it("uses desktop command groups and replacements", async () => {
+    const world = await createAssistantLaneWorld("scripted");
+    try {
+      for (const name of ["get_settings", "patch_settings"])
+        expect(world.commands.find((tool) => tool.name === name)?.group).toBe(
+          "settings",
+        );
+      for (const name of [
+        "get_profile",
+        "patch_profile",
+        "patch_profile_goals",
+      ])
+        expect(world.commands.find((tool) => tool.name === name)?.group).toBe(
+          "profile",
+        );
+      expect(
+        world.commands.find((tool) => tool.name === "move_jobs")?.replaces,
+      ).toContain("shortlist_jobs");
+      expect(
+        world.commands.find((tool) => tool.name === "get_resume")?.replaces,
+      ).toContain("read_resume");
+    } finally {
+      await world.shutdown();
+    }
+  });
   it("offers the desktop resume and tracker command sets, including writes", async () => {
     const world = await createAssistantLaneWorld("scripted");
     try {

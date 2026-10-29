@@ -27,6 +27,8 @@ import {
 import { createStubBrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   TRACKER_COMMANDS,
+  PROFILE_COMMANDS,
+  HomeSummaryInputSchema,
   APPLICATION_COMMANDS,
   JobFinderSettingsSchema,
   JobSearchPreferencesSchema,
@@ -69,6 +71,8 @@ import {
   createResumeStore,
   approveOriginalResumesForTests,
   seedTrackerDemo,
+  createHomeStore,
+  createActivityStore,
   type JobStore,
 } from "@nestor/db/job-store";
 import {
@@ -81,6 +85,8 @@ import {
   createAssistantModelHandle,
   createProfileService,
   createScriptedAssistantModelHandle,
+  guardProfileCommand,
+  profilePatchReceipts,
   type ProfileServiceOptions,
   type AssistantHostPorts,
   type AssistantModelResolution,
@@ -479,6 +485,7 @@ function recordingPorts(
   const tracker = createTrackerStore(store);
   const applications = createApplicationStore(store);
   const runTrackerCommand = createTrackerCommandRunner(store);
+  const patches = profilePatchReceipts(runJobCommand);
   return {
     savePageJobs: (input) => Promise.resolve(savePageJobs(store, input)),
     resolveApprovedJobs: (selection) =>
@@ -526,8 +533,28 @@ function recordingPorts(
         typeof ASSISTANT_JOB_COMMANDS,
         JobCommandOutputs
       >(ASSISTANT_JOB_COMMANDS, runJobCommand, {
-        group: "jobs",
+        beforeRun: guardProfileCommand,
+        before: patches.before,
+        group: (name) =>
+          name === "get_settings" || name === "patch_settings"
+            ? "settings"
+            : name in PROFILE_COMMANDS
+              ? "profile"
+              : "jobs",
+        replaces: {
+          list_jobs: ["query_jobs", "show_jobs", "compare_jobs"],
+          move_jobs: [
+            "shortlist_jobs",
+            "shortlist_result_set",
+            "remove_from_shortlist",
+            "dismiss_jobs",
+            "restore_jobs",
+          ],
+          start_search: ["search_for_jobs"],
+          stop_search: ["cancel_search"],
+        },
         results: {
+          ...patches.results,
           stage_counts: (counts) => ({
             summary: "Current job counts.",
             data: assistantJobCounts(counts),
@@ -556,6 +583,16 @@ function recordingPorts(
         runResumeCommand,
         {
           group: "resume",
+          replaces: {
+            get_resume: ["read_resume"],
+            save_resume: [
+              "edit_resume",
+              "revise_resume",
+              "set_resume_template",
+            ],
+            rewrite_resume: ["generate_resumes"],
+            approve_resume: ["action_approve_resumes"],
+          },
           results: {
             list_shortlisted: (_page, input) => ({
               summary: "Matching shortlisted jobs.",
@@ -703,6 +740,12 @@ function recordingPorts(
       ),
     ],
     executeAction: (actionId, input) => {
+      if (actionId === "get-home-summary")
+        return Promise.resolve(
+          createHomeStore(store).summary(HomeSummaryInputSchema.parse(input)),
+        );
+      if (actionId === "get-activity")
+        return Promise.resolve(createActivityStore(store).feed());
       if (actionId !== "write-clipboard-text")
         return Promise.reject(
           new Error(

@@ -45,6 +45,8 @@ export interface AssistantLaneObservation {
 export interface AssistantLaneTurn {
   text: string;
   context?: AssistantContextReference;
+  /** Simulate the person moving after sending, while the model is thinking. */
+  moveAfterSend?: AssistantContextReference;
 }
 
 export interface AssistantLaneCase {
@@ -577,6 +579,12 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
  * outcome case above are graded there too.
  */
 const INVENTORY_REQUESTS: Record<string, string> = {
+  "home.summary": "How is my job search going?",
+  "home.search_now": "Search for remote product designer jobs now.",
+  "discovery.search": "Find me some remote product design jobs.",
+  "discovery.shortlist": "Shortlist my two highest-fit remote jobs.",
+  "needs_you.list": "Is anything waiting for me in Needs you?",
+  "profile.edit_fields": "Set my headline to Staff product designer.",
   "home.notifications": "Turn off finished-work notifications.",
   "profile.files_delete": "Delete my old cover letter file.",
   "discovery.judge_unjudged":
@@ -601,7 +609,7 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "profile.files": "Which files do I have saved?",
   "profile.sources":
     "Which job sources am I using? Turn off any that are broken.",
-  "profile.source_check": "Check my first job source.",
+  "profile.source_check": "Run a source check on my first job site.",
   "discovery.list": "Show me the jobs I found, best match first.",
   "discovery.cancel": "Stop the search that's running.",
   "discovery.keep_reading":
@@ -636,7 +644,8 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "settings.read": "What are my apply settings?",
   "settings.ai_behavior": "Make the AI write more conservatively.",
   "settings.applying": "Use Fill in for me as my default Apply mode.",
-  "settings.workspace": "Only search, don't prepare applications for now.",
+  "settings.workspace":
+    "Turn off writing resumes automatically when I shortlist jobs.",
   "settings.theme": "Switch to dark mode.",
   "settings.safeguards": "What safeguards are on?",
   "settings.diagnostics": "Export diagnostics.",
@@ -651,7 +660,25 @@ const INVENTORY_SCENARIOS: Partial<Record<string, AssistantLaneScenario>> = {
   "apply.send": "ready_application",
   "tracking.commands": "tracked_application",
   "settings.applying": "send_by_default",
+  "shortlist.remove": "approved_shortlist",
 };
+
+function inventoryContext(id: string): AssistantContextReference {
+  if (id.startsWith("profile.")) return profileScreen();
+  const screen = id.startsWith("home.")
+    ? "home"
+    : id.startsWith("settings.")
+      ? "settings"
+      : id.startsWith("needs_you.")
+        ? "actions"
+        : id.startsWith("apply.") || id.startsWith("tracking.")
+          ? "applications"
+          : id.startsWith("shortlist.") || id.startsWith("resume.")
+            ? "review_queue"
+            : "discovery";
+  const path = screen === "review_queue" ? "review-queue" : screen;
+  return { ...discoveryList(), screen, route: `/job-finder/${path}` };
+}
 
 const INVENTORY_CASES: AssistantLaneCase[] = ACTION_INVENTORY.flatMap(
   (entry): AssistantLaneCase[] => {
@@ -669,8 +696,94 @@ const INVENTORY_CASES: AssistantLaneCase[] = ACTION_INVENTORY.flatMap(
           entry.id,
         ),
         ...(scenario ? { scenario } : {}),
-        turns: [{ text: request, context: discoveryList() }],
+        turns: [{ text: request, context: inventoryContext(entry.id) }],
         check: (o) => {
+          if (["home.search_now", "discovery.search"].includes(entry.id))
+            return expect(
+              o.recorder.searches.length === 1,
+              "exactly one search was not started",
+            );
+          if (entry.id === "discovery.shortlist")
+            return expect(
+              stage(o, "job_lane_1") === "shortlisted" &&
+                stage(o, "job_lane_3") === "shortlisted" &&
+                stage(o, "job_lane_2") === "found",
+              "the two highest-fit remote jobs were not shortlisted exclusively",
+            );
+          if (entry.id === "profile.edit_fields")
+            return expect(
+              o.snapshot.profile.headline === "Staff product designer",
+              "the requested headline was not saved",
+            );
+          if (entry.id === "profile.edit_background")
+            return expect(
+              ["portuguese", "english"].every((name) =>
+                o.snapshot.profile.spokenLanguages.some(
+                  (language) => language.language.toLowerCase() === name,
+                ),
+              ),
+              "the requested languages were not saved",
+            );
+          if (entry.id === "profile.edit_experience")
+            return expect(
+              o.snapshot.profile.education.some((education) =>
+                /lisbon school of design/iu.test(education.schoolName ?? ""),
+              ),
+              "the requested education was not saved",
+            );
+          if (entry.id === "profile.edit_preferences")
+            return expect(
+              o.snapshot.searchPreferences.workModes.length === 1 &&
+                o.snapshot.searchPreferences.workModes[0] === "remote" &&
+                o.snapshot.searchPreferences.locations.some((location) =>
+                  /berlin/iu.test(location),
+                ),
+              "remote-only preferences and Berlin were not saved",
+            );
+          if (entry.id === "settings.read")
+            return expect(
+              o.toolRuns.some(
+                (run) =>
+                  ["get_settings", "read_settings"].includes(run.toolName) &&
+                  run.outcome === "done",
+              ) &&
+                o.changes.length === 0 &&
+                o.replyText.trim().length > 0,
+              "did not read and explain saved settings without changing them",
+            );
+          if (entry.id === "profile.setup_state")
+            return expect(
+              /(?:complete|nothing.*left|no.*(?:missing|required))/iu.test(
+                o.replyText,
+              ),
+              "did not explain the already-completed setup",
+            );
+          if (entry.id === "settings.workspace")
+            return expect(
+              o.snapshot.settings.writeResumesOnShortlist === false,
+              "automatic resume writing was not disabled",
+            );
+          if (entry.id === "apply.uncertain")
+            return expect(
+              o.recorder.sends.length === 0 &&
+                /(?:no|not|nothing|none|hasn.t|haven.t)/iu.test(o.replyText),
+              "did not explain the absence of a sent application",
+            );
+          if (entry.id === "settings.theme")
+            return expect(
+              o.snapshot.settings.appearanceTheme === "dark",
+              "dark appearance was not saved",
+            );
+          if (entry.id === "discovery.dismiss")
+            return expect(
+              stage(o, "job_lane_5") === "hidden",
+              "Cinder Robotics was not hidden",
+            );
+          if (entry.id === "shortlist.remove")
+            return expect(
+              stage(o, "job_lane_2") === "found",
+              "Bluebird was not removed from Shortlisted",
+            );
           if (entry.id === "profile.legacy_copilot")
             return expect(
               o.snapshot.profile.headline === "Senior Product Designer",
@@ -715,10 +828,6 @@ const INVENTORY_CASES: AssistantLaneCase[] = ACTION_INVENTORY.flatMap(
                   "confirm_before_submit",
                 "default Apply mode did not change to Fill in for me",
               ),
-              ...expect(
-                usedTool(o, "update_apply_settings"),
-                "update_apply_settings did not run",
-              ),
             ];
           if (entry.id === "tracking.commands")
             return [
@@ -741,7 +850,7 @@ const INVENTORY_CASES: AssistantLaneCase[] = ACTION_INVENTORY.flatMap(
               // A clarifying question is not a fake success; the report
               // counts these separately.
               o.questions > 0 ||
-              /can(?:'|no)t|not able|unable|isn't possible|no .* to|nothing .*(?:waiting|pending|open)|nothing to /iu.test(
+              /can(?:'|no)t|couldn.t|not able|unable|isn't possible|no .* to|nothing .*(?:waiting|pending|open)|nothing to /iu.test(
                 o.replyText,
               ),
             `none of ${tools.join(", ")} ran, no question was asked, and the reply did not say why`,
