@@ -107,12 +107,16 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
   by the application service. The explicit main-only subpath also exports this
   seam. Click and request facts alone cannot prove `submitted`; browser hands
   must observe an employer confirmation
-- uncertain outcomes block automatic retry. The Assistant's confirmed
-  resolution action records what the person checked on the employer site;
-  main derives evidence and lineage from persisted state. The authority repository records
-  the resolution and idempotency, then the application store updates the matching
-  attempt to submitted or stopped. After the person's own send, the kept page
-  may also supply the employer confirmation. Neither path grants a new send
+- uncertain outcomes block automatic retry. The person settles one with what
+  they checked on the employer site, through Applications' "It went through" /
+  "It didn't go through" or the Assistant's confirmed resolution action; main
+  derives evidence and lineage from persisted state. For a send the app made,
+  the authority repository records the resolution and idempotency, then the
+  application store updates the matching attempt to submitted or stopped. A
+  send with no authority record (the person's own press, or one the app closed
+  during) is settled in the application store alone. After the person's own
+  send, the kept page may also supply the employer confirmation. No path grants
+  a new send
 - prepare-only browser execution installs page and network mutation guards before filling fields. A separate `intermediateMutationsAuthorized` capability may allow autosave/draft/non-final ATS traffic, but outside a separately authorized final-action window it does not authorize DOM form submission, `requestSubmit`, a final-control click, navigation mutation, beacon, WebSocket, EventSource, or WebTransport; omitted authorization remains false. The capability is field-scoped: one exact grounded field action opens a same-origin 10-second/40-request window, only fetch/XHR `POST`/`PUT`/`PATCH` traffic with explicit draft/autosave/save/update/field/answer/upload/progress semantics can pass, and final-action, cross-origin, ambiguous, late, or exhausted traffic is blocked and journaled. Both the page wrapper and Playwright route enforce the boundary. Observed intermediate writes do not prove submission; a submitted receipt requires employer confirmation or explicit operator evidence
 - attachment selection opens a separate 15-second, two-request window. A same-origin presign may request only a file-upload handle with upload metadata. An upload may cross origins only when its multipart or raw body matches the selected file's name, size and digest (raw object PUTs match the bytes); mixed form answers and application/account operations are refused. The application origin and any saved envelope are rechecked before selection. This does not open an ordinary field-save or submit window
 - prepare-only execution continuously rechecks application-origin service-worker registration through the run sentinel plus an in-page scan, with explicit rechecks before safe-advance clicks and at the preparation step limit, and pauses untouched before any further field or click action when a worker can influence the origin; a failed employer-page goto is classified once as the technical `application_page_unreachable` blocker carrying only causal-free user copy, while its raw transport detail stays in session diagnostics

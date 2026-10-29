@@ -15,6 +15,7 @@ import {
   NeedsYouPageSchema,
   AnswerNeedsYouInputSchema,
   AnswerNeedsYouResultSchema,
+  ResolveUncertainSendInputSchema,
   type ApplicationAutomationMode,
 } from "@nestor/contracts";
 import {
@@ -93,6 +94,30 @@ export async function executeApplicationStoreCommand(
       return (await getApplicationService()).sendPrepared(
         ApplicationTargetSchema.parse(input).id,
       );
+    case "resolve-uncertain-send": {
+      const { id, sent } = ResolveUncertainSendInputSchema.parse(input);
+      // A send the app made keeps an authority record, settled with the row.
+      // The person's own press, or a send the app closed during, has none.
+      const receipt = store.getSubmissionReceipt(id);
+      if (receipt?.outcome === "outcome_uncertain") {
+        const { getJobFinderApplicationAuthorityService } =
+          await import("../services/job-finder");
+        const { status } =
+          await getJobFinderApplicationAuthorityService().resolveSubmissionOutcome(
+            {
+              uncertainOutcomeId: receipt.id,
+              resolution: sent ? "submitted" : "not_submitted",
+              confirmedOnEmployerSite: true,
+            },
+          );
+        if (status !== "missing")
+          return status === "recorded" || status === "duplicate";
+      }
+      await startJobFinderRuntime();
+      return ApplicationCommandResultSchema.parse(
+        await (await getApplicationService()).resolveUncertainByPerson(id, sent),
+      );
+    }
     case "open-application": {
       await startJobFinderRuntime();
       const opened = await (
@@ -122,6 +147,7 @@ export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
     "get-application-details",
     "stop-application",
     "open-application",
+    "resolve-uncertain-send",
     "list-needs-you",
     "answer-needs-you",
   ]) {

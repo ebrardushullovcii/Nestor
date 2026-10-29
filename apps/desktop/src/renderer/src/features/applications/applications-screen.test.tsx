@@ -479,6 +479,81 @@ describe("a failed application is never a dead end", () => {
   });
 });
 
+describe("a stopped or unconfirmed application is never a dead end", () => {
+  it("one click applies again to a run stopped before sending", async () => {
+    applyWrites(ids[1]!, "state = 'stopped'");
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    fireEvent.click(
+      await within(detail).findByRole("button", { name: "Apply again" }),
+    );
+    await screen.findByText("Applying again");
+    const applications = createApplicationStore(store);
+    expect(
+      applications.getApplication(applications.forJobs([ids[1]!])[0]!.id)
+        ?.state,
+    ).toBe("queued");
+  });
+
+  it("after the person says it was not sent, Apply again is there", async () => {
+    applyWrites(
+      ids[1]!,
+      "state = 'stopped', error = 'You checked the site: this application was not sent.'",
+    );
+    receipt = {
+      outcome: "not_submitted",
+      attemptedAt: new Date().toISOString(),
+      verifiedAt: null,
+      evidence: [],
+    } as unknown as ApplicationDetails["receipt"];
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    expect(
+      await within(detail).findByRole("button", { name: "Apply again" }),
+    ).toBeTruthy();
+  });
+
+  it("the person says what the site shows after a send the app could not confirm", async () => {
+    applyWrites(ids[1]!, "state = 'uncertain'");
+    const resolveUncertainSend = vi.fn(() => Promise.resolve(true));
+    Object.assign(window.nestor.jobFinder, { resolveUncertainSend });
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    expect(
+      within(detail).getByText(
+        "Apply could not tell whether it went through. Check the site, then say what you found.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(detail).queryByRole("button", { name: "Try again" }),
+    ).toBeNull();
+    fireEvent.click(
+      await within(detail).findByRole("button", { name: "It went through" }),
+    );
+    await screen.findByText("Moved to Applied");
+    const applications = createApplicationStore(store);
+    expect(resolveUncertainSend).toHaveBeenCalledExactlyOnceWith({
+      id: applications.forJobs([ids[1]!])[0]!.id,
+      sent: true,
+    });
+  });
+});
+
 describe("one main action per screen", () => {
   it("the page's Follow up is secondary while an application is open, whose own action leads", async () => {
     // A reminder that is already due on the submitted application.

@@ -8,6 +8,7 @@ import type {
   ApplicationListQuery,
   ApplicationRow,
   ApplicationTarget,
+  ResolveUncertainSendInput,
   ApplicationsForJobsInput,
   ApplicationDetails,
   NeedsYouListQuery,
@@ -187,6 +188,9 @@ declare global {
         ) => Promise<ApplicationDetails | null>;
         openApplication: (input: ApplicationTarget) => Promise<boolean>;
         stopApplication: (input: ApplicationTarget) => Promise<boolean>;
+        resolveUncertainSend: (
+          input: ResolveUncertainSendInput,
+        ) => Promise<boolean>;
         listNeedsYou: (input?: NeedsYouListQuery) => Promise<NeedsYouPage>;
         answerNeedsYou: (
           input: AnswerNeedsYouInput,

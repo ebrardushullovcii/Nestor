@@ -1388,6 +1388,65 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     else await operation();
   }
 
+  /**
+   * The person checked the site after a send the app could not confirm and
+   * says what it shows. Their word settles the row: sent moves it to
+   * Applied; not sent stops it, so nothing sends it again by itself.
+   */
+  async function resolveUncertainByPerson(
+    id: number,
+    sent: boolean,
+  ): Promise<boolean> {
+    const row = applications.getApplication(id);
+    if (!row || row.state !== "uncertain") return false;
+    const job = jobs.getJob(row.jobId);
+    const page =
+      applications.getWork(id)?.reviewCard?.pageUrl ??
+      job?.applyUrl ??
+      job?.url;
+    if (!page) return false;
+    const destination = new URL(page);
+    const previous = applications.getSubmissionReceipt(id);
+    const identity = applicationIdentity(id, row.attempt);
+    const key = `person_${identity.resultId}_checked`;
+    const at = new Date().toISOString();
+    const receipt = SubmissionOutcomeRecordSchema.parse({
+      id: key,
+      preflightId: previous?.preflightId ?? key,
+      idempotencyKey: previous?.idempotencyKey ?? key,
+      authorityEnvelopeId: previous?.authorityEnvelopeId ?? key,
+      authorityRevision: previous?.authorityRevision ?? 1,
+      ...identity,
+      jobId: String(row.jobId),
+      outcome: sent ? "submitted" : "not_submitted",
+      attemptedAt: previous?.attemptedAt ?? row.updatedAt,
+      verifiedAt: sent ? at : null,
+      evidence: [
+        {
+          id: key,
+          kind: "operator_confirmation",
+          observedAt: at,
+          destination: {
+            origin: destination.origin,
+            safePath: destination.pathname,
+          },
+          artifactRefId: null,
+          summary: sent
+            ? "You checked the employer's site: this application was sent."
+            : "You checked the employer's site: this application was not sent.",
+        },
+      ],
+      retry: {
+        eligible: false,
+        blockReason: sent ? "submission_confirmed" : "policy_decision",
+      },
+    });
+    if (!applications.resolveUncertainSend(id, receipt)) return false;
+    pressedByPerson.delete(id);
+    await closePage(id, row.attempt);
+    return true;
+  }
+
   /** A receipt for the person's own send on the site, by its own key. */
   function personReceipt(
     row: ApplicationRow,
@@ -1863,6 +1922,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       }
       return applications.needsYou.details(taskId) === null;
     },
+    resolveUncertainByPerson,
     async stopApplication(id: number): Promise<boolean> {
       const row = applications.getApplication(id);
       if (!row || !applications.stop(id)) return false;
