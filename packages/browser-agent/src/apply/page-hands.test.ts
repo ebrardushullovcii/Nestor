@@ -57,6 +57,9 @@ describe("buildApplyFormObservation credential redaction", () => {
     const email = {
       ...page.controls[0],
       inputType: "email",
+      id: "email",
+      name: "email",
+      placeholder: "Email",
       label: "Email *",
       autocomplete: "email",
     };
@@ -195,4 +198,16 @@ describe("buildApplyFormObservation radio groups", () => {
       ["Yes"],
     ]);
   });
+});
+
+test("a website's Show password field remains redacted when its input type becomes text", () => {
+  const page = rawPage("synthetic-replica-secret");
+  page.controls[0].inputType = "text";
+  const observed = buildApplyFormObservation(page, "2026-10-29T10:00:00.000Z");
+  expect(observed.controls[0]).toMatchObject({
+    credentialRole: "password",
+    answered: true,
+    value: "",
+  });
+  expect(JSON.stringify(observed)).not.toContain("synthetic-replica-secret");
 });

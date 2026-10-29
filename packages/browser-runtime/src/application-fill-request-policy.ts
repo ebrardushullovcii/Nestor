@@ -89,7 +89,15 @@ function carriesAnswer(url: URL, preparedValues: readonly string[]): boolean {
 
 /** The final words in an address the run itself opened: the form may be at `/apply`. */
 function runNavigationSignal(url: URL): string {
-  return readSignal(url).replace(/\/apply(?=\/|\s|$)/giu, "/form");
+  const target = new URL(url.href);
+  // Opening an account page is a read, just like opening /apply. It does not
+  // authorize the credential/account POST. Keep the query and all prepared
+  // values subject to the normal checks.
+  target.pathname = target.pathname.replace(
+    /\/(?:register|registration|signup|sign-up|create-account)(?=\/|$)/giu,
+    "/account-page",
+  );
+  return readSignal(target).replace(/\/apply(?=\/|\s|$)/giu, "/form");
 }
 
 /** Words that make an address a write, wherever they appear in it. */

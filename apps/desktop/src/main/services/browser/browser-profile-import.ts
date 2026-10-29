@@ -21,13 +21,16 @@ import type {
   DesktopBrowserImportSources,
 } from "@nestor/contracts";
 import type { EmbeddedBrowser } from "./embedded-browser";
+import type { PasswordValue } from "./password-vault";
+import { passwordOrigin } from "./password-origin";
 
 /**
  * Brings sign-ins over from a browser profile already on this device, the
  * way browsers import from each other. The user picks the browser and
  * profile; cookie values are read, decrypted and written only in main, and
- * never logged or sent to the renderer. Passwords, bookmarks, history and
- * partitioned cookies are not imported (ADR 0017).
+ * never logged or sent to the renderer. This sign-in import does not copy
+ * passwords, bookmarks, history or partitioned cookies (ADR 0017). Explicit
+ * password import below uses the separate encrypted local vault.
  */
 const execFileAsync = promisify(execFile);
 
@@ -250,6 +253,7 @@ async function firefoxProfiles(root: string): Promise<Profile[]> {
 
 interface ResolvedSource extends DesktopBrowserImportSource {
   cookiesPath: string;
+  profileDirectory: string;
   family: BrowserFamily;
 }
 
@@ -274,6 +278,7 @@ async function resolveSources(
           supported: support.supported,
           note: support.note,
           cookiesPath,
+          profileDirectory: profile.directory,
           family,
         });
       }
@@ -289,6 +294,7 @@ async function resolveSources(
         supported: true,
         note: null,
         cookiesPath: path.join(profile.directory, "cookies.sqlite"),
+        profileDirectory: profile.directory,
         family: FIREFOX_FAMILY,
       });
     }
@@ -300,8 +306,9 @@ export async function listBrowserImportSources(
   env: ImportEnvironment = defaultImportEnvironment(),
 ): Promise<DesktopBrowserImportSources> {
   const sources = (await resolveSources(env)).map(
-    ({ cookiesPath, family, ...source }) => {
+    ({ cookiesPath, profileDirectory, family, ...source }) => {
       void cookiesPath;
+      void profileDirectory;
       void family;
       return source;
     },
@@ -376,6 +383,71 @@ export function decryptChromiumCookieValue(
     plain = plain.subarray(32);
   }
   return plain.toString("utf8");
+}
+
+/** Main-only explicit import. Uses the same Keychain consent as cookie import.
+ * Windows app-bound encryption and Firefox NSS require exported CSV instead. */
+export async function readBrowserPasswords(
+  sourceId: string,
+  env: ImportEnvironment = defaultImportEnvironment(),
+): Promise<{ values: PasswordValue[]; skipped: number; unsupported: boolean }> {
+  const source = (await resolveSources(env)).find(
+    (item) => item.id === sourceId,
+  );
+  if (
+    !source ||
+    env.platform === "win32" ||
+    source.browser === "firefox" ||
+    !source.supported
+  )
+    return { values: [], skipped: 0, unsupported: true };
+  const key = await chromiumKey(source.family, env);
+  let snapshot: Awaited<ReturnType<typeof snapshotDatabase>> | null = null;
+  try {
+    snapshot = await snapshotDatabase(
+      path.join(source.profileDirectory, "Login Data"),
+    );
+    const db = new DatabaseSync(snapshot.path, { readOnly: true });
+    try {
+      const rows = db
+        .prepare(
+          "SELECT origin_url, action_url, username_value, password_value FROM logins WHERE blacklisted_by_user = 0",
+        )
+        .all();
+      const values: PasswordValue[] = [];
+      let skipped = 0;
+      for (const row of rows) {
+        const origin =
+          typeof row.origin_url === "string"
+            ? passwordOrigin(row.origin_url)
+            : null;
+        const action =
+          typeof row.action_url === "string" && row.action_url
+            ? passwordOrigin(row.action_url)
+            : origin;
+        const password =
+          row.password_value instanceof Uint8Array
+            ? decryptChromiumCookieValue(row.password_value, key, "", 0)
+            : null;
+        if (
+          !origin ||
+          action !== origin ||
+          !password ||
+          typeof row.username_value !== "string"
+        ) {
+          skipped++;
+          continue;
+        }
+        values.push({ origin, username: row.username_value, password });
+      }
+      return { values, skipped, unsupported: false };
+    } finally {
+      db.close();
+    }
+  } finally {
+    key.fill(0);
+    await snapshot?.dispose().catch(() => undefined);
+  }
 }
 
 interface ChromiumCookieRow {

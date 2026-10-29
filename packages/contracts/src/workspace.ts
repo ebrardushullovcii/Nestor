@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SpeedLevelSchema } from "./speed-schema";
+import { BrowserAgentPermissionsSchema } from "./browser-permissions";
 
 import {
   AiProviderKindSchema,
@@ -362,6 +363,8 @@ export const AiBehaviorPreferenceSchema = z
     profileAssistant: AiProfileAssistantBehaviorSchema.default({}),
     jobSearch: AiJobSearchBehaviorSchema.default({}),
     applying: AiApplyingBehaviorSchema.default({}),
+    /** What the agent may do on its own in the in-app browser; all off. */
+    browserPermissions: BrowserAgentPermissionsSchema.default({}),
   })
   .strict();
 
@@ -470,6 +473,7 @@ export const UpdateAiBehaviorInputSchema = z.object({
       profileAssistant: AiProfileAssistantBehaviorSchema.partial().optional(),
       jobSearch: AiJobSearchBehaviorSchema.partial().optional(),
       applying: AiApplyingBehaviorSchema.partial().optional(),
+      browserPermissions: BrowserAgentPermissionsSchema.partial().optional(),
     })
     .strict()
     .optional(),

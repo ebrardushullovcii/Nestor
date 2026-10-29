@@ -867,6 +867,7 @@ export async function resetJobFinderBrowser(): Promise<void> {
   const browser = getEmbeddedBrowser();
   await browser.close(true);
   await clearBrowserSession();
+  browser.clearSavedPasswords();
   // Restore/reset replaces the old browser state, including its person-close
   // latch. Activity stays globally paused until the person resumes it.
   browser.clearPersonPause();
@@ -895,6 +896,7 @@ export async function resetJobFinderWorkspace(): Promise<void> {
   const browser = getEmbeddedBrowser();
   await browser.close(true);
   await clearBrowserSession();
+  browser.clearSavedPasswords();
   // A resume import still reading would otherwise write its file and text
   // back into the cleared store. Stop it, and the runtime's own imports and
   // site checks, and wait for all of them first.
@@ -922,6 +924,7 @@ export async function resetJobFinderWorkspace(): Promise<void> {
     );
   }
   await completeJobFinderWorkspaceReset(intent);
+  browser.clearPersonPause();
   // The very last step: every earlier failure leaves work paused.
   lowerPauseAfterReset();
   void startJobFinderRuntime().catch((error: unknown) => {

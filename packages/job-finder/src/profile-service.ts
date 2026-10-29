@@ -583,6 +583,10 @@ export function createProfileService(options: ProfileServiceOptions) {
                 ...patch.aiBehavior.jobSearch,
               },
               applying: { ...current.applying, ...patch.aiBehavior.applying },
+              browserPermissions: {
+                ...current.browserPermissions,
+                ...patch.aiBehavior.browserPermissions,
+              },
             });
       const coverLetter =
         patch.coverLetter === undefined

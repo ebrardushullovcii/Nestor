@@ -1,3 +1,7 @@
+import {
+  describeBrowserPermissions,
+  type BrowserPermissionPolicy,
+} from "../browser-permission-policy";
 import { parseToolArguments } from "@nestor/agent-runtime";
 
 import type { LLMClient } from "../agent/contracts";
@@ -6,7 +10,8 @@ import { searchSelectivity } from "./job-search-prompts";
 
 /** The search or source-check goal, for the reviewer. */
 export function describeSearchGoal(config: AgentConfig): string {
-  if (config.inventoryOnly) return `Collect vacancy cards from ${config.promptContext.siteLabel} and its observed employer/ATS handoffs. Do not judge fit, location, seniority or preferences; the following engine steps do that.`;
+  if (config.inventoryOnly)
+    return `Collect vacancy cards from ${config.promptContext.siteLabel} and its observed employer/ATS handoffs. Do not judge fit, location, seniority or preferences; the following engine steps do that.`;
   const packet = config.promptContext.taskPacket;
   const searchIntent = config.promptContext.searchRequest?.intent.trim();
   return packet
@@ -54,16 +59,18 @@ const DECIDE_TOOL = {
   },
 };
 
-export function createMoveReviewer(input: {
-  llmClient: LLMClient;
-  /** What the run is for, in one or two sentences. */
-  goal: string;
-  /** The site the run lives on, in the person's words. */
-  homeLabel: string;
-  /** Hostnames that count as home. */
-  homeHosts: readonly string[];
-  signal?: AbortSignal;
-}): (move: {
+export function createMoveReviewer(
+  input: BrowserPermissionPolicy & {
+    llmClient: LLMClient;
+    /** What the run is for, in one or two sentences. */
+    goal: string;
+    /** The site the run lives on, in the person's words. */
+    homeLabel: string;
+    /** Hostnames that count as home. */
+    homeHosts: readonly string[];
+    signal?: AbortSignal;
+  },
+): (move: {
   url: string;
   reason: string;
   fromUrl: string | null;
@@ -77,8 +84,9 @@ export function createMoveReviewer(input: {
         content: [
           "You review one proposed move by an agent working in a person's browser. The agent wants to leave the site the run is on. Decide whether that is a reasonable thing to do for the goal, judging only the reason it gave and the addresses involved.",
           "",
-          "Allow a move when the reason is specific and the destination plausibly serves the goal: a posting's own page on the employer's site, an applicant-tracking system the listing hands off to, a careers hub the site points at, the employer's application form. Refuse when the reason is vague, when the destination has nothing to do with the goal (a search engine, a scraper or mirror of listings, a social network, an unrelated site), or when the reason describes signing in, creating an account, or getting around a check; those stay with the person whatever the reason.",
+          "Allow a move when the reason is specific and the destination plausibly serves the goal: a posting's own page on the employer's site, an applicant-tracking system the listing hands off to, a careers hub the site points at, the employer's application form. Refuse when the reason is vague, when the destination has nothing to do with the goal (a search engine, a scraper or mirror of listings, a social network, an unrelated site), or when it describes an account or CAPTCHA step disabled in the saved browser permissions. An enabled step may use an observed identity-provider handoff that serves this task; it does not authorize unrelated browsing or application sending.",
           "",
+          describeBrowserPermissions(input),
           "Answer with the decide tool only.",
         ].join("\n"),
       },

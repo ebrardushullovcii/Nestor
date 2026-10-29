@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  BrowserPasswordPromptSchema,
+  type BrowserPasswordsBridge,
+} from "./browser-passwords";
 
 const BrowserTabIdSchema = z.string().min(1).max(100);
 // Measured on a 16 GiB PC: replica forms used ~29 MiB private memory;
@@ -30,6 +34,7 @@ export const DesktopBrowserAttentionSchema = z.object({
 /** Only display state crosses preload. Cookies, page content and CDP stay in main. */
 export const DesktopBrowserStateSchema = z.object({
   revision: z.number().int().nonnegative(),
+  passwordPrompt: BrowserPasswordPromptSchema.nullable().optional(),
   unboundSendNotice: z
     .object({ id: z.string().min(1).max(100), tabId: BrowserTabIdSchema })
     .nullable()
@@ -183,6 +188,7 @@ export const AddBrowserJobResultSchema = z
 export type AddBrowserJobResult = z.infer<typeof AddBrowserJobResultSchema>;
 
 export interface DesktopBrowserBridge {
+  passwords: BrowserPasswordsBridge;
   addCurrentJob(input: AddBrowserJobInput): Promise<AddBrowserJobResult>;
   getState(): Promise<DesktopBrowserState>;
   command(command: DesktopBrowserCommand): Promise<DesktopBrowserState>;

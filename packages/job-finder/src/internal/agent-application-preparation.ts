@@ -1,3 +1,4 @@
+import { browserAgentPermissionsOf } from "@nestor/contracts";
 import {
   checkWrittenApplicationAnswer,
   applicationFacts,
@@ -597,6 +598,8 @@ export async function runAgentApplicationPreparation(
     return uploadFile(ref, file);
   };
   const moveReviewer = createMoveReviewer({
+    browserPermissions: browserAgentPermissionsOf(executionInput.settings),
+    ...(executionInput.prepareBrowserCredentials ? { prepareBrowserCredentials: executionInput.prepareBrowserCredentials } : {}),
     llmClient: input.llmClient,
     goal: isContinuation
       ? `Continue the ${executionInput.job.title} application at ${executionInput.job.company} on the currently open retained page at ${targetUrl}. Confirm that the open page is still this employer's application. Keep working on that current form; do not return to the listing or reload it. Nothing is sent.`
@@ -650,8 +653,10 @@ export async function runAgentApplicationPreparation(
     // Only Send for me presses the form's own buttons; Fill in for me leaves
     // them to the person even where the site saves fields as they are filled.
     pressesFormButtons: executionInput.submitAuthorized === true,
+    browserPermissions: browserAgentPermissionsOf(executionInput.settings),
+    ...(executionInput.readBrowserPermissions ? { readBrowserPermissions: executionInput.readBrowserPermissions } : {}),
     accountCreationAuthorized:
-      executionInput.accountCreationAuthorized === true,
+      browserAgentPermissionsOf(executionInput.settings).createAccounts,
     authority: activeAuthority,
     sources: {
       profile: executionInput.profile,

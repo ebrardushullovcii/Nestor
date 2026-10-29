@@ -107,8 +107,15 @@ export function createListingSearchEngine(deps: {
   });
 
   return {
-    collectSource(input) {
+    async collectSource(input) {
       const { target, signal, settings, context } = input;
+      const browserPermissions = context.readBrowserPermissions
+        ? await context.readBrowserPermissions()
+        : context.browserPermissions;
+      const browserAccessAuthorized =
+        browserPermissions?.signIn === true ||
+        browserPermissions?.createAccounts === true ||
+        browserPermissions?.solveCaptchas === true;
       const artifact =
         context.sourceInstructionArtifacts.find(
           (artifact) =>
@@ -126,6 +133,7 @@ export function createListingSearchEngine(deps: {
         ...(target.customInstructions ? [target.customInstructions] : []),
       ];
       return collectSource({
+        browserAccessAuthorized,
         source: { id: target.id, label: target.label, url: target.startingUrl },
         lane: input.lane,
         readPage:
@@ -159,6 +167,15 @@ export function createListingSearchEngine(deps: {
                   signal,
                   () =>
                     deps.browserRuntime.runAgentDiscovery!("target_site", {
+                      ...(context.browserPermissions
+                        ? { browserPermissions: context.browserPermissions }
+                        : {}),
+                      ...(context.readBrowserPermissions
+                        ? {
+                            readBrowserPermissions:
+                              context.readBrowserPermissions,
+                          }
+                        : {}),
                       inventoryOnly: true,
                       dedicatedPage: true,
                       retainAllFound: true,

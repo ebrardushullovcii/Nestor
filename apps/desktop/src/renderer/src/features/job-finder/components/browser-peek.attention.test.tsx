@@ -42,6 +42,15 @@ describe("BrowserPeek handoff attention", () => {
   it("clears the derived browser chip when the workspace has no unresolved handoff", async () => {
     const previousBridge = window.nestor;
     const browser: DesktopBrowserBridge = {
+      passwords: {
+        list: vi.fn(),
+        save: vi.fn(),
+        dismiss: vi.fn(),
+        autofill: vi.fn(),
+        delete: vi.fn(),
+        importCsv: vi.fn(),
+        importFromBrowser: vi.fn(),
+      },
       addCurrentJob: vi.fn(),
       getState: vi.fn().mockResolvedValue(staleAttentionState),
       command: vi.fn().mockResolvedValue(staleAttentionState),

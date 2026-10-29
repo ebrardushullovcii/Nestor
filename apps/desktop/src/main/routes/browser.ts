@@ -12,6 +12,7 @@ import {
 import { loadEmbeddedBrowser } from "../services/browser/load-embedded-browser";
 import { getJobStore } from "../services/job-store";
 import { scoreUnscoredJobs } from "../services/job-commands";
+import { registerBrowserPasswordRoutes } from "./browser-passwords";
 
 export function registerBrowserRoutes(ipc: IpcMain): void {
   // The browser loads after the first window; each call waits for it here.
@@ -25,6 +26,7 @@ export function registerBrowserRoutes(ipc: IpcMain): void {
     }
     return host;
   };
+  registerBrowserPasswordRoutes(ipc, owner);
   ipc.handle("browser:add-job", async (event, input: unknown) => {
     const host = await owner(event);
     const { tabId } = AddBrowserJobInputSchema.parse(input);

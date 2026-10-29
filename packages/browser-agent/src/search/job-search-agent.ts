@@ -29,6 +29,7 @@ import {
 } from "../agent/contracts";
 import type { ApplyFormObservation, ApplyPageHands } from "../apply/types";
 import { createPageTools } from "../page-tools";
+import { withBrowserPermissions } from "../browser-permission-policy";
 import {
   SEARCH_KEEP_WHOLE_ANSWERS,
   compactSearchObservation,
@@ -382,7 +383,8 @@ function indexFingerprint(observation: ApplyFormObservation): string | null {
 export async function runJobSearchAgent(
   input: JobSearchAgentInput,
 ): Promise<AgentResult> {
-  const { config, hands } = input;
+  const { config } = input;
+  const hands = withBrowserPermissions(input.hands, config);
   const now = input.now ?? (() => new Date());
   const isSourceCheck = Boolean(config.promptContext.taskPacket);
   const siteLabel = config.promptContext.siteLabel;
@@ -479,6 +481,9 @@ export async function runJobSearchAgent(
 
   const notes: string[] = [];
   const reviewMove = createMoveReviewer({
+    ...(config.browserPermissions
+      ? { browserPermissions: config.browserPermissions }
+      : {}),
     llmClient,
     goal: describeSearchGoal(config),
     homeLabel: siteLabel,

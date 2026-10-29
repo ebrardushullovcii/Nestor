@@ -1,3 +1,8 @@
+import {
+  browserInteractionKind,
+  currentBrowserPermissions,
+  withBrowserPermissions,
+} from "../browser-permission-policy";
 import { classifyAnswerPermission } from "./answer-source-catalog";
 import { semanticAnswerKey } from "./answer-match";
 import {
@@ -169,6 +174,8 @@ export interface ApplyExecutorDeps {
   /** fill_fields verifies all provisional text writes before recording them. */
   deferTextRetention?: boolean;
   config: ApplyAgentConfig;
+  /** One policy wrapper per run keeps account-action attempts bounded. */
+  browserPermissionHands?: ApplyAgentConfig["hands"];
   now: () => Date;
   guardState: ApplyGuardState;
   /**
@@ -1994,6 +2001,104 @@ export async function executeApplyProposal(
         "This picker refused its choices already.",
         at,
       );
+  }
+
+  // Puzzle answers use the browser permission, independently of candidate facts.
+  // Account buttons use an exact form-action window, never the application send path.
+  if ("ref" in proposal) {
+    const kind = browserInteractionKind(observation, proposal.ref);
+    const permissions = await currentBrowserPermissions(config);
+    const enabled =
+      kind !== null &&
+      kind !== "password" &&
+      kind !== "mfa" &&
+      permissions[kind];
+    const challengeControl = observation.controls.find(
+      (control) =>
+        control.ref === proposal.ref && isSecurityChallengeControl(control),
+    );
+    const accessAction =
+      proposal.tool === "click" &&
+      (kind === "signIn" ||
+        kind === "createAccounts" ||
+        (kind === "solveCaptchas" && !challengeControl));
+    if (
+      enabled &&
+      (kind === "signIn" || kind === "createAccounts") &&
+      proposal.tool === "type" &&
+      observation.controls.find((control) => control.ref === proposal.ref)
+        ?.credentialRole === "identifier"
+    ) {
+      const email =
+        config.sources.profile.applicationIdentity.preferredEmail ??
+        config.sources.profile.email;
+      if (
+        !email ||
+        proposal.text.trim().toLowerCase() !== email.trim().toLowerCase()
+      )
+        return {
+          kind: "refused",
+          reason:
+            "Use the person's saved email, or let them enter their account identifier on the website.",
+          observation,
+        };
+      const write = await config.hands.fillText(proposal.ref, email);
+      return write.ok
+        ? {
+            kind: "moved",
+            note: "Entered the saved email for this enabled account step.",
+            observation: await config.hands.observe(),
+            progress: true,
+          }
+        : { kind: "refused", reason: write.error, observation };
+    }
+    const challengeWrite =
+      kind === "solveCaptchas" &&
+      challengeControl &&
+      (proposal.tool === "click" ||
+        proposal.tool === "type" ||
+        proposal.tool === "set_checkbox" ||
+        proposal.tool === "select");
+    if (enabled && (accessAction || challengeWrite)) {
+      const hands = (deps.browserPermissionHands ??= withBrowserPermissions(
+        config.hands,
+        config,
+      ));
+      const write =
+        proposal.tool === "type"
+          ? await hands.fillText(proposal.ref, proposal.text)
+          : proposal.tool === "select"
+            ? await hands.chooseOption(proposal.ref, proposal.option)
+            : proposal.tool === "set_checkbox"
+              ? await hands.setToggle(proposal.ref, proposal.checked)
+              : await hands.clickElement(proposal.ref);
+      const after = await config.hands.observe();
+      return write.ok
+        ? {
+            kind: "moved",
+            note: "Completed the enabled browser step; inspect the result before continuing.",
+            observation: after,
+            progress: true,
+          }
+        : { kind: "refused", reason: write.error, observation: after };
+    }
+    if (accessAction && !enabled) {
+      if (observation.blocker)
+        return {
+          kind: "paused",
+          pause: {
+            code: "page_blocked",
+            summary: observation.blocker.summary,
+            question: null,
+            blocker: observation.blocker,
+          },
+        };
+      return {
+        kind: "refused",
+        reason: "This browser step is off in Settings. Leave it to the person.",
+        observation,
+      };
+    }
   }
 
   // Security checks stay with the person. A continuation after the person

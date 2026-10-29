@@ -2258,6 +2258,28 @@ export function createPlaywrightApplyPageMechanics(
   // Before any file is attached, so the request that carries it is seen.
   watchAttachmentUploads(page);
   return {
+    clickAuthorizedFormAction: async (ref) => {
+      const locator = actionLocator(page, ref);
+      if (!locator)
+        return {
+          ok: false,
+          error: "The account or verification button is no longer on this page.",
+        };
+      try {
+        await openPrepareOnlyAuthorizedFormActionWindow(page, locator);
+        await clickAndSettle(page, locator);
+        await waitForPrepareOnlyAuthorizedFormAction(page);
+        return { ok: true, observedValue: "clicked" };
+      } catch {
+        // A prefilled password must never escape through a locator call log.
+        return {
+          ok: false,
+          error: "The account or verification action could not be completed.",
+        };
+      } finally {
+        await closePrepareOnlyAuthorizedFormActionWindow(page);
+      }
+    },
     readPage: () => readRawApplyPage(page),
     readLinkedText: () => readPageLinkedText(page),
     checkAction: async (ref): Promise<ApplyWriteResult> => {
@@ -2760,6 +2782,7 @@ export function createPlaywrightApplyPageSession(input: {
 
   return {
     ...mechanics,
+    clickAuthorizedFormAction: mechanics.clickAuthorizedFormAction!,
     clickWithoutWrites: async (expected) => {
       const fresh = await mechanics.readPage();
       const action = fresh.actions.find(
@@ -2922,28 +2945,6 @@ export function createPlaywrightApplyPageSession(input: {
     closeUploadWindow: () => closePrepareOnlyAttachmentUploadWindow(page),
     closeIntermediateWriteWindow: () =>
       closePrepareOnlyIntermediateMutationWindow(page),
-    clickAuthorizedFormAction: async (ref) => {
-      const locator = actionLocator(page, ref);
-      if (!locator) {
-        return { ok: false, error: `No button named ${ref} on this page.` };
-      }
-      try {
-        await openPrepareOnlyAuthorizedFormActionWindow(page, locator);
-        await clickAndSettle(page, locator);
-        await waitForPrepareOnlyAuthorizedFormAction(page);
-        return { ok: true, observedValue: "clicked" };
-      } catch (error) {
-        return {
-          ok: false,
-          error: describeWriteFailure(
-            error,
-            "The authorized form action would not respond.",
-          ),
-        };
-      } finally {
-        await closePrepareOnlyAuthorizedFormActionWindow(page);
-      }
-    },
     readIntermediateWriteCount: () =>
       readPrepareOnlyIntermediateWriteCount(page),
     drainIntermediateWrites: () => drainPrepareOnlyIntermediateWrites(page),

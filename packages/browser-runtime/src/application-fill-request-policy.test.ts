@@ -348,3 +348,13 @@ fragment AutocompleteLocationResultParts on AutocompleteLocationResult {
     expect(search("Kosovo", "ApiSaveLocation")).toBe("carries_answer");
   });
 });
+
+
+test("account-page reads need explicit navigation, never an account write or a query carrying answers", () => {
+  const accountPage = { method: "GET", resourceType: "document", url: "https://jobs.test/register", preparedValues: prepared };
+  expect(classifyStrictFillRead({ ...accountPage, navigation: "run" }).allowed).toBe(true);
+  expect(classifyStrictFillRead({ ...accountPage, navigation: "page" }).allowed).toBe(false);
+  expect(classifyStrictFillRead({ ...accountPage, navigation: "run", method: "POST" }).allowed).toBe(false);
+  expect(classifyStrictFillRead({ ...accountPage, navigation: "run", url: "https://jobs.test/register?email=robin%40example.test" }).allowed).toBe(false);
+  expect(classifyStrictFillRead({ ...accountPage, navigation: "run", url: "https://jobs.test/register?action=submit" }).allowed).toBe(false);
+});

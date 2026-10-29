@@ -10,6 +10,7 @@ import {
   AiJobSearchBehaviorSchema,
   AiApplyingBehaviorSchema,
 } from "./workspace";
+import { BrowserAgentPermissionsSchema } from "./browser-permissions";
 import { prefixFieldShape } from "./profile-store";
 
 export const GoalFieldsSchema = z
@@ -88,6 +89,10 @@ export const SettingsFieldsSchema = z
     ...prefixFieldShape(
       "aiBehavior.applying",
       AiApplyingBehaviorSchema.omit({ preApprovedDeclarations: true }).shape,
+    ),
+    ...prefixFieldShape(
+      "aiBehavior.browserPermissions",
+      BrowserAgentPermissionsSchema.shape,
     ),
     "applicationCrm.noResponseAutomation.enabled": z.boolean(),
     "applicationCrm.noResponseAutomation.afterDays": z

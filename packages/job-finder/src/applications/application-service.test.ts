@@ -10,6 +10,7 @@ import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
 import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   ApplicationAuthorityEnvelopeSchema,
+  AiBehaviorPreferenceSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   type ApplicationReviewAnswer,
   ApplicationReviewCardSchema,
@@ -1832,6 +1833,103 @@ it("recovers interrupted preparation, settles an interrupted send from its saved
   ]);
   expect(f.authorizeSending).not.toHaveBeenCalled();
 });
+
+it.each(["signIn", "createAccounts", "solveCaptchas"] as const)(
+  "resumes %s after new permission/input, without repeating an unchanged unsuccessful step",
+  async (permission) => {
+    const f = await setup(1);
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const captcha = permission === "solveCaptchas";
+    const label = captcha ? "I am not a robot" : "Password";
+    const action =
+      permission === "createAccounts" ? "Create account" : "Sign in";
+    const page: RawApplyPage = {
+      ...f.personPage,
+      title: action,
+      bodyText: captcha ? label : action,
+      controls: [
+        {
+          index: 0,
+          tagName: "input",
+          inputType: captcha ? "checkbox" : "password",
+          role: "",
+          id: "test-input",
+          name: "test-input",
+          label,
+          groupLabel: "",
+          placeholder: "",
+          autocomplete: "",
+          required: true,
+          invalid: false,
+          validationMessage: "",
+          disabled: false,
+          readOnly: false,
+          visible: true,
+          value: "",
+          checked: false,
+          multiple: false,
+          options: [],
+          selectedOptionLabel: "",
+        },
+      ],
+      actions: captcha
+        ? []
+        : [
+            {
+              index: 0,
+              label: action,
+              visible: true,
+              disabled: false,
+              submitsForm: true,
+              formMethod: "POST",
+              formAction: "https://replica.test/session",
+            },
+          ],
+    };
+    preparation.blocker = {
+      code: captcha
+        ? "security_challenge"
+        : permission === "createAccounts"
+          ? "account_creation_required"
+          : "site_login_required",
+      requiresPerson: true,
+      summary: action,
+      detail: action,
+      nextActionLabel: "Open browser",
+    };
+    f.browser.readApplicationPageBinding.mockResolvedValue(page);
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(
+        f.applications.listApplications({ state: "needs_you" }).rows,
+      ).toHaveLength(1),
+    );
+    const task = f.applications.needsYou.list().rows[0]!;
+    await f.service.checkAccess(task.id);
+    f.seed.settings.aiBehavior = AiBehaviorPreferenceSchema.parse({
+      browserPermissions: { [permission]: true },
+    });
+    if (!captcha) {
+      await f.service.checkAccess(task.id);
+      expect(f.execute).toHaveBeenCalledTimes(1);
+      page.controls[0]!.value = "synthetic-password";
+    }
+    await f.service.checkAccess(task.id);
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(
+        f.applications.listApplications({ state: "needs_you" }).rows,
+      ).toHaveLength(1),
+    );
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(f.execute).toHaveBeenCalledTimes(2);
+    expect(f.authorizeSending).not.toHaveBeenCalled();
+  },
+);
 
 it("automatically carries every waiting page on after one site sign-in and MFA, checking each checkpoint", async () => {
   const f = await setup(3);

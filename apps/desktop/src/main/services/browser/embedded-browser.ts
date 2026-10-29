@@ -16,6 +16,7 @@ import {
   app,
   BrowserWindow,
   dialog,
+  ipcMain,
   screen,
   session,
   WebContentsView,
@@ -49,6 +50,7 @@ import {
 } from "./embedded-browser-layout";
 import { sendObserverSource } from "./send-observer";
 import { alignClientHintHeaders } from "./browser-identity";
+import { BrowserPasswords } from "./browser-passwords";
 import {
   browserDisplayUrl,
   browserUserAgent,
@@ -109,6 +111,35 @@ const OPEN_PREPARE_ONLY_GUARD_FOR_PERSON = `(() => {
 })();`;
 
 export class EmbeddedBrowser {
+  private passwordManager: BrowserPasswords | null = null;
+  passwords(): BrowserPasswords {
+    if (!this.passwordManager) {
+      this.passwordManager = new BrowserPasswords({
+        pages: () => [...this.pageMap.values()],
+        changed: () => this.emit(),
+        chooseAccount: (tabId) =>
+          this.requestAttention(
+            {
+              kind: "sign_in",
+              title: "Choose a saved login",
+              detail:
+                "More than one account is saved for this site. Open Saved passwords in the browser toolbar and choose Fill for the account you want.",
+            },
+            tabId,
+          ),
+      });
+      this.passwordManager.attach(ipcMain);
+    }
+    return this.passwordManager;
+  }
+  /** Explicit browser/workspace reset also removes the encrypted saved accounts. */
+  clearSavedPasswords(): void {
+    this.passwords().clear();
+  }
+  /** Main-only: settings and exact form/origin binding are checked on each use. */
+  prepareAgentCredentials(tabId: string): Promise<boolean> {
+    return this.passwords().prepareAgentCredentials(tabId);
+  }
   private window: BrowserWindow | null = null;
   private backstage: BrowserWindow | null = null;
   private browserSession: Session | null = null;
@@ -654,6 +685,7 @@ export class EmbeddedBrowser {
     );
     return DesktopBrowserStateSchema.parse({
       revision: this.revision,
+      passwordPrompt: this.passwordManager?.prompt(this.activeTabId) ?? null,
       unboundSendNotice: this.unboundSendNotice,
       sentNotice: this.sentNotice,
       phase: this.closing
@@ -706,6 +738,7 @@ export class EmbeddedBrowser {
   getSession(): Session {
     if (this.browserSession) return this.browserSession;
     const browserSession = session.fromPartition(EMBEDDED_BROWSER_PARTITION);
+    this.passwords();
     browserSession.setUserAgent(
       browserUserAgent(browserSession.getUserAgent(), app.getName()),
     );
@@ -1417,7 +1450,10 @@ export class EmbeddedBrowser {
         );
     });
     page.contents.on("page-title-updated", update);
-    page.contents.on("did-navigate", update);
+    page.contents.on("did-navigate", (_event, url) => {
+      this.passwordManager?.navigation(page.id, url);
+      update();
+    });
     page.contents.on("did-navigate-in-page", update);
     page.contents.on("will-navigate", (event, target) => {
       if (!isBrowserNavigationAllowed(target)) event.preventDefault();
@@ -1520,6 +1556,7 @@ export class EmbeddedBrowser {
       };
     });
     page.contents.once("destroyed", () => {
+      this.passwordManager?.forget(page.id);
       const idleTimer = this.automationIdleTimers.get(page.id);
       if (idleTimer) clearTimeout(idleTimer);
       this.automationIdleTimers.delete(page.id);

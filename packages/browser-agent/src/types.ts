@@ -1,3 +1,4 @@
+import type { BrowserPermissionPolicy } from "./browser-permission-policy";
 import type {
   AgentDebugFindings,
   DiscoveryAccessBlockerReason,
@@ -52,7 +53,7 @@ export interface AgentPromptContext {
   };
 }
 
-export interface AgentConfig {
+export interface AgentConfig extends BrowserPermissionPolicy {
   inventoryOnly?: boolean;
   lookupKnownUrls?: KnownJobUrlLookup;
   /** No person-specified result cap; retain every suitable posting found. */

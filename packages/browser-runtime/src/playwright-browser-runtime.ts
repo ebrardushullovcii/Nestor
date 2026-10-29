@@ -3525,6 +3525,9 @@ export function createBrowserAgentRuntime(
 
       const agentConfig: AgentConfig = {
         source,
+        ...(agentOptions.browserPermissions ? { browserPermissions: agentOptions.browserPermissions } : {}),
+        ...(agentOptions.prepareBrowserCredentials ? { prepareBrowserCredentials: agentOptions.prepareBrowserCredentials } : {}),
+        ...(agentOptions.readBrowserPermissions ? { readBrowserPermissions: agentOptions.readBrowserPermissions } : {}),
         ...(agentOptions.inventoryOnly ? { inventoryOnly: true } : {}),
         ...(agentOptions.lookupKnownUrls
           ? { lookupKnownUrls: agentOptions.lookupKnownUrls }

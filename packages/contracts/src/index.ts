@@ -1,6 +1,7 @@
 export * from "./base";
 export * from "./prepared-application-form";
 export * from "./desktop-browser";
+export * from "./browser-permissions";
 export * from "./apply-form-mechanics";
 export * from "./browser-errors";
 export * from "./application-authority";
@@ -79,3 +80,4 @@ export { preserveTechnologyTokens } from "./technology-text";
 export * from "./form-question-meaning";
 export * from "./application-question-reason";
 export * from "./assistant-job-list";
+export * from "./browser-passwords";

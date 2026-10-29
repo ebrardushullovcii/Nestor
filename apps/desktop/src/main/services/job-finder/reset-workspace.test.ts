@@ -27,6 +27,7 @@ const {
   mockCloseBrowser,
   mockClearPersonPause,
   mockClearBrowserStorage,
+  mockClearSavedPasswords,
   mockClearBrowserCache,
   mockSetActivityControl,
   mockResetJobStore,
@@ -59,6 +60,7 @@ const {
   mockCloseBrowser: vi.fn(),
   mockClearPersonPause: vi.fn(),
   mockClearBrowserStorage: vi.fn(),
+  mockClearSavedPasswords: vi.fn(),
   mockClearBrowserCache: vi.fn(),
   mockSetActivityControl: vi.fn(),
   mockResetJobStore: vi.fn(),
@@ -85,6 +87,7 @@ vi.mock("../browser/embedded-browser", () => ({
   getEmbeddedBrowser: () => ({
     close: mockCloseBrowser,
     clearPersonPause: mockClearPersonPause,
+    clearSavedPasswords: mockClearSavedPasswords,
     getSession: () => ({
       clearStorageData: mockClearBrowserStorage,
       clearCache: mockClearBrowserCache,
@@ -360,6 +363,7 @@ test("browser reset for restore keeps the global pause without latching a person
   expect(mockCloseBrowser).toHaveBeenCalledExactlyOnceWith(true);
   expect(mockClearPersonPause).toHaveBeenCalledOnce();
   expect(mockClearBrowserStorage).toHaveBeenCalledOnce();
+  expect(mockClearSavedPasswords).toHaveBeenCalledOnce();
   expect(mockClearBrowserCache).toHaveBeenCalledOnce();
   expect(mockSetActivityControl.mock.invocationCallOrder[0]).toBeLessThan(
     mockCloseBrowser.mock.invocationCallOrder[0]!,
@@ -470,6 +474,11 @@ describe("resetJobFinderWorkspace", () => {
       "files",
     ]);
     expect(mockCloseBrowser).toHaveBeenCalledWith(true);
+    expect(mockClearSavedPasswords).toHaveBeenCalledOnce();
+    expect(mockClearPersonPause).toHaveBeenCalledOnce();
+    expect(mockClearPersonPause.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockShutdownRuntime.mock.invocationCallOrder[0]!,
+    );
   });
 
   test("stops the search first and clears the job store before marking the reset done", async () => {

@@ -64,3 +64,21 @@ approaches may be replaced if another design produces better truthful outcomes.
   warning substitutes for user choice or technical safety.
 - Product and architecture work should optimize for reliable end-to-end results,
   not preserve the current agent loop or UI structure.
+
+## Update (2026-10-29): opt-in browser access
+
+The owner authorized three independent settings for browser agents: solving
+CAPTCHAs, signing in, and creating website accounts. All default off, including
+for existing profiles. Search, source checks and application preparation read
+these permissions separately from sending authority and recheck them before
+acting. An enabled step may be attempted using the site's visible controls; an
+unavailable password, MFA, an unreadable challenge or an ambiguous action still
+hands the exact page to the person. Account and verification POSTs use the exact
+observed form action, with no application-send window. A solved challenge or a
+successful sign-in never proves an application was sent.
+
+The owner also authorized local password import, explicit save/update offers and
+autofill. Secrets stay between the main-owned encrypted vault and the exact-site
+browser form; they never become model input, renderer state or diagnostic data.
+Agent autofill additionally requires the sign-in permission and one unambiguous
+saved account on an existing-account form.

@@ -8,6 +8,7 @@ export function createSearchResultCache(maxEntries = 24) {
   const keyFor = (config: AgentConfig) =>
     JSON.stringify({
       source: config.source,
+      browserPermissions: config.browserPermissions,
       inventoryOnly: config.inventoryOnly === true,
       urls: config.startingUrls,
       profile: config.userProfile,

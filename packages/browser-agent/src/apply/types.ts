@@ -1,3 +1,4 @@
+import type { BrowserPermissionPolicy } from "../browser-permission-policy";
 import type { FormReplay } from "./form-replay";
 import type {
   ApplyAgentTiming,
@@ -277,6 +278,8 @@ export interface ApplyDocument {
  * whether writing is allowed; that is the executor's job.
  */
 export interface ApplyPageHands {
+  prepareBrowserCredentials?: ApplyRawPageHands["prepareBrowserCredentials"];
+  clickAuthorizedFormAction?: ApplyRawPageHands["clickAuthorizedFormAction"];
   observe: () => Promise<ApplyFormObservation>;
   navigate: (url: string) => Promise<ApplyNavigationResult>;
   clickElement: (ref: string) => Promise<ApplyWriteResult>;
@@ -551,7 +554,7 @@ export type ApplyProposal =
       forPerson?: string[];
     };
 
-export interface ApplyAgentConfig {
+export interface ApplyAgentConfig extends BrowserPermissionPolicy {
   /** Host-only semantic matches that passed the independent grounding check. */
   matchedAnswers?: ReadonlyMap<string, string>;
   initialQuestionContexts?: ReadonlyArray<{ prompt: string; step: string }>;

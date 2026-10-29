@@ -28,3 +28,31 @@ Find jobs > What each site found reports listings observed, new jobs and jobs sa
 - The default `--net replica` refuses requests outside loopback. Use `--net web` only for authorized read-only checks and never send a real application.
 - A restarted verify instance may get a different replica port. Update stored site URLs before another search.
 - The sidebar uses the same list_sites/get_site/add_sites/update_site/remove_site/set_sites_enabled commands as the screens. Changes have separate persisted Undo receipts; later site edits are preserved. Ask to show Profile > Job sources after the change, then compare the screen with job_sites.
+
+
+## Browser permissions and saved passwords
+
+Settings > AI behavior > In-app browser has three independent switches: Solve
+CAPTCHAs, Sign in to websites, and Create website accounts. All are off on new
+and migrated profiles. They apply across browser search/source-check and Apply
+agents; turning one off is rechecked before another protected action. Sending
+remains the separate Applying choice. MFA and steps the browser cannot complete
+still go to the person.
+
+For verification, check default-off values and independent saves in the UI and
+profile_settings, then restart and check persistence. Use only synthetic
+replicas: an opted-in sign-in should reuse one exact-origin saved account, while
+multiple accounts require a choice. Verify a disabled step makes no account or
+verification write. In both apply modes, completing a CAPTCHA never grants a
+final application send.
+
+The browser toolbar's Saved passwords panel imports exported password CSV via
+the native picker, lists metadata, fills a selected account and deletes it.
+Entering synthetic login/new-account credentials on the website offers Save;
+changing an existing password offers Update. Verify the actual filled fields,
+restart persistence, no password in app browser state or agent observations,
+and no plaintext password in browser-passwords.sqlite. Test an unrelated host,
+cross-origin frame/action and HTTP downgrade as refusals. Windows direct profile
+password import reports its limitation and directs the person to CSV; do not
+read real browser stores during verification. Browser/workspace reset removes
+the saved accounts too; ordinary tab closing keeps them.

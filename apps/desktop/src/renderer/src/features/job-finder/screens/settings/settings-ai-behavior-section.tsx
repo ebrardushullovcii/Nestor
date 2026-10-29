@@ -4,6 +4,7 @@ import {
   AiBehaviorPreferenceSchema,
   JOB_FINDER_SETTINGS_SECTIONS,
   type AiProfileAssistantBehavior,
+  type BrowserAgentPermissions,
   type JobFinderSettings,
   type ProfileAssistantInitiative,
   type UpdateAiBehaviorInput,
@@ -19,14 +20,15 @@ import { SettingsSectionSaveControl } from "./settings-section-save-control";
 /**
  * How the AI talks and judges, in one place.
  *
- * Three groups follow the person's own flow: the Profile chat, finding
- * jobs, resumes. What it writes while applying lives under Applying, with
- * the send choice it belongs to, and how picky a search is is chosen per
- * search on Find jobs. Each choice here changes what the model is told
- * and how it talks; none changes what it is allowed to do. Sending an
- * application, signing in, and creating accounts stay the person's
- * (ADR 0012, ADR 0022), and every stretched resume line still needs
- * their confirmation (ADR 0018).
+ * The groups follow the person's own flow: the side chat, finding jobs,
+ * the in-app browser. What it writes while applying lives under Applying,
+ * with the send choice it belongs to, and how picky a search is is chosen
+ * per search on Find jobs. The first two change what the model is told
+ * and how it talks. The in-app browser group is the only one that widens
+ * what the agent may do, and each of its switches is off until the person
+ * turns it on. Sending an application stays the send choice under
+ * Applying (ADR 0012, ADR 0022), and every stretched resume line still
+ * needs their confirmation (ADR 0018).
  *
  * A choice saves the moment it is picked, like every other Settings
  * switch, and the saved toast offers Undo. A Save button appears only to
@@ -79,9 +81,39 @@ function ChoiceField(props: { label: string; children: ReactNode }) {
   );
 }
 
+const browserPermissionChoices: readonly {
+  key: keyof BrowserAgentPermissions;
+  label: string;
+  description: string;
+  hint: string;
+}[] = [
+  {
+    key: "solveCaptchas",
+    label: "Solve CAPTCHAs",
+    description:
+      "Attempts the CAPTCHA checks a site puts in the way.",
+    hint: "Some checks can't be solved this way. Those still come to you.",
+  },
+  {
+    key: "signIn",
+    label: "Sign in to websites",
+    description:
+      "Uses saved logins and existing browser sign-ins, including Sign in with Google.",
+    hint: "If no saved login is available, it hands you the page to enter your password, then carries on.",
+  },
+  {
+    key: "createAccounts",
+    label: "Create website accounts",
+    description:
+      "Makes an account when a site needs one before you can search or apply.",
+    hint: "Choosing a password, or confirming your email or phone, may still need you.",
+  },
+];
+
 type AiBehaviorSlice = {
   profileAssistant: AiProfileAssistantBehavior;
   remoteCountsAsAnyLocation: boolean;
+  browserPermissions: BrowserAgentPermissions;
 };
 
 function seedSlice(settings: JobFinderSettings): AiBehaviorSlice {
@@ -89,6 +121,7 @@ function seedSlice(settings: JobFinderSettings): AiBehaviorSlice {
   return {
     profileAssistant: behavior.profileAssistant,
     remoteCountsAsAnyLocation: behavior.jobSearch.remoteCountsAsAnyLocation,
+    browserPermissions: behavior.browserPermissions,
   };
 }
 
@@ -99,6 +132,7 @@ function toInput(slice: AiBehaviorSlice): UpdateAiBehaviorInput {
       jobSearch: {
         remoteCountsAsAnyLocation: slice.remoteCountsAsAnyLocation,
       },
+      browserPermissions: slice.browserPermissions,
     },
   };
 }
@@ -127,7 +161,7 @@ export function SettingsAiBehaviorSection({
       saveLabel: "Save AI behavior",
       failedMessage:
         "AI behavior was not saved. Retry before leaving this page.",
-      savedMessage: "AI behavior saved. It applies from the next run.",
+      savedMessage: "AI behavior saved.",
       undoneMessage: "AI behavior change undone.",
     });
   const editAssistant = (next: Partial<AiProfileAssistantBehavior>) =>
@@ -147,8 +181,8 @@ export function SettingsAiBehaviorSection({
             {SETTINGS_AI_BEHAVIOR_LABEL}
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-            How much the assistant suggests, and how locations count when it
-            searches.
+            How much the assistant suggests, how locations count when it
+            searches, and what it may do by itself in the in-app browser.
           </p>
         </div>
         <SettingsSectionSaveControl
@@ -156,7 +190,7 @@ export function SettingsAiBehaviorSection({
           onSave={sendTypedText}
           saveState={saveState}
           subject="AI behavior"
-          effect="Applies from your next chat, search, or resume."
+          effect="Applies from your next chat, search, application, or resume."
         />
       </div>
 
@@ -198,6 +232,36 @@ export function SettingsAiBehaviorSection({
             edit((current) => ({ ...current, remoteCountsAsAnyLocation }))
           }
         />
+      </article>
+
+      <article
+        className="grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-overlay-subtle) p-3.5"
+        data-testid="settings-ai-browser"
+      >
+        <GroupHeading
+          title="In-app browser"
+          description="What the agent may do by itself in the in-app browser, in searches, applications and any other browser work. Each is off until you turn it on. When one is off, or a step needs something only you have, it stops and asks you. Whether an application is sent stays your choice under Applying."
+        />
+        <div className="grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {browserPermissionChoices.map((choice) => (
+            <ToggleField
+              checked={draft.browserPermissions[choice.key]}
+              description={choice.description}
+              hint={choice.hint}
+              key={choice.key}
+              label={choice.label}
+              onCheckedChange={(checked) =>
+                edit((current) => ({
+                  ...current,
+                  browserPermissions: {
+                    ...current.browserPermissions,
+                    [choice.key]: checked,
+                  },
+                }))
+              }
+            />
+          ))}
+        </div>
       </article>
     </section>
   );

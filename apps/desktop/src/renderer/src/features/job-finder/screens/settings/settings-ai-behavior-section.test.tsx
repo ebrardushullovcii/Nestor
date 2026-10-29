@@ -4,7 +4,10 @@ import type {
   JobFinderSettings,
   UpdateAiBehaviorInput,
 } from "@nestor/contracts";
-import { JobFinderSettingsSchema } from "@nestor/contracts";
+import {
+  AiBehaviorPreferenceSchema,
+  JobFinderSettingsSchema,
+} from "@nestor/contracts";
 import {
   act,
   cleanup,
@@ -153,6 +156,11 @@ describe("SettingsAiBehaviorSection", () => {
           replyStyle: "brief",
         },
         jobSearch: { remoteCountsAsAnyLocation: false },
+        browserPermissions: {
+          solveCaptchas: false,
+          signIn: false,
+          createAccounts: false,
+        },
       },
     });
     await waitFor(() =>
@@ -161,6 +169,70 @@ describe("SettingsAiBehaviorSection", () => {
     expect(
       screen.queryByRole("button", { name: "Save AI behavior" }),
     ).toBeNull();
+  });
+
+  it("keeps each in-app browser permission off until turned on, and saves each on its own", async () => {
+    const onUpdateAiBehavior = vi
+      .fn<(input: UpdateAiBehaviorInput) => Promise<boolean>>()
+      .mockResolvedValue(true);
+    renderSection(onUpdateAiBehavior);
+
+    const group = within(screen.getByTestId("settings-ai-browser"));
+    expect(group.getByText("In-app browser")).toBeTruthy();
+    // The scope is every browser task, and sending is not one of these.
+    expect(group.getByText(/in searches, applications/)).toBeTruthy();
+    expect(
+      group.getByText(/sent stays your choice under Applying/),
+    ).toBeTruthy();
+    const toggle = (name: string) => group.getByRole("switch", { name });
+    const names = [
+      "Solve CAPTCHAs",
+      "Sign in to websites",
+      "Create website accounts",
+    ];
+    for (const name of names)
+      expect(toggle(name).getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(toggle("Sign in to websites"));
+    expect(onUpdateAiBehavior.mock.calls[0]?.[0].aiBehavior).toMatchObject({
+      browserPermissions: {
+        solveCaptchas: false,
+        signIn: true,
+        createAccounts: false,
+      },
+    });
+    await waitFor(() =>
+      expect(screen.getByText(/AI behavior saved/)).toBeTruthy(),
+    );
+
+    fireEvent.click(toggle("Create website accounts"));
+    await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
+    expect(
+      onUpdateAiBehavior.mock.calls[1]?.[0].aiBehavior?.browserPermissions,
+    ).toEqual({ solveCaptchas: false, signIn: true, createAccounts: true });
+    expect(toggle("Solve CAPTCHAs").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("shows saved browser permissions as they are", () => {
+    renderSection(
+      vi.fn(() => Promise.resolve(true)),
+      parseSettings({
+        aiBehavior: AiBehaviorPreferenceSchema.parse({
+          browserPermissions: { solveCaptchas: true },
+        }),
+      }),
+    );
+    const group = within(screen.getByTestId("settings-ai-browser"));
+    expect(
+      group
+        .getByRole("switch", { name: "Solve CAPTCHAs" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(
+      group
+        .getByRole("switch", { name: "Sign in to websites" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
   });
 
   it("hands the save toast an Undo that saves the earlier choice back", async () => {

@@ -183,6 +183,43 @@ test("Settings preserve Apply choices and a deliberately cleared declaration lis
   ).toEqual([]);
 });
 
+test("browser permissions start off, save one at a time and survive reader recreation", () => {
+  const { store, preferences } = setup();
+  const off = { solveCaptchas: false, signIn: false, createAccounts: false };
+  expect(preferences.settings.read().aiBehavior?.browserPermissions).toEqual(
+    off,
+  );
+  preferences.settings.patch({
+    fields: { "aiBehavior.browserPermissions.signIn": true },
+  });
+  const again = createPreferencesStore(store);
+  expect(again.settings.read().aiBehavior?.browserPermissions).toEqual({
+    ...off,
+    signIn: true,
+  });
+  // Turning another one on leaves the first as it was, and the rest off.
+  again.settings.patch({
+    fields: { "aiBehavior.browserPermissions.createAccounts": true },
+  });
+  again.settings.patch({
+    fields: { "aiBehavior.browserPermissions.signIn": false },
+  });
+  expect(again.settings.read().aiBehavior?.browserPermissions).toEqual({
+    ...off,
+    createAccounts: true,
+  });
+  // A file from before the permissions has empty columns: all off.
+  store
+    .sql(
+      "UPDATE profile_settings SET ai_behavior_browser_permissions_solve_captchas=NULL,ai_behavior_browser_permissions_sign_in=NULL,ai_behavior_browser_permissions_create_accounts=NULL",
+    )
+    .run();
+  expect(
+    createPreferencesStore(store).settings.read().aiBehavior
+      ?.browserPermissions,
+  ).toEqual(off);
+});
+
 test("goals retain all constraints and reject an invalid partial range atomically", () => {
   const { preferences } = setup();
   preferences.goals.patch({

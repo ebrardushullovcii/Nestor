@@ -247,6 +247,10 @@ export interface ApplyUploadFile {
  * control, an answer, or whether a write is allowed.
  */
 export interface ApplyRawPageHands {
+  /** Host-only exact-site autofill. It never returns credentials. */
+  prepareBrowserCredentials?: (url: string) => Promise<boolean>;
+  /** One exact POST form action, authorized by the workflow policy. */
+  clickAuthorizedFormAction?: (ref: string) => Promise<ApplyWriteResult>;
   readPage: () => Promise<RawApplyPage>;
   fillText: (ref: string, value: string) => Promise<ApplyWriteResult>;
   chooseOption: (ref: string, optionLabel: string) => Promise<ApplyWriteResult>;

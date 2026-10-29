@@ -23,3 +23,20 @@ Users may bring sign-ins over from a browser profile already on the device, chos
 Electron and Playwright upgrades require focused native browser checks, including hidden-page rendering, popups, routing, handover and resource cleanup. The scoped bridge has a deliberately limited CDP surface and is not a general remote debugging service. Existing prepare-only guards remain required; embedding adds no submission authority.
 
 The default live desktop host is embedded. `NESTOR_BROWSER_HOST=external` retains the dedicated Chrome path for compatibility. Existing deterministic desktop harnesses retain their prior host behavior unless they explicitly select the embedded host. Closing preserves the session partition, not a Chrome profile folder; some imported sessions still need a fresh sign-in.
+
+## Update (2026-10-29): saved passwords and browser permissions
+
+The browser now has a separate password manager in addition to persistent
+sessions and cookie import. Save/update offers require the person's choice;
+passwords are encrypted through Electron safeStorage and persisted behind a db
+repository. No plaintext fallback is allowed. Browser-profile password import
+reports platform limitations and offers native password-CSV import when a store
+cannot be read. Website credentials never pass through the app renderer, AI
+tools, prompts or diagnostic logs. Autofill validates the current tab, frame,
+form action and exact origin, including submitter overrides.
+
+Signing in, account creation and CAPTCHA interaction remain off by default.
+The owner may enable each independently in Settings > AI behavior > In-app
+browser. See the 2026-10-29 update to ADR 0012. MFA and steps the agent cannot
+complete still hand the page to the person. These choices grant no application
+sending authority.
