@@ -204,7 +204,7 @@ test("an uncached reading still resolves plain identity; phone needs its classif
     true,
     true,
   ]);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
 });
 
 test.each(["profile", "reference", "instructions"] as const)(
@@ -226,7 +226,9 @@ test.each(["profile", "reference", "instructions"] as const)(
     expect(checked.slice(0, 3).map((check) => check.supported)).toEqual(
       change === "profile" ? [false, true, false] : [false, false, false],
     );
-    expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+    expect(client.chatWithTools).toHaveBeenCalledTimes(
+      change === "profile" ? 4 : 2,
+    );
   },
 );
 
@@ -247,5 +249,5 @@ test("plain identity resolves a missing source without authorizing unrelated con
     true,
     false,
   ]);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
 });

@@ -423,7 +423,7 @@ test("a picker in a frame reports only that frame's choices despite matching lis
   });
 }, 20_000);
 
-test("rows a search left are never the form's choices when the full list cannot be read", async () => {
+test("settled search rows are offered even when clearing cannot expose the full list", async () => {
   // Typing filters the list; clearing the search closes it, so the full list
   // is never read.
   await withPage(async (page) => {
@@ -451,10 +451,126 @@ test("rows a search left are never the form's choices when the full list cannot 
       page.getByRole("combobox"),
       "Fallback territory",
     );
-    expect(result.ok).toBe(false);
-    expect(result).not.toHaveProperty("reason");
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "option_not_offered",
+      offeredOptions: [replay.offered[0], replay.variant],
+    });
   });
 }, 30_000);
+
+/** Remote results replace the menu; no unfiltered inventory is exposed. */
+const remotePicker = (results: Record<string, string[]>, reject = false) => `
+<label>Answer<input role="combobox" aria-controls="remote-options"></label>
+<div id="remote-options" role="listbox" hidden></div>
+<script>
+  const results = ${JSON.stringify(results)};
+  const input = document.querySelector("input");
+  const list = document.getElementById("remote-options");
+  window.queries = [];
+  let request = 0;
+  input.addEventListener("input", () => {
+    const query = input.value;
+    window.queries.push(query);
+    input.dataset.committed = "";
+    list.replaceChildren();
+    list.hidden = !query;
+    const current = ++request;
+    if (!query) return;
+    list.setAttribute("aria-busy", "true");
+    setTimeout(() => {
+      if (current !== request) return;
+      list.removeAttribute("aria-busy");
+      for (const text of results[query] || []) {
+        const row = document.createElement("div");
+        row.setAttribute("role", "option");
+        row.textContent = text;
+        row.onmousedown = (event) => event.preventDefault();
+        row.onclick = () => {
+          input.value = text;
+          input.dataset.committed = ${reject} ? "" : text;
+          list.hidden = true;
+        };
+        list.appendChild(row);
+      }
+      if (!list.children.length) list.textContent = "No results";
+    }, 150);
+  });
+  input.addEventListener("blur", () => { input.value = input.dataset.committed || ""; });
+</script>`;
+
+test.each([
+  {
+    name: "a spelling variant from the full query",
+    value: "Prishtina",
+    results: { Prishtina: ["Pristina", "Prizren"], Pristina: ["Pristina"] },
+    offered: ["Pristina", "Prizren"],
+    queries: ["Prishtina"],
+  },
+  {
+    name: "leading words then a leading word",
+    value: "Bachelor Computer Science",
+    results: {
+      "Bachelor Computer": ["Bachelor of Computer Science"],
+      Bachelor: ["Bachelor's Degree", "Bachelor of Computer Science"],
+      "Bachelor of Computer Science": ["Bachelor of Computer Science"],
+    },
+    offered: ["Bachelor of Computer Science", "Bachelor's Degree"],
+    queries: [
+      "Bachelor Computer Science",
+      "Bachelor Computer",
+      "Bachelor",
+      "Bac",
+    ],
+  },
+  {
+    name: "a single word's prefix when the full spelling has no results",
+    value: "Prishtina",
+    results: { Pri: ["Pristina", "Prizren"], Pristina: ["Pristina"] },
+    offered: ["Pristina", "Prizren"],
+    queries: ["Prishtina", "Pri"],
+  },
+])(
+  "remote search offers $name, never chooses it until an exact retry",
+  async ({ value, results, offered, queries }) => {
+    await withPage(async (page) => {
+      await page.setContent(remotePicker(results));
+      const control = page.getByRole("combobox");
+      expect(await choosePageOption(page, control, value)).toMatchObject({
+        ok: false,
+        reason: "option_not_offered",
+        offeredOptions: offered,
+      });
+      expect(await page.evaluate("window.queries.filter(Boolean)")).toEqual(
+        queries,
+      );
+      expect(await control.inputValue()).toBe("");
+      expect(await control.getAttribute("data-committed")).toBe("");
+      expect(await choosePageOption(page, control, offered[0]!)).toEqual({
+        ok: true,
+        observedValue: offered[0],
+      });
+      expect(await control.inputValue()).toBe(offered[0]);
+      expect(await control.getAttribute("data-committed")).toBe(offered[0]);
+    });
+  },
+  30_000,
+);
+
+test("an exact remote result that the field drops on blur is not a successful selection", async () => {
+  await withPage(async (page) => {
+    await page.setContent(remotePicker({ Pristina: ["Pristina"] }, true));
+    const result = await choosePageOption(
+      page,
+      page.getByRole("combobox"),
+      "Pristina",
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: 'The list did not keep "Pristina" selected.',
+    });
+  });
+});
 
 test("a windowed list with no scroll box of its own is not read as complete", async () => {
   // 300 rows, 12 drawn, each saying where it sits and how many there are;

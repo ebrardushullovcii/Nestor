@@ -343,7 +343,7 @@ test.each([
     formControls: [field],
   });
   expect(checks[0]?.supported).toBe(row.supported);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(row.supported ? 1 : 3);
 });
 test("preflight reuses the Workday country-bound facts without a prose check", async () => {
   const answers = replay.workday.questions.map((row) => ({
@@ -768,5 +768,7 @@ test.each([
       expect.objectContaining({ supported: entry.supported }),
     ]);
   }
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(
+    entry.name === "an uncertain Profile timezone" ? 6 : 2,
+  );
 });

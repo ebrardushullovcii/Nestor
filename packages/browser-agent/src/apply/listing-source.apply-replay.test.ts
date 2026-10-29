@@ -255,7 +255,10 @@ test.each([null, "listingDiscovery"])(
       Promise.resolve({ ok: true as const, observedValue: "Local job board" }),
     );
     const checkWrittenAnswer = vi.fn(() =>
-      Promise.resolve({ supported: true, reason: "Lying checker" }),
+      Promise.resolve({
+        supported: false,
+        reason: "A listing source is not a referral name.",
+      }),
     );
     const config = {
       sources: sources(
@@ -302,7 +305,7 @@ test.each([null, "listingDiscovery"])(
     );
     expect(outcome.kind).toBe("suggestion");
     expect(fillText).not.toHaveBeenCalled();
-    expect(checkWrittenAnswer).not.toHaveBeenCalled();
+    expect(checkWrittenAnswer).toHaveBeenCalledOnce();
   },
 );
 

@@ -5374,7 +5374,7 @@ describe("picker replay: refused choices", () => {
     expect(outcome.kind).toBe("filled");
   });
 
-  test("the handover lists the form's own choices and a refused choice is not tried again", async () => {
+  test("a refusal offers the model the form's own choices; repeating it hands over", async () => {
     const source = picker();
     const chooseOption = refusing();
     const { config } = configFor(source, { hands: { chooseOption } });
@@ -5392,11 +5392,13 @@ describe("picker replay: refused choices", () => {
         { config, now, guardState },
       );
     const first = await propose();
-    expect(first.kind).toBe("suggestion");
-    if (first.kind === "suggestion")
-      expect(first.question?.answerOptions).toEqual(pickerReplay.options);
+    expect(first.kind).toBe("refused");
+    if (first.kind === "refused")
+      expect(first.reason).toContain(JSON.stringify(pickerReplay.options));
     const second = await propose();
     expect(second.kind).toBe("suggestion");
+    if (second.kind === "suggestion")
+      expect(second.question?.answerOptions).toEqual(pickerReplay.options);
     expect(chooseOption).toHaveBeenCalledTimes(1);
     const control = observationOf(source).controls[0];
     expect(pickerExhausted(guardState, control)).toBe(true);
@@ -5451,6 +5453,65 @@ describe("picker replay: refused choices", () => {
     expect(answered.kind).toBe("filled");
     expect(chooseOption).toHaveBeenCalledWith("c0", pickerReplay.options[0]);
   });
+
+  test.each([true, false])(
+    "an offered spelling reaches the ordinary fact check (supported=%s)",
+    async (supported) => {
+      const source = picker({ label: "City", options: [] });
+      const chooseOption = vi.fn((_ref: string, option: string) =>
+        Promise.resolve(
+          option === "Prishtina"
+            ? {
+                ok: false as const,
+                reason: "option_not_offered" as const,
+                offeredOptions: ["Pristina", "Prizren"],
+                error: "No exact row.",
+              }
+            : { ok: true as const, observedValue: option },
+        ),
+      );
+      const { config } = configFor(source, { hands: { chooseOption } });
+      config.sources.profile.currentLocation = "Prishtina";
+      const checkWrittenAnswer = vi.fn(() =>
+        Promise.resolve({
+          supported,
+          reason: supported
+            ? "Same city spelling."
+            : "Not supported by the facts.",
+        }),
+      );
+      const deps = {
+        config,
+        now,
+        guardState: createApplyGuardState(),
+        checkWrittenAnswer,
+      };
+      const signature = observationOf(source).signature;
+      const first = await executeApplyProposal(
+        {
+          tool: "select",
+          ref: "c0",
+          option: "Prishtina",
+          storedFactId: "profile.currentLocation",
+        },
+        signature,
+        deps,
+      );
+      expect(first.kind).toBe("refused");
+      if (first.kind === "refused")
+        expect(first.reason).toContain('["Pristina","Prizren"]');
+      const retry = await executeApplyProposal(
+        { tool: "select", ref: "c0", option: "Pristina" },
+        signature,
+        deps,
+      );
+      expect(checkWrittenAnswer).toHaveBeenCalledWith("City", "Pristina");
+      expect(retry.kind).toBe(supported ? "filled" : "suggestion");
+      expect(chooseOption.mock.calls.map((call) => call[1])).toEqual(
+        supported ? ["Prishtina", "Pristina"] : ["Prishtina"],
+      );
+    },
+  );
 
   test("a later success keeps the refused choice on record", async () => {
     const source = picker();

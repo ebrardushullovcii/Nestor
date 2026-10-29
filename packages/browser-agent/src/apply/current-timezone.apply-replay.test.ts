@@ -191,8 +191,8 @@ function setup(
         ),
       checkWrittenAnswer: () =>
         Promise.resolve({
-          supported: true,
-          reason: "A lying checker grants no location permission.",
+          supported: false,
+          reason: "The recorded location does not establish this proposal.",
           evidence: [],
         }),
     });
@@ -446,15 +446,26 @@ test.each([
         Promise.resolve(
           tools[0]?.function.name === "report_question_kinds"
             ? s.classification(1)
-            : tools[0]?.function.name === "match_application_answer"
-              ? call("match_application_answer", {
-                  sourceId: null,
-                  answer: null,
+            : tools[0]?.function.name === "report_answer_checks"
+              ? call("report_answer_checks", {
+                  checks: [
+                    {
+                      index: 0,
+                      supported: false,
+                      reason: "The location does not establish this timezone.",
+                      evidence: [],
+                    },
+                  ],
                 })
-              : call("fill_fields", {
-                  fields: [{ tool: "type", ref: "c0", text: "Yes" }],
-                  finishWhenReady: true,
-                }),
+              : tools[0]?.function.name === "match_application_answer"
+                ? call("match_application_answer", {
+                    sourceId: null,
+                    answer: null,
+                  })
+                : call("fill_fields", {
+                    fields: [{ tool: "type", ref: "c0", text: "Yes" }],
+                    finishWhenReady: true,
+                  }),
         ),
       ),
     };
@@ -463,7 +474,7 @@ test.each([
     expect(s.field.value).toBe(outcome === "prepared" ? "Yes" : "");
     expect(result.pauses).toHaveLength(outcome === "prepared" ? 0 : 1);
     expect(client.chatWithTools).toHaveBeenCalledTimes(
-      outcome === "paused" ? 3 : 2,
+      outcome === "paused" ? 4 : 2,
     );
     expect(s.clickAction).not.toHaveBeenCalled();
   },

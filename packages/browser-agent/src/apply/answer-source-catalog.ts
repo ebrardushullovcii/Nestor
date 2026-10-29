@@ -45,6 +45,7 @@ import { requiresOwnWords, ownWordsAppliesToQuestion } from "./own-words";
 import { employmentMonthEvidence, isScalarAnswer } from "./answer-evidence";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
+import { isShortValueAnswer } from "./written-answer-grounding";
 import { asksGithubUsername, fieldNamesAnotherPerson } from "./github-username";
 import {
   asksForSpecificStory,
@@ -568,6 +569,11 @@ function permitConditionsFit(
 export type ClassifiedAnswerDecision =
   | { kind: "literal"; source: ClassifiedAnswerSource }
   | {
+      kind: "inference";
+      source: null;
+      evidencePolicy: "factual_inference";
+    }
+  | {
       kind: "writing";
       source: ClassifiedAnswerSource | null;
       evidencePolicy?: "factual_summary";
@@ -833,10 +839,12 @@ export function classifyAnswerPermission(input: {
   )
     return { kind: "writing", source: null };
   if (!source)
-    return deny(
-      "There is no matching verbatim source for this question. Please supply your answer.",
-      "source_lookup",
-    );
+    return factualInferenceAllowed(input)
+      ? { kind: "inference", source: null, evidencePolicy: "factual_inference" }
+      : deny(
+          "There is no matching verbatim source for this question. Please supply your answer.",
+          "source_lookup",
+        );
   const saved =
     savedAnswerForQuestion(
       input.control,
@@ -1158,7 +1166,56 @@ export function classifyAnswerPermission(input: {
       : deny(
           "This summary must use complete statements from your resume or Profile, without joining separate facts into a new claim.",
         );
-  return deny(
-    "This value is not a verbatim answer from a known-safe matching source.",
+  return factualInferenceAllowed(input)
+    ? { kind: "inference", source: null, evidencePolicy: "factual_inference" }
+    : deny(
+        "This value is not a verbatim answer from a known-safe matching source.",
+      );
+}
+
+/** Permission to ask the checker, never permission to enter its proposal. */
+function factualInferenceAllowed(input: {
+  control: ApplyFormControl;
+  tags: ApplyAnswerTags | null | undefined;
+  pageInstructions: string;
+  answer: string;
+}): boolean {
+  const { control, tags } = input;
+  const question = [
+    ...(control.sectionPath ?? []),
+    control.groupLabel,
+    control.label,
+    control.hint ?? "",
+  ].join("\n");
+  return (
+    !!tags &&
+    ["other", "residence_country"].includes(tags.kind) &&
+    ["text", "select", "combobox", "radio", "checkbox"].includes(
+      control.kind,
+    ) &&
+    (control.kind !== "text" || isShortValueAnswer(control, input.answer)) &&
+    !["salary_expectation", "work_authorization", "visa_sponsorship"].includes(
+      control.questionKind,
+    ) &&
+    !control.asksCurrentPay &&
+    !control.asksHiringCountry &&
+    !control.credentialRole &&
+    !control.repeatedQuestion &&
+    control.attestationKind === null &&
+    inferAttestationKind(control) === null &&
+    // These are permission boundaries, not rules choosing an answer. The
+    // question reader also recognizes their meaning in other languages.
+    !/\b(?:criminal|convict(?:ion|ed)?|felon(?:y)?|misdemeanou?r|arrest(?:ed)?|signature|sign here|digitally sign)\b/iu.test(
+      question,
+    ) &&
+    !fieldNamesAnotherPerson(control) &&
+    !requiresOwnWords(question) &&
+    !ownWordsAppliesToQuestion(
+      `${control.groupLabel}\n${input.pageInstructions}`,
+      control.label,
+    ) &&
+    !requiresSavedNationalityAnswer(question) &&
+    !requiresSavedOpinionAnswer(question, input.answer) &&
+    !asksForSpecificStory(question)
   );
 }

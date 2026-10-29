@@ -550,6 +550,13 @@ async function runMeasuredApplyAgent(
           control.answered = false;
         if (previousOptions && !control.options.length)
           control.options = [...previousOptions];
+        // Remote menus disappear when their search is cleared. Keep the
+        // rows the picker returned available to the next model turn and to
+        // the person's question if no supported equivalent can be chosen.
+        if (guardState.openPickers.has(key) && !control.options.length)
+          control.options = [
+            ...(guardState.pickerAttempts.get(key)?.offeredOptions ?? []),
+          ];
       }
       return observation;
     },
@@ -757,7 +764,7 @@ async function runMeasuredApplyAgent(
   const answerCheckKey = (
     question: string,
     answer: string,
-    evidencePolicy?: "factual_summary",
+    evidencePolicy?: "factual_summary" | "factual_inference",
   ) =>
     JSON.stringify([
       pageTools.state.observation?.url,
@@ -769,7 +776,7 @@ async function runMeasuredApplyAgent(
   const checkOne = (
     question: string,
     answer: string,
-    evidencePolicy?: "factual_summary",
+    evidencePolicy?: "factual_summary" | "factual_inference",
   ): Promise<WrittenAnswerCheck> => {
     const key = answerCheckKey(question, answer, evidencePolicy);
     const cached = answerChecks.get(key);
@@ -802,7 +809,7 @@ async function runMeasuredApplyAgent(
     question: string;
     answer: string;
     control: ApplyFormObservation["controls"][number];
-    evidencePolicy?: "factual_summary";
+    evidencePolicy?: "factual_summary" | "factual_inference";
   } | null => {
     const control = observation.controls.find(
       (candidate) => candidate.ref === proposal.ref,
@@ -838,7 +845,8 @@ async function runMeasuredApplyAgent(
           control.kind === "checkbox" &&
           control.answerControlType !== "multi_choice" &&
           control.questionKind !== "work_authorization" &&
-          control.questionKind !== "visa_sponsorship"
+          control.questionKind !== "visa_sponsorship" &&
+          !classifyQuestions
         )
           return null;
         answer =
@@ -855,27 +863,44 @@ async function runMeasuredApplyAgent(
       case "click":
         return null; // The executor checks files and click-derived answers itself.
     }
-    let evidencePolicy: "factual_summary" | undefined;
+    let evidencePolicy: "factual_summary" | "factual_inference" | undefined;
     if (answer !== null && classifyQuestions) {
       const readings = classifyQuestions.settled(
         observation.controls,
         questionReadContext(observation),
       );
-      const tags = (
+      const reading =
         readings?.get(
           questionClassificationKey(control, observation.controls),
-        ) ?? readings?.get(questionPrompt(control))
-      )?.answerTags;
+        ) ?? readings?.get(questionPrompt(control));
       const permission = classifyAnswerPermission({
-        control,
+        control: {
+          ...control,
+          attestationKind: reading?.declarationKind ?? control.attestationKind,
+          questionKind: reading?.asksAboutPay
+            ? "salary_expectation"
+            : (reading?.eligibilityKind ?? control.questionKind),
+          asksCurrentPay:
+            reading?.asksCurrentPay ?? control.asksCurrentPay ?? false,
+          asksHiringCountry:
+            reading?.asksHiringCountry ?? control.asksHiringCountry ?? false,
+        },
         controls: observation.controls,
-        tags,
+        tags: reading?.answerTags,
         sources: runConfig.sources,
         answer,
         pageInstructions: formWritingInstructions(observation),
       });
-      if (permission.kind !== "writing") return null;
+      if (permission.kind !== "writing" && permission.kind !== "inference")
+        return null;
       evidencePolicy = permission.evidencePolicy;
+      if (permission.kind === "inference")
+        return {
+          question: questionPrompt(control),
+          answer,
+          control,
+          evidencePolicy: permission.evidencePolicy,
+        };
     }
     return answer !== null &&
       !requiresSavedOpinionAnswer(questionPrompt(control), answer) &&
@@ -1615,7 +1640,7 @@ async function runMeasuredApplyAgent(
         );
         syncObservation(outcome.observation);
         note(
-          `Answered "${outcome.filled.label}" from ${outcome.filled.answer.provenanceLabel}.`,
+          `Answered "${outcome.filled.label}" (${outcome.filled.answer.provenanceLabel}).`,
         );
         return {
           kind: "ok",
@@ -2395,7 +2420,7 @@ async function runMeasuredApplyAgent(
     checkWrittenAnswer: (
       question: string,
       answer: string,
-      evidencePolicy?: "factual_summary",
+      evidencePolicy?: "factual_summary" | "factual_inference",
     ) => Promise<WrittenAnswerCheck>,
     deferTextCommit?: (commit: () => void) => void,
   ): Promise<ApplyExecutionOutcome> => {
@@ -2857,8 +2882,10 @@ async function runMeasuredApplyAgent(
       );
       const shortShape =
         toCheck.length > 0 &&
-        toCheck.every((entry) =>
-          isShortValueAnswer(entry.control, entry.answer),
+        toCheck.every(
+          (entry) =>
+            entry.evidencePolicy !== "factual_inference" &&
+            isShortValueAnswer(entry.control, entry.answer),
         );
       const verdicts = (
         !shortShape || !classifyQuestions
@@ -2900,8 +2927,11 @@ async function runMeasuredApplyAgent(
       void classifyQuestions?.(observation.controls, stepKey).catch(
         () => undefined,
       );
-      const checkFromBatch = (question: string, answer: string) =>
-        checkOne(question, answer);
+      const checkFromBatch = (
+        question: string,
+        answer: string,
+        evidencePolicy?: "factual_summary" | "factual_inference",
+      ) => checkOne(question, answer, evidencePolicy);
       const lines: string[] = [];
       let wrote = false;
       let stopped = false;

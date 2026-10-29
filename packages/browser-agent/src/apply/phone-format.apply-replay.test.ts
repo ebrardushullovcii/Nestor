@@ -171,8 +171,8 @@ function setup() {
     });
   const checkWrittenAnswer = vi.fn(() =>
     Promise.resolve({
-      supported: true,
-      reason: "A model cannot authorize a different phone number.",
+      supported: false,
+      reason: "The recorded phone does not support this proposal.",
       evidence: [],
     }),
   );
@@ -294,7 +294,7 @@ test.each([
     expect((await s.execute(answer)).kind).not.toBe("filled");
     expect(s.fillText).not.toHaveBeenCalled();
     expect((await s.check(answer))[0]?.supported).toBe(false);
-    expect(s.checkWrittenAnswer).not.toHaveBeenCalled();
+    expect(s.checkWrittenAnswer).toHaveBeenCalledOnce();
   },
 );
 

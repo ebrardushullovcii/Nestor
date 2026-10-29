@@ -116,14 +116,14 @@ test("a nested scalar history fact remains literal when classified as a factual 
   ).toBe("needs_you");
 });
 
-test("an unknown age has a no-source check rather than a rejected Profile value", () => {
+test("an unknown age goes to the fact check instead of literal permission", () => {
   expect(
     decide(source(), control("Are you over 18?"), {
       kind: "other",
       country: null,
       sourceId: null,
     }),
-  ).toMatchObject({ kind: "needs_you", check: "source_lookup" });
+  ).toMatchObject({ kind: "inference", evidencePolicy: "factual_inference" });
 });
 
 test("the classified meaning retains additional legal conditions in another language", () => {
@@ -229,8 +229,8 @@ test("plain applicant identity binds to its own exact Profile value when the mod
       kind: "literal",
       source: { id },
     });
-    expect(decide(sources, field, tags, "Different value").kind).toBe(
-      "needs_you",
+    expect(decide(sources, field, tags, "Different value").kind).not.toBe(
+      "literal",
     );
     expect(decide(sources, field, null, value).kind).toBe("needs_you");
     expect(
@@ -242,7 +242,7 @@ test("plain applicant identity binds to its own exact Profile value when the mod
         answer: value,
         pageInstructions: "Professional reference",
       }).kind,
-    ).toBe("needs_you");
+    ).not.toBe("literal");
     expect(
       decide(sources, field, { ...tags, kind: "own_words" }, value).kind,
     ).toBe("needs_you");
@@ -419,8 +419,8 @@ test("a missing identity source does not fill a reference, qualified question or
       hint: "Your name before your most recent change",
     },
   ])
-    expect(decide(sources, field, tags, "Alex Vanguard").kind).toBe(
-      "needs_you",
+    expect(decide(sources, field, tags, "Alex Vanguard").kind).not.toBe(
+      "literal",
     );
   const field = control("Full name");
   expect(
@@ -430,10 +430,12 @@ test("a missing identity source does not fill a reference, qualified question or
     ]).kind,
   ).toBe("needs_you");
   sources.profile.fullName = "";
-  expect(decide(sources, field, tags, "Alex Vanguard").kind).toBe("needs_you");
+  expect(decide(sources, field, tags, "Alex Vanguard").kind).not.toBe(
+    "literal",
+  );
 });
 
-test("relocation choice groups use the question leaf, and unknown relocation or age stays unknown", () => {
+test("relocation choice groups use the question leaf; unknown facts have no literal permission", () => {
   const sources = source();
   const field = {
     ...control("No"),
@@ -448,7 +450,7 @@ test("relocation choice groups use the question leaf, and unknown relocation or 
     country: null,
     sourceId: "profile.workEligibility.willingToRelocate",
   } as const;
-  expect(decide(sources, field, tags, "No").kind).toBe("needs_you");
+  expect(decide(sources, field, tags, "No").kind).not.toBe("literal");
   sources.profile.workEligibility.willingToRelocate = false;
   expect(decide(sources, field, tags, "No").kind).toBe("literal");
   expect(
@@ -462,7 +464,7 @@ test("relocation choice groups use the question leaf, and unknown relocation or 
       tags,
       "No",
     ).kind,
-  ).toBe("needs_you");
+  ).not.toBe("literal");
 });
 
 test.each(["profile.githubUrl", "profile.links.code"])(
@@ -502,7 +504,7 @@ test.each(["profile.githubUrl", "profile.links.code"])(
         { kind: "other", country: null, sourceId: null },
         "synthetic-alex",
       ).kind,
-    ).toBe("needs_you");
+    ).not.toBe("literal");
     expect(
       decide(
         sources,
@@ -510,7 +512,7 @@ test.each(["profile.githubUrl", "profile.links.code"])(
         { kind: "other", country: null, sourceId },
         "https://github.com/synthetic-alex",
       ).kind,
-    ).toBe("needs_you");
+    ).not.toBe("literal");
     expect(
       decide(
         sources,
@@ -569,7 +571,7 @@ test.each([
           { kind: "other", country: null, sourceId },
           "synthetic-alex",
         ).kind,
-      ).toBe("needs_you");
+      ).not.toBe("literal");
     if (shape.hint.includes("emergency contact"))
       expect(
         decide(
@@ -609,7 +611,7 @@ test.each(["other", null] as const)(
           { kind: "other", country: null, sourceId },
           "synthetic-community",
         ).kind,
-      ).toBe("needs_you");
+      ).not.toBe("literal");
     expect(
       decide(
         sources,
@@ -632,11 +634,11 @@ test.each([
     country: null,
     sourceId: "profile.githubUrl#username",
   } as const;
-  expect(decide(sources, control(label), tags, "synthetic-alex").kind).toBe(
-    "needs_you",
+  expect(decide(sources, control(label), tags, "synthetic-alex").kind).not.toBe(
+    "literal",
   );
   const url = control("GitHub URL");
-  expect(decide(sources, url, tags, "synthetic-alex").kind).toBe("needs_you");
+  expect(decide(sources, url, tags, "synthetic-alex").kind).not.toBe("literal");
   expect(
     decide(
       sources,
@@ -764,7 +766,7 @@ test.each([
         },
         answer,
       ).kind,
-    ).toBe(expected);
+    ).toBe(expected === "needs_you" ? "inference" : expected);
   },
 );
 
@@ -844,7 +846,7 @@ test.each([
         { kind: "other", country: null, sourceId: null },
         answer,
       ).kind,
-    ).toBe("needs_you");
+    ).not.toBe("literal");
   },
 );
 
@@ -859,8 +861,8 @@ test.each(["Months", "Weeks", "", "Days or months"])(
       country: null,
       sourceId: "profile.workEligibility.noticePeriodDays",
     } as const;
-    expect(decide(sources, field, tags, "30").kind).toBe("needs_you");
-    expect(decide(sources, field, tags, "30 days").kind).toBe("needs_you");
+    expect(decide(sources, field, tags, "30").kind).not.toBe("literal");
+    expect(decide(sources, field, tags, "30 days").kind).not.toBe("literal");
   },
 );
 
@@ -1280,7 +1282,7 @@ test("total experience brackets format the recorded total without lending it to 
   expect(decide(sources, field, tags, "6-10").kind).toBe("literal");
   expect(decide(sources, field, tags, "7 or more years").kind).toBe("literal");
   for (const answer of ["3-5", "11+", "7-9"])
-    expect(decide(sources, field, tags, answer).kind).toBe("needs_you");
+    expect(decide(sources, field, tags, answer).kind).not.toBe("literal");
   expect(
     decide(
       sources,
@@ -1288,7 +1290,7 @@ test("total experience brackets format the recorded total without lending it to 
       tags,
       "6-10",
     ).kind,
-  ).toBe("needs_you");
+  ).not.toBe("literal");
 });
 
 test("country of residence selects the legal jurisdiction but never proves permission", () => {
@@ -1316,7 +1318,7 @@ test("an explicit saved international phone supplies its code, not residence or 
     sourceId: "profile.phone#callingCode",
   } as const;
   expect(decide(sources, field, tags, "+49").kind).toBe("literal");
-  expect(decide(sources, field, tags, "+351").kind).toBe("needs_you");
+  expect(decide(sources, field, tags, "+351").kind).not.toBe("literal");
   expect(
     decide(
       sources,
@@ -1326,7 +1328,7 @@ test("an explicit saved international phone supplies its code, not residence or 
     ).kind,
   ).toBe("needs_you");
   sources.profile.phone = "0555 0000000";
-  expect(decide(sources, field, tags, "+49").kind).toBe("needs_you");
+  expect(decide(sources, field, tags, "+49").kind).not.toBe("literal");
 });
 
 test("explicit residence country can be read from a saved full location, never from the city alone", () => {

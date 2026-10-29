@@ -11,6 +11,7 @@ import { handlePersonalClaims } from "./personal-claims.mjs";
 import { handleUploadRepair } from "./upload-repair.mjs";
 import { handleHandoverOptions } from "./handover-options.mjs";
 import { handleRememberedQuestions } from "./remembered-questions.mjs";
+import { handleRemoteSearch } from "./remote-search.mjs";
 
 // All data, accounts and endpoints are synthetic and local to this server.
 const confirmation = "Thank you! Your application has been received.";
@@ -446,6 +447,8 @@ const server = http.createServer(async (req, res) => {
     req.headers.cookie || "",
   );
   try {
+    if (await handleRemoteSearch(req, res, url, { send, readPost, logPost }))
+      return;
     if (handlePermitFit(req, res, url, { send })) return;
     if (await scale.handle(req, res, url)) return;
     if (await handleHandoverOptions(req, res, url, { send, readPost, logPost }))

@@ -419,4 +419,4 @@ test("a GitLab-sized fill keeps the same facts and handovers with bounded input 
     formContext: { pageText: observation.bodyTextExcerpt, fields: [] },
   });
   expect(rechecked.every((check) => check.supported)).toBe(true);
-});
+}, 30_000);

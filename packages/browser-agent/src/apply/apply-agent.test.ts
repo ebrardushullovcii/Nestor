@@ -7438,6 +7438,28 @@ test.each([false, true])(
     ]);
     const result = await runApplyAgent(input, {
       chatWithTools: (messages, definitions, options) => {
+        if (definitions[0]?.function.name === "report_answer_checks")
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "reject-typo",
+                type: "function",
+                function: {
+                  name: "report_answer_checks",
+                  arguments: JSON.stringify({
+                    checks: [
+                      {
+                        index: 0,
+                        supported: false,
+                        reason: "The name does not match Profile.",
+                        evidence: [],
+                      },
+                    ],
+                  }),
+                },
+              },
+            ],
+          });
         if (definitions[0]?.function.name !== "report_question_kinds")
           return flow.chatWithTools(messages, definitions, options);
         return Promise.resolve({
@@ -8470,6 +8492,129 @@ describe("saved picker fallback replay", () => {
     expect(result.skipReason).toBeUndefined();
     expect(choose).not.toHaveBeenCalled();
   });
+});
+
+test("fill_fields returns remote-search choices to the model and accepts its checked exact retry", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        label: "City",
+        role: "combobox",
+        value: "",
+        options: [],
+      },
+    ],
+  });
+  const input = config(source);
+  input.sources.profile.currentLocation = "Cloud Harbour";
+  input.sources.profile.summary =
+    "Lives in Cloud Harbor, also spelled Cloud Harbour.";
+  expect(createApplySystemPrompt(input)).toContain(
+    "do not treat that as needing a saved fallback rule",
+  );
+  const choose = vi.fn((_ref: string, option: string) => {
+    if (option === "Cloud Harbour")
+      return Promise.resolve({
+        ok: false as const,
+        reason: "option_not_offered" as const,
+        offeredOptions: ["Cloud Harbor", "Cloud Hill"],
+        error: "No exact row.",
+      });
+    source.controls[0].value = option;
+    source.controls[0].selectedOptionLabel = option;
+    return Promise.resolve({ ok: true as const, observedValue: option });
+  });
+  input.hands.chooseOption = choose;
+  const flow = scriptedModel([
+    {
+      name: "fill_fields",
+      args: {
+        fields: [{ tool: "select", ref: "c0", option: "Cloud Harbour" }],
+      },
+    },
+    {
+      name: "fill_fields",
+      args: { fields: [{ tool: "select", ref: "c0", option: "Cloud Harbor" }] },
+    },
+    { name: "finish", args: { reason: "Filled." } },
+  ]);
+  let sawOffered = false;
+  let checkedRetry = false;
+  const result = await runApplyAgent(input, {
+    chatWithTools: (messages, definitions, options) => {
+      if (definitions[0]?.function.name === "report_answer_checks")
+        checkedRetry ||= messages.some((message) =>
+          message.content.includes('"proposedAnswer":"Cloud Harbor"'),
+        );
+      else
+        sawOffered ||= messages.some(
+          (message) =>
+            message.role === "tool" &&
+            message.content.includes(
+              'It offers: ["Cloud Harbor","Cloud Hill"]',
+            ),
+        );
+      return flow.chatWithTools(messages, definitions, options);
+    },
+  });
+  expect(sawOffered).toBe(true);
+  expect(checkedRetry).toBe(true);
+  expect(choose.mock.calls.map((call) => call[1])).toEqual([
+    "Cloud Harbour",
+    "Cloud Harbor",
+  ]);
+  expect(source.controls[0].value).toBe("Cloud Harbor");
+  expect(result.filled[0]?.answer.value).toBe("Cloud Harbor");
+  expect(result.pauses).toHaveLength(0);
+});
+
+test("remote-search choices survive a closed menu when the model leaves the question for the person", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        label: "City",
+        role: "combobox",
+        value: "",
+        options: [],
+      },
+    ],
+  });
+  const input = config(source);
+  input.sources.profile.currentLocation = "Cloud Harbour";
+  input.hands.chooseOption = () =>
+    Promise.resolve({
+      ok: false,
+      reason: "option_not_offered",
+      offeredOptions: ["Cloud Harbor", "Cloud Hill"],
+      error: "No exact row.",
+    });
+  const result = await runApplyAgent(
+    input,
+    scriptedModel([
+      {
+        name: "fill_fields",
+        args: {
+          fields: [{ tool: "select", ref: "c0", option: "Cloud Harbour" }],
+        },
+      },
+      {
+        name: "finish",
+        args: {
+          reason: "The city needs the person.",
+          needsPerson: true,
+          forPerson: ["City"],
+        },
+      },
+    ]),
+  );
+  expect(result.filled).toHaveLength(0);
+  expect(
+    result.pauses.flatMap(
+      (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+    )[0]?.answerOptions,
+  ).toEqual(["Cloud Harbor", "Cloud Hill"]);
 });
 
 test("resumed picker replay never counts leftover search text as a confirmed answer", async () => {

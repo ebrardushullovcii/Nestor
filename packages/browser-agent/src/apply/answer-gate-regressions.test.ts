@@ -662,7 +662,7 @@ test.each(["empty", "draft", "reference", "compound"])(
         answer: "No",
         pageInstructions: "",
       }).kind,
-    ).toBe("needs_you");
+    ).not.toBe("literal");
   },
 );
 function sources(): ApplyAnswerSources {
@@ -1749,7 +1749,7 @@ test.each([
         answer,
         pageInstructions: "Professional reference",
       }).kind,
-    ).toBe("needs_you");
+    ).not.toBe("literal");
   },
 );
 

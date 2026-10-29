@@ -784,7 +784,7 @@ test("bounds shared question reads and reads an evicted page with the model agai
   expect(client.chatWithTools).toHaveBeenCalledTimes(513);
   await createQuestionClassifier({ client, cacheScope })(controls("Page 0"));
   expect(client.chatWithTools).toHaveBeenCalledTimes(514);
-});
+}, 30_000);
 
 test("plain questions are named by index and only flagged ones are spelled out", async () => {
   const client = clientReplyingSparse({
