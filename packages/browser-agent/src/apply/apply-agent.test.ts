@@ -433,7 +433,7 @@ function scriptedModel(
   };
 }
 
-test.each(["Sign in", "Create account"])("an enabled %s handoff never asks for credentials as saved-answer questions", async (label) => {
+test.each(["Sign in", "Create account", "Continue"])("an enabled %s handoff never asks for credentials as saved-answer questions", async (label) => {
   const source = page({
     title: label, bodyText: label,
     controls: [{ ...nameControl(), label: "Password", inputType: "password", value: "" }],
@@ -443,7 +443,8 @@ test.each(["Sign in", "Create account"])("an enabled %s handoff never asks for c
     { name: "finish", args: { reason: "Enter the password on the site", needsPerson: true, forPerson: ["Password"] } },
   ]));
   expect(result.pauses).toHaveLength(1);
-  expect(result.pauses[0]).toMatchObject({ code: "page_blocked", question: null, blocker: { code: label === "Sign in" ? "site_login_required" : "account_creation_required", requiresPerson: true } });
+  expect(result.pauses[0]).toMatchObject({ code: "page_blocked", question: null });
+  if (label !== "Continue") expect(result.pauses[0]?.blocker).toMatchObject({ code: label === "Sign in" ? "site_login_required" : "account_creation_required", requiresPerson: true });
   expect(result.pauses[0]?.questions ?? []).toEqual([]);
 });
 

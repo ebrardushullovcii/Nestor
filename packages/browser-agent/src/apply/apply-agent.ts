@@ -138,6 +138,7 @@ import type {
   ApplyAgentConfig,
   ApplyAgentResult,
   ApplyAttachedDocument,
+  ApplyBlocker,
   ApplyFilledControl,
   ApplyFormObservation,
   ApplyFormControl,
@@ -1789,20 +1790,43 @@ async function runMeasuredApplyAgent(
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();
         if (
-          observation.blocker &&
-          [
-            "site_login_required",
-            "account_creation_required",
-            "multi_factor_required",
-            "security_challenge",
-          ].includes(observation.blocker.code)
+          (observation.blocker &&
+            [
+              "site_login_required",
+              "account_creation_required",
+              "multi_factor_required",
+              "security_challenge",
+            ].includes(observation.blocker.code)) ||
+          (!observation.blocker &&
+            observation.controls.some(
+              (control) =>
+                control.visible &&
+                !control.disabled &&
+                (control.credentialRole === "password" ||
+                  control.credentialRole === "one_time_code") &&
+                (control.required || outcome.needsPerson),
+            ))
         ) {
           // Credentials and verification belong on the website. Even with an
           // enabled permission, a step the agent could not finish is an access
           // handoff, never a saved-answer question asking for a password/code.
           pendingQuestions.clear();
           forPerson = [];
-          const blocker = { ...observation.blocker, requiresPerson: true };
+          const blocker: ApplyBlocker = observation.blocker
+            ? { ...observation.blocker, requiresPerson: true }
+            : {
+                code: observation.controls.some(
+                  (control) => control.visible && control.credentialRole === "one_time_code",
+                )
+                  ? "multi_factor_required"
+                  : "site_login_required",
+                requiresPerson: true,
+                summary:
+                  "Complete the password or verification step on the website, then continue.",
+                detail:
+                  "Enter credentials only on the website. They must never be entered as saved answers in Nestor.",
+                nextActionLabel: "Open the website",
+              };
           pageTools.state.observation = { ...observation, blocker };
           pauses.push({
             code: "page_blocked",
