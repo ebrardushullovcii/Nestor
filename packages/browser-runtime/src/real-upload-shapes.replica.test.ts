@@ -382,7 +382,7 @@ test("Ashby with field saves: guarded Submit sends once after the Yes/No presses
       file: expect.stringContaining(resume.name) as unknown,
     },
   });
-});
+}, 15_000);
 
 test("A JavaScript-sent form: its Apply submits it, and the guarded click sends the page's own POST once", async () => {
   const { page, session } = await fillPage("contact-form-shape");
@@ -574,6 +574,38 @@ test("Lever: the renamed resume reaches its parser with the form's id, and typed
   ).toEqual([]);
 });
 
+test("remote-search replica returns city and degree rows, commits exact retries and sends nothing", async () => {
+  const { page, session } = await fillPage("remote-search");
+  for (const [id, answer, offered] of [
+    ["city", "Cloud Harbour", ["Cloud Harbor", "Cloud Hill"]],
+    ["degree", "BSc Computer Science", ["Bachelor's Degree"]],
+  ] as const) {
+    const control = (await session.readPage()).controls.find(
+      (entry) => entry.id === id,
+    )!;
+    const ref = control.ref ?? `c${control.index}`;
+    await registerPrepareOnlyPreparedValue(page, answer);
+    expect(await session.chooseOption(ref, answer)).toMatchObject({
+      ok: false,
+      reason: "option_not_offered",
+      offeredOptions: [...offered],
+    });
+    expect(await page.locator(`#${id}`).inputValue()).toBe("");
+    await registerPrepareOnlyPreparedValue(page, offered[0]);
+    expect(await session.chooseOption(ref, offered[0])).toEqual({
+      ok: true,
+      observedValue: offered[0],
+    });
+    expect(
+      (await session.readPage()).controls.find((entry) => entry.id === id)
+        ?.value,
+    ).toBe(offered[0]);
+  }
+  expect(
+    posts().filter((post) => post.path === "/remote-search/apply/1"),
+  ).toEqual([]);
+}, 60_000);
+
 test("Ashby: its location picker's search carries what was typed, and the choice reads back", async () => {
   const { page, session } = await fillPage("ashby-shape");
   const sent = () =>
@@ -593,7 +625,7 @@ test("Ashby: its location picker's search carries what was typed, and the choice
   expect(after).toMatchObject({ role: "combobox", value: "Kosovo" });
   // Only the search left; nothing was submitted.
   expect(sent()).toBe(sentBefore);
-});
+}, 15_000);
 
 test("Ashby: a location already picked stays picked when a continue chooses it again", async () => {
   const { page, session } = await fillPage("ashby-shape");

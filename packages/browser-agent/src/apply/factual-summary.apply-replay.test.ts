@@ -227,7 +227,11 @@ test.each([
     siteLabel: "Synthetic employer",
   } as unknown as ApplyAgentConfig;
   const check = vi.fn(
-    (question: string, answer: string, evidencePolicy?: "factual_summary") =>
+    (
+      question: string,
+      answer: string,
+      evidencePolicy?: "factual_summary" | "factual_inference",
+    ) =>
       checkWrittenApplicationAnswer({
         client,
         sources,

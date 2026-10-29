@@ -73,7 +73,10 @@ async function replay(
     return Promise.resolve({ ok: true as const, observedValue: "Germany" });
   });
   const checkWrittenAnswer = vi.fn(() =>
-    Promise.resolve({ supported: true, reason: "Lying checker" }),
+    Promise.resolve({
+      supported: false,
+      reason: "This proposal has not been independently supported.",
+    }),
   );
   const config = {
     sources: {
@@ -257,7 +260,9 @@ test.each([
     const result = await replay(label, "text", group, sourceId);
     expect(result.outcome.kind).toBe("suggestion");
     expect(result.write).not.toHaveBeenCalled();
-    expect(result.checkWrittenAnswer).not.toHaveBeenCalled();
+    expect(result.checkWrittenAnswer).toHaveBeenCalledTimes(
+      sourceId === null ? 1 : 0,
+    );
   },
 );
 

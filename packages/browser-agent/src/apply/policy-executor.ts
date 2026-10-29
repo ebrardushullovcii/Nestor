@@ -192,11 +192,12 @@ export interface ApplyExecutorDeps {
   checkWrittenAnswer?: (
     question: string,
     answer: string,
-    evidencePolicy?: "factual_summary",
+    evidencePolicy?: "factual_summary" | "factual_inference",
   ) => Promise<{
     supported: boolean;
     reason: string;
     reviewWording?: string;
+    groundedIn?: string[];
   }>;
 }
 
@@ -1052,11 +1053,12 @@ async function decideAnswer(input: {
         },
       };
     }
-    // Writing permission never falls through the legacy literal shortcuts.
+    // Checked answers never fall through the legacy literal shortcuts.
+    const inferred = permission.kind === "inference";
     if (!deps.checkWrittenAnswer)
       return {
         kind: "leave",
-        reason: "This writing could not be checked against your sources.",
+        reason: "This answer could not be checked against your sources.",
         suggestion: null,
         permission: true,
       };
@@ -1075,7 +1077,7 @@ async function decideAnswer(input: {
         kind: "leave",
         reason:
           check?.reason ??
-          "This writing could not be checked against your sources.",
+          "This answer could not be checked against your sources.",
         suggestion: null,
         permission: true,
       };
@@ -1085,13 +1087,17 @@ async function decideAnswer(input: {
         value,
         kind: control.questionKind,
         sourceKind: "generated",
-        sourceId: `written.${control.ref}`,
-        provenanceLabel: "written for this application",
-        groundedIn: input.groundedIn?.length
-          ? [...input.groundedIn]
-          : permission.source
-            ? [permission.source.id]
-            : [],
+        sourceId: `${inferred ? "inferred" : "written"}.${control.ref}`,
+        provenanceLabel: inferred
+          ? "worked out from your profile"
+          : "written for this application",
+        groundedIn: inferred
+          ? [...(check.groundedIn ?? [])]
+          : input.groundedIn?.length
+            ? [...input.groundedIn]
+            : permission.source
+              ? [permission.source.id]
+              : [],
       },
     };
     // Only requested writing reaches the independent claim checker below.
@@ -2748,6 +2754,19 @@ export async function executeApplyProposal(
       const write = await choosePickerOption(deps, control, option);
       if (!write.ok) {
         const after = await config.hands.observe();
+        // A remote-search list may use a different spelling or a broader
+        // label. Give its rows back to the model; its next proposal still
+        // goes through decideAnswer and the usual permission/fact checks.
+        if (
+          control.kind === "combobox" &&
+          write.offeredOptions?.length &&
+          !pickerExhausted(deps.guardState, control)
+        )
+          return {
+            kind: "refused",
+            reason: `The list did not take "${option}". It offers: ${JSON.stringify(write.offeredOptions)}. Choose an exact offered option only if it means the person's answer and their facts support it; otherwise leave this question for the person.`,
+            observation: after,
+          };
         return pickerHandover(
           deps,
           after,
@@ -2758,7 +2777,8 @@ export async function executeApplyProposal(
         );
       }
       return pickerFilled(deps, control, observation, at, {
-        ...(choice.answer.sourceKind === "generated"
+        ...(choice.answer.sourceKind === "generated" &&
+        !choice.answer.sourceId.startsWith("inferred.")
           ? {
               ...choice.answer,
               sourceId: `chosen.${control.ref}`,
@@ -2836,7 +2856,8 @@ export async function executeApplyProposal(
           });
         }
         radioAnswer =
-          choice.answer.sourceKind === "generated"
+          choice.answer.sourceKind === "generated" &&
+          !choice.answer.sourceId.startsWith("inferred.")
             ? {
                 ...choice.answer,
                 value: proposedOption,

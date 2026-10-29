@@ -38,8 +38,8 @@ const pause = (ms: number) =>
 
 /**
  * Reports the list's response to one requested choice, never chooses an
- * alternative. "Not offered" is returned only from a list that finished
- * loading and was read to its end; anything less is uncertain.
+ * alternative. A searchable list can report the choices a settled search
+ * offered even when the picker does not expose its entire inventory.
  */
 export async function choosePageOption(
   page: Page,
@@ -323,6 +323,9 @@ function exactName(text: string): RegExp {
   const escaped = text
     .trim()
     .replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")
+    // Quotes inside a role-name regexp must not open a selector string.
+    .replace(/'/gu, "\\x27")
+    .replace(/"/gu, "\\x22")
     .replace(/\s+/gu, "\\s+");
   return new RegExp(`^\\s*${escaped}\\s*$`, "iu");
 }
@@ -339,6 +342,48 @@ async function clickRow(list: Locator, text: string): Promise<string> {
   return text;
 }
 
+/** Search queries only, never guesses at alternative answers. */
+function shorterSearches(label: string): string[] {
+  const words = label.trim().split(/\s+/u);
+  const first = words[0] ?? "";
+  return [
+    ...new Set([
+      words.slice(0, 2).join(" "),
+      first,
+      Array.from(first).slice(0, 3).join(""),
+    ]),
+  ].filter((query) => query && query.length < label.trim().length);
+}
+
+async function selectRow(
+  list: Locator,
+  locator: Locator,
+  text: string,
+  searchable: boolean,
+): Promise<ApplyWriteResult> {
+  await clickRow(list, text);
+  if (!searchable) return { ok: true, observedValue: text };
+  // Typed text is not a committed selection. Leave the search and let the
+  // widget's blur validation run before reporting what it kept.
+  await locator.blur();
+  await pause(STABLE_MS);
+  const retained = await locator.evaluate((element) => {
+    const input = element as HTMLInputElement;
+    const root = element.closest(
+      "[class*='__control'], [class*='-control'], .select-shell, [class*='select-shell']",
+    );
+    const selected = root?.querySelector(
+      "[class*='__single-value'], [class*='-singleValue'], [class*='single-value'], [role='option'][aria-selected='true']",
+    );
+    return selected?.textContent?.trim() || input.value || "";
+  });
+  if (normalizeOptionLabel(retained) === normalizeOptionLabel(text))
+    return { ok: true, observedValue: retained.replace(/\s+/gu, " ").trim() };
+  await locator.fill("", { timeout: 2_000 }).catch(() => undefined);
+  await locator.press("Escape").catch(() => undefined);
+  return uncertain(`The list did not keep "${text}" selected.`);
+}
+
 /**
  * Waits for the list to show the choice or finish drawing without it. After a
  * search, rows that do not answer it may be the previous results still on
@@ -351,6 +396,7 @@ async function settle(
   wanted: string,
   budgetMs: number,
   searched: boolean,
+  query = wanted,
 ): Promise<
   | { kind: "found"; list: Locator; text: string }
   | { kind: "settled"; list: Locator; state: ListState }
@@ -383,7 +429,7 @@ async function settle(
         state.noResults ||
         state.options.some((text) => {
           const option = normalizeOptionLabel(text);
-          return option.includes(wanted) || wanted.includes(option);
+          return option.includes(query) || query.includes(option);
         });
       if (
         state.visible &&
@@ -414,7 +460,11 @@ async function chooseCustomOption(
   locator: Locator,
   label: string,
 ): Promise<ApplyWriteResult> {
-  const searchable = await locator.isEditable().catch(() => false);
+  const searchable =
+    (await locator.isEditable().catch(() => false)) &&
+    (await locator.evaluate((element) =>
+      element.matches("input, textarea, [contenteditable='true']"),
+    ));
   const leave = async () => {
     // A typed search left in the box reads as an answer it is not.
     if (searchable)
@@ -458,16 +508,17 @@ async function chooseFromList(
   const scope = (await controlFrame(locator)) ?? page;
   const first = await settle(scope, locator, wanted, SETTLE_MS, searchable);
   if (first.kind === "found")
-    return { ok: true, observedValue: await clickRow(first.list, first.text) };
+    return selectRow(first.list, locator, first.text, searchable);
   if (first.kind === "unbound") {
     // No list says it belongs to this control. A list elsewhere on the page
     // may still hold the choice, but its rows are not evidence of absence.
     try {
-      await scope
-        .getByRole("option", { name: exactName(label) })
-        .first()
-        .click({ timeout: 2_000 });
-      return { ok: true, observedValue: label.trim() };
+      return await selectRow(
+        scope.locator("body"),
+        locator,
+        label.trim(),
+        searchable,
+      );
     } catch {
       await leave();
       return uncertain(
@@ -475,14 +526,18 @@ async function chooseFromList(
       );
     }
   }
+  const offered = new Map<string, string>();
+  const collect = (options: readonly string[]) => {
+    for (const option of options)
+      if (!offered.has(normalizeOptionLabel(option)))
+        offered.set(normalizeOptionLabel(option), option);
+  };
   if (first.kind === "settled") {
     const read = await readWholeList(first.list, wanted);
     if (read.found)
-      return {
-        ok: true,
-        observedValue: await clickRow(first.list, read.found),
-      };
-    if (!read.complete) {
+      return selectRow(first.list, locator, read.found, searchable);
+    collect(read.options);
+    if (!read.complete && !searchable) {
       await leave();
       return uncertain(
         "The option list was too long to read to its end, so its choices could not be confirmed.",
@@ -500,29 +555,48 @@ async function chooseFromList(
       "The option list did not finish loading, so its choices could not be confirmed.",
     );
   }
-  // What a search left shows the choice is absent, not what the form offers;
-  // a search that found nothing shows only that. Clear it and read the list
-  // the form actually has, to its end.
+  // Preserve the existing full-list order when clearing exposes all choices.
+  // Remote-search pickers may instead close or require a nonempty query.
   await locator.fill("", { timeout: 2_000 }).catch(() => undefined);
   const listed = await settle(scope, locator, wanted, 3_000, false);
   if (listed.kind === "found")
-    return {
-      ok: true,
-      observedValue: await clickRow(listed.list, listed.text),
-    };
+    return selectRow(listed.list, locator, listed.text, searchable);
   const whole =
     listed.kind === "settled" ? await readWholeList(listed.list, wanted) : null;
   if (whole?.found && listed.kind === "settled")
-    return {
-      ok: true,
-      observedValue: await clickRow(listed.list, whole.found),
-    };
+    return selectRow(listed.list, locator, whole.found, searchable);
+  if (whole?.complete && whole.options.length > 0) {
+    await leave();
+    return missing(label, whole.options);
+  }
+  // A spelling variant can be visible after the full query. When that query
+  // offers nothing, broaden it with a few literal prefixes of the answer.
+  // Only the model may decide whether a returned row means the same thing.
+  if (offered.size === 0) {
+    for (const query of shorterSearches(label)) {
+      await locator.fill(query, { timeout: 2_000 });
+      const searched = await settle(
+        scope,
+        locator,
+        wanted,
+        SETTLE_MS,
+        true,
+        normalizeOptionLabel(query),
+      );
+      if (searched.kind === "found")
+        return selectRow(searched.list, locator, searched.text, searchable);
+      if (searched.kind === "settled") {
+        const read = await readWholeList(searched.list, wanted);
+        if (read.found)
+          return selectRow(searched.list, locator, read.found, searchable);
+        collect(read.options);
+      }
+    }
+  }
   await leave();
-  // The rows a search left are not what the form offers: without the whole
-  // list nothing proves the choice absent.
-  if (!whole?.complete || whole.options.length === 0)
-    return uncertain(
-      "The full option list could not be read after the search, so its choices could not be confirmed.",
-    );
-  return missing(label, whole.options);
+  return offered.size > 0
+    ? missing(label, [...offered.values()])
+    : uncertain(
+        "The list offered no selectable choices after searching, so its choices could not be confirmed.",
+      );
 }

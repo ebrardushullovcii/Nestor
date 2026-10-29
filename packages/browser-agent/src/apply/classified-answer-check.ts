@@ -156,6 +156,13 @@ export async function checkClassifiedApplicationAnswers(input: {
         control: {
           ...control,
           attestationKind: reading?.declarationKind ?? control.attestationKind,
+          questionKind: reading?.asksAboutPay
+            ? "salary_expectation"
+            : (reading?.eligibilityKind ?? control.questionKind),
+          asksCurrentPay:
+            reading?.asksCurrentPay ?? control.asksCurrentPay ?? false,
+          asksHiringCountry:
+            reading?.asksHiringCountry ?? control.asksHiringCountry ?? false,
         },
         controls: contextControls,
         tags: reading?.answerTags,
@@ -169,7 +176,7 @@ export async function checkClassifiedApplicationAnswers(input: {
   );
   const writing = input.answers.flatMap((answer, index) => {
     const decision = decisions[index];
-    return decision?.kind === "writing"
+    return decision?.kind === "writing" || decision?.kind === "inference"
       ? [
           {
             ...answer,
@@ -181,7 +188,15 @@ export async function checkClassifiedApplicationAnswers(input: {
       : [];
   });
   const checks = writing.length
-    ? await checkWrittenApplicationAnswers({ ...input, answers: writing })
+    ? await checkWrittenApplicationAnswers({
+        ...input,
+        answers: writing,
+      }).catch(() =>
+        writing.map(() => ({
+          supported: false,
+          reason: "This answer could not be checked against your sources.",
+        })),
+      )
     : [];
   let writtenIndex = 0;
   return decisions.map((decision) =>

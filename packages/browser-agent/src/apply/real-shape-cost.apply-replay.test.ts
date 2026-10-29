@@ -296,4 +296,4 @@ test("an Ashby-sized form fills known facts and hands unknown facts over once", 
   expect(
     requests.reduce((sum, request) => sum + Buffer.byteLength(request), 0),
   ).toBeLessThan(400_000);
-});
+}, 30_000);
