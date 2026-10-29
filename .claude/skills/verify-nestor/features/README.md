@@ -27,6 +27,8 @@ Each recipe starts with an H1 and a paragraph on user-visible behavior, then cov
 
 ## Features
 
+The whole journey at once: `journeys/full-check.mjs` runs the features below in a person's order on one live-AI instance (see the Saved journeys table in `../SKILL.md`). Use a single feature's recipe to prove one change.
+
 - [Guided setup and resume import](./guided-setup.md): import a resume through the picker, review Basics and Work history, set job targets and work eligibility, finish setup. Proven 2026-10-17 (`journeys/job-finder-replica.mjs setup`).
 - [Job sources](./job-sources.md): add, turn on and off, and edit the sites Job Finder searches. The setup step is proven; Profile › Job sources is not yet.
 - [Search and fit](./search-and-fit.md): Find jobs searches the enabled sources; each result carries the model's fit verdict and its reasons. Proven with live AI 2026-10-17 (`search` stage).
