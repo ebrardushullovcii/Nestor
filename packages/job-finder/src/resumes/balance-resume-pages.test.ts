@@ -58,12 +58,12 @@ const count = (draft: ReturnType<typeof fixture>["draft"]) =>
         .filter((e) => e.included)
         .flatMap((e) => e.bullets.filter((b) => b.included)),
     ).length;
-const measure = async (draft: ReturnType<typeof fixture>["draft"]) => {
+const measure = (draft: ReturnType<typeof fixture>["draft"]) => {
   const n = count(draft);
-  return {
+  return Promise.resolve({
     pageCount: Math.max(1, Math.ceil(n / 10)),
     lastPageFillRatio: n <= 10 ? n / 10 : (n % 10 || 10) / 10,
-  };
+  });
 };
 describe("final resume page balance", () => {
   it("restores real hidden material to a substantial second page", async () => {

@@ -30,7 +30,7 @@ vi.mock("node:fs/promises", () => ({
 vi.mock("./resume-document", () => ({ getPdfPageCount: mocks.count }));
 vi.mock("./resume-document/pdf", () => ({
   inspectPdfLayout: async (file: string) => ({
-    pageCount: await mocks.count(file),
+    pageCount: (await mocks.count(file)) as number,
     lastPageFillRatio: 0.75,
   }),
 }));

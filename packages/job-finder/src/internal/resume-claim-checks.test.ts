@@ -866,6 +866,50 @@ test("claim reuse is invalidated when the target job's checker context changes",
   expect(checkResumeClaims).toHaveBeenCalledTimes(2);
 });
 
+test.each([
+  ["Builds resilient workflows.", "Builds resilient workflows."],
+  ["Engineer at Example.", null],
+  ["Engineer", null],
+  [null, null],
+  [
+    "Engineer at Example. Builds resilient workflows.",
+    "Engineer at Example. Builds resilient workflows.",
+  ],
+])(
+  "an explicit style removal uses saved summary %s only when it adds more than a role label",
+  (savedSummary, replacement) => {
+    const { profile } = context();
+    profile.summary = savedSummary;
+    profile.headline = "Engineer";
+    profile.experiences[0]!.title = "Engineer";
+    profile.experiences[0]!.companyName = "Example";
+    const metric = "Exceeded the sales target by 20%.";
+    const summary = "Delivered quota performance 20% above the sales target.";
+    const draft = draftWith([{ text: metric, origin: "ai_generated" }]);
+    draft.sections[0]!.text = summary;
+    draft.claimChecks = [metric, summary].map((text) => ({
+      contentHash: resumeClaimContentHash(text),
+      verdict: "supported",
+      reason: "Backed by saved achievements.",
+      style: "Repeats the earlier achievement.",
+      fix: "",
+      evidenceIds: [],
+      evidenceKey: "test",
+      checkedAt: at,
+    }));
+    const fixed = settleResumeClaimLines({
+      draft,
+      profile,
+      stretchesAreThePersons: false,
+    })!;
+    expect(fixed.sections[0]!.text).toBe(replacement ?? summary);
+    expect(fixed.sections[0]!.bullets[0]).toMatchObject({
+      text: metric,
+      included: true,
+    });
+  },
+);
+
 test("supported summary and metric bullet survive overlapping style suggestions", () => {
   const { profile } = context();
   profile.summary = "Engineer at Example.";
