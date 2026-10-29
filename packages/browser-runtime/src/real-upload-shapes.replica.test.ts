@@ -741,7 +741,11 @@ async function recoveryRun(
       startingUrl: page.url(),
     },
     siteLabel: "Synthetic Workshop",
-    uploadWaitMs: shape === "slow" ? 20_000 : 1_500,
+    // Only a field with nothing pending waits the whole time (vanished); a
+    // request still out is waited on until its answer settles, which on a
+    // busy runner takes seconds.
+    uploadWaitMs:
+      shape === "slow" ? 20_000 : shape === "vanished" ? 1_500 : 10_000,
     ...options,
   };
   let calls = 0;
@@ -792,9 +796,10 @@ test.each([
     );
     expect(result.pauses).toEqual([]);
     if (shape === "transient") {
-      expect(result.notes.join("\n")).toContain("HTTP 503");
-      expect(result.notes.join("\n")).toContain("Document service unavailable");
-      expect(result.notes.join("\n")).not.toContain("signature=");
+      const log = result.notes.join("\n");
+      expect(log, log).toContain("HTTP 503");
+      expect(log, log).toContain("Document service unavailable");
+      expect(log, log).not.toContain("signature=");
     }
     expect(
       posts().filter(

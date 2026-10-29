@@ -43,7 +43,9 @@ export async function handleUploadRecovery(
       send(403, "No submission in this fixture");
       return true;
     }
-    const key = `${shape}/${id}`;
+    // Counted per page load, so a reloaded form (or a retried test) starts
+    // with its first upload again.
+    const key = `${shape}/${id}/${url.searchParams.get("page") ?? ""}`;
     const count = (tries.get(key) ?? 0) + 1;
     tries.set(key, count);
     if (shape === "slow")
@@ -75,6 +77,7 @@ export async function handleUploadRecovery(
       const input = document.getElementById('resume'), zone = document.getElementById('zone');
       const feedback = document.getElementById('feedback'), chip = document.getElementById('chip');
       let choosing = false;
+      const pageLoad = Math.random().toString(36).slice(2);
       document.getElementById('choose').onclick = () => { choosing = true; input.click(); };
       async function attach(file, method) {
         input.value = '';
@@ -87,7 +90,7 @@ export async function handleUploadRecovery(
         feedback.textContent = 'Uploading and processing'; chip.textContent = '';
         const body = new FormData(); body.append('resume', file);
         let response;
-        try { response = await fetch('/upload-recovery/${shape}/attachments/${id}?signature=synthetic-private-query', { method: 'POST', body }); }
+        try { response = await fetch('/upload-recovery/${shape}/attachments/${id}?signature=synthetic-private-query&page=' + pageLoad, { method: 'POST', body }); }
         catch { feedback.textContent = 'Your file upload failed: Document service unavailable'; input.setCustomValidity('Document service unavailable'); return; }
         if (!response.ok) { feedback.textContent = 'Your file upload failed: Document service unavailable'; input.setCustomValidity('Document service unavailable'); return; }
         if (${JSON.stringify(shape)} === 'slow') await new Promise(resolve => setTimeout(resolve, 4_000));
