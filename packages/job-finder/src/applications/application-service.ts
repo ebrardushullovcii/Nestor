@@ -158,6 +158,16 @@ export interface ApplicationServiceDeps {
   }): void;
 }
 
+/**
+ * How often a page waiting on the person is read. A read pulls the whole form
+ * across the browser connection; every waiting page every two seconds kept the
+ * main process busy with ten waiting, and the app lagged. A page the person
+ * just opened or checked is read every two seconds for two minutes.
+ */
+const WATCH_IDLE_MS = 30_000;
+const WATCH_CLOSE_MS = 2_000;
+const WATCH_CLOSE_FOR_MS = 120_000;
+
 export const applicationIdentity = (id: number, attempt: number) => ({
   applicationRecordId: `application_${id}`,
   runId: `application_run_${id}`,
@@ -180,6 +190,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   const resumes = createResumeStore(jobs);
   const active = new Map<number, AbortController>();
   const waiting = new Map<number, number>();
+  /** When each waiting page is read next, and until when it is read closely. */
+  const watchPlan = new Map<number, { next: number; closeUntil: number }>();
+  const watchClosely = (id: number) =>
+    watchPlan.set(id, { next: 0, closeUntil: Date.now() + WATCH_CLOSE_FOR_MS });
   const browserStepReadiness = new Map<string, boolean>();
   /**
    * Applications the person sent on the site themselves, kept Uncertain until
@@ -1636,7 +1650,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           : null;
   }
 
-  async function checkApplicationAccess(row: ApplicationRow): Promise<void> {
+  /** `readUnheld` false: only a page the person holds is read this time. */
+  async function checkApplicationAccess(
+    row: ApplicationRow,
+    readUnheld = true,
+  ): Promise<void> {
     if (row.state === "blocked") return;
     const access = applications.needsYou.accessForApplication(row.id);
     if (!access.length) return;
@@ -1653,9 +1671,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
     const raw =
       personPage ??
-      (await browser
-        .readApplicationPageBinding?.("target_site", key)
-        .catch(() => null));
+      (readUnheld
+        ? await browser
+            .readApplicationPageBinding?.("target_site", key)
+            .catch(() => null)
+        : null);
     if (!raw || raw.loading || !current(row)) return;
     const page = buildApplyFormObservation(raw, new Date().toISOString());
     const readyForAgent = browserStepReadyForAgent(
@@ -1710,7 +1730,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   }
 
   /** The person fixed the upload on the page: drop its item, finish the rest. */
-  async function checkUploadRepair(row: ApplicationRow): Promise<boolean> {
+  async function checkUploadRepair(
+    row: ApplicationRow,
+    readUnheld = true,
+  ): Promise<boolean> {
     if (
       row.state !== "needs_you" ||
       !applications.needsYou.waitsOn(row.id, UPLOAD_REPAIR_QUESTION_ID)
@@ -1721,9 +1744,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       (await browser
         .readApplicationPageWithPerson?.("target_site", key)
         .catch(() => null)) ??
-      (await browser
-        .readApplicationPageBinding?.("target_site", key)
-        .catch(() => null));
+      (readUnheld
+        ? await browser
+            .readApplicationPageBinding?.("target_site", key)
+            .catch(() => null)
+        : null);
     if (!raw || raw.loading || !current(row)) return false;
     const page = buildApplyFormObservation(raw, new Date().toISOString());
     // The item names the fields whose upload failed; only a confirmed file
@@ -1782,11 +1807,25 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           waiting.delete(id);
           continue;
         }
+        // A page the person holds is read every cycle. A page nobody holds
+        // is read only when due.
+        const now = Date.now();
+        const plan = watchPlan.get(id);
+        const due = !plan || now >= plan.next;
+        if (due)
+          watchPlan.set(id, {
+            next:
+              now +
+              (plan && now < plan.closeUntil ? WATCH_CLOSE_MS : WATCH_IDLE_MS),
+            closeUntil: plan?.closeUntil ?? 0,
+          });
         if (await recordPersonSubmission(row, attempt)) continue;
         if (await recordPersonPress(row, attempt)) continue;
-        if (await checkUploadRepair(row)) continue;
-        await checkApplicationAccess(row);
+        if (await checkUploadRepair(row, due)) continue;
+        await checkApplicationAccess(row, due);
       }
+      for (const id of watchPlan.keys())
+        if (!waiting.has(id)) watchPlan.delete(id);
     } finally {
       watching = false;
     }
@@ -1936,10 +1975,27 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     async checkAccess(taskId: number): Promise<boolean> {
       const details = applications.needsYou.details(taskId);
       if (!details || details.task.kind === "question") return false;
+      let retrying = false;
       for (const row of details.applications) {
         const app = applications.getApplication(row.id);
-        if (app?.state === "needs_you") await checkApplicationAccess(app);
+        if (app?.state !== "needs_you") continue;
+        watchClosely(app.id);
+        await checkApplicationAccess(app);
+        // The person says the sign-in is done, but this page still shows it:
+        // the account step often finishes in another window, or lands on the
+        // site's own account page. Run the application again from its own
+        // address with GET under the same item, as Open does for a lost page.
+        // No password or form is replayed; a site that still asks stops here.
+        if (
+          details.task.kind === "sign_in" &&
+          applications.needsYou
+            .accessForApplication(app.id)
+            .some((task) => task.id === taskId) &&
+          applications.retryAccessForPerson(app.id, app.attempt)
+        )
+          retrying = true;
       }
+      if (retrying) wake();
       return applications.needsYou.details(taskId) === null;
     },
     resolveUncertainByPerson,
@@ -2001,6 +2057,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (focused) {
       await browser.handApplicationPageToPerson?.("target_site", key);
       waiting.set(id, work.attempt);
+      watchClosely(id);
       return true;
     }
     // The page is gone (a restart closes them all): refill the form, and a
