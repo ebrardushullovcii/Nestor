@@ -73,6 +73,7 @@ import { isShortValueAnswer } from "./written-answer-grounding";
 import {
   OWN_WORDS_REASON,
   formWritingInstructions,
+  questionReadContext,
   ownWordsAppliesToQuestion,
 } from "./own-words";
 import type {
@@ -771,11 +772,7 @@ async function withModelQuestionKinds(
   try {
     const classifications = await deps.classifyQuestions(
       observation.controls,
-      JSON.stringify({
-        url: observation.url,
-        step: observation.step,
-        instructions: formWritingInstructions(observation),
-      }),
+      questionReadContext(observation),
     );
     classification =
       classifications.get(

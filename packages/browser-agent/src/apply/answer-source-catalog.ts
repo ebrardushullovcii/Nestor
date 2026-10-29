@@ -275,8 +275,8 @@ const contactLabels: Record<string, readonly string[]> = {
   "profile.portfolioUrl": ["portfolio", "portfolio url"],
   "profile.personalWebsiteUrl": ["website", "personal website", "website url"],
 };
-function knownLiteralField(
-  source: ClassifiedAnswerSource,
+export function knownLiteralField(
+  source: Pick<ClassifiedAnswerSource, "id">,
   control: ApplyFormControl,
 ): boolean {
   if (fieldNamesAnotherPerson(control)) return false;

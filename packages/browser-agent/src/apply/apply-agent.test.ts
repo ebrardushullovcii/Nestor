@@ -1,3 +1,4 @@
+import { applicationModelFacts } from "./model-facts";
 import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
 import fallbackReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-option-fallback.json";
 import {
@@ -6518,6 +6519,8 @@ test("a site-prefilled Email is not a checked write that can clear a handover", 
 
 test("classification settles before starting a sourced writing check and before any write", async () => {
   const source = page({
+    bodyText: "Application instructions\nWhy this role?",
+    headings: [{ level: 1, text: "Application instructions" }],
     controls: [{ ...nameControl(), label: "Why this role?", value: "" }],
   });
   const input = config(source);
@@ -10098,4 +10101,16 @@ test("a custom checkbox the page draws itself is a checkbox, and its answer is i
   const answer = result.reviewFilled?.find((entry) => entry.label === consent);
   expect(answer?.answer.value).toBe("Yes");
   expect(answer?.fieldKey).toContain("field:checkbox:");
+});
+
+
+test("listing discovery changes only the tail of the shared applicant prompt", () => {
+  const sources = config(page()).sources;
+  const first = applicationModelFacts({...sources,listingDiscovery:{label:"First board",url:"https://first.example/job"}}, {payDisclosed:false});
+  const second = applicationModelFacts({...sources,listingDiscovery:{label:"Second board",url:"https://second.example/job"}}, {payDisclosed:false});
+  const prefix = first.slice(0, first.indexOf(',"listingDiscovery":'));
+  expect(prefix.length).toBeGreaterThan(100);
+  expect(second.startsWith(prefix)).toBe(true);
+  expect(JSON.parse(first).listingDiscovery.label).toBe("First board");
+  expect(JSON.parse(second).listingDiscovery.label).toBe("Second board");
 });
