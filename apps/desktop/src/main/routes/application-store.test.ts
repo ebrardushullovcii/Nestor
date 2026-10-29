@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   listApplications: vi.fn(),
   stopApplication: vi.fn(),
+  openApplication: vi.fn(),
+  browserCommand: vi.fn(),
 }));
 vi.mock("../services/job-finder/application-store", () => ({
   getApplicationStore: () => ({ listApplications: mocks.listApplications }),
@@ -13,7 +15,13 @@ vi.mock("../services/job-finder/test-api", () => ({
 }));
 vi.mock("../services/applications", () => ({
   getApplicationService: () =>
-    Promise.resolve({ stopApplication: mocks.stopApplication }),
+    Promise.resolve({
+      stopApplication: mocks.stopApplication,
+      open: mocks.openApplication,
+    }),
+}));
+vi.mock("../services/browser/load-embedded-browser", () => ({
+  loadEmbeddedBrowser: () => Promise.resolve({ command: mocks.browserCommand }),
 }));
 vi.mock("../services/browser/embedded-browser", () => ({
   getEmbeddedBrowser: vi.fn(),
@@ -28,6 +36,17 @@ beforeEach(() => vi.clearAllMocks());
 
 // The preload passes these calls through, so main is where they are checked.
 describe("application commands in main", () => {
+  it.each([true, false])(
+    "Open delegates the exact page or refill to the service and never opens an unrelated active tab: %s",
+    async (opened) => {
+      mocks.openApplication.mockResolvedValue(opened);
+      expect(
+        await executeApplicationStoreCommand("open-application", { id: 3 }),
+      ).toBe(opened);
+      expect(mocks.openApplication).toHaveBeenCalledWith(3);
+      expect(mocks.browserCommand).not.toHaveBeenCalled();
+    },
+  );
   it("rejects a malformed selection before anything is queued", async () => {
     await expect(
       executeApplicationStoreCommand("apply-jobs", {
