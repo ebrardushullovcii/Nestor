@@ -19,8 +19,6 @@ export const ResumeBatchProviderBlockSchema: z.ZodType<ResumeBatchProviderBlock>
     })
     .strict();
 
-const ProbabilitySchema = z.number().min(0).max(1);
-
 export const resumeExportFormatValues = ["html", "pdf"] as const;
 
 export const ResumeExportFormatSchema = z.enum(resumeExportFormatValues);
@@ -1237,94 +1235,6 @@ export const ResumeDraftSummarySchema = ResumeDraftSchema.pick({
   updatedAt: true,
 });
 export type ResumeDraftSummary = z.infer<typeof ResumeDraftSummarySchema>;
-
-export const ResumeQualityBenchmarkCaseSchema = z.object({
-  id: NonEmptyStringSchema,
-  label: NonEmptyStringSchema,
-  canary: z.boolean().default(false),
-  tags: z.array(NonEmptyStringSchema).default([]),
-});
-export type ResumeQualityBenchmarkCase = z.infer<
-  typeof ResumeQualityBenchmarkCaseSchema
->;
-
-export const ResumeQualityBenchmarkRequestSchema = z.object({
-  benchmarkVersion: NonEmptyStringSchema.default("023-local-benchmark-v1"),
-  caseIds: z.array(NonEmptyStringSchema).default([]),
-  templateIds: z.array(ResumeTemplateIdSchema).default([]),
-  canaryOnly: z.boolean().default(false),
-  useConfiguredAi: z.boolean().default(false),
-  persistArtifactsDirectory: NonEmptyStringSchema.nullable().default(null),
-});
-export type ResumeQualityBenchmarkRequest = z.infer<
-  typeof ResumeQualityBenchmarkRequestSchema
->;
-
-export const ResumeQualityBenchmarkMetricsSchema = z.object({
-  groundedVisibleSkillRate: ProbabilitySchema.default(0),
-  workHistoryRepresentationRate: ProbabilitySchema.default(0),
-  visibleWorkHistoryCoverageRate: ProbabilitySchema.default(0),
-  fragmentFreeExperienceBulletRate: ProbabilitySchema.default(0),
-  professionalExperienceSummaryRate: ProbabilitySchema.default(0),
-  bleedFreeCaseRate: ProbabilitySchema.default(0),
-  keywordCoverageRate: ProbabilitySchema.default(0),
-  duplicateIssueFreeRate: ProbabilitySchema.default(0),
-  thinOutputFreeRate: ProbabilitySchema.default(0),
-  pageTargetPassRate: ProbabilitySchema.default(0),
-  atsRenderPassRate: ProbabilitySchema.default(0),
-  issueFreeCaseRate: ProbabilitySchema.default(0),
-});
-export type ResumeQualityBenchmarkMetrics = z.infer<
-  typeof ResumeQualityBenchmarkMetricsSchema
->;
-
-export const ResumeQualityGenerationDiagnosticsSchema = z.object({
-  strategy: z.enum(["deterministic", "evidence_linked"]),
-  proposedRewriteCount: z.number().int().min(0),
-  acceptedRewriteCount: z.number().int().min(0),
-  rejectedRewriteCount: z.number().int().min(0),
-  acceptedRewriteCharacters: z.number().int().min(0),
-  acceptedRewriteRate: ProbabilitySchema,
-  fallbackRate: ProbabilitySchema,
-});
-export type ResumeQualityGenerationDiagnostics = z.infer<
-  typeof ResumeQualityGenerationDiagnosticsSchema
->;
-
-export const ResumeQualityBenchmarkCaseResultSchema = z.object({
-  caseId: NonEmptyStringSchema,
-  label: NonEmptyStringSchema,
-  templateId: ResumeTemplateIdSchema,
-  passed: z.boolean(),
-  visibleSkills: z.array(NonEmptyStringSchema).default([]),
-  issueCategories: z.array(ResumeValidationCategorySchema).default([]),
-  issueCount: z.number().int().min(0).default(0),
-  generationDurationMs: z.number().finite().nonnegative().default(0),
-  generationDiagnostics:
-    ResumeQualityGenerationDiagnosticsSchema.nullable().default(null),
-  metrics: ResumeQualityBenchmarkMetricsSchema,
-  htmlArtifactRelativePath: NonEmptyStringSchema.nullable().default(null),
-  notes: z.array(NonEmptyStringSchema).default([]),
-});
-export type ResumeQualityBenchmarkCaseResult = z.infer<
-  typeof ResumeQualityBenchmarkCaseResultSchema
->;
-
-export const ResumeQualityBenchmarkReportSchema = z.object({
-  benchmarkVersion: NonEmptyStringSchema,
-  generatedAt: IsoDateTimeSchema,
-  providerMode: z
-    .enum(["deterministic", "configured"])
-    .default("deterministic"),
-  templates: z.array(ResumeTemplateIdSchema).default([]),
-  persistedArtifactsDirectory: NonEmptyStringSchema.nullable().default(null),
-  cases: z.array(ResumeQualityBenchmarkCaseResultSchema).default([]),
-  aggregate: ResumeQualityBenchmarkMetricsSchema,
-  notes: z.array(NonEmptyStringSchema).default([]),
-});
-export type ResumeQualityBenchmarkReport = z.infer<
-  typeof ResumeQualityBenchmarkReportSchema
->;
 
 export const ResumeExportArtifactSummarySchema =
   ResumeExportArtifactSchema.pick({
