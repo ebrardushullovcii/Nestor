@@ -547,7 +547,7 @@ describe("performModelRequest", () => {
   });
 
   test.each(["chat_completions", "responses"] as const)(
-    "retries %s keepalives and whitespace without spending the total budget",
+    "with progress-only idle, retries %s keepalives and whitespace without spending the total budget",
     async (apiMode) => {
       let timer: ReturnType<typeof setInterval>;
       const cancelled = vi.fn();
@@ -588,6 +588,7 @@ describe("performModelRequest", () => {
         apiMode,
         idleTimeoutMs: 60,
         totalTimeoutMs: 2000,
+        idleOnModelProgressOnly: true,
         fetchImpl,
       });
       expect(result.choices?.[0]?.message?.content).toBe("recovered");
@@ -595,6 +596,47 @@ describe("performModelRequest", () => {
       expect(cancelled).toHaveBeenCalledOnce();
     },
   );
+
+  test("by default, keepalives still count as liveness", async () => {
+    let ticks = 0;
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            const timer = setInterval(() => {
+              ticks += 1;
+              if (ticks < 12) {
+                controller.enqueue(new TextEncoder().encode(": keepalive\n\n"));
+                return;
+              }
+              clearInterval(timer);
+              const done = {
+                choices: [
+                  { delta: { content: "done" }, finish_reason: "stop" },
+                ],
+              };
+              controller.enqueue(
+                new TextEncoder().encode(
+                  `data: ${JSON.stringify(done)}\n\ndata: [DONE]\n\n`,
+                ),
+              );
+              controller.close();
+            }, 10);
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+    );
+    const result = await performModelRequest({
+      ...baseInput,
+      apiMode: "chat_completions",
+      idleTimeoutMs: 60,
+      totalTimeoutMs: 2000,
+      fetchImpl,
+    });
+    expect(result.choices?.[0]?.message?.content).toBe("done");
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
 
   test("reasoning summaries keep a healthy Responses request alive", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(

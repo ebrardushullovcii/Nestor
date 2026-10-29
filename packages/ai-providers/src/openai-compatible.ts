@@ -399,7 +399,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         // low-effort extraction attempt gets a minute (healthy one-page reads
         // measured 8–33s); a fresh attempt can still use the remaining total.
         ...(operation === "extractResumeImportStage"
-          ? { attemptTimeoutMs: 60_000 }
+          ? { attemptTimeoutMs: 60_000, idleOnModelProgressOnly: true }
           : {}),
         ...resilience,
         // Resume reads use low effort. Two missed reasoning-summary intervals

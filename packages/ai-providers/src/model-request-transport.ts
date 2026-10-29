@@ -9,8 +9,9 @@
  *
  * The approach:
  *
- * - Requests are streamed (`stream: true`). Text, tool arguments and reasoning
- *   prove progress; keepalives and whitespace alone do not.
+ * - Requests are streamed (`stream: true`). Arriving bytes prove the service
+ *   is alive; an operation may opt into counting only model progress (text,
+ *   tool arguments, reasoning), as resume import does.
  * - Two clocks per request: an idle clock (no progress for `idleTimeoutMs` means
  *   the connection is presumed dead and the attempt is retried) and a total
  *   clock (`totalTimeoutMs`, the most the caller is willing to wait across
@@ -95,6 +96,12 @@ export interface ModelRequestResilienceOptions {
 export interface PerformModelRequestInput extends ModelRequestResilienceOptions {
   /** Optional cap on one attempt, leaving the total budget for a fresh read. */
   attemptTimeoutMs?: number | undefined;
+  /**
+   * Reset the idle clock only on model progress (text, tool arguments,
+   * reasoning), not on keepalives or whitespace. Off by default: other
+   * operations keep treating any arriving bytes as liveness.
+   */
+  idleOnModelProgressOnly?: boolean | undefined;
   url: string;
   headers: Record<string, string>;
   body: Record<string, unknown>;
@@ -408,8 +415,9 @@ function buildChatPayloadFromStream(
 
 /**
  * Reads a server-sent-event body to completion and returns the normalized
- * payload. Only model progress resets the idle clock: keepalives and JSON
- * whitespace can continue indefinitely after useful output has stopped.
+ * payload. Every chunk resets the idle clock, unless `progressOnly` is set:
+ * then only model progress does, because keepalives and JSON whitespace can
+ * continue indefinitely after useful output has stopped.
  */
 async function readStreamedPayload(
   response: Response,
@@ -418,6 +426,7 @@ async function readStreamedPayload(
   signal: AbortSignal,
   emit?: (event: ModelStreamEvent) => void,
   observeUsage?: (payload: unknown) => void,
+  progressOnly = false,
 ): Promise<ChatCompletionsPayload> {
   const body = response.body;
   if (!body) {
@@ -609,6 +618,7 @@ async function readStreamedPayload(
         reachedEof = true;
         break;
       }
+      if (!progressOnly) onActivity();
       buffered += decoder.decode(value, { stream: true });
       let newlineIndex = buffered.indexOf("\n");
       while (newlineIndex >= 0 && !sawDone) {
@@ -676,6 +686,7 @@ async function readTextWithActivity(
   response: Response,
   onActivity: () => void,
   signal: AbortSignal,
+  progressOnly = false,
 ): Promise<string> {
   const body = response.body;
   if (!body) {
@@ -695,7 +706,7 @@ async function readTextWithActivity(
         break;
       }
       const chunk = decoder.decode(value, { stream: true });
-      if (chunk.trim()) onActivity();
+      if (!progressOnly || chunk.trim()) onActivity();
       text += chunk;
     }
     text += decoder.decode();
@@ -919,6 +930,7 @@ async function performModelRequestAttempts(
           response,
           armIdle,
           attemptController.signal,
+          input.idleOnModelProgressOnly,
         );
         let parsed: unknown = null;
         try {
@@ -946,6 +958,7 @@ async function performModelRequestAttempts(
           attemptController.signal,
           input.onStreamEvent,
           usage.observe,
+          input.idleOnModelProgressOnly,
         );
         outcome = "completed";
         return { ...payload, usage: usage.finish(outcome).payload };
@@ -955,6 +968,7 @@ async function performModelRequestAttempts(
         response,
         armIdle,
         attemptController.signal,
+        input.idleOnModelProgressOnly,
       );
       let rawPayload: unknown = null;
       try {
