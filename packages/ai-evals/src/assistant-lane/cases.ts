@@ -654,6 +654,7 @@ const INVENTORY_REQUESTS: Record<string, string> = {
     "Open the Northwind listing in the browser and tell me the salary.",
   "browser.collect": "Collect the jobs on the page that's open in the browser.",
   "browser.apply_here": "Apply on the page that's open in the browser.",
+  "browser.import_signins": "Bring my sign-ins over from Firefox.",
 };
 
 const INVENTORY_SCENARIOS: Partial<Record<string, AssistantLaneScenario>> = {
@@ -794,6 +795,12 @@ const INVENTORY_CASES: AssistantLaneCase[] = ACTION_INVENTORY.flatMap(
               o.recorder.clipboard.length === 1 &&
                 o.recorder.clipboard[0] === o.snapshot.profile.headline,
               "the current headline was not copied exactly once",
+            );
+          if (entry.id === "browser.import_signins")
+            return expect(
+              o.recorder.signInImports.length === 1 &&
+                o.recorder.signInImports[0]?.browser === "firefox",
+              "sign-ins were not brought over from Firefox exactly once",
             );
           if (entry.id === "needs_you.answers")
             return expect(

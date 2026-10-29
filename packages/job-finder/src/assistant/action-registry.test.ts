@@ -71,6 +71,8 @@ describe("registered user actions", () => {
   it.each([
     ["get-home-summary", { utcOffsetMinutes: 60 }],
     ["get-activity", {}],
+    ["browser-list-import-sources", {}],
+    ["browser-import-signins", { browser: "chrome", profileLabel: "Work" }],
     ["candidate-assets:list", {}],
     ["candidate-assets:delete", { assetId: "file" }],
     [

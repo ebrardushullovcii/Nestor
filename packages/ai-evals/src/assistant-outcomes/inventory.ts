@@ -48,7 +48,6 @@ function fields(
   );
 }
 const navigate = ["open_in_app"];
-const control = ["control_app"];
 const excluded = (
   id: string,
   action: string,
@@ -117,25 +116,6 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     ["resume_read", "Show resume read mode"],
     ["resume_edit", "Show resume edit mode"],
   ]),
-  ...actions("shell", "Shell", control, [
-    ["back", "Go back in app history"],
-    ["forward", "Go forward in app history"],
-    ["sidebar_collapse", "Collapse sidebar"],
-    ["sidebar_expand", "Expand sidebar"],
-    ["shortcuts_open", "Open shortcut help"],
-    ["shortcuts_close", "Close shortcut help"],
-    ["module_job_finder", "Switch to Job Finder"],
-    ["module_live_assistant", "Switch to Live Assistant"],
-    ["palette_open", "Open workspace search"],
-    ["palette_search", "Search workspace"],
-    ["palette_choose", "Choose a workspace search result"],
-    ["palette_close", "Close workspace search"],
-    ["window_minimize", "Minimize the app window"],
-    ["window_maximize", "Maximize the app window"],
-    ["window_restore", "Restore the app window"],
-    ["window_close", "Close the app window, preserving unsaved work"],
-    ["dismiss_notice", "Dismiss an app notification or status notice"],
-  ]),
   // The current setup screen has its own stepper and save/continue controls;
   // editing the same facts in full Profile does not prove these controls.
   ...actions(
@@ -162,12 +142,6 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       ["full_profile", "Leave guided setup for full Profile"],
     ],
   ),
-  ...actions("profile", "Profile", control, [
-    ["refresh", "Retry a failed Profile read"],
-  ]),
-  ...actions("settings", "Settings", control, [
-    ["refresh", "Retry a failed Settings read"],
-  ]),
   ...actions(
     "home",
     "Home",
@@ -198,17 +172,17 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       ["continue", "Continue background work"],
     ],
   ),
-  ...actions("activity", "Activity", control, [
-    ["open", "Open Activity"],
-    ["close", "Close Activity"],
-    ["clear_finished", "Clear finished Activity rows"],
-    ["open_item", "Open a particular activity"],
-  ]),
   ...actions(
     "activity",
     "Activity",
     ["get_activity"],
     [["read", "Read complete Activity feed"]],
+  ),
+  ...actions(
+    "activity",
+    "Activity",
+    ["get_activity", "open_in_app"],
+    [["open_item", "Open what a particular activity is about"]],
   ),
 
   ...fields(
@@ -260,14 +234,6 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
         ["filter", `Filter visible ${collection} records`],
         ["focus", `Show a particular ${collection} editor`],
       ],
-    ),
-    ...actions(
-      `profile.record.${collection}`,
-      "Profile record paging",
-      control,
-      ["next", "previous", "first"].map(
-        (name) => [name, `${name} visible ${collection} page`] as const,
-      ),
     ),
   ]),
   ...actions(
@@ -399,14 +365,6 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   ]),
   ...actions(
     "sites",
-    "Job source paging",
-    control,
-    ["next", "previous", "first"].map(
-      (name) => [name, `${name} visible source page`] as const,
-    ),
-  ),
-  ...actions(
-    "sites",
     "Job sources",
     [
       "add_sites",
@@ -467,7 +425,6 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
         ["exclude_selection", "Exclude a matching row"],
         ["clear_selection", "Clear selection"],
       ]),
-      ...actions(screen, screen, control, [["more", "Load more visible rows"]]),
     ],
   ),
   ...actions("discovery", "Find jobs", navigate, [
@@ -797,10 +754,8 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       "read_settings",
       "action_zoom",
       "action_export_diagnostics",
-      "action_get_performance_snapshot",
       "action_reset_browser",
       "action_reset_workspace",
-      "action_dismiss_startup_database_recovery_notice",
       "patch_settings",
     ],
     [
@@ -809,10 +764,8 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       ["zoom_out", "Decrease text size"],
       ["zoom_reset", "Reset text size"],
       ["diagnostics", "Export diagnostics"],
-      ["performance", "Read performance"],
       ["reset_browser", "Reset browser"],
       ["reset_workspace", "Reset workspace"],
-      ["recovery_dismiss", "Dismiss recovery notice"],
       ["retry", "Retry failed Settings save"],
       ["discard", "Discard local Settings draft"],
     ],
@@ -820,32 +773,11 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
 
   ...actions(
     "browser",
-    "Browser",
-    ["browser_control"],
-    [
-      "forward",
-      "reload",
-      "stop",
-      "new_tab",
-      "select_tab",
-      "close_tab",
-      "close_finished_tabs",
-      "show",
-      "minimize",
-      "expand",
-      "reduce",
-      "close",
-      "take_control",
-      "resume",
-    ].map((name) => [name, `${name} browser`] as const),
-  ),
-  ...actions(
-    "browser",
     "Sign-in import",
     ["action_browser_list_import_sources", "action_browser_import_signins"],
     [
       ["list_profiles", "Discover installed browser profiles"],
-      ["import_signins", "Import sign-ins after person's confirmation"],
+      ["import_signins", "Bring sign-ins over when the person asks"],
     ],
   ),
   ...actions(
