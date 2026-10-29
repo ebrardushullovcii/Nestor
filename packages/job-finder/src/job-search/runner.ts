@@ -641,9 +641,9 @@ export function createJobSearchRunner(
           deps.readRemoteCountsAsAnyLocation?.() ??
           context.remoteCountsAsAnyLocation ??
           true;
-        deps.store.syncFitContext(
-          fitContextFingerprint(context, settings.note),
-        );
+        // A search's note shapes the fit of the jobs it finds; it is not a
+        // reason to judge every saved job again.
+        deps.store.syncFitContext(fitContextFingerprint(context));
         deps.store.restoreAgeHidden(
           settings.postedWithin === "any"
             ? null
@@ -790,9 +790,7 @@ export function createJobSearchRunner(
               deps.readRemoteCountsAsAnyLocation?.() ??
               current.remoteCountsAsAnyLocation ??
               true;
-            deps.store.syncFitContext(
-              fitContextFingerprint(current, search?.settings.note),
-            );
+            deps.store.syncFitContext(fitContextFingerprint(current));
             const before = liveFits.scored;
             liveFits.enqueue([
               ...visibleIds,
@@ -811,9 +809,7 @@ export function createJobSearchRunner(
             deps.readRemoteCountsAsAnyLocation?.() ??
             context.remoteCountsAsAnyLocation ??
             true;
-          deps.store.syncFitContext(
-            fitContextFingerprint(context, search?.settings.note),
-          );
+          deps.store.syncFitContext(fitContextFingerprint(context));
           const fits = createFitQueue(
             deps,
             context,
@@ -821,7 +817,8 @@ export function createJobSearchRunner(
             concurrency(deps.concurrency?.fit, 6),
             () => notify(),
             () => {},
-            search?.settings,
+            // The last search's note was for that search only.
+            search ? { ...search.settings, note: "" } : undefined,
             () => notify(),
           );
           recoveryQueue = fits;
