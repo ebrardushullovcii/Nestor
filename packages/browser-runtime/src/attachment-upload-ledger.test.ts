@@ -195,12 +195,33 @@ describe("the server's word on a resume Fill attached", () => {
     expect(await page.locator("#chip").innerText()).toBe("Taylor-Resume.pdf");
   });
 
+  test("request diagnostics preserve path case and exclude the query", async () => {
+    const { page, outcome, storage } = await attach(
+      (_site, storage) =>
+        `${storage.url}/Storage/Upload?signature=do-not-record`,
+      { status: 503 },
+    );
+    // This deliberately unmatched path gets the replica's 404 response.
+    await expect.poll(outcome).toBe("rejected");
+    const raw = await createPlaywrightApplyPageSession({ page }).readPage();
+    const requests = raw.controls.find((control) => control.id === "resume")
+      ?.upload?.requests;
+    expect(requests).toEqual([
+      {
+        endpoint: `${new URL(storage.url).host}/Storage/Upload`,
+        status: 404,
+        blocked: false,
+      },
+    ]);
+    expect(JSON.stringify(requests)).not.toContain("signature");
+  });
+
   test("a bare 200 with no receipt is not attached", async () => {
     const { outcome } = await attach(
       (_site, storage) => `${storage.url}/storage`,
       { status: 200, body: "{}" },
     );
-    await expect.poll(outcome).toBe("rejected");
+    await expect.poll(outcome).toBe("unconfirmed");
   });
 
   test("pending until the storage answers, then attached on its receipt", async () => {

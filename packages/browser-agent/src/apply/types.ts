@@ -16,6 +16,7 @@ import type {
   ApplyRawPageHands,
   ApplyServiceWorkerFinding,
   ApplyWriteResult,
+  ApplyUploadFile,
   ApplicationAttestationKind,
   ApplicationAutomationMode,
   ApplicationQuestionControlType,
@@ -299,10 +300,7 @@ export interface ApplyPageHands {
   fillText: (ref: string, value: string) => Promise<ApplyWriteResult>;
   chooseOption: (ref: string, optionLabel: string) => Promise<ApplyWriteResult>;
   setToggle: (ref: string, checked: boolean) => Promise<ApplyWriteResult>;
-  uploadFile: (
-    ref: string,
-    file: { name: string; mimeType: string; bytes: Uint8Array },
-  ) => Promise<ApplyWriteResult>;
+  uploadFile: (ref: string, file: ApplyUploadFile) => Promise<ApplyWriteResult>;
   clickAction: (ref: string) => Promise<ApplyWriteResult>;
   /** Report whether an intended action is reachable, without clicking it. */
   checkAction?: (ref: string) => Promise<ApplyWriteResult>;
@@ -540,7 +538,12 @@ export type ApplyProposal =
       checked: boolean;
       storedFactId?: string;
     }
-  | { tool: "upload"; ref: string; documentId: string }
+  | {
+      tool: "upload";
+      ref: string;
+      documentId: string;
+      method?: ApplyUploadFile["method"];
+    }
   | { tool: "scroll"; direction: "down" | "up" | "top" | "bottom" }
   | { tool: "wait"; milliseconds: number }
   | { tool: "go_back" }

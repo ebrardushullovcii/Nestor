@@ -682,13 +682,14 @@ describe("reading the choices of lists the page draws itself", () => {
         expect(
           controls.find((control) => control.id === "resume")?.upload,
         ).toEqual({
+          ariaInvalid: false,
           described: "Upload rejected by server",
           nearby: "Resume\nAttach\nTaylor-Resume.pdf",
           shown: false,
         });
         expect(
           controls.find((control) => control.id === "letter")?.upload,
-        ).toEqual({ described: "", nearby: "Cover letter", shown: true });
+        ).toEqual({ described: "", nearby: "Cover letter", shown: true, ariaInvalid: false });
         expect(
           controls.find((control) => control.id === "")?.upload,
         ).toBeUndefined();

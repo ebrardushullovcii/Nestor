@@ -325,6 +325,19 @@ describe("file uploads", () => {
     ]);
   });
 
+  test("a required input the widget emptied after a 2xx is attached, not refused", () => {
+    // Greenhouse-style: the input is cleared once the storage has the file,
+    // so the browser reports the empty required input as invalid.
+    const emptied = file({
+      value: "",
+      required: true,
+      invalid: true,
+      validationMessage: "Please select a file.",
+      upload: { network: "accepted", nearby: "Resume" },
+    });
+    expect(states({ controls: [emptied] })).toEqual([]);
+  });
+
   test("a form that sends the file with the final submission counts it once nothing reports a problem", () => {
     for (const shown of [true, false])
       expect(
