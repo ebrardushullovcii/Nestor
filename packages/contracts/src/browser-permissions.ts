@@ -19,6 +19,8 @@ export const BrowserAgentPermissionsSchema = z
      * enters the password on the website.
      */
     signIn: z.boolean().default(false),
+    /** Use an existing Google session to sign in or register on a website. */
+    googleSignIn: z.boolean().default(false),
     /** Create an account when a site needs one to continue. */
     createAccounts: z.boolean().default(false),
   })

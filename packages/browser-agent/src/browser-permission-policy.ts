@@ -4,6 +4,11 @@ import {
 } from "@nestor/contracts";
 import { isSecurityChallengeControl } from "./apply/blockers";
 import type { ApplyFormObservation, ApplyPageHands } from "./apply/types";
+import {
+  googleSignInInteraction,
+  hasGoogleSignInAction,
+  isGoogleAccountPage,
+} from "./google-sign-in";
 
 export interface BrowserPermissionPolicy {
   browserPermissions?: BrowserAgentPermissions;
@@ -26,6 +31,7 @@ const CHALLENGE_ACTION =
 
 export type BrowserInteractionKind =
   | keyof BrowserAgentPermissions
+  | "google_handoff"
   | "mfa"
   | "password";
 
@@ -43,6 +49,10 @@ export function browserInteractionKind(
     page.links.find((entry) => entry.ref === ref) ??
     page.clickables.find((entry) => entry.ref === ref);
   const label = item?.label.trim() ?? "";
+  if (/\bgoogle\b/iu.test(label) || isGoogleAccountPage(page)) {
+    const google = googleSignInInteraction(page, ref);
+    if (google) return google;
+  }
   if (FINAL_APPLICATION_ACTION.test(label)) return null;
   if (CREATE_ACCOUNT_ACTION.test(label)) return "createAccounts";
   if (SIGN_IN_ACTION.test(label)) {
@@ -112,6 +122,8 @@ export function browserStepReadyForAgent(
   const passwords = controls.filter(
     (entry) => entry.credentialRole === "password",
   );
+  if (permissions.googleSignIn && hasGoogleSignInAction(page)) return true;
+  if (isGoogleAccountPage(page)) return false;
   return Boolean(
     enabled && passwords.length && passwords.every((entry) => entry.answered),
   );
@@ -124,7 +136,12 @@ export function describeBrowserPermissions(
     policy.browserPermissions ?? {},
   );
   return [
-    `Browser permissions: CAPTCHA ${permissions.solveCaptchas ? "ON" : "OFF"}; sign-in ${permissions.signIn ? "ON" : "OFF"}; account creation ${permissions.createAccounts ? "ON" : "OFF"}.`,
+    `Browser permissions: CAPTCHA ${permissions.solveCaptchas ? "ON" : "OFF"}; website sign-in ${permissions.signIn ? "ON" : "OFF"}; Google sign-in/sign-up ${permissions.googleSignIn ? "ON" : "OFF"}; account creation ${permissions.createAccounts ? "ON" : "OFF"}.`,
+    ...(permissions.googleSignIn
+      ? [
+          "Google: use its button or sole signed-in account, even beside an empty password form. This may register a site account. Hand off Google login, multiple accounts and access requests; never create Google accounts.",
+        ]
+      : []),
     "Use visible controls for enabled steps; hand off others. Reuse sessions or host-filled saved logins. Never request or type passwords or MFA codes; the person enters missing credentials on-site. Sending and extra consent stay separate. Check results; never repeat an uncertain account action.",
   ].join("\n");
 }
@@ -140,11 +157,14 @@ export function withBrowserPermissions(
   const refusal = async (
     ref: string | undefined,
     secretWrite = false,
+    observed?: ApplyFormObservation,
   ): Promise<string | null> => {
-    const page = await hands.observe();
+    const page = observed ?? (await hands.observe());
     const kind = browserInteractionKind(page, ref);
     if (kind === "mfa")
       return "Enter the verification code yourself on the website, then continue.";
+    if (kind === "google_handoff")
+      return "Complete Google's account selection, sign-in or access request yourself on the website, then continue.";
     if (kind === "password")
       return secretWrite
         ? "Enter passwords yourself on the website. They are never given to the agent."
@@ -153,16 +173,39 @@ export function withBrowserPermissions(
     const allowed = await currentBrowserPermissions(policy);
     return allowed[kind]
       ? null
-      : `${kind === "solveCaptchas" ? "Solving CAPTCHAs" : kind === "signIn" ? "Signing in" : "Creating accounts"} is off in Settings. Leave this step to the person.`;
+      : `${kind === "solveCaptchas" ? "Solving CAPTCHAs" : kind === "googleSignIn" ? "Google sign-in/sign-up" : kind === "signIn" ? "Signing in" : "Creating accounts"} is off in Settings. Leave this step to the person.`;
   };
   const click = async (ref: string) => {
-    const denied = await refusal(ref);
-    if (denied) return { ok: false as const, error: denied };
     const page = await hands.observe();
+    const denied = await refusal(ref, false, page);
+    if (denied) return { ok: false as const, error: denied };
     const kind = browserInteractionKind(page, ref);
     const action = page.actions.find((entry) => entry.ref === ref);
-    if (kind === "signIn" || kind === "createAccounts") {
+    if (kind === "googleSignIn") {
+      const fresh = await hands.observe();
       if (
+        fresh.url !== page.url ||
+        fresh.signature !== page.signature ||
+        browserInteractionKind(fresh, ref) !== "googleSignIn"
+      )
+        return {
+          ok: false as const,
+          error:
+            "The Google step changed. Inspect the page again before continuing.",
+        };
+      if (!(await currentBrowserPermissions(policy)).googleSignIn)
+        return {
+          ok: false as const,
+          error: "Google sign-in/sign-up was turned off before this action.",
+        };
+    }
+    if (
+      kind === "signIn" ||
+      kind === "createAccounts" ||
+      kind === "googleSignIn"
+    ) {
+      if (
+        kind !== "googleSignIn" &&
         page.controls.some(
           (entry) =>
             entry.visible &&
@@ -186,6 +229,7 @@ export function withBrowserPermissions(
     if (
       (kind === "signIn" ||
         kind === "createAccounts" ||
+        kind === "googleSignIn" ||
         kind === "solveCaptchas") &&
       action?.submitsForm
     ) {
@@ -237,9 +281,42 @@ export function withBrowserPermissions(
   };
   return {
     ...hands,
+    navigate: async (url) => {
+      const page = await hands.observe();
+      const link = page.links.find((entry) => entry.href === url);
+      if (
+        isGoogleAccountPage({ url }) &&
+        !(await currentBrowserPermissions(policy)).googleSignIn
+      )
+        return {
+          ok: false,
+          error:
+            "Google sign-in/sign-up is off in Settings. Leave this step to the person.",
+        };
+      if (link) {
+        const denied = await refusal(link.ref, false, page);
+        if (denied) return { ok: false, error: denied };
+      }
+      return hands.navigate(url);
+    },
     observe: async () => {
       let page = await hands.observe();
       const permissions = await currentBrowserPermissions(policy);
+      if (
+        isGoogleAccountPage(page) &&
+        !(permissions.googleSignIn && hasGoogleSignInAction(page))
+      )
+        return {
+          ...page,
+          blocker: {
+            code: "site_login_required",
+            requiresPerson: true,
+            summary: "Google needs you to finish this step.",
+            detail:
+              "Choose your Google account, sign in or review the access request on the website. The agent cannot create Google accounts or approve Google permissions.",
+            nextActionLabel: "Finish the Google step in the browser",
+          },
+        };
       if (
         permissions.signIn &&
         prepareCredentials &&
@@ -263,7 +340,11 @@ export function withBrowserPermissions(
               ? "createAccounts"
               : null;
       if (!key || !page.blocker) return page;
-      if (!permissions[key]) {
+      const googleReady =
+        (key === "signIn" || key === "createAccounts") &&
+        permissions.googleSignIn &&
+        hasGoogleSignInAction(page);
+      if (!permissions[key] && !googleReady) {
         if (key === "solveCaptchas" && !page.blocker.requiresPerson)
           return page;
         return { ...page, blocker: { ...page.blocker, requiresPerson: true } };

@@ -143,6 +143,7 @@ export class EmbeddedBrowser {
   private window: BrowserWindow | null = null;
   private backstage: BrowserWindow | null = null;
   private browserSession: Session | null = null;
+  private originalUserAgent: string | null = null;
   private readonly pageMap = new Map<string, BrowserPage>();
   private readonly tabLifecycle = new TabLifecycle();
   private readonly pageListeners = new Set<(page: BrowserCdpPage) => void>();
@@ -738,9 +739,10 @@ export class EmbeddedBrowser {
   getSession(): Session {
     if (this.browserSession) return this.browserSession;
     const browserSession = session.fromPartition(EMBEDDED_BROWSER_PARTITION);
+    this.originalUserAgent = browserSession.getUserAgent();
     this.passwords();
     browserSession.setUserAgent(
-      browserUserAgent(browserSession.getUserAgent(), app.getName()),
+      browserUserAgent(this.originalUserAgent, app.getName()),
     );
     // Present as the Chrome this Chromium is built from: brand headers here,
     // the in-page brand list and window.chrome shape through a bridge-free
@@ -2217,6 +2219,16 @@ export class EmbeddedBrowser {
         )
           page.contents.navigationHistory.goForward();
         if (command.type === "reload") page.contents.reload();
+        if (command.type === "retry_verification" && this.originalUserAgent) {
+          const url = normalizeBrowserNavigation(page.contents.getURL());
+          if (url !== "about:blank") {
+            // A site may reject the Chrome identity even after verification.
+            // Change this tab only; retained sign-ins and other tabs stay put.
+            page.contents.setUserAgent(this.originalUserAgent);
+            // Start a GET rather than replaying a previous form POST.
+            void page.contents.loadURL(url).catch(() => undefined);
+          }
+        }
         if (command.type === "stop") page.contents.stop();
       }
     }

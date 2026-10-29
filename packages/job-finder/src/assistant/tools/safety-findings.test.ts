@@ -660,6 +660,7 @@ it("browser permissions start off and save one at a time without touching other 
   const before = await ctx.service.read();
   expect(browserAgentPermissionsOf(before.settings)).toEqual({
     solveCaptchas: false,
+    googleSignIn: false,
     signIn: false,
     createAccounts: false,
   });
@@ -675,6 +676,7 @@ it("browser permissions start off and save one at a time without touching other 
   const after = await ctx.service.read();
   expect(browserAgentPermissionsOf(after.settings)).toEqual({
     solveCaptchas: true,
+    googleSignIn: false,
     signIn: false,
     createAccounts: true,
   });
@@ -690,7 +692,12 @@ it("browser permissions start off and save one at a time without touching other 
   });
   expect(
     browserAgentPermissionsOf((await ctx.service.read()).settings),
-  ).toEqual({ solveCaptchas: true, signIn: false, createAccounts: true });
+  ).toEqual({
+    solveCaptchas: true,
+    signIn: false,
+    googleSignIn: false,
+    createAccounts: true,
+  });
 });
 
 it("refuses unmentioned jobs in second person without echoing internal ids", async () => {

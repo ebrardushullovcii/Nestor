@@ -90,16 +90,21 @@ const browserPermissionChoices: readonly {
   {
     key: "solveCaptchas",
     label: "Solve CAPTCHAs",
-    description:
-      "Attempts the CAPTCHA checks a site puts in the way.",
+    description: "Attempts the CAPTCHA checks a site puts in the way.",
     hint: "Some checks can't be solved this way. Those still come to you.",
   },
   {
     key: "signIn",
     label: "Sign in to websites",
-    description:
-      "Uses saved logins and existing browser sign-ins, including Sign in with Google.",
+    description: "Uses saved website logins and existing browser sign-ins.",
     hint: "If no saved login is available, it hands you the page to enter your password, then carries on.",
+  },
+  {
+    key: "googleSignIn",
+    label: "Use Google to sign in or sign up",
+    description:
+      "Uses an existing Google sign-in to log in or create accounts on job sites.",
+    hint: "Sign in to Google in the browser first. Multiple Google accounts, passwords, verification and new access requests still come to you.",
   },
   {
     key: "createAccounts",

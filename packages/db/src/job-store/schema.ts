@@ -104,6 +104,11 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   },
   {
     table: "profile_settings",
+    column: "ai_behavior_browser_permissions_google_sign_in",
+    definition: "INTEGER",
+  },
+  {
+    table: "profile_settings",
     column: "ai_behavior_browser_permissions_create_accounts",
     definition: "INTEGER",
   },

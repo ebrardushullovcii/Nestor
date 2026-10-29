@@ -1816,7 +1816,9 @@ async function runMeasuredApplyAgent(
             ? { ...observation.blocker, requiresPerson: true }
             : {
                 code: observation.controls.some(
-                  (control) => control.visible && control.credentialRole === "one_time_code",
+                  (control) =>
+                    control.visible &&
+                    control.credentialRole === "one_time_code",
                 )
                   ? "multi_factor_required"
                   : "site_login_required",
@@ -3969,7 +3971,9 @@ async function runMeasuredApplyAgent(
               const browserPermissions =
                 await currentBrowserPermissions(config);
               const enabledAccessLink =
-                (accessKind === "signIn" || accessKind === "createAccounts") &&
+                (accessKind === "signIn" ||
+                  accessKind === "createAccounts" ||
+                  accessKind === "googleSignIn") &&
                 browserPermissions[accessKind];
               if (
                 !enabledAccessLink &&

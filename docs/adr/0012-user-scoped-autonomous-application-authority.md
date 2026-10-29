@@ -67,8 +67,9 @@ approaches may be replaced if another design produces better truthful outcomes.
 
 ## Update (2026-10-29): opt-in browser access
 
-The owner authorized three independent settings for browser agents: solving
-CAPTCHAs, signing in, and creating website accounts. All default off, including
+The owner authorized independent settings for browser agents: solving
+CAPTCHAs, signing in, creating website accounts, and using an existing Google
+sign-in to sign in or register on a website. All default off, including
 for existing profiles. Search, source checks and application preparation read
 these permissions separately from sending authority and recheck them before
 acting. An enabled step may be attempted using the site's visible controls; an
@@ -82,3 +83,10 @@ autofill. Secrets stay between the main-owned encrypted vault and the exact-site
 browser form; they never become model input, renderer state or diagnostic data.
 Agent autofill additionally requires the sign-in permission and one unambiguous
 saved account on an existing-account form.
+
+The Google opt-in is independent of password-based sign-in and account creation.
+It permits the site's visible Google button and a single already signed-in
+Google account choice. An empty password form beside that button does not block
+it. Multiple Google accounts, Google credentials, Google account creation and
+Google consent/access requests still hand off to the person. It does not grant
+application-sending authority.

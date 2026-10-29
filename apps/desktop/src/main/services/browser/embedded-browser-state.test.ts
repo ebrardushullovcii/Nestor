@@ -27,6 +27,7 @@ function makeBrowser() {
     personSendPressedAt: Map<string, number>;
     ownedTabs: Map<string, Set<string>>;
     closeReleasedOwnedTabs(): void;
+    originalUserAgent: string | null;
     operations: Map<AbortController, string>;
     operationClaims: Map<
       AbortController,
@@ -61,6 +62,9 @@ function makeContents(id: string) {
     getURL: () => `https://jobs.example/${id}`,
     isLoading: () => false,
     setBackgroundThrottling: vi.fn(),
+    setUserAgent: vi.fn(),
+    loadURL: vi.fn(() => Promise.resolve()),
+    reload: vi.fn(),
     getBackgroundThrottling: () => true,
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
     mainFrame: {
@@ -76,6 +80,27 @@ function makeContents(id: string) {
 }
 
 describe("embedded browser tab state", () => {
+  test("verification retry changes only the active tab and uses GET instead of replaying a form", async () => {
+    const { browser, state, pages } = makeBrowser();
+    state.originalUserAgent = "Chromium/152 Electron/44 Nestor/0.1";
+    state.parkedTabs.set("failed", null);
+    await browser.command({ type: "retry_verification" });
+    expect(pages.get("failed")!.setUserAgent).toHaveBeenCalledExactlyOnceWith(
+      state.originalUserAgent,
+    );
+    expect(pages.get("failed")!.loadURL).toHaveBeenCalledExactlyOnceWith(
+      "https://jobs.example/failed",
+    );
+    expect(pages.get("failed")!.reload).not.toHaveBeenCalled();
+    expect(state.parkedTabs.has("failed")).toBe(true);
+    for (const [id, page] of pages) {
+      if (id === "failed") continue;
+      expect(page.setUserAgent).not.toHaveBeenCalled();
+      expect(page.loadURL).not.toHaveBeenCalled();
+      expect(page.close).not.toHaveBeenCalled();
+    }
+  });
+
   test.each(["completed", "failed", "aborted"])(
     "a %s discovery operation closes finished tabs after releasing its claim",
     async (outcome) => {

@@ -368,6 +368,7 @@ test("Settings saves one in-app browser permission without touching the others",
   await waitFor(() =>
     expect(preferences.settings.read().aiBehavior?.browserPermissions).toEqual({
       solveCaptchas: false,
+      googleSignIn: false,
       signIn: true,
       createAccounts: false,
     }),

@@ -84,6 +84,7 @@ export const DesktopBrowserCommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("back") }).strict(),
   z.object({ type: z.literal("forward") }).strict(),
   z.object({ type: z.literal("reload") }).strict(),
+  z.object({ type: z.literal("retry_verification") }).strict(),
   z.object({ type: z.literal("stop") }).strict(),
   z.object({ type: z.literal("take_control") }).strict(),
   z.object({ type: z.literal("resume") }).strict(),

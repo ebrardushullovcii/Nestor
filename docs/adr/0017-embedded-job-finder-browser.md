@@ -35,6 +35,12 @@ cannot be read. Website credentials never pass through the app renderer, AI
 tools, prompts or diagnostic logs. Autofill validates the current tab, frame,
 form action and exact origin, including submitter overrides.
 
+The browser menu also offers **Retry site verification**. It reloads only the
+selected tab with Electron's original user-agent, using a fresh GET instead of
+replaying a form POST. That identity lasts for the tab; other tabs and the
+session's default Chrome identity stay unchanged. Cookies and saved sign-ins
+are retained. This is a compatibility retry, not a challenge solver.
+
 Signing in, account creation and CAPTCHA interaction remain off by default.
 The owner may enable each independently in Settings > AI behavior > In-app
 browser. See the 2026-10-29 update to ADR 0012. MFA and steps the agent cannot

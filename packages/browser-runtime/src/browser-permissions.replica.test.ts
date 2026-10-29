@@ -37,7 +37,17 @@ beforeAll(async () => {
       return;
     }
     response.setHeader("Content-Type", "text/html");
-    if (path === "/jobs") {
+    if (path === "/google-session") {
+      response.writeHead(303, {
+        Location: "/jobs",
+        "Set-Cookie": "syntheticGoogleSession=yes; Path=/; SameSite=Lax",
+      });
+      response.end();
+    } else if (path === "/register/google") {
+      response.end(
+        "<h1>Create an account to continue</h1><form method='post' action='/account'><label>Password<input type='password'></label><button>Create account</button><button type='button' onclick=\"location.href='/google-session'\">Continue with Google</button></form>",
+      );
+    } else if (path === "/jobs") {
       response.end(
         "<h1>Job results</h1><a href='/jobs/1'>Software engineer</a>",
       );
@@ -62,6 +72,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await browser?.close();
+  server?.closeAllConnections();
   await new Promise<void>((resolve) => server?.close(() => resolve()));
 });
 
@@ -82,6 +93,52 @@ async function enterSyntheticLogin(page: Page) {
   await page.getByLabel("Email").fill("synthetic@example.test");
   await page.getByLabel("Password").fill("synthetic-replica-password");
 }
+
+test("Google sign-up opt-in follows the provider button beside an empty password form without authorizing other writes", async () => {
+  const context = await browser.newContext();
+  try {
+    const { page, hands } = await open(context, "/register/google");
+    const initial = await hands.observe();
+    const google = initial.actions.find(
+      (entry) => entry.label === "Continue with Google",
+    )!;
+    const before = posts.length;
+    const off = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({
+        signIn: true,
+        createAccounts: true,
+      }),
+    });
+    expect(await off.clickElement(google.ref)).toMatchObject({ ok: false });
+    expect(page.url()).toBe(`${base}/register/google`);
+    const on = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({
+        googleSignIn: true,
+      }),
+    });
+    const observed = await on.observe();
+    expect(observed.blocker?.requiresPerson).toBe(false);
+    const account = observed.actions.find(
+      (entry) => entry.label === "Create account",
+    )!;
+    expect(await on.clickElement(account.ref)).toMatchObject({ ok: false });
+    expect(await on.clickElement(google.ref)).toMatchObject({ ok: true });
+    await page.waitForURL(`${base}/jobs`);
+    expect(
+      (await context.cookies(base)).some(
+        (cookie) => cookie.name === "syntheticGoogleSession",
+      ),
+    ).toBe(true);
+    await page.evaluate(() =>
+      fetch("/application", { method: "POST", body: "blocked" }).catch(
+        () => undefined,
+      ),
+    );
+    expect(posts.slice(before)).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
 
 test("search mechanics install a closed guard before the exact sign-in POST", async () => {
   const context = await browser.newContext();
