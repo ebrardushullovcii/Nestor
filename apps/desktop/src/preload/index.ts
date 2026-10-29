@@ -13,6 +13,7 @@ import type {
   ApplicationRow,
   ApplicationStoreDemoResult,
   ApplicationTarget,
+  ResolveUncertainSendInput,
   ApplicationsForJobsInput,
   ApplyJobsInput,
   ApplyJobsResult,
@@ -436,6 +437,11 @@ const desktopApi = {
     stopApplication: (input: ApplicationTarget) =>
       ipcRenderer.invoke(
         "job-finder:stop-application",
+        input,
+      ) as Promise<boolean>,
+    resolveUncertainSend: (input: ResolveUncertainSendInput) =>
+      ipcRenderer.invoke(
+        "job-finder:resolve-uncertain-send",
         input,
       ) as Promise<boolean>,
     listNeedsYou: (input: NeedsYouListQuery = {}) =>

@@ -68,7 +68,8 @@ export const WORK_HINT: Record<ApplicationWorkState, string> = {
   blocked:
     "The site blocked this browser. Open the job in your browser to continue by hand.",
   failed: "Apply couldn’t finish this application. Nothing was sent.",
-  uncertain: "Apply could not tell whether it went through. Check the site.",
+  uncertain:
+    "Apply could not tell whether it went through. Check the site, then say what you found.",
 };
 
 export function describeStatus(row: Pick<TrackerRow, "status" | "work">): {
