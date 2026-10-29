@@ -1,12 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { ResumeDraft, ResumeDraftEntry } from "@nestor/contracts";
-import {
-  ResumeClaimConfirmationSchema,
-  ResumeDraftSchema,
-  resumeClaimOwnershipStatement,
-} from "@nestor/contracts";
-import { fnv1a32 } from "@nestor/core";
+import { ResumeDraftSchema } from "@nestor/contracts";
 import {
   buildResumeCoverageComparison,
   buildResumeDraftContentHash,
@@ -42,7 +37,6 @@ function withClaimChecks(
   };
 }
 import { createEntry } from "./resume-workspace-primitives";
-import { normalizeText } from "./shared";
 import { createSeed } from "../profile-service.test-support";
 
 function createBullets(prefix: string, texts: string[]) {
@@ -144,7 +138,6 @@ function createBaseDraft(): ResumeDraft {
     approvedExportId: null,
     staleReason: null,
     workHistoryReviewAcknowledgments: [],
-    claimConfirmations: [],
     issueApprovals: [],
     createdAt: "2026-03-20T10:04:00.000Z",
     updatedAt: "2026-03-20T10:04:00.000Z",
@@ -1479,7 +1472,7 @@ ${ownSentence}`,
     );
   });
 
-  test("maps the model's verdicts to statuses; only an unbacked generated line blocks, bound to locator and hash", () => {
+  test("maps the model's verdicts to statuses; only an unbacked generated line blocks", () => {
     const { profile, job } = getSeedContext();
     const groundedDraft = updateSection(
       createBaseDraft(),
@@ -1546,60 +1539,9 @@ ${ownSentence}`,
     expect(
       hasBlockingResumeClaimAssessment({
         validation: { claimAssessments: [stretchClaim!, paraphraseClaim!] },
-        draft,
       }),
     ).toBe(false);
-    expect(hasBlockingResumeClaimAssessment({ validation, draft })).toBe(true);
-
-    const confirmation = ResumeClaimConfirmationSchema.parse({
-      id: "claim_confirmation_grounding_3",
-      draftId: draft.id,
-      field: unbackedClaim?.field ?? "section_bullet",
-      sectionId: unbackedClaim?.sectionId ?? "",
-      entryId: unbackedClaim?.entryId ?? null,
-      bulletId: unbackedClaim?.bulletId ?? null,
-      confirmedClaimContentHash: fnv1a32(
-        normalizeText(unbackedClaim?.claimText ?? ""),
-      ),
-      ownershipStatement: resumeClaimOwnershipStatement,
-      confirmedAt: "2026-08-26T10:00:00.000Z",
-    });
-    const confirmedDraft = { ...draft, claimConfirmations: [confirmation] };
-    expect(
-      hasBlockingResumeClaimAssessment({ validation, draft: confirmedDraft }),
-    ).toBe(false);
-
-    // A cross-draft confirmation never satisfies the gate.
-    expect(
-      hasBlockingResumeClaimAssessment({
-        validation,
-        draft: {
-          ...draft,
-          claimConfirmations: [
-            {
-              ...confirmation,
-              id: "claim_confirmation_foreign_draft",
-              draftId: "resume_draft_elsewhere",
-            },
-          ],
-        },
-      }),
-    ).toBe(true);
-
-    // A reworded line needs its own approval.
-    expect(
-      hasBlockingResumeClaimAssessment({
-        validation: {
-          ...validation,
-          claimAssessments: validation.claimAssessments.map((assessment) =>
-            assessment.id === unbackedClaim?.id
-              ? { ...assessment, contentHash: fnv1a32("reworded claim") }
-              : assessment,
-          ),
-        },
-        draft: confirmedDraft,
-      }),
-    ).toBe(true);
+    expect(hasBlockingResumeClaimAssessment({ validation })).toBe(true);
 
     // The person's own line is theirs, whatever the checker says.
     expect(
@@ -1609,7 +1551,6 @@ ${ownSentence}`,
             { ...unbackedClaim!, claimOrigin: "user_edited" as const },
           ],
         },
-        draft,
       }),
     ).toBe(false);
   });
@@ -1625,7 +1566,6 @@ ${ownSentence}`,
     const blocks = (overrides: Partial<typeof row>) =>
       hasBlockingResumeClaimAssessment({
         validation: { claimAssessments: [{ ...row, ...overrides }] },
-        draft: baseDraft,
       });
 
     expect(

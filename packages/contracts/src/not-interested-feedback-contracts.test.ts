@@ -46,30 +46,21 @@ describe("discovery feedback contracts", () => {
     ).toBe("shortlisted");
   });
 
-  it("defaults a legacy employer exclusion reference to null", () => {
-    expect(
-      DiscoveryFeedbackSchema.parse({
-        version: 1,
-        revision: 1,
-        reasons: ["company"],
-        recordedAt: "2026-07-31T12:00:00.000Z",
-      }).employerExclusion,
-    ).toBeNull();
-  });
+  it("drops an employer exclusion saved with older feedback", () => {
+    const parsed = DiscoveryFeedbackSchema.parse({
+      version: 1,
+      revision: 1,
+      reasons: ["company"],
+      recordedAt: "2026-07-31T12:00:00.000Z",
+      employerExclusion: {
+        normalizedCompanyName: "legacy employer",
+        displayCompanyName: "Legacy Employer",
+        addedByThisFeedback: true,
+        campaignId: "campaign_1",
+      },
+    });
 
-  it("defaults a legacy employer exclusion campaign reference to null", () => {
-    expect(
-      DiscoveryFeedbackSchema.parse({
-        version: 1,
-        revision: 1,
-        reasons: ["company"],
-        recordedAt: "2026-07-31T12:00:00.000Z",
-        employerExclusion: {
-          normalizedCompanyName: "legacy employer",
-          displayCompanyName: "Legacy Employer",
-          addedByThisFeedback: true,
-        },
-      }).employerExclusion?.campaignId,
-    ).toBeNull();
+    expect(parsed.reasons).toEqual(["company"]);
+    expect(parsed).not.toHaveProperty("employerExclusion");
   });
 });

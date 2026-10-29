@@ -100,7 +100,6 @@ function createDraft(): ResumeDraft {
     approvedExportId: null,
     staleReason: null,
     workHistoryReviewAcknowledgments: [],
-    claimConfirmations: [],
     issueApprovals: [],
     createdAt: updatedAt,
     updatedAt,

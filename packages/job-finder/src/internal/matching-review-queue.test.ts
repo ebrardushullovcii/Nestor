@@ -882,7 +882,6 @@ describe("approved tailored resume apply readiness", () => {
       targetPageCount: 2,
       generationMethod: "deterministic" as const,
       workHistoryReviewAcknowledgments: [],
-      claimConfirmations: [],
       issueApprovals: [],
       approvedAt: "2026-03-20T10:05:00.000Z",
       approvedExportId: "export_stale",

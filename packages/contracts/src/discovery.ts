@@ -1458,19 +1458,7 @@ export const DiscoveryFeedbackReasonSchema = z.enum(
   discoveryFeedbackReasonValues,
 );
 
-export const EmployerExclusionReferenceSchema = z
-  .object({
-    normalizedCompanyName: NonEmptyStringSchema,
-    displayCompanyName: NonEmptyStringSchema,
-    addedByThisFeedback: z.boolean(),
-    campaignId: NonEmptyStringSchema.nullable().default(null),
-  })
-  .strict();
-export type EmployerExclusionReference = z.infer<
-  typeof EmployerExclusionReferenceSchema
->;
-
-const DiscoveryFeedbackObjectSchema = z.object({
+export const DiscoveryFeedbackSchema = z.object({
   version: z.literal(1),
   revision: z.number().int().positive(),
   reasons: z.array(DiscoveryFeedbackReasonSchema).max(9),
@@ -1479,21 +1467,8 @@ const DiscoveryFeedbackObjectSchema = z.object({
   // dismissal exactly instead of downgrading every hidden job to discovered.
   // Null for pending jobs and feedback recorded before this field existed.
   priorStatus: ApplicationStatusSchema.nullable().default(null),
-  employerExclusion: EmployerExclusionReferenceSchema.nullable().default(null),
 });
-type DiscoveryFeedbackParsed = z.infer<typeof DiscoveryFeedbackObjectSchema>;
-type DiscoveryFeedbackInput = z.input<typeof DiscoveryFeedbackObjectSchema>;
-export type DiscoveryFeedback = Omit<
-  DiscoveryFeedbackParsed,
-  "employerExclusion"
-> & {
-  employerExclusion?: DiscoveryFeedbackParsed["employerExclusion"];
-};
-export const DiscoveryFeedbackSchema: z.ZodType<
-  DiscoveryFeedback,
-  z.ZodTypeDef,
-  DiscoveryFeedbackInput
-> = DiscoveryFeedbackObjectSchema;
+export type DiscoveryFeedback = z.infer<typeof DiscoveryFeedbackSchema>;
 
 export const discoveryLedgerEntryStatusValues = [
   "seen",
