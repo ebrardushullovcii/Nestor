@@ -141,26 +141,66 @@ export function composeContextReference(input: {
     }),
     base,
   );
+  const bounded = withinMessageLimits(merged);
   // Text selected in the resume editor is the editor's selection too.
   const withSelection =
-    merged.editor?.editor === "resume" && merged.selectedText
+    bounded.editor?.editor === "resume" && bounded.selectedText
       ? {
-          ...merged,
+          ...bounded,
           editor: {
-            ...merged.editor,
+            ...bounded.editor,
             selection: {
-              sectionId: merged.editor.selection?.sectionId ?? null,
-              entryId: merged.editor.selection?.entryId ?? null,
-              bulletIds: merged.editor.selection?.bulletIds ?? [],
-              text: merged.selectedText,
+              sectionId: bounded.editor.selection?.sectionId ?? null,
+              entryId: bounded.editor.selection?.entryId ?? null,
+              bulletIds: bounded.editor.selection?.bulletIds ?? [],
+              text: bounded.selectedText,
             },
           },
         }
-      : merged;
+      : bounded;
   // The browser only takes over the screen while it is on screen.
   return input.browser?.visible
     ? { ...withSelection, screen: "browser" }
     : withSelection;
+}
+
+/**
+ * Screens hand over what they hold, which can outgrow a message: Find jobs
+ * keeps every row loaded while scrolling, and a sign-in page's address runs
+ * to thousands of characters. Main rejects an oversized message outright, so
+ * the context is trimmed here to the limits AssistantContextReferenceSchema
+ * accepts. The counts stay whole.
+ */
+function withinMessageLimits(
+  reference: AssistantContextReference,
+): AssistantContextReference {
+  const { list, browser, focus } = reference;
+  const entity = (ref: AssistantEntityRef) => ({
+    ...ref,
+    label: ref.label?.slice(0, 300) ?? null,
+  });
+  return {
+    ...reference,
+    sectionLabel: reference.sectionLabel?.slice(0, 160) ?? null,
+    focus: focus ? entity(focus) : null,
+    mentions: reference.mentions.map(entity),
+    list: list
+      ? {
+          ...list,
+          selectedIds: list.selectedIds.slice(0, 500),
+          displayedIds: list.displayedIds.slice(0, 300),
+          filteredIds: list.filteredIds.slice(0, 3000),
+          filterSummary: list.filterSummary?.slice(0, 4000) ?? null,
+        }
+      : null,
+    browser: browser
+      ? {
+          ...browser,
+          url: browser.url.slice(0, 2000),
+          title: browser.title?.slice(0, 300) ?? null,
+        }
+      : null,
+  };
 }
 
 /**

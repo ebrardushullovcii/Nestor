@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AssistantEventSchema,
   AssistantMessageSchema,
+  AssistantSendMessageInputSchema,
   AssistantTurnSchema,
 } from "@nestor/contracts";
 
@@ -118,6 +119,50 @@ describe("assistant context capture", () => {
       now: NOW,
     });
     expect(reference.screen).toBe("browser");
+  });
+
+  it("keeps a long scrolled list and long page labels within what a message accepts", () => {
+    // Find jobs loads 50 rows a page as the person scrolls; 7 pages used to
+    // reject every message with "Some details were missing or did not fit".
+    const rows = Array.from({ length: 350 }, (_, n) => String(n + 1));
+    const reference = composeContextReference({
+      pathname: "/job-finder/discovery",
+      search: "",
+      patches: [
+        {
+          sectionLabel: "S".repeat(400),
+          focus: { kind: "job", id: "1", label: "T".repeat(500) },
+          list: {
+            listKind: "jobs",
+            selectedIds: Array.from({ length: 600 }, (_, n) => String(n)),
+            displayedIds: rows,
+            filteredIds: [],
+            totalFilteredCount: 1921,
+            filterSummary: JSON.stringify({ except: rows }).repeat(20),
+            campaignId: null,
+          },
+        },
+      ],
+      browser: {
+        tabId: "tab_1",
+        url: `https://accounts.google.com/signin?continue=${"x".repeat(3000)}`,
+        title: "G".repeat(400),
+        visible: false,
+      },
+      selectedText: null,
+      mentions: [],
+      attachments: [],
+      now: NOW,
+    });
+    expect(() =>
+      AssistantSendMessageInputSchema.parse({
+        clientMessageId: "message_1",
+        text: "Read my portfolio",
+        context: reference,
+      }),
+    ).not.toThrow();
+    expect(reference.list?.displayedIds).toEqual(rows.slice(0, 300));
+    expect(reference.list?.totalFilteredCount).toBe(1921);
   });
 });
 
