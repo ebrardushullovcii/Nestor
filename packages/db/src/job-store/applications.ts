@@ -377,6 +377,24 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
+    /**
+     * The person pressed Check again on a sign-in they finished: the next run
+     * re-enters this application from its own address with GET, under the
+     * same sign-in item. A site that still asks stops it there again.
+     */
+    retryAccessForPerson(id: number, attempt: number): boolean {
+      return store.transaction(() => {
+        const result =
+          sql(`UPDATE application_details SET access_recheck=2 WHERE application_id=? AND attempt=?
+          AND EXISTS (SELECT 1 FROM applications a WHERE a.id=application_id AND a.attempt=application_details.attempt AND a.state='needs_you')`).run(
+            id,
+            attempt,
+          );
+        if (result.changes) changed([getApplication(id)!.jobId]);
+        return !!result.changes;
+      });
+    },
+
     saveWork(
       id: number,
       work: Omit<ApplicationWork, "accessRecheck">,

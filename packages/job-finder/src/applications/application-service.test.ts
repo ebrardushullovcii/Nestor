@@ -2491,3 +2491,97 @@ it("Send for me resumes after two Needs-you answers and forwards only the final 
   expect(action).toHaveBeenCalledOnce();
   expect(f.onError).not.toHaveBeenCalled();
 });
+
+it("reads waiting pages nobody holds every 30 seconds, and closely after the person opens one", async () => {
+  const f = await setup(2);
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  preparation.blocker = {
+    code: "site_login_required",
+    requiresPerson: true,
+    summary: "Sign in to continue",
+    detail: "Sign in",
+    nextActionLabel: "Open browser",
+  };
+  const signIn = {
+    ...f.personPage,
+    title: "Sign in",
+    bodyText: "Sign in to continue",
+  };
+  f.browser.readApplicationPageBinding.mockResolvedValue(signIn);
+  f.browser.readApplicationPageWithPerson.mockResolvedValue(null);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  f.releases.splice(0).forEach((release) => release());
+  await vi.waitFor(() =>
+    expect(
+      f.applications.listApplications({ state: "needs_you" }).rows,
+    ).toHaveLength(2),
+  );
+  const reads = () => f.browser.readApplicationPageBinding.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(2000);
+  const afterFirst = reads();
+  // Ten more watch cycles: an unchanged page nobody holds is not re-read.
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(reads()).toBe(afterFirst);
+  await vi.advanceTimersByTimeAsync(12_000);
+  expect(reads()).toBe(afterFirst + 2);
+  // The person opens one: that page is read every cycle for a while.
+  const [opened] = f.applications
+    .listApplications({ state: "needs_you" })
+    .rows.sort((a, b) => a.id - b.id);
+  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+  expect(await f.service.open(opened!.id)).toBe(true);
+  const beforeClose = reads();
+  await vi.advanceTimersByTimeAsync(6000);
+  expect(reads() - beforeClose).toBeGreaterThanOrEqual(3);
+  expect(f.onError).not.toHaveBeenCalled();
+});
+
+it("Check again on a sign-in the page still shows runs the application again from its own address", async () => {
+  const f = await setup(1);
+  preparation.blocker = {
+    code: "site_login_required",
+    requiresPerson: true,
+    summary: "Sign in to continue",
+    detail: "Sign in",
+    nextActionLabel: "Open browser",
+  };
+  f.browser.readApplicationPageBinding.mockResolvedValue({
+    ...f.personPage,
+    title: "Sign in",
+    bodyText: "Sign in to continue",
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.splice(0).forEach((release) => release());
+  await vi.waitFor(() =>
+    expect(
+      f.applications.listApplications({ state: "needs_you" }).rows,
+    ).toHaveLength(1),
+  );
+  const [row] = f.applications.listApplications({ state: "needs_you" }).rows;
+  const task = f.applications.needsYou.list().rows[0]!;
+  // The sign-in finished in another window; this page still shows it.
+  expect(await f.service.checkAccess(task.id)).toBe(false);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  const job = f.jobs.getJob(row!.jobId)!;
+  expect(f.browser.reloadApplicationPageBinding).toHaveBeenCalledWith(
+    "target_site",
+    `application_${row!.id}_attempt_2`,
+    job.applyUrl ?? job.url,
+  );
+  // The site still asks: the new attempt stops at the same item.
+  f.releases.splice(0).forEach((release) => release());
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row!.id)?.state).toBe("needs_you"),
+  );
+  expect(f.applications.needsYou.list().rows.map((t) => t.id)).toEqual([
+    task.id,
+  ]);
+  expect(
+    f.applications.needsYou.details(task.id)?.applications.map((a) => a.id),
+  ).toEqual([row!.id]);
+  expect(f.onError).not.toHaveBeenCalled();
+});

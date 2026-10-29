@@ -473,10 +473,21 @@ export function TaskPane(props: {
                   void act(async () => {
                     if (
                       !(await window.nestor.needsYou.run("open_need", { id }))
-                    )
+                    ) {
+                      // A run already under way owns its page; it comes back
+                      // here only if the site still needs the person.
+                      const now = await window.nestor.needsYou.run("get_need", {
+                        id,
+                      });
                       throw new Error(
-                        "This application tab is unavailable. Open the application again from Applications.",
+                        now?.applications.length &&
+                          now.applications.every(
+                            (application) => application.state === "running",
+                          )
+                          ? "Job Finder is working on this application right now. If the site still needs you, it comes back here."
+                          : "This application tab is unavailable. Open the application again from Applications.",
                       );
+                    }
                   })
                 }
               >
@@ -499,7 +510,9 @@ export function TaskPane(props: {
                         );
                       else
                         setError(
-                          "The page is still waiting. Finish the browser step, then check again.",
+                          task.kind === "sign_in"
+                            ? "Job Finder is opening the application again with your sign-in. If the site still asks, this stays here."
+                            : "The page is still waiting. Finish the browser step, then check again.",
                         );
                     })
                   }
