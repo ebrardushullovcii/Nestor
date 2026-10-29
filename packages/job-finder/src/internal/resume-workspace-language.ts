@@ -216,7 +216,6 @@ export function applyResumeLanguage(
     writtenLanguage: result.language,
     listingLanguage: result.listingLanguage ?? source.listingLanguage ?? null,
     claimChecks: [],
-    claimConfirmations: [],
     issueApprovals: [],
   };
 }

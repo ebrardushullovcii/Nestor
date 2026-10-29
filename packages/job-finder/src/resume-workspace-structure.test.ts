@@ -223,7 +223,6 @@ describe("buildResumeRenderDocument", () => {
       approvedExportId: null,
       staleReason: null,
       workHistoryReviewAcknowledgments: [],
-      claimConfirmations: [],
       issueApprovals: [],
       createdAt: "2026-03-20T10:04:00.000Z",
       updatedAt: "2026-03-20T10:04:00.000Z",

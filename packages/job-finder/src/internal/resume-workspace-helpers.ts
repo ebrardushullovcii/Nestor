@@ -1528,10 +1528,7 @@ export function validateResumeDraft(input: {
       });
     }
     // A stretch was accepted by choosing Aggressive; it is not a chore.
-    const blocksExport = isBlockingResumeClaimAssessment({
-      assessment,
-      draft: input.draft,
-    });
+    const blocksExport = isBlockingResumeClaimAssessment({ assessment });
     // A note the person already approved no longer stands in for the claim
     // row; otherwise the line kept blocking with nothing left to click.
     const alreadyReported = issues.some(
@@ -1590,30 +1587,14 @@ export function validateResumeDraft(input: {
 }
 
 /**
- * Single confirmation-aware gate over persisted resume claim assessments for
- * export, approve, and validate call sites. A draft has a blocking claim when:
- *
- * - the assessment was produced by the stale v1 verifier (fail-closed
- *   currency: generated claims must be revalidated under v2 before they can
- *   gate-pass, while user-authored rows keep their legacy semantics where
- *   only hard unsupported verdicts blocked), or
- * - the claim is unsupported — including every hard integrity gap regardless
- * of claim origin — so origin flips alone can never clear the block, or
- * - the claim needs confirmation (`confirm_needed`) and no stored
- *   confirmation matches the exact draft id, locator (field, section, entry,
- *   bullet), and confirmed normalized-content hash. Reworded claims change
- *   the content hash and block again.
- *
- * Review-status user-authored prose stays informational here, matching the
- * assessment mapping; review-status generated claims keep gating until they
- * are rewritten, confirmed, or reclassified by a fresh validation.
+ * Whether any persisted claim assessment blocks export, approve or validate,
+ * by the one rule in `isBlockingResumeClaimAssessment`.
  */
 export function hasBlockingResumeClaimAssessment(input: {
   validation: Pick<ResumeValidationResult, "claimAssessments">;
-  draft: Pick<ResumeDraft, "id" | "claimConfirmations">;
 }): boolean {
   return input.validation.claimAssessments.some((assessment) =>
-    isBlockingResumeClaimAssessment({ assessment, draft: input.draft }),
+    isBlockingResumeClaimAssessment({ assessment }),
   );
 }
 
@@ -1651,7 +1632,6 @@ function buildResumeExportBlockerKey(blocker: ResumeExportBlocker): string {
  * re-derive "is this grounded" with its own local rule.
  */
 export function collectResumeExportBlockers(input: {
-  draft: Pick<ResumeDraft, "id" | "claimConfirmations">;
   validation: Pick<ResumeValidationResult, "claimAssessments" | "issues">;
 }): ResumeExportBlocker[] {
   const blockers: ResumeExportBlocker[] = [];
@@ -1690,7 +1670,7 @@ export function collectResumeExportBlockers(input: {
   }
 
   for (const assessment of input.validation.claimAssessments) {
-    if (!isBlockingResumeClaimAssessment({ assessment, draft: input.draft })) {
+    if (!isBlockingResumeClaimAssessment({ assessment })) {
       continue;
     }
 
@@ -1734,14 +1714,12 @@ export function evaluateResumeProposalExportGate(input: {
     ...(input.profile ? { profile: input.profile } : {}),
   };
   const baselineBlockers = collectResumeExportBlockers({
-    draft: input.baselineDraft,
     validation: validateResumeDraft({
       ...validationInput,
       draft: input.baselineDraft,
     }),
   });
   const candidateBlockers = collectResumeExportBlockers({
-    draft: input.candidateDraft,
     validation: validateResumeDraft({
       ...validationInput,
       draft: input.candidateDraft,

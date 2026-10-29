@@ -35,7 +35,9 @@ import { describe, expect, it } from "vitest";
  * holds rows written by each schema as it was on 2026-10-26: `full` fills
  * every optional field, `minimal` leaves out everything that may be absent.
  * Never edit a fixture to make a schema change pass; a new shape gets new
- * fixtures beside the old ones.
+ * fixtures beside the old ones. The one exception is a field the product no
+ * longer reads or writes: list it in `RETIRED_FIELDS`, and the old row must
+ * still parse with the field dropped.
  */
 interface StoredJsonSchema {
   safeParse(
@@ -100,6 +102,11 @@ const FIXTURES: Record<string, string> = {
   SavedOptionFallbackSchema: "saved-option-fallback",
 };
 
+/** Fields removed from a schema on purpose; stored rows still carry them. */
+const RETIRED_FIELDS: Record<string, readonly string[]> = {
+  ResumeDraftSchema: ["claimConfirmations"],
+};
+
 const fixtureDir = path.join(__dirname, "stored-json");
 
 describe("JSON the job store keeps", () => {
@@ -137,9 +144,16 @@ describe("JSON the job store keeps", () => {
         const result = schema.safeParse(row);
         expect(result.success ? [] : result.error.issues).toEqual([]);
         if (result.success) {
-          if (row !== null && typeof row === "object")
-            expect(result.data).toMatchObject(row);
-          else expect(result.data).toEqual(row);
+          if (row !== null && typeof row === "object") {
+            const retired = RETIRED_FIELDS[name] ?? [];
+            expect(result.data).toMatchObject(
+              Object.fromEntries(
+                Object.entries(row).filter(([key]) => !retired.includes(key)),
+              ),
+            );
+            for (const field of retired)
+              expect(result.data).not.toHaveProperty(field);
+          } else expect(result.data).toEqual(row);
         }
       });
 });

@@ -307,68 +307,6 @@ export const ResumeClaimContentHashSchema = z
   .string()
   .regex(/^fnv1a32:[0-9a-f]{8}$/);
 
-export const resumeClaimOwnershipStatement =
-  "I confirm this content is accurate and my own.";
-
-export const ResumeClaimOwnershipStatementSchema = z.literal(
-  resumeClaimOwnershipStatement,
-);
-
-/**
- * Explicit user confirmation that a specific draft locator's claim content is
- * accurate and owned. Strictly bound to the confirmed claim content hash
- * (normalized, assessment-compatible) and a literal ownership statement so
- * confirmations fail closed against substantive content changes, malformed
- * locators, or forged statements.
- */
-export const ResumeClaimConfirmationSchema = z
-  .object({
-    id: NonEmptyStringSchema,
-    // draftId equality with the parent draft is a service responsibility:
-    // contracts may parse confirmations detached from their draft.
-    draftId: NonEmptyStringSchema,
-    field: ResumeClaimFieldSchema,
-    sectionId: NonEmptyStringSchema,
-    entryId: NonEmptyStringSchema.nullable().default(null),
-    bulletId: NonEmptyStringSchema.nullable().default(null),
-    confirmedClaimContentHash: ResumeClaimContentHashSchema,
-    ownershipStatement: ResumeClaimOwnershipStatementSchema,
-    confirmedAt: IsoDateTimeSchema,
-  })
-  .strict()
-  .superRefine((value, ctx) => {
-    const expectsEntry =
-      value.field === "entry_summary" || value.field === "entry_bullet";
-    const expectsBullet =
-      value.field === "section_bullet" || value.field === "entry_bullet";
-
-    if ((value.entryId !== null) !== expectsEntry) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["entryId"],
-        message:
-          "Claim confirmation locators require an entryId exactly when field is entry_summary or entry_bullet.",
-      });
-    }
-
-    if ((value.bulletId !== null) !== expectsBullet) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["bulletId"],
-        message:
-          "Claim confirmation locators require a bulletId exactly when field is section_bullet or entry_bullet.",
-      });
-    }
-  });
-export type ResumeClaimConfirmation = z.infer<
-  typeof ResumeClaimConfirmationSchema
->;
-
-export const ResumeClaimConfirmationsFieldSchema = z
-  .array(ResumeClaimConfirmationSchema)
-  .max(100)
-  .default([]);
-
 /**
  * The person's explicit approval of one validation blocker that is not a
  * claim assessment (an invented-looking metric, job-description wording, a
@@ -775,32 +713,12 @@ export const ResumeDraftSchema = z.object({
   approvedExportId: NonEmptyStringSchema.nullable().default(null),
   staleReason: NonEmptyStringSchema.nullable().default(null),
   workHistoryReviewAcknowledgments: WorkHistoryReviewAcknowledgmentsFieldSchema,
-  claimConfirmations: ResumeClaimConfirmationsFieldSchema,
   issueApprovals: ResumeIssueApprovalsFieldSchema,
   claimChecks: z.array(ResumeClaimCheckSchema).optional(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });
 export type ResumeDraft = z.output<typeof ResumeDraftSchema>;
-
-/**
- * Skills-section bullets the candidate can bulk-confirm. Years rounding and
- * other prose stretches stay one-by-one; listing-asked technologies in the
- * skills or keywords section share one command, each still getting its own
- * confirmation record and the same ownership statement.
- */
-export function isResumeSkillClaimAssessment(
-  draft: Pick<ResumeDraft, "sections">,
-  assessment: Pick<ResumeClaimAssessment, "field" | "sectionId">,
-): boolean {
-  if (assessment.field !== "section_bullet") {
-    return false;
-  }
-  const section = draft.sections.find(
-    (entry) => entry.id === assessment.sectionId,
-  );
-  return section?.kind === "skills" || section?.kind === "keywords";
-}
 
 export const ResumeDraftPatchSchema = z.object({
   id: NonEmptyStringSchema,
@@ -942,45 +860,18 @@ export function isGeneratedResumeClaimOrigin(
  * gate — must call this exact function so a proposal can never be presented as
  * grounded while the export gate would reject the same text.
  *
- * A claim blocks when it was produced by the stale v1 verifier and is either
- * generated or hard-unsupported, when it is unsupported under any origin, when
- * it needs confirmation and no exact locator/content-hash confirmation exists,
- * or when it is review-status generated content.
+ * Only a generated line the saved evidence contradicts can hold a resume
+ * back, and generation settles those itself (it puts back the person's
+ * wording or leaves the line off). The person's own lines are theirs, a
+ * stretch was accepted by choosing Aggressive (ADR 0018), and a line the
+ * AI could not check yet does not wait on the person.
  */
 export function isBlockingResumeClaimAssessment(input: {
-  assessment: Pick<
-    ResumeClaimAssessment,
-    | "bulletId"
-    | "claimOrigin"
-    | "contentHash"
-    | "entryId"
-    | "field"
-    | "sectionId"
-    | "status"
-    | "verifier"
-  >;
-  draft: Pick<ResumeDraft, "id" | "claimConfirmations">;
+  assessment: Pick<ResumeClaimAssessment, "claimOrigin" | "status">;
 }): boolean {
-  const assessment = input.assessment;
-  const hasMatchingConfirmation = input.draft.claimConfirmations.some(
-    (confirmation) =>
-      confirmation.draftId === input.draft.id &&
-      confirmation.field === assessment.field &&
-      confirmation.sectionId === assessment.sectionId &&
-      confirmation.entryId === assessment.entryId &&
-      confirmation.bulletId === assessment.bulletId &&
-      confirmation.confirmedClaimContentHash === assessment.contentHash,
-  );
-
-  // Only a generated line the saved evidence contradicts can hold a resume
-  // back, and generation settles those itself (it puts back the person's
-  // wording or leaves the line off). The person's own lines are theirs, a
-  // stretch was accepted by choosing Aggressive (ADR 0018), and a line the
-  // AI could not check yet does not wait on the person.
   return (
-    assessment.status === "unsupported" &&
-    isGeneratedResumeClaimOrigin(assessment.claimOrigin) &&
-    !hasMatchingConfirmation
+    input.assessment.status === "unsupported" &&
+    isGeneratedResumeClaimOrigin(input.assessment.claimOrigin)
   );
 }
 

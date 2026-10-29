@@ -344,7 +344,6 @@ const LISTING_READ_MESSAGES = new Set([
   "The listing could not be read from this page. Open the listing and try again.",
   "The fit assessment could not be completed. Your previous assessment was kept. Try again.",
   "The listing could not be assessed. Your previous assessment was kept.",
-  "This job is not in the saved or pending list. Use Assess next 1 listing in Find jobs to assess the search results.",
   "The AI is unavailable. Try again.",
   "The linked listing names a different role. Open the listing and choose the role you want.",
   "Only a short excerpt could be read. Open the listing to check the requirements.",

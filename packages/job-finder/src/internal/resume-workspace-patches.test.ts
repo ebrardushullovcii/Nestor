@@ -64,7 +64,6 @@ function createDraft(): ResumeDraft {
     approvedExportId: null,
     staleReason: null,
     workHistoryReviewAcknowledgments: [],
-    claimConfirmations: [],
     issueApprovals: [],
     createdAt: "2026-08-09T10:00:00.000Z",
     updatedAt: "2026-08-09T10:00:00.000Z",
@@ -217,7 +216,6 @@ function createGeneratedDraft(): ResumeDraft {
     approvedExportId: null,
     staleReason: null,
     workHistoryReviewAcknowledgments: [],
-    claimConfirmations: [],
     issueApprovals: [],
     createdAt: "2026-08-09T10:00:00.000Z",
     updatedAt: "2026-08-09T10:00:00.000Z",
@@ -387,10 +385,7 @@ describe("resume workspace patch generated-claim provenance", () => {
     // Not checked by the model yet; that does not hold the resume back.
     expect(rewrittenAssessment?.status).toBe("review");
     expect(
-      hasBlockingResumeClaimAssessment({
-        validation: afterValidation,
-        draft: patchedDraft,
-      }),
+      hasBlockingResumeClaimAssessment({ validation: afterValidation }),
     ).toBe(false);
   });
 });

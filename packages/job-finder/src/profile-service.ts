@@ -233,8 +233,10 @@ export function createProfileService(options: ProfileServiceOptions) {
     const parsed = normalizeSearchPreferences(
       JobSearchPreferencesSchema.parse(searchPreferences),
     );
-    // The resume approach and how picky a search is belong to Settings; an
-    // older Profile draft never writes its copies over a newer Settings save.
+    // The resume level and the saved search selectivity are written by their
+    // own commands (the resume-level picker in Profile › Preferences, and
+    // `updateAiBehavior`), not by the preferences form. A form save keeps the
+    // stored values, so an older form copy never writes them over a newer one.
     const next = ownsAiBehaviorFields
       ? parsed
       : {
