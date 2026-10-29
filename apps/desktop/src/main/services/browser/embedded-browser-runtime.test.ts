@@ -15,6 +15,33 @@ import {
 import { describeApplicationPreparationProgress } from "@nestor/job-finder";
 
 describe("withEmbeddedBrowserActivity", () => {
+  test("Open shows only the exact binding adopted during restoration", async () => {
+    const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
+    let restored = false;
+    const showTab = vi.fn(() => true);
+    const focus = vi.fn(() => {
+      restored = true;
+      return Promise.resolve(true);
+    });
+    const wrapped = withEmbeddedBrowserActivity(
+      { ...base, focusApplicationPageBinding: focus },
+      {
+        getApplicationTabIds: (key: string) =>
+          restored && key === "wanted" ? ["restored-wanted"] : [],
+        showTab,
+        releaseOwnedTabs: vi.fn(),
+      } as unknown as EmbeddedBrowser,
+    );
+    expect(
+      await wrapped.focusApplicationPageBinding!("target_site", "wanted"),
+    ).toBe(true);
+    expect(showTab).toHaveBeenCalledExactlyOnceWith("restored-wanted");
+    showTab.mockClear();
+    expect(
+      await wrapped.focusApplicationPageBinding!("target_site", "missing"),
+    ).toBe(false);
+    expect(showTab).not.toHaveBeenCalled();
+  });
   test("rendered reads preserve readiness and page callbacks through the activity adapter", async () => {
     const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
     const ready = vi.fn(() => true),
