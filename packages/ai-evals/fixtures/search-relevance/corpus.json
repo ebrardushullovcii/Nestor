@@ -151,12 +151,12 @@
       "title": "Senior FullStack Engineer - Grafana Cloud Observability| US | Remote",
       "labels": {
         "volume": {
-          "relevant": true,
-          "reason": "US remote React/TypeScript full-stack product work; comparable backend languages explicitly accepted."
+          "relevant": false,
+          "reason": "US/Canada remote, explicitly qualified by EST time zone. The Chicago persona is in Central time; the frozen text does not offer hours overlap as an alternative. Eligibility needs clarification rather than assuming Chicago is allowed."
         },
         "close": {
-          "relevant": true,
-          "reason": "US remote React/TypeScript full-stack product work; comparable backend languages explicitly accepted."
+          "relevant": false,
+          "reason": "US/Canada remote, explicitly qualified by EST time zone. The Chicago persona is in Central time; the frozen text does not offer hours overlap as an alternative. Eligibility needs clarification rather than assuming Chicago is allowed."
         }
       }
     },
@@ -572,11 +572,11 @@
       "labels": {
         "volume": {
           "relevant": true,
-          "reason": "Remote full-stack customer-facing product ownership, React/TypeScript; US is in the stated Americas/Europe hiring area."
+          "reason": "Remote full-stack customer-facing product ownership, React/TypeScript; frozen posting metadata identifies USA. The text does not state an Americas/Europe hiring area."
         },
         "close": {
           "relevant": true,
-          "reason": "Remote full-stack customer-facing product ownership, React/TypeScript; US is in the stated Americas/Europe hiring area."
+          "reason": "Remote full-stack customer-facing product ownership, React/TypeScript; frozen posting metadata identifies USA. The text does not state an Americas/Europe hiring area."
         }
       }
     },
