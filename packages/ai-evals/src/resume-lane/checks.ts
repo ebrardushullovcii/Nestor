@@ -386,6 +386,130 @@ export function flagsLeft(draft: ResumeDraft | null): string[] {
     });
 }
 
+const ROLE_LABEL_CONNECTORS = new Set(
+  "at bei for fur fuer and und the der die das als von of in".split(" "),
+);
+const ENGLISH_HEADING_WORDS = new Set(
+  "summary profile professional about me objective experience work employment history education skills core key technical competencies keywords certifications certificates licenses languages projects volunteer volunteering awards publications references additional information".split(
+    " ",
+  ),
+);
+/** A label at the start of a line or sentence, as the project summary builds it. */
+const LABEL_AT_SENTENCE_START =
+  /(?:^|[.!?]\s+|\n)\s*(technologies|skills used|key skills|skills)\s*:/giu;
+
+/**
+ * Whether a summary only restates one of the person's roles ("Title at
+ * Company."): one short sentence that is made of that role's title and
+ * company words and connectors, or that is up to six words and then
+ * "at|bei <company>" (a translated title is not among the source words).
+ */
+function isRoleLabel(
+  text: string,
+  roles: readonly { title: string | null; company: string | null }[],
+): boolean {
+  const plain = fold(text);
+  const words = plain.split(" ").filter(Boolean);
+  if (words.length === 0 || words.length > 12) return false;
+  if (/[.!?]\s+\S/u.test(text.trim())) return false;
+  return roles.some((role) => {
+    const company = fold(role.company ?? "");
+    const own = `${fold(role.title ?? "")} ${company}`
+      .split(" ")
+      .filter(Boolean);
+    const tail = [` at ${company}`, ` bei ${company}`].find(
+      (ending) => company !== "" && plain.endsWith(ending),
+    );
+    const endsAtCompany =
+      tail !== undefined &&
+      plain.slice(0, -tail.length).split(" ").filter(Boolean).length <= 6;
+    return (
+      endsAtCompany ||
+      (words.some((word) => own.includes(word)) &&
+        words.every(
+          (word) => own.includes(word) || ROLE_LABEL_CONNECTORS.has(word),
+        ))
+    );
+  });
+}
+
+/**
+ * Findings about how a written resume reads, separate from invented facts and
+ * from the level checks. Reported, never fatal. They apply to Original, Light
+ * and Tailored; Aggressive's wording is accepted with the level (ADR 0018), so
+ * it is neither judged nor changed here.
+ *
+ * - the summary is only a role label ("Title at Company.")
+ * - a project line starts a sentence with "Technologies:"
+ * - in a non-English case, a section heading or a "Skills used:" label is
+ *   left in English
+ * - a skill item ends with a full stop
+ */
+export function writingProblems(input: {
+  draft: ResumeDraft | null;
+  level: ResumeLevel;
+  roles: readonly { title: string | null; company: string | null }[];
+  /** The language the resume is expected in; absent or English judges no labels. */
+  language?: string | undefined;
+}): string[] {
+  if (!input.draft || input.level === "aggressive") return [];
+  const problems = new Set<string>();
+  const sections = input.draft.sections.filter((section) => section.included);
+  const printed = (bullets: ResumeDraft["sections"][number]["bullets"]) =>
+    bullets.filter((bullet) => bullet.included).map((bullet) => bullet.text);
+  const english =
+    !input.language || /^en(glish)?$/iu.test(input.language.trim());
+  for (const section of sections) {
+    if (section.kind === "summary") {
+      const text = [section.text ?? "", ...printed(section.bullets)]
+        .join(" ")
+        .trim();
+      if (text && isRoleLabel(text, input.roles))
+        problems.add(`summary is only a role label: ${text}`);
+    }
+    if (!english && section.kind !== "header") {
+      const words = fold(section.label).split(" ").filter(Boolean);
+      if (
+        words.length &&
+        words.every((word) => ENGLISH_HEADING_WORDS.has(word))
+      )
+        problems.add(
+          `${section.kind} heading left in English: ${section.label}`,
+        );
+    }
+    if (section.kind === "skills" || section.kind === "keywords") {
+      const items = [
+        ...(section.text ?? "").split(/[,;\n]/u),
+        ...printed(section.bullets),
+      ];
+      for (const item of items)
+        if (item.trim().endsWith("."))
+          problems.add(`skill item ends with a full stop: ${item.trim()}`);
+    }
+    const projectLines = [
+      ...(section.kind === "projects"
+        ? [section.text ?? "", ...printed(section.bullets)]
+        : []),
+      ...section.entries
+        .filter(
+          (entry) =>
+            entry.included &&
+            (entry.entryType === "project" || section.kind === "projects"),
+        )
+        .flatMap((entry) => [entry.summary ?? "", ...printed(entry.bullets)]),
+    ];
+    for (const line of projectLines)
+      for (const match of line.matchAll(LABEL_AT_SENTENCE_START)) {
+        const label = match[1]!.toLowerCase();
+        if (label === "technologies")
+          problems.add(`project line starts with "Technologies:": ${line}`);
+        if (!english)
+          problems.add(`project label left in English (${label}): ${line}`);
+      }
+  }
+  return [...problems];
+}
+
 /** The edit size Light may not exceed: small, clear wording fixes. */
 export const LIGHT_MAX_EDIT = 0.25;
 

@@ -34,6 +34,10 @@ Per level it reports:
                    or removes, and whether it ran (main Aggressive: no model checker);
                    saved model traces permit an audit without more calls
   flags left       problems the writer flagged and did not fix
+  writing problems Original, Light and Tailored only: a summary that is just a role
+                   label ("Title at Company."), a project line starting
+                   "Technologies:", section or skill labels left in English in a
+                   non-English case, a skill item ending in a full stop
   work history     visible/source roles; dropping all experience fails the eval
   edit size, time (median per resume, and over all written resumes), model
   calls and tokens in/out
@@ -105,7 +109,7 @@ export async function runResumeLaneCli(argv: readonly string[]): Promise<void> {
     cases,
     (result) => {
       console.log(
-        `${result.caseId} ${result.level}: ${result.error ? `failed (${result.error})` : `${result.inventedFacts.length} invented, ${result.stretches.length} stretches, ${result.levelProblem ?? "as named"}, ${result.flagsLeft.length} flags, ${result.seconds.toFixed(1)}s`}`,
+        `${result.caseId} ${result.level}: ${result.error ? `failed (${result.error})` : `${result.inventedFacts.length} invented, ${result.stretches.length} stretches, ${result.levelProblem ?? "as named"}, ${result.flagsLeft.length} flags, ${result.writingProblems.length} writing problems, ${result.seconds.toFixed(1)}s`}`,
       );
     },
     levels.length ? levels : RESUME_LEVELS,

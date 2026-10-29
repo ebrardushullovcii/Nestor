@@ -24,6 +24,7 @@ import {
   assessFacts,
   levelShape,
   levelVerdicts,
+  writingProblems,
   type InventedFact,
   type LevelShape,
   type ResumeStretch,
@@ -46,6 +47,8 @@ export interface ResumeLaneResult {
   stretches: ResumeStretch[];
   levelProblem: string | null;
   flagsLeft: string[];
+  /** How the resume reads (role-label summary, English labels, full stops); not facts. */
+  writingProblems: string[];
   shape: LevelShape;
   seconds: number;
   modelCalls: number;
@@ -423,6 +426,15 @@ export function scoreCase(
       ? `failed: ${entry.error}`
       : (verdicts[entry.level] ?? null),
     flagsLeft: flagsLeft(entry.draft),
+    writingProblems: writingProblems({
+      draft: entry.draft,
+      level: entry.level,
+      roles: profile.experiences.map((record) => ({
+        title: record.title,
+        company: record.companyName,
+      })),
+      language: evalCase.language,
+    }),
     shape,
   }));
 }
@@ -568,6 +580,21 @@ function median(values: readonly number[]): number {
     : (sorted[mid - 1]! + sorted[mid]!) / 2;
 }
 
+/** Edit size, tool coverage and entry identity read words of the English source. */
+function translatedNote(results: readonly ResumeLaneResult[]): string[] {
+  const translated = RESUME_LANE_CASES.filter(
+    (evalCase) =>
+      evalCase.language &&
+      results.some((result) => result.caseId === evalCase.id),
+  );
+  return translated.length
+    ? [
+        `Translated cases (${translated.map((evalCase) => `${evalCase.id}: ${evalCase.language}`).join(", ")}): edit size, truthful tool coverage and the entry check compare words with the English source resume, so their values, "As named" and "invented entry" findings for translated titles and dates are not meaningful there. Read the drafts.`,
+        "",
+      ]
+    : [];
+}
+
 /** The baseline table: one row per level, then every finding. */
 export function formatResumeLaneReport(
   model: string,
@@ -580,15 +607,15 @@ export function formatResumeLaneReport(
     "",
     `As named: 0 invented facts and a non-empty work history when the source has roles, and Original unchanged; Light keeps the headline and edits at most ${pct(LIGHT_MAX_EDIT)} of words; Tailored edits more than Light; Aggressive edits at least as much as Tailored and leads with the role.`,
     "",
-    "| Level | Resumes | Work roles visible/source | Invented facts | Stretches | As named | Flags left | Median edit size | Truthful tool coverage | Median s | Median calls | Median tokens in/out |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Level | Resumes | Work roles visible/source | Invented facts | Stretches | As named | Flags left | Writing problems | Median edit size | Truthful tool coverage | Median s | Median calls | Median tokens in/out |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const level of RESUME_LEVELS) {
     const rows = results.filter((result) => result.level === level);
     const mid = (pick: (row: ResumeLaneResult) => number) =>
       median(rows.map(pick));
     lines.push(
-      `| ${level} | ${rows.length} | ${rows.reduce((sum, row) => sum + (row.shape.workHistory?.visible ?? 0), 0)}/${rows.reduce((sum, row) => sum + (row.shape.workHistory?.expected ?? 0), 0)} | ${rows.reduce((sum, row) => sum + row.inventedFacts.length, 0)} | ${rows.reduce((sum, row) => sum + row.stretches.length, 0)} | ${rows.filter((row) => !row.levelProblem).length}/${rows.length} | ${rows.reduce((sum, row) => sum + row.flagsLeft.length, 0)} | ${pct(mid((row) => row.shape.editSize))} | ${pct(mid((row) => row.shape.truthfulKeywordCoverage))} | ${mid((row) => row.seconds).toFixed(1)} | ${mid((row) => row.modelCalls)} | ${Math.round(mid((row) => row.promptTokens))}/${Math.round(mid((row) => row.completionTokens))} |`,
+      `| ${level} | ${rows.length} | ${rows.reduce((sum, row) => sum + (row.shape.workHistory?.visible ?? 0), 0)}/${rows.reduce((sum, row) => sum + (row.shape.workHistory?.expected ?? 0), 0)} | ${rows.reduce((sum, row) => sum + row.inventedFacts.length, 0)} | ${rows.reduce((sum, row) => sum + row.stretches.length, 0)} | ${rows.filter((row) => !row.levelProblem).length}/${rows.length} | ${rows.reduce((sum, row) => sum + row.flagsLeft.length, 0)} | ${rows.reduce((sum, row) => sum + row.writingProblems.length, 0)} | ${pct(mid((row) => row.shape.editSize))} | ${pct(mid((row) => row.shape.truthfulKeywordCoverage))} | ${mid((row) => row.seconds).toFixed(1)} | ${mid((row) => row.modelCalls)} | ${Math.round(mid((row) => row.promptTokens))}/${Math.round(mid((row) => row.completionTokens))} |`,
     );
   }
   const written = results.filter((row) => row.level !== "original");
@@ -596,8 +623,9 @@ export function formatResumeLaneReport(
     "",
     `Median write time over the ${written.length} written resumes: ${median(written.map((row) => row.seconds)).toFixed(1)} s.`,
     "",
-    "Offline probes do not prove semantic correctness. Read the saved drafts for unsupported duties and hiring-domain transfer. Main's Aggressive path uses number checks, without the model fact checker; the other written levels use that checker.",
+    'Offline probes do not prove semantic correctness. Read the saved drafts for unsupported duties and hiring-domain transfer. Main\'s Aggressive path uses number checks, without the model fact checker; the other written levels use that checker. Writing problems (a summary that only restates a role, a project line starting "Technologies:", section or skill labels left in English in a non-English case, a skill item ending in a full stop) are counted for Original, Light and Tailored only.',
     "",
+    ...translatedNote(results),
     "## Stretch handling by case",
     "",
     "| Case | Trace available | Model checker invoked | Sanctioned lines checked | Flagged | Removed/rewritten by checker | Missing before checker | No verdict | Unflagged listing-only lines |",
@@ -629,6 +657,7 @@ export function formatResumeLaneReport(
           `${result.stretchChecks.checkerInvoked ? `checker ${!line.checked ? "did not see" : line.flagged ? "flagged" : "passed"}` : "no model checker invoked"}, ${line.removed ? "removed/rewritten" : "kept"} sanctioned stretch: ${line.text} (${line.verdicts.map((check) => `${check.verdict}: ${check.reason}`).join("; ")})`,
       ),
       ...result.flagsLeft.map((flag) => `flag left: ${flag}`),
+      ...result.writingProblems.map((problem) => `writing problem: ${problem}`),
     ];
     if (notes.length)
       lines.push(
