@@ -9,9 +9,9 @@
  *
  * The approach:
  *
- * - Requests are streamed (`stream: true`). Bytes arriving prove the service
- *   is alive, so liveness is measured as *silence*, not total elapsed time.
- * - Two clocks per request: an idle clock (no bytes for `idleTimeoutMs` means
+ * - Requests are streamed (`stream: true`). Text, tool arguments and reasoning
+ *   prove progress; keepalives and whitespace alone do not.
+ * - Two clocks per request: an idle clock (no progress for `idleTimeoutMs` means
  *   the connection is presumed dead and the attempt is retried) and a total
  *   clock (`totalTimeoutMs`, the most the caller is willing to wait across
  *   all attempts).
@@ -54,6 +54,7 @@ const TRANSIENT_MESSAGE_PATTERN =
 export type ModelRequestRetryReason =
   | "network"
   | "idle_timeout"
+  | "attempt_timeout"
   | "incomplete_stream"
   | "http_status"
   | "transient_message";
@@ -81,7 +82,7 @@ export type ModelStreamEvent =
   | { type: "tool_call_started"; index: number; name: string };
 
 export interface ModelRequestResilienceOptions {
-  /** Longest silence tolerated before an attempt is presumed dead. */
+  /** Longest gap without model progress before an attempt is presumed dead. */
   idleTimeoutMs?: number | undefined;
   /** Attempts across the whole request, including the first. */
   maxAttempts?: number | undefined;
@@ -92,6 +93,8 @@ export interface ModelRequestResilienceOptions {
 }
 
 export interface PerformModelRequestInput extends ModelRequestResilienceOptions {
+  /** Optional cap on one attempt, leaving the total budget for a fresh read. */
+  attemptTimeoutMs?: number | undefined;
   url: string;
   headers: Record<string, string>;
   body: Record<string, unknown>;
@@ -120,15 +123,15 @@ export class ModelRequestHttpError extends Error {
 }
 
 export class ModelRequestTimeoutError extends Error {
-  readonly kind: "idle" | "total";
+  readonly kind: "idle" | "attempt" | "total";
 
-  constructor(kind: "idle" | "total", waitedMs: number) {
+  constructor(kind: "idle" | "attempt" | "total", waitedMs: number) {
     // The "timed out after Ns" shape is what provenance and studio copy key
     // on to say "the AI took too long" instead of "the AI failed".
     super(
       kind === "idle"
         ? `Model request timed out after ${Math.floor(waitedMs / 1000)}s of silence from the AI service`
-        : `Model request timed out after ${Math.floor(waitedMs / 1000)}s`,
+        : `Model request timed out after ${Math.floor(waitedMs / 1000)}s${kind === "attempt" ? " on one attempt" : ""}`,
     );
     this.name = "AbortError";
     this.kind = kind;
@@ -405,7 +408,8 @@ function buildChatPayloadFromStream(
 
 /**
  * Reads a server-sent-event body to completion and returns the normalized
- * payload. `onActivity` is called for every chunk so the idle clock resets.
+ * payload. Only model progress resets the idle clock: keepalives and JSON
+ * whitespace can continue indefinitely after useful output has stopped.
  */
 async function readStreamedPayload(
   response: Response,
@@ -453,6 +457,35 @@ async function readStreamedPayload(
       parsed = JSON.parse(data);
     } catch {
       return;
+    }
+    if (isRecord(parsed)) {
+      const delta = parsed.delta;
+      const choices = Array.isArray(parsed.choices) ? parsed.choices : [];
+      const hasText = (value: unknown) =>
+        typeof value === "string" && value.trim().length > 0;
+      if (
+        hasText(delta) ||
+        choices.some((choice: unknown) => {
+          if (!isRecord(choice)) return false;
+          const fragment = isRecord(choice.delta)
+            ? choice.delta
+            : choice.message;
+          if (!isRecord(fragment)) return false;
+          return (
+            hasText(fragment.content) ||
+            hasText(fragment.reasoning_content) ||
+            (Array.isArray(fragment.tool_calls) &&
+              fragment.tool_calls.some((call: unknown) => {
+                if (!isRecord(call) || !isRecord(call.function)) return false;
+                return (
+                  hasText(call.function.name) ||
+                  hasText(call.function.arguments)
+                );
+              }))
+          );
+        })
+      )
+        onActivity();
     }
     observeUsage?.(parsed);
     const errorMessage = readErrorMessage(parsed);
@@ -576,7 +609,6 @@ async function readStreamedPayload(
         reachedEof = true;
         break;
       }
-      onActivity();
       buffered += decoder.decode(value, { stream: true });
       let newlineIndex = buffered.indexOf("\n");
       while (newlineIndex >= 0 && !sawDone) {
@@ -662,8 +694,9 @@ async function readTextWithActivity(
       if (done) {
         break;
       }
-      onActivity();
-      text += decoder.decode(value, { stream: true });
+      const chunk = decoder.decode(value, { stream: true });
+      if (chunk.trim()) onActivity();
+      text += chunk;
     }
     text += decoder.decode();
   } finally {
@@ -682,7 +715,9 @@ function classifyRetry(
   if (error instanceof ModelRequestTimeoutError) {
     return error.kind === "idle"
       ? { reason: "idle_timeout", retryAfterMs: null }
-      : null;
+      : error.kind === "attempt"
+        ? { reason: "attempt_timeout", retryAfterMs: null }
+        : null;
   }
   if (error instanceof ModelRequestHttpError) {
     return RETRYABLE_HTTP_STATUSES.has(error.status)
@@ -842,12 +877,17 @@ async function performModelRequestAttempts(
     let failureKind: ModelRequestUsage["failureKind"];
 
     const attemptController = new AbortController();
-    let abortReason: "idle" | "total" | "caller" | null = null;
+    let abortReason: "idle" | "attempt" | "total" | "caller" | null = null;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    const attemptBudget = Math.min(
+      remainingMs,
+      input.attemptTimeoutMs ?? remainingMs,
+    );
     const totalTimer = setTimeout(() => {
-      abortReason = abortReason ?? "total";
+      abortReason =
+        abortReason ?? (attemptBudget < remainingMs ? "attempt" : "total");
       attemptController.abort();
-    }, remainingMs);
+    }, attemptBudget);
     const armIdle = () => {
       if (idleTimer) {
         clearTimeout(idleTimer);
@@ -949,7 +989,9 @@ async function performModelRequestAttempts(
           ? new ModelRequestTimeoutError("total", input.totalTimeoutMs)
           : abortReason === "idle"
             ? new ModelRequestTimeoutError("idle", idleTimeoutMs)
-            : error;
+            : abortReason === "attempt"
+              ? new ModelRequestTimeoutError("attempt", attemptBudget)
+              : error;
       lastError = normalized;
       failureKind =
         normalized instanceof ModelRequestHttpError

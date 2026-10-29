@@ -395,7 +395,20 @@ export function createOpenAiCompatibleJobFinderAiClient(
         }),
         apiMode,
         totalTimeoutMs: timeoutMs,
+        // A looping response can keep emitting real deltas forever. One
+        // low-effort extraction attempt gets a minute (healthy one-page reads
+        // measured 8–33s); a fresh attempt can still use the remaining total.
+        ...(operation === "extractResumeImportStage"
+          ? { attemptTimeoutMs: 60_000 }
+          : {}),
         ...resilience,
+        // Resume reads use low effort. Two missed reasoning-summary intervals
+        // (normally 4–15s, ADR 0020) mean a stuck read, not useful thinking.
+        // Keep the total budget for retries and honour an explicit override.
+        ...(operation === "extractResumeImportStage" &&
+        resilience.idleTimeoutMs === undefined
+          ? { idleTimeoutMs: 30_000 }
+          : {}),
         signal: options?.signal,
       });
       return extractModelJsonFromPayload(payload);

@@ -546,6 +546,122 @@ describe("performModelRequest", () => {
     expect(alwaysSilent).toHaveBeenCalledTimes(2);
   });
 
+  test.each(["chat_completions", "responses"] as const)(
+    "retries %s keepalives and whitespace without spending the total budget",
+    async (apiMode) => {
+      let timer: ReturnType<typeof setInterval>;
+      const cancelled = vi.fn();
+      const stalled = new Response(
+        new ReadableStream({
+          start(controller) {
+            timer = setInterval(() => {
+              const payload =
+                apiMode === "responses"
+                  ? { type: "response.output_text.delta", delta: "   \n" }
+                  : { choices: [{ delta: { content: "   \n" } }] };
+              controller.enqueue(
+                new TextEncoder().encode(
+                  `: keepalive\n\ndata: ${JSON.stringify(payload)}\n\n`,
+                ),
+              );
+            }, 10);
+          },
+          cancel() {
+            clearInterval(timer);
+            cancelled();
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+      const fetchImpl = vi
+        .fn()
+        .mockResolvedValueOnce(stalled)
+        .mockResolvedValueOnce(
+          jsonResponse(
+            apiMode === "responses"
+              ? { output_text: "recovered" }
+              : { choices: [{ message: { content: "recovered" } }] },
+          ),
+        );
+      const result = await performModelRequest({
+        ...baseInput,
+        apiMode,
+        idleTimeoutMs: 60,
+        totalTimeoutMs: 2000,
+        fetchImpl,
+      });
+      expect(result.choices?.[0]?.message?.content).toBe("recovered");
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(cancelled).toHaveBeenCalledOnce();
+    },
+  );
+
+  test("reasoning summaries keep a healthy Responses request alive", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      sseResponse(
+        [
+          ...Array.from({ length: 5 }, () =>
+            JSON.stringify({
+              type: "response.reasoning_summary_text.delta",
+              delta: "Still reasoning",
+            }),
+          ),
+          JSON.stringify({
+            type: "response.completed",
+            response: { output_text: "done" },
+          }),
+        ],
+        { chunkDelayMs: 25 },
+      ),
+    );
+    const result = await performModelRequest({
+      ...baseInput,
+      apiMode: "responses",
+      idleTimeoutMs: 100,
+      fetchImpl,
+    });
+    expect(result.choices?.[0]?.message?.content).toBe("done");
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  test("retries an active but non-terminating attempt within the unchanged total budget", async () => {
+    let timer: ReturnType<typeof setInterval>;
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          timer = setInterval(
+            () =>
+              controller.enqueue(
+                new TextEncoder().encode(
+                  'data: {"choices":[{"delta":{"content":"loop"}}]}\n\n',
+                ),
+              ),
+            10,
+          );
+        },
+        cancel() {
+          clearInterval(timer);
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    );
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(response)
+      .mockResolvedValueOnce(
+        jsonResponse({ choices: [{ message: { content: "fresh read" } }] }),
+      );
+    const result = await performModelRequest({
+      ...baseInput,
+      totalTimeoutMs: 2000,
+      attemptTimeoutMs: 80,
+      idleTimeoutMs: 1000,
+      fetchImpl,
+    });
+    expect(result.choices?.[0]?.message?.content).toBe("fresh read");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   test("retries a stream the service closed before completing", async () => {
     const fetchImpl = vi
       .fn()

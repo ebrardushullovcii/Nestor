@@ -33,10 +33,20 @@ the gateway after a 20-second gap without a completion event.
   `packages/ai-providers/src/model-request-transport.ts`.
 - Requests stream by default. The Responses API is asked for reasoning
   summaries; the text is discarded and only serves as a liveness signal.
-- Two clocks per request. An idle clock (default 120s of silence) presumes the
+- Two clocks per request. An idle clock (default 120s without model progress) presumes the
   connection dead and retries. A total clock (per operation: 300s for
-  structured calls and agent turns, 600s for resume drafts and imports, 240s
+  structured calls, agent turns and resume import stages, 600s for resume drafts, 240s
   for search-results extraction, 600s for vision) is the most a user waits.
+  Model progress means non-whitespace text, tool arguments or reasoning deltas;
+  SSE keepalives and whitespace-only JSON output do not restart the idle clock.
+  Low-effort resume import stages default to 30s without progress (two missed
+  4–15s reasoning-summary intervals), preserving their total budget for retries.
+  An explicit idle-timeout setting still wins.
+  Resume import also caps each extraction attempt at 60s: the Oct 29 failure
+  streamed roughly 130 KB without completing for 300s, so an idle clock alone
+  cannot recover it. Healthy one-page reads measured 8–33s. The attempt cap
+  retries a non-terminating read inside the existing total budget; it does not
+  shorten the total budget or cap resume writing and other model operations.
 - Retries with capped exponential backoff (1s doubling to 20s, jitter,
   `Retry-After` honoured) for network errors, idle timeouts, streams closed
   before completion, and HTTP 408/409/425/429/5xx. Never for 4xx validation
