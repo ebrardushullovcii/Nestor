@@ -143,3 +143,53 @@ test.each([
     }
   },
 );
+
+test("a site Quick stopped early reads More to read, never Stopped, and Keep reading reads it whole", async () => {
+  const store = openJobStore(":memory:");
+  try {
+    const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1),
+      sources = createSearchSourcesStore(store);
+    sources.put(search.id, {
+      sourceId: "7",
+      label: "Big board",
+      url: "https://big.example/jobs",
+      state: "partial",
+      lane: "http",
+      phase: null,
+      cards: 300,
+      related: 120,
+      unrelated: 180,
+      seen: 0,
+      failedReads: 0,
+      found: 120,
+      added: 120,
+      hidden: 0,
+      message:
+        "300 listings; 120 new related; 180 unrelated; 0 already seen. Quick stopped after 100 listings in a row that don't match your profile.",
+    });
+    const calls: [string, unknown][] = [];
+    Object.defineProperty(window, "nestor", {
+      configurable: true,
+      value: {
+        jobs: {
+          run: (name: string, input: JobSearchSourceQuery) => {
+            calls.push([name, input]);
+            return Promise.resolve(
+              name === "list_search_sources" ? sources.list(input) : {},
+            );
+          },
+        },
+      },
+    });
+    render(<SiteResults searchId={search.id} revision={1} />);
+    fireEvent.click(screen.getByText("What each site found"));
+    const row = await screen.findByText(/Big board/);
+    const item = row.closest<HTMLElement>("[data-site-result]")!;
+    expect(item.textContent).toContain("More to read");
+    expect(item.textContent).not.toContain("Stopped");
+    fireEvent.click(within(item).getByRole("button", { name: "Keep reading" }));
+    expect(calls.at(-1)).toEqual(["keep_reading", { id: 7 }]);
+  } finally {
+    store.close();
+  }
+});

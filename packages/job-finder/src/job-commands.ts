@@ -21,6 +21,7 @@ export interface JobSearchControl {
   start(settings: JobSearchSettings): Promise<unknown>;
   stop(): void;
   retrySource(id: number): Promise<unknown>;
+  keepReading(id?: number): Promise<unknown>;
   status(): JobSearchStatus;
   /** Scores saved jobs in Find jobs or Shortlisted that have no fit yet. */
   scoreUnscored(): Promise<number>;
@@ -187,6 +188,11 @@ export function createJobCommandRunner(deps: {
     retry_source: async ({ id }) => {
       const runner = await search();
       await runner.retrySource(id);
+      return runner.status();
+    },
+    keep_reading: async ({ id }) => {
+      const runner = await search();
+      await runner.keepReading(id);
       return runner.status();
     },
     stop_search: () => {

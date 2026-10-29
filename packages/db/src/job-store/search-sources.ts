@@ -93,6 +93,14 @@ export function createSearchSourcesStore(store: JobStore) {
         total,
       };
     },
+    /** The sites a search left with more listings to read. */
+    partialIds(searchId: string): string[] {
+      return (
+        sql(
+          "SELECT source_id FROM search_sources WHERE search_id = ? AND state = 'partial' ORDER BY id",
+        ).all(searchId) as { source_id: string }[]
+      ).map((row) => row.source_id);
+    },
     compact(searchId: string): {
       sources: JobSearchSourceRow[];
       progress: JobSearchProgress;
@@ -113,6 +121,7 @@ export function createSearchSourcesStore(store: JobStore) {
         fitActive: 0,
         needsYou: 0,
         failed: 0,
+        partial: 0,
       };
       for (const row of rows) {
         if (row.state === "waiting") {
@@ -126,6 +135,7 @@ export function createSearchSourcesStore(store: JobStore) {
         }
         if (row.state === "needs_you") progress.needsYou += row.n;
         if (row.state === "failed") progress.failed += row.n;
+        if (row.state === "partial") progress.partial += row.n;
       }
       return { sources, progress };
     },

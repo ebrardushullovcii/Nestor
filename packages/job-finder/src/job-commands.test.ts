@@ -80,6 +80,7 @@ describe("job commands", () => {
         return Promise.resolve();
       },
       retrySource: () => Promise.resolve(undefined),
+      keepReading: () => Promise.resolve(undefined),
       stop: () => undefined,
       status: () => status,
       scoreUnscored: () => Promise.resolve(0),

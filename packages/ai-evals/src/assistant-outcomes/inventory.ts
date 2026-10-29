@@ -478,7 +478,13 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   ...actions(
     "search",
     "Find jobs search",
-    ["start_search", "search_status", "stop_search", "list_search_sources"],
+    [
+      "start_search",
+      "search_status",
+      "stop_search",
+      "list_search_sources",
+      "keep_reading",
+    ],
     [
       ["depth", "Choose search depth"],
       ["pickiness", "Choose search pickiness"],
@@ -492,6 +498,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
       ["coverage_filter", "Filter per-site coverage"],
       ["coverage_page", "Page per-site coverage"],
       ["failure", "Inspect a source failure"],
+      ["keep_reading", "Keep reading sites a Quick search stopped early"],
     ],
   ),
   ...actions(

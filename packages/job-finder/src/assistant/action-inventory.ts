@@ -190,6 +190,13 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     coverage: tools("start_search", "search_status"),
   },
   {
+    id: "discovery.keep_reading",
+    screen: "Find jobs",
+    action: "Keep reading sites a Quick search stopped early",
+    channels: [],
+    coverage: tools("keep_reading"),
+  },
+  {
     id: "discovery.cancel",
     screen: "Find jobs",
     action: "Stop search",

@@ -16,7 +16,7 @@ import {
 
 import { describeAge, plural } from "@renderer/features/job-lists";
 import { SitePicker } from "./site-picker";
-import { SiteResults } from "./site-results";
+import { SiteResults, useKeepReading } from "./site-results";
 
 const DEPTH: readonly SegmentedControlOption<JobSearchSettings["depth"]>[] = [
   { value: "quick", label: "Quick", title: "A short look at each site" },
@@ -96,6 +96,9 @@ function RunningSearch(props: { status: JobSearchStatus; onStop: () => void }) {
             ? ` · ${progress.processing} sites being read or screened`
             : ""}
           {progress.failed > 0 ? ` · ${progress.failed} could not be read` : ""}
+          {progress.partial > 0
+            ? ` · ${progress.partial} with more to read`
+            : ""}
         </p>
       ) : null}
       <ProgressBar
@@ -173,6 +176,8 @@ export function SearchPanel(props: {
       setAdopted(true);
     }
   }, [adopted, last]);
+  const more = useKeepReading();
+  const partial = props.status.progress?.partial ?? 0;
   const set = <K extends keyof JobSearchSettings>(
     key: K,
     value: JobSearchSettings[K],
@@ -267,6 +272,31 @@ export function SearchPanel(props: {
             >
               Some jobs still need a fit score. The next search will retry them.
             </p>
+          ) : null}
+          {partial > 0 ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-(length:--text-small) text-foreground-muted">
+                Quick stopped early on {plural(partial, "site")} that{" "}
+                {partial === 1 ? "has" : "have"} more listings.
+              </p>
+              <Button
+                pending={more.pending}
+                size="toolbar"
+                type="button"
+                variant="outline"
+                onClick={() => more.keepReading()}
+              >
+                {partial === 1 ? "Keep reading it" : "Keep reading them"}
+              </Button>
+              {more.error ? (
+                <p
+                  className="text-(length:--text-small) text-(--warning-text)"
+                  role="alert"
+                >
+                  {more.error}
+                </p>
+              ) : null}
+            </div>
           ) : null}
           {props.status.search !== null ? (
             <SiteResults

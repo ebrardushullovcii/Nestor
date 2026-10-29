@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   JobSearchSourcePage,
   JobSearchSourceState,
@@ -18,8 +18,35 @@ const LABELS: Record<JobSearchSourceState["state"], string> = {
   done: "Done",
   failed: "Could not read",
   needs_you: "Needs you",
+  // The person pressed Stop.
   stopped: "Stopped",
+  // Quick stopped reading a healthy site early, on purpose.
+  partial: "More to read",
 };
+
+/**
+ * Keep reading: a full read of one site, or of every site the last Quick
+ * search stopped early. The search panel shows the run it starts.
+ */
+export function useKeepReading() {
+  const [pending, setPending] = useState(false),
+    [error, setError] = useState<string | null>(null);
+  const keepReading = useCallback((id?: number) => {
+    setPending(true);
+    setError(null);
+    void window.nestor.jobs
+      .run("keep_reading", id === undefined ? {} : { id })
+      .catch((reason: unknown) =>
+        setError(
+          reason instanceof Error
+            ? reason.message
+            : "Could not keep reading. Try again.",
+        ),
+      )
+      .finally(() => setPending(false));
+  }, []);
+  return { keepReading, pending, error };
+}
 function failureReason(message: string | null): string {
   if (/\btimed? out\b|\btimeout\b|\btook too long\b/iu.test(message ?? ""))
     return "This site took too long to respond. Open it to check it loads, then search again. Other sites continue normally.";
@@ -64,6 +91,7 @@ export function SiteResults(props: {
     [index, setIndex] = useState(0);
   const [page, setPage] = useState(EMPTY),
     [error, setError] = useState<string | null>(null);
+  const more = useKeepReading();
   useEffect(() => {
     setCursors([0]);
     setIndex(0);
@@ -132,11 +160,14 @@ export function SiteResults(props: {
               <option value="all">All sites</option>
               <option value="needs_you">Needs you</option>
               <option value="failed">Could not read</option>
+              <option value="partial">More to read</option>
               <option value="done">Done</option>
               <option value="searching">Working</option>
             </select>
           </div>
-          {error ? <p role="alert">{error}</p> : null}
+          {error || more.error ? (
+            <p role="alert">{error ?? more.error}</p>
+          ) : null}
           <ul className="grid max-h-96 list-none gap-2 overflow-y-auto p-0">
             {page.rows.map((source) => (
               <li
@@ -169,6 +200,21 @@ export function SiteResults(props: {
                     <p className="mt-1">{failureReason(source.message)}</p>
                   ) : source.message ? (
                     <p className="mt-1 whitespace-pre-wrap">{source.message}</p>
+                  ) : null}
+                  {source.state === "partial" ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span>This site has more listings.</span>
+                      <Button
+                        size="toolbar"
+                        variant="outline"
+                        pending={more.pending}
+                        onClick={() =>
+                          more.keepReading(Number(source.sourceId))
+                        }
+                      >
+                        Keep reading
+                      </Button>
+                    </div>
                   ) : null}
                   {source.state === "failed" ? (
                     <p className="mt-2">

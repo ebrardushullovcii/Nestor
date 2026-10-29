@@ -604,6 +604,8 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "profile.source_check": "Check my first job source.",
   "discovery.list": "Show me the jobs I found, best match first.",
   "discovery.cancel": "Stop the search that's running.",
+  "discovery.keep_reading":
+    "Keep reading the sites my last quick search stopped early on.",
   "discovery.dismiss": "Hide the Cinder Robotics job, the pay is too low.",
   "discovery.restore": "Bring back any job I hid.",
   "discovery.exclude_employer": "Never show me jobs from Harbor Mutual again.",

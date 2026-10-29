@@ -758,12 +758,14 @@ test.each(["pages", "one large inventory"])(
     ).toHaveLength(100);
     const source = createSearchSourcesStore(store).list({}).rows[0]!;
     expect(source).toMatchObject({
-      state: "stopped",
+      state: "partial",
       cards: 100,
       unrelated: 100,
     });
-    expect(source.message).toContain("100 consecutive unrelated");
-    expect(source.message).toContain("Coverage is partial");
+    expect(source.message).toContain(
+      "100 listings in a row that don't match your profile",
+    );
+    expect(status.progress).toMatchObject({ partial: 1, failed: 0 });
     expect(engine.fitJobs).not.toHaveBeenCalled();
     if (kind === "pages") expect(pages).toBe(4);
   },
@@ -822,7 +824,7 @@ test("Thorough can reach a related listing after 1274 unrelated cards", async ()
   expect(engine.fitJobs).toHaveBeenCalled();
 });
 
-test("Quick reports its card cap as partial even on a productive board", async () => {
+test("Quick has no listing cap: a board that keeps paying off is read whole", async () => {
   const { runner, engine, context, store } = setup();
   context.sources = context.sources.slice(0, 1);
   engine.collectSource.mockImplementation(({ target }) =>
@@ -836,13 +838,44 @@ test("Quick reports its card cap as partial even on a productive board", async (
   await runner.start({ depth: "quick", postedWithin: "any" });
   await finished(runner);
   expect(createSearchSourcesStore(store).list({}).rows[0]).toMatchObject({
-    state: "stopped",
-    cards: 300,
-    related: 300,
+    state: "done",
+    cards: 400,
+    related: 400,
   });
-  expect(createSearchSourcesStore(store).list({}).rows[0]?.message).toContain(
-    "300-listing limit",
+});
+
+test("Keep reading gives a site Quick stopped a full read and keeps the next search's choices", async () => {
+  const { runner, engine, context, store } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://partial.example/source" });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [
+        ...numberedCards(target.id, 150),
+        ...numberedCards(target.id, 1, "Backend Engineer", 150),
+      ],
+      complete: true,
+      pagesRead: 7,
+      notes: [],
+    }),
   );
+  await runner.start({ depth: "quick", postedWithin: "any" });
+  const quick = await finished(runner);
+  expect(quick.progress?.partial).toBe(1);
+  await runner.keepReading();
+  const full = await finished(runner);
+  expect(full.search).toMatchObject({
+    state: "done",
+    sourcesTotal: 1,
+    settings: { depth: "quick", sites: { all: true, except: [] } },
+  });
+  expect(full.progress?.partial).toBe(0);
+  expect(createSearchSourcesStore(store).list({}).rows[0]).toMatchObject({
+    state: "done",
+    related: 1,
+  });
+  await expect(runner.keepReading()).rejects.toThrow("more to read");
 });
 
 test("Quick bounds HTTP collection without cancelling an accepted listing read", async () => {
@@ -877,7 +910,7 @@ test("Quick bounds HTTP collection without cancelling an accepted listing read",
     await vi.runAllTimersAsync();
     expect(runner.status().search).toMatchObject({ state: "done", scored: 1 });
     expect(createSearchSourcesStore(store).list({}).rows[0]?.message).toContain(
-      "three-minute collection limit",
+      "three-minute look at this site ran out",
     );
   } finally {
     vi.useRealTimers();
@@ -956,16 +989,20 @@ test("quick-stopped validated cards record successful access, while later auth e
   sites.add({ text: "https://partial.example/source" });
   context.sources = sites.enabled().map(jobSiteTarget);
   engine.collectSource.mockImplementation(async ({ target, onCards }) => {
-    await onCards?.(numberedCards(target.id, 400, "Backend Engineer"));
+    await onCards?.([
+      ...numberedCards(target.id, 5, "Backend Engineer"),
+      ...numberedCards(target.id, 250, "Nurse", 5),
+    ]);
     return { cards: [], complete: false, pagesRead: 1, notes: [] };
   });
   await runner.start({ postedWithin: "any" });
   await finished(runner);
   expect(sites.get(1)).toMatchObject({ health: "healthy", lane: "http" });
   expect(sites.get(1)?.lastSearchedAt).toBeTruthy();
-  expect(createSearchSourcesStore(store).list({}).rows[0]?.message).toContain(
-    "partial",
-  );
+  expect(createSearchSourcesStore(store).list({}).rows[0]).toMatchObject({
+    state: "partial",
+    related: 5,
+  });
   engine.collectSource.mockImplementation(() =>
     Promise.resolve({
       cards: [],
@@ -992,9 +1029,15 @@ test.each([false, true])(
     const gate = deferred<void>();
     let reads = 0;
     engine.collectSource.mockImplementation(async ({ target, onCards }) => {
-      const cards = numberedCards(target.id, 400, "Backend Engineer");
-      await onCards?.(cards.slice(0, 1));
-      await onCards?.(cards.slice(1));
+      await onCards?.(numberedCards(target.id, 1, "Backend Engineer"));
+      // Related work in two screening waves (the second read waits on the
+      // gate), then a long unrelated run that makes Quick stop.
+      await onCards?.([
+        ...numberedCards(target.id, 1, "Backend Engineer", 1),
+        ...numberedCards(target.id, 99, "Nurse", 2),
+        ...numberedCards(target.id, 1, "Backend Engineer", 101),
+        ...numberedCards(target.id, 199, "Nurse", 102),
+      ]);
       return { cards: [], complete: false, pagesRead: 1, notes: [] };
     });
     engine.readListings.mockImplementation(async ({ cards }) => {
