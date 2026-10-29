@@ -935,6 +935,26 @@ test("material profile changes refresh found jobs on a repeat with no new jobs; 
   expect(store.getJob(before.id)?.fit?.inputFingerprint).not.toBe(fingerprint);
 });
 
+test("a search note judges only that search's new jobs, not the saved ones", async () => {
+  const { runner, context, engine, store } = setup();
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  const before = store.listJobs({ stage: "found" }).rows[0]!;
+  const fit = store.getJob(before.id)?.fit;
+  expect(engine.fitJobs).toHaveBeenCalledTimes(1);
+  await runner.start({ postedWithin: "any", note: "Only pastry chef roles" });
+  await finished(runner);
+  expect(runner.status().search?.added).toBe(0);
+  expect(engine.fitJobs).toHaveBeenCalledTimes(1);
+  expect(store.getJob(before.id)?.fitStale).toBe(false);
+  expect(store.getJob(before.id)?.fit).toEqual(fit);
+  // A later profile change re-checks without the old search's note.
+  context.profile.workEligibility.authorizedWorkCountries = ["Germany"];
+  await runner.scoreUnscored();
+  expect(engine.fitJobs).toHaveBeenCalledTimes(2);
+  expect(engine.fitJobs.mock.calls[1]?.[0]).not.toHaveProperty("request");
+});
+
 test("rapid eligibility edits fence superseded results and preserve the old score", async () => {
   const { runner, context, engine, store } = setup();
   await runner.start({ postedWithin: "any" });
