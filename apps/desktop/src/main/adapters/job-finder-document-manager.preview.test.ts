@@ -28,6 +28,12 @@ vi.mock("node:fs/promises", () => ({
   readFile: vi.fn((file: string) => Promise.resolve(mocks.files.get(file))),
 }));
 vi.mock("./resume-document", () => ({ getPdfPageCount: mocks.count }));
+vi.mock("./resume-document/pdf", () => ({
+  inspectPdfLayout: async (file: string) => ({
+    pageCount: await mocks.count(file),
+    lastPageFillRatio: 0.75,
+  }),
+}));
 vi.mock("electron", () => ({
   BrowserWindow: class {
     destroyed = false;
@@ -75,7 +81,11 @@ test("uses the host renderer's HTML for both preview and page counting", async (
     settings: input.settings,
     templateId: input.templateId,
   });
-  expect(mocks.write).toHaveBeenCalledWith(expect.any(String), "<html>Worker printable document</html>", "utf8");
+  expect(mocks.write).toHaveBeenCalledWith(
+    expect.any(String),
+    "<html>Worker printable document</html>",
+    "utf8",
+  );
 });
 beforeEach(() => {
   vi.resetAllMocks();

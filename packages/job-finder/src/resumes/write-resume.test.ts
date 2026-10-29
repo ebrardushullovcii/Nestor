@@ -59,17 +59,14 @@ describe("aggressive headline policy", () => {
     ["Director Data Analyst", "Data Science Student", 1, false],
     ["Junior Marketing Coordinator", "Marketing Director", 17, false],
     ["Backend Engineer", "Warehouse Operations Manager", 10, false],
-  ])(
-    "%s for a %s (%i years) is %s",
-    (target, ownTitle, years, expected) => {
-      expect(
-        isPlausibleAggressiveHeadline(
-          target,
-          profileWith(ownTitle, [ownTitle], years),
-        ),
-      ).toBe(expected);
-    },
-  );
+  ])("%s for a %s (%i years) is %s", (target, ownTitle, years, expected) => {
+    expect(
+      isPlausibleAggressiveHeadline(
+        target,
+        profileWith(ownTitle, [ownTitle], years),
+      ),
+    ).toBe(expected);
+  });
 });
 
 describe("repeated appended clauses", () => {
@@ -189,7 +186,11 @@ describe("older role compression", () => {
               dateRange: "Jun 2008 – Aug 2010",
               included: true,
               bullets: [
-                { id: "old_1", text: "Maintained client sites", included: true },
+                {
+                  id: "old_1",
+                  text: "Maintained client sites",
+                  included: true,
+                },
                 {
                   id: "old_2",
                   text: "Cut load time by 30 percent",
@@ -274,4 +275,34 @@ describe("summary deduplication", () => {
       "Frontend Engineer with 16 years building accessible web applications, design systems and platform tooling with TypeScript.",
     );
   });
+});
+
+it("detects restored source prose beside translated fields without assuming a language or script", async () => {
+  const { hasUntranslatedResumeSourceProse } =
+    await import("../internal/resume-workspace-language");
+  const { seedResumeDraft } =
+    await import("../internal/resume-workspace-structure");
+  const seed = createSeed();
+  const profile = {
+    ...seed.profile,
+    summary: "Built accessible public services with measurable results.",
+  };
+  const draft = seedResumeDraft({
+    profile,
+    job: seed.savedJobs[0]!,
+    templateId: seed.settings.resumeTemplateId,
+  });
+  draft.writtenLanguage = "German";
+  expect(hasUntranslatedResumeSourceProse(draft, profile)).toBe(false);
+  draft.sections[0]!.sourceRefs.push({
+    id: "original",
+    sourceKind: "resume",
+    sourceId: `draft:${draft.id}:field:headline`,
+    snippet: "Engineer",
+  });
+  expect(hasUntranslatedResumeSourceProse(draft, profile)).toBe(true);
+  profile.summary = "";
+  profile.experiences = [];
+  profile.projects = [];
+  expect(hasUntranslatedResumeSourceProse(draft, profile)).toBe(false);
 });

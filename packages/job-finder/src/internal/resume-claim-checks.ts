@@ -348,15 +348,6 @@ export function settleResumeClaimLines(input: {
     profile: input.profile,
   });
   let changed = false;
-  // Every line on the resume now; a fix that repeats one hides its line.
-  const shown = buildResumeClaimDescriptors(draft).map((claim) => claim.text);
-  const repeatsAShownLine = (fix: string, original: string) =>
-    shown.some(
-      (line) =>
-        line !== original &&
-        (resumeClaimContentHash(line) === resumeClaimContentHash(fix) ||
-          areNearDuplicateResumeLines(line, fix)),
-    );
   // An achievement's saved wording, by its "experience:<id>:achievement:<n>"
   // evidence ID, for a failed line the checker offered no fix for.
   const savedAchievement = (sourceId: string | null): string | null => {
@@ -423,11 +414,13 @@ export function settleResumeClaimLines(input: {
         ),
       );
       if (fix === null) return bullet;
-      // A fix that repeats a line already on the resume hides this one instead.
-      if (!fix || repeatsAShownLine(fix, bullet.text)) {
-        return { ...bullet, included: false };
+      // A style suggestion cannot erase a fact the check already supports.
+      if (!fix) {
+        const check = checks.get(resumeClaimContentHash(bullet.text));
+        return check?.verdict === "supported"
+          ? bullet
+          : { ...bullet, included: false };
       }
-      shown.push(fix);
       return { ...bullet, text: fix };
     });
   // A rejected summary falls back to the person's saved summary, as the
@@ -445,11 +438,10 @@ export function settleResumeClaimLines(input: {
     if (!text?.trim()) return text;
     const fix = fixFor({ text, origin, field, sectionId }, savedWording);
     if (fix === null) return text;
-    const replacement =
-      !fix || repeatsAShownLine(fix, text) ? savedWording : fix;
-    if (!replacement) return null;
-    shown.push(replacement);
-    return replacement;
+    if (fix) return fix;
+    return checks.get(resumeClaimContentHash(text))?.verdict === "supported"
+      ? text
+      : savedWording;
   };
 
   const fixed: ResumeDraft = {
@@ -490,7 +482,56 @@ export function settleResumeClaimLines(input: {
           },
     ),
   };
-  return changed ? fixed : null;
+  if (!changed) return null;
+  // Compare repairs with the evolving final document, never the pre-repair
+  // snapshot. A summary may highlight an achievement; only another bullet
+  // can duplicate that achievement. Rejected style advice keeps supported prose.
+  const original = buildResumeClaimDescriptors(draft);
+  const key = (line: ReturnType<typeof buildResumeClaimDescriptors>[number]) =>
+    `${line.sectionId}|${line.entryId}|${line.bulletId}|${line.field}`;
+  const originals = new Map(original.map((line) => [key(line), line]));
+  const finalLines = new Map(
+    buildResumeClaimDescriptors(fixed).map((line) => [key(line), line]),
+  );
+  for (const [id, line] of finalLines) {
+    const before = originals.get(id);
+    if (!before || before.text === line.text) continue;
+    const bullet = line.bulletId !== null;
+    const duplicate = [...finalLines].some(
+      ([otherId, other]) =>
+        otherId !== id &&
+        (bullet ? other.bulletId !== null : true) &&
+        (resumeClaimContentHash(other.text) ===
+          resumeClaimContentHash(line.text) ||
+          areNearDuplicateResumeLines(other.text, line.text)),
+    );
+    if (!duplicate) continue;
+    const supported =
+      checks.get(resumeClaimContentHash(before.text))?.verdict === "supported";
+    const replacement = supported
+      ? before.text
+      : line.field === "section_text"
+        ? input.profile?.summary?.trim() || null
+        : null;
+    const section = fixed.sections.find(
+      (section) => section.id === line.sectionId,
+    )!;
+    const entry = section.entries.find((entry) => entry.id === line.entryId);
+    if (bullet) {
+      const target = (entry?.bullets ?? section.bullets).find(
+        (item) => item.id === line.bulletId,
+      )!;
+      if (replacement) target.text = replacement;
+      else {
+        target.text = before.text;
+        target.included = false;
+      }
+    } else if (entry) entry.summary = replacement;
+    else section.text = replacement;
+    if (replacement) finalLines.set(id, { ...line, text: replacement });
+    else finalLines.delete(id);
+  }
+  return fixed;
 }
 
 /**

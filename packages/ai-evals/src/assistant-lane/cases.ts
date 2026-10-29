@@ -407,6 +407,26 @@ const OUTCOME_CASES: AssistantLaneCase[] = [
       ),
   },
   {
+    id: "jobs.no_sites",
+    title: "Search without an enabled source is refused",
+    inventory: ["home.search_now", "discovery.search"],
+    scripted: true,
+    scenario: "no_sites",
+    turns: [{ text: "Find remote product design jobs" }],
+    check: (o) => [
+      ...expect(
+        o.recorder.searches.length === 0,
+        "a search started without an enabled site",
+      ),
+      ...expect(
+        o.toolRuns.every(
+          (run) => run.toolName !== "start_search" || run.outcome !== "done",
+        ),
+        "search was reported successful without a site",
+      ),
+    ],
+  },
+  {
     id: "jobs.shortlist_top",
     title: '"Shortlist the top 2" shortlists the two best matches',
     inventory: ["discovery.shortlist"],
@@ -564,8 +584,7 @@ const INVENTORY_REQUESTS: Record<string, string> = {
   "campaigns.rules": "Which rules are saved for my current search plan?",
   "apply.work": "Show my queued and ready applications.",
   "apply.send": "Send my ready Northwind application.",
-  "profile.legacy_copilot":
-    "Earlier I asked the old profile chat to fix my headline. Is my headline right now?",
+  "profile.legacy_copilot": "Change my headline to Senior Product Designer.",
   "home.pause": "Pause Job Finder for now.",
   "profile.edit_experience":
     "Add an education entry: BA in Interaction Design, Lisbon School of Design, 2014.",
@@ -644,10 +663,33 @@ const INVENTORY_CASES: AssistantLaneCase[] = ACTION_INVENTORY.flatMap(
         id: `inventory.${entry.id}`,
         title: `${entry.screen}: ${entry.action}`,
         inventory: [entry.id],
-        scripted: false,
+        scripted: ["profile.legacy_copilot", "settings.clipboard"].includes(
+          entry.id,
+        ),
         ...(scenario ? { scenario } : {}),
         turns: [{ text: request, context: discoveryList() }],
         check: (o) => {
+          if (entry.id === "profile.legacy_copilot")
+            return expect(
+              o.snapshot.profile.headline === "Senior Product Designer",
+              "the requested headline was not saved",
+            );
+          if (entry.id === "settings.clipboard")
+            return expect(
+              o.recorder.clipboard.length === 1 &&
+                o.recorder.clipboard[0] === o.snapshot.profile.headline,
+              "the current headline was not copied exactly once",
+            );
+          if (entry.id === "needs_you.answers")
+            return expect(
+              o.snapshot.savedAnswers.some(
+                (answer) =>
+                  /^(?:5|five)(?:\s+years?(?:\s+of\s+analysis\s+experience)?)?\.?$/iu.test(
+                    answer.answer.trim(),
+                  ) && /analysis/iu.test(answer.prompt),
+              ),
+              "the requested analysis experience answer was not saved",
+            );
           if (entry.id === "apply.send")
             return [
               ...expect(

@@ -1249,7 +1249,7 @@ describe("ai provider config and fallback behavior", () => {
       restoreFetch();
     }
   });
-  test("compacts oversized resume import stage payloads before sending them to the model", async () => {
+  test("preserves complete resume import payloads that fit the model budget", async () => {
     const capture = mockCapturingJsonFetch({
       choices: [
         {
@@ -1314,12 +1314,14 @@ describe("ai provider config and fallback behavior", () => {
 
       expect(userPayload.documentBundle?.blocks).toBeDefined();
       expect(Array.isArray(userPayload.documentBundle?.blocks)).toBe(true);
-      expect(
-        userPayload.documentBundle?.blocks?.length ?? 0,
-      ).toBeLessThanOrEqual(32);
-      expect(userPayload.documentBundle?.blocks?.[0]?.text).toContain(
-        "[truncated",
+      expect(userPayload.documentBundle?.blocks).toHaveLength(80);
+      expect(userPayload.documentBundle?.blocks?.[0]?.text).toBe(
+        `Experience block 1 ${"resume evidence ".repeat(200)}`,
       );
+      expect(userPayload.documentBundle?.blocks?.[79]?.text).toBe(
+        `Experience block 80 ${"resume evidence ".repeat(200)}`,
+      );
+      expect(JSON.stringify(userPayload)).not.toContain("[truncated");
     } finally {
       capture.restore();
     }

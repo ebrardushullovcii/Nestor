@@ -1,15 +1,8 @@
-import type {
-  ResumeImportFieldCandidate,
-  UpsertSavedFormAnswerInput,
-  CandidateAnswerKind,
+import {
+  resumeImportAnswer,
+  type ResumeImportFieldCandidate,
+  type UpsertSavedFormAnswerInput,
 } from "@nestor/contracts";
-
-const ANSWER_KINDS: Readonly<Record<string, CandidateAnswerKind>> = {
-  workAuthorization: "work_authorization", visaSponsorship: "visa_sponsorship",
-  relocation: "relocation", travel: "travel", noticePeriod: "notice_period",
-  availability: "availability", salaryExpectations: "salary_expectation",
-  selfIntroduction: "self_intro", careerTransition: "career_transition",
-};
 
 /** Reusable suggestions belong to Needs you, including text awaiting confirmation. */
 export function resumeImportSavedAnswers(
@@ -21,12 +14,13 @@ export function resumeImportSavedAnswers(
       candidate.target.section !== "answer_bank"
     )
       return [];
-    const kind = ANSWER_KINDS[candidate.target.key];
+    const saved = resumeImportAnswer(candidate.target.key);
     const answer = candidate.normalizedValue ?? candidate.value;
-    if (!kind || typeof answer !== "string" || !answer.trim()) return [];
+    if (!saved || typeof answer !== "string" || !answer.trim()) return [];
+    const { key, kind } = saved;
     return [
       {
-        key: `resume_import:${kind}`,
+        key,
         kind,
         label: candidate.label,
         prompt: candidate.label,

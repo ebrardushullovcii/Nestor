@@ -26,6 +26,7 @@ Preconditions: baseline. Live AI is optional here; the deterministic import work
 - **Job targets.** `$V/drive fill "Target roles" "Frontend Engineer"`, `press Enter`; `fill "Preferred job locations" "Remote"`, `press Enter`; `click "I can work in Germany"`; `click "No" --within "Would you need employer visa sponsorship?"`; `click Remote --role checkbox`. Add the source in the same step: `fill "Job site URLs" <replica>/board/`, `click "Add and turn on"`, `wait "/^Added and turned on 1 source/"`. Proof: "Everything required is in. You can finish setup."
 - **Finish.** `$V/drive click "Finish setup and find jobs"` lands on Find jobs and starts the first search; use live AI for the full search/fit journey.
 - Whole flow: `$V/drive run .claude/skills/verify-nestor/journeys/job-finder-replica.mjs setup`.
+- Long text coverage: import `alex-vale-long.txt` and `alex-vale-long.md` separately with live AI. Compare all nine Engineer roles, BSc Computing at Example University, Mentor at Example Coding Club and the Family care break against Profile and the stored candidates. Entries recovered by completeness remain review suggestions.
 - Other formats: pick a persona from `resume-import-personas/`. PDF and DOCX use the parser sidecar that `bin/build` prepares; vision import needs `--ai live`.
 
 ## Gotchas

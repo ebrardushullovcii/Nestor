@@ -12,7 +12,13 @@ import {
   ResumeImportFieldCandidateSummarySchema,
   ResumeImportRunSchema,
 } from "@nestor/contracts";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { ToastProvider } from "@renderer/components/ui/toast";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -223,6 +229,54 @@ describe("ProfileScreen ready-state density and save-bar footprint", () => {
         .every((button) => button.getAttribute("aria-disabled") === "true"),
     ).toBe(false);
   });
+
+  it.each(["running_role", "active_workflow"])(
+    "holds autosave during deferred vision (%s) then saves the preserved draft",
+    async (source) => {
+      const props = buildProfileScreenProps();
+      props.pendingActions.importResume = source === "active_workflow";
+      const run = ResumeImportRunSchema.parse({
+        id: "deferred",
+        sourceResumeId: profile.baseResume.id,
+        sourceResumeFileName: "long.pdf",
+        trigger: "import",
+        status: "applied",
+        startedAt: "2026-10-29T00:00:00Z",
+        modelRoles: {
+          vision: {
+            status: source === "running_role" ? "running" : "completed",
+          },
+        },
+      });
+      const view = render(
+        <MemoryRouter>
+          <ProfileScreen {...props} latestResumeImportRun={run} />
+        </MemoryRouter>,
+      );
+      fireEvent.change(screen.getByLabelText("Headline"), {
+        target: { value: "My preserved headline" },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      expect(props.onSaveAll).not.toHaveBeenCalled();
+      props.pendingActions.importResume = false;
+      view.rerender(
+        <MemoryRouter>
+          <ProfileScreen
+            {...props}
+            latestResumeImportRun={ResumeImportRunSchema.parse({
+              ...run,
+              modelRoles: { vision: { status: "completed" } },
+            })}
+          />
+        </MemoryRouter>,
+      );
+      await waitFor(() => expect(props.onSaveAll).toHaveBeenCalledOnce());
+      expect(screen.getByLabelText("Headline")).toHaveProperty(
+        "value",
+        "My preserved headline",
+      );
+    },
+  );
 
   it("keeps the full-Profile route state and draft when switching tabs before setup", () => {
     const props = buildProfileScreenProps();

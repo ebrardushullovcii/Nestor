@@ -43,6 +43,7 @@ export type AssistantCatalogMode = "flat" | "grouped";
 
 const COMMON_TOOLS = [
   "open_in_app",
+  "action_write_clipboard_text",
   "read_result",
   "ask_person",
   "list_needs_you",
@@ -103,7 +104,7 @@ export const loadToolsTool = defineTool({
   name: "load_tools",
   group: "workspace",
   description:
-    "Call tools already offered directly. Load schemas with names. Groups load small catalogs directly; large groups return a menu for choosing exact names. Unknown names return matching names without discarding valid requests. Domains: profile (profile/preferences edits, Undo, setup), files (library, import, exports), resume (write, edit, approve, history, PDF), jobs (find, shortlist, hide, sources), applications (queues, prepare, send with grants, forms, letters), tracking (Applications statuses, notes, replies, reminders, interviews, tags, saved views, CSV export and Undo), settings (applying policy, AI behavior, theme, zoom, reset), browser (read and work in a lent tab), workspace (summary, questions, navigation). Loaded schemas stay available this turn.",
+    "Call tools already offered directly. Load schemas with names. Groups load small catalogs directly; large groups return a menu for choosing exact names. Unknown names return matching names without discarding valid requests. Domains: profile (profile/preferences edits, Undo, setup), files (library, import, exports), resume (write, edit, approve, history, PDF), jobs (find, shortlist, hide, sources), applications (queues, prepare, send with grants, forms, letters), tracking (Applications statuses, notes, replies, reminders, interviews, tags, saved views, CSV export and Undo), settings (applying policy, AI behavior, theme, zoom, reset), browser (read and work in a lent tab), workspace (summary, questions, navigation, copy text to clipboard). Loaded schemas stay available this turn.",
   parameters: json.object({
     groups: json.array(json.enumOf(assistantToolGroupValues)),
     names: json.ids(
