@@ -20,7 +20,7 @@ import { abortable, concurrency, errorMessage } from "./async";
 import { createFitQueue } from "./fit-queue";
 import { fitContextFingerprint } from "./fit-input";
 import { createSearchPipeline } from "./pipeline";
-import { sourceWork, type SourceWork } from "./source-work";
+import { settledState, sourceWork, type SourceWork } from "./source-work";
 import type {
   JobSearchContext,
   JobSearchRunner,
@@ -36,7 +36,11 @@ interface ActiveSearch {
   ready: Promise<FitQueue | null>;
   setReady(fits: FitQueue | null): void;
   queueProgress?: () => Partial<JobSearchProgress>;
-  enqueue?: (target: JobDiscoveryTarget, force: boolean) => void;
+  enqueue?: (
+    target: JobDiscoveryTarget,
+    force: boolean,
+    full?: boolean,
+  ) => void;
 }
 
 /** How long site progress gathers before it commits in one write. */
@@ -163,7 +167,7 @@ export function createJobSearchRunner(
     run: ActiveSearch,
     context: JobSearchContext,
     targets: JobDiscoveryTarget[],
-    forced?: string,
+    forced: { ids: ReadonlySet<string>; full: boolean },
   ) => {
     setMaxListeners(0, run.controller.signal);
     const signal = run.controller.signal,
@@ -232,17 +236,11 @@ export function createJobSearchRunner(
       )
         return;
       source.counted = true;
-      if (
-        source.row.state !== "needs_you" &&
-        source.row.state !== "failed" &&
-        source.row.state !== "stopped"
-      )
-        source.row.state = "done";
+      if (!settledState(source.row.state)) source.row.state = "done";
       // Inventory alone is not proof of access: the selected details must
       // also have finished, without an access or read failure.
       if (
-        (source.row.state === "done" ||
-          (source.row.state === "stopped" && source.quickStopReason)) &&
+        (source.row.state === "done" || source.row.state === "partial") &&
         source.row.failedReads === 0
       )
         source.completeAccess?.();
@@ -300,11 +298,7 @@ export function createJobSearchRunner(
     ) => {
       if (!current(source)) return;
       source.row.lane = "browser";
-      if (
-        source.row.state !== "failed" &&
-        source.row.state !== "needs_you" &&
-        source.row.state !== "stopped"
-      ) {
+      if (!settledState(source.row.state)) {
         source.row.phase = "browser";
         source.row.state = "waiting";
       }
@@ -312,18 +306,16 @@ export function createJobSearchRunner(
       void browser
         .run(new URL(source.target.startingUrl).hostname, signal, async () => {
           if (!current(source)) return;
-          if (
-            source.row.state !== "failed" &&
-            source.row.state !== "needs_you" &&
-            source.row.state !== "stopped"
-          ) {
+          if (!settledState(source.row.state)) {
             source.row.state = "searching";
             source.row.phase = "browser";
           }
           write(source);
           const deadline = AbortSignal.any([
             signal,
-            AbortSignal.timeout(settings.depth === "quick" ? 25000 : 45000),
+            AbortSignal.timeout(
+              settings.depth === "quick" && !source.full ? 25000 : 45000,
+            ),
           ]);
           await abortable(work(deadline), deadline);
         })
@@ -398,10 +390,10 @@ export function createJobSearchRunner(
       // HTTP collection has no model of its own. Stop paging, while accepted
       // cards finish their already-running screening/reading/fit on run.signal.
       const timer =
-        settings.depth === "quick" && lane === "http"
+        settings.depth === "quick" && !source.full && lane === "http"
           ? setTimeout(() => {
               source.quickStopReason ??=
-                "Quick search reached its three-minute collection limit for this site. Coverage is partial; use Thorough to search further.";
+                "Quick's three-minute look at this site ran out.";
               stopCollection();
             }, 180000)
           : null;
@@ -489,21 +481,26 @@ export function createJobSearchRunner(
         if (!current(source) || !source.quickStopReason) throw error;
         source.collected = true;
         source.notes.push(source.quickStopReason);
+        // A deliberate Quick stop on a healthy site: more to read, not a failure.
         if (source.row.state !== "needs_you" && source.row.state !== "failed")
-          source.row.state = "stopped";
+          source.row.state = "partial";
         write(source);
         markDone(source);
       } finally {
         if (timer) clearTimeout(timer);
       }
     };
-    const enqueue = (target: JobDiscoveryTarget, force: boolean) => {
+    const enqueue = (
+      target: JobDiscoveryTarget,
+      force: boolean,
+      full = false,
+    ) => {
       if (signal.aborted) return;
       const before = states.get(target.id);
       if (before && !before.counted) return;
       if (before?.counted) update(run, { sourcesDone: -1 });
       else if (run.enqueue) update(run, { sourcesTotal: 1 });
-      const source = sourceWork(target);
+      const source = sourceWork(target, full);
       states.set(target.id, source);
       write(source);
       if (!force && access.pending(Number(target.id))) {
@@ -548,7 +545,12 @@ export function createJobSearchRunner(
     try {
       // One transaction for the initial rows; no 900-site status array crosses IPC.
       deps.store.transaction(() => {
-        for (const target of targets) enqueue(target, target.id === forced);
+        for (const target of targets)
+          enqueue(
+            target,
+            forced.ids.has(target.id),
+            forced.full && forced.ids.has(target.id),
+          );
         flush();
       });
       run.enqueue = enqueue;
@@ -602,9 +604,13 @@ export function createJobSearchRunner(
     }
   };
 
+  /**
+   * `forced` sites run alone, ahead of any pending sign-in; `full` reads them
+   * whole. The record keeps `input` as the choices for the next search.
+   */
   const begin = (
     input: JobSearchSettingsInput,
-    forcedTarget?: JobDiscoveryTarget,
+    forced?: { targets: JobDiscoveryTarget[]; full?: boolean },
   ): Promise<JobSearchRecord> => {
     if (active)
       return active.record
@@ -650,8 +656,8 @@ export function createJobSearchRunner(
             : settings.sites.ids
           ).map(String),
         );
-        const targets = forcedTarget
-          ? [{ ...forcedTarget, enabled: true }]
+        const targets = forced
+          ? forced.targets.map((target) => ({ ...target, enabled: true }))
           : [
               ...new Map(
                 context.sources
@@ -670,7 +676,12 @@ export function createJobSearchRunner(
         revision++;
         const started = structuredClone(run.record);
         void yieldTurn()
-          .then(() => execute(run, context, targets, forcedTarget?.id))
+          .then(() =>
+            execute(run, context, targets, {
+              ids: new Set(forced?.targets.map((target) => target.id)),
+              full: forced?.full ?? false,
+            }),
+          )
           .catch((error: unknown) => {
             finish(
               run,
@@ -707,8 +718,34 @@ export function createJobSearchRunner(
       }
       return begin(
         { ...(search?.settings ?? {}), sites: { ids: [id] } },
-        target,
+        { targets: [target] },
       );
+    },
+    async keepReading(id) {
+      const ids =
+        id !== undefined
+          ? [String(id)]
+          : search
+            ? resultRows.partialIds(search.id)
+            : [];
+      const targets = ids.flatMap((sourceId) => {
+        const site = siteRows.get(Number(sourceId));
+        return site ? [{ ...jobSiteTarget(site), enabled: true }] : [];
+      });
+      if (targets.length === 0)
+        throw new Error("No site from the last search has more to read.");
+      const run = active;
+      if (run) {
+        await run.starting;
+        await run.ready;
+        if (!run.controller.signal.aborted && run.enqueue && run.record) {
+          for (const target of targets) run.enqueue(target, true, true);
+          return structuredClone(run.record);
+        }
+      }
+      // A new run over just these sites, keeping the person's choices for
+      // their next search as they were.
+      return begin(search?.settings ?? {}, { targets, full: true });
     },
     stop() {
       if (continuation) clearTimeout(continuation);

@@ -145,6 +145,12 @@ export const JOB_COMMANDS = {
       "Retries just one job site after you open it and finish sign-in or verification. Leaves its Needs you item open until the site can actually be read; other sites keep running.",
     input: RetrySourceInputSchema,
   },
+  keep_reading: {
+    effect: "external",
+    description:
+      "Reads on where a Quick search stopped early: one job site by id, or with no id every site the last search left with more listings. Those sites get a full read; other sites and the next search's choices are unchanged. Returns at once.",
+    input: z.object({ id: z.number().int().positive().optional() }).strict(),
+  },
   stop_search: {
     effect: "local_write",
     description: "Stops the running search. Jobs already found stay.",
@@ -193,6 +199,7 @@ export interface JobCommandOutputs extends ProfileCommandOutputs {
   undo_site_change: { changed: number; skipped: number };
   start_search: JobSearchStatus;
   retry_source: JobSearchStatus;
+  keep_reading: JobSearchStatus;
   stop_search: JobSearchStatus;
   search_status: JobSearchStatus;
   list_search_sources: JobSearchSourcePage;

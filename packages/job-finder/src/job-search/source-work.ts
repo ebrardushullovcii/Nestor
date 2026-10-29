@@ -2,6 +2,8 @@ import type { JobDiscoveryTarget, JobSearchSourceRow } from "@nestor/contracts";
 
 export interface SourceWork {
   target: JobDiscoveryTarget;
+  /** Read the whole site even in a Quick search (the person chose Keep reading). */
+  full: boolean;
   row: JobSearchSourceRow;
   urls: Set<string>;
   processed: number;
@@ -14,9 +16,23 @@ export interface SourceWork {
   notes: string[];
   completeAccess?: () => void;
 }
-export function sourceWork(target: JobDiscoveryTarget): SourceWork {
+/** A site's outcome is settled: later work on it must not mark it searching or done. */
+export function settledState(state: JobSearchSourceRow["state"]): boolean {
+  return (
+    state === "needs_you" ||
+    state === "failed" ||
+    state === "stopped" ||
+    state === "partial"
+  );
+}
+
+export function sourceWork(
+  target: JobDiscoveryTarget,
+  full = false,
+): SourceWork {
   return {
     target,
+    full,
     urls: new Set(),
     processed: 0,
     screened: 0,

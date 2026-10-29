@@ -463,6 +463,7 @@ function recordingPorts(
     },
     stop: () => {},
     retrySource: () => Promise.resolve(),
+    keepReading: () => Promise.resolve(),
     scoreUnscored: () => Promise.resolve(0),
     status: () => searchStatus,
   };

@@ -45,6 +45,8 @@ export interface JobSearchRunner {
   stop(): void;
   /** Rechecks only this site; joins the running search, or starts a single-site search. */
   retrySource(id: number): Promise<JobSearchRecord>;
+  /** Reads the rest of one site, or of every site the last search left partial. */
+  keepReading(id?: number): Promise<JobSearchRecord>;
   status(): JobSearchStatus;
   /** Coalesced to at most four notifications per second. */
   onStatus(listener: (status: JobSearchStatus) => void): () => void;

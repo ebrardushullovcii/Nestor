@@ -364,6 +364,11 @@ export type JobSearchRecord = z.infer<typeof JobSearchRecordSchema>;
 export const JobSearchSourceStateSchema = z.object({
   sourceId: z.string(),
   label: z.string(),
+  /**
+   * `partial`: a Quick search stopped reading this healthy site early (a long
+   * run of unrelated listings, or its time ran out); `keep_reading` reads the
+   * rest. `stopped`: the person stopped the search.
+   */
   state: z.enum([
     "waiting",
     "searching",
@@ -371,6 +376,7 @@ export const JobSearchSourceStateSchema = z.object({
     "failed",
     "needs_you",
     "stopped",
+    "partial",
   ]),
   found: z.number().int().nonnegative(),
   added: z.number().int().nonnegative(),
@@ -418,6 +424,8 @@ export const JobSearchProgressSchema = z.object({
   fitActive: z.number(),
   needsYou: z.number(),
   failed: z.number(),
+  /** Sites a Quick search left with more listings to read. */
+  partial: z.number(),
 });
 
 export type JobSearchProgress = z.infer<typeof JobSearchProgressSchema>;

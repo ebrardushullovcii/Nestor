@@ -4,12 +4,16 @@ import type {
   ReadListingResult,
 } from "@nestor/contracts";
 import type { JobSearchContext, JobSearchRunnerDeps } from "./types";
-import type { SourceWork } from "./source-work";
+import { settledState, type SourceWork } from "./source-work";
 import type { createFitQueue } from "./fit-queue";
 import { createCardWaves } from "./card-waves";
 
+/**
+ * Quick reads a site while it keeps finding related jobs, and stops early
+ * after this many unrelated listings in a row. There is no listing cap: a
+ * board that keeps paying off is read on (until Quick's time runs out).
+ */
 const QUICK_REVIEW_INTERVAL = 100;
-const QUICK_CARD_LIMIT = 300;
 
 /** Screening stays serialized so waves share one cached profession decision. Fit runs alongside it. */
 export function createSearchPipeline(input: {
@@ -144,11 +148,7 @@ export function createSearchPipeline(input: {
     const touched = new Set(cards.map((card) => card.sourceId));
     for (const id of touched) {
       const source = sources.get(id)!;
-      if (
-        source.row.state !== "needs_you" &&
-        source.row.state !== "failed" &&
-        source.row.state !== "stopped"
-      ) {
+      if (!settledState(source.row.state)) {
         source.row.state = "searching";
         source.row.phase = "screening";
       }
@@ -198,12 +198,7 @@ export function createSearchPipeline(input: {
       );
     for (const id of touched) {
       const source = sources.get(id)!;
-      if (
-        source.row.state !== "needs_you" &&
-        source.row.state !== "failed" &&
-        source.row.state !== "stopped"
-      )
-        source.row.phase = "reading";
+      if (!settledState(source.row.state)) source.row.phase = "reading";
       input.write(source);
       input.settled(source);
     }
@@ -272,15 +267,13 @@ export function createSearchPipeline(input: {
   });
   return {
     async accept(source: SourceWork, cards: readonly ListingCard[]) {
-      const quick = settings.depth === "quick";
+      const quick = settings.depth === "quick" && !source.full;
       const chunk = quick ? QUICK_REVIEW_INTERVAL : 400;
       for (let offset = 0; offset < cards.length; offset += chunk) {
         if (source.quickStopReason) return;
         const fresh: ListingCard[] = [];
         for (const card of cards.slice(offset, offset + chunk)) {
           if (source.urls.has(card.url)) continue;
-          if (quick && source.row.cards + fresh.length >= QUICK_CARD_LIMIT)
-            break;
           source.urls.add(card.url);
           fresh.push(card);
         }
@@ -303,11 +296,7 @@ export function createSearchPipeline(input: {
         )
           await waves.checkpoint();
         if (quick && source.unrelatedRun >= QUICK_REVIEW_INTERVAL)
-          source.quickStopReason =
-            "Quick search stopped after 100 consecutive unrelated listings. Coverage is partial; use Thorough to search further.";
-        else if (quick && source.row.cards >= QUICK_CARD_LIMIT)
-          source.quickStopReason =
-            "Quick search reached its 300-listing limit for this site. Coverage is partial; use Thorough to search further.";
+          source.quickStopReason = `Quick stopped after ${QUICK_REVIEW_INTERVAL} listings in a row that don't match your profile.`;
       }
     },
     drain: () => waves.drain(),
