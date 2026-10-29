@@ -428,6 +428,25 @@ export function settleResumeClaimLines(input: {
   // otherwise a later preview restores it while the editor stays empty.
   // Without a saved summary it is left off (ADR 0051): keeping the rejected
   // text would leave the person to repair the app's own line before approval.
+  const hasSubstantiveSavedSummary = (text: string): boolean => {
+    const hash = resumeClaimContentHash(text);
+    // A role label is not a useful replacement for supported prose (#312).
+    // Compare with saved metadata rather than rejecting short real summaries.
+    const roleLabels = [
+      input.profile?.headline ?? "",
+      ...(input.profile?.experiences ?? []).flatMap((experience) => [
+        experience.title ?? "",
+        `${experience.title ?? ""} at ${experience.companyName ?? ""}`,
+      ]),
+      ...draft.sections.flatMap((section) =>
+        section.entries.flatMap((entry) => [
+          entry.title ?? "",
+          `${entry.title ?? ""} at ${entry.subtitle ?? ""}`,
+        ]),
+      ),
+    ];
+    return !roleLabels.some((label) => resumeClaimContentHash(label) === hash);
+  };
   const fixText = (
     text: string | null,
     origin: ResumeLine["origin"],
@@ -439,9 +458,16 @@ export function settleResumeClaimLines(input: {
     const fix = fixFor({ text, origin, field, sectionId }, savedWording);
     if (fix === null) return text;
     if (fix) return fix;
-    return checks.get(resumeClaimContentHash(text))?.verdict === "supported"
-      ? text
-      : savedWording;
+    const supported =
+      checks.get(resumeClaimContentHash(text))?.verdict === "supported";
+    // An explicit style removal may replace a redundant summary with the
+    // person's real summary, but must not collapse it to a bare role label.
+    if (
+      supported &&
+      (!savedWording || !hasSubstantiveSavedSummary(savedWording))
+    )
+      return text;
+    return savedWording;
   };
 
   const fixed: ResumeDraft = {
