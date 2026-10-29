@@ -165,6 +165,22 @@ function plan(messages: readonly AgentLoopMessage[]): Step {
     };
   }
 
+  if (/^Copy my headline so I can paste it\.?$/iu.test(text)) {
+    if (!last)
+      return { toolCalls: [call("read_profile", { section: "basics" })] };
+    if (results.length === 1) {
+      const data = jsonOf(last.content);
+      const basics = (data?.basics ?? {}) as Record<string, unknown>;
+      return {
+        toolCalls: [
+          call("action_write_clipboard_text", {
+            text: typeof basics.headline === "string" ? basics.headline : "",
+          }),
+        ],
+      };
+    }
+    return { content: "Your headline was copied." };
+  }
   let match =
     /(?:change|set|update) my headline to\s+["“]?(.+?)["”]?\.?$/iu.exec(text);
   if (match) {

@@ -356,6 +356,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     channels: ["needs-you:run"],
     coverage: tools(
       "create_form_answer",
+      "upsert_form_answer",
       "list_form_answers",
       "get_form_answer",
       "save_form_answer",
