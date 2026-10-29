@@ -104,4 +104,17 @@ test("a select-all-that-apply question takes several options as one list", () =>
   fireEvent.click(screen.getByRole("checkbox", { name: "Monday" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Wednesday" }));
   expect(onChange).toHaveBeenLastCalledWith('["Monday"]');
+  expect(screen.getByText("Select all that apply. 2 selected.")).toBeTruthy();
+  view.rerender(
+    <AnswerField
+      question={{
+        prompt: "Which days? Select all that apply",
+        input: "multi_choice",
+        options,
+      }}
+      value='["Monday"]'
+      onChange={onChange}
+    />,
+  );
+  expect(screen.getByText("1 selected.")).toBeTruthy();
 });

@@ -146,12 +146,20 @@ function MultiChoices(props: Parameters<typeof AnswerField>[0]) {
       : chosen.filter((value) => value !== option);
     props.onChange(next.length ? formatMultiChoiceAnswer(next, options) : "");
   };
+  // Forms usually say it already; say it once.
+  const hint = [
+    /all that apply/iu.test(props.question.prompt)
+      ? ""
+      : "Select all that apply.",
+    chosen.length ? `${chosen.length} selected.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
     <fieldset disabled={props.disabled} className="grid gap-3">
       <legend className="mb-3 font-medium">{props.question.prompt}</legend>
       <p className="text-sm text-foreground-soft" id={`${id}-hint`}>
-        Select all that apply.
-        {chosen.length ? ` ${chosen.length} selected.` : ""}
+        {hint}
       </p>
       {searchable ? (
         <>
