@@ -102,6 +102,28 @@ export function ShortlistedScreen() {
     totalCapped && selection.all ? "+" : ""
   }`;
 
+  // Arriving with nothing to review while approved jobs wait opens Approved,
+  // where the jobs are. A link, a tab or an Assistant view chooses for itself.
+  const [arriving, setArriving] = useState(false);
+  const choosesTab =
+    requestedApproved ||
+    searchParams.has("jobId") ||
+    searchParams.has("jobs");
+  useEffectWhileKeptRouteShown(() => {
+    if (!choosesTab) setArriving(true);
+  }, [choosesTab, navigationKey]);
+  useEffect(() => {
+    if (!arriving || list.loading) return;
+    setArriving(false);
+    if (
+      tab === "shortlisted" &&
+      text === "" &&
+      list.counts.shortlisted === 0 &&
+      list.counts.resume > 0
+    )
+      setTab("resume");
+  }, [arriving, list.loading, list.counts, tab, text]);
+
   // A job asked for by link (`?jobId=`) stays open in its own tab.
   const linkedJob = Number(searchParams.get("jobId") ?? "");
   const pinnedId = useRef<number | null>(null);
@@ -179,8 +201,12 @@ export function ShortlistedScreen() {
         displayedIds: list.rows.map((row) => String(row.id)),
         filteredIds: [],
         totalFilteredCount: list.total,
+        // Name the tab and both counts: an empty tab is not a filter.
         filterSummary: JSON.stringify({
           stage: tab,
+          tab: tab === "shortlisted" ? "To review" : "Approved",
+          toReview: list.counts.shortlisted,
+          approved: list.counts.resume,
           text,
           allSelected: selection.all,
           except: selection.all ? [...selection.ids] : [],
