@@ -770,7 +770,7 @@ const cookieBannerSite: FixtureSite = {
   pages: {
     "https://careers.example-cookie.test/apply/7": {
       title: "Northwind Tools — Apply",
-      clickables: [{ label: "Accept all cookies", dismisses: true }],
+      clickables: [{ label: "Reject optional cookies", dismisses: true }],
       controls: FORM_CONTROLS,
       actions: ["Submit Application"],
     },
@@ -884,7 +884,7 @@ describe("the apply harness across real site shapes", () => {
       createHarnessModel(state, "document_resume"),
     );
 
-    expect(state.clicks).toContain("Accept all cookies");
+    expect(state.clicks).toContain("Reject optional cookies");
     expect(result.outcome).toBe("prepared");
     expect(result.filled.length).toBeGreaterThan(0);
   });
