@@ -326,7 +326,7 @@ export const openInAppTool = defineTool({
   name: "open_in_app",
   group: "workspace",
   description:
-    "Opens a screen or a record in the app for the person. Use screen applications for the tracker (statuses, notes, interviews and reminders), optionally with its numeric jobId. Open screens only when asked to see them.",
+    "Opens a screen or a record in the app for the person. Use screen applications for the tracker (statuses, notes, interviews and reminders), optionally with its numeric jobId. Open screens only when asked to see them. For an explicit destination request, call even if the send-time context already names it: the person may have moved; the renderer preserves an already-visible view and acknowledges the live destination. A request to open a screen, including a repeated one, preserves its filters and selection: omit view, applicationView and needsView unless the person asks to change those preferences.",
   parameters: json.object({
     screen: json.enumOf(Object.keys(APP_ROUTES)),
     jobId: json.number(

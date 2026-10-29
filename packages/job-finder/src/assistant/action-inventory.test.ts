@@ -369,6 +369,99 @@ describe("assistant action inventory", () => {
     expect(missing).toEqual([]);
   });
 
+  it("offers every mapped inventory tool and discovers it by group without eval requests", async () => {
+    const reject = () => Promise.reject(new Error("Catalog only"));
+    const commands = [
+      ...assistantCommandTools(JOB_COMMANDS, reject, {
+        group: (name) =>
+          name === "get_settings" || name === "patch_settings"
+            ? "settings"
+            : name in PROFILE_COMMANDS
+              ? "profile"
+              : "jobs",
+        replaces: {
+          list_jobs: ["query_jobs", "show_jobs", "compare_jobs"],
+          move_jobs: [
+            "shortlist_jobs",
+            "shortlist_result_set",
+            "remove_from_shortlist",
+            "dismiss_jobs",
+            "restore_jobs",
+          ],
+          start_search: ["search_for_jobs"],
+          stop_search: ["cancel_search"],
+        },
+      }),
+      ...assistantCommandTools(RESUME_COMMANDS, reject, {
+        group: "resume",
+        replaces: {
+          get_resume: ["read_resume"],
+          save_resume: ["edit_resume", "revise_resume", "set_resume_template"],
+          rewrite_resume: ["generate_resumes"],
+          approve_resume: ["action_approve_resumes"],
+        },
+      }),
+      ...assistantCommandTools(TRACKER_COMMANDS, reject, { group: "tracking" }),
+      ...assistantCommandTools(APPLICATION_COMMANDS, reject, {
+        group: "applications",
+      }),
+      ...needsCommands,
+    ];
+    const options = { commands, browserAvailable: true };
+    const flat = buildAssistantToolCatalog({ ...options, mode: "flat" });
+    const initial = buildAssistantToolCatalog({
+      ...options,
+      mode: "grouped",
+      screen: "home",
+    });
+    const loader = initial.find((tool) => tool.name === "load_tools")!;
+    for (const entry of ACTION_INVENTORY) {
+      if (entry.coverage.kind !== "tools") continue;
+      for (const name of entry.coverage.tools) {
+        const tool = flat.find((candidate) => candidate.name === name);
+        expect(
+          tool,
+          `${entry.id}: ${name} is absent from the actual catalog`,
+        ).toBeDefined();
+        expect(loader.description, tool!.group).toContain(`${tool!.group} (`);
+        const result = await loader.execute(
+          { groups: [tool!.group], names: [] },
+          {} as never,
+        );
+        expect(
+          result.data,
+          `${entry.id}: ${name} is absent from its discovery menu`,
+        ).toHaveProperty(
+          "availableTools",
+          expect.arrayContaining([expect.objectContaining({ name })]),
+        );
+        const loaded: string[] = [];
+        const catalog = buildAssistantToolCatalog({
+          ...options,
+          mode: "grouped",
+          onLoadToolNames: (names) => loaded.push(...names),
+        });
+        await catalog
+          .find((candidate) => candidate.name === "load_tools")!
+          .execute({ groups: [], names: [name] }, {} as never);
+        expect(
+          buildAssistantToolCatalog({
+            ...options,
+            mode: "grouped",
+            loadedToolNames: loaded,
+          }).map((candidate) => candidate.name),
+          `${entry.id}: ${name} cannot be offered after loading`,
+        ).toContain(name);
+      }
+    }
+    for (const tool of flat) {
+      expect(tool.description.trim().length, tool.name).toBeGreaterThan(15);
+      expect(tool.description.trim(), tool.name).not.toMatch(
+        /^(?:todo|tool|action|command|undefined|null)[.!]?$/iu,
+      );
+    }
+  });
+
   it("gives every excluded action a reason and every entry a unique id", () => {
     const ids = ACTION_INVENTORY.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);

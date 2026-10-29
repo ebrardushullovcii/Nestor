@@ -24,6 +24,20 @@ export interface AssistantLaneCaseResult {
   error: string | null;
 }
 
+/** Provider notices are failed runs, even when an earlier tool already ran. */
+export function assistantReplyFailure(
+  messages: readonly AssistantMessage[],
+): string | null {
+  const errors =
+    lastReply(messages)?.parts.flatMap((part) =>
+      part.type === "notice" &&
+      (part.kind === "outage" || part.kind === "error")
+        ? [part.text]
+        : [],
+    ) ?? [];
+  return errors.length ? errors.join("; ") : null;
+}
+
 async function waitForIdle(
   world: AssistantLaneWorld,
   conversationId: string,
@@ -106,6 +120,7 @@ export async function runAssistantLaneCase(
         context,
       });
       conversationId = result.conversationId;
+      if (turn.moveAfterSend) world.show(turn.moveAfterSend);
       await waitForIdle(
         world,
         conversationId,
@@ -124,6 +139,7 @@ export async function runAssistantLaneCase(
       ...observe(view.messages),
     };
     const failures = evalCase.check(observation);
+    const modelFailure = assistantReplyFailure(view.messages);
     if (!world.recorder.inputs.length)
       failures.push("No assistant input measurements were recorded.");
     const inputTokens = world.recorder.inputs.reduce(
@@ -143,7 +159,7 @@ export async function runAssistantLaneCase(
     return {
       id: evalCase.id,
       title: evalCase.title,
-      passed: failures.length === 0,
+      passed: failures.length === 0 && !modelFailure,
       asked: observation.questions > 0,
       failures,
       replyText: observation.replyText.slice(0, 600),
@@ -151,7 +167,7 @@ export async function runAssistantLaneCase(
       navigations: [...observation.navigations],
       durationMs: Date.now() - started,
       inputs: world.recorder.inputs,
-      error: null,
+      error: modelFailure,
     };
   } catch (error) {
     return {

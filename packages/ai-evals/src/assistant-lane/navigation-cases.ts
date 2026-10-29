@@ -12,7 +12,7 @@ import { laneContext } from "./world";
  *   discussed.
  * - Answer only for questions: counts, values, yes/no, status, lists,
  *   how-to, why and advice. The text answer is enough; they can ask to open.
- * - Never open the screen already showing the answer, and never leave
+ * - A requested destination is acknowledged even if its send-time snapshot matches; never leave
  *   Profile while it has unsaved typing unless they asked to go.
  * - Always answer in text, navigation or not.
  *
@@ -134,6 +134,18 @@ const NOTHING_WAITING =
   /\bno\b|none|nothing|not (?:any|waiting)|all clear|don't have any|aren't any/iu;
 
 export const NAVIGATION_CASES: AssistantLaneCase[] = [
+  navCase(
+    "race.shortlisted_after_move",
+    "Return to Shortlisted when the person leaves during a same-screen request",
+    [
+      {
+        text: "Open my shortlisted jobs.",
+        context: SHORTLISTED,
+        moveAfterSend: screen("applications", "/job-finder/applications"),
+      },
+    ],
+    opens({ path: "/job-finder/review-queue" }, SHORTLIST_NAMES),
+  ),
   // Asked to see a screen or record: open it and answer.
   navCase(
     "go.shortlisted",
@@ -166,7 +178,24 @@ export const NAVIGATION_CASES: AssistantLaneCase[] = [
     "go.applications_board",
     "Show my applications board",
     [{ text: "Show my applications board", context: HOME }],
-    opens({ path: "/job-finder/applications" }, /northwind/iu),
+    (o) => {
+      const route = o.navigations.at(-1);
+      const url = route ? new URL(route, "https://nestor.local") : null;
+      const view: unknown = JSON.parse(
+        url?.searchParams.get("applications") ?? "{}",
+      );
+      return [
+        ...(url?.pathname === "/job-finder/applications" &&
+        view !== null &&
+        typeof view === "object" &&
+        "layout" in view &&
+        view.layout === "board"
+          ? []
+          : ["did not display Applications in board layout"]),
+        ...(o.replyText.trim() ? [] : ["no readable answer"]),
+        ...(o.changes.length ? ["changed saved application data"] : []),
+      ];
+    },
   ),
   navCase(
     "go.pull_up_resume",
@@ -342,7 +371,7 @@ export const NAVIGATION_CASES: AssistantLaneCase[] = [
     "stay.already_on_shortlisted",
     "Show my shortlisted jobs, asked on Shortlisted",
     [{ text: "show my shortlisted jobs", context: SHORTLISTED }],
-    answers(SHORTLIST_NAMES),
+    opens({ path: "/job-finder/review-queue" }, SHORTLIST_NAMES),
   ),
   navCase(
     "stay.headline_on_profile",
