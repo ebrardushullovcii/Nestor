@@ -1,10 +1,15 @@
-import type { ResumeImportFieldCandidateSummary } from "@nestor/contracts";
+import {
+  resumeImportAnswer,
+  type AssistantNeedsView,
+  type ResumeImportFieldCandidateSummary,
+} from "@nestor/contracts";
 import type { ProfileSection } from "../../lib/profile-screen-progress";
 import { getJobFinderScrollBehavior } from "../../lib/job-finder-scroll-behavior";
 
 export interface ProfileImportSuggestionDestination {
   actionLabel: string;
-  section: ProfileSection;
+  /** Null: form answers live only in Needs you (Saved answers). */
+  section: ProfileSection | null;
 }
 
 const sectionDestination: Record<
@@ -36,10 +41,7 @@ const sectionDestination: Record<
     actionLabel: "Review in Preferences",
     section: "preferences",
   },
-  answer_bank: {
-    actionLabel: "Review in Preferences",
-    section: "preferences",
-  },
+  answer_bank: { actionLabel: "Review in Needs you", section: null },
   application_identity: {
     actionLabel: "Review in Preferences",
     section: "preferences",
@@ -98,6 +100,26 @@ export function getProfileImportSuggestionDestination(
   return sectionDestination[candidate.target.section];
 }
 
+/**
+ * Where to review a suggested form answer: its saved answer in Needs you,
+ * found by the key the import saved it under, else Saved answers searched for
+ * its question.
+ */
+export async function getNeedsYouSuggestionPath(
+  candidate: ResumeImportFieldCandidateSummary,
+): Promise<string> {
+  const saved = resumeImportAnswer(candidate.target.key);
+  const answer = saved
+    ? await window.nestor.needsYou
+        .run("get_form_answer_by_key", { key: saved.key })
+        .catch(() => null)
+    : null;
+  const view: AssistantNeedsView = answer
+    ? { tab: "saved", focusId: answer.id }
+    : { tab: "saved", text: candidate.label };
+  return `/job-finder/actions?needs=${encodeURIComponent(JSON.stringify(view))}`;
+}
+
 function getExactTarget(
   candidate: ResumeImportFieldCandidateSummary,
   documentRef: Document,
@@ -144,9 +166,9 @@ export function focusProfileImportSuggestion(
 ): boolean {
   const destination = getProfileImportSuggestionDestination(candidate);
   const exactTarget = getExactTarget(candidate, documentRef);
-  const fallbackTarget = documentRef.getElementById(
-    `${destination.section}-tab`,
-  );
+  const fallbackTarget = destination.section
+    ? documentRef.getElementById(`${destination.section}-tab`)
+    : null;
   const target = exactTarget ?? fallbackTarget;
 
   if (!target) {
