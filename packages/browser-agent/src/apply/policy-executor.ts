@@ -156,7 +156,12 @@ export type ApplyExecutionOutcome =
     }
   | { kind: "paused"; pause: ApplyPause }
   /** The step did not fit the page. The loop says why and the model retries. */
-  | { kind: "refused"; reason: string; observation: ApplyFormObservation }
+  | {
+      kind: "refused";
+      reason: string;
+      observation: ApplyFormObservation;
+      uploadFailed?: boolean;
+    }
   | {
       kind: "ready_to_send";
       finalActionRef: string;
@@ -3085,12 +3090,18 @@ export async function executeApplyProposal(
             write: () =>
               config.hands.uploadFile(control.ref, {
                 name: ownLetter.fileName,
+                ...(proposal.method ? { method: proposal.method } : {}),
                 mimeType: ownLetter.mimeType,
                 bytes: ownBytes,
               }),
           });
           if (!ownUpload.ok) {
-            return { kind: "refused", reason: ownUpload.error, observation };
+            return {
+              kind: "refused",
+              reason: ownUpload.error,
+              observation,
+              uploadFailed: true,
+            };
           }
           if (
             fileFieldHoldsOtherFile(ownUpload.observedValue, ownLetter.fileName)
@@ -3217,12 +3228,18 @@ export async function executeApplyProposal(
           write: () =>
             config.hands.uploadFile(control.ref, {
               name: letterFile.fileName,
+              ...(proposal.method ? { method: proposal.method } : {}),
               mimeType: letterFile.mimeType,
               bytes: letterBytes,
             }),
         });
         if (!letterUpload.ok) {
-          return { kind: "refused", reason: letterUpload.error, observation };
+          return {
+            kind: "refused",
+            reason: letterUpload.error,
+            observation,
+            uploadFailed: true,
+          };
         }
         if (
           fileFieldHoldsOtherFile(
@@ -3344,12 +3361,18 @@ export async function executeApplyProposal(
         write: () =>
           config.hands.uploadFile(control.ref, {
             name: document.fileName,
+            ...(proposal.method ? { method: proposal.method } : {}),
             mimeType: document.mimeType,
             bytes,
           }),
       });
       if (!write.ok) {
-        return { kind: "refused", reason: write.error, observation };
+        return {
+          kind: "refused",
+          reason: write.error,
+          observation,
+          uploadFailed: true,
+        };
       }
       if (fileFieldHoldsOtherFile(write.observedValue, document.fileName)) {
         return {

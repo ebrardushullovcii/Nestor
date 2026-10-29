@@ -40,6 +40,8 @@ import {
 interface UploadRecord {
   /** The order its answer arrived in; null while it waits. */
   completedAt: number | null;
+  sequence?: number;
+  httpStatus?: number;
   carriesFile: boolean;
   /** Carrier: the file names its multipart body gives. */
   names: readonly string[];
@@ -48,9 +50,10 @@ interface UploadRecord {
   /** Mention: the request body, lowercased. */
   text: string;
   url: string;
+  endpoint: string;
   /** Keys, ids and URLs a successful answer handed out. */
   tokens: string[];
-  status: "pending" | "accepted" | "rejected";
+  status: "pending" | "accepted" | "rejected" | "unconfirmed";
   /** Held back by Nestor's own fence; the site never saw it. */
   blocked: boolean;
   /**
@@ -65,6 +68,7 @@ interface FileIdentity {
   name: string;
   size: number;
   sha256?: string;
+  startedAfter?: number;
 }
 
 const ledgers = new WeakMap<Page, UploadRecord[]>();
@@ -85,10 +89,11 @@ export function rememberAttachedFile(
 ): void {
   let files = given.get(page);
   if (!files) given.set(page, (files = new Map<string, FileIdentity>()));
-  files.set(ref, file);
+  files.set(ref, { ...file, startedAfter: sequence });
 }
 /** Answers in the order they arrived; milliseconds tie too often. */
 let answered = 0;
+let sequence = 0;
 /** Kept per kind, so chatty autosaves cannot push the uploads out. */
 const MAX_PER_KIND = 60;
 const MAX_TEXT = 64_000;
@@ -119,6 +124,7 @@ function fileNamesIn(body: Buffer): string[] {
 }
 
 function add(records: UploadRecord[], record: UploadRecord): UploadRecord {
+  record.sequence = ++sequence;
   records.push(record);
   const sameKind = records.filter(
     (entry) => entry.carriesFile === record.carriesFile,
@@ -135,6 +141,7 @@ function track(records: UploadRecord[], request: Request): UploadRecord | null {
   const base = {
     completedAt: null,
     url: request.url().toLowerCase(),
+    endpoint: `${new URL(request.url()).host}${new URL(request.url()).pathname}`,
     tokens: [],
     status: "pending" as const,
     blocked: false,
@@ -258,6 +265,7 @@ function tokensIn(
 async function settle(page: Page, record: UploadRecord, response: Response) {
   // Ordered by when the answer arrived, not by when its body was read.
   record.completedAt = ++answered;
+  record.httpStatus = response.status();
   // The fence's upload permit names the exact file this request carried:
   // it is a carrier whatever its content type (a raw text/plain PUT too).
   const permit = getPrepareOnlyRequestPermit(response.request());
@@ -270,11 +278,12 @@ async function settle(page: Page, record: UploadRecord, response: Response) {
   // upload permit for this exact request, and a storage receipt) attaches a
   // file; a refusal refuses whatever was sent.
   const { judgment, body } = await inspectPageMutationResponse(page, response);
-  if (
-    judgment === "refused" ||
-    (record.carriesFile && judgment !== "accepted")
-  ) {
+  if (judgment === "refused") {
     record.status = "rejected";
+    return;
+  }
+  if (record.carriesFile && judgment !== "accepted") {
+    record.status = "unconfirmed";
     return;
   }
   // A mention that was not refused proves nothing, but may hand out the key
@@ -313,6 +322,7 @@ export function watchAttachmentUploads(page: Page): void {
       record = add(records, {
         completedAt: null,
         url: request.url().toLowerCase(),
+        endpoint: `${new URL(request.url()).host}${new URL(request.url()).pathname}`,
         tokens: [],
         status: "pending",
         blocked: false,
@@ -354,11 +364,17 @@ export function watchAttachmentUploads(page: Page): void {
 }
 
 /** The server's word on one chosen file; the module comment has the rules. */
-export function attachmentUploadOutcome(
+function attachmentUploadEvidence(
   page: Page,
   file: Partial<FileIdentity>,
-): RawApplyUpload["network"] {
-  const records = ledgers.get(page);
+): Pick<RawApplyUpload, "network" | "requests"> | undefined {
+  const records = ledgers
+    .get(page)
+    ?.filter(
+      (record) =>
+        file.startedAfter === undefined ||
+        (record.sequence ?? 0) > file.startedAfter,
+    );
   const name = file.name?.trim().toLowerCase();
   if (!records || !name) return undefined;
   // A carrier is this file only by the permit's exact identity (field,
@@ -403,20 +419,40 @@ export function attachmentUploadOutcome(
       !record.blocked || carriers.includes(record) || linked.includes(record),
   );
   if (!group.length) return undefined;
-  if (group.some((record) => record.status === "pending")) return "pending";
+  const requests = group.slice(-6).map((record) => {
+    return {
+      endpoint: record.endpoint,
+      status: record.httpStatus ?? null,
+      blocked: record.blocked,
+    };
+  });
+  const evidence = (network: NonNullable<RawApplyUpload["network"]>) => ({
+    network,
+    requests,
+  });
+  if (group.some((record) => record.status === "pending"))
+    return evidence("pending");
   const order = (record: UploadRecord) => record.completedAt ?? 0;
   const lastCarrier = [...carriers]
     .sort((left, right) => order(left) - order(right))
     .at(-1);
-  if (lastCarrier?.status === "rejected") return "rejected";
+  if (lastCarrier?.status === "rejected") return evidence("rejected");
   const after = lastCarrier ? order(lastCarrier) : 0;
   if (
     group.some(
       (record) => record.status === "rejected" && order(record) > after,
     )
   )
-    return "rejected";
-  return lastCarrier ? "accepted" : undefined;
+    return evidence("rejected");
+  if (lastCarrier?.status === "unconfirmed") return evidence("unconfirmed");
+  return lastCarrier ? evidence("accepted") : undefined;
+}
+
+export function attachmentUploadOutcome(
+  page: Page,
+  file: Partial<FileIdentity>,
+): RawApplyUpload["network"] {
+  return attachmentUploadEvidence(page, file)?.network;
 }
 
 /** Adds the server's word to every file control a page read found. */
@@ -449,10 +485,15 @@ export function withAttachmentUploadOutcomes(
                   : {}),
               }
             : undefined;
-      const network = file ? attachmentUploadOutcome(page, file) : undefined;
-      return network
-        ? { ...control, upload: { ...control.upload, network } }
-        : control;
+      const evidence = file ? attachmentUploadEvidence(page, file) : undefined;
+      return {
+        ...control,
+        upload: {
+          ...control.upload,
+          ...(mine ? { selectedFileName: mine.name } : {}),
+          ...evidence,
+        },
+      };
     }),
   };
 }

@@ -65,6 +65,10 @@ export interface RawApplyUpload {
   /** The file the input holds now, as the page reports it. */
   fileName?: string;
   fileSize?: number;
+  /** The file selected by this runtime, even if the widget emptied its input. */
+  selectedFileName?: string;
+  /** Distinguishes an ARIA refusal from native file validation. */
+  ariaInvalid?: boolean;
   /**
    * The site's server on the request that carried this file: a 2xx, a
    * refusal, or still waiting. Absent when no such request was seen, as on
@@ -72,6 +76,12 @@ export interface RawApplyUpload {
    * the read that hears the requests could not be tied to this control.
    */
   network?: "accepted" | "rejected" | "pending" | "unconfirmed";
+  /** Bounded request facts only: no query, credentials or response body. */
+  requests?: readonly {
+    endpoint: string;
+    status: number | null;
+    blocked: boolean;
+  }[];
 }
 
 /**
@@ -234,6 +244,7 @@ export type ApplyNavigationResult =
 
 /** One file, already verified by whoever owns it, on its way into a form. */
 export interface ApplyUploadFile {
+  method?: "input" | "chooser" | "drop";
   name: string;
   mimeType: string;
   bytes: Uint8Array;

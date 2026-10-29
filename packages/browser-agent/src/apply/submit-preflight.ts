@@ -29,6 +29,7 @@ type FileControl = ApplyFormObservation["controls"][number];
 export type FileUploadProblem = {
   control: FileControl;
   state: "rejected" | "unconfirmed" | "uploading";
+  rule: string;
 };
 
 // Word edges that also hold for accented letters ("échec", "ungültig").
@@ -135,24 +136,51 @@ function fileUploadState(
   control: FileControl,
   observation: ApplyFormObservation,
   confirmedByPerson: boolean,
-): FileUploadProblem["state"] | "accepted" {
+): { state: FileUploadProblem["state"] | "accepted"; rule: string } {
   const upload = control.upload;
+  const pending = {
+    state: "uploading",
+    rule: "upload or parsing still pending",
+  } as const;
+  if (upload?.network === "pending") return pending;
+  const own = `${upload?.described ?? ""}\n${upload?.nearby ?? ""}`;
+  const stillWorking = clauses(own)
+    .filter((line) => !isGuidance(line))
+    .some((line) => uploadInProgress.test(line) && !uploadSuccess.test(line));
+  // A widget that emptied its input after the server's 2xx holds the file,
+  // even though the browser now calls the empty input invalid. Only its own
+  // word that it is still working on the file holds it back.
+  if (!control.answered && upload?.network === "accepted")
+    return stillWorking
+      ? pending
+      : { state: "accepted", rule: "file accepted" };
   // A stale aria-invalid gives way only to both a server 2xx and the
   // person's word that the file is attached.
   if (
     (control.invalid || uploadFailure.test(control.validationMessage)) &&
     !(upload?.network === "accepted" && confirmedByPerson)
   )
-    return "rejected";
-  if (upload?.network === "rejected") return "rejected";
-  if (upload?.network === "pending") return "uploading";
+    return {
+      state: "rejected",
+      rule:
+        upload?.ariaInvalid || !control.validationMessage
+          ? "aria-invalid"
+          : "field validation message",
+    };
+  if (upload?.network === "rejected")
+    return { state: "rejected", rule: "server refusal" };
+  if (failures(own).length && !confirmedByPerson)
+    return { state: "rejected", rule: "failure text beside the field" };
+  if (stillWorking) return pending;
   // Nothing tied the server's word to this field: the page alone cannot
   // settle it, only the person can.
   if (upload?.network === "unconfirmed")
-    return confirmedByPerson ? "accepted" : "unconfirmed";
-  const own = `${upload?.described ?? ""}\n${upload?.nearby ?? ""}`;
-  if (failures(own).length && !confirmedByPerson) return "rejected";
-  if (upload?.network === "accepted" || confirmedByPerson) return "accepted";
+    return {
+      state: confirmedByPerson ? "accepted" : "unconfirmed",
+      rule: "never confirmed",
+    };
+  if (upload?.network === "accepted" || confirmedByPerson)
+    return { state: "accepted", rule: "file accepted" };
   const mine = labelWords(control);
   const others = observation.controls.filter(
     (other) => other.kind === "file" && other.ref !== control.ref,
@@ -175,15 +203,12 @@ function fileUploadState(
       )
     );
   });
-  if (pageFailure) return "rejected";
-  const ownLines = clauses(own).filter((line) => !isGuidance(line));
-  if (
-    ownLines.some(
-      (line) => uploadInProgress.test(line) && !uploadSuccess.test(line),
-    )
-  )
-    return "uploading";
-  return "accepted";
+  if (pageFailure)
+    return {
+      state: "rejected",
+      rule: "failure text on the page about this file",
+    };
+  return { state: "accepted", rule: "file accepted" };
 }
 
 /** A selected local file is not evidence that the site accepted its upload. */
@@ -198,15 +223,17 @@ export function fileUploadProblems(
     if (
       control.kind !== "file" ||
       control.disabled ||
-      (!control.answered && (!network || network === "accepted"))
+      (!control.answered && !network && !control.upload?.selectedFileName)
     )
       return [];
-    const state = fileUploadState(
+    const decision = fileUploadState(
       control,
       observation,
       options.confirmedByPerson?.(control) ?? false,
     );
-    return state === "accepted" ? [] : [{ control, state }];
+    return decision.state === "accepted"
+      ? []
+      : [{ control, state: decision.state, rule: decision.rule }];
   });
 }
 
@@ -218,7 +245,12 @@ export function fileUploadProblems(
 export function holdsAnswer(control: FileControl): boolean {
   return (
     control.answered ||
-    (control.kind === "file" && control.upload?.network === "accepted")
+    (control.kind === "file" &&
+      (control.upload?.network === "accepted" ||
+        (!!control.upload?.selectedFileName &&
+          `${control.upload.described}\n${control.upload.nearby}`
+            .toLowerCase()
+            .includes(control.upload.selectedFileName.toLowerCase()))))
   );
 }
 

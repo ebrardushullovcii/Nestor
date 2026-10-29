@@ -6,6 +6,7 @@ Apply queues approved resumes in the applications store. Settings offers Fill in
 
 - Shortlisted: Apply one, selected jobs, the current page or every approved matching job. Work runs in bounded background tabs.
 - Applications: Open application opens the exact filled form; Stop closes its tab and stops unsent work. What Apply filled in / What was sent shows the recorded answers, attachments and receipt.
+- Upload recovery tries the input, the field's chooser and its drop zone before handing over, and waits for upload/parsing feedback. A fresh attempt retries an open upload item; only confirmed acceptance in that field clears it. Failed/unconfirmed uploads record the deciding rule, validation, nearby text and request status/host/path in the step log.
 - Sidebar: record the person's instruction, then apply_to_jobs with an ids selection or an Approved (stage=resume) filter and exclusions. The instruction freezes matching jobs once; later arrivals stay out. applications_for_jobs maps job ids to work ids; list_application_work and get_application_details read the store. open_application, stop_application and send_application use work ids.
 - A plain Apply follows the saved mode. An explicit fill-only instruction stays fill-only even with Send for me saved. An explicit send instruction can authorize the ready-form send command without changing the default setting.
 - Sidebar Needs you uses list_needs_you/get_need and answer_need; one answer releases all applications waiting on that question. Saved answers use the shared add/edit/forget commands and per-change Undo for future forms. open_need opens a source sign-in item; retry_need checks that source again after the person signs in. Application browser steps use open_need and check_need and can continue automatically once the page is accessible. The retired Application documents editor is not an available fallback.
@@ -20,6 +21,8 @@ Apply queues approved resumes in the applications store. Settings offers Fill in
 ## Driving it with verify-nestor
 
 Use live AI, synthetic profile/resume data and this instance's replica URLs. Seed only preconditions that are not being proved, and report them.
+
+- Use `/upload-recovery/` to check chooser-only, drop-only, ten-second parsing, transient 503 and stale failure text. Check the retained form's chip, attachment review and stored application state. For `refused`/`vanished`, inspect the step log and open upload item, then Check again and verify the new attempt re-attaches starting at try one. No final submission is needed.
 
 - Queue one job through chat in Fill mode. Inspect applications.mode/state and the screen. Wait outside the chat for ready; there must be no replica submission.
 - Change the saved mode to Send for me, ask Apply again for the active job, and prove its mode and attempt did not change.

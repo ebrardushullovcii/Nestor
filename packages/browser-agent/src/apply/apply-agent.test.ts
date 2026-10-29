@@ -2285,7 +2285,7 @@ describe("apply agent run endings", () => {
         resumeFile("Resume resume.txt", { required: false }),
       ],
     });
-    const input = config(source);
+    const input = config(source, { uploadWaitMs: 0 });
     input.hands.fillText = vi.fn((_ref: string, value: string) => {
       source.controls[0].value = value;
       source.controls[1] = resumeFile("Resume", { required: false, value: "" });
@@ -2413,7 +2413,7 @@ describe("apply agent run endings", () => {
     ]);
   });
 
-  test("a refused upload stops after two tries and says what was refused", async () => {
+  test("a refused upload stops after input, chooser and drop tries and says what was refused", async () => {
     // Workable: every storage POST was held back, and the run kept
     // uploading the same file until it was stopped by hand.
     const source = page({
@@ -2450,11 +2450,11 @@ describe("apply agent run endings", () => {
       input,
       repeatingModel("upload", { ref: "c1", documentId: suppliedResume.id }),
     );
-    expect(uploadFile).toHaveBeenCalledTimes(2);
+    expect(uploadFile).toHaveBeenCalledTimes(3);
     expect(result.outcome).toBe("paused");
     expect(result.readyToSend).toBeNull();
     expect(result.reason).toContain("resume.txt");
-    expect(result.reason).toContain("after 2 tries: its upload was refused");
+    expect(result.reason).toContain("after 3 tries: its upload was refused");
     expect(fileQuestions(result)).toEqual([
       expect.objectContaining({
         id: "upload_repair",
@@ -5485,7 +5485,11 @@ describe("fill_fields visible steps", () => {
         expect(result.pauses[0]?.code).toBe("document_needs_you");
       } else expect(report).toContain("c1: not attempted");
       expect(upload).toHaveBeenCalledTimes(
-        ["write refused", "navigation", "new field"].includes(barrier) ? 1 : 0,
+        barrier === "write refused"
+          ? 3
+          : ["navigation", "new field"].includes(barrier)
+            ? 1
+            : 0,
       );
       expect(result.timing?.requests[0]?.uploadsAttached).toBe(
         ["navigation", "new field"].includes(barrier) ? 1 : 0,
@@ -10263,22 +10267,136 @@ test("a custom checkbox the page draws itself is a checkbox, and its answer is i
   expect(answer?.fieldKey).toContain("field:checkbox:");
 });
 
-
 test("listing discovery changes only the tail of the shared applicant prompt", () => {
   const sources = config(page()).sources;
   const first = applicationModelFacts(
-    { ...sources, listingDiscovery: { label: "First board", url: "https://first.example/job" } },
+    {
+      ...sources,
+      listingDiscovery: {
+        label: "First board",
+        url: "https://first.example/job",
+      },
+    },
     { payDisclosed: false },
   );
   const second = applicationModelFacts(
-    { ...sources, listingDiscovery: { label: "Second board", url: "https://second.example/job" } },
+    {
+      ...sources,
+      listingDiscovery: {
+        label: "Second board",
+        url: "https://second.example/job",
+      },
+    },
     { payDisclosed: false },
   );
   const prefix = first.slice(0, first.indexOf(',"listingDiscovery":'));
   expect(prefix.length).toBeGreaterThan(100);
   expect(second.startsWith(prefix)).toBe(true);
-  const firstData = JSON.parse(first) as { listingDiscovery: { label: string } };
-  const secondData = JSON.parse(second) as { listingDiscovery: { label: string } };
+  const firstData = JSON.parse(first) as {
+    listingDiscovery: { label: string };
+  };
+  const secondData = JSON.parse(second) as {
+    listingDiscovery: { label: string };
+  };
   expect(firstData.listingDiscovery.label).toBe("First board");
   expect(secondData.listingDiscovery.label).toBe("Second board");
+});
+
+test("an emptied file input gets ten seconds to show its chip without a second attachment", async () => {
+  const source = page({
+    controls: [
+      { ...nameControl(), inputType: "file", label: "Resume", value: "" },
+    ],
+  });
+  const input = config(source, { uploadWaitMs: 15_000 });
+  let elapsed = 0;
+  input.now = () => new Date(Date.UTC(2026, 9, 29) + elapsed);
+  input.sources.documents = [
+    {
+      id: "cv",
+      kind: "resume",
+      label: "Synthetic CV",
+      fileName: "synthetic.pdf",
+      mimeType: "application/pdf",
+      loadBytes: () => Promise.resolve(new Uint8Array([1])),
+    },
+  ];
+  input.hands.uploadFile = vi.fn(() =>
+    Promise.resolve({
+      ok: true as const,
+      observedValue: "synthetic.pdf",
+    }),
+  );
+  input.hands.wait = (ms) => {
+    elapsed += ms;
+    if (elapsed >= 10_000)
+      source.controls[0].upload = {
+        described: "",
+        nearby: "synthetic.pdf attached",
+        selectedFileName: "synthetic.pdf",
+        shown: false,
+      };
+    return Promise.resolve();
+  };
+  const result = await runApplyAgent(
+    input,
+    scriptedModel([
+      { name: "upload", args: { ref: "c0", documentId: "cv" } },
+      { name: "finish", args: { reason: "File checked." } },
+    ]),
+  );
+  expect(elapsed).toBe(10_000);
+  expect(input.hands.uploadFile).toHaveBeenCalledOnce();
+  expect(result.outcome).toBe("prepared");
+  expect(result.notes.join("\n")).not.toContain("failed. Rule:");
+});
+
+test("upload diagnostics name native validation, field text and the refused endpoint", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        inputType: "file",
+        label: "Resume",
+        value: "synthetic.pdf",
+        invalid: true,
+        validationMessage: "Please use a smaller PDF",
+        upload: {
+          described: "Your file was rejected",
+          nearby: "Resume: file too large",
+          shown: false,
+          ariaInvalid: false,
+          network: "rejected",
+          requests: [
+            {
+              endpoint: "storage.example.test/files/upload",
+              status: 413,
+              blocked: false,
+            },
+          ],
+        },
+      },
+    ],
+  });
+  const result = await runApplyAgent(
+    config(source),
+    repeatingModel("finish", {
+      reason: "Checked the file.",
+      needsPerson: true,
+    }),
+  );
+  const log = result.timeline.map((entry) => entry.text).join("\n");
+  expect(log).toContain("Rule: field validation message");
+  expect(log).toContain("Please use a smaller PDF");
+  expect(log).toContain("Resume: file too large");
+  expect(log).toContain("HTTP 413 from storage.example.test/files/upload");
+  expect(
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .find((question) => question.id === "upload_repair")?.askReason,
+  ).toMatchObject({
+    kind: "page_refused",
+    check: "upload_acceptance",
+  });
+  expect(result.pauses.flatMap((pause) => pause.questions ?? []).find((question) => question.id === "upload_repair")?.askReason?.detail).toContain("HTTP 413");
 });

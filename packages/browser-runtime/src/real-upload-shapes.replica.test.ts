@@ -4,6 +4,13 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, expect, test } from "vitest";
+import { CandidateProfileSchema } from "@nestor/contracts";
+import {
+  createApplyPageHands,
+  runApplyAgent,
+  type LLMClient,
+  type ApplyAgentConfig,
+} from "@nestor/browser-agent";
 import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
 import {
   executeExactlyOneFinalAction,
@@ -676,3 +683,184 @@ test("Ashby: a date picker reads as a date, takes only a date, and its open cale
   });
   expect((await start()).value).toBe("01/15/2027");
 });
+
+async function recoveryRun(
+  shape: string,
+  options: Partial<ApplyAgentConfig> = {},
+) {
+  const { page, session } = await fillPage(`upload-recovery/${shape}`, false);
+  // fillPage ends in /apply/1, so these shapes share exactly the app's guard.
+  const initial = (await session.readPage()).controls.find(
+    (control) => control.id === "resume",
+  )!;
+  const config: ApplyAgentConfig = {
+    hands: createApplyPageHands(session),
+    authority: {
+      mode: "prepare_only",
+      submitAuthorized: false,
+      preApprovedAttestationKinds: [],
+      salaryDisclosure: "pause_for_user",
+      allowedOrigins: [],
+    },
+    sources: {
+      profile: CandidateProfileSchema.parse({
+        id: "synthetic",
+        fullName: "Alex Example",
+        yearsExperience: 5,
+        baseResume: {
+          id: "synthetic",
+          fileName: "synthetic.pdf",
+          uploadedAt: "2026-10-29T00:00:00.000Z",
+          textContent: "Synthetic engineer",
+          textUpdatedAt: "2026-10-29T00:00:00.000Z",
+          extractionStatus: "ready",
+        },
+      }),
+      resumeText: null,
+      posting: {
+        title: "Document Engineer",
+        company: "Synthetic Workshop",
+        location: "Remote",
+        description: "Synthetic role",
+      },
+      reusableAnswers: [],
+      documents: [
+        {
+          id: "resume",
+          kind: "resume",
+          label: "Synthetic CV",
+          fileName: resume.name,
+          mimeType: resume.mimeType,
+          loadBytes: () => Promise.resolve(resume.bytes),
+        },
+      ],
+    },
+    application: {
+      jobId: "synthetic",
+      applicationId: `synthetic-${shape}`,
+      startingUrl: page.url(),
+    },
+    siteLabel: "Synthetic Workshop",
+    uploadWaitMs: shape === "slow" ? 20_000 : 1_500,
+    ...options,
+  };
+  let calls = 0;
+  const model: LLMClient = {
+    chatWithTools: () =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: `upload-${calls}`,
+            type: "function",
+            function:
+              calls++ === 0
+                ? {
+                    name: "upload",
+                    arguments: JSON.stringify({
+                      ref: initial.ref ?? `c${initial.index}`,
+                      documentId: "resume",
+                    }),
+                  }
+                : {
+                    name: "finish",
+                    arguments: JSON.stringify({ reason: "Checked the file." }),
+                  },
+          },
+        ],
+      }),
+  };
+  const result = await runApplyAgent(config, model);
+  return { page, session, result, config, calls };
+}
+
+test.each([
+  ["chooser", "chooser"],
+  ["drop", "drop"],
+  ["slow", "input"],
+  ["transient", "chooser"],
+  ["stale", "input"],
+])(
+  "upload recovery: %s attaches through %s without a send",
+  async (shape, method) => {
+    const { page, result } = await recoveryRun(shape);
+    expect(result.outcome, result.notes.join("\n")).toBe("prepared");
+    expect(await page.locator("#zone").getAttribute("data-attached")).toBe(
+      method,
+    );
+    expect(result.reviewAttachments?.map((file) => file.fileName)).toContain(
+      resume.name,
+    );
+    expect(result.pauses).toEqual([]);
+    if (shape === "transient") {
+      expect(result.notes.join("\n")).toContain("HTTP 503");
+      expect(result.notes.join("\n")).toContain("Document service unavailable");
+      expect(result.notes.join("\n")).not.toContain("signature=");
+    }
+    expect(
+      posts().filter(
+        (post) => post.path === `/upload-recovery/${shape}/apply/1`,
+      ),
+    ).toEqual([]);
+    await page.context().close();
+  },
+  45_000,
+);
+
+test.each(["refused", "vanished"])(
+  "upload recovery: %s records the cause after all methods",
+  async (shape) => {
+    const { page, result } = await recoveryRun(shape);
+    expect(result.outcome).toBe("paused");
+    const log = result.notes.join("\n");
+    expect(log).toContain("using input");
+    expect(log).toContain("using chooser");
+    expect(log).toContain("using drop");
+    expect(log).toContain(
+      shape === "refused"
+        ? "Document service unavailable"
+        : "file gone from the field; never confirmed",
+    );
+    expect(log).toContain(
+      shape === "refused" ? "HTTP 503" : "no upload request observed",
+    );
+    expect(log).not.toContain("signature=");
+    expect(
+      result.pauses
+        .flatMap(
+          (pause) =>
+            pause.questions ?? (pause.question ? [pause.question] : []),
+        )
+        .some((question) => question.id === "upload_repair"),
+    ).toBe(true);
+    await page.context().close();
+  },
+  30_000,
+);
+
+test("upload recovery: a fresh attempt retries an old failure even when replay kept all other answers", async () => {
+  const { page, config } = await recoveryRun("stale");
+  // Restore the old failed display on the retained page as a real widget can.
+  await page.locator("#feedback").evaluate((node) => {
+    node.textContent = "Your file upload failed on the previous attempt";
+  });
+  const result = await runApplyAgent(
+    {
+      ...config,
+      initialUnansweredPickerQuestions: [
+        { prompt: "Resume — upload failed", options: [] },
+      ],
+      replay: { answers: [], attachments: [], path: [] },
+    },
+    {
+      chatWithTools: () =>
+        Promise.reject(new Error("Replay should settle without the model")),
+    },
+  );
+  expect(result.outcome, result.notes.join("\n")).toBe("prepared");
+  expect(result.notes.join("\n")).toContain("fresh attempt");
+  expect(result.notes.join("\n")).toContain("try 1 of 3");
+  expect(result.reviewAttachments?.map((file) => file.fileName)).toContain(
+    resume.name,
+  );
+  await page.context().close();
+}, 30_000);

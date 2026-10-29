@@ -9,6 +9,7 @@ import { handleFillChores } from "./fill-chores.mjs";
 import { handleStepsShape } from "./steps-shape.mjs";
 import { handlePersonalClaims } from "./personal-claims.mjs";
 import { handleUploadRepair } from "./upload-repair.mjs";
+import { handleUploadRecovery } from "./upload-recovery.mjs";
 import { handleHandoverOptions } from "./handover-options.mjs";
 import { handleRememberedQuestions } from "./remembered-questions.mjs";
 import { handleRemoteSearch } from "./remote-search.mjs";
@@ -489,6 +490,8 @@ const server = http.createServer(async (req, res) => {
       return;
     if (handlePersonalClaims(req, res, url, { send })) return;
     if (await handleUploadRepair(req, res, url, { send, readPost, logPost }))
+      return;
+    if (await handleUploadRecovery(req, res, url, { send, readPost, logPost }))
       return;
     if (await handleMoreSites(req, res, url, { send, readPost, logPost }))
       return;

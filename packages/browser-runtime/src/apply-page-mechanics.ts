@@ -1,3 +1,4 @@
+import { attachFile } from "./file-attachment";
 import { createHash } from "node:crypto";
 import { choosePageOption } from "./choose-page-option";
 import { pickCalendarDate } from "./date-picker";
@@ -346,6 +347,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               node && depth < 6;
               node = node.parentElement, depth += 1
             ) {
+              if (node.matches("form, body")) break;
               const other = Array.from(
                 node.querySelectorAll("input, textarea, select"),
               ).some(
@@ -362,6 +364,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             const rect = input.getBoundingClientRect();
             return {
               described: described.slice(0, 500),
+              ariaInvalid: input.getAttribute("aria-invalid") === "true",
               nearby: (box?.innerText ?? "")
                 .replace(/[ \t]+/gu, " ")
                 .replace(/\s*\n\s*/gu, "\n")
@@ -1276,6 +1279,7 @@ export function collectApplyDocumentSnapshot(
         node && depth < 6;
         node = node.parentElement, depth += 1
       ) {
+        if (node.matches("form, body")) break;
         const other = Array.from(
           node.querySelectorAll("input, textarea, select"),
         ).some(
@@ -1290,6 +1294,7 @@ export function collectApplyDocumentSnapshot(
       const rect = input.getBoundingClientRect();
       return {
         described: described.slice(0, 500),
+        ariaInvalid: input.getAttribute("aria-invalid") === "true",
         nearby: (box?.innerText ?? "")
           .replace(/[ \t]+/gu, " ")
           .replace(/\s*\n\s*/gu, "\n")
@@ -2263,7 +2268,8 @@ export function createPlaywrightApplyPageMechanics(
       if (!locator)
         return {
           ok: false,
-          error: "The account or verification button is no longer on this page.",
+          error:
+            "The account or verification button is no longer on this page.",
         };
       try {
         await openPrepareOnlyAuthorizedFormActionWindow(page, locator);
@@ -2489,20 +2495,13 @@ export function createPlaywrightApplyPageMechanics(
               active.blur();
           })
           .catch(() => undefined);
-        await locator.setInputFiles(
-          {
-            name: file.name,
-            mimeType: file.mimeType,
-            buffer: Buffer.from(file.bytes),
-          },
-          { timeout: 15_000 },
-        );
         rememberAttachedFile(page, ref, {
           field,
           name: file.name,
           size: file.bytes.byteLength,
           sha256: createHash("sha256").update(file.bytes).digest("hex"),
         });
+        await attachFile(page, locator, file);
         return { ok: true, observedValue: file.name };
       } catch (error) {
         return {
