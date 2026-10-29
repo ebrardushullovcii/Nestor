@@ -518,7 +518,9 @@ export function ProfileScreen(props: {
             baseline: editBaseline,
           }
         : null,
-    blocked: hasBackgroundConflict,
+    // Keep the preserved draft until text AND deferred visual writes finish.
+    // The form hook rebases disjoint changes and still flags true overlaps.
+    blocked: hasBackgroundConflict || importPending,
     preserve: props.onPreserveEdits
       ? ({ profile, goals, baseline }) =>
           props.onPreserveEdits!(profile, goals, baseline)

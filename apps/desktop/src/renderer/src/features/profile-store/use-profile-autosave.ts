@@ -32,7 +32,9 @@ export function useProfileAutosave<T>(input: {
             : "Could not keep your unsaved changes.",
         );
     });
-    if (pending.current || current.blocked) return;
+    // Leaving the screen still saves: a hold only defers writes while the
+    // person stays here, and the save's revision checks guard any overlap.
+    if (pending.current || (current.blocked && mounted.current)) return;
     const fingerprint = JSON.stringify(current.value);
     if (fingerprint === attempted.current) return;
     attempted.current = fingerprint;
