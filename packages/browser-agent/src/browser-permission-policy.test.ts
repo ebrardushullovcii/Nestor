@@ -84,7 +84,7 @@ function setup(kind: "signIn" | "createAccounts" | "solveCaptchas") {
       Promise.resolve(
         buildApplyFormObservation(raw, "2026-10-29T10:00:00.000Z"),
       ),
-    navigate: (url) => Promise.resolve({ ok: true, url }),
+    navigate: vi.fn((url: string) => Promise.resolve({ ok: true as const, url })),
     goBack: () =>
       Promise.resolve({
         ok: true,
@@ -112,6 +112,158 @@ function setup(kind: "signIn" | "createAccounts" | "solveCaptchas") {
 }
 
 describe("browser permissions at the action boundary", () => {
+  test.each(["Continue with Google", "Sign up with Google", "Google"])(
+    "%s has its own opt-in and ignores an unrelated empty password form",
+    async (label) => {
+      const { hands, raw } = setup("createAccounts");
+      raw.bodyText = "Create an account to continue";
+      raw.actions[0].label = label;
+      raw.actions[0].submitsForm = false;
+      raw.controls[1].value = "";
+      const off = withBrowserPermissions(hands, {
+        browserPermissions: BrowserAgentPermissionsSchema.parse({
+          signIn: true,
+          createAccounts: true,
+        }),
+      });
+      expect(await off.clickElement("a0")).toMatchObject({ ok: false });
+      expect(hands.clickElement).not.toHaveBeenCalled();
+      const permissions = BrowserAgentPermissionsSchema.parse({
+        googleSignIn: true,
+      });
+      const on = withBrowserPermissions(hands, {
+        browserPermissions: permissions,
+      });
+      const page = await on.observe();
+      expect(page.blocker?.requiresPerson).toBe(false);
+      expect(browserStepReadyForAgent(page, permissions)).toBe(true);
+      expect(await on.clickElement("a0")).toMatchObject({ ok: true });
+      expect(hands.clickElement).toHaveBeenCalledExactlyOnceWith("a0");
+      expect(hands.clickAuthorizedFormAction).not.toHaveBeenCalled();
+      expect(await on.clickElement("a0")).toMatchObject({ ok: false });
+    },
+  );
+
+  test("an SSO-only wall resumes, and turning Google off blocks the next action", async () => {
+    const { hands, raw } = setup("createAccounts");
+    raw.bodyText = "Create an account to continue";
+    raw.controls = [];
+    raw.actions[0].label = "Continue with Google";
+    raw.actions[0].submitsForm = false;
+    let googleSignIn = true;
+    const on = withBrowserPermissions(hands, {
+      readBrowserPermissions: () =>
+        BrowserAgentPermissionsSchema.parse({ googleSignIn }),
+    });
+    const page = await on.observe();
+    expect(
+      browserStepReadyForAgent(
+        page,
+        BrowserAgentPermissionsSchema.parse({ googleSignIn: true }),
+      ),
+    ).toBe(true);
+    googleSignIn = false;
+    expect(await on.clickElement("a0")).toMatchObject({ ok: false });
+    expect(hands.clickElement).not.toHaveBeenCalled();
+  });
+
+  test("Google opt-in can select one existing account, but not several", async () => {
+    const { hands, raw } = setup("signIn");
+    raw.url = "https://accounts.google.com/v3/signin/accountchooser";
+    raw.headings = [{ level: 1, text: "Choose an account" }];
+    raw.controls = [];
+    raw.actions[0].label = "Jamie synthetic@example.test";
+    raw.actions[0].submitsForm = false;
+    const guarded = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({
+        googleSignIn: true,
+      }),
+    });
+    expect(await guarded.clickElement("a0")).toMatchObject({ ok: true });
+    raw.actions.push({
+      ...raw.actions[0],
+      index: 1,
+      label: "Other other@example.test",
+    });
+    expect((await guarded.observe()).blocker?.requiresPerson).toBe(true);
+    expect(await guarded.clickElement("a1")).toMatchObject({ ok: false });
+    expect(hands.clickElement).toHaveBeenCalledTimes(1);
+  });
+
+  test("direct navigation cannot bypass the Google opt-in, including a site's provider link", async () => {
+    const { hands, raw } = setup("signIn");
+    raw.links = [
+      {
+        index: 0,
+        label: "Continue with Google",
+        href: "https://fixture.test/oauth",
+        target: "",
+        visible: true,
+        topOffset: 0,
+      },
+    ];
+    const guarded = withBrowserPermissions(hands, {});
+    expect(
+      await guarded.navigate("https://accounts.google.com/o/oauth2/v2/auth"),
+    ).toMatchObject({ ok: false });
+    expect(
+      await guarded.navigate("http://accounts.google.com/o/oauth2/v2/auth"),
+    ).toMatchObject({ ok: false });
+    expect(await guarded.navigate("https://fixture.test/oauth")).toMatchObject({
+      ok: false,
+    });
+    expect(hands.navigate).not.toHaveBeenCalled();
+  });
+
+  test("a changing Google button cannot become a consent or application action", async () => {
+    const { hands, raw } = setup("createAccounts");
+    raw.controls = [];
+    raw.actions[0].label = "Continue with Google";
+    raw.actions[0].submitsForm = false;
+    const read = hands.observe;
+    let reads = 0;
+    hands.observe = async () => {
+      const page = await read();
+      if (++reads === 1) {
+        raw.url = "https://accounts.google.com/signin/oauth/consent";
+        raw.actions[0].label = "Allow";
+      }
+      return page;
+    };
+    const guarded = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({
+        googleSignIn: true,
+      }),
+    });
+    expect(await guarded.clickElement("a0")).toMatchObject({ ok: false });
+    expect(hands.clickElement).not.toHaveBeenCalled();
+    expect(hands.clickAuthorizedFormAction).not.toHaveBeenCalled();
+  });
+
+  test.each(["Allow", "Continue", "Create account"])(
+    "Google's %s stays with the person even with every account permission",
+    async (label) => {
+      const { hands, raw } = setup("createAccounts");
+      raw.url = "https://accounts.google.com/signin/oauth/consent";
+      raw.title = "Google access request";
+      raw.controls = [];
+      raw.actions[0].label = label;
+      raw.actions[0].submitsForm = false;
+      const guarded = withBrowserPermissions(hands, {
+        browserPermissions: BrowserAgentPermissionsSchema.parse({
+          signIn: true,
+          createAccounts: true,
+          googleSignIn: true,
+        }),
+      });
+      expect((await guarded.observe()).blocker?.requiresPerson).toBe(true);
+      expect(await guarded.clickElement("a0")).toMatchObject({ ok: false });
+      expect(await guarded.followLink("a0")).toMatchObject({ ok: false });
+      expect(hands.clickElement).not.toHaveBeenCalled();
+      expect(hands.followLink).not.toHaveBeenCalled();
+    },
+  );
+
   test.each(["signIn", "createAccounts", "solveCaptchas"] as const)(
     "%s resumes only an enabled step with enough on-site input",
     async (kind) => {
@@ -223,6 +375,7 @@ describe("browser permissions at the action boundary", () => {
     const guarded = withBrowserPermissions(hands, {
       browserPermissions: {
         signIn: true,
+        googleSignIn: true,
         createAccounts: true,
         solveCaptchas: true,
       },

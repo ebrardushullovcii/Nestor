@@ -5,7 +5,12 @@ import {
 } from "./browser-permissions";
 import { JobFinderSettingsSchema } from "./workspace";
 
-const off = { solveCaptchas: false, signIn: false, createAccounts: false };
+const off = {
+  solveCaptchas: false,
+  signIn: false,
+  googleSignIn: false,
+  createAccounts: false,
+};
 
 describe("browser agent permissions", () => {
   it("read as all off when nothing was saved", () => {

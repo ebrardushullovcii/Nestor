@@ -64,6 +64,7 @@ const SETTINGS_TABLE: ScalarTable = {
     "aiBehavior.jobSearch.remoteCountsAsAnyLocation",
     "aiBehavior.browserPermissions.solveCaptchas",
     "aiBehavior.browserPermissions.signIn",
+    "aiBehavior.browserPermissions.googleSignIn",
     "aiBehavior.browserPermissions.createAccounts",
     "applicationCrm.noResponseAutomation.enabled",
   ],

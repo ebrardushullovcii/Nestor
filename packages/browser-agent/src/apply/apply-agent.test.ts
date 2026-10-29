@@ -439,7 +439,7 @@ test.each(["Sign in", "Create account", "Continue"])("an enabled %s handoff neve
     controls: [{ ...nameControl(), label: "Password", inputType: "password", value: "" }],
     actions: [{ index: 0, label, visible: true, disabled: false }],
   });
-  const result = await runApplyAgent(config(source, { browserPermissions: { signIn: true, createAccounts: true, solveCaptchas: true } }), scriptedModel([
+  const result = await runApplyAgent(config(source, { browserPermissions: { signIn: true, googleSignIn: true, createAccounts: true, solveCaptchas: true } }), scriptedModel([
     { name: "finish", args: { reason: "Enter the password on the site", needsPerson: true, forPerson: ["Password"] } },
   ]));
   expect(result.pauses).toHaveLength(1);

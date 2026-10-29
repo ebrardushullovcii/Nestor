@@ -185,7 +185,12 @@ test("Settings preserve Apply choices and a deliberately cleared declaration lis
 
 test("browser permissions start off, save one at a time and survive reader recreation", () => {
   const { store, preferences } = setup();
-  const off = { solveCaptchas: false, signIn: false, createAccounts: false };
+  const off = {
+    solveCaptchas: false,
+    signIn: false,
+    googleSignIn: false,
+    createAccounts: false,
+  };
   expect(preferences.settings.read().aiBehavior?.browserPermissions).toEqual(
     off,
   );
@@ -208,10 +213,21 @@ test("browser permissions start off, save one at a time and survive reader recre
     ...off,
     createAccounts: true,
   });
+  again.settings.patch({
+    fields: { "aiBehavior.browserPermissions.googleSignIn": true },
+  });
+  expect(
+    createPreferencesStore(store).settings.read().aiBehavior
+      ?.browserPermissions,
+  ).toEqual({
+    ...off,
+    createAccounts: true,
+    googleSignIn: true,
+  });
   // A file from before the permissions has empty columns: all off.
   store
     .sql(
-      "UPDATE profile_settings SET ai_behavior_browser_permissions_solve_captchas=NULL,ai_behavior_browser_permissions_sign_in=NULL,ai_behavior_browser_permissions_create_accounts=NULL",
+      "UPDATE profile_settings SET ai_behavior_browser_permissions_solve_captchas=NULL,ai_behavior_browser_permissions_sign_in=NULL,ai_behavior_browser_permissions_google_sign_in=NULL,ai_behavior_browser_permissions_create_accounts=NULL",
     )
     .run();
   expect(

@@ -2009,6 +2009,13 @@ export async function executeApplyProposal(
   if ("ref" in proposal) {
     const kind = browserInteractionKind(observation, proposal.ref);
     const permissions = await currentBrowserPermissions(config);
+    if (kind === "google_handoff")
+      return {
+        kind: "refused",
+        reason:
+          "Finish Google's account selection, sign-in or access request yourself in the browser.",
+        observation,
+      };
     const enabled =
       kind !== null &&
       kind !== "password" &&
@@ -2022,6 +2029,7 @@ export async function executeApplyProposal(
       proposal.tool === "click" &&
       (kind === "signIn" ||
         kind === "createAccounts" ||
+        kind === "googleSignIn" ||
         (kind === "solveCaptchas" && !challengeControl));
     if (
       enabled &&

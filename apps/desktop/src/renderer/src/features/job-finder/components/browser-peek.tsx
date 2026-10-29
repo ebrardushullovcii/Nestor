@@ -725,6 +725,18 @@ export function BrowserPeek(props: {
                         <button
                           type="button"
                           role="menuitem"
+                          disabled={blank}
+                          title="Reload this tab using the browser’s original identity. Unsaved entries in this tab may be lost."
+                          onClick={() => {
+                            setMenuOpen(false);
+                            void command({ type: "retry_verification" });
+                          }}
+                        >
+                          <RotateCw size={14} /> Retry site verification
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
                           disabled={blank || busy || addingJob}
                           onClick={() => void addJob()}
                         >

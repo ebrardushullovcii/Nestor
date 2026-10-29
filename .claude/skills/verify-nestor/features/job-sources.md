@@ -32,12 +32,28 @@ Find jobs > What each site found reports listings observed, new jobs and jobs sa
 
 ## Browser permissions and saved passwords
 
-Settings > AI behavior > In-app browser has three independent switches: Solve
-CAPTCHAs, Sign in to websites, and Create website accounts. All are off on new
+Settings > AI behavior > In-app browser has independent switches: Solve
+CAPTCHAs, Sign in to websites, Use Google to sign in or sign up, and Create
+website accounts. All are off on new
 and migrated profiles. They apply across browser search/source-check and Apply
 agents; turning one off is rechecked before another protected action. Sending
 remains the separate Applying choice. MFA and steps the browser cannot complete
 still go to the person.
+
+Check the Google switch on its own with the other account switches off. A local
+replica's Continue with Google button beside an empty password form should be
+usable only when the Google switch is on. One signed-in Google account can be
+selected; multiple accounts and Google credentials/consent remain handoffs.
+Restart and verify the saved switch, then turn it off and verify a running
+browser task cannot use the provider button again.
+
+Browser > More browser actions > Retry site verification reloads the active
+tab with Electron's original user-agent. On a local read-only page, inspect
+the selected tab's new request and navigator.userAgent, keep a cookie across
+the retry, and verify a second tab keeps its default identity and form values.
+The retry sends a GET, never replays a prior form POST, and keeps a parked tab's
+handoff binding. Live checks require an isolated non-Playwright launch: the
+driver's automation flag and web-mode POST guard would invalidate that proof.
 
 For verification, check default-off values and independent saves in the UI and
 profile_settings, then restart and check persistence. Use only synthetic

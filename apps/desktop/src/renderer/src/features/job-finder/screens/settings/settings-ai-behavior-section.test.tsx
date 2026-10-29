@@ -158,6 +158,7 @@ describe("SettingsAiBehaviorSection", () => {
         jobSearch: { remoteCountsAsAnyLocation: false },
         browserPermissions: {
           solveCaptchas: false,
+          googleSignIn: false,
           signIn: false,
           createAccounts: false,
         },
@@ -188,6 +189,7 @@ describe("SettingsAiBehaviorSection", () => {
     const names = [
       "Solve CAPTCHAs",
       "Sign in to websites",
+      "Use Google to sign in or sign up",
       "Create website accounts",
     ];
     for (const name of names)
@@ -209,8 +211,23 @@ describe("SettingsAiBehaviorSection", () => {
     await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(2));
     expect(
       onUpdateAiBehavior.mock.calls[1]?.[0].aiBehavior?.browserPermissions,
-    ).toEqual({ solveCaptchas: false, signIn: true, createAccounts: true });
+    ).toEqual({
+      solveCaptchas: false,
+      signIn: true,
+      googleSignIn: false,
+      createAccounts: true,
+    });
     expect(toggle("Solve CAPTCHAs").getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(toggle("Use Google to sign in or sign up"));
+    await waitFor(() => expect(onUpdateAiBehavior).toHaveBeenCalledTimes(3));
+    expect(
+      onUpdateAiBehavior.mock.calls[2]?.[0].aiBehavior?.browserPermissions,
+    ).toEqual({
+      solveCaptchas: false,
+      signIn: true,
+      googleSignIn: true,
+      createAccounts: true,
+    });
   });
 
   it("shows saved browser permissions as they are", () => {
