@@ -26,8 +26,10 @@ vi.mock("../services/browser/load-embedded-browser", () => ({
 vi.mock("../services/browser/embedded-browser", () => ({
   getEmbeddedBrowser: vi.fn(),
 }));
+const runtime = vi.hoisted(() => ({ noteExplicitUserStart: vi.fn() }));
 vi.mock("../services/job-finder/runtime", () => ({
   startJobFinderRuntime: () => Promise.resolve({}),
+  noteExplicitUserStart: runtime.noteExplicitUserStart,
 }));
 
 import { executeApplicationStoreCommand } from "./application-store";
@@ -45,6 +47,8 @@ describe("application commands in main", () => {
       ).toBe(opened);
       expect(mocks.openApplication).toHaveBeenCalledWith(3);
       expect(mocks.browserCommand).not.toHaveBeenCalled();
+      // Opening is the person's own start: a browser they closed may reopen.
+      expect(runtime.noteExplicitUserStart).toHaveBeenCalledTimes(1);
     },
   );
   it("rejects a malformed selection before anything is queued", async () => {

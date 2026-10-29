@@ -22,7 +22,7 @@ function memoryText(megabytes: number): string {
 /** What a level does, in the person's terms. */
 export function describeSpeedLevel(level: SpeedLevel): string {
   const limits = SPEED_LEVELS[level];
-  return `Up to ${limits.searchPages} pages for searching and ${limits.applyAtOnce} applications at once, with the ${limits.waitingPages} most recent forms waiting for you kept open.`;
+  return `Up to ${limits.searchPages} pages for searching, ${limits.applyAtOnce} applications and ${limits.fitRequests} fit checks at once, with the ${limits.waitingPages} most recent forms waiting for you kept open.`;
 }
 
 function extraMemoryText(level: SpeedLevel): string {

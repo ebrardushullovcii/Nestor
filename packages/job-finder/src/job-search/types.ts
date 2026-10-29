@@ -41,6 +41,13 @@ export interface JobSearchRunnerDeps {
   };
   /** Sites read in the browser at once, read at each search: the Speed setting. */
   browserPages?: () => number;
+  /** Fit requests in flight at once, read at each pass: the Speed setting. */
+  fitRequests?: () => number;
+  /**
+   * The person started this work (Search, Retry, Keep reading). Work the
+   * person stopped by closing the browser may use it again.
+   */
+  onExplicitStart?: () => void;
 }
 
 export interface JobSearchRunner {

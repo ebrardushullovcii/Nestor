@@ -1,6 +1,7 @@
 /**
  * How much the person lets Job Finder do at once: browser pages for search,
- * applications prepared together, and pages kept open waiting on them.
+ * applications prepared together, pages kept open waiting on them, and fit
+ * requests sent to the AI together.
  * Standard fits an 8 GB laptop and stays on par with Chrome for the same
  * pages; the others trade memory and AI limits for speed.
  */
@@ -17,6 +18,8 @@ export interface SpeedLevelLimits {
   applyAtOnce: number;
   /** Ready and Needs-you pages kept open; older ones close and refill on Open. */
   waitingPages: number;
+  /** Fit batches sent to the AI at once; network-bound, so no memory cost. */
+  fitRequests: number;
 }
 
 // Measured 2026-10-27 on nine real job-board pages: about 65 MB of private
@@ -29,13 +32,21 @@ export const SPEED_LEVELS: Record<SpeedLevel, SpeedLevelLimits> = {
     searchPages: 2,
     applyAtOnce: 4,
     waitingPages: 3,
+    fitRequests: 6,
   },
-  faster: { label: "Faster", searchPages: 4, applyAtOnce: 6, waitingPages: 6 },
+  faster: {
+    label: "Faster",
+    searchPages: 4,
+    applyAtOnce: 6,
+    waitingPages: 6,
+    fitRequests: 10,
+  },
   maximum: {
     label: "Maximum",
     searchPages: 6,
     applyAtOnce: 8,
     waitingPages: 10,
+    fitRequests: 16,
   },
 };
 

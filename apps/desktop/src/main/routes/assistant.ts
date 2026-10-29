@@ -26,6 +26,7 @@ import {
 
 import { getAssistantHost } from "../services/assistant/assistant-service";
 import { getCandidateAssetLibrary } from "../services/job-finder/candidate-asset-library-instance";
+import { noteExplicitUserStart } from "../services/job-finder/runtime";
 
 /**
  * Typed IPC for the assistant sidebar. Messages arrive only from the app's
@@ -107,6 +108,7 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
     async (event, payload: unknown) => {
       assertAppWindow(event);
       const input = AssistantSendMessageInputSchema.parse(payload);
+      noteExplicitUserStart();
       const host = await getAssistantHost();
       return AssistantSendMessageResultSchema.parse(
         await host.sendMessage(input),
@@ -131,6 +133,7 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
     async (event, payload: unknown) => {
       assertAppWindow(event);
       const input = AssistantAnswerQuestionInputSchema.parse(payload);
+      noteExplicitUserStart();
       const host = await getAssistantHost();
       return AssistantSendMessageResultSchema.parse(
         await host.answerQuestion(input),

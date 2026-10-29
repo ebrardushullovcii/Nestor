@@ -20,7 +20,12 @@ describe("Speed setting", () => {
 
   it("gives each faster level more of everything", () => {
     const { standard, faster, maximum } = SPEED_LEVELS;
-    for (const key of ["searchPages", "applyAtOnce", "waitingPages"] as const) {
+    for (const key of [
+      "searchPages",
+      "applyAtOnce",
+      "waitingPages",
+      "fitRequests",
+    ] as const) {
       expect(faster[key]).toBeGreaterThan(standard[key]);
       expect(maximum[key]).toBeGreaterThan(faster[key]);
     }

@@ -28,7 +28,10 @@ import { getApplicationStore } from "../services/job-finder/application-store";
 import { getJobStore } from "../services/job-store";
 import { isDesktopTestApiEnabled } from "../services/job-finder/test-api";
 import { getApplicationService } from "../services/applications";
-import { startJobFinderRuntime } from "../services/job-finder/runtime";
+import {
+  noteExplicitUserStart,
+  startJobFinderRuntime,
+} from "../services/job-finder/runtime";
 
 /** The registered Assistant actions and preload bridge execute the same commands. */
 export async function executeApplicationStoreCommand(
@@ -46,6 +49,7 @@ export async function executeApplicationStoreCommand(
         throw new Error(
           "The person paused background work. Resume it before applying.",
         );
+      noteExplicitUserStart();
       return ApplyJobsResultSchema.parse(
         store.applyJobs(
           value,
@@ -90,6 +94,7 @@ export async function executeApplicationStoreCommand(
       );
     case "send-application":
       await startJobFinderRuntime();
+      noteExplicitUserStart();
       return (await getApplicationService()).sendPrepared(
         ApplicationTargetSchema.parse(input).id,
       );
@@ -119,6 +124,7 @@ export async function executeApplicationStoreCommand(
     }
     case "open-application": {
       await startJobFinderRuntime();
+      noteExplicitUserStart();
       const opened = await (
         await getApplicationService()
       ).open(ApplicationTargetSchema.parse(input).id);

@@ -397,6 +397,7 @@ async function createJobFinderRuntime(
     ...(envOverrides ?? {}),
   };
   const desktopTestApiEnabled = isDesktopTestApiEnabled(env);
+  const usesEmbeddedBrowser = usesEmbeddedBrowserHost(env);
   await ensureJobFinderUserDataDirectory();
   const store = getJobStore();
   const repository = createJobFinderRepository(store);
@@ -430,6 +431,8 @@ async function createJobFinderRuntime(
           searchPreferencesStore.settings.read().aiBehavior?.jobSearch
             .remoteCountsAsAnyLocation ?? true,
         browserPages: () => currentSpeedLimits().searchPages,
+        fitRequests: () => currentSpeedLimits().fitRequests,
+        onExplicitStart: noteExplicitUserStart,
         engine: createListingSearchEngine({
           browserRuntime,
           aiClient,
@@ -484,9 +487,6 @@ async function createJobFinderRuntime(
   });
   void documentManager.pruneGeneratedResumeFiles?.();
 
-  const usesEmbeddedBrowser =
-    env.NESTOR_BROWSER_HOST !== "external" &&
-    (!desktopTestApiEnabled || env.NESTOR_BROWSER_HOST === "embedded");
   installDiscoveryFeedWorkers();
   // Listing bodies are read over plain HTTP from the main process; the
   // package only reads when a host hands it a reader, so tests stay offline.
@@ -529,11 +529,7 @@ async function createJobFinderRuntime(
       return latest !== null && latest.state !== "running";
     },
     approvedResumeJobIds: () => resumes.approvedJobIds().map(String),
-    // A deliberate start after the person closed the browser may open it
-    // again.
-    ...(usesEmbeddedBrowser
-      ? { onExplicitUserStart: () => getEmbeddedBrowser().clearPersonPause() }
-      : {}),
+    onExplicitUserStart: noteExplicitUserStart,
     onActivityControlChanged: (control) => {
       applicationService.wake();
       // Home pauses new work at the queue boundary. Keep the browser
@@ -585,6 +581,23 @@ async function createJobFinderRuntime(
 let runtimePromise: Promise<JobFinderRuntime> | undefined;
 let overrideEnv: Partial<NodeJS.ProcessEnv> | null = null;
 let closing = false;
+
+function usesEmbeddedBrowserHost(env: NodeJS.ProcessEnv): boolean {
+  return (
+    env.NESTOR_BROWSER_HOST !== "external" &&
+    (!isDesktopTestApiEnabled(env) || env.NESTOR_BROWSER_HOST === "embedded")
+  );
+}
+
+/**
+ * The person started work: a search, a retry, an application, a send, a
+ * chat message. Closing the browser stops what it was running and keeps
+ * background work from reopening it; a deliberate start may open it again.
+ */
+export function noteExplicitUserStart(): void {
+  if (usesEmbeddedBrowserHost({ ...process.env, ...(overrideEnv ?? {}) }))
+    getEmbeddedBrowser().clearPersonPause();
+}
 
 /** Starts Job Finder's runtime once; every caller shares it. */
 export function startJobFinderRuntime(): Promise<JobFinderRuntime> {
