@@ -19,6 +19,7 @@ import {
   type FormAnswerMatch,
   AnswerNeedsYouInputSchema,
   FormAnswerScopeSchema,
+  parseMultiChoiceAnswer,
   NeedsYouTaskSchema,
   NeedsYouCountsSchema,
   SaveNeedsYouDraftInputSchema,
@@ -62,6 +63,8 @@ type Task = {
   prompt_key: string;
   reuse_prompt: number;
   input: NeedsYouTask["input"];
+  /** 1: a "choice" row that takes several options (`multi_choice`). */
+  multiple?: number;
   options_json: string;
   opened_at: number;
   resolved_at: number | null;
@@ -110,14 +113,33 @@ function uniquePromptAnswer<T extends { prompt: string; answer: string }>(
   );
 }
 
+/**
+ * A row's answer format. `needs_you` keeps multi_choice as `choice` with
+ * `multiple = 1`; `form_answers` stores it as written.
+ */
+function inputOf(row: { input: string; multiple?: number }): string {
+  return row.multiple === 1 ? "multi_choice" : row.input;
+}
+
+/** What a list shows of an answer: a multi_choice selection as its options. */
+function answerPreview(input: string, answer: string): string {
+  if (input === "multi_choice")
+    try {
+      const chosen = JSON.parse(answer) as unknown;
+      if (Array.isArray(chosen)) return chosen.join(", ").slice(0, 140);
+    } catch {
+      /* Shown as stored. */
+    }
+  return answer.slice(0, 140);
+}
+
 function sameFormat(
-  input: string,
-  optionsJson: string,
+  row: { input: string; multiple?: number; options_json: string },
   question: RequestNeedsYouInput,
 ): boolean {
-  const options = JSON.parse(optionsJson) as string[];
+  const options = JSON.parse(row.options_json) as string[];
   return (
-    input === question.input &&
+    inputOf(row) === question.input &&
     JSON.stringify([...new Set(options)].sort()) ===
       JSON.stringify([...new Set(question.options)].sort())
   );
@@ -166,7 +188,7 @@ function toTask(row: Task): NeedsYouTask {
     key: row.answer_key,
     scope: { country: row.country, siteOrigin: row.site_origin },
     prompt: row.prompt,
-    input: row.input,
+    input: inputOf(row),
     options,
     openedAt: toIso(row.opened_at),
     ...(row.blocked_url ? { blockedUrl: row.blocked_url } : {}),
@@ -218,11 +240,16 @@ function selectionFilter(
   return { where: filters.join(" AND "), params };
 }
 function validateAnswer(
-  task: Pick<Task, "input" | "options_json">,
+  task: { input: string; multiple?: number; options_json: string },
   answer: string,
 ): string {
   answer = answer.trim();
   const options = JSON.parse(task.options_json) as string[];
+  if (inputOf(task) === "multi_choice") {
+    const chosen = parseMultiChoiceAnswer(answer, options);
+    if (!chosen) throw new Error("Choose a valid answer for this question.");
+    return JSON.stringify(chosen);
+  }
   if (
     !answer ||
     (task.input === "boolean" && !["Yes", "No"].includes(answer)) ||
@@ -343,7 +370,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
                 JSON.parse(row.option_fallback_json) as unknown,
               )
             : null,
-          preview: row.answer.slice(0, 140),
+          preview: answerPreview(row.input, row.answer),
           scope: { country: row.country, siteOrigin: row.site_origin },
           input: row.input,
           options: JSON.parse(row.options_json) as string[],
@@ -630,7 +657,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       const countsNow = counts();
       const { where, params } = selectionFilter("saved", query.text, null);
       const records =
-        sql(`SELECT id,answer_key,kind,label,needs_confirmation,prompt,substr(answer,1,140) AS preview,country,site_origin,input,updated_at
+        sql(`SELECT id,answer_key,kind,label,needs_confirmation,prompt,CASE input WHEN 'multi_choice' THEN answer ELSE substr(answer,1,140) END AS preview,country,site_origin,input,updated_at
         FROM form_answers WHERE ${where} AND (? = 0 OR id < ?) ORDER BY id DESC LIMIT ?`).all(
           ...params,
           query.after,
@@ -663,7 +690,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         label: row.label || row.prompt,
         needsConfirmation: row.needs_confirmation === 1,
         prompt: row.prompt,
-        preview: row.preview,
+        preview: answerPreview(row.input, row.preview),
         scope: { country: row.country, siteOrigin: row.site_origin },
         input: row.input,
         updatedAt: toIso(row.updated_at),
@@ -969,7 +996,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             ).filter(
               (candidate) =>
                 candidate.reuse_prompt === 1 &&
-                (sameFormat(candidate.input, candidate.options_json, value) ||
+                (sameFormat(candidate, value) ||
                   compatibleYesNoQuestion(candidate, value)) &&
                 savedQuestionMatches(
                   candidate.prompt,
@@ -990,7 +1017,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           }
           if (previous?.answer !== undefined && previous?.answer !== null) {
             if (
-              !sameFormat(previous.input, previous.options_json, value) &&
+              !sameFormat(previous, value) &&
               !compatibleYesNoQuestion(previous, value)
             )
               throw new Error(
@@ -1022,10 +1049,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
               )
             : findAnswerRecord(value.key, value.scope);
           if (saved) {
-            if (
-              !value.reusePrompt &&
-              !sameFormat(saved.input, saved.options_json, value)
-            )
+            if (!value.reusePrompt && !sameFormat(saved, value))
               throw new Error(
                 "A shared question key must use the same answer format.",
               );
@@ -1078,7 +1102,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           task = alternatives.find(
             (candidate) =>
               savedQuestionMatches(candidate.prompt, value.prompt) &&
-              sameFormat(candidate.input, candidate.options_json, value),
+              sameFormat(candidate, value),
           );
         }
         // Sharing an unanswered Yes/No item never consumes a refused answer.
@@ -1106,7 +1130,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           );
           task = get(task.id)!;
         }
-        if (task && !sameFormat(task.input, task.options_json, value)) {
+        if (task && !sameFormat(task, value)) {
           if (compatibleYesNoQuestion(task, value)) {
             // Native choices validate both renderings. Never downgrade them to text.
             if (value.input === "boolean") {
@@ -1123,15 +1147,16 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         if (!task) {
           const created = sql(
             `INSERT INTO needs_you
-             (kind, answer_key, country, site_origin, prompt, input, options_json, opened_at, prompt_key, reuse_prompt)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (kind, answer_key, country, site_origin, prompt, input, multiple, options_json, opened_at, prompt_key, reuse_prompt)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).run(
             value.kind,
             value.key,
             value.scope.country,
             value.scope.siteOrigin,
             value.prompt,
-            value.input,
+            value.input === "multi_choice" ? "choice" : value.input,
+            value.input === "multi_choice" ? 1 : 0,
             JSON.stringify(value.options),
             Date.now(),
             normalizeFormQuestionPrompt(value.prompt),
@@ -1224,7 +1249,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             key: task.answer_key,
             scope: { country: task.country, siteOrigin: task.site_origin },
             prompt: task.prompt,
-            input: task.input,
+            input: inputOf(task) as NeedsYouTask["input"],
             options: JSON.parse(task.options_json) as string[],
             answer,
           });

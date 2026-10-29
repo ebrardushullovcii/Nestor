@@ -1294,6 +1294,31 @@ it("keeps every shared file question's key, and scopes only the upload item to i
   expect(describeFormQuestion(step, one).reusePrompt).toBe(false);
 });
 
+it("asks a checkbox group as select-all-that-apply, apart from a single choice", () => {
+  const job = { id: 1, location: "Remote" };
+  const days = {
+    prompt: "Which days could you work on site?",
+    kind: "other" as const,
+    answerControlType: "multi_choice" as const,
+    answerOptions: ["Monday", "Tuesday"],
+  };
+  const multi = describeFormQuestion(days, job);
+  expect(multi).toMatchObject({
+    input: "multi_choice",
+    options: ["Monday", "Tuesday"],
+  });
+  const single = describeFormQuestion(
+    { ...days, answerControlType: "single_choice" },
+    job,
+  );
+  expect(single.input).toBe("choice");
+  expect(single.key).not.toBe(multi.key);
+  // A Yes/No checkbox group still takes a list.
+  expect(
+    describeFormQuestion({ ...days, answerOptions: ["Yes", "No"] }, job).input,
+  ).toBe("multi_choice");
+});
+
 it("opens a restored Ready form without preparing or authorizing a send again", async () => {
   const f = await setup(1);
   await f.service.start();

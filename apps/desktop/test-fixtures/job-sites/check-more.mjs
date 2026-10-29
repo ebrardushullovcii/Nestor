@@ -44,6 +44,7 @@ export async function checkMore({ request, application, index }) {
       currency: "EUR",
       notice: "Two weeks",
       skills: "Analysis",
+      onsiteDays: "Tuesday",
       analysisYears: "3",
       coordinationYears: "2",
       portfolio: "https://portfolio.synthetic.example/work",

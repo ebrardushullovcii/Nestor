@@ -116,6 +116,26 @@ export function fieldGroups(site) {
         field("skills", "Select your skills", "multi", {
           options: ["Communication", "Analysis", "Planning", "Mentoring"],
         }),
+        // Only the person knows this: Apply asks it in Needs you. One site
+        // carries it so recorded flows on the other sites stay unchanged.
+        ...(site.slug === "clientnest"
+          ? [
+              field(
+                "onsiteDays",
+                "Which days could you work on site? Select all that apply",
+                "multi",
+                {
+                  options: [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday",
+                  ],
+                },
+              ),
+            ]
+          : []),
         field("analysisYears", "Years of analysis experience", "number", {
           min: 0,
           max: 60,
@@ -251,7 +271,10 @@ export function validateApplication(site, values) {
           !selected.length ||
           selected.some((choice) => !spec.options.includes(choice))
         )
-          errors[spec.name] = "Select at least one listed skill.";
+          errors[spec.name] =
+            spec.name === "skills"
+              ? "Select at least one listed skill."
+              : "Select at least one listed option.";
         continue;
       }
       if (spec.required && (typeof value !== "string" || !value.trim())) {

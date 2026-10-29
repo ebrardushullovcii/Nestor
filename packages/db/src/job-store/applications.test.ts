@@ -2056,3 +2056,70 @@ it("clears a refused standalone letter, preserves an intervening edit, and is id
   );
   expect(read().letter).toBeNull();
 });
+
+it("a select-all-that-apply question takes, saves and reuses a list of options", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const days = ["Monday", "Tuesday", "Wednesday"];
+  const question = (row: { id: number; attempt: number }) => ({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "onsite",
+    kind: "question" as const,
+    key: "onsite-days",
+    scope: {},
+    prompt: "Which days could you work on site?",
+    input: "multi_choice" as const,
+    options: days,
+  });
+  const first = applications.claimNext()!;
+  const asked = applications.needsYou.request(question(first));
+  if (asked.status !== "needs_you") throw new Error("Expected a question");
+  expect(asked.task.input).toBe("multi_choice");
+  expect(applications.needsYou.list().rows[0]?.input).toBe("multi_choice");
+  expect(() =>
+    applications.needsYou.answer({
+      id: asked.task.id,
+      answer: JSON.stringify(["Monday", "Sunday"]),
+      remember: true,
+    }),
+  ).toThrow("Choose a valid answer");
+  expect(() =>
+    applications.needsYou.answer({
+      id: asked.task.id,
+      answer: "[]",
+      remember: true,
+    }),
+  ).toThrow("Choose a valid answer");
+  applications.needsYou.answer({
+    id: asked.task.id,
+    answer: JSON.stringify(["Wednesday", "Monday"]),
+    remember: true,
+  });
+  // One stored form, in the form's own order.
+  const [saved] = applications.needsYou.listAnswers().rows;
+  expect(saved).toMatchObject({
+    input: "multi_choice",
+    preview: "Monday, Wednesday",
+  });
+  expect(applications.needsYou.savedAnswer(saved!.id)?.answer).toBe(
+    '["Monday","Wednesday"]',
+  );
+  const second = applications.claimNext()!;
+  expect(applications.needsYou.request(question(second))).toEqual({
+    status: "answered",
+    answer: '["Monday","Wednesday"]',
+  });
+  // A single choice with the same options is another format.
+  expect(() =>
+    applications.needsYou.request({
+      ...question(second),
+      fieldKey: "onsite-single",
+      input: "choice",
+    }),
+  ).toThrow("same answer format");
+  applications.needsYou.saveAnswer({ id: saved!.id, answer: "Tuesday" });
+  expect(applications.needsYou.savedAnswer(saved!.id)?.answer).toBe(
+    '["Tuesday"]',
+  );
+});

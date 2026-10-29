@@ -88,7 +88,7 @@ export function SavedAnswerPane(props: {
             Changes are used the next time a form is filled. Submitted
             applications keep their original answers.
           </p>
-          {value.input !== "file" ? (
+          {value.input !== "file" && value.input !== "multi_choice" ? (
             <OptionFallbackField
               answer={answer}
               value={fallback}

@@ -96,7 +96,7 @@ export const NEEDS_YOU_COMMANDS = {
   answer_need: {
     effect: "local_write",
     description:
-      "Save the person's answer to one question and continue every application it unblocks. Remember it only when the person asks.",
+      "Save the person's answer to one question and continue every application it unblocks. A multi_choice question takes a JSON array of its chosen options. Remember it only when the person asks.",
     input: AnswerNeedsYouInputSchema,
     output: AnswerNeedsYouResultSchema.merge(AnswerChangeSchema),
   },

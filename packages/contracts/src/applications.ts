@@ -154,7 +154,15 @@ export const NeedsYouTaskSchema = z.object({
   key: z.string().min(1),
   scope: FormAnswerScopeSchema,
   prompt: z.string(),
-  input: z.enum(["text", "boolean", "choice", "number", "file"]),
+  /** `multi_choice` answers are a JSON array of the chosen options (see `formatMultiChoiceAnswer`). */
+  input: z.enum([
+    "text",
+    "boolean",
+    "choice",
+    "multi_choice",
+    "number",
+    "file",
+  ]),
   options: z.array(z.string()),
   openedAt: IsoDateTimeSchema,
   source: SourceAccessReferenceSchema.optional(),
@@ -169,6 +177,40 @@ export const NeedsYouTaskSchema = z.object({
     .optional(),
 });
 export type NeedsYouTask = z.infer<typeof NeedsYouTaskSchema>;
+
+/**
+ * The chosen options of a "select all that apply" answer, or null when the
+ * text is not one. A lone option counts as a one-option selection.
+ */
+export function parseMultiChoiceAnswer(
+  answer: string,
+  options: readonly string[],
+): string[] | null {
+  const text = answer.trim();
+  let chosen: unknown;
+  try {
+    chosen = text.startsWith("[") ? JSON.parse(text) : [text];
+  } catch {
+    return null;
+  }
+  if (
+    !Array.isArray(chosen) ||
+    chosen.length === 0 ||
+    !chosen.every(
+      (option) => typeof option === "string" && options.includes(option),
+    )
+  )
+    return null;
+  const picked = new Set<unknown>(chosen);
+  return options.filter((option) => picked.has(option));
+}
+/** The one stored form of a multi_choice answer: a JSON array, in the form's option order. */
+export function formatMultiChoiceAnswer(
+  chosen: readonly string[],
+  options: readonly string[],
+): string {
+  return JSON.stringify(options.filter((option) => chosen.includes(option)));
+}
 
 export const NeedsYouCountsSchema = z.object({
   question: z.number().int().nonnegative(),
