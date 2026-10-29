@@ -88,7 +88,9 @@ export function describeFormQuestion(
       question.answerOptions.map((value) => value.trim()).filter(Boolean),
     ),
   ];
+  // A Yes/No checkbox group still takes the list of ticked options.
   const yesNo =
+    question.answerControlType !== "multi_choice" &&
     options.length === 2 &&
     options.some((v) => /^yes$/iu.test(v)) &&
     options.some((v) => /^no$/iu.test(v));
@@ -100,10 +102,12 @@ export function describeFormQuestion(
         : question.answerControlType === "file"
           ? "file"
           : options.length > 0
-            ? "choice"
+            ? question.answerControlType === "multi_choice"
+              ? "multi_choice"
+              : "choice"
             : "text";
   const format =
-    input === "choice"
+    input === "choice" || input === "multi_choice"
       ? `${input}:${options.map(normalize).sort().join("|")}`
       : input;
   // A refused upload belongs to this application's page, whichever files
@@ -139,7 +143,8 @@ export function describeFormQuestion(
   return {
     key: `question:${digest(`${normalize(question.prompt)}|${format}|${place}`)}`,
     input,
-    options: input === "choice" || yesNo ? options : [],
+    options:
+      input === "choice" || input === "multi_choice" || yesNo ? options : [],
     reusePrompt:
       input !== "file" &&
       !jobSpecific &&

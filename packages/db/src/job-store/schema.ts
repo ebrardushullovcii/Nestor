@@ -80,6 +80,11 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   { table: "needs_you", column: "blocked_url", definition: "TEXT" },
   { table: "needs_you", column: "ask_reason_json", definition: "TEXT" },
   {
+    table: "needs_you",
+    column: "multiple",
+    definition: "INTEGER NOT NULL DEFAULT 0",
+  },
+  {
     table: "applications",
     column: "review_refill",
     definition: "INTEGER NOT NULL DEFAULT 0",

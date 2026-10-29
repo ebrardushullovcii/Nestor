@@ -1226,6 +1226,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     ["Yes", "No"].includes(suggestion)) &&
                   (known.input !== "choice" ||
                     known.options.includes(suggestion)) &&
+                  known.input !== "multi_choice" &&
                   (known.input !== "number" ||
                     Number.isFinite(Number(suggestion)))
                 )
@@ -1320,8 +1321,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               return browser.executeExactlyOneFinalAction!(source, {
                 ...input,
                 veto: async (facts) => {
-                  const { profile: latestProfile } =
-                    await deps.readInputs();
+                  const { profile: latestProfile } = await deps.readInputs();
                   const app = applications.getApplication(row.id);
                   const approved = resumes.get(row.jobId);
                   return (

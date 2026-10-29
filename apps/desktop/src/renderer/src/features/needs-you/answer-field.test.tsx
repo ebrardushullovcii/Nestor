@@ -66,3 +66,42 @@ test("observed boolean choices retain the form's own order", () => {
     screen.getAllByRole("button").map((button) => button.textContent),
   ).toEqual(["No", "Yes"]);
 });
+
+test("a select-all-that-apply question takes several options as one list", () => {
+  const options = ["Monday", "Tuesday", "Wednesday"],
+    onChange = vi.fn();
+  const view = render(
+    <AnswerField
+      question={{ prompt: "On-site days", input: "multi_choice", options }}
+      value=""
+      onChange={onChange}
+    />,
+  );
+  expect(screen.getByText("Select all that apply.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Wednesday" }));
+  expect(onChange).toHaveBeenLastCalledWith('["Wednesday"]');
+  view.rerender(
+    <AnswerField
+      question={{ prompt: "On-site days", input: "multi_choice", options }}
+      value='["Wednesday"]'
+      onChange={onChange}
+    />,
+  );
+  fireEvent.click(screen.getByRole("checkbox", { name: "Monday" }));
+  expect(onChange).toHaveBeenLastCalledWith('["Monday","Wednesday"]');
+  view.rerender(
+    <AnswerField
+      question={{ prompt: "On-site days", input: "multi_choice", options }}
+      value='["Monday","Wednesday"]'
+      onChange={onChange}
+    />,
+  );
+  expect(
+    screen
+      .getAllByRole("checkbox")
+      .map((box) => (box as HTMLInputElement).checked),
+  ).toEqual([true, false, true]);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Monday" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Wednesday" }));
+  expect(onChange).toHaveBeenLastCalledWith('["Monday"]');
+});

@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS needs_you (
   prompt_key TEXT NOT NULL DEFAULT '',
   reuse_prompt INTEGER NOT NULL DEFAULT 0,
   input TEXT NOT NULL CHECK (input IN ('text', 'boolean', 'choice', 'number', 'file')),
+  -- A "choice" that takes several options (multi_choice): the CHECK above
+  -- was released without it, and a released constraint is never redefined.
+  multiple INTEGER NOT NULL DEFAULT 0,
   options_json TEXT NOT NULL,
   opened_at INTEGER NOT NULL,
   resolved_at INTEGER,

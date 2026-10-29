@@ -1,5 +1,9 @@
 import { useId, useState } from "react";
-import type { NeedsYouTask } from "@nestor/contracts";
+import {
+  formatMultiChoiceAnswer,
+  parseMultiChoiceAnswer,
+  type NeedsYouTask,
+} from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
 import { Textarea } from "@renderer/components/ui/textarea";
@@ -12,6 +16,8 @@ export function AnswerField(props: {
 }) {
   const id = useId();
   const { question, value, onChange, disabled } = props;
+  if (question.input === "multi_choice")
+    return <MultiChoices key={question.prompt} {...props} />;
   if (question.input === "boolean" || question.input === "choice") {
     const options =
       question.input === "boolean" && question.options.length === 0
@@ -110,6 +116,77 @@ function SearchableChoices(
               value={option}
               checked={props.value === option}
               onChange={() => props.onChange(option)}
+            />
+            <span>{option}</span>
+          </label>
+        ))}
+        {shown.length === 0 && (
+          <p className="p-2 text-sm text-muted-foreground">
+            No matching options.
+          </p>
+        )}
+      </div>
+    </fieldset>
+  );
+}
+
+/** "Select all that apply": the answer is every ticked option, in the form's order. */
+function MultiChoices(props: Parameters<typeof AnswerField>[0]) {
+  const id = useId(),
+    [search, setSearch] = useState("");
+  const { options } = props.question;
+  const chosen = parseMultiChoiceAnswer(props.value, options) ?? [];
+  const searchable = options.length > 8;
+  const shown = options.filter((option) =>
+    option.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+  );
+  const toggle = (option: string, checked: boolean) => {
+    const next = checked
+      ? [...chosen, option]
+      : chosen.filter((value) => value !== option);
+    props.onChange(next.length ? formatMultiChoiceAnswer(next, options) : "");
+  };
+  return (
+    <fieldset disabled={props.disabled} className="grid gap-3">
+      <legend className="mb-3 font-medium">{props.question.prompt}</legend>
+      <p className="text-sm text-foreground-soft" id={`${id}-hint`}>
+        Select all that apply.
+        {chosen.length ? ` ${chosen.length} selected.` : ""}
+      </p>
+      {searchable ? (
+        <>
+          <label htmlFor={`${id}-search`} className="text-sm">
+            Search options
+          </label>
+          <Input
+            id={`${id}-search`}
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search the form’s options"
+            aria-controls={`${id}-choices`}
+          />
+        </>
+      ) : null}
+      <div
+        id={`${id}-choices`}
+        aria-describedby={`${id}-hint`}
+        className={
+          searchable
+            ? "grid max-h-64 gap-1 overflow-y-auto rounded-md border p-2"
+            : "grid gap-1"
+        }
+      >
+        {shown.map((option) => (
+          <label
+            key={option}
+            className="flex cursor-pointer items-center gap-3 rounded px-2 py-2 hover:bg-muted"
+          >
+            <input
+              type="checkbox"
+              value={option}
+              checked={chosen.includes(option)}
+              onChange={(event) => toggle(option, event.target.checked)}
             />
             <span>{option}</span>
           </label>
