@@ -46,13 +46,14 @@ function setup() {
     ),
     importFromBrowser: vi.fn(),
   };
+  const listSources = vi.fn<DesktopBrowserBridge["listImportSources"]>(() =>
+    Promise.resolve({ sources: [], note: null }),
+  );
   const bridge = {
     passwords,
-    listImportSources: vi.fn(() =>
-      Promise.resolve({ sources: [], note: null }),
-    ),
+    listImportSources: listSources,
   } as unknown as DesktopBrowserBridge;
-  return { passwords, bridge };
+  return { passwords, bridge, listSources };
 }
 it("offers Save/Update using only an opaque prompt, and can dismiss", async () => {
   const { bridge, passwords } = setup();
@@ -118,4 +119,67 @@ it("lists metadata, deletes one login and imports via native picker with counts 
   fireEvent.click(screen.getByRole("button", { name: "Import password CSV…" }));
   expect(await screen.findByText("Added 1 login.")).toBeTruthy();
   expect(passwords.importCsv).toHaveBeenCalledExactlyOnceWith();
+});
+
+it("disables locked password profiles with a reason while leaving v10 profiles and CSV clickable", async () => {
+  const { bridge, passwords, listSources } = setup();
+  listSources.mockResolvedValue({
+    sources: [
+      {
+        id: "locked",
+        browser: "chrome",
+        browserLabel: "Google Chrome",
+        profileLabel: "Default",
+        supported: false,
+        note: "Sign-ins locked",
+        passwordImport: {
+          supported: false,
+          note: "This browser keeps its passwords locked to itself. Export a CSV instead.",
+        },
+      },
+      {
+        id: "readable",
+        browser: "edge",
+        browserLabel: "Microsoft Edge",
+        profileLabel: "Profile 1",
+        supported: false,
+        note: "Sign-ins locked",
+        passwordImport: { supported: true, note: null },
+      },
+    ],
+    note: null,
+  });
+  passwords.importFromBrowser.mockResolvedValue({
+    status: "imported",
+    added: 1,
+    updated: 0,
+    skipped: 2,
+    message: "Added 1, updated 0, skipped 2 logins.",
+  });
+  render(<BrowserPasswordPanel bridge={bridge} tabId="tab" close={vi.fn()} />);
+  await screen.findByText("Import directly from a browser");
+  fireEvent.click(screen.getByText("Import directly from a browser"));
+  const locked = screen.getByRole<HTMLButtonElement>("button", {
+    name: /Google Chrome/,
+  });
+  const readable = screen.getByRole<HTMLButtonElement>("button", {
+    name: /Microsoft Edge/,
+  });
+  expect(locked.disabled).toBe(true);
+  expect(locked.textContent).toContain(
+    "locked to itself. Export a CSV instead.",
+  );
+  fireEvent.click(locked);
+  expect(passwords.importFromBrowser).not.toHaveBeenCalled();
+  expect(readable.disabled).toBe(false);
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", {
+      name: "Import password CSV…",
+    }).disabled,
+  ).toBe(false);
+  fireEvent.click(readable);
+  await screen.findByText("Added 1, updated 0, skipped 2 logins.");
+  expect(passwords.importFromBrowser).toHaveBeenCalledExactlyOnceWith({
+    sourceId: "readable",
+  });
 });

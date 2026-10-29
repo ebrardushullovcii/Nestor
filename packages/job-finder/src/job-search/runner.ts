@@ -186,7 +186,7 @@ export function createJobSearchRunner(
       deps,
       context,
       signal,
-      concurrency(deps.concurrency?.fit, 6),
+      concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
       (n) => update(run, { scored: n }),
       (error) => {
         fitError = errorMessage(error);
@@ -702,8 +702,12 @@ export function createJobSearchRunner(
   };
 
   const runner: JobSearchRunner = {
-    start: (input) => begin(input),
+    start: (input) => {
+      deps.onExplicitStart?.();
+      return begin(input);
+    },
     async retrySource(id) {
+      deps.onExplicitStart?.();
       const site = siteRows.get(id);
       if (!site) throw new Error("This source is no longer in your list.");
       const target = { ...jobSiteTarget(site), enabled: true };
@@ -722,6 +726,7 @@ export function createJobSearchRunner(
       );
     },
     async keepReading(id) {
+      deps.onExplicitStart?.();
       const ids =
         id !== undefined
           ? [String(id)]
@@ -814,7 +819,7 @@ export function createJobSearchRunner(
             deps,
             context,
             controller.signal,
-            concurrency(deps.concurrency?.fit, 6),
+            concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
             () => notify(),
             () => {},
             // The last search's note was for that search only.

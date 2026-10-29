@@ -21,6 +21,7 @@ vi.mock("../job-finder/application-store", () => ({
 }));
 vi.mock("../job-store", () => ({ getJobStore: () => jobs }));
 vi.mock("../job-finder/runtime", () => ({
+  noteExplicitUserStart: () => {},
   startJobFinderRuntime: () =>
     Promise.resolve({
       repository: {

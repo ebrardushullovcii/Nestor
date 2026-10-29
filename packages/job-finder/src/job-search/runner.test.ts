@@ -979,28 +979,32 @@ test("rapid eligibility edits fence superseded results and preserve the old scor
   expect(store.getJob(row.id)?.fitStale).toBe(false);
 });
 
-test("a bounded pass prioritizes visible jobs and leaves later work persisted", async () => {
-  const { runner, context, engine, store } = setup();
-  context.sources = [];
-  const ids = store.saveFoundJobs({
+function seedBacklog(store: JobStore, count: number, description: string) {
+  return store.saveFoundJobs({
     searchId: "seed",
-    jobs: Array.from({ length: 120 }, (_, n) => ({
+    jobs: Array.from({ length: count }, (_, n) => ({
       ...found(card("seed")),
       title: `Backend Engineer ${n}`,
       sourceJobId: String(n),
-      url: `https://seed.example/${n}`,
-      description: "Complete listing requirements. ".repeat(500),
+      url: `https://seed.example/backlog-${n}`,
+      description,
     })),
   }).added;
+}
+const LONG_LISTING = "Complete listing requirements. ".repeat(500);
+
+test("one pass scores the whole backlog, visible jobs first, in bounded batches", async () => {
+  const { runner, context, engine, store } = setup();
+  context.sources = [];
+  const ids = seedBacklog(store, 120, LONG_LISTING);
   runner.prioritizeFit([ids.at(-1)!]);
   await runner.scoreUnscored();
   expect(engine.fitJobs.mock.calls[0]?.[0].jobs[0]?.id).toBe(ids.at(-1));
-  const scored = engine.fitJobs.mock.calls.flatMap(
-    ([input]) => input.jobs,
-  ).length;
-  expect(scored).toBeGreaterThan(0);
-  expect(scored).toBeLessThan(ids.length);
-  expect(store.unscoredJobIds(200)).toHaveLength(ids.length - scored);
+  const sizes = engine.fitJobs.mock.calls.map(([input]) => input.jobs.length);
+  // Each request stays within its budget; the pass does not stop early.
+  expect(Math.max(...sizes)).toBeLessThan(48);
+  expect(sizes.reduce((sum, size) => sum + size, 0)).toBe(ids.length);
+  expect(store.unscoredJobIds(200)).toHaveLength(0);
 });
 
 test("quick-stopped validated cards record successful access, while later auth evidence wins", async () => {
@@ -1084,50 +1088,109 @@ test.each([false, true])(
   },
 );
 
-test("reported token usage stops the pass before another estimated batch starts", async () => {
+test("fit batches run in parallel up to the limit", async () => {
   const { context, engine, store } = setup();
-  const ids = store.saveFoundJobs({
-    searchId: "seed",
-    jobs: Array.from({ length: 120 }, (_, n) => ({
-      ...found(card("seed")),
-      title: `Backend Engineer ${n}`,
-      sourceJobId: String(n),
-      url: `https://seed.example/usage-${n}`,
-      description: "Complete listing.",
-    })),
-  }).added;
-  engine.fitJobs.mockImplementation(({ jobs, onUsage }) => {
-    onUsage?.({
-      inputTokens: 49_000,
-      outputTokens: 500,
-      cachedInputTokens: 0,
-      reasoningTokens: 0,
-    });
-    return Promise.resolve(
-      jobs.map(({ id }) => ({
-        id,
-        score: 80,
-        summary: "Fit",
-        reasons: [],
-        gaps: [],
-      })),
-    );
+  const ids = seedBacklog(store, 120, LONG_LISTING);
+  let inFlight = 0,
+    peak = 0;
+  engine.fitJobs.mockImplementation(async ({ jobs }) => {
+    peak = Math.max(peak, ++inFlight);
+    await new Promise((done) => setTimeout(done, 5));
+    inFlight--;
+    return jobs.map(({ id }) => ({
+      id,
+      score: 80,
+      summary: "Fit",
+      reasons: [],
+      gaps: [],
+    }));
   });
   const controller = new AbortController();
   const queue = createFitQueue(
     { store, engine, readContext: () => Promise.resolve(context) },
     context,
     controller.signal,
-    1,
+    4,
     () => {},
     () => {},
     JobSearchSettingsSchema.parse({ postedWithin: "any" }),
   );
   queue.enqueue(ids);
   await queue.drain();
-  expect(engine.fitJobs).toHaveBeenCalledTimes(1);
-  expect(queue.scored).toBe(48);
-  expect(queue.needsAnotherPass).toBe(true);
-  expect(store.unscoredJobIds(200)).toHaveLength(72);
+  expect(peak).toBe(4);
+  expect(engine.fitJobs.mock.calls.length).toBeGreaterThan(4);
+  expect(queue.scored).toBe(ids.length);
+  expect(queue.needsAnotherPass).toBe(false);
   controller.abort();
+});
+
+test("an unanswered batch is tried once more at fewer requests, then left unscored", async () => {
+  const { context, engine, store } = setup();
+  const ids = seedBacklog(store, 120, LONG_LISTING);
+  const never = ids[5]!;
+  let calls = 0,
+    inFlight = 0,
+    peakAfterFailure = 0;
+  engine.fitJobs.mockImplementation(async ({ jobs }) => {
+    const first = calls++ === 0;
+    if (!first) peakAfterFailure = Math.max(peakAfterFailure, ++inFlight);
+    await new Promise((done) => setTimeout(done, first ? 1 : 5));
+    if (!first) inFlight--;
+    // The first request gets no answer at all (a rate limit, say); one job
+    // is never answered.
+    return first
+      ? []
+      : jobs
+          .filter(({ id }) => id !== never)
+          .map(({ id }) => ({
+            id,
+            score: 80,
+            summary: "Fit",
+            reasons: [],
+            gaps: [],
+          }));
+  });
+  const errors: unknown[] = [];
+  const controller = new AbortController();
+  const queue = createFitQueue(
+    { store, engine, readContext: () => Promise.resolve(context) },
+    context,
+    controller.signal,
+    4,
+    () => {},
+    (error) => errors.push(error),
+    JobSearchSettingsSchema.parse({ postedWithin: "any" }),
+  );
+  queue.enqueue(ids);
+  await queue.drain();
+  expect(queue.scored).toBe(ids.length - 1);
+  expect(store.unscoredJobIds(200)).toEqual([never]);
+  expect(
+    engine.fitJobs.mock.calls.filter(([input]) =>
+      input.jobs.some(({ id }) => id === never),
+    ),
+  ).toHaveLength(2);
+  expect(errors).toHaveLength(1);
+  // Halved from 4 when nothing came back, then climbing back up.
+  expect(peakAfterFailure).toBeLessThanOrEqual(4);
+  controller.abort();
+});
+
+test("a search the person starts may use a browser they closed; background fit may not", async () => {
+  const { store, engine, context } = setup();
+  const onExplicitStart = vi.fn();
+  const runner = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+    onExplicitStart,
+  });
+  runners.push(runner);
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(onExplicitStart).toHaveBeenCalledTimes(1);
+  await runner.scoreUnscored();
+  expect(onExplicitStart).toHaveBeenCalledTimes(1);
+  await expect(runner.keepReading()).rejects.toThrow();
+  expect(onExplicitStart).toHaveBeenCalledTimes(2);
 });

@@ -20,9 +20,187 @@ import {
 } from "./browser-profile-import";
 
 const temporary: string[] = [];
+const dpapi = vi.hoisted(() => vi.fn<(blob: Uint8Array) => Promise<Buffer>>());
+vi.mock("@nestor/os-integration", () => ({
+  unprotectWindowsCurrentUserData: dpapi,
+}));
 afterEach(async () => {
+  vi.clearAllMocks();
   for (const directory of temporary.splice(0))
     await rm(directory, { recursive: true, force: true });
+});
+
+function encryptWindows(plain: string, key: Buffer, prefix = "v10"): Buffer {
+  const nonce = Buffer.alloc(12, 7);
+  const cipher = createCipheriv("aes-256-gcm", key, nonce);
+  return Buffer.concat([
+    Buffer.from(prefix),
+    nonce,
+    cipher.update(plain, "utf8"),
+    cipher.final(),
+    cipher.getAuthTag(),
+  ]);
+}
+
+async function windowsProfiles(
+  profiles: Record<string, Buffer[]>,
+  encryptedKey = Buffer.from("DPAPIsynthetic-wrapped-key"),
+) {
+  const home = await mkdtemp(path.join(tmpdir(), "nestor-windows-passwords-"));
+  temporary.push(home);
+  const root = path.join(home, "Microsoft/Edge/User Data");
+  await mkdir(root, { recursive: true });
+  await writeFile(
+    path.join(root, "Local State"),
+    JSON.stringify({
+      os_crypt: {
+        encrypted_key: encryptedKey.toString("base64"),
+        app_bound_encrypted_key: "ignored-app-bound-key",
+      },
+    }),
+  );
+  for (const [profile, values] of Object.entries(profiles)) {
+    const dir = path.join(root, profile);
+    await mkdir(dir);
+    // Cookies can be v20 even while passwords remain v10.
+    const cookies = new DatabaseSync(path.join(dir, "Cookies"));
+    cookies.exec("CREATE TABLE cookies (encrypted_value BLOB)");
+    cookies
+      .prepare("INSERT INTO cookies VALUES (?)")
+      .run(Buffer.from("v20synthetic-cookie"));
+    cookies.close();
+    const db = new DatabaseSync(path.join(dir, "Login Data"));
+    db.exec(
+      "CREATE TABLE logins (origin_url TEXT, action_url TEXT, username_value TEXT, password_value BLOB, blacklisted_by_user INTEGER)",
+    );
+    const insert = db.prepare("INSERT INTO logins VALUES (?, ?, ?, ?, 0)");
+    for (const value of values)
+      insert.run(
+        "https://example.test/login",
+        "https://example.test/session",
+        "synthetic",
+        value,
+      );
+    db.close();
+  }
+  return {
+    env: {
+      platform: "win32",
+      home,
+      localAppData: home,
+      appData: home,
+    } satisfies ImportEnvironment,
+    root,
+  };
+}
+
+describe("Windows profile passwords", () => {
+  test("discovers capability per profile, independently of cookies, without unwrapping a key", async () => {
+    const key = Buffer.alloc(32, 4);
+    const { env, root } = await windowsProfiles({
+      Default: [encryptWindows("synthetic", key, "v20")],
+      "Profile 1": [encryptWindows("synthetic", key)],
+      "Profile 2": [
+        encryptWindows("synthetic", key),
+        encryptWindows("synthetic", key, "v20"),
+      ],
+      "Profile 3": [],
+    });
+    // Password-only profiles must be discoverable too.
+    await rm(path.join(root, "Profile 1/Cookies"));
+    const { sources } = await listBrowserImportSources(env);
+    expect(
+      sources.map((source) => [
+        source.profileLabel,
+        source.supported,
+        source.passwordImport.supported,
+      ]),
+    ).toEqual([
+      ["Default", false, false],
+      ["Profile 1", false, true],
+      ["Profile 2", false, true],
+      ["Profile 3", false, false],
+    ]);
+    expect(sources[0]?.passwordImport.note).toMatch(/locked.*CSV/);
+    expect(sources[3]?.passwordImport.note).toMatch(/No saved passwords/);
+    expect(dpapi).not.toHaveBeenCalled();
+    expect(JSON.stringify(sources)).not.toContain(env.home);
+    const locked = await readBrowserPasswords(sources[0]!.id, env);
+    expect(locked.unsupported).toBe(true);
+    expect(locked.skipped).toBe(1);
+    expect(dpapi).not.toHaveBeenCalled();
+  });
+
+  test("unwraps only DPAPI, imports authenticated v10, skips v20/corrupt rows and clears the key", async () => {
+    const key = Buffer.alloc(32, 4);
+    const corrupt = encryptWindows("synthetic-corrupt", key);
+    corrupt[corrupt.length - 1]! ^= 1;
+    const { env } = await windowsProfiles({
+      Default: [
+        encryptWindows("synthetic-only", key),
+        // Valid GCM with a v20 prefix still must never be imported.
+        encryptWindows("synthetic-app-bound", key, "v20"),
+        corrupt,
+        Buffer.from("v10short"),
+        encryptWindows("synthetic-v11", key, "v11"),
+      ],
+    });
+    const unwrapped = Buffer.from(key);
+    dpapi.mockImplementation((blob) => {
+      expect(
+        Buffer.from(blob).equals(Buffer.from("synthetic-wrapped-key")),
+      ).toBe(true);
+      return Promise.resolve(unwrapped);
+    });
+    const source = (await listBrowserImportSources(env)).sources[0]!;
+    const result = await readBrowserPasswords(source.id, env);
+    expect(result).toEqual({
+      values: [
+        {
+          origin: "https://example.test",
+          username: "synthetic",
+          password: "synthetic-only",
+        },
+      ],
+      skipped: 4,
+      unsupported: false,
+    });
+    expect(dpapi).toHaveBeenCalledOnce();
+    expect(unwrapped.every((byte) => byte === 0)).toBe(true);
+  });
+
+  test("rejects a missing DPAPI prefix, failed unprotect and wrong key size without using app-bound keys", async () => {
+    const key = Buffer.alloc(32, 4);
+    const { env, root } = await windowsProfiles(
+      { Default: [encryptWindows("synthetic", key)] },
+      Buffer.from("APPBsynthetic-key"),
+    );
+    let source = (await listBrowserImportSources(env)).sources[0]!;
+    expect(source.passwordImport.supported).toBe(false);
+    expect((await readBrowserPasswords(source.id, env)).unsupported).toBe(true);
+    expect(dpapi).not.toHaveBeenCalled();
+    await writeFile(
+      path.join(root, "Local State"),
+      JSON.stringify({
+        os_crypt: {
+          encrypted_key: Buffer.from("DPAPIsynthetic-wrapped-key").toString(
+            "base64",
+          ),
+        },
+      }),
+    );
+    source = (await listBrowserImportSources(env)).sources[0]!;
+    dpapi.mockRejectedValueOnce(new Error("Windows key access failed."));
+    await expect(readBrowserPasswords(source.id, env)).rejects.toThrow(
+      "Windows key access failed.",
+    );
+    const wrongKey = Buffer.alloc(16, 3);
+    dpapi.mockResolvedValueOnce(wrongKey);
+    await expect(readBrowserPasswords(source.id, env)).rejects.toThrow(
+      "Windows key is unavailable.",
+    );
+    expect(wrongKey.every((byte) => byte === 0)).toBe(true);
+  });
 });
 
 function encrypt(plain: Buffer, key: Buffer): Buffer {

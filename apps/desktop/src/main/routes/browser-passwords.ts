@@ -61,12 +61,13 @@ export function registerBrowserPasswordRoutes(
   const failure = (
     status: "failed" | "cancelled" | "unsupported",
     message: string,
+    skipped = 0,
   ) =>
     BrowserPasswordImportResultSchema.parse({
       status,
       added: 0,
       updated: 0,
-      skipped: 0,
+      skipped,
       message,
     });
   ipc.handle("browser-passwords:import-csv", async (event) => {
@@ -120,10 +121,8 @@ export function registerBrowserPasswordRoutes(
           return failure(
             "unsupported",
             "Direct password import is protected on this browser or device. In your browser's password manager, export passwords to CSV, then choose Import password CSV here.",
+            result.skipped,
           );
-        return BrowserPasswordImportResultSchema.parse(
-          importPasswordValues(vault, result.values, result.skipped),
-        );
         if (!result.values.length && result.skipped)
           return BrowserPasswordImportResultSchema.parse({
             status: "unsupported",
@@ -133,6 +132,15 @@ export function registerBrowserPasswordRoutes(
             message:
               "This browser's saved passwords could not be decrypted. Export passwords from its password manager, then choose Import password CSV here.",
           });
+        try {
+          return BrowserPasswordImportResultSchema.parse(
+            importPasswordValues(vault, result.values, result.skipped),
+          );
+        } finally {
+          // JS strings cannot be zeroed; release references immediately after saving.
+          for (const value of result.values) value.password = "";
+          result.values.length = 0;
+        }
       } catch {
         return failure(
           "failed",
