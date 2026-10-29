@@ -13,6 +13,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import type { CookiesSetDetails } from "electron";
+import { unprotectWindowsCurrentUserData } from "@nestor/os-integration";
 import type {
   BrowserSignInSources,
   DesktopBrowserImportBrowser,
@@ -206,7 +207,11 @@ async function chromiumProfiles(root: string): Promise<Profile[]> {
     )
       continue;
     const directory = path.join(root, entry);
-    if (!(await chromiumCookiesPath(directory))) continue;
+    if (
+      !(await chromiumCookiesPath(directory)) &&
+      !(await exists(path.join(directory, "Login Data")))
+    )
+      continue;
     profiles.push({ directory, label: names.get(entry) ?? entry });
   }
   return profiles;
@@ -254,13 +259,101 @@ async function firefoxProfiles(root: string): Promise<Profile[]> {
 }
 
 interface ResolvedSource extends DesktopBrowserImportSource {
-  cookiesPath: string;
+  cookiesPath: string | null;
   profileDirectory: string;
   family: BrowserFamily;
+  passwordCount: number;
 }
 
 const encodeId = (value: string) =>
   Buffer.from(value, "utf8").toString("base64url");
+
+const PASSWORDS_LOCKED =
+  "This browser keeps its passwords locked to itself. Export a CSV instead.";
+
+async function windowsEncryptedKey(profileDirectory: string): Promise<Buffer> {
+  const state = JSON.parse(
+    await readFile(path.join(profileDirectory, "..", "Local State"), "utf8"),
+  ) as {
+    os_crypt?: { encrypted_key?: unknown };
+  };
+  const encoded = state.os_crypt?.encrypted_key;
+  if (typeof encoded !== "string" || encoded.length > 90_000)
+    throw new Error("Windows key is unavailable.");
+  const bytes = Buffer.from(encoded, "base64");
+  if (bytes.length <= 5 || !bytes.subarray(0, 5).equals(Buffer.from("DPAPI"))) {
+    bytes.fill(0);
+    throw new Error("Windows key is unavailable.");
+  }
+  return bytes;
+}
+
+/** Checks only format tags and counts; discovery never decrypts credentials. */
+async function passwordSupport(
+  profileDirectory: string,
+  env: ImportEnvironment,
+): Promise<DesktopBrowserImportSource["passwordImport"] & { count: number }> {
+  const file = path.join(profileDirectory, "Login Data");
+  if (!(await exists(file)))
+    return {
+      supported: false,
+      note: "No saved passwords in this profile.",
+      count: 0,
+    };
+  let snapshot: Awaited<ReturnType<typeof snapshotDatabase>> | null = null;
+  let count = 0;
+  try {
+    snapshot = await snapshotDatabase(file);
+    const db = new DatabaseSync(snapshot.path, { readOnly: true });
+    let readable = false;
+    try {
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) AS total,
+        COALESCE(SUM(CASE WHEN (substr(password_value, 1, 3) = X'763130'
+          OR (? = 1 AND substr(password_value, 1, 3) = X'763131'))
+          AND length(password_value) >= ? THEN 1 ELSE 0 END), 0) AS readable
+        FROM logins WHERE blacklisted_by_user = 0`,
+        )
+        .get(
+          env.platform === "darwin" ? 1 : 0,
+          env.platform === "win32" ? 32 : 19,
+        );
+      count = Number(row?.total ?? 0);
+      readable = Number(row?.readable ?? 0) > 0;
+    } finally {
+      db.close();
+    }
+    if (!count)
+      return {
+        supported: false,
+        note: "No saved passwords in this profile.",
+        count,
+      };
+    if (!readable || !["win32", "darwin", "linux"].includes(env.platform))
+      return { supported: false, note: PASSWORDS_LOCKED, count };
+    if (env.platform === "win32") {
+      const encrypted = await windowsEncryptedKey(profileDirectory);
+      encrypted.fill(0);
+    }
+    return {
+      supported: true,
+      count,
+      note:
+        env.platform === "darwin"
+          ? "macOS asks for Keychain access to read saved passwords."
+          : null,
+    };
+  } catch {
+    return {
+      supported: false,
+      count,
+      note: "Passwords could not be read. Close the browser and try again, or import a CSV.",
+    };
+  } finally {
+    await snapshot?.dispose().catch(() => undefined);
+  }
+}
 
 async function resolveSources(
   env: ImportEnvironment,
@@ -271,14 +364,19 @@ async function resolveSources(
     for (const root of familyRoots(family, env)) {
       for (const profile of await chromiumProfiles(root)) {
         const cookiesPath = await chromiumCookiesPath(profile.directory);
-        if (!cookiesPath) continue;
+        const { count: passwordCount, ...passwordImport } =
+          await passwordSupport(profile.directory, env);
         sources.push({
           id: encodeId(`${family.browser}:${profile.directory}`),
           browser: family.browser,
           browserLabel: family.label,
           profileLabel: profile.label,
-          supported: support.supported,
-          note: support.note,
+          supported: !!cookiesPath && support.supported,
+          note: cookiesPath
+            ? support.note
+            : "No saved sign-ins in this profile.",
+          passwordImport,
+          passwordCount,
           cookiesPath,
           profileDirectory: profile.directory,
           family,
@@ -295,6 +393,8 @@ async function resolveSources(
         profileLabel: profile.label,
         supported: true,
         note: null,
+        passwordImport: { supported: false, note: PASSWORDS_LOCKED },
+        passwordCount: 0,
         cookiesPath: path.join(profile.directory, "cookies.sqlite"),
         profileDirectory: profile.directory,
         family: FIREFOX_FAMILY,
@@ -308,10 +408,11 @@ export async function listBrowserImportSources(
   env: ImportEnvironment = defaultImportEnvironment(),
 ): Promise<DesktopBrowserImportSources> {
   const sources = (await resolveSources(env)).map(
-    ({ cookiesPath, profileDirectory, family, ...source }) => {
+    ({ cookiesPath, profileDirectory, family, passwordCount, ...source }) => {
       void cookiesPath;
       void profileDirectory;
       void family;
+      void passwordCount;
       return source;
     },
   );
@@ -319,7 +420,7 @@ export async function listBrowserImportSources(
     sources,
     note: sources.length
       ? null
-      : "No browser profiles with saved sign-ins were found on this device.",
+      : "No browser profiles with saved sign-ins or passwords were found on this device.",
   };
 }
 
@@ -368,23 +469,78 @@ export function decryptChromiumCookieValue(
   const prefix = buffer.subarray(0, 3).toString("latin1");
   if (prefix !== "v10" && prefix !== "v11") return null;
   if (prefix === "v11" && process.platform === "linux") return null;
-  let plain: Buffer;
+  let plain: Buffer | undefined;
+  let partial: Buffer | undefined;
+  let tail: Buffer | undefined;
   try {
     const decipher = createDecipheriv("aes-128-cbc", key, CHROMIUM_IV);
-    plain = Buffer.concat([
-      decipher.update(buffer.subarray(3)),
-      decipher.final(),
-    ]);
+    partial = decipher.update(buffer.subarray(3));
+    tail = decipher.final();
+    plain = Buffer.concat([partial, tail]);
+    if (schemaVersion >= 24) {
+      if (plain.length < 32) return null;
+      const digest = createHash("sha256").update(hostKey, "utf8").digest();
+      if (!digest.equals(plain.subarray(0, 32))) return null;
+      return plain.subarray(32).toString("utf8");
+    }
+    return plain.toString("utf8");
   } catch {
     return null;
+  } finally {
+    partial?.fill(0);
+    tail?.fill(0);
+    plain?.fill(0);
+    buffer.fill(0);
   }
-  if (schemaVersion >= 24) {
-    if (plain.length < 32) return null;
-    const digest = createHash("sha256").update(hostKey, "utf8").digest();
-    if (!digest.equals(plain.subarray(0, 32))) return null;
-    plain = plain.subarray(32);
+}
+
+/** Windows v10 is AES-256-GCM. App-bound v20 never reaches a decryptor. */
+function decryptWindowsPassword(
+  encrypted: Uint8Array,
+  key: Buffer,
+): string | null {
+  if (
+    encrypted.length < 32 ||
+    encrypted[0] !== 0x76 ||
+    encrypted[1] !== 0x31 ||
+    encrypted[2] !== 0x30
+  )
+    return null;
+  const bytes = Buffer.from(
+    encrypted.buffer,
+    encrypted.byteOffset,
+    encrypted.byteLength,
+  );
+  let partial: Buffer | undefined;
+  let plain: Buffer | undefined;
+  try {
+    const decipher = createDecipheriv(
+      "aes-256-gcm",
+      key,
+      bytes.subarray(3, 15),
+    );
+    decipher.setAuthTag(bytes.subarray(-16));
+    partial = decipher.update(bytes.subarray(15, -16));
+    plain = Buffer.concat([partial, decipher.final()]);
+    return plain.toString("utf8");
+  } catch {
+    return null;
+  } finally {
+    partial?.fill(0);
+    plain?.fill(0);
   }
-  return plain.toString("utf8");
+}
+
+async function windowsPasswordKey(profileDirectory: string): Promise<Buffer> {
+  const encrypted = await windowsEncryptedKey(profileDirectory);
+  try {
+    const key = await unprotectWindowsCurrentUserData(encrypted.subarray(5));
+    if (key.length === 32) return key;
+    key.fill(0);
+    throw new Error("Windows key is unavailable.");
+  } finally {
+    encrypted.fill(0);
+  }
 }
 
 /** Main-only explicit import. Uses the same Keychain consent as cookie import.
@@ -398,12 +554,18 @@ export async function readBrowserPasswords(
   );
   if (
     !source ||
-    env.platform === "win32" ||
     source.browser === "firefox" ||
-    !source.supported
+    !source.passwordImport.supported
   )
-    return { values: [], skipped: 0, unsupported: true };
-  const key = await chromiumKey(source.family, env);
+    return {
+      values: [],
+      skipped: source?.passwordCount ?? 0,
+      unsupported: true,
+    };
+  const key =
+    env.platform === "win32"
+      ? await windowsPasswordKey(source.profileDirectory)
+      : await chromiumKey(source.family, env);
   let snapshot: Awaited<ReturnType<typeof snapshotDatabase>> | null = null;
   try {
     snapshot = await snapshotDatabase(
@@ -429,7 +591,9 @@ export async function readBrowserPasswords(
             : origin;
         const password =
           row.password_value instanceof Uint8Array
-            ? decryptChromiumCookieValue(row.password_value, key, "", 0)
+            ? env.platform === "win32"
+              ? decryptWindowsPassword(row.password_value, key)
+              : decryptChromiumCookieValue(row.password_value, key, "", 0)
             : null;
         if (
           !origin ||
@@ -563,18 +727,23 @@ async function snapshotDatabase(source: string): Promise<{
   // The browser may hold the live file open; a private copy is read instead.
   const directory = await mkdtemp(path.join(tmpdir(), "nestor-import-"));
   const target = path.join(directory, "cookies.sqlite");
-  await copyFile(source, target);
-  for (const suffix of ["-wal", "-journal"]) {
-    try {
-      await copyFile(`${source}${suffix}`, `${target}${suffix}`);
-    } catch {
-      /* No write-ahead log to carry over. */
+  try {
+    await copyFile(source, target);
+    for (const suffix of ["-wal", "-journal"]) {
+      try {
+        await copyFile(`${source}${suffix}`, `${target}${suffix}`);
+      } catch {
+        /* No write-ahead log to carry over. */
+      }
     }
+    return {
+      path: target,
+      dispose: () => rm(directory, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    throw error;
   }
-  return {
-    path: target,
-    dispose: () => rm(directory, { recursive: true, force: true }),
-  };
 }
 
 /** BigInt columns become numbers; precision loss only affects far-future expiry. */
@@ -676,7 +845,7 @@ export async function importSignInsFromBrowser(
       "failed",
       "That browser profile is no longer available. Pick another one.",
     );
-  if (!source.supported)
+  if (!source.supported || !source.cookiesPath)
     return result(
       "unsupported",
       source.note ??
@@ -703,7 +872,11 @@ export async function importSignInsFromBrowser(
           `Keychain access was not granted, so nothing was imported from ${source.browserLabel}.`,
         );
       }
-      cookies = readChromiumCookies(snapshot.path, key);
+      try {
+        cookies = readChromiumCookies(snapshot.path, key);
+      } finally {
+        key.fill(0);
+      }
     }
   } catch {
     return result(
@@ -747,8 +920,9 @@ export async function listSignInSourcesByName(
 ): Promise<BrowserSignInSources> {
   const listed = await listBrowserImportSources(env);
   return {
-    sources: listed.sources.map(({ id, ...source }) => {
+    sources: listed.sources.map(({ id, passwordImport, ...source }) => {
       void id;
+      void passwordImport;
       return source;
     }),
     note: listed.note,

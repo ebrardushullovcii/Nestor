@@ -222,7 +222,12 @@ export function BrowserPasswordPanel({
                   type="button"
                   className="browser-import-source"
                   key={source.id}
-                  disabled={busy || listed?.available === false}
+                  disabled={
+                    busy ||
+                    listed?.available === false ||
+                    !source.passwordImport.supported
+                  }
+                  title={source.passwordImport.note ?? undefined}
                   onClick={() =>
                     run(async () => {
                       const result = await bridge.passwords.importFromBrowser({
@@ -236,6 +241,12 @@ export function BrowserPasswordPanel({
                   <span className="browser-import-source-text">
                     <span>{source.browserLabel}</span>
                     <small>{source.profileLabel}</small>
+                    {!source.passwordImport.supported && (
+                      <small>
+                        {source.passwordImport.note ??
+                          "Export passwords to CSV instead."}
+                      </small>
+                    )}
                   </span>
                 </button>
               ))}

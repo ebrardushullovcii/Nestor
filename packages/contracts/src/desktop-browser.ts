@@ -141,6 +141,11 @@ export const DesktopBrowserImportSourceSchema = z.object({
   profileLabel: z.string().max(120),
   supported: z.boolean(),
   note: z.string().max(300).nullable(),
+  /** Password capability is separate from sign-ins (which use cookies). */
+  passwordImport: z.object({
+    supported: z.boolean(),
+    note: z.string().max(300).nullable(),
+  }),
 });
 export type DesktopBrowserImportSource = z.infer<
   typeof DesktopBrowserImportSourceSchema
@@ -166,7 +171,11 @@ export type DesktopBrowserImportInput = z.infer<
  * path, so the Assistant chooses by browser and profile name instead.
  */
 export const BrowserSignInSourcesSchema = z.object({
-  sources: z.array(DesktopBrowserImportSourceSchema.omit({ id: true })).max(60),
+  sources: z
+    .array(
+      DesktopBrowserImportSourceSchema.omit({ id: true, passwordImport: true }),
+    )
+    .max(60),
   note: z.string().max(300).nullable(),
 });
 export type BrowserSignInSources = z.infer<typeof BrowserSignInSourcesSchema>;

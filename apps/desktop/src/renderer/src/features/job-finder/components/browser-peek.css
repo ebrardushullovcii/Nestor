@@ -729,6 +729,10 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   background: var(--secondary);
   border-color: var(--control-border);
 }
+.browser-import-source:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .browser-import-source > svg:last-child {
   color: var(--muted-foreground);
   opacity: 0;

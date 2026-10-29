@@ -1,5 +1,7 @@
 export const osIntegrationPackageReady = true;
 
+export { unprotectWindowsCurrentUserData } from "./windows-dpapi";
+
 export const appWindowKinds = [
   "main",
   "interview-panel",
