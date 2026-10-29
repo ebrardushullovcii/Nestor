@@ -40,6 +40,7 @@ import { normalizeSignal } from "./control-classification";
 import { localStepPreflight, localStepAdvanced } from "./local-step-preflight";
 import {
   fillPressFor,
+  cookieConsentChoice,
   recordFillPress,
   type FillPressState,
 } from "./fill-presses";
@@ -2077,6 +2078,14 @@ export async function executeApplyProposal(
           deps,
         );
       }
+      const cookie = cookieConsentChoice(observation, proposal.ref);
+      if (cookie?.kind === "blocked_cookie_consent")
+        return {
+          kind: "refused",
+          reason:
+            "This banner offers no privacy-preserving dismissal. Do not accept optional cookies or tracking.",
+          observation,
+        };
       // Ordinary filling presses and local wizard steps have separate fences.
       const fillPress = fillPressFor({
         config,

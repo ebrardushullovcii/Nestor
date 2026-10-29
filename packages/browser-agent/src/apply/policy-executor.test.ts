@@ -330,7 +330,13 @@ describe("apply policy executor", () => {
           required: true,
           invalid: result === "invalid",
         }),
-        rawControl({index: 1, label: "Email", inputType: "email", value: "robin@example.test", required: true}),
+        rawControl({
+          index: 1,
+          label: "Email",
+          inputType: "email",
+          value: "robin@example.test",
+          required: true,
+        }),
       ],
       actions: [
         {
@@ -2911,7 +2917,7 @@ describe("a site that saves as you go", () => {
       expect(outcomes[0]?.kind).toBe("moved");
     });
 
-    test("a banner without Reject is dismissed with Necessary only, else Accept", async () => {
+    test("a banner without Reject uses Necessary only, never an opt-in fallback", async () => {
       const necessary = rawPage({
         actions: banner(["Accept all cookies", "Necessary cookies only"]),
       });
@@ -2919,8 +2925,43 @@ describe("a site that saves as you go", () => {
       const acceptOnly = rawPage({
         actions: banner(["OK"], "We use cookies to run this site."),
       });
-      expect((await fillPresses(acceptOnly, ["a0"])).pressed).toEqual(["a0"]);
+      expect((await fillPresses(acceptOnly, ["a0"])).pressed).toEqual([]);
     });
+
+    test("privacy-labelled banners use essential only in Fill mode", async () => {
+      const page = rawPage({
+        actions: banner(
+          ["Use essential only", "Allow all"],
+          "Your privacy matters",
+        ),
+      });
+      expect((await fillPresses(page, ["a0"])).pressed).toEqual(["a0"]);
+      expect((await fillPresses(page, ["a1"])).pressed).toEqual(["a0"]);
+    });
+
+    test.each([false, true])(
+      "optional cookie consent is refused even when intermediate writes are authorized: %s",
+      async (intermediateWritesAuthorized) => {
+        const page = rawPage({
+          actions: banner(["Accept all"], "Your privacy matters"),
+        });
+        const pressed = vi.fn();
+        const { config } = configFor(page, {
+          hands: { clickElement: pressed },
+        });
+        const outcome = await executeApplyProposal(
+          { tool: "click", ref: "a0" },
+          observationOf(page).signature,
+          {
+            config: { ...config, intermediateWritesAuthorized },
+            now,
+            guardState: createApplyGuardState(),
+          },
+        );
+        expect(outcome.kind).toBe("refused");
+        expect(pressed).not.toHaveBeenCalled();
+      },
+    );
 
     test("Accept outside a cookie banner is the person's", async () => {
       const page = rawPage({ actions: banner(["Accept"], "Offer details") });
