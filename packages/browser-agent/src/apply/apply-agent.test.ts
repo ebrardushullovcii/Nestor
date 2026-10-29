@@ -10106,11 +10106,19 @@ test("a custom checkbox the page draws itself is a checkbox, and its answer is i
 
 test("listing discovery changes only the tail of the shared applicant prompt", () => {
   const sources = config(page()).sources;
-  const first = applicationModelFacts({...sources,listingDiscovery:{label:"First board",url:"https://first.example/job"}}, {payDisclosed:false});
-  const second = applicationModelFacts({...sources,listingDiscovery:{label:"Second board",url:"https://second.example/job"}}, {payDisclosed:false});
+  const first = applicationModelFacts(
+    { ...sources, listingDiscovery: { label: "First board", url: "https://first.example/job" } },
+    { payDisclosed: false },
+  );
+  const second = applicationModelFacts(
+    { ...sources, listingDiscovery: { label: "Second board", url: "https://second.example/job" } },
+    { payDisclosed: false },
+  );
   const prefix = first.slice(0, first.indexOf(',"listingDiscovery":'));
   expect(prefix.length).toBeGreaterThan(100);
   expect(second.startsWith(prefix)).toBe(true);
-  expect(JSON.parse(first).listingDiscovery.label).toBe("First board");
-  expect(JSON.parse(second).listingDiscovery.label).toBe("Second board");
+  const firstData = JSON.parse(first) as { listingDiscovery: { label: string } };
+  const secondData = JSON.parse(second) as { listingDiscovery: { label: string } };
+  expect(firstData.listingDiscovery.label).toBe("First board");
+  expect(secondData.listingDiscovery.label).toBe("Second board");
 });

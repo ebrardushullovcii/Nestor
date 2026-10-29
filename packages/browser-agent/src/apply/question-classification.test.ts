@@ -1010,8 +1010,10 @@ test("a GitHub help-text change is read again instead of reusing the URL reading
 
 test("shares individual meanings across changed batches and rebinds current saved answers", async () => {
   const client: LLMClient = {
-    chatWithTools: vi.fn((messages) =>
-      Promise.resolve(reportFor(JSON.parse(messages[1].content))),
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) =>
+      Promise.resolve(
+        reportFor(JSON.parse(messages[1].content) as { question: string }[]),
+      ),
     ),
   };
   const cacheScope = {};
@@ -1050,9 +1052,11 @@ test("shares individual meanings across changed batches and rebinds current save
   const result = await next([...phone, ...email]);
   expect(result.get("Email")?.answerTags?.sourceId).toBe("answerLibrary.new");
   expect(
-    JSON.parse(vi.mocked(client.chatWithTools).mock.calls[1][0][1].content).map(
-      (q: { question: string }) => q.question,
-    ),
+    (
+      JSON.parse(
+        vi.mocked(client.chatWithTools).mock.calls[1][0][1].content,
+      ) as { question: string }[]
+    ).map((q) => q.question),
   ).toEqual(["Phone"]);
   sources = [];
   expect(next.settled(email)?.get("Email")?.answerTags?.sourceId).toBeNull();
@@ -1197,8 +1201,10 @@ test("inactive disabled uploads do not reread an earlier wizard step", async () 
 
 test("another form root's help text is scoped to its controls; global own-word rules remain conservative", async () => {
   const client: LLMClient = {
-    chatWithTools: vi.fn((messages) =>
-      Promise.resolve(reportFor(JSON.parse(messages[1].content))),
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) =>
+      Promise.resolve(
+        reportFor(JSON.parse(messages[1].content) as { question: string }[]),
+      ),
     ),
   };
   const classify = createQuestionClassifier({ client });
