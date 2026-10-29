@@ -592,7 +592,8 @@ export async function writeResume(
                       // rather than exporting a title with no bullets. Two
                       // source bullets are enough to avoid an empty role; the
                       // page-fill pass can show more when there is room.
-                      ...(section.included === false || entry.included === false
+                      ...(section.included === false ||
+                      entry.included === false
                         ? {
                             summary: entry.summary ?? null,
                             bullets: entry.bullets.map((bullet, index) => ({
@@ -767,29 +768,44 @@ export async function writeResume(
       : alignedDraft;
   const measure = async (draft: ResumeDraft) => {
     const rendered = await deps.documentManager.renderResumeArtifact({
-      ...(signal ? { signal } : {}), job, profile,
+      ...(signal ? { signal } : {}),
+      job,
+      profile,
       renderDocument: buildResumeRenderDocument(profile, draft),
-      templateId: draft.templateId, settings,
+      templateId: draft.templateId,
+      settings,
     });
     await deps.documentManager.discardResumeArtifact?.(rendered);
     return rendered;
   };
   const canMeasure = templates.some(isResumeTemplateApplyEligible);
-  const balanced = canMeasure ? await balanceResumePages({
-    draft: input.level === "tailored" ? prioritizeMetricBullets(finalDraft) : finalDraft,
-    profile, measure,
-  }) : finalDraft;
+  const balanced = canMeasure
+    ? await balanceResumePages({
+        draft:
+          input.level === "tailored"
+            ? prioritizeMetricBullets(finalDraft)
+            : finalDraft,
+        profile,
+        measure,
+      })
+    : finalDraft;
   // Restoring saved facts for page fill (or settling a failed line) can put
   // source-language prose back beside translated fields. Finish those display
   // edits through the existing whole-document translator, then measure again:
   // translated wording can take more space. Ordinary same-language writes
   // retain the one writer call and need no translation call.
   const localized = hasUntranslatedResumeSourceProse(balanced, profile)
-    ? await writeResumeLanguage({ aiClient: deps.aiClient, draft: balanced, job, ...(signal ? { signal } : {}) })
+    ? await writeResumeLanguage({
+        aiClient: deps.aiClient,
+        draft: balanced,
+        job,
+        ...(signal ? { signal } : {}),
+      })
     : balanced;
-  const complete = localized !== balanced && canMeasure
-    ? await balanceResumePages({ draft: localized, profile, measure })
-    : localized;
+  const complete =
+    localized !== balanced && canMeasure
+      ? await balanceResumePages({ draft: localized, profile, measure })
+      : localized;
   return { ...complete, status: "draft" };
 }
 
