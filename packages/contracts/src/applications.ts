@@ -75,6 +75,13 @@ export const ApplicationTargetSchema = z
   .strict();
 export type ApplicationTarget = z.infer<typeof ApplicationTargetSchema>;
 export const ApplicationCommandResultSchema = z.boolean();
+/** The person checked the site after a send the app could not confirm. */
+export const ResolveUncertainSendInputSchema = z
+  .object({ id: ApplicationIdSchema, sent: z.boolean() })
+  .strict();
+export type ResolveUncertainSendInput = z.infer<
+  typeof ResolveUncertainSendInputSchema
+>;
 export const ApplicationsForJobsInputSchema = z
   .object({ jobIds: z.array(JobIdSchema).max(200) })
   .strict();

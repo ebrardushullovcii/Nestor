@@ -52,7 +52,7 @@ export type ProfileSetupImportNoticeModel =
       actionLabel: string;
     }
   | {
-      kind: "read_without_ai";
+      kind: "read_without_ai" | "partial";
       key: string;
       message: string;
       actionLabel: string;
@@ -87,6 +87,25 @@ export function buildProfileSetupImportNotice(input: {
       actionLabel: canRetrySavedResumeImport(run)
         ? `Try ${run.sourceResumeFileName} again`
         : "Choose another file",
+    };
+  }
+  const unread =
+    run?.timing?.textStages.filter((stage) => stage.status !== "completed") ??
+    [];
+  if (run && unread.length > 0) {
+    const labels = {
+      identity_summary:
+        "name, contact details, summary, job preferences and work permissions",
+      experience: "work history",
+      background:
+        "education, skills, languages, certifications, projects and links",
+      shared_memory: "reusable evidence and application answers",
+    };
+    return {
+      kind: "partial",
+      key: `partial:${run.id}`,
+      message: `Your resume was only partly imported. These sections could not be read: ${unread.map((stage) => labels[stage.stage]).join("; ")}. The details that did import are saved.`,
+      actionLabel: "Read missing sections again",
     };
   }
   const summary = getResumeImportStageFallbackSummary(run);
@@ -139,7 +158,7 @@ export function ProfileSetupImportNotice(props: {
     return null;
   }
   const onAction =
-    notice.kind !== "read_without_ai"
+    notice.kind !== "read_without_ai" && notice.kind !== "partial"
       ? canRetrySavedResumeImport(props.latestResumeImportRun)
         ? props.onRetryInterruptedImport
         : props.onImportResume
@@ -158,7 +177,7 @@ export function ProfileSetupImportNotice(props: {
             disabled={Boolean(props.importDisabledReason)}
             onClick={onAction}
             pending={
-              notice.kind !== "read_without_ai"
+              notice.kind !== "read_without_ai" && notice.kind !== "partial"
                 ? props.isImportResumePending
                 : props.isAnalyzeProfilePending
             }

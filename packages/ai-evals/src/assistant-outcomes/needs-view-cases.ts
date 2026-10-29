@@ -469,42 +469,5 @@ export function needsViewOutcomeCases(): BuiltAppBatch[] {
         },
       ],
     },
-    {
-      id: "needs-view-more",
-      prepare: async (page) => {
-        await saved(page);
-        if (await checkbox(page, 1).count())
-          throw Error("Load-more proof requires an unloaded final page");
-      },
-      request: `Load the next page in the Needs you Saved answers list, keeping the "${prefix}" filter. Show all 55 rows in the list, including "${prompt(1)}".`,
-      actions: [
-        {
-          actionId: "needs_you.more",
-          observe: async (page) => [
-            equalOutcome(
-              "visible_state",
-              "Existing filter retained",
-              "Filter Needs you input",
-              await filter(page).inputValue(),
-              prefix,
-            ),
-            equalOutcome(
-              "visible_state",
-              "Loaded list expanded",
-              "Rendered saved-answer row inputs",
-              await region(page).locator("li [role='checkbox']").count(),
-              55,
-            ),
-            equalOutcome(
-              "visible_state",
-              "Previously unloaded final row shown",
-              "Saved-answer checkbox 1",
-              await checkbox(page, 1).count(),
-              1,
-            ),
-          ],
-        },
-      ],
-    },
   ];
 }

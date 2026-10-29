@@ -584,7 +584,14 @@ export function withEmbeddedBrowserActivity(
               browser.releaseOwnedTabs(key);
               applicationSources.delete(key);
             }
-            return focused;
+            // Reopening can create/adopt a native tab during the await.
+            // Show only that exact binding, never the host's current tab.
+            const restoredTabs = focused
+              ? browser.getApplicationTabIds(key)
+              : [];
+            return (
+              restoredTabs.length === 1 && browser.showTab(restoredTabs[0]!)
+            );
           },
         }
       : {}),

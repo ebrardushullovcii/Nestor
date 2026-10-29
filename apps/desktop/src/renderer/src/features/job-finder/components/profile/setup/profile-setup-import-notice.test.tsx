@@ -105,7 +105,10 @@ describe("what the last import left behind, on whichever step setup opens", () =
       failureKind: "interrupted",
     });
     expect(
-      buildProfileSetupImportNotice({ latestResumeImportRun: olderRun, profile }),
+      buildProfileSetupImportNotice({
+        latestResumeImportRun: olderRun,
+        profile,
+      }),
     ).toMatchObject({
       kind: "interrupted",
       // Today's sentence, not the one the old run saved.
@@ -142,6 +145,43 @@ describe("what the last import left behind, on whichever step setup opens", () =
     fireEvent.click(screen.getByRole("button", { name: "Read it again" }));
     expect(onAnalyzeProfileFromResume).toHaveBeenCalledOnce();
   });
+
+  it.each(["failed", "timed_out"] as const)(
+    "names a %s section and retries the saved resume in one press",
+    (status) => {
+      const onAnalyzeProfileFromResume = vi.fn();
+      const run = ResumeImportRunSchema.parse({
+        ...readWithoutAiRun,
+        timing: {
+          ...readWithoutAiRun.timing,
+          textStages: [
+            { stage: "identity_summary", status: "completed", durationMs: 10 },
+            { stage: "background", status, durationMs: 30000 },
+          ],
+        },
+      });
+      render(
+        <ProfileSetupImportNotice
+          latestResumeImportRun={run}
+          profile={profile}
+          isImportResumePending={false}
+          isAnalyzeProfilePending={false}
+          importDisabledReason={null}
+          onAnalyzeProfileFromResume={onAnalyzeProfileFromResume}
+        />,
+      );
+      expect(screen.getByRole("status").textContent).toContain(
+        "education, skills, languages, certifications, projects and links",
+      );
+      expect(screen.getByRole("status").textContent).toContain(
+        "details that did import are saved",
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Read missing sections again" }),
+      );
+      expect(onAnalyzeProfileFromResume).toHaveBeenCalledOnce();
+    },
+  );
 
   it("can be dismissed", () => {
     render(

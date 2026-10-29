@@ -503,7 +503,10 @@ function context(extra = {}) {
     get page() {
       return mainPage();
     },
-    app,
+    // A getter, like page: a restart replaces the app.
+    get app() {
+      return app;
+    },
     sites: sites && {
       url: sites.url,
       log: sites.log,
@@ -554,6 +557,8 @@ function context(extra = {}) {
         })),
       ),
     sleep,
+    // Close and relaunch on the same data, as `drive restart` does.
+    restart: () => commands.restart(),
     ...extra,
   };
 }

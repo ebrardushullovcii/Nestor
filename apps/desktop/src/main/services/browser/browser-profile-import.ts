@@ -14,11 +14,13 @@ import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import type { CookiesSetDetails } from "electron";
 import type {
+  BrowserSignInSources,
   DesktopBrowserImportBrowser,
   DesktopBrowserImportInput,
   DesktopBrowserImportResult,
   DesktopBrowserImportSource,
   DesktopBrowserImportSources,
+  ImportBrowserSignInsInput,
 } from "@nestor/contracts";
 import type { EmbeddedBrowser } from "./embedded-browser";
 import type { PasswordValue } from "./password-vault";
@@ -737,4 +739,53 @@ export async function importSignInsFromBrowser(
     imported,
     sites.size,
   );
+}
+
+/** The device's profiles for the Assistant: names only, never ids or paths. */
+export async function listSignInSourcesByName(
+  env: ImportEnvironment = defaultImportEnvironment(),
+): Promise<BrowserSignInSources> {
+  const listed = await listBrowserImportSources(env);
+  return {
+    sources: listed.sources.map(({ id, ...source }) => {
+      void id;
+      return source;
+    }),
+    note: listed.note,
+  };
+}
+
+/** Imports from the profile the person named by browser and profile name. */
+export async function importSignInsByName(
+  host: EmbeddedBrowser,
+  choice: ImportBrowserSignInsInput,
+  env: ImportEnvironment = defaultImportEnvironment(),
+): Promise<DesktopBrowserImportResult> {
+  const label =
+    [...CHROMIUM_FAMILIES, FIREFOX_FAMILY].find(
+      (family) => family.browser === choice.browser,
+    )?.label ?? choice.browser;
+  const profiles = (await listBrowserImportSources(env)).sources.filter(
+    (source) => source.browser === choice.browser,
+  );
+  const wanted = choice.profileLabel?.toLowerCase();
+  const matches = wanted
+    ? profiles.filter((source) => source.profileLabel.toLowerCase() === wanted)
+    : profiles;
+  // Every profile of a browser this device cannot read gives the same answer.
+  const chosen =
+    matches.length === 1 ||
+    (matches.length > 1 && matches.every((source) => !source.supported))
+      ? matches[0]
+      : undefined;
+  if (!chosen)
+    return {
+      status: "failed",
+      cookieCount: 0,
+      siteCount: 0,
+      message: profiles.length
+        ? `${label} has more than one profile here: ${profiles.map((source) => source.profileLabel).join(", ")}. Say which one.`
+        : `No ${label} profile with saved sign-ins was found on this device.`,
+    };
+  return importSignInsFromBrowser(host, { sourceId: chosen.id }, env);
 }

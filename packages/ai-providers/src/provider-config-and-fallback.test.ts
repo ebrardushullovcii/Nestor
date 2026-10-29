@@ -659,20 +659,25 @@ describe("ai provider config and fallback behavior", () => {
         (error: unknown) => error,
       );
 
-      await vi.advanceTimersByTimeAsync(299_999);
+      await vi.advanceTimersByTimeAsync(29_999);
       expect(settled).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2_001);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(268_000);
 
-      // Silent attempts are retried inside the 300s budget (idle clock 120s);
-      // a timeout is not asked again after that, and nothing is guessed.
+      // Each silent read is retried after 30s. Five failed attempts stop
+      // before the unchanged total budget, without an outer retry loop.
       const error = await outcome;
-      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(fetchSpy).toHaveBeenCalledTimes(5);
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).toContain(
         "could not read your name, contact details and summary",
       );
       expect((error as Error).message).toContain("Nothing was guessed");
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("300s"));
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("30s of silence"),
+      );
     } finally {
       globalThis.fetch = originalFetch;
       errorSpy.mockRestore();

@@ -88,7 +88,7 @@ type Pressable = (ApplyFormAction | ApplyClickable) & { formAction?: string };
 const FORM_STEP_WORDS =
   /\b(?:submit|send|apply|application|save|continue|next|finish|complete|review|done|confirm|post|proceed)\b/u;
 
-const COOKIE_PART = /\b(?:cookies?|consent|gdpr|tracking)\b/u;
+const COOKIE_PART = /\b(?:cookies?|consent|gdpr|tracking|privacy)\b/u;
 const COOKIE_REJECT =
   /^(?:i )?(?:reject|decline|deny|refuse|disagree)(?: all)?(?: optional| non essential| additional)?(?: cookies)?$/u;
 const COOKIE_NECESSARY =
@@ -122,6 +122,34 @@ function pressables(observation: ApplyFormObservation): Pressable[] {
   );
 }
 
+/** Routine privacy mechanics, shared by Fill and Send modes. A banner with
+ * only an opt-in is never permission to accept optional tracking. */
+export function cookieConsentChoice(
+  observation: ApplyFormObservation,
+  ref: string,
+):
+  | Extract<FillPress, { kind: "cookie_banner" }>
+  | { kind: "blocked_cookie_consent" }
+  | null {
+  const entries = pressables(observation);
+  const entry = entries.find((candidate) => candidate.ref === ref);
+  if (!entry || cookieChoiceRank(entry) === null) return null;
+  const banner = entries.filter(
+    (candidate) =>
+      cookieChoiceRank(candidate) !== null &&
+      candidate.section === entry.section &&
+      !candidate.formAction &&
+      !("submitsForm" in candidate && candidate.submitsForm),
+  );
+  const safe = banner
+    .filter((candidate) => (cookieChoiceRank(candidate) ?? 2) < 2)
+    .sort((a, b) => (cookieChoiceRank(a) ?? 2) - (cookieChoiceRank(b) ?? 2));
+  const best = safe.find((candidate) => candidate.ref === ref) ?? safe[0];
+  return best
+    ? { kind: "cookie_banner", ref: best.ref, label: best.label }
+    : { kind: "blocked_cookie_consent" };
+}
+
 /**
  * The press Fill in for me makes for the one the model asked for, or null
  * when that one is the person's. For a cookie banner it may be another
@@ -149,24 +177,8 @@ export function fillPressFor(input: {
     return { kind: "field_part", ref };
   const label = normalizeSignal(entry.label);
 
-  if (cookieChoiceRank(entry) !== null) {
-    const banner = pressables(observation)
-      .filter(
-        (candidate) =>
-          cookieChoiceRank(candidate) !== null &&
-          (!entry.section || candidate.section === entry.section),
-      )
-      .sort((a, b) => (cookieChoiceRank(a) ?? 3) - (cookieChoiceRank(b) ?? 3));
-    const [first] = banner;
-    if (!first) return null;
-    const best =
-      banner.find(
-        (candidate) =>
-          candidate.ref === ref &&
-          cookieChoiceRank(candidate) === cookieChoiceRank(first),
-      ) ?? first;
-    return { kind: "cookie_banner", ref: best.ref, label: best.label };
-  }
+  const cookie = cookieConsentChoice(observation, ref);
+  if (cookie) return cookie.kind === "cookie_banner" ? cookie : null;
 
   // The button that opens the form, before anything on it is filled: the
   // run's first, on a page where no field holds an answer yet, and not a

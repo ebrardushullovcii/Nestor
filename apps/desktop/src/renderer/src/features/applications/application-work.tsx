@@ -1,5 +1,5 @@
 import type { ApplicationDetails } from "@nestor/contracts";
-import { ExternalLink, RotateCcw, Square } from "lucide-react";
+import { Check, ExternalLink, RotateCcw, Square, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@renderer/components/ui/button";
@@ -59,24 +59,55 @@ export function ApplicationWork(props: { jobId: number }) {
 }
 
 /**
- * Open the page Apply prepared, stop Apply before it sends, or try a run
- * that failed before sending again.
+ * Open the page Apply prepared, stop Apply before it sends, start a run
+ * that failed or was stopped before sending again, or settle a send the app
+ * could not confirm with what the person saw on the site.
  */
 function ApplyActions(props: { details: ApplicationDetails }) {
   const { showToast } = useToast();
-  const [busy, setBusy] = useState<"open" | "stop" | "retry" | null>(null);
+  const [busy, setBusy] = useState<
+    "open" | "stop" | "retry" | "sent" | "not_sent" | null
+  >(null);
   const { application, receipt } = props.details;
   const canOpen = ["ready", "needs_you"].includes(application.state);
   const canStop = ["queued", "running", "needs_you", "ready"].includes(
     application.state,
   );
-  // Only a run that never reached a send: anything the guarded send tried
+  // Only a run that never reached a send, or one stopped after the site or
+  // the person said it was not sent: anything else the guarded send tried
   // keeps its receipt, and trying again could send it twice.
   const canRetry =
-    application.state === "failed" &&
-    receipt === null &&
-    application.submittedAt === null;
-  if (!canOpen && !canStop && !canRetry) return null;
+    ["failed", "stopped"].includes(application.state) &&
+    application.submittedAt === null &&
+    (receipt === null ||
+      (application.state === "stopped" &&
+        receipt.outcome === "not_submitted"));
+  const canSettle = application.state === "uncertain";
+  if (!canOpen && !canStop && !canRetry && !canSettle) return null;
+
+  const settle = async (sent: boolean) => {
+    setBusy(sent ? "sent" : "not_sent");
+    try {
+      const done = await window.nestor.jobFinder.resolveUncertainSend({
+        id: application.id,
+        sent,
+      });
+      showToast(
+        done
+          ? sent
+            ? { title: "Moved to Applied" }
+            : {
+                title: "Marked as not sent",
+                description: "Apply won't send it again by itself.",
+              }
+          : { title: "It had already moved on.", tone: "warning" },
+      );
+    } catch (error) {
+      showToast({ title: describeError(error), tone: "warning" });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const retry = async () => {
     setBusy("retry");
@@ -87,7 +118,10 @@ function ApplyActions(props: { details: ApplicationDetails }) {
       showToast(
         result.queued > 0
           ? {
-              title: "Trying again",
+              title:
+                application.state === "stopped"
+                  ? "Applying again"
+                  : "Trying again",
               description:
                 "Apply fills the form in again with your saved answers.",
             }
@@ -156,8 +190,31 @@ function ApplyActions(props: { details: ApplicationDetails }) {
           size="toolbar"
         >
           <RotateCcw aria-hidden />
-          Try again
+          {application.state === "stopped" ? "Apply again" : "Try again"}
         </Button>
+      ) : null}
+      {canSettle ? (
+        <>
+          <Button
+            disabled={busy !== null}
+            onClick={() => void settle(true)}
+            pending={busy === "sent"}
+            size="toolbar"
+          >
+            <Check aria-hidden />
+            It went through
+          </Button>
+          <Button
+            disabled={busy !== null}
+            onClick={() => void settle(false)}
+            pending={busy === "not_sent"}
+            size="toolbar"
+            variant="outline"
+          >
+            <X aria-hidden />
+            It didn’t go through
+          </Button>
+        </>
       ) : null}
       {canOpen ? (
         <Button

@@ -265,7 +265,7 @@ it("requires a send instruction in Fill mode; Open and Stop use the work id and 
   expect(send).not.toHaveBeenCalled();
   await tools.find((t) => t.name === "open_application")!.execute(target, ctx);
   expect(open).toHaveBeenCalledWith(target.id);
-  expect(browser).toHaveBeenCalledWith({ type: "open" });
+  expect(browser).not.toHaveBeenCalled(); // The service owns the exact page (or queues its refill).
   await record(ctx, { ids }, "prepare_and_send");
   await sendTool.execute(target, ctx);
   expect(send).toHaveBeenCalledOnce();

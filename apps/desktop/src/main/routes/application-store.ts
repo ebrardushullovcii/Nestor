@@ -15,6 +15,7 @@ import {
   NeedsYouPageSchema,
   AnswerNeedsYouInputSchema,
   AnswerNeedsYouResultSchema,
+  ResolveUncertainSendInputSchema,
   type ApplicationAutomationMode,
 } from "@nestor/contracts";
 import {
@@ -27,7 +28,6 @@ import { getApplicationStore } from "../services/job-finder/application-store";
 import { getJobStore } from "../services/job-store";
 import { isDesktopTestApiEnabled } from "../services/job-finder/test-api";
 import { getApplicationService } from "../services/applications";
-import { loadEmbeddedBrowser } from "../services/browser/load-embedded-browser";
 import { startJobFinderRuntime } from "../services/job-finder/runtime";
 
 /** The registered Assistant actions and preload bridge execute the same commands. */
@@ -93,12 +93,38 @@ export async function executeApplicationStoreCommand(
       return (await getApplicationService()).sendPrepared(
         ApplicationTargetSchema.parse(input).id,
       );
+    case "resolve-uncertain-send": {
+      const { id, sent } = ResolveUncertainSendInputSchema.parse(input);
+      // A send the app made keeps an authority record, settled with the row.
+      // The person's own press, or a send the app closed during, has none.
+      const receipt = store.getSubmissionReceipt(id);
+      if (receipt?.outcome === "outcome_uncertain") {
+        const { getJobFinderApplicationAuthorityService } =
+          await import("../services/job-finder");
+        const { status } =
+          await getJobFinderApplicationAuthorityService().resolveSubmissionOutcome(
+            {
+              uncertainOutcomeId: receipt.id,
+              resolution: sent ? "submitted" : "not_submitted",
+              confirmedOnEmployerSite: true,
+            },
+          );
+        if (status !== "missing")
+          return status === "recorded" || status === "duplicate";
+      }
+      await startJobFinderRuntime();
+      return ApplicationCommandResultSchema.parse(
+        await (await getApplicationService()).resolveUncertainByPerson(id, sent),
+      );
+    }
     case "open-application": {
       await startJobFinderRuntime();
       const opened = await (
         await getApplicationService()
       ).open(ApplicationTargetSchema.parse(input).id);
-      if (opened) await (await loadEmbeddedBrowser()).command({ type: "open" });
+      // open() focuses the exact retained binding. A true result can also
+      // mean a lost page was queued for refill: never expose the active tab
+      // of some other application while that work runs in the background.
       return ApplicationCommandResultSchema.parse(opened);
     }
     case "list-needs-you":
@@ -122,6 +148,7 @@ export function registerApplicationStoreRoutes(ipcMain: IpcMain): void {
     "get-application-details",
     "stop-application",
     "open-application",
+    "resolve-uncertain-send",
     "list-needs-you",
     "answer-needs-you",
   ]) {

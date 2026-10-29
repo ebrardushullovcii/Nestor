@@ -800,7 +800,7 @@ export function createApplicationStore(store: JobStore) {
             WHERE n.application_id = applications.id AND t.kind = 'question'
               AND t.input = 'file' AND t.resolved_at IS NULL) THEN 'needs_you' ELSE ? END,
            error = ?, updated_at = ?
-           WHERE id = ? AND attempt = ? AND state = 'running' RETURNING job_id`,
+           WHERE id = ? AND attempt = ? AND state = 'running' RETURNING job_id, state`,
         ).get(
           input.state,
           input.state,
@@ -808,7 +808,25 @@ export function createApplicationStore(store: JobStore) {
           Date.now(),
           input.id,
           input.attempt,
-        ) as { job_id: number } | undefined;
+        ) as { job_id: number; state: string } | undefined;
+        // A Ready form waits on nothing: an earlier attempt's open questions
+        // that this attempt never asked again (a press handed over on a page
+        // the refill got past) close. The delete trigger resolves each task
+        // once no application waits on it.
+        if (row?.state === "ready") {
+          const stale = sql(`DELETE FROM application_needs_you
+            WHERE application_id = ? AND attempt < ? AND task_id IN (
+              SELECT id FROM needs_you WHERE kind = 'question' AND resolved_at IS NULL)
+            RETURNING task_id`).all(input.id, input.attempt) as {
+            task_id: number;
+          }[];
+          for (const { task_id } of stale)
+            sql(`DELETE FROM needs_you_drafts WHERE task_id = ? AND EXISTS (
+              SELECT 1 FROM needs_you WHERE id = ? AND resolved_at IS NOT NULL)`).run(
+              task_id,
+              task_id,
+            );
+        }
         if (row) changed([row.job_id]);
         return !!row;
       });

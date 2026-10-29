@@ -273,7 +273,7 @@ it("applies the jobs on this page of Approved, next to all and the ticked ones",
   expect("ids" in sent.selection && sent.selection.ids).toHaveLength(50);
 });
 
-it("an empty tab offers the next step: the other tab when it has jobs, else Find jobs", async () => {
+it("opens on Approved when nothing waits for review, and an empty tab offers the next step", async () => {
   approveOriginalResumesForTests(store, ids);
   render(
     <MemoryRouter>
@@ -282,7 +282,9 @@ it("an empty tab offers the next step: the other tab when it has jobs, else Find
       </ToastProvider>
     </MemoryRouter>,
   );
-  // Every resume is approved: To review is empty, Approved holds three.
+  // Every resume is approved: the screen opens where the jobs are.
+  await screen.findByRole("button", { name: "Apply to all 3 jobs" });
+  fireEvent.click(screen.getByRole("button", { name: "To review 0" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "See 3 approved jobs" }),
   );
@@ -290,4 +292,19 @@ it("an empty tab offers the next step: the other tab when it has jobs, else Find
   for (const id of ids) send(id);
   // Both tabs are empty now: the way on is Find jobs.
   expect(await screen.findByRole("button", { name: "Find jobs" })).toBeTruthy();
+});
+
+it("stays on To review when its last resume is approved during the visit", async () => {
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <ShortlistedScreen />
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByRole("button", { name: "To review 3" });
+  approveOriginalResumesForTests(store, ids);
+  expect(
+    await screen.findByRole("button", { name: "See 3 approved jobs" }),
+  ).toBeTruthy();
 });

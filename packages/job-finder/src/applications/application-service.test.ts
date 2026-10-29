@@ -1931,6 +1931,41 @@ it.each(["signIn", "createAccounts", "solveCaptchas"] as const)(
   },
 );
 
+it("the person's word settles a send the app could not confirm, with or without its receipt", async () => {
+  const f = await setup(2);
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  // The app closed during both sends, so neither left a receipt.
+  const sent = f.applications.claimNext()!;
+  f.applications.beginSubmission(sent.id, sent.attempt);
+  const notSent = f.applications.claimNext()!;
+  f.applications.beginSubmission(notSent.id, notSent.attempt);
+  await f.service.start();
+  expect(f.applications.getApplication(sent.id)?.state).toBe("uncertain");
+  expect(f.applications.getSubmissionReceipt(sent.id)).toBeNull();
+
+  expect(await f.service.resolveUncertainByPerson(sent.id, true)).toBe(true);
+  expect(f.applications.getApplication(sent.id)?.state).toBe("submitted");
+  expect(f.jobs.getJob(sent.jobId)?.stage).toBe("applied");
+  expect(f.applications.getSubmissionReceipt(sent.id)).toMatchObject({
+    outcome: "submitted",
+    evidence: [expect.objectContaining({ kind: "operator_confirmation" })],
+  });
+
+  expect(await f.service.resolveUncertainByPerson(notSent.id, false)).toBe(
+    true,
+  );
+  expect(f.applications.getApplication(notSent.id)?.state).toBe("stopped");
+  expect(f.jobs.getJob(notSent.jobId)?.stage).toBe("resume");
+  // A settled row takes no second word. Only the person's own Apply takes
+  // the unsent one again; the sent one stays sent.
+  expect(await f.service.resolveUncertainByPerson(sent.id, false)).toBe(false);
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+  expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
+    1,
+  );
+  expect(f.applications.getApplication(sent.id)?.state).toBe("submitted");
+});
+
 it("automatically carries every waiting page on after one site sign-in and MFA, checking each checkpoint", async () => {
   const f = await setup(3);
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });

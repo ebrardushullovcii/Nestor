@@ -50,6 +50,9 @@ import {
   type JobSearchSettings,
   type JobSearchStatus,
   WriteClipboardTextInputSchema,
+  ImportBrowserSignInsInputSchema,
+  type BrowserSignInSources,
+  type ImportBrowserSignInsInput,
   type JobCommandOutputs,
   type ResumeCommandOutputs,
   type TrackerCommandOutputs,
@@ -129,6 +132,7 @@ export interface AssistantLaneRecorder {
   }[];
   searches: string[];
   clipboard: string[];
+  signInImports: ImportBrowserSignInsInput[];
   applications: { jobIds: string[]; mode: string }[];
   sends: string[][];
 }
@@ -746,6 +750,38 @@ function recordingPorts(
         );
       if (actionId === "get-activity")
         return Promise.resolve(createActivityStore(store).feed());
+      if (actionId === "browser-list-import-sources")
+        return Promise.resolve({
+          sources: [
+            {
+              browser: "chrome",
+              browserLabel: "Google Chrome",
+              profileLabel: "Person 1",
+              supported: false,
+              note: "This browser protects its sign-ins on Windows so other apps cannot read them. Sign in here directly instead.",
+            },
+            {
+              browser: "firefox",
+              browserLabel: "Firefox",
+              profileLabel: "default-release",
+              supported: true,
+              note: null,
+            },
+          ],
+          note: null,
+        } satisfies BrowserSignInSources);
+      if (actionId === "browser-import-signins") {
+        recorder.signInImports.push(
+          ImportBrowserSignInsInputSchema.parse(input),
+        );
+        return Promise.resolve({
+          status: "imported",
+          cookieCount: 12,
+          siteCount: 3,
+          message:
+            "Brought over sign-ins for 3 sites from Firefox. Some sites may still ask you to sign in again.",
+        });
+      }
       if (actionId !== "write-clipboard-text")
         return Promise.reject(
           new Error(
@@ -898,6 +934,7 @@ export async function createAssistantLaneWorld(
     inputs: [],
     searches: [],
     clipboard: [],
+    signInImports: [],
     applications: [],
     sends: [],
   };

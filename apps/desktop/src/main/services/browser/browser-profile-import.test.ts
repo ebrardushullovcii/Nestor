@@ -2,14 +2,17 @@ import { createCipheriv, createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import type { EmbeddedBrowser } from "./embedded-browser";
 import {
   chromiumCookieToDetails,
   decryptChromiumCookieValue,
   deriveChromiumKey,
   firefoxCookieToDetails,
+  importSignInsByName,
   listBrowserImportSources,
+  listSignInSourcesByName,
   readChromiumCookies,
   readFirefoxCookies,
   readBrowserPasswords,
@@ -324,5 +327,73 @@ describe("browser profile import", () => {
     const listed = await listBrowserImportSources({ platform: "darwin", home });
     expect(listed.sources).toEqual([]);
     expect(listed.note).toMatch(/No browser profiles/);
+  });
+
+  test("the Assistant chooses a profile by name and never sees its id", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "nestor-home-"));
+    temporary.push(home);
+    const localAppData = path.join(home, "AppData/Local");
+    const chrome = path.join(localAppData, "Google/Chrome/User Data");
+    for (const profile of ["Default", "Profile 1"]) {
+      await mkdir(path.join(chrome, profile), { recursive: true });
+      await writeFile(path.join(chrome, profile, "Cookies"), "");
+    }
+    const env: ImportEnvironment = {
+      platform: "win32",
+      home,
+      localAppData,
+      appData: path.join(home, "AppData/Roaming"),
+    };
+    const listed = await listSignInSourcesByName(env);
+    expect(listed.sources).toHaveLength(2);
+    expect(JSON.stringify(listed)).not.toMatch(/"id"|AppData/);
+
+    // Windows protects every Chrome profile alike: no need to ask which.
+    const takeControl = vi.fn();
+    const host = { takeControl } as unknown as EmbeddedBrowser;
+    const chromeResult = await importSignInsByName(
+      host,
+      { browser: "chrome" },
+      env,
+    );
+    expect(chromeResult.status).toBe("unsupported");
+    expect(chromeResult.message).toMatch(/Sign in here directly/);
+    expect(
+      (
+        await importSignInsByName(
+          host,
+          { browser: "chrome", profileLabel: "profile 1" },
+          env,
+        )
+      ).status,
+    ).toBe("unsupported");
+    const missing = await importSignInsByName(
+      host,
+      { browser: "firefox" },
+      env,
+    );
+    expect(missing).toMatchObject({ status: "failed", cookieCount: 0 });
+    expect(missing.message).toMatch(/No Firefox profile/);
+    expect(takeControl).not.toHaveBeenCalled();
+  });
+
+  test("asks which profile when a readable browser has several", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "nestor-home-"));
+    temporary.push(home);
+    const chrome = path.join(home, "Library/Application Support/Google/Chrome");
+    for (const profile of ["Default", "Profile 1"]) {
+      await mkdir(path.join(chrome, profile), { recursive: true });
+      await writeFile(path.join(chrome, profile, "Cookies"), "");
+    }
+    const takeControl = vi.fn();
+    const host = { takeControl } as unknown as EmbeddedBrowser;
+    const result = await importSignInsByName(
+      host,
+      { browser: "chrome" },
+      { platform: "darwin", home },
+    );
+    expect(result.status).toBe("failed");
+    expect(result.message).toMatch(/more than one profile.*Say which one/);
+    expect(takeControl).not.toHaveBeenCalled();
   });
 });

@@ -131,7 +131,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
       function: {
         name: "click",
         description:
-          "Press anything on the page: a button, a link, a card, a tab, a cookie banner's Accept, the close cross on a chat widget. If a person could click it, you can.",
+          "Press a button, link, card, tab, a cookie banner's Reject or Essential only, or the close cross on a chat widget. Never accept optional cookies, tracking or marketing consent. Security checks and unapproved declarations stay with the person.",
         parameters: {
           type: "object",
           properties: {

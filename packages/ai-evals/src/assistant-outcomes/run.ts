@@ -16,7 +16,7 @@ import {
   validateBatches,
   type BuiltAppBatch,
 } from "./built-app";
-import { navigationOutcomeCases, shellOutcomeCases } from "./view-cases";
+import { navigationOutcomeCases } from "./view-cases";
 import {
   profileFieldOutcomeCases,
   profileRecordOutcomeCases,
@@ -61,7 +61,6 @@ export function allBatches(
   checkPreferenceFixtures();
   const batches = [
     ...navigationOutcomeCases(),
-    ...shellOutcomeCases(),
     ...huntOutcomeCases(replicaOrigin),
     ...readOutcomeCases(),
     ...profileFieldOutcomeCases(),

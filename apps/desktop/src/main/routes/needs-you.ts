@@ -69,7 +69,6 @@ const run = createNeedsYouCommandRunner(getApplicationStore, {
     for (const application of getApplicationStore().needsYou.details(id)
       ?.applications ?? []) {
       if (await service.open(application.id)) {
-        await (await loadEmbeddedBrowser()).command({ type: "open" });
         return true;
       }
     }

@@ -162,6 +162,27 @@ export type DesktopBrowserImportInput = z.infer<
 >;
 
 /**
+ * The browser profiles the Assistant may name. A source id encodes a local
+ * path, so the Assistant chooses by browser and profile name instead.
+ */
+export const BrowserSignInSourcesSchema = z.object({
+  sources: z.array(DesktopBrowserImportSourceSchema.omit({ id: true })).max(60),
+  note: z.string().max(300).nullable(),
+});
+export type BrowserSignInSources = z.infer<typeof BrowserSignInSourcesSchema>;
+
+export const ImportBrowserSignInsInputSchema = z
+  .object({
+    browser: DesktopBrowserImportBrowserSchema,
+    /** Needed only when that browser has more than one profile. */
+    profileLabel: z.string().trim().min(1).max(120).optional(),
+  })
+  .strict();
+export type ImportBrowserSignInsInput = z.infer<
+  typeof ImportBrowserSignInsInputSchema
+>;
+
+/**
  * A still of the active page, used while app chrome (a menu, a picker) has to
  * sit above the native page view, which always paints over the app's own
  * document. Null when there is no page to show.
