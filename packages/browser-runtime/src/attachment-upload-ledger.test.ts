@@ -8,6 +8,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 
 import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
+import resumeReceipt from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/resume-storage-receipt.json";
 
 /**
  * What the Ready card and Needs you say about a resume Fill in for me
@@ -173,6 +174,18 @@ async function attach(
 }
 
 describe("the server's word on a resume Fill attached", () => {
+  test("a parser's storage handle settles the selected file as attached", async () => {
+    const { outcome } = await attach(
+      (_site, storage) => `${storage.url}/storage`,
+      {
+        status: 200,
+        body: JSON.stringify(resumeReceipt.response),
+        type: "application/json",
+      },
+    );
+    await expect.poll(outcome).toBe("accepted");
+  });
+
   test("a refused upload is not attached, though the page shows its name", async () => {
     const { page, outcome } = await attach(
       (_site, storage) => `${storage.url}/storage`,

@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/parseResume",
+    "fileField": "resume"
+  },
+  "response": {
+    "position": "Synthetic Engineer",
+    "phone": "+12025550123",
+    "name": "Alex Example",
+    "email": "alex@example.test",
+    "links": [
+      {
+        "domain": "example.test",
+        "url": "https://example.test/",
+        "canonicalUrl": "https://example.test/"
+      }
+    ],
+    "resumeStorageId": "synthetic-resume-storage-123",
+    "location": { "name": "Example City" }
+  }
+}

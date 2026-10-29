@@ -148,6 +148,7 @@ function uploadReceipt(
     const key = name.replace(/[-_\s]/gu, "").toLowerCase();
     if (
       (["uploadid", "fileid", "attachmentid", "key"].includes(key) ||
+        /^(?:upload|file|attachment|document|resume)storageid$/u.test(key) ||
         (key === "id" && fileContext) ||
         (key === "location" &&
           typeof item === "string" &&
