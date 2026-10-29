@@ -35,8 +35,11 @@ import {
 import {
   applyResumeLanguage,
   collectResumeLanguageFields,
+  hasUntranslatedResumeSourceProse,
+  writeResumeLanguage,
 } from "../internal/resume-workspace-language";
 import { looksLikeCleanRoleTitle } from "../internal/resume-workspace-structure";
+import { balanceResumePages } from "./balance-resume-pages";
 import type { JobFinderDocumentManager } from "../internal/workspace-service-contracts";
 
 /** What every resume is written from: the person's profile and settings. */
@@ -745,7 +748,7 @@ export async function writeResume(
       if (
         pageCount === null ||
         initial.targetPageCount <= 1 ||
-        pageCount < initial.targetPageCount
+        pageCount <= initial.targetPageCount
       ) {
         break;
       }
@@ -763,7 +766,47 @@ export async function writeResume(
     input.level === "aggressive" && alignedDraft.targetPageCount > 1
       ? await trimOverTargetPages(alignedDraft)
       : alignedDraft;
-  return { ...finalDraft, status: "draft" };
+  const measure = async (draft: ResumeDraft) => {
+    const rendered = await deps.documentManager.renderResumeArtifact({
+      ...(signal ? { signal } : {}),
+      job,
+      profile,
+      renderDocument: buildResumeRenderDocument(profile, draft),
+      templateId: draft.templateId,
+      settings,
+    });
+    await deps.documentManager.discardResumeArtifact?.(rendered);
+    return rendered;
+  };
+  const canMeasure = templates.some(isResumeTemplateApplyEligible);
+  const balanced = canMeasure
+    ? await balanceResumePages({
+        draft:
+          input.level === "tailored"
+            ? prioritizeMetricBullets(finalDraft)
+            : finalDraft,
+        profile,
+        measure,
+      })
+    : finalDraft;
+  // Restoring saved facts for page fill (or settling a failed line) can put
+  // source-language prose back beside translated fields. Finish those display
+  // edits through the existing whole-document translator, then measure again:
+  // translated wording can take more space. Ordinary same-language writes
+  // retain the one writer call and need no translation call.
+  const localized = hasUntranslatedResumeSourceProse(balanced, profile)
+    ? await writeResumeLanguage({
+        aiClient: deps.aiClient,
+        draft: balanced,
+        job,
+        ...(signal ? { signal } : {}),
+      })
+    : balanced;
+  const complete =
+    localized !== balanced && canMeasure
+      ? await balanceResumePages({ draft: localized, profile, measure })
+      : localized;
+  return { ...complete, status: "draft" };
 }
 
 /**

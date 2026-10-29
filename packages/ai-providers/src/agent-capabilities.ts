@@ -521,7 +521,7 @@ export function resumeLengthBudget(input: {
   targetPageCount: number;
   density: keyof typeof RESUME_PROSE_WORDS_PER_PAGE | undefined;
 }) {
-  const pages = Math.max(1, input.targetPageCount);
+  const pages = Math.min(2, Math.max(1, input.targetPageCount));
   const words =
     RESUME_PROSE_WORDS_PER_PAGE[input.density ?? "balanced"] * pages;
   return {
