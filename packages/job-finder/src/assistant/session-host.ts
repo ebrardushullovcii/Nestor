@@ -141,7 +141,6 @@ interface LiveTurn {
   outputs: AssistantToolOutputs;
   lastPersistedDraftAt: number;
   runsStarted: AssistantRunRef[];
-  /** This turn asked the app to open a screen; the message's screen is stale. */
 }
 
 interface RunWatch {
