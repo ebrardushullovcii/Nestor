@@ -363,7 +363,7 @@ describe("resume claim checks before a draft is kept (ADR 0041)", () => {
       aiClient: { checkResumeClaims },
       draft: draftWith([
         {
-          text: "Scaled an internal design system. Reduced release churn for operations teams. Technologies: Figma, Accessibility.",
+          text: "Scaled an internal design system. Reduced release churn for operations teams. Skills used: Figma, Accessibility.",
           origin: "ai_generated",
         },
       ]),

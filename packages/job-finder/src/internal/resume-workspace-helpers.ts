@@ -741,7 +741,9 @@ export function buildPersonsOwnResumeClaimMatcher(input: {
     if (
       sentences.length > 1 &&
       sentences.every((sentence) => {
-        const listed = /^technologies:\s*(.+?)\.?$/iu.exec(sentence)?.[1];
+        const listed = /^(?:skills used|technologies):\s*(.+?)\.?$/iu.exec(
+          sentence,
+        )?.[1];
         return listed
           ? listed
               .split(",")
