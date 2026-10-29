@@ -1423,3 +1423,51 @@ test("another form root's help text is scoped to its controls; global own-word r
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1][0]),
   ).toContain("Write this yourself");
 });
+
+test("residence-relative work permission rereads changed residence, even for a regional posting", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [],
+    flagged: [
+      {
+        index: 0,
+        eligibilityKind: "work_authorization",
+        asksAboutPay: false,
+        declarationKind: null,
+      },
+    ],
+    tags: [{ index: 0, kind: "work_auth", country: "DE", sourceId: "auth.DE" }],
+  });
+  const sources = [
+    {
+      id: "posting.location",
+      value: "EMEA Remote",
+      purpose: "context",
+      country: null as string | null,
+    },
+    {
+      id: "profile.currentCountry",
+      value: "Germany",
+      purpose: "profile",
+      country: null as string | null,
+    },
+    {
+      id: "auth.DE",
+      value: "Yes",
+      purpose: "work_auth",
+      country: "DE" as string | null,
+    },
+  ];
+  const classify = createQuestionClassifier({ client, sources: () => sources });
+  const question = controls(
+    "Are you authorized to work in country of residence?",
+    [],
+  );
+  expect(
+    (await classify(question)).get(question[0].label)?.answerTags,
+  ).toMatchObject({ country: "DE", sourceId: "auth.DE" });
+  sources[1].value = "France";
+  expect(
+    (await classify(question)).get(question[0].label)?.answerTags,
+  ).toMatchObject({ country: "FR", sourceId: null });
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});

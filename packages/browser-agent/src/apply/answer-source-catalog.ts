@@ -29,6 +29,7 @@ import {
   phoneAnswerMatches,
   phoneCountryPicker,
   phoneLabels,
+  isPhoneCodeControl,
 } from "./phone-answer";
 import {
   fullProfileUrl,
@@ -74,6 +75,30 @@ const country = (text: string) => {
   const codes = countriesIn(text);
   return codes.size === 1 ? (codes.values().next().value ?? null) : null;
 };
+
+/** An explicit residence-relative legal question names a different jurisdiction
+ * from a remote/regional posting. Residence selects the country, never the answer. */
+export function legalQuestionCountry(
+  question: string,
+  sources: readonly Pick<ClassifiedAnswerSource, "id" | "value">[],
+): string | null {
+  const named = countriesIn(question);
+  if (named.size) return named.size === 1 ? ([...named][0] ?? null) : null;
+  const residence =
+    /\bcountry (?:of (?:your )?residence|(?:where|in which) you (?:currently )?(?:live|reside))\b/iu.test(
+      question,
+    );
+  const residenceCountry = sources.find(
+    (row) => row.id === "profile.currentCountry",
+  )?.value;
+  return country(
+    residence
+      ? residenceCountry ||
+          sources.find((row) => row.id === "profile.currentLocation")?.value ||
+          ""
+      : sources.find((row) => row.id === "posting.location")?.value || "",
+  );
+}
 export function answerSourceCatalog(
   sources: ApplyAnswerSources,
 ): ClassifiedAnswerSource[] {
@@ -248,6 +273,7 @@ const contactLabels: Record<string, readonly string[]> = {
     "city",
     "current city",
     "city of residence",
+    "location city",
     "your city",
   ],
   "profile.currentLocation": addressLabels,
@@ -280,6 +306,8 @@ export function knownLiteralField(
   control: ApplyFormControl,
 ): boolean {
   if (fieldNamesAnotherPerson(control)) return false;
+  if (source.id === "profile.phone#callingCode")
+    return isPhoneCodeControl(control);
   const questionLabel = normalizeFormQuestionPrompt(
     control.kind === "radio" || control.answerControlType === "multi_choice"
       ? (control.sectionPath?.at(-1) ??
@@ -408,6 +436,28 @@ function literalValueMatches(
     );
   if (source.id === "profile.phone")
     return phoneAnswerMatches(source.value, answer, control, controls);
+  if (
+    source.id === "profile.yearsExperience" &&
+    knownLiteralField(source, control)
+  ) {
+    const years = Number(source.value);
+    if (!Number.isFinite(years) || years < 0) return false;
+    if (answer.trim() === source.value.trim()) return true;
+    // A total-experience picker may ask for a bracket rather than a number.
+    // Only the actual offered bracket is a formatting of the recorded total;
+    // it never establishes years with a particular skill or responsibility.
+    if (!control.options.includes(answer)) return false;
+    const range =
+      /^(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)(?:\s+years?)?$/iu.exec(
+        answer.trim(),
+      );
+    if (range) return years >= Number(range[1]) && years <= Number(range[2]);
+    const minimum =
+      /^(\d+(?:\.\d+)?)(?:\s*\+(?:\s+years?)?|\s+or more years?)$/iu.exec(
+        answer.trim(),
+      );
+    return !!minimum && years >= Number(minimum[1]);
+  }
   if (isProfileUrlSource(source.id) && wantsProfileUrl(control)) {
     const expected = fullProfileUrl(source.value);
     return expected !== null && answer.trim() === expected;
@@ -652,15 +702,10 @@ export function classifyAnswerPermission(input: {
     );
     if (human) return { kind: "literal", source: human };
   }
-  const namedCountries = countriesIn(
+  const target = legalQuestionCountry(
     input.control.groupLabel + " " + input.control.label,
+    catalog,
   );
-  const target =
-    namedCountries.size === 1
-      ? (namedCountries.values().next().value ?? null)
-      : namedCountries.size === 0
-        ? country(input.sources.posting.location ?? "")
-        : null;
   if (legal && !target)
     return deny("The work-permission country is unknown or ambiguous.");
   const knownLegalQuestion = legal && !fieldNamesAnotherPerson(input.control);

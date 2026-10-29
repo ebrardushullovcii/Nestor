@@ -9,6 +9,8 @@ export const addressLabels = [
   "location",
   "current location",
   "current address",
+  "where are you based",
+  "what location are you based in city state and country",
 ];
 
 /** Formatting only; different locality spellings need the person's answer. */

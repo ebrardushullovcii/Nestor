@@ -20,7 +20,7 @@ import {
   wantsProfileUrl,
 } from "./profile-url";
 import { currentCountryTimezone } from "./current-timezone";
-import { phoneCountryPicker } from "./phone-answer";
+import { phoneCallingCode, phoneCountryPicker } from "./phone-answer";
 import type {
   ApplyAnswer,
   ApplyAnswerSources,
@@ -338,6 +338,13 @@ export function storedFacts(
     "your phone number",
   );
   add(profile.currentLocation, "profile.currentLocation", "where you live");
+  add(
+    phoneCallingCode(
+      profile.applicationIdentity.preferredPhone ?? profile.phone ?? "",
+    ),
+    "profile.phone#callingCode",
+    "the calling code in your saved international phone number",
+  );
   add(profile.currentCity, "profile.currentCity", "your city");
   add(profile.currentRegion, "profile.currentRegion", "your region");
   add(
