@@ -31,7 +31,8 @@ async function readState(): Promise<ProfileWorkflowState> {
   ]);
   // Brings setup up to date first: review items the import left, and an
   // import the app closed on marked interrupted so it can be tried again.
-  await (await getProfileService()).refreshProfileSetup();
+  const service = await getProfileService();
+  await service.refreshProfileSetup();
   const personal = readPersonalWorkspaceState(getJobStore());
   return {
     profileSetupState: personal.profileSetupState,
@@ -40,7 +41,8 @@ async function readState(): Promise<ProfileWorkflowState> {
       personal.latestResumeImportReviewCandidates.map((candidate) =>
         ResumeImportFieldCandidateSummarySchema.parse(candidate),
       ),
-    resumeImportActive: isDesktopResumeImportActive(),
+    resumeImportActive:
+      isDesktopResumeImportActive() || service.isResumeImportActive(),
   };
 }
 

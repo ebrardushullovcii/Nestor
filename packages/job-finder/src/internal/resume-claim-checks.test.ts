@@ -8,6 +8,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createSeed } from "../profile-service.test-support";
 import {
+  settleResumeClaimLines,
   withResumeClaimChecks,
   withResumeClaimFixes,
 } from "./resume-claim-checks";
@@ -863,4 +864,78 @@ test("claim reuse is invalidated when the target job's checker context changes",
     aiClient: { checkResumeClaims },
   });
   expect(checkResumeClaims).toHaveBeenCalledTimes(2);
+});
+
+test("supported summary and metric bullet survive overlapping style suggestions", () => {
+  const { profile } = context();
+  profile.summary = "Engineer at Example.";
+  const metric = "Reduced processing time by 42% with queue redesign.";
+  const summary = `Software engineer delivering reliable systems. ${metric}`;
+  const draft = draftWith([{ text: metric, origin: "ai_generated" }]);
+  draft.sections[0]!.text = summary;
+  draft.claimChecks = [
+    {
+      contentHash: resumeClaimContentHash(metric),
+      verdict: "supported",
+      reason: "Backed",
+      style: "repetition",
+      fix: metric.replace("with", "through"),
+      evidenceIds: [],
+      evidenceKey: "test",
+      checkedAt: at,
+    },
+    {
+      contentHash: resumeClaimContentHash(summary),
+      verdict: "supported",
+      reason: "Backed",
+      style: "repetition",
+      fix: metric,
+      evidenceIds: [],
+      evidenceKey: "test",
+      checkedAt: at,
+    },
+  ];
+  const fixed = settleResumeClaimLines({
+    draft,
+    profile,
+    stretchesAreThePersons: false,
+  })!;
+  expect(fixed.sections[0]!.text).toBe(summary);
+  expect(fixed.sections[0]!.bullets[0]!.included).toBe(true);
+});
+
+test("a repair is compared to final text after another line moves away", () => {
+  const { profile } = context();
+  const first = "Built event processing services for the operations team.";
+  const second =
+    "Maintained event processing services for the operations team.";
+  const moved = "Authored accessibility audits for public websites.";
+  const draft = draftWith([
+    { text: first, origin: "ai_generated" },
+    { text: second, origin: "ai_generated" },
+  ]);
+  draft.claimChecks = [
+    [first, moved],
+    [second, first],
+  ].map(([text, fix]) => ({
+    contentHash: resumeClaimContentHash(text!),
+    verdict: "unsupported",
+    reason: "Repair",
+    fix: fix!,
+    style: null,
+    evidenceIds: [],
+    evidenceKey: "test",
+    checkedAt: at,
+  }));
+  const fixed = settleResumeClaimLines({
+    draft,
+    profile,
+    stretchesAreThePersons: false,
+  })!;
+  expect(
+    fixed.sections[0]!.bullets.map((bullet) => [bullet.text, bullet.included]),
+  ).toEqual([
+    [moved, true],
+    [first, true],
+  ]);
 });

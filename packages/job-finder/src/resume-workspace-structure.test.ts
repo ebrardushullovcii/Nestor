@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import type { TailoredResumeDraft } from "@nestor/ai-providers";
+import {
+  completeTailoredResumeDraft,
+  type TailoredResumeDraft,
+} from "@nestor/ai-providers";
 import type {
   ResumeDraft,
   WorkHistoryReviewAcknowledgment,
@@ -14,7 +17,7 @@ import {
 import { createSeed } from "./profile-service.test-support";
 
 describe("buildResumeRenderDocument", () => {
-  test("keeps the candidate's own headline on the generated resume and gives experienced candidates two pages", () => {
+  test("keeps the candidate's own headline and budgets sparse evidence for one page", () => {
     const seed = createSeed();
     const job = {
       ...seed.savedJobs[0]!,
@@ -52,7 +55,7 @@ describe("buildResumeRenderDocument", () => {
       buildResumeRenderDocument({ ...seed.profile, yearsExperience: 7 }, draft)
         .headline,
     ).toBe(seed.profile.headline);
-    expect(draft.targetPageCount).toBe(2);
+    expect(draft.targetPageCount).toBe(1);
   });
 
   test("keeps the candidate's own headline when the listing title is board marketing", () => {
@@ -1794,6 +1797,46 @@ test.each([false, true])(
     ]);
   },
 );
+
+test("page budget follows available real material rather than career years", () => {
+  const seed = createSeed();
+  for (const [yearsExperience, achievements, expected] of [
+    [1, 14, 2],
+    [20, 2, 1],
+  ] as const) {
+    const profile = {
+      ...seed.profile,
+      yearsExperience,
+      projects: [],
+      experiences: [
+        {
+          ...seed.profile.experiences[0]!,
+          achievements: Array.from(
+            { length: achievements },
+            (_, n) => `Delivered saved achievement ${n}.`,
+          ),
+        },
+      ],
+    };
+    const draft = buildResumeDraftFromTailoredDraft({
+      profile,
+      job: seed.savedJobs[0]!,
+      draft: completeTailoredResumeDraft(
+        {},
+        {
+          ...seed,
+          profile,
+          job: seed.savedJobs[0]!,
+          resumeText: profile.baseResume.textContent,
+        },
+      ),
+      templateId: seed.settings.resumeTemplateId,
+      createdAt: "2026-10-29T00:00:00.000Z",
+      generationMethod: "ai",
+    });
+    expect(draft.targetPageCount).toBe(expected);
+  }
+});
 
 test("non-technical project skills use a neutral label included in language translation", async () => {
   const { applyResumeLanguage, collectResumeLanguageFields } =

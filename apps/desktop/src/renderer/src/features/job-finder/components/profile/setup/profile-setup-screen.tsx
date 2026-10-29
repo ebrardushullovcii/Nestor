@@ -343,8 +343,15 @@ export function ProfileSetupScreen(props: {
   // local pending lifecycle has gone stale). Keep editing/recovery available
   // in that phase; once the importer reports a real pipeline stage, protect
   // the draft from concurrent canonical writes.
+  // Text has already populated the form during deferred vision. Keep setup
+  // editable: scoped step saves rebase through the existing revision checks.
+  const textImportSettled =
+    latestResumeImportRun !== null &&
+    ["applied", "review_ready"].includes(latestResumeImportRun.status);
   const isResumeImportProcessing =
-    isImportResumePending && resumeImportProgress !== null;
+    isImportResumePending &&
+    resumeImportProgress !== null &&
+    !textImportSettled;
   const setupMutationPending =
     isProfileSetupPending || isResumeImportProcessing;
   const setupActionsDisabledReason = isResumeImportProcessing

@@ -235,3 +235,25 @@ test.each(["queued", "parsing", "extracting", "reconciling"] as const)(
     ).toBeNull();
   },
 );
+
+for (const status of ["applied", "review_ready"] as const) {
+  test(`deferred vision and adjudication keep ${status} imports active`, () => {
+    for (const role of ["vision", "adjudication"] as const) {
+      const run = ResumeImportRunSchema.parse({
+        id: "deferred",
+        sourceResumeId: "synthetic",
+        sourceResumeFileName: "three-page.pdf",
+        trigger: "import",
+        status,
+        startedAt: "2026-10-29T00:00:00Z",
+        modelRoles: { [role]: { status: "running" } },
+      });
+      expect(getRunningResumeImportProgress(run)?.stage).toBe("saving_results");
+      const settled = ResumeImportRunSchema.parse({
+        ...run,
+        modelRoles: { [role]: { status: "completed" } },
+      });
+      expect(getRunningResumeImportProgress(settled)).toBeNull();
+    }
+  });
+}

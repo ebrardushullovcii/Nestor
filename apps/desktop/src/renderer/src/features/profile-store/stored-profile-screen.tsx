@@ -344,7 +344,8 @@ export function StoredProfileScreen() {
         }
         pendingActions={{
           analyzeProfile: workflow.isPending("analyze"),
-          importResume: workflow.isPending("import"),
+          importResume:
+            workflow.isPending("import") || workflow.state.resumeImportActive,
           profileCopilotBusy: false,
           profileMutation: store.saving,
           profileSetup: workflow.isPending("setup"),

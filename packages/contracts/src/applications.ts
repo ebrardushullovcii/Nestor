@@ -445,6 +445,28 @@ export type UpsertSavedFormAnswerInput = z.input<
   typeof UpsertSavedFormAnswerInputSchema
 >;
 
+/** The kind of saved answer each reusable resume-import answer becomes. */
+const RESUME_IMPORT_ANSWER_KINDS: Readonly<
+  Record<string, z.infer<typeof CandidateAnswerKindSchema>>
+> = {
+  workAuthorization: "work_authorization",
+  visaSponsorship: "visa_sponsorship",
+  relocation: "relocation",
+  travel: "travel",
+  noticePeriod: "notice_period",
+  availability: "availability",
+  salaryExpectations: "salary_expectation",
+  selfIntroduction: "self_intro",
+  careerTransition: "career_transition",
+};
+/** A resume import's `answer_bank` suggestion is saved in Needs you under this key. */
+export function resumeImportAnswer(
+  targetKey: string,
+): { key: string; kind: z.infer<typeof CandidateAnswerKindSchema> } | null {
+  const kind = RESUME_IMPORT_ANSWER_KINDS[targetKey];
+  return kind ? { key: `resume_import:${kind}`, kind } : null;
+}
+
 /** What a person answers an upload item with once the file is attached on the site. */
 export const UPLOAD_ATTACHED_ANSWER = "Attached on the site";
 /** An upload item: the files one form refused, or never confirmed, as Apply words it. */

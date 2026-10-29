@@ -1,6 +1,6 @@
 import { getRunningResumeImportProgress } from "@renderer/features/job-finder/lib/profile-resume-panel-utils";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import type {
   CandidateProfile,
   EditableSourceInstructionArtifact,
@@ -36,6 +36,7 @@ import { ProfileResumePanel } from "../components/profile/profile-resume-panel";
 import { ProfileReadyBanner } from "../components/profile/profile-ready-banner";
 import {
   focusProfileImportSuggestion,
+  getNeedsYouSuggestionPath,
   getProfileImportSuggestionDestination,
 } from "../components/profile/profile-import-suggestion-navigation";
 import { useProfileAutosave } from "@renderer/features/profile-store/use-profile-autosave";
@@ -187,6 +188,7 @@ export function ProfileScreen(props: {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
+  const navigate = useNavigate();
   const requestedSection = searchParams.get("section");
   const requestedFocus = searchParams.get("focus");
   const [activeSection, setActiveSection] = useState<ProfileSection>(
@@ -518,7 +520,9 @@ export function ProfileScreen(props: {
             baseline: editBaseline,
           }
         : null,
-    blocked: hasBackgroundConflict,
+    // Keep the preserved draft until text AND deferred visual writes finish.
+    // The form hook rebases disjoint changes and still flags true overlaps.
+    blocked: hasBackgroundConflict || importPending,
     preserve: props.onPreserveEdits
       ? ({ profile, goals, baseline }) =>
           props.onPreserveEdits!(profile, goals, baseline)
@@ -576,8 +580,13 @@ export function ProfileScreen(props: {
   function handleReviewImportSuggestion(
     candidate: ResumeImportFieldCandidateSummary,
   ) {
+    const { section } = getProfileImportSuggestionDestination(candidate);
+    if (!section) {
+      void getNeedsYouSuggestionPath(candidate).then((path) => navigate(path));
+      return;
+    }
     pendingImportSuggestionRef.current = candidate;
-    setActiveSection(getProfileImportSuggestionDestination(candidate).section);
+    setActiveSection(section);
     setImportSuggestionFocusRequest((current) => current + 1);
   }
 

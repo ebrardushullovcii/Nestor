@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ResumeImportFieldCandidateSummarySchema } from "@nestor/contracts";
 import {
   focusProfileImportSuggestion,
+  getNeedsYouSuggestionPath,
   getProfileImportSuggestionDestination,
 } from "./profile-import-suggestion-navigation";
 
@@ -11,7 +12,12 @@ function buildCandidate(input: {
   id: string;
   key: string;
   recordId?: string | null;
-  section: "identity" | "experience" | "education" | "search_preferences";
+  section:
+    | "identity"
+    | "experience"
+    | "education"
+    | "search_preferences"
+    | "answer_bank";
 }) {
   return ResumeImportFieldCandidateSummarySchema.parse({
     id: input.id,
@@ -20,7 +26,8 @@ function buildCandidate(input: {
       key: input.key,
       recordId: input.recordId ?? null,
     },
-    label: "Imported suggestion",
+    label:
+      input.section === "answer_bank" ? "Availability" : "Imported suggestion",
     value: "Suggested value",
     valuePreview: "Suggested value",
     evidenceText: "Resume evidence",
@@ -36,6 +43,44 @@ describe("profile import suggestion navigation", () => {
     document.body.innerHTML = "";
     Reflect.deleteProperty(window, "matchMedia");
     vi.restoreAllMocks();
+    Reflect.deleteProperty(window, "nestor");
+  });
+
+  it("sends suggested form answers to their saved answer in Needs you", async () => {
+    const run = vi.fn((_name: string, input: { key: string }) =>
+      Promise.resolve(
+        input.key === "resume_import:availability" ? { id: 7 } : null,
+      ),
+    );
+    Object.defineProperty(window, "nestor", {
+      configurable: true,
+      value: { needsYou: { run } },
+    });
+    const availability = buildCandidate({
+      id: "availability",
+      key: "availability",
+      section: "answer_bank",
+    });
+    expect(getProfileImportSuggestionDestination(availability)).toEqual({
+      actionLabel: "Review in Needs you",
+      section: null,
+    });
+    expect(focusProfileImportSuggestion(availability)).toBe(false);
+    const view = (path: string) =>
+      JSON.parse(
+        new URL(path, "app://x").searchParams.get("needs")!,
+      ) as unknown;
+    expect(view(await getNeedsYouSuggestionPath(availability))).toEqual({
+      tab: "saved",
+      focusId: 7,
+    });
+    expect(run).toHaveBeenCalledWith("get_form_answer_by_key", {
+      key: "resume_import:availability",
+    });
+    run.mockResolvedValueOnce(null);
+    const path = await getNeedsYouSuggestionPath(availability);
+    expect(path.startsWith("/job-finder/actions?")).toBe(true);
+    expect(view(path)).toEqual({ tab: "saved", text: "Availability" });
   });
 
   it("maps suggestions to the profile section where they can be edited", () => {

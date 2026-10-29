@@ -1,7 +1,7 @@
 import { parentPort } from "node:worker_threads";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { getPdfPageCount } from "./resume-document/pdf";
+import { inspectPdfLayout } from "./resume-document/pdf";
 import type {
   ResumeComputationRequest,
   ResumeComputationResponse,
@@ -24,7 +24,7 @@ async function compute(request: ResumeComputationRequest): Promise<void> {
           id: request.id,
           kind: request.kind,
           result: {
-            pageCount: await getPdfPageCount(request.input),
+            ...(await inspectPdfLayout(request.input)),
             sha256: createHash("sha256")
               .update(await readFile(request.input))
               .digest("hex"),
