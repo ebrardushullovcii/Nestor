@@ -1,3 +1,5 @@
+import type { ApplyFormObservation } from "./types";
+
 /** A site's writing rule cannot be overridden by a model's fact-check verdict. */
 export const OWN_WORDS_REASON =
   "This form asks for your own words. Write this answer yourself; Job Finder will use it unchanged.";
@@ -47,5 +49,18 @@ export function ownWordsAppliesToQuestion(
       !letter.test(clause.normalize("NFKD").replace(/\p{M}/gu, "")) ||
       letter.test(question.normalize("NFKD").replace(/\p{M}/gu, ""))
     );
+  });
+}
+
+/** Non-question chrome is data, but does not change what an answer means. */
+export function questionReadContext(page: ApplyFormObservation): string {
+  return JSON.stringify({
+    instructions: formWritingInstructions(page),
+    chrome: [
+      page.title ?? "",
+      ...page.headings.map((heading) => heading.text),
+      ...page.actions.map((action) => action.label),
+      page.step.label ?? "",
+    ],
   });
 }

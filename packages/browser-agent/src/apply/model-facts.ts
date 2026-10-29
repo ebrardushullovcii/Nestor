@@ -16,6 +16,7 @@ export function applicationModelFacts(
     reusableAnswers: relevantSavedAnswers(sources.reusableAnswers),
   };
   const facts = applicationFacts(sources, options);
+  const { listingDiscovery, ...personFacts } = facts;
   const paths = new Map<string, string | null>();
   const escape = (key: string) =>
     key.replaceAll("~", "~0").replaceAll("/", "~1");
@@ -26,7 +27,7 @@ export function applicationModelFacts(
       for (const [key, child] of Object.entries(value))
         index(child, `${path}/${escape(key)}`);
   };
-  index(facts, "");
+  index(personFacts, "");
   const recordPath = (id: string): string | undefined => {
     const saved = facts.savedAnswers.findIndex(
       (entry) => `answerLibrary.${entry.id}` === id,
@@ -55,7 +56,7 @@ export function applicationModelFacts(
     return value;
   };
   return serializeApplicationData({
-    ...facts,
+    ...personFacts,
     storedFactCatalog: storedFacts(sources, options).map((fact) => {
       const literal = { id: fact.sourceId, value: fact.value };
       const path = recordPath(fact.sourceId) ?? paths.get(fact.value);
@@ -66,6 +67,8 @@ export function applicationModelFacts(
         ? reference
         : literal;
     }),
+    // This changes with the listing; keep it after the shared person prefix.
+    listingDiscovery,
   });
 }
 

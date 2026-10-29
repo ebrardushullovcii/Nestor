@@ -109,6 +109,7 @@ import {
 import {
   OWN_WORDS_REASON,
   formWritingInstructions,
+  questionReadContext,
   ownWordsAppliesToQuestion,
 } from "./own-words";
 import {
@@ -620,9 +621,7 @@ async function runMeasuredApplyAgent(
                   };
                 const readings = await classifyQuestions(
                   page.controls,
-                  JSON.stringify({
-                    instructions: formWritingInstructions(page),
-                  }),
+                  questionReadContext(page),
                 ).catch(() => undefined);
                 const reading =
                   readings?.get(
@@ -851,9 +850,7 @@ async function runMeasuredApplyAgent(
     if (answer !== null && classifyQuestions) {
       const readings = classifyQuestions.settled(
         observation.controls,
-        JSON.stringify({
-          instructions: formWritingInstructions(observation),
-        }),
+        questionReadContext(observation),
       );
       const tags = (
         readings?.get(
@@ -983,7 +980,7 @@ async function runMeasuredApplyAgent(
       return null;
     const readings = classifyQuestions?.settled(
       observation.controls,
-      JSON.stringify({ instructions: formWritingInstructions(observation) }),
+      questionReadContext(observation),
     );
     const reading =
       readings?.get(questionClassificationKey(control, observation.controls)) ??
@@ -1225,11 +1222,7 @@ async function runMeasuredApplyAgent(
     // the first answer does not wait for it. Writes await the same result.
     void classifyQuestions?.(
       next.controls,
-      JSON.stringify({
-        url: next.url,
-        step: next.step,
-        instructions: formWritingInstructions(next),
-      }),
+      questionReadContext(next),
     ).catch(() => undefined);
     // A person or a later page write may have answered a previously pending
     // question. Keep the live controls authoritative when continuing.
@@ -1718,11 +1711,7 @@ async function runMeasuredApplyAgent(
           const observation = await pageTools.observe();
           const classifications = await classifyQuestions?.(
             observation.controls,
-            JSON.stringify({
-              url: observation.url,
-              step: observation.step,
-              instructions: formWritingInstructions(observation),
-            }),
+            questionReadContext(observation),
           ).catch(() => undefined);
           // Cache the native question set before adding the model's required marker.
           syncObservation(observation);
@@ -1812,11 +1801,7 @@ async function runMeasuredApplyAgent(
         const observedShape = applyStepShape(observation);
         const classifications = await classifyQuestions?.(
           observation.controls,
-          JSON.stringify({
-            url: observation.url,
-            step: observation.step,
-            instructions: formWritingInstructions(observation),
-          }),
+          questionReadContext(observation),
         ).catch(() => undefined);
         // Inferred required markers are results, not changed native questions.
         syncObservation(observation);
@@ -2719,9 +2704,7 @@ async function runMeasuredApplyAgent(
       if (classifyQuestions) {
         await classifyQuestions(
           observation.controls,
-          JSON.stringify({
-            instructions: formWritingInstructions(observation),
-          }),
+          questionReadContext(observation),
         ).catch(() => undefined);
       }
       // Reorder only independent value writes in a contiguous segment. Clicks,
@@ -2777,11 +2760,7 @@ async function runMeasuredApplyAgent(
           }),
         ).values(),
       ];
-      const stepKey = JSON.stringify({
-        url: observation.url,
-        step: observation.step,
-        instructions: formWritingInstructions(observation),
-      });
+      const stepKey = questionReadContext(observation);
       const checkAnswers = (shortValues: boolean) =>
         checkWrittenApplicationAnswers({
           client: llmClient,
@@ -3460,9 +3439,7 @@ async function runMeasuredApplyAgent(
       if (classifyQuestions && observation) {
         const readings = await classifyQuestions(
           observation.controls,
-          JSON.stringify({
-            instructions: formWritingInstructions(observation),
-          }),
+          questionReadContext(observation),
         );
         if ([...readings.values()].some((reading) => reading.readFailed)) {
           const reason =
@@ -3881,13 +3858,7 @@ async function runMeasuredApplyAgent(
       {
         role: "user",
         content: applicationModelFactsMessage(
-          {
-            ...runConfig.sources,
-            reusableAnswers: relevantSavedAnswers(
-              runConfig.sources.reusableAnswers,
-              pageTools.state.observation?.controls.map(questionPrompt),
-            ),
-          },
+          runConfig.sources,
           payDisclosed,
         ),
       },

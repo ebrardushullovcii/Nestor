@@ -348,7 +348,7 @@ test("shares one classification for concurrent decisions and changed values on t
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test("reuses across steps and requirement changes but reads new wording and options", async () => {
+test("reuses across steps and native required changes but reads new wording and options", async () => {
   const client = clientReplying([
     { index: 0, asksAboutPay: true, declarationKind: null },
   ]);
@@ -396,7 +396,17 @@ test("a truncated report can recover on its single larger retry", async () => {
       },
     ],
   });
-  const classify = createQuestionClassifier({ client, sources: () => [] });
+  const classify = createQuestionClassifier({
+    client,
+    sources: () => [
+      {
+        id: "profile.fullName",
+        value: "Jamie Rivers",
+        purpose: "profile",
+        country: null,
+      },
+    ],
+  });
   const result = await classify(controls("Full name", []));
   expect(result.get("Full name")?.answerTags?.sourceId).toBe(
     "profile.fullName",
@@ -688,7 +698,7 @@ test("reuses a complete identical model read across applications, without sharin
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test("shared reads require the full same request and AI-client scope", async () => {
+test("shared meaning distinguishes question options, requirements and AI-client scope", async () => {
   const client = clientReplying([
     { index: 0, asksAboutPay: true, declarationKind: null },
   ]);
@@ -702,7 +712,7 @@ test("shared reads require the full same request and AI-client scope", async () 
     await createQuestionClassifier({ client, cacheScope })(questions);
   }
   await createQuestionClassifier({ client, cacheScope: {} })(controls());
-  expect(client.chatWithTools).toHaveBeenCalledTimes(5);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
 });
 
 test("incomplete, failed and cancelled reads never become reusable model decisions", async () => {
@@ -766,14 +776,14 @@ test("bounds shared question reads and reads an evicted page with the model agai
   const client = clientReplying([
     { index: 0, asksAboutPay: false, declarationKind: null },
   ]);
-  for (let page = 0; page < 65; page++)
+  for (let page = 0; page < 513; page++)
     await createQuestionClassifier({ client, cacheScope })(
       controls(`Page ${page}`),
     );
-  await createQuestionClassifier({ client, cacheScope })(controls("Page 64"));
-  expect(client.chatWithTools).toHaveBeenCalledTimes(65);
+  await createQuestionClassifier({ client, cacheScope })(controls("Page 512"));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(513);
   await createQuestionClassifier({ client, cacheScope })(controls("Page 0"));
-  expect(client.chatWithTools).toHaveBeenCalledTimes(66);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(514);
 });
 
 test("plain questions are named by index and only flagged ones are spelled out", async () => {
@@ -996,4 +1006,420 @@ test("a GitHub help-text change is read again instead of reusing the URL reading
   expect(
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1][0]),
   ).toContain(page[0].hint);
+});
+
+test("shares individual meanings across changed batches and rebinds current saved answers", async () => {
+  const client: LLMClient = {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: "read",
+            type: "function" as const,
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({
+                plainIndexes: [0],
+                flagged: [],
+                tags: [
+                  {
+                    index: 0,
+                    kind: "other",
+                    country: null,
+                    sourceId: messages[1].content.includes('"Email"')
+                      ? "answerLibrary.old"
+                      : null,
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+    ),
+  };
+  const cacheScope = {};
+  let sources = [
+    {
+      id: "answerLibrary.old",
+      value: "Old",
+      purpose: "saved",
+      country: null,
+      question: "Email",
+    },
+  ];
+  const first = createQuestionClassifier({
+    client,
+    cacheScope,
+    sources: () => sources,
+  });
+  await first(controls("Email", []));
+  sources = [
+    {
+      id: "answerLibrary.new",
+      value: "New",
+      purpose: "saved",
+      country: null,
+      question: "Email",
+    },
+  ];
+  const next = createQuestionClassifier({
+    client,
+    cacheScope,
+    sources: () => sources,
+  });
+  const email = controls("Email", []);
+  const phone = controls("Phone", []);
+  phone[0].ref = "phone";
+  const result = await next([...phone, ...email]);
+  expect(result.get("Email")?.answerTags?.sourceId).toBe("answerLibrary.new");
+  expect(
+    (
+      JSON.parse(
+        vi.mocked(client.chatWithTools).mock.calls[1][0][1].content,
+      ) as { question: string }[]
+    ).map((q) => q.question),
+  ).toEqual(["Phone"]);
+  sources = [];
+  expect(next.settled(email)?.get("Email")?.answerTags?.sourceId).toBeNull();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("classification receives descriptors, never resume, posting or scalar fact values", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [
+      { index: 0, kind: "motivation", country: null, sourceId: "resume.text" },
+    ],
+  });
+  await createQuestionClassifier({
+    client,
+    sources: () => [
+      {
+        id: "resume.text",
+        value: "FULL SYNTHETIC RESUME",
+        purpose: "writing",
+        country: null,
+      },
+      {
+        id: "posting.description",
+        value: "FULL POSTING EVIDENCE",
+        purpose: "writing",
+        country: null,
+      },
+      {
+        id: "profile.email",
+        value: "synthetic@example.test",
+        purpose: "profile",
+        country: null,
+      },
+    ],
+  })(controls("Why this role?", []));
+  const sent = JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[0][0]);
+  expect(sent).toContain("resume.text");
+  expect(sent).not.toContain("FULL SYNTHETIC RESUME");
+  expect(sent).not.toContain("FULL POSTING EVIDENCE");
+  expect(sent).not.toContain("synthetic@example.test");
+});
+
+test.each([
+  ["Phone", "other", null],
+  ["Phone", "other", "profile.email"],
+  ["País de residencia", "residence_country", null],
+  ["Why this role?", "motivation", null],
+  ["Summarize your experience", "factual_summary", null],
+] as const)(
+  "fresh and cached %s readings preserve their selected source: %s / %s",
+  async (label, kind, sourceId) => {
+    const client = clientReplyingSparse({
+      plainIndexes: [0],
+      flagged: [],
+      tags: [{ index: 0, kind, country: null, sourceId }],
+    });
+    const cacheScope = {};
+    const sources = () => [
+      {
+        id: "profile.phone",
+        value: "+44 7700 900123",
+        purpose: "profile",
+        country: null,
+      },
+      {
+        id: "profile.email",
+        value: "synthetic@example.test",
+        purpose: "profile",
+        country: null,
+      },
+      {
+        id: "profile.currentCountry",
+        value: "Germany",
+        purpose: "profile",
+        country: null,
+      },
+      {
+        id: "resume.text",
+        value: "Synthetic experience",
+        purpose: "writing",
+        country: null,
+      },
+      {
+        id: "answerLibrary.exact",
+        value: "Saved answer",
+        purpose: "saved",
+        country: null,
+        question: label,
+      },
+    ];
+    const page = controls(label, []);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const classify = createQuestionClassifier({
+        client,
+        cacheScope,
+        sources,
+      });
+      const readings = await classify(page);
+      expect(readings.get(label)?.answerTags?.sourceId).toBe(sourceId);
+      expect(classify.settled(page)?.get(label)?.answerTags?.sourceId).toBe(
+        sourceId,
+      );
+    }
+    expect(client.chatWithTools).toHaveBeenCalledOnce();
+  },
+);
+
+test("a changed applicant rereads contacts and cannot recover the earlier source selection", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [
+      { index: 0, kind: "other", country: null, sourceId: "profile.phone" },
+    ],
+  });
+  const sources = [
+    {
+      id: "profile.fullName",
+      value: "Jamie Rivers",
+      purpose: "profile",
+      country: null,
+    },
+    {
+      id: "profile.phone",
+      value: "+44 7700 900123",
+      purpose: "profile",
+      country: null,
+    },
+  ];
+  const classify = createQuestionClassifier({
+    client,
+    cacheScope: {},
+    sources: () => sources,
+  });
+  const page = controls("Phone", []);
+  expect((await classify(page)).get("Phone")?.answerTags?.sourceId).toBe(
+    "profile.phone",
+  );
+  sources[0].value = "Another Applicant";
+  expect(classify.settled(page)).toBeUndefined();
+  vi.mocked(client.chatWithTools).mockResolvedValue({
+    toolCalls: [
+      {
+        id: "read",
+        type: "function",
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({
+            plainIndexes: [0],
+            flagged: [],
+            tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
+          }),
+        },
+      },
+    ],
+  });
+  expect((await classify(page)).get("Phone")?.answerTags?.sourceId).toBeNull();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("a profile change during a pending read cannot borrow its source selection", async () => {
+  const report = (sourceId: string | null) => ({
+    toolCalls: [
+      {
+        id: "read",
+        type: "function" as const,
+        function: {
+          name: "report_question_kinds",
+          arguments: JSON.stringify({
+            plainIndexes: [0],
+            flagged: [],
+            tags: [{ index: 0, kind: "other", country: null, sourceId }],
+          }),
+        },
+      },
+    ],
+  });
+  let finish!: (value: ReturnType<typeof report>) => void;
+  const client: LLMClient = {
+    chatWithTools: vi
+      .fn<LLMClient["chatWithTools"]>()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValue(report(null)),
+  };
+  const sources = [
+    {
+      id: "profile.fullName",
+      value: "Jamie Rivers",
+      purpose: "profile",
+      country: null,
+    },
+    {
+      id: "profile.phone",
+      value: "+44 7700 900123",
+      purpose: "profile",
+      country: null,
+    },
+  ];
+  const classify = createQuestionClassifier({ client, sources: () => sources });
+  const result = classify(controls("Phone", []));
+  sources[0].value = "Another Applicant";
+  finish(report("profile.phone"));
+  expect((await result).get("Phone")?.answerTags?.sourceId).toBeNull();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("cached legal meaning rebinds country and evidence without inheriting permission", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [],
+    flagged: [
+      {
+        index: 0,
+        eligibilityKind: "work_authorization",
+        asksAboutPay: false,
+        declarationKind: null,
+      },
+    ],
+    tags: [
+      {
+        index: 0,
+        kind: "work_auth",
+        country: "DE",
+        sourceId: "auth.DE",
+        hasAdditionalConditions: true,
+      },
+    ],
+  });
+  let sources = [
+    {
+      id: "posting.location",
+      value: "Germany",
+      purpose: "context",
+      country: "DE",
+    },
+    { id: "auth.DE", value: "Yes", purpose: "work_auth", country: "DE" },
+  ];
+  const classify = createQuestionClassifier({ client, sources: () => sources });
+  const question = controls("Are you permanently authorized to work here?", []);
+  expect(
+    (await classify(question)).get(question[0].label)?.answerTags,
+  ).toMatchObject({
+    country: "DE",
+    sourceId: "auth.DE",
+    hasAdditionalConditions: true,
+  });
+  sources = [
+    {
+      id: "posting.location",
+      value: "France",
+      purpose: "context",
+      country: "FR",
+    },
+  ];
+  expect(
+    (await classify(question)).get(question[0].label)?.answerTags,
+  ).toMatchObject({
+    country: "FR",
+    sourceId: null,
+    hasAdditionalConditions: true,
+  });
+  expect(client.chatWithTools).toHaveBeenCalledOnce();
+});
+
+test("wizard chrome changes reuse meaning while changed own-word instructions reread it", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
+  });
+  const classify = createQuestionClassifier({ client });
+  const question = controls("Email", []);
+  const context = (step: string, extra = "") =>
+    JSON.stringify({
+      instructions: `${step}\nEmail\n${extra}`,
+      chrome: [step],
+    });
+  await classify(question, context("Step 1 of 4"));
+  await classify(question, context("Step 3 of 4"));
+  expect(client.chatWithTools).toHaveBeenCalledOnce();
+  await classify(question, context("Step 3 of 4", "Write this yourself"));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("inactive disabled uploads do not reread an earlier wizard step", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
+  });
+  const classify = createQuestionClassifier({ client });
+  const upload = controls("Resume", []);
+  upload[0].kind = "file";
+  await classify(upload, JSON.stringify({ instructions: "Upload a PDF" }));
+  upload[0].disabled = true;
+  upload[0].visible = false;
+  expect(
+    await classify(
+      upload,
+      JSON.stringify({ instructions: "An unrelated next step" }),
+    ),
+  ).toHaveProperty("size", 0);
+  expect(client.chatWithTools).toHaveBeenCalledOnce();
+});
+
+test("another form root's help text is scoped to its controls; global own-word rules remain conservative", async () => {
+  const client: LLMClient = {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) =>
+      Promise.resolve(
+        reportFor(JSON.parse(messages[1].content) as { question: string }[]),
+      ),
+    ),
+  };
+  const classify = createQuestionClassifier({ client });
+  const applicant = controls("Email", []);
+  applicant[0].scopeKey = "application";
+  const other = controls("Analytics", []);
+  other[0].scopeKey = "dialog";
+  other[0].hint =
+    "Cookie settingsOnly this tab stores your choice.Reject Accept";
+  await classify(
+    [...applicant, ...other],
+    JSON.stringify({
+      instructions: "Email\nOnly this tab stores your choice.\nReject Accept",
+    }),
+  );
+  await classify(applicant, JSON.stringify({ instructions: "Email" }));
+  expect(client.chatWithTools).toHaveBeenCalledOnce();
+  other[0].hint = "Write this yourself";
+  await classify(
+    [...applicant, ...other],
+    JSON.stringify({ instructions: "Email\nWrite this yourself" }),
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(
+    JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1][0]),
+  ).toContain("Write this yourself");
 });
