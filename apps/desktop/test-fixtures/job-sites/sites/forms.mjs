@@ -116,13 +116,26 @@ export function fieldGroups(site) {
         field("skills", "Select your skills", "multi", {
           options: ["Communication", "Analysis", "Planning", "Mentoring"],
         }),
-        // Only the person knows this: Apply asks it in Needs you.
-        field(
-          "onsiteDays",
-          "Which days could you work on site? Select all that apply",
-          "multi",
-          { options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"] },
-        ),
+        // Only the person knows this: Apply asks it in Needs you. One site
+        // carries it so recorded flows on the other sites stay unchanged.
+        ...(site.slug === "clientnest"
+          ? [
+              field(
+                "onsiteDays",
+                "Which days could you work on site? Select all that apply",
+                "multi",
+                {
+                  options: [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday",
+                  ],
+                },
+              ),
+            ]
+          : []),
         field("analysisYears", "Years of analysis experience", "number", {
           min: 0,
           max: 60,
