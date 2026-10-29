@@ -66,7 +66,12 @@ export function assessFitWorkLocation(
     /\b(worldwide|globally|global|anywhere in (?:the )?world|any country|all countries|europe(?:an(?!\s+(?:union|economic\s+area)\b))?|emea|apac|americas|asia|africa|oceania)\b/u.test(
       quote,
     ) ||
-    (!foreign && /\banywhere\b/u.test(quote));
+    (!foreign && /\b(?:anywhere|wherever)\b/u.test(quote)) ||
+    // A published global-remote location corroborates a work-from-anywhere
+    // passage even when the model inferred a country from unrelated text.
+    (!published &&
+      /\b(?:global|worldwide)\s+remote\b/u.test(location) &&
+      /\bwork(?:ing)? from (?:anywhere|wherever)\b/u.test(quote));
   const workScope =
     /\b(hire|hiring|remote|remotely|based|reside|residents|candidates|applicants|eligible)\b|\bwork(?:ing)? (?:from|anywhere|throughout)\b/u.test(
       quote,

@@ -21,7 +21,6 @@
     "test": "vitest run --passWithNoTests",
     "test:embedded-browser": "node ./scripts/test-embedded-browser.mjs",
     "benchmark:resume-import": "pnpm build && node ./scripts/run-resume-import-benchmark.mjs",
-    "benchmark:resume-quality": "pnpm build && node ./scripts/run-resume-quality-benchmark.mjs",
     "ui:live-assistant": "pnpm build && node ./scripts/capture-live-assistant.mjs",
     "ui:live-assistant:fast": "pnpm build && node ./scripts/capture-live-assistant-fast.mjs",
     "ui:live-assistant:fast:built": "node ./scripts/capture-live-assistant-fast.mjs",

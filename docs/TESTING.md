@@ -44,7 +44,7 @@ Other entry points: `pnpm test:correctness`, `pnpm test:coverage`, `pnpm format`
 ## Benchmarks
 
 - Resume import: `pnpm --filter @nestor/desktop benchmark:resume-import`
-- Resume quality: the retained `benchmark:resume-quality` script calls a retired test-API hook; use `pnpm --filter @nestor/ai-evals resume-lane` instead.
+- Resume quality: `pnpm --filter @nestor/ai-evals resume-lane`.
 - AI capabilities: `pnpm ai:benchmark plan | full <lane> | canary luna_high | full-report`. Keep each lane serial. Deterministic fallbacks are reported separately and never credited to the model.
 
 ## Assistant

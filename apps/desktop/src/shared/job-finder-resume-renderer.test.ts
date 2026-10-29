@@ -69,3 +69,41 @@ describe("ATS resume rendering", () => {
     expect(html).not.toContain("Additional:");
   });
 });
+
+it.each(["classic_ats", "modern_split", "technical_matrix"] as const)(
+  "keeps translated skill and language labels in %s",
+  (templateId) => {
+    const translated = structuredClone(document);
+    translated.sections[1]!.id = "section_core_skills";
+    translated.sections[1]!.label = "Kernkompetenzen";
+    translated.sections[1]!.bullets = [{ id: "bi", text: "Power BI" }];
+    translated.sections[2]!.label = "Weitere Kenntnisse";
+    translated.sections.push({
+      id: "section_languages",
+      kind: "skills",
+      label: "Sprachen",
+      text: null,
+      bullets: [{ id: "de", text: "Deutsch — C2" }],
+      entries: [],
+    });
+    translated.sections.push({
+      id: "custom_skills",
+      kind: "skills",
+      label: "Werkzeuge",
+      text: null,
+      bullets: [{ id: "excel", text: "Excel" }],
+      entries: [],
+    });
+    const html = renderResumeTemplateHtml({
+      renderDocument: translated,
+      settings,
+      templateId,
+    });
+    expect(html).toContain("<h3>Kernkompetenzen</h3>");
+    expect(html).toContain("<h3>Sprachen</h3>");
+    expect(html).not.toContain("<h3>Skills</h3>");
+    expect(html).not.toContain("Power BI.");
+    expect(html).not.toContain("Excel.");
+    expect(html).not.toContain("Deutsch — C2.");
+  },
+);

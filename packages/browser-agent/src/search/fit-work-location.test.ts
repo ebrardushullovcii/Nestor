@@ -369,3 +369,46 @@ test("unknown profile or work countries need review", () => {
     ).status,
   ).toBe("review");
 });
+
+test("work from wherever is corroborated by a global remote location", () => {
+  const job = {
+    location: "Global Remote",
+    description: "Work from wherever you want.",
+    workModes: ["remote" as const],
+  };
+  for (const countries of ["", "US"])
+    expect(
+      assessFitWorkLocation(profile, job, [
+        "compatible",
+        "Work from wherever you want",
+        "broader_remote",
+        countries,
+      ]).status,
+    ).toBe("compatible");
+  expect(
+    assessFitWorkLocation(profile, { ...job, location: "United States" }, [
+      "compatible",
+      "Work from wherever you want",
+      "broader_remote",
+      "US",
+    ]).status,
+  ).toBe("review");
+  expect(
+    assessFitWorkLocation(
+      profile,
+      {
+        ...job,
+        description: "US residents only. Work from wherever you want.",
+      },
+      ["blocked", "US residents only", "country_remote", "US"],
+    ).status,
+  ).toBe("blocked");
+  expect(
+    assessFitWorkLocation(profile, job, [
+      "review",
+      "Work from wherever you want",
+      "broader_remote",
+      "US",
+    ]).status,
+  ).toBe("review");
+});

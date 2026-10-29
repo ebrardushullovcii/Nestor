@@ -1283,7 +1283,7 @@ describe("buildResumeRenderDocument", () => {
       heading:
         "Workflow OS — Design lead · https://alex.example.com/workflow-os-case-study",
       summary:
-        "Scaled a workflow design system. Reduced release churn. Technologies: Figma, React.",
+        "Scaled a workflow design system. Reduced release churn. Skills used: Figma, React.",
       bullets: [],
     });
   });
@@ -1836,4 +1836,48 @@ test("page budget follows available real material rather than career years", () 
     });
     expect(draft.targetPageCount).toBe(expected);
   }
+});
+
+test("non-technical project skills use a neutral label included in language translation", async () => {
+  const { applyResumeLanguage, collectResumeLanguageFields } =
+    await import("./internal/resume-workspace-language");
+  const seed = createSeed();
+  const profile = {
+    ...seed.profile,
+    projects: [
+      {
+        ...seed.profile.projects[0]!,
+        id: "community",
+        name: "Community event",
+        summary: "Organized a community event.",
+        outcome: "Welcomed local residents.",
+        skills: ["Event planning", "Communication"],
+      },
+    ],
+  };
+  const draft = seedResumeDraft({
+    profile,
+    job: seed.savedJobs[0]!,
+    templateId: seed.settings.resumeTemplateId,
+  });
+  const field = collectResumeLanguageFields(draft).find(
+    (field) => field.id === "project_community:summary",
+  )!;
+  expect(field.text).toContain("Skills used: Event planning, Communication.");
+  expect(field.text).not.toContain("Technologies:");
+  const translated = applyResumeLanguage(draft, {
+    language: "German",
+    listingLanguage: "German",
+    translations: [
+      {
+        id: field.id,
+        text: "Organisierte eine Veranstaltung. Eingesetzte Kenntnisse: Veranstaltungsplanung, Kommunikation.",
+      },
+    ],
+  });
+  const rendered = buildResumeRenderDocument(profile, translated);
+  expect(
+    rendered.sections.find((section) => section.kind === "projects")!
+      .entries[0]!.summary,
+  ).toContain("Eingesetzte Kenntnisse:");
 });

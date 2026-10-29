@@ -523,6 +523,7 @@ export function presentEntryNarrative(entry: {
 function renderStructuredSection(input: {
   sectionId?: string;
   title: string;
+  proseBullets?: boolean;
   className?: string;
   mode?: "catalog" | "export" | "preview";
   text?: string | null;
@@ -544,7 +545,10 @@ function renderStructuredSection(input: {
   const bullets = (input.bullets ?? [])
     .map((bullet) => ({
       ...bullet,
-      text: ensureTerminalPunctuation(stripBulletGlyphs(bullet.text)),
+      text:
+        input.proseBullets === false
+          ? stripBulletGlyphs(bullet.text)
+          : ensureTerminalPunctuation(stripBulletGlyphs(bullet.text)),
     }))
     .filter((bullet) => bullet.text.length > 0);
   const entries = (input.entries ?? []).map((entry) => ({
@@ -698,6 +702,7 @@ function renderSection(
   const payload = {
     sectionId: section.id,
     title: section.label,
+    proseBullets: section.kind !== "skills",
     mode,
     text: section.text,
     bullets: section.bullets,
@@ -705,6 +710,7 @@ function renderSection(
   } satisfies {
     sectionId: string;
     title: string;
+    proseBullets: boolean;
     mode: "catalog" | "export" | "preview" | undefined;
     text: string | null;
     bullets: Array<{ id: string; text: string }>;
@@ -918,15 +924,17 @@ function buildSectionCatalog(
     ) ?? null;
   const coreSkillsSection =
     renderDocument.sections.find(
-      (section) => section.label === "Core Skills",
+      (section) =>
+        section.id === "section_core_skills" || section.id === "section_skills",
     ) ?? null;
   const additionalSkillsSection =
     renderDocument.sections.find(
-      (section) => section.label === "Additional Skills",
+      (section) => section.id === "section_additional_skills",
     ) ?? null;
   const languageSection =
-    renderDocument.sections.find((section) => section.label === "Languages") ??
-    null;
+    renderDocument.sections.find(
+      (section) => section.id === "section_languages",
+    ) ?? null;
   const knownSectionIds = new Set(
     [
       summarySection,
@@ -1208,12 +1216,20 @@ function renderCareerSnapshotSection(context: TemplateRenderContext): string {
   `;
 }
 
+function skillsHeading(catalog: SectionCatalog): string {
+  const label = (catalog.coreSkillsSection ?? catalog.additionalSkillsSection)
+    ?.label;
+  return !label || label === "Core Skills" || label === "Additional Skills"
+    ? "Skills"
+    : label;
+}
+
 function renderTechnicalSkillsInlineSection(
   context: TemplateRenderContext,
   className?: string,
 ): string {
   return renderInlineSection({
-    title: "Skills",
+    title: skillsHeading(context.catalog),
     mode: context.mode,
     groups: context.skillGroups,
     ...(className ? { className } : {}),
@@ -1225,7 +1241,7 @@ function renderTechnicalSkillsMatrixSection(
   className?: string,
 ): string {
   return renderSkillMatrixSection({
-    title: "Skills",
+    title: skillsHeading(context.catalog),
     mode: context.mode,
     groups: context.skillGroups,
     ...(className ? { className } : {}),
@@ -1242,7 +1258,7 @@ function renderLanguagesSection(
   }
 
   return renderInlineSection({
-    title: "Languages",
+    title: section.label,
     mode,
     groups: [{ values: section.bullets, sectionId: section.id }],
     ...(className ? { className } : {}),

@@ -7,7 +7,6 @@ import {
   ResumeDraftPatchSchema,
   ResumeAssistantMessageSchema,
   ResumeExportArtifactSchema,
-  ResumeQualityBenchmarkReportSchema,
   ResumeValidationResultSchema,
   getResumeValidationIssueSeverity,
   isBlockingResumeValidationIssue,
@@ -174,107 +173,6 @@ describe("contracts resume workspace schemas", () => {
       anchorEntryId: null,
       operation: "reset_entry_order",
       targetEntryId: null,
-    });
-  });
-
-  test("parses resume quality benchmark reports", () => {
-    const report = ResumeQualityBenchmarkReportSchema.parse({
-      benchmarkVersion: "023-local-benchmark-v1",
-      generatedAt: "2026-04-26T12:00:00.000Z",
-      templates: [
-        "classic_ats",
-        "compact_exec",
-        "modern_split",
-        "technical_matrix",
-        "project_showcase",
-        "credentials_focus",
-        "timeline_longform",
-        "career_pivot",
-      ],
-      persistedArtifactsDirectory:
-        "apps/desktop/test-artifacts/ui/resume-quality-benchmark",
-      cases: [
-        {
-          caseId: "grounded_baseline",
-          label: "Grounded baseline",
-          templateId: "classic_ats",
-          passed: true,
-          visibleSkills: ["Figma", "Design Systems"],
-          issueCategories: [],
-          issueCount: 0,
-          metrics: {
-            groundedVisibleSkillRate: 1,
-            workHistoryRepresentationRate: 1,
-            visibleWorkHistoryCoverageRate: 1,
-            fragmentFreeExperienceBulletRate: 1,
-            professionalExperienceSummaryRate: 1,
-            bleedFreeCaseRate: 1,
-            keywordCoverageRate: 1,
-            duplicateIssueFreeRate: 1,
-            thinOutputFreeRate: 1,
-            pageTargetPassRate: 1,
-            atsRenderPassRate: 1,
-            issueFreeCaseRate: 1,
-          },
-          htmlArtifactRelativePath: "grounded_baseline/classic_ats/sample.html",
-          notes: [],
-        },
-      ],
-      aggregate: {
-        groundedVisibleSkillRate: 1,
-        workHistoryRepresentationRate: 1,
-        visibleWorkHistoryCoverageRate: 1,
-        fragmentFreeExperienceBulletRate: 1,
-        professionalExperienceSummaryRate: 1,
-        bleedFreeCaseRate: 1,
-        keywordCoverageRate: 1,
-        duplicateIssueFreeRate: 1,
-        thinOutputFreeRate: 1,
-        pageTargetPassRate: 1,
-        atsRenderPassRate: 1,
-        issueFreeCaseRate: 1,
-      },
-      notes: [],
-    });
-
-    expect(report.templates).toEqual([
-      "classic_ats",
-      "compact_exec",
-      "modern_split",
-      "technical_matrix",
-      "project_showcase",
-      "credentials_focus",
-      "timeline_longform",
-      "career_pivot",
-    ]);
-    expect(report.persistedArtifactsDirectory).toBe(
-      "apps/desktop/test-artifacts/ui/resume-quality-benchmark",
-    );
-    expect(report.cases[0]?.metrics.atsRenderPassRate).toBe(1);
-    expect(report.cases[0]?.metrics.workHistoryRepresentationRate).toBe(1);
-    expect(report.cases[0]?.metrics.visibleWorkHistoryCoverageRate).toBe(1);
-    expect(report.providerMode).toBe("deterministic");
-    expect(report.cases[0]?.generationDurationMs).toBe(0);
-    expect(report.cases[0]?.generationDiagnostics).toBeNull();
-  });
-
-  test("defaults omitted resume quality acceptance metrics for old reports", () => {
-    const metrics = ResumeQualityBenchmarkReportSchema.shape.aggregate.parse({
-      groundedVisibleSkillRate: 1,
-      bleedFreeCaseRate: 1,
-      keywordCoverageRate: 1,
-      duplicateIssueFreeRate: 1,
-      thinOutputFreeRate: 1,
-      pageTargetPassRate: 1,
-      atsRenderPassRate: 1,
-      issueFreeCaseRate: 1,
-    });
-
-    expect(metrics).toMatchObject({
-      workHistoryRepresentationRate: 0,
-      visibleWorkHistoryCoverageRate: 0,
-      fragmentFreeExperienceBulletRate: 0,
-      professionalExperienceSummaryRate: 0,
     });
   });
 

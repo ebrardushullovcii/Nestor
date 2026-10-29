@@ -178,7 +178,7 @@ function formatProjectSummary(input: {
     [
       joinCompact([input.summary, input.outcome], " "),
       input.skills && input.skills.length > 0
-        ? `Technologies: ${uniqueStrings(input.skills).join(", ")}.`
+        ? `Skills used: ${uniqueStrings(input.skills).join(", ")}.`
         : null,
     ],
     " ",
