@@ -54,6 +54,39 @@ it("an exact answer key wins before normalized-wording alternatives", () => {
   ).toBe("The exact stored answer");
 });
 
+it("a refill that reaches Ready closes the earlier attempt's unasked handover", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!;
+  const handover = applications.needsYou.request(
+    {
+      applicationId: row.id,
+      attempt: row.attempt,
+      fieldKey: "step_handover",
+      kind: "question",
+      key: "step_handover",
+      scope: {},
+      prompt: 'Press "Use essential only" on the site, then continue',
+      input: "text",
+      options: [],
+    },
+    { reuseAnswers: false },
+  );
+  if (handover.status !== "needs_you") throw new Error("Expected a handover");
+  expect(applications.forJobs([row.jobId])[0]?.state).toBe("needs_you");
+  // Open lost the page: the refill gets past it without asking again.
+  expect(applications.reprepareForReview(row.id, row.attempt)).toBe(true);
+  const refill = applications.claimNext()!;
+  expect(refill.attempt).toBe(row.attempt + 1);
+  applications.finishPreparation({
+    id: row.id,
+    attempt: refill.attempt,
+    state: "ready",
+  });
+  expect(applications.forJobs([row.jobId])[0]?.state).toBe("ready");
+  expect(applications.needsYou.list().rows).toHaveLength(0);
+});
+
 it("a refused write preserves the answered link and an open task cannot hide it after restart", () => {
   const folder = mkdtempSync(path.join(tmpdir(), "nestor-answer-replay-"));
   folders.push(folder);
