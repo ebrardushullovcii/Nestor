@@ -5,6 +5,7 @@ import type {
   ApplyPlacement,
 } from "./types";
 import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions";
+import { holdsAnswer } from "./submit-preflight";
 
 /**
  * What the apply agent is told.
@@ -125,7 +126,9 @@ export function createApplyUserPrompt(config: ApplyAgentConfig): string {
 function describeAnswered(
   control: ApplyFormObservation["controls"][number],
 ): string {
-  if (!control.answered) return "empty";
+  // A widget that emptied its input once the upload landed still holds the
+  // file; shown as empty, the model attaches it again.
+  if (!holdsAnswer(control)) return "empty";
   if (
     control.credentialRole === "password" ||
     control.credentialRole === "one_time_code" ||
