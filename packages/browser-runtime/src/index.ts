@@ -35,6 +35,7 @@ export {
 export {
   APPLICATION_FINAL_CONTROL_SELECTOR,
   executeExactlyOneFinalAction,
+  recheckLastFinalAction,
   observeApplicationForm,
   type ApplicationExternalActionFacts,
   type ApplicationFinalActionBlockReason,
@@ -44,6 +45,7 @@ export {
   type ApplicationFormObservation,
   type ApplicationSafePageUrl,
   type ExecuteExactlyOneFinalActionInput,
+  type RecheckLastFinalActionInput,
   type ObserveApplicationFormOptions,
 } from "./application-submission-browser-hands";
 
