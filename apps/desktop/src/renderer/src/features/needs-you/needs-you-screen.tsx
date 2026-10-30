@@ -549,7 +549,9 @@ export function NeedsYouScreen() {
                       "w-full text-left hover:bg-(--accent)",
                     )}
                     onClick={() => openReady(row.id)}
-                    title="Open the filled form to review and send"
+                    title={
+                      row.error ?? "Open the filled form to review and send"
+                    }
                     type="button"
                   >
                     <span className={jobFinderListRowLinesClassName}>
@@ -561,13 +563,14 @@ export function NeedsYouScreen() {
                           .filter(Boolean)
                           .join(" · ")}
                       </span>
+                      {/* Why a Send for me form waits, when it has a reason. */}
                       <span
                         className={cn(
                           jobFinderListRowStatusClassName,
                           "text-foreground-soft",
                         )}
                       >
-                        Filled in. Review it and send.
+                        {row.error ?? "Filled in. Review it and send."}
                       </span>
                     </span>
                   </button>

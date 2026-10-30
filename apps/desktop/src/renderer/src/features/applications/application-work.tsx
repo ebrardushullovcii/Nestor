@@ -69,7 +69,9 @@ function ApplyActions(props: { details: ApplicationDetails }) {
     "open" | "stop" | "retry" | "sent" | "not_sent" | null
   >(null);
   const { application, receipt } = props.details;
-  const canOpen = ["ready", "needs_you"].includes(application.state);
+  const canOpen = ["ready", "needs_you", "uncertain"].includes(
+    application.state,
+  );
   const canStop = ["queued", "running", "needs_you", "ready"].includes(
     application.state,
   );
@@ -80,8 +82,7 @@ function ApplyActions(props: { details: ApplicationDetails }) {
     ["failed", "stopped"].includes(application.state) &&
     application.submittedAt === null &&
     (receipt === null ||
-      (application.state === "stopped" &&
-        receipt.outcome === "not_submitted"));
+      (application.state === "stopped" && receipt.outcome === "not_submitted"));
   const canSettle = application.state === "uncertain";
   if (!canOpen && !canStop && !canRetry && !canSettle) return null;
 
@@ -171,6 +172,12 @@ function ApplyActions(props: { details: ApplicationDetails }) {
                 kind === "open"
                   ? "The application page isn't open any more."
                   : "It had already moved on.",
+              ...(kind === "open" && canSettle
+                ? {
+                    description:
+                      "Check your account on the employer's site before settling this outcome. Nestor has not reopened or resent the application.",
+                  }
+                : {}),
               tone: "warning",
             },
       );
@@ -223,7 +230,7 @@ function ApplyActions(props: { details: ApplicationDetails }) {
           size="toolbar"
         >
           <ExternalLink aria-hidden />
-          Open application
+          {canSettle ? "Check site" : "Open application"}
         </Button>
       ) : null}
       {canStop ? (
@@ -255,6 +262,9 @@ function SentReview(props: { details: ApplicationDetails }) {
   const { reviewCard: card, receipt, resumeFileName } = props.details;
   if (!card && !receipt && !resumeFileName) return null;
   const sent = receipt?.outcome === "submitted";
+  const personConfirmed =
+    sent &&
+    receipt.evidence.some((entry) => entry.kind === "operator_confirmation");
 
   return (
     <details
@@ -280,9 +290,20 @@ function SentReview(props: { details: ApplicationDetails }) {
               </span>
               {` · tried ${formatWhen(receipt.attemptedAt)}`}
               {receipt.verifiedAt
-                ? ` · confirmed ${formatWhen(receipt.verifiedAt)}`
+                ? ` · ${personConfirmed ? "you confirmed" : "site confirmed"} ${formatWhen(receipt.verifiedAt)}`
                 : ""}
             </p>
+            {receipt.outcome === "outcome_uncertain" ? (
+              <p className="text-xs text-foreground-soft">
+                {receipt.browserAction
+                  ? receipt.browserAction.requestsAfterClick?.some(
+                      (request) => request.finalSubmit,
+                    )
+                    ? "A send request was observed, but the site has not confirmed receipt. Nestor will not send it again automatically."
+                    : "No application request or receipt was confirmed after the press. Nestor will not send it again automatically."
+                  : "A press was recorded, but receipt is unconfirmed. Check the site before marking the outcome."}
+              </p>
+            ) : null}
             {receipt.evidence.map((entry) => (
               <p className="text-xs text-foreground-soft" key={entry.id}>
                 {entry.summary}
@@ -294,7 +315,7 @@ function SentReview(props: { details: ApplicationDetails }) {
         {card ? (
           <p className="text-foreground-soft">
             {card.siteLabel}
-            {card.pageUrl ? (
+            {card.pageUrl && props.details.application.state !== "uncertain" ? (
               <>
                 {" · "}
                 <button
