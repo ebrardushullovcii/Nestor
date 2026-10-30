@@ -12,6 +12,16 @@
 
 Other entry points: `pnpm test:correctness`, `pnpm test:coverage`, `pnpm format`, `pnpm knip`, `pnpm structure:check`.
 
+## Keep checks proportional
+
+Builds and full suites are the slowest part of most changes. CI runs lint, typecheck and the test suite on every pull request, so locally:
+
+- Run the row above that matches the change, not `pnpm test` or a full suite by habit. When shared contracts, IPC or several packages change, run their checks or `pnpm verify:affected`.
+- Batch related fixes, then check once per batch. Don't rerun a passing check after an edit that cannot affect it.
+- Build the desktop app once per batch, and only when you will run the built app. After that build, use the `:built` harness variants instead of the ones that rebuild. `verify-nestor up` refuses a build whose stamp doesn't match the source; `qa` and the `:built` harnesses don't check freshness, so rebuild after changing build inputs before using them. The stamp covers tracked changes and the names of untracked files, not their contents. Restarting an instance reuses its copied build, so start a fresh instance after a rebuild.
+- In the app, prove a change through the feature it affects: that feature's recipe in `.claude/skills/verify-nestor/features/` or one journey stage. Run the combined `full-check` journey (about 25 minutes plus a 12-minute batch, with live model calls) only when asked or when a change touches most of the app.
+- Use `--ai deterministic` to prove screens and flow. Use `--ai live` only when the result depends on the model (search, fit, resume, apply).
+
 ## Stop rules
 
 - Never stop a process you did not start. Stop only the Electron instance you launched, through its own handle or PID tree, and report survivors instead of sweeping. Pattern kills (`pkill -f electron`, `killall Electron`) hit the user's own dev instance and every other Electron app.
@@ -21,9 +31,9 @@ Other entry points: `pnpm test:correctness`, `pnpm test:coverage`, `pnpm format`
 
 ## Testing the built app
 
-- For exploratory agent testing, use `pnpm --filter @nestor/desktop qa`. It wraps the installed Playwright/Electron tools in an isolated session with a private build copy, local sites, diagnostics and restarts. See [Agent development QA](AGENT_QA.md) for interactive/scripted usage, fault injection and evidence limits. Existing focused harnesses remain available.
+- To drive the built app like a user, use the `verify-nestor` skill (see `AGENTS.md`): an isolated instance with synthetic data, replica-only sends and saved evidence. `pnpm --filter @nestor/desktop qa` ([Agent development QA](AGENT_QA.md)) is an interactive Playwright alternative with fault injection; don't run both against one checkout at the same time. Existing focused harnesses remain available.
 
-- Build first: `pnpm --filter @nestor/desktop build`. Scripts that launch `out/main/index.cjs` run whatever was last built.
+- Build first, but never in the owner's main checkout: its `out/` feeds their running `pnpm desktop:dev`, and verify-nestor's `build` refuses there. Build in a worktree with verify-nestor's `build` (`node .claude/skills/verify-nestor/bin/lib/cli.mjs build`), which runs `pnpm --filter @nestor/desktop build` and stamps the result for `up`. If the task must stay in the main checkout, drive the existing build only when it matches the source; otherwise report fresh-build verification as blocked. Don't bypass the guard. Scripts that launch `out/main/index.cjs` run whatever was last built.
 - Use a temporary user-data directory and synthetic data (`apps/desktop/test-fixtures/job-finder/resume-import-sample.txt`, or the synthetic personas in `apps/desktop/test-fixtures/job-finder/resume-import-personas/` in PDF, DOCX, TXT and Markdown), never the user's real workspace or a real person's resume.
 - Serialize isolated Electron launches unless a coordinated parallel run explicitly uses the QA launcher's shared `--parallel-group` with distinct `--session-id` values (see [Agent development QA](AGENT_QA.md)). Build once before starting the group and audit only the processes you own.
 - Harness commands live in `apps/desktop/package.json` (`ui:*`, `test:embedded-browser`, `test:live-assistant-*`). `:built` variants use the existing build; the others rebuild.

@@ -100,7 +100,7 @@ Put one-off journeys in your evidence folder, not in the repo.
 | `journeys/live-assistant-session.mjs`                                                  | either AI mode | notices, quick check, start, one typed question answered in the window and the popups, end, post-session review, the stored session                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | about 30 s                                                                                                                         |
 | `journeys/website.mjs` (with `bin/website run`)                                        | nothing        | hero, early-access signup posted to the local server, the tour, phone width with no sideways scroll                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | about 3 s                                                                                                                          |
 
-A single stage assumes the earlier ones already ran on this instance.
+A single stage assumes the earlier ones already ran on this instance. For a routine change, run the affected feature's recipe or one stage; run `full-check` only when asked or when a change touches most of the app.
 
 ### Website
 
@@ -159,7 +159,7 @@ Internals, for fixing the helpers: `bin/lib/cli.mjs` (commands), `bin/lib/driver
 
 ## Feature map
 
-`features/README.md` lists the user-facing features, how to reach, drive and judge each one. Before calling a change proven, read the feature's file: a proof through one convenient entry point is incomplete when the map lists others. When the app changes, update the map (`/maintain-verification-skill`).
+`features/README.md` lists the user-facing features, how to reach, drive and judge each one. Before calling a change proven, read the feature's file: a proof through one convenient entry point is incomplete when the map lists others. When behavior changes, update the matching file in `features/` in the same change and check its steps against the app.
 
 ## Gotchas
 
