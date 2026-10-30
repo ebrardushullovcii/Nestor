@@ -2,13 +2,13 @@
 
 ## Automated checks by change
 
-| Change                                             | Run                                                                                                        |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| package-local code                                 | `pnpm validate:package <alias>` (`desktop`, `job-finder`, `browser-agent`, `browser-runtime`, `contracts`) |
-| contracts or IPC                                   | `pnpm validate:contracts` plus typecheck of affected packages                                              |
-| discovery or source-debug                          | `pnpm source-generic:check` plus focused package tests                                                     |
-| desktop UI                                         | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                  |
-| broad cross-package behavior                       | `pnpm verify:affected`                                                                                     |
+| Change                       | Run                                                                                                        |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| package-local code           | `pnpm validate:package <alias>` (`desktop`, `job-finder`, `browser-agent`, `browser-runtime`, `contracts`) |
+| contracts or IPC             | `pnpm validate:contracts` plus typecheck of affected packages                                              |
+| discovery or source-debug    | `pnpm source-generic:check` plus focused package tests                                                     |
+| desktop UI                   | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                  |
+| broad cross-package behavior | `pnpm verify:affected`                                                                                     |
 
 Other entry points: `pnpm test:correctness`, `pnpm test:coverage`, `pnpm format`, `pnpm knip`, `pnpm structure:check`.
 
