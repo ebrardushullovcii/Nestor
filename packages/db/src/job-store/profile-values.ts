@@ -84,11 +84,13 @@ export function createScalarValues(
     const values = store
       .sql(`SELECT ${selected} FROM ${table.name} WHERE id=1`)
       .get() as Fields;
+    // Added columns are NULL in older workspaces. Reads and edit-conflict
+    // checks must use the same default that the person sees in the UI.
     return Object.fromEntries(
       Object.entries(values).map(([key, value]) => [
         key,
         value === null && table.optional?.includes(key)
-          ? undefined
+          ? defaults[key]
           : table.booleans.includes(key) && value !== null
             ? Boolean(value)
             : value,
