@@ -2,6 +2,10 @@ import { app } from "electron";
 import { describe, expect, test, vi } from "vitest";
 import { EmbeddedBrowser } from "./embedded-browser";
 
+const { openExternal } = vi.hoisted(() => ({
+  openExternal: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock("electron", () => ({
   app: {
     getAppMetrics: vi.fn(() => [{ pid: 100, memory: { workingSetSize: 0 } }]),
@@ -10,6 +14,7 @@ vi.mock("electron", () => ({
   dialog: {},
   screen: {},
   session: {},
+  shell: { openExternal },
   WebContentsView: class {},
 }));
 
@@ -68,7 +73,13 @@ function makeContents(id: string) {
     getBackgroundThrottling: () => true,
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
     mainFrame: {
-      framesInSubtree: [{ executeJavaScript: vi.fn(() => Promise.resolve()) }],
+      framesInSubtree: [
+        {
+          executeJavaScript: vi.fn<() => Promise<unknown>>(() =>
+            Promise.resolve(),
+          ),
+        },
+      ],
     },
     executeJavaScript: vi.fn(() =>
       Promise.resolve({ title: id, bodyText: "Application received" }),
@@ -80,6 +91,36 @@ function makeContents(id: string) {
 }
 
 describe("embedded browser tab state", () => {
+  test("opening outside exports only the displayed address and keeps the waiting tab intact", async () => {
+    const { browser, state, pages } = makeBrowser();
+    const page = pages.get("failed")!;
+    page.getURL = () =>
+      "https://jobs.example/failed?code=private&answer=prepared#token";
+    state.parkedTabs.set("failed", null);
+    await browser.command({ type: "open_in_browser" });
+    expect(openExternal).toHaveBeenLastCalledWith(
+      "https://jobs.example/failed",
+    );
+    expect(state.parkedTabs.has("failed")).toBe(true);
+    for (const contents of pages.values()) {
+      expect(contents.loadURL).not.toHaveBeenCalled();
+      expect(contents.reload).not.toHaveBeenCalled();
+      expect(contents.setUserAgent).not.toHaveBeenCalled();
+      expect(contents.close).not.toHaveBeenCalled();
+    }
+  });
+
+  test.each(["about:blank", "file:///private", "javascript:alert(1)"])(
+    "opening outside ignores a non-web address (%s)",
+    async (url) => {
+      const { browser, pages } = makeBrowser();
+      pages.get("failed")!.getURL = () => url;
+      openExternal.mockClear();
+      await browser.command({ type: "open_in_browser" });
+      expect(openExternal).not.toHaveBeenCalled();
+    },
+  );
+
   test("verification retry changes only the active tab and uses GET instead of replaying a form", async () => {
     const { browser, state, pages } = makeBrowser();
     state.originalUserAgent = "Chromium/152 Electron/44 Nestor/0.1";
@@ -620,6 +661,63 @@ test("a general-browser send prompt requires recent person input and never claim
   state.noteUnboundSend("person");
   expect(browser.getState().unboundSendNotice?.id).not.toBe(previous);
 });
+
+test("a raw page timestamp cannot invent the person's final press", async () => {
+  const { browser, state, pages } = makeBrowser();
+  state.ownedTabs.set("result", new Set(["prepared"]));
+  const native = browser as unknown as { personInputTabs: Set<string> };
+  native.personInputTabs.add("prepared");
+  const spoofed = {
+    title: "Application",
+    bodyText: "Application",
+    sendPressedAt: new Date().toISOString(),
+    sendConfirmationBefore: [],
+    sendOrigin: "https://jobs.example",
+  };
+  pages.get("prepared")!.executeJavaScript.mockResolvedValue(spoofed);
+  const raw = await browser.readApplicationPageWithPerson("result");
+  expect(raw?.sendPressedAt).toBeUndefined();
+  expect(raw?.sendConfirmationBefore).toBeUndefined();
+});
+
+test.each(["Still processing", "Your application has been received"])(
+  "the sending iframe supplies the receipt, never a parent acknowledgement: %s",
+  async (bodyText) => {
+    const { browser, state, pages } = makeBrowser();
+    state.ownedTabs.set("result", new Set(["prepared"]));
+    const native = browser as unknown as {
+      personInputTabs: Set<string>;
+      personInputAt: Map<string, number>;
+      noteBoundSend(
+        id: string,
+        context: {
+          confirmationBefore: string[];
+          frameTreeNodeId: number;
+          origin: string;
+        },
+      ): void;
+    };
+    native.personInputTabs.add("prepared");
+    native.personInputAt.set("prepared", Date.now());
+    const contents = pages.get("prepared")!;
+    const frame = contents.mainFrame.framesInSubtree[0]!;
+    Object.assign(frame, {
+      frameTreeNodeId: 22,
+      url: "https://frame.example/receipt",
+    });
+    frame.executeJavaScript.mockResolvedValue({ title: "Receipt", bodyText });
+    native.noteBoundSend("prepared", {
+      confirmationBefore: [],
+      frameTreeNodeId: 22,
+      origin: "https://frame.example",
+    });
+    const raw = await browser.readApplicationPageWithPerson("result");
+    expect(raw?.bodyText).toBe(bodyText);
+    expect(raw?.url).toBe("https://frame.example/receipt");
+    expect(raw?.sendOrigin).toBe("https://frame.example");
+    expect(contents.executeJavaScript).not.toHaveBeenCalled();
+  },
+);
 
 test("ending an application loan returns the person's own send control", async () => {
   const { browser, pages, state } = makeBrowser();

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { runInNewContext } from "node:vm";
 import {
   alignClientHintHeaders,
   CHROME_IDENTITY_SCRIPT,
@@ -46,5 +47,20 @@ describe("browser identity", () => {
       "ipcRenderer",
     ])
       expect(CHROME_IDENTITY_SCRIPT).not.toContain(forbidden);
+  });
+  test("verification retry keeps original header and page brands consistent", () => {
+    const headers = {
+      "User-Agent": "Mozilla/5.0 Chrome/152.0.1.2 Electron/44.2.0 Nestor/0.1",
+      "Sec-CH-UA": '"Chromium";v="152", "Not?A_Brand";v="24"',
+    };
+    expect(alignClientHintHeaders(headers, "152.0.1.2")).toEqual(headers);
+    const chrome = {};
+    const data = { brands: [{ brand: "Chromium", version: "152" }] };
+    runInNewContext(CHROME_IDENTITY_SCRIPT, {
+      navigator: { userAgent: headers["User-Agent"], userAgentData: data },
+      window: { chrome },
+    });
+    expect(chrome).toEqual({});
+    expect(data.brands).toEqual([{ brand: "Chromium", version: "152" }]);
   });
 });

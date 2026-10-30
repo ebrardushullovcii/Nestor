@@ -299,6 +299,10 @@ export function createDesktopBrowserRuntime(
               workingTabCount: () => embedded.workingTabCount(),
               hasAutomationTabCapacity: (reservedTabs?: number) =>
                 embedded.hasAutomationTabCapacity(reservedTabs),
+              applicationPageWithPerson: (key: string) =>
+                embedded.applicationPageWithPerson(key),
+              focusRetainedApplicationPage: (key: string) =>
+                embedded.focusRetainedApplicationPage(key),
             },
           }
         : {}),
@@ -460,7 +464,8 @@ async function createJobFinderRuntime(
               profile.currentCountry,
             ),
             browserPermissions: browserAgentPermissionsOf(settings),
-            readBrowserPermissions: () => browserAgentPermissionsOf(searchPreferencesStore.settings.read()),
+            readBrowserPermissions: () =>
+              browserAgentPermissionsOf(searchPreferencesStore.settings.read()),
             remoteCountsAsAnyLocation:
               settings.aiBehavior?.jobSearch.remoteCountsAsAnyLocation ?? true,
           };

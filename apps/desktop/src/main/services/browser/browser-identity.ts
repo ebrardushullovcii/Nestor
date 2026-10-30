@@ -24,6 +24,12 @@ export function alignClientHintHeaders(
   headers: Record<string, string>,
   chromeVersion: string,
 ): Record<string, string> {
+  // Retry site verification restores the tab's original Electron identity.
+  // Its hints must stay original too, rather than contradicting that UA.
+  const userAgent = Object.entries(headers).find(
+    ([name]) => name.toLowerCase() === "user-agent",
+  )?.[1];
+  if (userAgent?.includes("Electron/")) return { ...headers };
   const major = chromeVersion.split(".")[0] ?? chromeVersion;
   const output: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) {
@@ -43,6 +49,7 @@ export function alignClientHintHeaders(
  * touches the user-agent brand list and the `window.chrome` shape.
  */
 export const CHROME_IDENTITY_SCRIPT = `(() => {
+  if (navigator.userAgent.includes("Electron/")) return;
   const match = /Chrome\\/(\\d+)(?:\\.(\\d+\\.\\d+\\.\\d+))?/.exec(navigator.userAgent);
   if (!match) return;
   const major = match[1];
