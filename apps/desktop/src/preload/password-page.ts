@@ -34,15 +34,37 @@ export function installPasswordPage(port: {
       return false;
     }
   };
-  const passwords = () =>
-    Array.from(
-      document.querySelectorAll<HTMLInputElement>('input[type="password"]'),
-    ).filter(safeForm);
+  const passwords = () => {
+    const inputs = document.querySelectorAll<HTMLInputElement>(
+      'input[type="password"]',
+    );
+    return readPasswordForms()
+      .map((form) => inputs[form.passwordIndex])
+      .filter((input): input is HTMLInputElement => !!input && safeForm(input));
+  };
   const usernameFor = (password: HTMLInputElement) => {
-    const root = password.form ?? document;
-    const inputs = Array.from(root.querySelectorAll<HTMLInputElement>("input"));
+    const dialog = password.closest(
+      'dialog, [role="dialog"], [aria-modal="true"]',
+    );
+    const root =
+      dialog && (!password.form || !dialog.contains(password.form))
+        ? dialog
+        : (password.form ?? dialog ?? document);
+    const inputs = Array.from(
+      root.querySelectorAll<HTMLInputElement>("input"),
+    ).filter(
+      (input) =>
+        !input.disabled &&
+        !input.readOnly &&
+        !input.closest('[hidden], [inert], [aria-hidden="true"]') &&
+        getComputedStyle(input).visibility !== "hidden" &&
+        input.getClientRects().length > 0,
+    );
+    const autocompleteIs = (input: HTMLInputElement, token: string) =>
+      input.autocomplete.split(/\s+/u).includes(token);
     return (
-      inputs.find((input) => input.autocomplete === "username") ??
+      inputs.find((input) => autocompleteIs(input, "username")) ??
+      inputs.find((input) => autocompleteIs(input, "email")) ??
       inputs.find((input) => input.type === "email") ??
       inputs.find(
         (input) =>
@@ -126,6 +148,21 @@ export function installPasswordPage(port: {
       );
       if (!descriptor?.set) return;
       const username = usernameFor(password);
+      const usernameText = value.username.trim()
+        ? value.username
+        : value.fallbackUsername;
+      // A password-only import does not identify a different account already
+      // entered on the site. Leave that conflict for the person.
+      if (
+        value.agent &&
+        username &&
+        !value.username.trim() &&
+        (!usernameText ||
+          (username.value.trim() &&
+            username.value.trim().toLowerCase() !==
+              usernameText.trim().toLowerCase()))
+      )
+        return;
       // All binding checks run before either value is written.
       if (!safeForm(password)) return;
       const fill = (input: HTMLInputElement, text: string) => {
@@ -133,7 +170,7 @@ export function installPasswordPage(port: {
         input.dispatchEvent(new Event("input", { bubbles: true }));
         input.dispatchEvent(new Event("change", { bubbles: true }));
       };
-      if (username) fill(username, value.username);
+      if (username && usernameText) fill(username, usernameText);
       // A username listener may navigate or replace/change the form action.
       if (
         !password.isConnected ||
@@ -141,6 +178,17 @@ export function installPasswordPage(port: {
         !safeForm(password)
       )
         return;
+      if (value.agent) {
+        const forms = readPasswordForms();
+        if (
+          forms.length !== 1 ||
+          !forms[0]?.login ||
+          document.querySelectorAll('input[type="password"]')[
+            forms[0].passwordIndex
+          ] !== password
+        )
+          return;
+      }
       fill(password, value.password);
       ok = true;
     } catch {

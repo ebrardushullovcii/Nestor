@@ -17,7 +17,10 @@ import {
   type BrowserPasswordsList,
 } from "@nestor/contracts";
 import { createBrowserPasswordRepository } from "@nestor/db";
-import { createPreferencesStore } from "@nestor/db/job-store";
+import {
+  createPreferencesStore,
+  createProfileStore,
+} from "@nestor/db/job-store";
 import { getJobStore } from "../job-store";
 import { resolveDesktopUserDataDirectory } from "../../setup/user-data-directory";
 import { PasswordVault } from "./password-vault";
@@ -62,6 +65,10 @@ export class BrowserPasswords {
       browserAgentPermissionsOf(
         createPreferencesStore(getJobStore()).settings.read(),
       ).signIn,
+    private readonly profileSignInEmail = (): string | null => {
+      const profile = createProfileStore(getJobStore()).read();
+      return profile.applicationIdentity.preferredEmail ?? profile.email;
+    },
   ) {
     this.expiryTimer = setInterval(() => {
       let changed = false;
@@ -273,7 +280,7 @@ export class BrowserPasswords {
         )
       )
         continue;
-      let forms: ReturnType<typeof readPasswordForms>;
+      let forms: ReturnType<typeof BrowserPasswordFormsSchema.parse>;
       try {
         forms = BrowserPasswordFormsSchema.parse(
           await frame.executeJavaScript(`(${readPasswordForms.toString()})()`),
@@ -305,9 +312,21 @@ export class BrowserPasswords {
           saved.origin,
           saved.origin,
         ) ||
-        (agent && !this.agentSignInAllowed())
+        (agent &&
+          (!this.agentSignInAllowed() ||
+            this.vault().list(saved.origin).length !== 1))
       )
         return false;
+      const email =
+        agent && !saved.username.trim()
+          ? this.profileSignInEmail()?.trim()
+          : undefined;
+      const fallbackUsername =
+        email &&
+        email.length <= 1000 &&
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+          ? email
+          : undefined;
       const value = this.vault().read(credentialId);
       if (!value || value.origin !== saved.origin) return false;
       const requestId = randomUUID();
@@ -320,7 +339,12 @@ export class BrowserPasswords {
         const timer = setTimeout(() => finish(false), 2000);
         this.fills.set(requestId, { tabId, frame, resolve: finish });
         try {
-          frame.send("browser-password:fill", { requestId, ...value, agent });
+          frame.send("browser-password:fill", {
+            requestId,
+            ...value,
+            agent,
+            ...(fallbackUsername ? { fallbackUsername } : {}),
+          });
         } catch {
           finish(false);
         }
