@@ -6,6 +6,7 @@ import {
 import { createApplyTiming } from "./apply-timing";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import { localStepAdvanced, localStepPreflight } from "./local-step-preflight";
+import { manualEntryPressFor } from "./fill-presses";
 import { asksListingDiscovery } from "./listing-discovery-answer";
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import { resumeFormFileNames } from "@nestor/contracts";
@@ -29,9 +30,11 @@ import { withReasoningTask, type LLMClient } from "../agent/contracts";
 import { createPageTools } from "../page-tools";
 import {
   browserInteractionKind,
+  isSignInEntryAction,
   currentBrowserPermissions,
   withBrowserPermissions,
 } from "../browser-permission-policy";
+import { googleSignInInteraction, isGoogleAccountPage } from "../google-sign-in";
 import {
   createApplySystemPrompt,
   createApplyUserPrompt,
@@ -486,6 +489,17 @@ async function runMeasuredApplyAgent(
   const reviewObservedFieldKeys = new Set<string>();
   const pendingQuestions = new Map<string, ApplicationAttemptQuestion>();
   const attemptedWrites = new Set<string>();
+  const attemptedManualEntries = new Set<string>();
+  const attemptedSignInEntries = new Set<string>();
+  const suggestedAccessRoutes = new Set<string>();
+  let attemptedGoogleSignIn = false;
+  const recordAccessAttempt = (observation: ApplyFormObservation, ref: string) => {
+    if (browserInteractionKind(observation, ref) === "googleSignIn")
+      attemptedGoogleSignIn = true;
+    const action = observation.actions.find((entry) => entry.ref === ref);
+    if (action && isSignInEntryAction(action))
+      attemptedSignInEntries.add(`${observation.url}|${action.label.toLowerCase()}`);
+  };
   const heldAnswerKeys = new Set<string>();
   const rejectedCandidates = new Map<
     string,
@@ -546,7 +560,11 @@ async function runMeasuredApplyAgent(
             (guardState.pickerAttempts.get(key)?.tried.includes(shown) ?? true))
             ? unconfirmedPickers.get(key)
             : undefined;
-        if (guardState.openPickers.has(key) || previousOptions)
+        if (
+          ((control.kind === "combobox" || control.kind === "select") &&
+            guardState.openPickers.has(key)) ||
+          previousOptions
+        )
           control.answered = false;
         if (previousOptions && !control.options.length)
           control.options = [...previousOptions];
@@ -1008,8 +1026,9 @@ async function runMeasuredApplyAgent(
     proposed?: string,
   ): string | null => {
     if (
-      guardState.openPickers.has(pickerQuestionKey(control)) ||
-      pickerExhausted(guardState, control)
+      (control.kind === "combobox" || control.kind === "select") &&
+      (guardState.openPickers.has(pickerQuestionKey(control)) ||
+        pickerExhausted(guardState, control))
     )
       return null;
     const readings = classifyQuestions?.settled(
@@ -1073,6 +1092,7 @@ async function runMeasuredApplyAgent(
       label: string;
       control: ApplyFormObservation["controls"][number];
       fileName: string;
+      documentId: string | undefined;
       state: FileUploadProblem["state"] | "accepted";
       since: number;
     }
@@ -1087,7 +1107,10 @@ async function runMeasuredApplyAgent(
       .indexOf(control);
     return `${page.url?.split(/[?#]/u)[0] ?? ""}|field:file:${ordinal}|${label}`;
   };
-  const selectedFiles = new Map<string, string>();
+  const selectedFiles = new Map<
+    string,
+    { documentId: string; fileName: string }
+  >();
   const uploadDiagnostics = new Map<string, string>();
   const recordUpload = (
     fieldKey: string,
@@ -1102,7 +1125,7 @@ async function runMeasuredApplyAgent(
       control.upload?.fileName ||
       (control.answered ? control.value.split(/[\\/]/u).at(-1) : "") ||
       earlier?.fileName ||
-      selectedFiles.get(fieldKey) ||
+      selectedFiles.get(fieldKey)?.fileName ||
       "";
     if (!control.answered && !earlier && !fileName && observed === "accepted")
       return;
@@ -1144,13 +1167,21 @@ async function runMeasuredApplyAgent(
         ? "file gone from the field; never confirmed"
         : "never confirmed";
     }
-    uploadLedger.set(fieldKey, { label, control, fileName, state, since });
+    uploadLedger.set(fieldKey, {
+      label,
+      control,
+      fileName,
+      documentId:
+        selectedFiles.get(fieldKey)?.documentId ?? earlier?.documentId,
+      state,
+      since,
+    });
     if (state !== "rejected" && state !== "unconfirmed") return;
     const requests =
       control.upload?.requests
         ?.map(
           (request) =>
-            `${request.status === null ? "no HTTP response" : `HTTP ${request.status}`} from ${request.endpoint}${request.blocked ? " (held back by Nestor)" : ""}`,
+            `${request.status === null ? "no HTTP response" : `HTTP ${request.status}`} from ${request.endpoint}${request.blocked ? " (held back by Nestor)" : ""}${request.guardRefusal ? ` [${request.guardRefusal}]` : ""}`,
         )
         .join("; ") || "no upload request observed";
     const diagnostic = `Upload for "${label}" ${state === "rejected" ? "failed" : "was not confirmed"}. Rule: ${rule}. Validation: ${control.validationMessage || "none"}. Beside the field: ${[control.upload?.described, control.upload?.nearby].filter(Boolean).join("; ") || "no text"}. Request: ${requests}.`;
@@ -1496,6 +1527,13 @@ async function runMeasuredApplyAgent(
     );
     const [firstRepair] = repairs;
     if (firstRepair) {
+      const selectedDocument =
+        documentCatalog.find(
+          (document) => document.id === firstRepair.documentId,
+        ) ??
+        documentCatalog.find(
+          (document) => document.fileName === firstRepair.fileName,
+        );
       const labels = [...new Set(repairs.map((entry) => entry.label))];
       const failed = repairs.some((entry) => entry.state === "rejected");
       pendingQuestions.set(UPLOAD_REPAIR_QUESTION_ID, {
@@ -1507,6 +1545,15 @@ async function runMeasuredApplyAgent(
           askReason: {
             kind: "page_refused",
             check: "upload_acceptance",
+            ...(selectedDocument
+              ? {
+                  selectedDocument: {
+                    kind: selectedDocument.kind,
+                    label: selectedDocument.label.slice(0, 300),
+                    fileName: selectedDocument.fileName.slice(0, 255),
+                  },
+                }
+              : {}),
             detail:
               repairs
                 .map(
@@ -1779,7 +1826,7 @@ async function runMeasuredApplyAgent(
           ];
         }
         if (outcome.pause.code === "document_needs_you") {
-          const observation = await pageTools.observe();
+          let observation = await pageTools.observe();
           const classifications = await classifyQuestions?.(
             observation.controls,
             questionReadContext(observation),
@@ -1795,6 +1842,13 @@ async function runMeasuredApplyAgent(
               )?.required
             )
               control.required = true;
+          }
+          // A file problem does not make the remaining Profile facts unknown.
+          // Fill those through the ordinary permission and retention checks
+          // before collecting the questions this handoff actually needs.
+          if (await tryKnownAnswers(observation)) {
+            observation = await pageTools.observe();
+            syncObservation(observation);
           }
           for (const control of unresolvedRequiredControls(observation)) {
             const key = pendingQuestionKey(control);
@@ -1852,6 +1906,61 @@ async function runMeasuredApplyAgent(
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();
+        const permissions = await currentBrowserPermissions(config);
+        // A password screen can hide provider choices behind a separate Sign In.
+        // Give the model one correction per route, without repeating an account
+        // action or forcing a provider attempt whose outcome is uncertain.
+        if (
+          permissions.googleSignIn &&
+          !attemptedGoogleSignIn &&
+          !isGoogleAccountPage(observation) &&
+          !observation.loading &&
+          (!observation.blocker ||
+            ["site_login_required", "account_creation_required"].includes(
+              observation.blocker.code,
+            )) &&
+          !observation.controls.some(
+            (control) =>
+              control.visible && control.credentialRole === "one_time_code",
+          )
+        ) {
+          const google = [
+            ...observation.actions,
+            ...observation.links,
+            ...observation.clickables,
+          ].find(
+            (entry) =>
+              entry.visible &&
+              googleSignInInteraction(observation, entry.ref) === "googleSignIn",
+          );
+          const entry =
+            permissions.signIn &&
+            observation.controls.some(
+              (control) =>
+                control.visible &&
+                control.credentialRole === "password" &&
+                !control.answered,
+            )
+              ? observation.actions.find(
+                  (action) =>
+                    isSignInEntryAction(action) &&
+                    !attemptedSignInEntries.has(
+                      `${observation.url}|${action.label.toLowerCase()}`,
+                    ),
+                )
+              : undefined;
+          const route = google ?? entry;
+          const routeKey = `${observation.url}|${google ? "google" : "entry"}`;
+          if (route && !suggestedAccessRoutes.has(routeKey)) {
+            suggestedAccessRoutes.add(routeKey);
+            needsPersonFinishPending = false;
+            forPerson = [];
+            return {
+              kind: "ok",
+              content: `${renderObservation(observation)}\nBefore handing off missing credentials, inspect the enabled ${JSON.stringify(route.label)} (${route.ref}) route. ${google ? "Google sign-in is enabled; prefer this observed provider over email/password." : "This button is outside the password form and may reveal provider choices."} Use its observed handle; never type a password or repeat an uncertain account action.`,
+            };
+          }
+        }
         if (
           (observation.blocker &&
             [
@@ -2464,6 +2573,22 @@ async function runMeasuredApplyAgent(
   ): Promise<ApplyExecutionOutcome> => {
     await refreshReusableAnswers();
     const current = pageTools.state.observation;
+    if (current && proposal.tool === "click")
+      recordAccessAttempt(current, proposal.ref);
+    if (
+      current &&
+      proposal.tool === "click" &&
+      manualEntryPressFor(current, proposal.ref)
+    ) {
+      const ref = proposal.ref;
+      const entry = [...current.actions, ...current.clickables].find(
+        (item) => item.ref === ref,
+      );
+      if (entry)
+        attemptedManualEntries.add(
+          `${current.url}|${normalizeSignal(entry.label)}`,
+        );
+    }
     const proposalRef = "ref" in proposal ? proposal.ref : undefined;
     const control = proposalRef
       ? current?.controls.find((entry) => entry.ref === proposalRef)
@@ -2705,7 +2830,10 @@ async function runMeasuredApplyAgent(
       const label = questionPrompt(control);
       const fieldKey = uploadFieldKey(control, current!);
       if (outcome.kind === "attached")
-        selectedFiles.set(fieldKey, outcome.attachment.fileName);
+        selectedFiles.set(fieldKey, {
+          documentId: outcome.attachment.documentId,
+          fileName: outcome.attachment.fileName,
+        });
       else
         note(
           `Upload for "${label}" was not confirmed using ${proposal.method ?? "input"}. Rule: attachment gesture failed. ${outcome.reason}`,
@@ -3661,29 +3789,53 @@ async function runMeasuredApplyAgent(
           observation.controls,
           questionReadContext(observation),
         );
+        // A question whose reading failed goes to the person, said as that:
+        // it was not read, which is not the same as no saved fact for it.
+        // The questions that were read are still filled; the executor
+        // refuses any write to an unread one. Only when nothing on the page
+        // could be read does the run stop here.
+        const reason =
+          "Job Finder could not read this question after three tries, so it did not check your saved answers for it. Answer it here or on the form.";
+        const unread = (control: ApplyFormControl) =>
+          (
+            readings.get(
+              questionClassificationKey(control, observation.controls),
+            ) ?? readings.get(questionPrompt(control))
+          )?.readFailed === true;
         if ([...readings.values()].some((reading) => reading.readFailed)) {
-          const reason =
-            "Job Finder could not read the form's questions after two attempts. Complete them here or on the form.";
           for (const control of observation.controls) {
             if (
               !control.visible ||
               control.disabled ||
               control.readOnly ||
               control.kind === "file" ||
-              !questionPrompt(control)
+              !questionPrompt(control) ||
+              holdsAnswer(control) ||
+              !unread(control) ||
+              pendingQuestions.has(pendingQuestionKey(control))
             )
               continue;
-            const question = buildPendingQuestion({
-              control,
-              jobId: config.application.jobId,
-              detectedAt: now().toISOString(),
-              suggestion: null,
-              siblings: observation.controls,
-            });
-            question.note = reason;
-            pendingQuestions.set(pendingQuestionKey(control), question);
+            pendingQuestions.set(
+              pendingQuestionKey(control),
+              buildPendingQuestion({
+                control,
+                jobId: config.application.jobId,
+                detectedAt: now().toISOString(),
+                suggestion: null,
+                siblings: observation.controls,
+                reason,
+                askReason: {
+                  kind: "source_rejected",
+                  check: "question_classification",
+                  detail: reason,
+                },
+              }),
+            );
           }
-          throw new QuestionReadUnavailableError(reason);
+          if ([...readings.values()].every((reading) => reading.readFailed))
+            throw new QuestionReadUnavailableError(
+              "Job Finder could not read the form's questions after three tries. Complete them here or on the form.",
+            );
         }
       }
       const current = pageTools.state.observation;
@@ -3727,6 +3879,7 @@ async function runMeasuredApplyAgent(
     // classifies the whole question before matching another source.
     if (!classifyQuestions) return false;
     await refreshReusableAnswers();
+    await classifyQuestions(page.controls, questionReadContext(page));
     let changed = false;
     for (const control of unresolvedRequiredControls(page)) {
       if (
@@ -4078,8 +4231,10 @@ async function runMeasuredApplyAgent(
       }
       break;
     }
-    const current = pageTools.state.observation;
+    let current = pageTools.state.observation;
     if (!current || current.blocker) return null;
+    // An old handoff is not evidence that a Profile fact is missing now.
+    if (await tryKnownAnswers(current)) current = pageTools.state.observation!;
     const open = unresolvedRequiredControls(current);
     // A question the person was already asked, and has not answered yet, is
     // theirs again as the attempt before left it. Any other open field means
@@ -4219,6 +4374,20 @@ async function runMeasuredApplyAgent(
                 );
                 if (deferredPress) return handOverPress(pause);
                 return { kind: "ok", content: deferPress(pause) };
+              }
+            }
+            if (name === "follow_link" || name === "navigate") {
+              try {
+                const args = JSON.parse(rawArguments) as Record<string, unknown>;
+                const seen = pageTools.state.observation;
+                const ref =
+                  name === "follow_link"
+                    ? args.ref
+                    : seen?.links.find((link) => link.href === args.url)?.ref;
+                if (seen && typeof ref === "string")
+                  recordAccessAttempt(seen, ref);
+              } catch {
+                // The page tool reports malformed arguments without an action.
               }
             }
             const result = await tool.execute(rawArguments, context);
@@ -4367,6 +4536,20 @@ async function runMeasuredApplyAgent(
           !control.answered &&
           pickerExhausted(guardState, control),
       );
+      // The model may use the site's manual entry once, even after the
+      // search picker exhausted its choices. It still uses normal click,
+      // source, permission and retention checks for every new field.
+      if (
+        current &&
+        [...current.actions, ...current.clickables].some(
+          (entry) =>
+            manualEntryPressFor(current, entry.ref) &&
+            !attemptedManualEntries.has(
+              `${current.url}|${normalizeSignal(entry.label)}`,
+            ),
+        )
+      )
+        return null;
       if (
         !current ||
         (!answerHeld && !exhausted) ||

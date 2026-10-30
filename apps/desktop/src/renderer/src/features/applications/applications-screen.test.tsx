@@ -526,7 +526,18 @@ describe("a stopped or unconfirmed application is never a dead end", () => {
   it("the person says what the site shows after a send the app could not confirm", async () => {
     applyWrites(ids[1]!, "state = 'uncertain'");
     const resolveUncertainSend = vi.fn(() => Promise.resolve(true));
-    Object.assign(window.nestor.jobFinder, { resolveUncertainSend });
+    const openApplication = vi.fn(() => Promise.resolve(true));
+    Object.assign(window.nestor.jobFinder, {
+      resolveUncertainSend,
+      openApplication,
+    });
+    receipt = {
+      outcome: "outcome_uncertain",
+      attemptedAt: new Date().toISOString(),
+      verifiedAt: null,
+      evidence: [],
+      browserAction: { reason: "confirmation_timeout", requestsAfterClick: [] },
+    } as unknown as ApplicationDetails["receipt"];
     const list = renderScreen();
     fireEvent.click(
       await within(list).findByRole("button", { name: /^Northfield 2 / }),
@@ -539,6 +550,17 @@ describe("a stopped or unconfirmed application is never a dead end", () => {
         "Apply could not tell whether it went through. Check the site, then say what you found.",
       ),
     ).toBeTruthy();
+    expect(
+      within(detail).getByText(
+        "No application request or receipt was confirmed after the press. Nestor will not send it again automatically.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(detail).queryByRole("button", { name: "the form" }),
+    ).toBeNull();
+    fireEvent.click(within(detail).getByRole("button", { name: "Check site" }));
+    await screen.findByText("Opened the application page");
+    expect(openApplication).toHaveBeenCalledOnce();
     expect(
       within(detail).queryByRole("button", { name: "Try again" }),
     ).toBeNull();

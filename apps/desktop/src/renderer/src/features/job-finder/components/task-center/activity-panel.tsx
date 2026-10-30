@@ -45,10 +45,12 @@ function ActivityRow(props: {
         type="button"
       >
         <span className="flex items-start justify-between gap-2">
-          <strong className="min-w-0 break-words font-semibold text-foreground">
+          <strong className="min-w-0 flex-1 break-words font-semibold text-foreground">
             {item.title}
           </strong>
-          <StatusBadge tone={item.tone}>{item.badge}</StatusBadge>
+          <StatusBadge className="shrink-0 whitespace-nowrap" tone={item.tone}>
+            {item.badge}
+          </StatusBadge>
         </span>
         <span className="break-words text-(length:--text-small) text-foreground-soft">
           {item.detail}

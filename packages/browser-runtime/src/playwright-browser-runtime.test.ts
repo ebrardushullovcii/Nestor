@@ -3409,7 +3409,9 @@ describe("managed context active service worker gate", () => {
       userDataDir: input.userDataDir,
       chromeExecutablePath: join(input.userDataDir, "chrome.exe"),
       debugPort: input.debugPort,
-      ...(input.preparedFormStore ? {preparedFormStore: input.preparedFormStore} : {}),
+      ...(input.preparedFormStore
+        ? { preparedFormStore: input.preparedFormStore }
+        : {}),
     });
   }
 
@@ -3433,41 +3435,83 @@ describe("managed context active service worker gate", () => {
   }
 
   test("the final Ready check persists declarations changed after preparation", async () => {
-    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-ready-checkpoint-"));
+    const userDataDir = await mkdtemp(
+      join(tmpdir(), "nestor-ready-checkpoint-"),
+    );
     const snapshot: PreparedFormSnapshot = {
-      url: "https://jobs.example.com/apply/first", structure: "a".repeat(64),
-      fields: [{type: "checkbox", value: "yes", checked: false, selected: [], files: [], disabled: false, readOnly: false}],
+      url: "https://jobs.example.com/apply/first",
+      structure: "a".repeat(64),
+      fields: [
+        {
+          type: "checkbox",
+          value: "yes",
+          checked: false,
+          selected: [],
+          files: [],
+          disabled: false,
+          readOnly: false,
+        },
+      ],
     };
     vi.doMock("./prepared-form-recovery", async (original) => ({
-      ...await original<typeof formRecovery>(),
+      ...(await original<typeof formRecovery>()),
       capturePreparedForm: () => Promise.resolve(structuredClone(snapshot)),
     }));
     vi.resetModules();
     try {
-      const harness = createGateHarness({activeServiceWorkers: () => []});
-      const save = vi.fn<(form: PreparedApplicationForm) => Promise<void>>().mockResolvedValue(undefined);
-      const runtime = await createGatedRuntime({userDataDir, debugPort: await reserveFreePort(), browser: harness.fakeBrowser,
-        preparedFormStore: {get: vi.fn().mockResolvedValue(null), save, delete: vi.fn(), loadAttachment: vi.fn()},
+      const harness = createGateHarness({ activeServiceWorkers: () => [] });
+      const save = vi
+        .fn<(form: PreparedApplicationForm) => Promise<void>>()
+        .mockResolvedValue(undefined);
+      const runtime = await createGatedRuntime({
+        userDataDir,
+        debugPort: await reserveFreePort(),
+        browser: harness.fakeBrowser,
+        preparedFormStore: {
+          get: vi.fn().mockResolvedValue(null),
+          save,
+          delete: vi.fn(),
+          loadAttachment: vi.fn(),
+        },
       });
-      const {approvedResumePath, prepareInput} = createPrepareInput({userDataDir});
+      const { approvedResumePath, prepareInput } = createPrepareInput({
+        userDataDir,
+      });
       await writeFile(approvedResumePath, "approved resume", "utf8");
       const stub = createStubFormPreparer();
-      await runtime.executeApplicationFlow("target_site", {...prepareInput, applicationPageBindingKey: "ready",
-        prepareApplicationForm: async (args) => ({...await stub(args), state: "ready"}),
+      await runtime.executeApplicationFlow("target_site", {
+        ...prepareInput,
+        applicationPageBindingKey: "ready",
+        prepareApplicationForm: async (args) => ({
+          ...(await stub(args)),
+          state: "ready",
+        }),
       });
-      expect(save.mock.calls.at(-1)?.[0].snapshot?.fields[0]?.checked).toBe(false);
-      await runtime.withApplicationPageExecution!("target_site", "ready", () => {
-        snapshot.fields[0]!.checked = true;
-        return Promise.resolve("ready");
-      });
-      expect(save.mock.calls.at(-1)?.[0].snapshot?.fields[0]?.checked).toBe(true);
+      expect(save.mock.calls.at(-1)?.[0].snapshot?.fields[0]?.checked).toBe(
+        false,
+      );
+      await runtime.withApplicationPageExecution!(
+        "target_site",
+        "ready",
+        () => {
+          snapshot.fields[0]!.checked = true;
+          return Promise.resolve("ready");
+        },
+      );
+      expect(save.mock.calls.at(-1)?.[0].snapshot?.fields[0]?.checked).toBe(
+        true,
+      );
       snapshot.fields[0]!.checked = false;
-      Object.assign(harness.fakePage, {evaluate: vi.fn().mockResolvedValue(undefined)});
+      Object.assign(harness.fakePage, {
+        evaluate: vi.fn().mockResolvedValue(undefined),
+      });
       await runtime.handApplicationPageToPerson!("target_site", "ready");
-      expect(save.mock.calls.at(-1)?.[0].snapshot?.fields[0]?.checked).toBe(false);
+      expect(save.mock.calls.at(-1)?.[0].snapshot?.fields[0]?.checked).toBe(
+        false,
+      );
     } finally {
       vi.doUnmock("./prepared-form-recovery");
-      await rm(userDataDir, {recursive: true, force: true});
+      await rm(userDataDir, { recursive: true, force: true });
     }
   });
 
@@ -3584,6 +3628,18 @@ describe("managed context active service worker gate", () => {
           ),
         ).toBe(closes);
         expect(harness.fakePage.close).toHaveBeenCalledTimes(closes ? 1 : 0);
+        if (closes) {
+          const contextsBefore = harness.fakeContext.newPage.mock.calls.length;
+          expect(
+            await runtime.focusRetainedApplicationPage!(
+              "target_site",
+              "waiting_page",
+            ),
+          ).toBe(false);
+          expect(harness.fakeContext.newPage).toHaveBeenCalledTimes(
+            contextsBefore,
+          );
+        }
         // Closed, it is no longer a live page: Open refills it instead.
         expect(
           await runtime.hasApplicationPageBinding!(

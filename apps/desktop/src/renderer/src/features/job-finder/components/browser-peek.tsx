@@ -279,15 +279,17 @@ export function BrowserPeek(props: {
   );
   const command = useCallback(
     async (input: DesktopBrowserCommand) => {
-      if (!bridge) return;
+      if (!bridge) return false;
       try {
         accept(await bridge.command(input));
         setMessage(null);
         setSavedJob(null);
+        return true;
       } catch {
         setMessage(
           "The browser couldn’t complete that action. Try again or close and reopen it.",
         );
+        return false;
       }
     },
     [bridge, accept],
@@ -733,6 +735,25 @@ export function BrowserPeek(props: {
                           }}
                         >
                           <RotateCw size={14} /> Retry site verification
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={blank}
+                          title="If verification keeps repeating, open the displayed address in your usual browser and apply by hand. Sign-ins and verification do not transfer back to Nestor."
+                          onClick={() => {
+                            setMenuOpen(false);
+                            void command({ type: "open_in_browser" }).then(
+                              (opened) => {
+                                if (opened)
+                                  setMessage(
+                                    "Continue in your usual browser and apply by hand. Its sign-in and verification do not transfer back to Nestor. Nestor cannot observe or continue work in that browser.",
+                                  );
+                              },
+                            );
+                          }}
+                        >
+                          <ArrowUpRight size={14} /> Open in my browser
                         </button>
                         <button
                           type="button"

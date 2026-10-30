@@ -93,6 +93,7 @@ import {
 import {
   executeExactlyOneFinalAction as executeExactlyOneFinalActionOnPage,
   observeApplicationForm as observeApplicationFormOnPage,
+  recheckLastFinalAction,
 } from "./application-submission-browser-hands";
 import type {
   ExecuteExactlyOneFinalActionInput,
@@ -636,7 +637,11 @@ async function buildApplyVisualDiagnostics(input: {
 export interface BrowserAgentRuntimeOptions {
   userDataDir: string;
   /** Rebind native tab ownership after a verified, model-free refill. */
-  onApplicationPageRestored?(key: string, page: Page, label?: string): Promise<void>;
+  onApplicationPageRestored?(
+    key: string,
+    page: Page,
+    label?: string,
+  ): Promise<void>;
   preparedFormStore?: PreparedApplicationFormStore;
   /** Host-owned pages, for example a desktop application's embedded browser. */
   browserHost?: {
@@ -652,6 +657,9 @@ export interface BrowserAgentRuntimeOptions {
     /** Waiting forms are excluded from the host's working slots. */
     workingTabCount?(): number;
     hasAutomationTabCapacity?(reservedTabs?: number): boolean;
+    /** Native trusted input means the prior automated action no longer owns observations. */
+    applicationPageWithPerson?(pageBindingKey: string): boolean;
+    focusRetainedApplicationPage?(pageBindingKey: string): boolean;
   };
   /** Forms prepared at once, read at each start: the Speed setting. */
   applicationConcurrency?: () => number;
@@ -1367,8 +1375,7 @@ export function createBrowserAgentRuntime(
   let browserPromise: Promise<Browser> | null = null;
   let launchedChromeProcess: ChildProcess | null = null;
   let ownsChromeProcess = false;
-  const envConcurrency =
-    process.env.NESTOR_APPLICATION_PREPARATION_CONCURRENCY;
+  const envConcurrency = process.env.NESTOR_APPLICATION_PREPARATION_CONCURRENCY;
   const applicationPreparationScheduler = createApplicationPreparationScheduler(
     envConcurrency === undefined && options.applicationConcurrency
       ? options.applicationConcurrency
@@ -1392,23 +1399,35 @@ export function createBrowserAgentRuntime(
   const preparedApplicationPages = new Map<string, Page>();
   // Bridge preparation to its already-ready continuation without giving the
   // site to a new form between them. Abandonment/Stop cannot retain a lease.
-  const executionHandoffs = new Map<string, { lease: ApplicationPreparationLease; detach: () => void }>();
-  function takeExecutionHandoff(key: string): ApplicationPreparationLease | null {
+  const executionHandoffs = new Map<
+    string,
+    { lease: ApplicationPreparationLease; detach: () => void }
+  >();
+  function takeExecutionHandoff(
+    key: string,
+  ): ApplicationPreparationLease | null {
     const held = executionHandoffs.get(key);
     if (!held) return null;
     executionHandoffs.delete(key);
     held.detach();
     return held.lease;
   }
-  function handoffExecution(key: string, lease: ApplicationPreparationLease, signal?: AbortSignal): void {
+  function handoffExecution(
+    key: string,
+    lease: ApplicationPreparationLease,
+    signal?: AbortSignal,
+  ): void {
     takeExecutionHandoff(key)?.release();
     const release = () => takeExecutionHandoff(key)?.release();
     const timeout = setTimeout(release, 5_000);
     timeout.unref();
-    executionHandoffs.set(key, { lease, detach: () => {
-      clearTimeout(timeout);
-      signal?.removeEventListener("abort", release);
-    } });
+    executionHandoffs.set(key, {
+      lease,
+      detach: () => {
+        clearTimeout(timeout);
+        signal?.removeEventListener("abort", release);
+      },
+    });
     signal?.addEventListener("abort", release, { once: true });
     if (signal?.aborted) release();
   }
@@ -1457,57 +1476,95 @@ export function createBrowserAgentRuntime(
   const recoveryUnavailable = new Set<string>();
   const recoveringForms = new Map<string, Promise<void>>();
 
-  async function saveReviewedPreparedForm(key: string, page: Page): Promise<void> {
+  async function saveReviewedPreparedForm(
+    key: string,
+    page: Page,
+  ): Promise<void> {
     const recovery = formRecovery.get(key);
     if (!preparedFormStore || !recovery?.saved || page.isClosed()) return;
     const snapshot = await capturePreparedForm(page).catch(() => null);
-    const attachments = snapshot && describePreparedFormAttachments(snapshot, recovery.attachments);
+    const attachments =
+      snapshot &&
+      describePreparedFormAttachments(snapshot, recovery.attachments);
     if (!snapshot || !attachments) return;
     recovery.snapshot = snapshot;
-    recovery.saved = {...recovery.saved, snapshot, attachments, reason: null, savedAt: new Date().toISOString()};
+    recovery.saved = {
+      ...recovery.saved,
+      snapshot,
+      attachments,
+      reason: null,
+      savedAt: new Date().toISOString(),
+    };
     await preparedFormStore.save(recovery.saved);
   }
 
-  async function loadSavedForm(key: string): Promise<PreparedApplicationForm | null> {
-    const saved = await preparedFormStore?.get(key) ?? null;
+  async function loadSavedForm(
+    key: string,
+  ): Promise<PreparedApplicationForm | null> {
+    const saved = (await preparedFormStore?.get(key)) ?? null;
     if (saved?.snapshot && !formRecovery.has(key)) {
       formRecovery.set(key, {
         snapshot: saved.snapshot,
         saved,
         attachments: saved.attachments,
-        files: saved.attachments.map(file => ({name: file.name, load: async () => {
-          const bytes = await preparedFormStore!.loadAttachment(file);
-          if (createHash("sha256").update(bytes).digest("hex") !== file.sha256)
-            throw new Error("Attachment changed");
-          return bytes;
-        }})),
+        files: saved.attachments.map((file) => ({
+          name: file.name,
+          load: async () => {
+            const bytes = await preparedFormStore!.loadAttachment(file);
+            if (
+              createHash("sha256").update(bytes).digest("hex") !== file.sha256
+            )
+              throw new Error("Attachment changed");
+            return bytes;
+          },
+        })),
         // Recovery does not inherit any old send or intermediate-write window.
-        guard: page => ensurePrepareOnlyMutationGuard(page, false),
+        guard: (page) => ensurePrepareOnlyMutationGuard(page, false),
       });
     }
     return saved;
   }
 
-  async function invalidateSavedForm(key: string, reason: "form_changed" | "attachment_unavailable") {
+  async function invalidateSavedForm(
+    key: string,
+    reason: "form_changed" | "attachment_unavailable",
+  ) {
     const saved = await preparedFormStore?.get(key);
-    if (saved) await preparedFormStore!.save({...saved, snapshot: null, attachments: [], reason});
+    if (saved)
+      await preparedFormStore!.save({
+        ...saved,
+        snapshot: null,
+        attachments: [],
+        reason,
+      });
     formRecovery.delete(key);
   }
 
-  async function applicationPageState(key: string): Promise<ApplicationPageState> {
+  async function applicationPageState(
+    key: string,
+  ): Promise<ApplicationPageState> {
     const live = preparedApplicationPages.get(key);
-    if (live && !live.isClosed()) return {resultId: key, state: "open", reason: null};
+    if (live && !live.isClosed())
+      return { resultId: key, state: "open", reason: null };
     const saved = await loadSavedForm(key);
     if (formRecovery.get(key)?.snapshot) {
       try {
         for (const file of formRecovery.get(key)!.files) await file.load();
       } catch {
         await invalidateSavedForm(key, "attachment_unavailable");
-        return {resultId: key, state: "needs_preparing", reason: "attachment_unavailable"};
+        return {
+          resultId: key,
+          state: "needs_preparing",
+          reason: "attachment_unavailable",
+        };
       }
-      return {resultId: key, state: "reopenable", reason: null};
+      return { resultId: key, state: "reopenable", reason: null };
     }
-    return {resultId: key, state: "needs_preparing", reason: saved?.reason ?? "no_snapshot"};
+    return {
+      resultId: key,
+      state: "needs_preparing",
+      reason: saved?.reason ?? "no_snapshot",
+    };
   }
 
   async function markPreparedPage(key: string, page: Page): Promise<void> {
@@ -1561,8 +1618,10 @@ export function createBrowserAgentRuntime(
    * connection was dropped (the person took over or paused the browser), by
    * the key that tab carries, and only on a browser that is already open.
    */
-  async function rebindPreparedApplicationPage(key: string,
-    onProgress?: (progress: ApplicationPageReopenProgress) => void): Promise<void> {
+  async function rebindPreparedApplicationPage(
+    key: string,
+    onProgress?: (progress: ApplicationPageReopenProgress) => void,
+  ): Promise<void> {
     const current = preparedApplicationPages.get(key);
     if (current && !current.isClosed()) {
       // Keep the mark fresh across the form's own navigations.
@@ -1576,34 +1635,44 @@ export function createBrowserAgentRuntime(
       if (!pending) {
         const snapshot = recovery.snapshot;
         pending = (async () => {
-          let failure: "form_changed" | "attachment_unavailable" | "reopen_failed" = "reopen_failed";
+          let failure:
+            | "form_changed"
+            | "attachment_unavailable"
+            | "reopen_failed" = "reopen_failed";
           const page = await restorePreparedForm({
             context: await getContext(),
             snapshot,
             files: recovery.files,
             guard: recovery.guard,
-            onProgress: phase => onProgress?.({resultId: key, phase}),
-            onFailure: reason => { failure = reason; },
+            onProgress: (phase) => onProgress?.({ resultId: key, phase }),
+            onFailure: (reason) => {
+              failure = reason;
+            },
           });
           if (!page) {
-            if (failure !== "reopen_failed") await invalidateSavedForm(key, failure);
+            if (failure !== "reopen_failed")
+              await invalidateSavedForm(key, failure);
             throw new Error(
               `The saved form could not be refilled exactly (${failure}). ${failure === "reopen_failed" ? "Try opening it again." : "Prepare the application again before sending."}`,
             );
           }
           if (formRecovery.get(key) !== recovery) {
-            await page.close({runBeforeUnload: false});
+            await page.close({ runBeforeUnload: false });
             throw new Error("Application changed while reopening");
           }
           bindPreparedApplicationPage(key, page);
           await markPreparedPage(key, page);
           delete recovery.snapshot;
           try {
-            await options.onApplicationPageRestored?.(key, page, recovery.saved?.label);
+            await options.onApplicationPageRestored?.(
+              key,
+              page,
+              recovery.saved?.label,
+            );
           } catch (error) {
             recovery.snapshot = snapshot;
             preparedApplicationPages.delete(key);
-            await page.close({runBeforeUnload: false}).catch(() => undefined);
+            await page.close({ runBeforeUnload: false }).catch(() => undefined);
             throw error;
           }
         })().finally(() => recoveringForms.delete(key));
@@ -1654,7 +1723,9 @@ export function createBrowserAgentRuntime(
     ),
   ];
 
-  async function getProtectedApplicationPages(context: BrowserContext): Promise<Page[]> {
+  async function getProtectedApplicationPages(
+    context: BrowserContext,
+  ): Promise<Page[]> {
     const roots = new Set([
       ...getLivePreparedApplicationPages(),
       ...pagesInUseByOtherRuns(),
@@ -2125,11 +2196,13 @@ export function createBrowserAgentRuntime(
     }
 
     const context = await getContext();
-    const retainedApplicationPages = await getProtectedApplicationPages(context);
+    const retainedApplicationPages =
+      await getProtectedApplicationPages(context);
     const prepared = await prepareAutomationPageForTarget(context, {
       targetUrl: navigationTarget,
       acceptTargetOriginAfterTimeout: true,
-      bringToFront: !agentOptions.inventoryOnly && currentSessionState.status !== "ready",
+      bringToFront:
+        !agentOptions.inventoryOnly && currentSessionState.status !== "ready",
       closeOtherPages: !agentOptions.dedicatedPage,
       ...(agentOptions.dedicatedPage ? { reuseExistingPage: false } : {}),
       ...(agentOptions.protectedPages
@@ -2169,7 +2242,8 @@ export function createBrowserAgentRuntime(
       typeof input.targetUrl === "string" ? input.targetUrl.trim() : "";
     if (isHttpUrlLike(normalizedTargetUrl)) {
       const context = await getContext();
-      const retainedApplicationPages = await getProtectedApplicationPages(context);
+      const retainedApplicationPages =
+        await getProtectedApplicationPages(context);
       await prepareAutomationPageForTarget(context, {
         targetUrl: normalizedTargetUrl,
         ...(input.reuseExistingPage !== undefined
@@ -2535,23 +2609,30 @@ export function createBrowserAgentRuntime(
     async reopenApplicationPage(_source, key, onProgress) {
       const state = await applicationPageState(key);
       if (state.state === "needs_preparing") {
-        onProgress?.({resultId: key, phase: "needs_preparing"});
+        onProgress?.({ resultId: key, phase: "needs_preparing" });
         return state;
       }
-      onProgress?.({resultId: key, phase: "opening"});
+      onProgress?.({ resultId: key, phase: "opening" });
       try {
         await rebindPreparedApplicationPage(key, onProgress);
-        const page = selectPreparedApplicationPage(preparedApplicationPages, key);
+        const page = selectPreparedApplicationPage(
+          preparedApplicationPages,
+          key,
+        );
         await ensurePrepareOnlyMutationGuard(page, false);
         await closePrepareOnlyAuthorizedFormActionWindow(page);
         await closePrepareOnlyFinalActionWindow(page);
         await focusPreparedApplicationPage(preparedApplicationPages, key);
-        onProgress?.({resultId: key, phase: "ready"});
-        return {resultId: key, state: "open", reason: null};
+        onProgress?.({ resultId: key, phase: "ready" });
+        return { resultId: key, state: "open", reason: null };
       } catch {
         const failed = await applicationPageState(key);
-        onProgress?.({resultId: key, phase: failed.state === "needs_preparing" ? "needs_preparing" : "failed"});
-        return {...failed, reason: failed.reason ?? "reopen_failed"};
+        onProgress?.({
+          resultId: key,
+          phase:
+            failed.state === "needs_preparing" ? "needs_preparing" : "failed",
+        });
+        return { ...failed, reason: failed.reason ?? "reopen_failed" };
       }
     },
     async hasApplicationPageBinding(_source, pageBindingKey) {
@@ -2625,15 +2706,17 @@ export function createBrowserAgentRuntime(
         const snapshot = await capturePreparedForm(page).catch(() => null);
         // A form saved for restarts must carry its files' identities, or it
         // would come back unable to attach them; keep the live page instead.
-        const attachments = snapshot && describePreparedFormAttachments(snapshot, recovery.attachments);
+        const attachments =
+          snapshot &&
+          describePreparedFormAttachments(snapshot, recovery.attachments);
         if (
           !snapshot ||
           (preparedFormStore && !attachments) ||
           snapshot.fields.some((field) =>
             field.files.some(
               (saved) =>
-                recovery.files.filter((file) => file.name === saved.name).length !==
-                1,
+                recovery.files.filter((file) => file.name === saved.name)
+                  .length !== 1,
             ),
           )
         ) {
@@ -2662,7 +2745,13 @@ export function createBrowserAgentRuntime(
         )
           return closeForRefill();
         if (recovery.saved && preparedFormStore) {
-          recovery.saved = {...recovery.saved, snapshot, attachments: attachments ?? [], reason: null, savedAt: new Date().toISOString()};
+          recovery.saved = {
+            ...recovery.saved,
+            snapshot,
+            attachments: attachments ?? [],
+            reason: null,
+            savedAt: new Date().toISOString(),
+          };
           await preparedFormStore.save(recovery.saved);
         }
         // The readback and save awaited: a Send or the person may have taken
@@ -2698,6 +2787,14 @@ export function createBrowserAgentRuntime(
         pageBindingKey,
       );
     },
+    async focusRetainedApplicationPage(_source, pageBindingKey) {
+      if (options.browserHost?.focusRetainedApplicationPage)
+        return options.browserHost.focusRetainedApplicationPage(pageBindingKey);
+      return focusPreparedApplicationPage(
+        preparedApplicationPages,
+        pageBindingKey,
+      );
+    },
     async readApplicationPageBinding(_source, pageBindingKey) {
       await rebindPreparedApplicationPage(pageBindingKey);
       const page = selectPreparedApplicationPage(
@@ -2714,8 +2811,14 @@ export function createBrowserAgentRuntime(
         ),
       };
     },
-    async reloadApplicationPageBinding(_source, pageBindingKey, applicationUrl) {
-      await rebindPreparedApplicationPage(pageBindingKey).catch(() => undefined);
+    async reloadApplicationPageBinding(
+      _source,
+      pageBindingKey,
+      applicationUrl,
+    ) {
+      await rebindPreparedApplicationPage(pageBindingKey).catch(
+        () => undefined,
+      );
       let page = preparedApplicationPages.get(pageBindingKey);
       if (!page || page.isClosed()) {
         if (!applicationUrl || !isHttpUrlLike(applicationUrl))
@@ -2724,8 +2827,13 @@ export function createBrowserAgentRuntime(
         const context = await getContext();
         const release = usesEmbeddedBrowserHost
           ? await reserveEmbeddedApplicationTab(
-              context, undefined, undefined, undefined,
-              hostTabCount, hostWorkingTabCount, hostHasCapacity,
+              context,
+              undefined,
+              undefined,
+              undefined,
+              hostTabCount,
+              hostWorkingTabCount,
+              hostHasCapacity,
             )
           : () => undefined;
         try {
@@ -2733,7 +2841,8 @@ export function createBrowserAgentRuntime(
           await ensurePrepareOnlyMutationGuard(page, false);
           allowPrepareOnlyRunNavigation(page, applicationUrl);
           await page.goto(applicationUrl, {
-            waitUntil: "domcontentloaded", timeout: 15_000,
+            waitUntil: "domcontentloaded",
+            timeout: 15_000,
           });
           bindPreparedApplicationPage(pageBindingKey, page);
           await options.onApplicationPageRestored?.(pageBindingKey, page);
@@ -2748,7 +2857,10 @@ export function createBrowserAgentRuntime(
       }
       // Re-enter with GET; never replay a credential, challenge or application POST.
       allowPrepareOnlyRunNavigation(page, applicationUrl ?? page.url());
-      await page.goto(applicationUrl ?? page.url(), { waitUntil: "domcontentloaded", timeout: 15_000 });
+      await page.goto(applicationUrl ?? page.url(), {
+        waitUntil: "domcontentloaded",
+        timeout: 15_000,
+      });
     },
     async armApplicationFormAction(_source, input) {
       await rebindPreparedApplicationPage(input.pageBindingKey);
@@ -2812,13 +2924,13 @@ export function createBrowserAgentRuntime(
       preparedApplicationPages.delete(previousKey);
       const saved = await preparedFormStore?.get(previousKey);
       if (saved) {
-        await preparedFormStore!.save({...saved, id: nextKey});
+        await preparedFormStore!.save({ ...saved, id: nextKey });
         await preparedFormStore!.delete(previousKey);
       }
       const recovery = formRecovery.get(previousKey);
       formRecovery.delete(previousKey);
       if (recovery) {
-        if (recovery.saved) recovery.saved = {...recovery.saved, id: nextKey};
+        if (recovery.saved) recovery.saved = { ...recovery.saved, id: nextKey };
         formRecovery.set(nextKey, recovery);
       }
       recoveryUnavailable.delete(previousKey);
@@ -2831,6 +2943,21 @@ export function createBrowserAgentRuntime(
     applyPageMechanics: applyPageMechanicsForSource,
     installApplyPrepareOnlyGuard: installApplyPrepareOnlyGuardForSource,
     executeExactlyOneFinalAction: executeExactlyOneFinalActionForSource,
+    async recheckApplicationSubmission(_source, input) {
+      if (
+        preparedPagesWithPerson.has(input.pageBindingKey) ||
+        options.browserHost?.applicationPageWithPerson?.(input.pageBindingKey)
+      )
+        return null;
+      const page = preparedApplicationPages.get(input.pageBindingKey);
+      if (!page || page.isClosed()) return null;
+      const release = usePage(page);
+      try {
+        return await recheckLastFinalAction(page, input);
+      } finally {
+        release();
+      }
+    },
     async withApplicationPageExecution(
       source,
       pageBindingKey,
@@ -2847,7 +2974,13 @@ export function createBrowserAgentRuntime(
       const releasePageUse = usePage(page);
       let lease: ApplicationPreparationLease | null = null;
       try {
-        lease = takeExecutionHandoff(pageBindingKey) ?? await applicationPreparationScheduler.acquire(page.url(), signal, "continuation");
+        lease =
+          takeExecutionHandoff(pageBindingKey) ??
+          (await applicationPreparationScheduler.acquire(
+            page.url(),
+            signal,
+            "continuation",
+          ));
         for (let attempt = 0; attempt < 3; attempt += 1) {
           if (page.isClosed())
             throw new Error("The prepared application page was closed.");
@@ -2914,41 +3047,45 @@ export function createBrowserAgentRuntime(
           input.startingUrl ??
           input.job.applicationUrl ??
           input.job.canonicalUrl;
-        if (input.applicationPageBindingKey) takeExecutionHandoff(input.applicationPageBindingKey)?.release();
+        if (input.applicationPageBindingKey)
+          takeExecutionHandoff(input.applicationPageBindingKey)?.release();
         const queuedAt = Date.now();
         const preparationLease = await applicationPreparationScheduler.acquire(
           requestedUrl,
           options?.signal,
         );
-        console.info(`[apply] timing application=${input.applicationPageBindingKey ?? "unbound"} stage=preparation_queue startedAt=${new Date(queuedAt).toISOString()} completedAt=${new Date().toISOString()} durationMs=${Date.now() - queuedAt}`);
+        console.info(
+          `[apply] timing application=${input.applicationPageBindingKey ?? "unbound"} stage=preparation_queue startedAt=${new Date(queuedAt).toISOString()} completedAt=${new Date().toISOString()} durationMs=${Date.now() - queuedAt}`,
+        );
         let handedOff = false;
         try {
-        const executionStartedAtMs = Date.now();
-        const startedAt = new Date(executionStartedAtMs).toISOString();
-        const executionTimings: ApplyExecutionTiming[] = [];
-        const recordExecutionTiming = (
-          stage: ApplyExecutionStage,
-          stageStartedAtMs: number,
-        ): void => {
-          const completedAtMs = Date.now();
-          executionTimings.push({
-            stage,
-            startedAt: new Date(stageStartedAtMs).toISOString(),
-            completedAt: new Date(completedAtMs).toISOString(),
-            durationMs: Math.max(0, completedAtMs - stageStartedAtMs),
-          });
-        };
-        // A continued run owns one exact prepared Page. Its live URL is more
-        // authoritative than a persisted checkpoint URL: the form can move
-        // from a listing through several wizard URLs before the checkpoint is
-        // written. Requiring the binding also prevents restart recovery from
-        // creating a fresh, empty same-URL form and calling it continuation.
-        const isContinuation = isHttpUrlLike(input.startingUrl ?? "");
-        if (input.applicationPageBindingKey) {
-          await rebindPreparedApplicationPage(input.applicationPageBindingKey);
-        }
-        const retainedContinuationPage =
-          input.applicationPageBindingKey
+          const executionStartedAtMs = Date.now();
+          const startedAt = new Date(executionStartedAtMs).toISOString();
+          const executionTimings: ApplyExecutionTiming[] = [];
+          const recordExecutionTiming = (
+            stage: ApplyExecutionStage,
+            stageStartedAtMs: number,
+          ): void => {
+            const completedAtMs = Date.now();
+            executionTimings.push({
+              stage,
+              startedAt: new Date(stageStartedAtMs).toISOString(),
+              completedAt: new Date(completedAtMs).toISOString(),
+              durationMs: Math.max(0, completedAtMs - stageStartedAtMs),
+            });
+          };
+          // A continued run owns one exact prepared Page. Its live URL is more
+          // authoritative than a persisted checkpoint URL: the form can move
+          // from a listing through several wizard URLs before the checkpoint is
+          // written. Requiring the binding also prevents restart recovery from
+          // creating a fresh, empty same-URL form and calling it continuation.
+          const isContinuation = isHttpUrlLike(input.startingUrl ?? "");
+          if (input.applicationPageBindingKey) {
+            await rebindPreparedApplicationPage(
+              input.applicationPageBindingKey,
+            );
+          }
+          const retainedContinuationPage = input.applicationPageBindingKey
             ? isContinuation
               ? selectPreparedApplicationPage(
                   preparedApplicationPages,
@@ -2958,532 +3095,596 @@ export function createBrowserAgentRuntime(
                   input.applicationPageBindingKey,
                 ) ?? null)
             : null;
-        if (retainedContinuationPage) {
-          await closePrepareOnlyAuthorizedFormActionWindow(
-            retainedContinuationPage,
-          );
-          assertRetainedApplicationPageOrigin(
-            retainedContinuationPage.url(),
-            input,
-          );
-        }
-        const targetUrl =
-          (retainedContinuationPage &&
-          isHttpUrlLike(retainedContinuationPage.url())
-            ? retainedContinuationPage.url()
-            : null) ??
-          (isContinuation ? input.startingUrl : null) ??
-          input.job.applicationUrl ??
-          input.job.canonicalUrl;
-        await preparationLease.moveTo(targetUrl);
-        const resumeFilePath = input.resumeArtifact.filePath.trim();
-        const approvedResumeFileExists = resumeFilePath
-          ? await pathExists(resumeFilePath)
-          : false;
-        let executionResult: ApplyExecutionResult;
-        let applicationPageOpened = false;
-        let applicationPageForVisuals: Page | null = null;
+          if (retainedContinuationPage) {
+            await closePrepareOnlyAuthorizedFormActionWindow(
+              retainedContinuationPage,
+            );
+            assertRetainedApplicationPageOrigin(
+              retainedContinuationPage.url(),
+              input,
+            );
+          }
+          const targetUrl =
+            (retainedContinuationPage &&
+            isHttpUrlLike(retainedContinuationPage.url())
+              ? retainedContinuationPage.url()
+              : null) ??
+            (isContinuation ? input.startingUrl : null) ??
+            input.job.applicationUrl ??
+            input.job.canonicalUrl;
+          await preparationLease.moveTo(targetUrl);
+          const resumeFilePath = input.resumeArtifact.filePath.trim();
+          const approvedResumeFileExists = resumeFilePath
+            ? await pathExists(resumeFilePath)
+            : false;
+          let executionResult: ApplyExecutionResult;
+          let applicationPageOpened = false;
+          let applicationPageForVisuals: Page | null = null;
 
-        if (
-          input.resumeArtifact.jobId !== input.job.id ||
-          !approvedResumeFileExists
-        ) {
-          const detail =
-            "The production runtime refused to open the application because the approved application resume is missing or does not belong to this job.";
-          executionResult = buildPreparationResult({
-            executionInput: input,
-            state: "failed",
-            summary: "Approved resume export is missing",
-            detail,
-            questions: [],
-            blocker: {
-              code: "missing_resume",
-              summary: "A current approved resume export is required.",
+          if (
+            input.resumeArtifact.jobId !== input.job.id ||
+            !approvedResumeFileExists
+          ) {
+            const detail =
+              "The production runtime refused to open the application because the approved application resume is missing or does not belong to this job.";
+            executionResult = buildPreparationResult({
+              executionInput: input,
+              state: "failed",
+              summary: "Approved resume export is missing",
               detail,
-              questionIds: [],
-              sourceDebugEvidenceRefIds: [],
-              url: isHttpUrlLike(targetUrl) ? targetUrl : null,
-            },
-            checkpoints: [],
-            checkpointLabel: "Stopped before opening the application",
-            checkpointDetail: detail,
-            checkpointUrls: isHttpUrlLike(targetUrl) ? [targetUrl] : [],
-            lastUrl: isHttpUrlLike(targetUrl) ? targetUrl : null,
-            now: startedAt,
-            nextActionLabel: "Export and approve the tailored resume",
-          });
-        } else if (!isHttpUrlLike(targetUrl)) {
-          executionResult = buildUnsupportedApplyResult({
-            job: input.job,
-            startedAt,
-            mode: input.mode,
-            targetUrl: null,
-          });
-        } else {
-          const browserPreparationStartedAtMs = Date.now();
-          let formPreparationStartedAtMs: number | null = null;
-          let workingPage: Page | null = null;
-          let workingPageOwnedByRun = false;
-          let releaseReservedTab: (() => void) | null = null;
-          let releaseWorkingPageUse: (() => void) | null = null;
-          const closeWorkingPageOnAbort = () => {
-            if (workingPage && workingPageOwnedByRun) {
-              void workingPage.close().catch(() => undefined);
-            }
-          };
-          options?.signal?.addEventListener("abort", closeWorkingPageOnAbort, {
-            once: true,
-          });
-          try {
-            const context = await getContext();
-            const pagesBeforeRun = new Set(context.pages());
-            assertNoActiveServiceWorkerControlsApplicationOrigin({
-              context,
-              targetUrl,
+              questions: [],
+              blocker: {
+                code: "missing_resume",
+                summary: "A current approved resume export is required.",
+                detail,
+                questionIds: [],
+                sourceDebugEvidenceRefIds: [],
+                url: isHttpUrlLike(targetUrl) ? targetUrl : null,
+              },
+              checkpoints: [],
+              checkpointLabel: "Stopped before opening the application",
+              checkpointDetail: detail,
+              checkpointUrls: isHttpUrlLike(targetUrl) ? [targetUrl] : [],
+              lastUrl: isHttpUrlLike(targetUrl) ? targetUrl : null,
+              now: startedAt,
+              nextActionLabel: "Export and approve the tailored resume",
             });
-            const runSentinel = createApplicationRunServiceWorkerSentinel({
-              context,
-              targetUrl,
+          } else if (!isHttpUrlLike(targetUrl)) {
+            executionResult = buildUnsupportedApplyResult({
+              job: input.job,
+              startedAt,
+              mode: input.mode,
+              targetUrl: null,
             });
+          } else {
+            const browserPreparationStartedAtMs = Date.now();
+            let formPreparationStartedAtMs: number | null = null;
+            let workingPage: Page | null = null;
+            let workingPageOwnedByRun = false;
+            let releaseReservedTab: (() => void) | null = null;
+            let releaseWorkingPageUse: (() => void) | null = null;
+            const closeWorkingPageOnAbort = () => {
+              if (workingPage && workingPageOwnedByRun) {
+                void workingPage.close().catch(() => undefined);
+              }
+            };
+            options?.signal?.addEventListener(
+              "abort",
+              closeWorkingPageOnAbort,
+              {
+                once: true,
+              },
+            );
             try {
-              const preNavigationFinding = await runSentinel.check(
-                "browser_preparation",
-              );
-              if (preNavigationFinding) {
-                executionResult = buildServiceWorkerSafetyStopResult({
-                  executionInput: input,
-                  finding: preNavigationFinding,
-                });
-              } else {
-                const boundPage =
-                  retainedContinuationPage ??
-                  (input.applicationPageBindingKey
-                    ? (preparedApplicationPages.get(
-                        input.applicationPageBindingKey,
-                      ) ?? null)
-                    : null);
-                const otherPreparedPages = [
-                  ...preparedApplicationPages.entries(),
-                ]
-                  .filter(
-                    ([key, page]) =>
-                      key !== input.applicationPageBindingKey &&
-                      !page.isClosed(),
-                  )
-                  .map(([, page]) => page);
-                const boundPageMatchesTarget =
-                  boundPage !== null &&
-                  !boundPage.isClosed() &&
-                  areExactHttpUrls(boundPage.url(), targetUrl);
-                // Take a free tab while holding the site. Only a full browser
-                // gives the site up, and that wait keeps no tab: the pages
-                // occupying the tabs may need the site to finish, and a
-                // preparation queued behind its site must not hold a working
-                // tab that searches and other sites could use.
-                while (
-                  usesEmbeddedBrowserHost &&
-                  !boundPageMatchesTarget &&
-                  !(releaseReservedTab = takeEmbeddedApplicationTab(
-                    context,
-                    hostTabCount,
-                    hostWorkingTabCount,
-                    hostHasCapacity,
-                  ))
-                )
-                  await preparationLease.suspend(async () =>
-                    (await reserveEmbeddedApplicationTab(
+              const context = await getContext();
+              const pagesBeforeRun = new Set(context.pages());
+              assertNoActiveServiceWorkerControlsApplicationOrigin({
+                context,
+                targetUrl,
+              });
+              const runSentinel = createApplicationRunServiceWorkerSentinel({
+                context,
+                targetUrl,
+              });
+              try {
+                const preNavigationFinding = await runSentinel.check(
+                  "browser_preparation",
+                );
+                if (preNavigationFinding) {
+                  executionResult = buildServiceWorkerSafetyStopResult({
+                    executionInput: input,
+                    finding: preNavigationFinding,
+                  });
+                } else {
+                  const boundPage =
+                    retainedContinuationPage ??
+                    (input.applicationPageBindingKey
+                      ? (preparedApplicationPages.get(
+                          input.applicationPageBindingKey,
+                        ) ?? null)
+                      : null);
+                  const otherPreparedPages = [
+                    ...preparedApplicationPages.entries(),
+                  ]
+                    .filter(
+                      ([key, page]) =>
+                        key !== input.applicationPageBindingKey &&
+                        !page.isClosed(),
+                    )
+                    .map(([, page]) => page);
+                  const boundPageMatchesTarget =
+                    boundPage !== null &&
+                    !boundPage.isClosed() &&
+                    areExactHttpUrls(boundPage.url(), targetUrl);
+                  // Take a free tab while holding the site. Only a full browser
+                  // gives the site up, and that wait keeps no tab: the pages
+                  // occupying the tabs may need the site to finish, and a
+                  // preparation queued behind its site must not hold a working
+                  // tab that searches and other sites could use.
+                  while (
+                    usesEmbeddedBrowserHost &&
+                    !boundPageMatchesTarget &&
+                    !(releaseReservedTab = takeEmbeddedApplicationTab(
                       context,
-                      options?.signal,
-                      // A blank tab may still be opening for another worker.
-                      // The native host owns its actual startup placeholder.
-                      undefined,
-                      input.onWaitingForBrowserTab
-                        ? () => {
-                            void Promise.resolve(
-                              input.onWaitingForBrowserTab?.(),
-                            ).catch(() => undefined);
-                          }
-                        : undefined,
                       hostTabCount,
                       hostWorkingTabCount,
                       hostHasCapacity,
-                    ))(),
-                  );
-                const protectedPreparedPages = [
-                  ...otherPreparedPages,
-                  ...(boundPage && !boundPageMatchesTarget ? [boundPage] : []),
-                  ...(await getProtectedApplicationPages(context)).filter(
-                    (page) => page !== boundPage,
-                  ),
-                ];
-                const exactTargetOwnedByAnotherPreparation =
-                  !boundPageMatchesTarget &&
-                  otherPreparedPages.some((page) =>
-                    areExactHttpUrls(page.url(), targetUrl),
-                  );
-                const prepared = await prepareAutomationPageForTarget(context, {
-                  targetUrl,
-                  requireExactTarget: true,
-                  bringToFront: !usesEmbeddedBrowserHost,
-                  closeOtherPages: false,
-                  ...(usesEmbeddedBrowserHost && !boundPageMatchesTarget
-                    ? { reuseExistingPage: false }
-                    : {}),
-                  ...(boundPageMatchesTarget
-                    ? { preferredPage: boundPage }
-                    : {}),
-                  ...(protectedPreparedPages.length > 0
-                    ? { protectedPages: protectedPreparedPages }
-                    : {}),
-                  ...(exactTargetOwnedByAnotherPreparation
-                    ? { reuseExistingPage: false }
-                    : {}),
-                  ...(options?.signal ? { signal: options.signal } : {}),
-                  onPageResolved: async (page) => {
-                    applicationSitePacing.observe(page);
-                    releaseReservedTab?.();
-                    releaseReservedTab = null;
-                    workingPage = page;
-                    workingPageOwnedByRun = !pagesBeforeRun.has(page);
-                    releaseWorkingPageUse?.();
-                    releaseWorkingPageUse = usePage(page);
-                    await options?.onAutomationPage?.(page);
-                    runSentinel.attachPage(page);
-                    if (options?.signal?.aborted) {
-                      closeWorkingPageOnAbort();
-                    }
-                  },
-                  setBlockedState: (detail) => {
-                    setSessionState(
-                      source,
-                      "blocked",
-                      "Application navigation failed",
-                      detail,
+                    ))
+                  )
+                    await preparationLease.suspend(async () =>
+                      (
+                        await reserveEmbeddedApplicationTab(
+                          context,
+                          options?.signal,
+                          // A blank tab may still be opening for another worker.
+                          // The native host owns its actual startup placeholder.
+                          undefined,
+                          input.onWaitingForBrowserTab
+                            ? () => {
+                                void Promise.resolve(
+                                  input.onWaitingForBrowserTab?.(),
+                                ).catch(() => undefined);
+                              }
+                            : undefined,
+                          hostTabCount,
+                          hostWorkingTabCount,
+                          hostHasCapacity,
+                        )
+                      )(),
                     );
-                  },
-                });
-                await applicationSitePacing.waitForReady(
-                  prepared.page,
-                  preparationLease,
-                  options?.signal,
-                );
-                applicationPageForVisuals = prepared.page;
-                if (input.applicationPageBindingKey) {
-                  bindPreparedApplicationPage(
-                    input.applicationPageBindingKey,
-                    prepared.page,
-                  );
-                }
-                options?.signal?.throwIfAborted();
-                const postNavigationFinding =
-                  await runSentinel.check("post_navigation");
-                if (postNavigationFinding) {
-                  applicationPageOpened = true;
-                  recordExecutionTiming(
-                    "browser_preparation",
-                    browserPreparationStartedAtMs,
-                  );
-                  executionResult = buildServiceWorkerSafetyStopResult({
-                    executionInput: input,
-                    finding: postNavigationFinding,
-                  });
-                } else {
-                  applicationPageOpened = true;
-                  recordExecutionTiming(
-                    "browser_preparation",
-                    browserPreparationStartedAtMs,
-                  );
-                  setSessionState(
-                    source,
-                    "ready",
-                    "Application page ready",
-                    "The Job Finder browser is open at the current application checkpoint.",
-                  );
-                  formPreparationStartedAtMs = Date.now();
-                  const applicationSession = guardApplicationPreparationSession(
-                    createPlaywrightApplyPageSession({
-                      page: prepared.page,
-                      sentinel: runSentinel,
-                    }),
-                    preparationLease,
-                    () => applicationSitePacing.waitForReady(
-                      prepared.page,
-                      preparationLease,
-                      options?.signal,
+                  const protectedPreparedPages = [
+                    ...otherPreparedPages,
+                    ...(boundPage && !boundPageMatchesTarget
+                      ? [boundPage]
+                      : []),
+                    ...(await getProtectedApplicationPages(context)).filter(
+                      (page) => page !== boundPage,
                     ),
+                  ];
+                  const exactTargetOwnedByAnotherPreparation =
+                    !boundPageMatchesTarget &&
+                    otherPreparedPages.some((page) =>
+                      areExactHttpUrls(page.url(), targetUrl),
+                    );
+                  const prepared = await prepareAutomationPageForTarget(
+                    context,
+                    {
+                      targetUrl,
+                      requireExactTarget: true,
+                      bringToFront: !usesEmbeddedBrowserHost,
+                      closeOtherPages: false,
+                      ...(usesEmbeddedBrowserHost && !boundPageMatchesTarget
+                        ? { reuseExistingPage: false }
+                        : {}),
+                      ...(boundPageMatchesTarget
+                        ? { preferredPage: boundPage }
+                        : {}),
+                      ...(protectedPreparedPages.length > 0
+                        ? { protectedPages: protectedPreparedPages }
+                        : {}),
+                      ...(exactTargetOwnedByAnotherPreparation
+                        ? { reuseExistingPage: false }
+                        : {}),
+                      ...(options?.signal ? { signal: options.signal } : {}),
+                      onPageResolved: async (page) => {
+                        applicationSitePacing.observe(page);
+                        releaseReservedTab?.();
+                        releaseReservedTab = null;
+                        workingPage = page;
+                        workingPageOwnedByRun = !pagesBeforeRun.has(page);
+                        releaseWorkingPageUse?.();
+                        releaseWorkingPageUse = usePage(page);
+                        await options?.onAutomationPage?.(page);
+                        runSentinel.attachPage(page);
+                        if (options?.signal?.aborted) {
+                          closeWorkingPageOnAbort();
+                        }
+                      },
+                      setBlockedState: (detail) => {
+                        setSessionState(
+                          source,
+                          "blocked",
+                          "Application navigation failed",
+                          detail,
+                        );
+                      },
+                    },
+                  );
+                  await applicationSitePacing.waitForReady(
+                    prepared.page,
+                    preparationLease,
                     options?.signal,
                   );
-                  if (input.prepareTaskLocalCredentials) {
-                    await input.prepareTaskLocalCredentials({
+                  applicationPageForVisuals = prepared.page;
+                  if (input.applicationPageBindingKey) {
+                    bindPreparedApplicationPage(
+                      input.applicationPageBindingKey,
+                      prepared.page,
+                    );
+                  }
+                  options?.signal?.throwIfAborted();
+                  const postNavigationFinding =
+                    await runSentinel.check("post_navigation");
+                  if (postNavigationFinding) {
+                    applicationPageOpened = true;
+                    recordExecutionTiming(
+                      "browser_preparation",
+                      browserPreparationStartedAtMs,
+                    );
+                    executionResult = buildServiceWorkerSafetyStopResult({
+                      executionInput: input,
+                      finding: postNavigationFinding,
+                    });
+                  } else {
+                    applicationPageOpened = true;
+                    recordExecutionTiming(
+                      "browser_preparation",
+                      browserPreparationStartedAtMs,
+                    );
+                    setSessionState(
+                      source,
+                      "ready",
+                      "Application page ready",
+                      "The Job Finder browser is open at the current application checkpoint.",
+                    );
+                    formPreparationStartedAtMs = Date.now();
+                    const applicationSession =
+                      guardApplicationPreparationSession(
+                        createPlaywrightApplyPageSession({
+                          page: prepared.page,
+                          sentinel: runSentinel,
+                        }),
+                        preparationLease,
+                        () =>
+                          applicationSitePacing.waitForReady(
+                            prepared.page,
+                            preparationLease,
+                            options?.signal,
+                          ),
+                        options?.signal,
+                      );
+                    if (input.prepareTaskLocalCredentials) {
+                      await input.prepareTaskLocalCredentials({
+                        session: applicationSession,
+                        ...(options?.signal ? { signal: options.signal } : {}),
+                      });
+                      options?.signal?.throwIfAborted();
+                    }
+                    executionResult = await input.prepareApplicationForm({
                       session: applicationSession,
+                      currentUrl: prepared.page.url(),
+                      startedAt,
                       ...(options?.signal ? { signal: options.signal } : {}),
                     });
+                    await preparationLease.moveTo(prepared.page.url());
                     options?.signal?.throwIfAborted();
+                    recordExecutionTiming(
+                      "form_preparation",
+                      formPreparationStartedAtMs,
+                    );
                   }
-                  executionResult = await input.prepareApplicationForm({
-                    session: applicationSession,
-                    currentUrl: prepared.page.url(),
-                    startedAt,
-                    ...(options?.signal ? { signal: options.signal } : {}),
-                  });
-                  await preparationLease.moveTo(prepared.page.url());
-                  options?.signal?.throwIfAborted();
-                  recordExecutionTiming(
-                    "form_preparation",
-                    formPreparationStartedAtMs,
-                  );
                 }
+              } finally {
+                runSentinel.detach();
+              }
+            } catch (error) {
+              if (options?.signal?.aborted) {
+                throw error;
+              }
+              if (!applicationPageOpened) {
+                recordExecutionTiming(
+                  "browser_preparation",
+                  browserPreparationStartedAtMs,
+                );
+              } else if (formPreparationStartedAtMs !== null) {
+                recordExecutionTiming(
+                  "form_preparation",
+                  formPreparationStartedAtMs,
+                );
+              }
+              const errorDetail =
+                error instanceof Error
+                  ? error.message
+                  : "The application page could not be inspected safely.";
+              if (error instanceof ApplicationNavigationError) {
+                // The employer page never opened, so this is a technical failure,
+                // not a Needs-you step: report it failed with causal-free copy.
+                // Raw transport detail stays in session diagnostics only.
+                const unreachableDetail = `${error.userDetail}`;
+                executionResult = buildPreparationResult({
+                  executionInput: input,
+                  state: "failed",
+                  summary: error.userSummary,
+                  detail: unreachableDetail,
+                  questions: [],
+                  blocker: {
+                    code: "application_page_unreachable",
+                    summary: `${error.userSummary}.`,
+                    detail: unreachableDetail,
+                    questionIds: [],
+                    sourceDebugEvidenceRefIds: [],
+                    url: isHttpUrlLike(targetUrl) ? targetUrl : null,
+                  },
+                  checkpoints: [],
+                  checkpointLabel: "Failed before the application page opened",
+                  checkpointDetail: unreachableDetail,
+                  checkpointUrls: isHttpUrlLike(targetUrl) ? [targetUrl] : [],
+                  lastUrl: isHttpUrlLike(targetUrl) ? targetUrl : null,
+                  now: new Date().toISOString(),
+                  nextActionLabel: "Retry preparation",
+                });
+              } else if (
+                (workingPage as Page | null) === null &&
+                /Close a browser tab before opening another/i.test(errorDetail)
+              ) {
+                // The embedded browser refused a new tab for this application,
+                // so no page ever opened and there is nothing for the person
+                // to look at: a failure to try again, not a Needs-you step.
+                const summary = "The Job Finder browser has too many tabs open";
+                const unopenedDetail =
+                  "Job Finder could not open this application because its browser already has as many tabs as it allows. Nothing was sent. Close tabs you no longer need, then try again.";
+                executionResult = buildPreparationResult({
+                  executionInput: input,
+                  state: "failed",
+                  summary,
+                  detail: unopenedDetail,
+                  questions: [],
+                  blocker: {
+                    code: "application_page_unreachable",
+                    summary: `${summary}.`,
+                    detail: unopenedDetail,
+                    questionIds: [],
+                    sourceDebugEvidenceRefIds: [],
+                    url: isHttpUrlLike(targetUrl) ? targetUrl : null,
+                  },
+                  checkpoints: [],
+                  checkpointLabel: "Failed before the application page opened",
+                  checkpointDetail: unopenedDetail,
+                  checkpointUrls: isHttpUrlLike(targetUrl) ? [targetUrl] : [],
+                  lastUrl: isHttpUrlLike(targetUrl) ? targetUrl : null,
+                  now: new Date().toISOString(),
+                  nextActionLabel: "Retry preparation",
+                });
+              } else {
+                const detail = `The runtime stopped without submitting after browser preparation failed: ${errorDetail}`;
+                executionResult = buildPreparationResult({
+                  executionInput: input,
+                  summary: "Application preparation stopped safely",
+                  detail,
+                  questions: [],
+                  blocker: {
+                    code: "requires_manual_review",
+                    summary: "The live application page needs manual review.",
+                    detail,
+                    questionIds: [],
+                    sourceDebugEvidenceRefIds: [],
+                    url: targetUrl,
+                  },
+                  checkpoints: [],
+                  checkpointLabel: "Stopped after a safe browser failure",
+                  checkpointDetail: detail,
+                  checkpointUrls: [targetUrl],
+                  lastUrl: targetUrl,
+                  now: new Date().toISOString(),
+                  nextActionLabel: "Inspect the application page manually",
+                });
               }
             } finally {
-              runSentinel.detach();
-            }
-          } catch (error) {
-            if (options?.signal?.aborted) {
-              throw error;
-            }
-            if (!applicationPageOpened) {
-              recordExecutionTiming(
-                "browser_preparation",
-                browserPreparationStartedAtMs,
+              releaseReservedTab?.();
+              (releaseWorkingPageUse as (() => void) | null)?.();
+              options?.signal?.removeEventListener(
+                "abort",
+                closeWorkingPageOnAbort,
               );
-            } else if (formPreparationStartedAtMs !== null) {
-              recordExecutionTiming(
-                "form_preparation",
-                formPreparationStartedAtMs,
-              );
+              const pageToClose = workingPage as Page | null;
+              if (
+                (options?.signal?.aborted || !applicationPageOpened) &&
+                workingPageOwnedByRun &&
+                pageToClose &&
+                !pageToClose.isClosed()
+              ) {
+                await pageToClose.close().catch(() => undefined);
+              }
             }
-            const errorDetail =
-              error instanceof Error
-                ? error.message
-                : "The application page could not be inspected safely.";
-            if (error instanceof ApplicationNavigationError) {
-              // The employer page never opened, so this is a technical failure,
-              // not a Needs-you step: report it failed with causal-free copy.
-              // Raw transport detail stays in session diagnostics only.
-              const unreachableDetail = `${error.userDetail}`;
-              executionResult = buildPreparationResult({
-                executionInput: input,
-                state: "failed",
-                summary: error.userSummary,
-                detail: unreachableDetail,
-                questions: [],
-                blocker: {
-                  code: "application_page_unreachable",
-                  summary: `${error.userSummary}.`,
-                  detail: unreachableDetail,
-                  questionIds: [],
-                  sourceDebugEvidenceRefIds: [],
-                  url: isHttpUrlLike(targetUrl) ? targetUrl : null,
-                },
-                checkpoints: [],
-                checkpointLabel: "Failed before the application page opened",
-                checkpointDetail: unreachableDetail,
-                checkpointUrls: isHttpUrlLike(targetUrl) ? [targetUrl] : [],
-                lastUrl: isHttpUrlLike(targetUrl) ? targetUrl : null,
-                now: new Date().toISOString(),
-                nextActionLabel: "Retry preparation",
-              });
-            } else if (
-              (workingPage as Page | null) === null &&
-              /Close a browser tab before opening another/i.test(errorDetail)
-            ) {
-              // The embedded browser refused a new tab for this application,
-              // so no page ever opened and there is nothing for the person
-              // to look at: a failure to try again, not a Needs-you step.
-              const summary = "The Job Finder browser has too many tabs open";
-              const unopenedDetail =
-                "Job Finder could not open this application because its browser already has as many tabs as it allows. Nothing was sent. Close tabs you no longer need, then try again.";
-              executionResult = buildPreparationResult({
-                executionInput: input,
-                state: "failed",
-                summary,
-                detail: unopenedDetail,
-                questions: [],
-                blocker: {
-                  code: "application_page_unreachable",
-                  summary: `${summary}.`,
-                  detail: unopenedDetail,
-                  questionIds: [],
-                  sourceDebugEvidenceRefIds: [],
-                  url: isHttpUrlLike(targetUrl) ? targetUrl : null,
-                },
-                checkpoints: [],
-                checkpointLabel: "Failed before the application page opened",
-                checkpointDetail: unopenedDetail,
-                checkpointUrls: isHttpUrlLike(targetUrl) ? [targetUrl] : [],
-                lastUrl: isHttpUrlLike(targetUrl) ? targetUrl : null,
-                now: new Date().toISOString(),
-                nextActionLabel: "Retry preparation",
-              });
-            } else {
-              const detail = `The runtime stopped without submitting after browser preparation failed: ${errorDetail}`;
-              executionResult = buildPreparationResult({
-                executionInput: input,
-                summary: "Application preparation stopped safely",
-                detail,
-                questions: [],
-                blocker: {
-                  code: "requires_manual_review",
-                  summary: "The live application page needs manual review.",
-                  detail,
-                  questionIds: [],
-                  sourceDebugEvidenceRefIds: [],
-                  url: targetUrl,
-                },
-                checkpoints: [],
-                checkpointLabel: "Stopped after a safe browser failure",
-                checkpointDetail: detail,
-                checkpointUrls: [targetUrl],
-                lastUrl: targetUrl,
-                now: new Date().toISOString(),
-                nextActionLabel: "Inspect the application page manually",
-              });
-            }
-          } finally {
-            releaseReservedTab?.();
-            (releaseWorkingPageUse as (() => void) | null)?.();
-            options?.signal?.removeEventListener(
-              "abort",
-              closeWorkingPageOnAbort,
+          }
+
+          const visualDiagnosticsStartedAtMs = Date.now();
+          const visualDiagnostics = applicationPageOpened
+            ? await buildApplyVisualDiagnostics({
+                job: input.job,
+                mode: input.mode,
+                targetUrl: executionResult.replay.lastUrl ?? targetUrl,
+                ...(input.captureVisualSnapshot
+                  ? {
+                      captureVisualSnapshot: (
+                        request: BrowserVisualSnapshotRequest,
+                      ) =>
+                        applicationPageForVisuals
+                          ? captureVisualSnapshotForPage(
+                              applicationPageForVisuals,
+                              request,
+                            )
+                          : input.captureVisualSnapshot!(request),
+                    }
+                  : {}),
+                ...(input.analyzeVisualSnapshot
+                  ? { analyzeVisualSnapshot: input.analyzeVisualSnapshot }
+                  : {}),
+              })
+            : {
+                visualEvidence: [],
+                visualObservationSets: [],
+                visualCheckpoints: [],
+              };
+          if (applicationPageOpened) {
+            recordExecutionTiming(
+              "visual_diagnostics",
+              visualDiagnosticsStartedAtMs,
             );
-            const pageToClose = workingPage as Page | null;
-            if (
-              (options?.signal?.aborted || !applicationPageOpened) &&
-              workingPageOwnedByRun &&
-              pageToClose &&
-              !pageToClose.isClosed()
-            ) {
-              await pageToClose.close().catch(() => undefined);
+          }
+          recordExecutionTiming("total", executionStartedAtMs);
+          const lastCheckpointIndex = executionResult.checkpoints.length - 1;
+
+          if (
+            input.applicationPageBindingKey &&
+            executionResult.state === "ready" &&
+            preparedApplicationPages.has(input.applicationPageBindingKey)
+          ) {
+            const resumeArtifact = input.resumeArtifact;
+            const attachments = input.applicationAttachments ?? [];
+            const available: PreparedFormAttachment[] = [
+              ...(resumeArtifact.sha256 &&
+              (resumeArtifact.exportArtifactId ||
+                resumeArtifact.sourceDocumentId)
+                ? [
+                    {
+                      kind: resumeArtifact.exportArtifactId
+                        ? ("resume_export" as const)
+                        : ("resume_source" as const),
+                      id: (resumeArtifact.exportArtifactId ??
+                        resumeArtifact.sourceDocumentId)!,
+                      name: resumeArtifact.fileName,
+                      sha256: resumeArtifact.sha256.toLowerCase(),
+                    },
+                  ]
+                : []),
+              ...attachments.map((file) => ({
+                kind: "candidate_asset" as const,
+                id: file.assetId,
+                name: file.fileName,
+                sha256: file.sha256.toLowerCase(),
+              })),
+            ];
+            formRecovery.set(input.applicationPageBindingKey, {
+              files: [
+                {
+                  name: resumeArtifact.fileName,
+                  load: () => loadVerifiedResumeBytes(resumeArtifact),
+                },
+                ...attachments.map((file) => ({
+                  name: file.fileName,
+                  load: file.loadVerifiedBytes,
+                })),
+              ],
+              attachments: available,
+              guard: (page) => ensurePrepareOnlyMutationGuard(page, false),
+            });
+            recoveryUnavailable.delete(input.applicationPageBindingKey);
+            if (preparedFormStore) {
+              const key = input.applicationPageBindingKey;
+              const page = preparedApplicationPages.get(key)!;
+              let snapshot = await capturePreparedForm(page).catch(() => null);
+              let reason: PreparedApplicationForm["reason"] = snapshot
+                ? null
+                : "unsupported_form";
+              const descriptors = snapshot
+                ? describePreparedFormAttachments(snapshot, available)
+                : null;
+              if (snapshot && !descriptors) {
+                snapshot = null;
+                reason = "attachment_unavailable";
+              }
+              const saved: PreparedApplicationForm = {
+                id: key,
+                label: [
+                  input.job.location,
+                  input.job.title.slice(0, 120),
+                  input.job.company.slice(0, 80),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+                  .slice(0, 280),
+                savedAt: new Date().toISOString(),
+                snapshot,
+                attachments: snapshot ? (descriptors ?? []) : [],
+                reason,
+              };
+              await preparedFormStore.save(saved);
+              formRecovery.get(key)!.saved = saved;
             }
           }
-        }
 
-        const visualDiagnosticsStartedAtMs = Date.now();
-        const visualDiagnostics = applicationPageOpened
-          ? await buildApplyVisualDiagnostics({
-              job: input.job,
-              mode: input.mode,
-              targetUrl: executionResult.replay.lastUrl ?? targetUrl,
-              ...(input.captureVisualSnapshot
-                ? {
-                    captureVisualSnapshot: (request: BrowserVisualSnapshotRequest) =>
-                      applicationPageForVisuals
-                        ? captureVisualSnapshotForPage(applicationPageForVisuals, request)
-                        : input.captureVisualSnapshot!(request),
-                  }
-                : {}),
-              ...(input.analyzeVisualSnapshot
-                ? { analyzeVisualSnapshot: input.analyzeVisualSnapshot }
-                : {}),
-            })
-          : {
-              visualEvidence: [],
-              visualObservationSets: [],
-              visualCheckpoints: [],
-            };
-        if (applicationPageOpened) {
-          recordExecutionTiming(
-            "visual_diagnostics",
-            visualDiagnosticsStartedAtMs,
-          );
-        }
-        recordExecutionTiming("total", executionStartedAtMs);
-        const lastCheckpointIndex = executionResult.checkpoints.length - 1;
-
-        if (
-          input.applicationPageBindingKey &&
-          executionResult.state === "ready" &&
-          preparedApplicationPages.has(input.applicationPageBindingKey)
-        ) {
-          const resumeArtifact = input.resumeArtifact;
-          const attachments = input.applicationAttachments ?? [];
-          const available: PreparedFormAttachment[] = [
-            ...(resumeArtifact.sha256 && (resumeArtifact.exportArtifactId || resumeArtifact.sourceDocumentId) ? [{
-              kind: resumeArtifact.exportArtifactId ? "resume_export" as const : "resume_source" as const,
-              id: (resumeArtifact.exportArtifactId ?? resumeArtifact.sourceDocumentId)!,
-              name: resumeArtifact.fileName, sha256: resumeArtifact.sha256.toLowerCase(),
-            }] : []),
-            ...attachments.map(file => ({kind: "candidate_asset" as const, id: file.assetId, name: file.fileName, sha256: file.sha256.toLowerCase()})),
-          ];
-          formRecovery.set(input.applicationPageBindingKey, {
-            files: [
-              { name: resumeArtifact.fileName, load: () => loadVerifiedResumeBytes(resumeArtifact) },
-              ...attachments.map(file => ({name: file.fileName, load: file.loadVerifiedBytes})),
-            ],
-            attachments: available,
-            guard: page => ensurePrepareOnlyMutationGuard(page, false),
-          });
-          recoveryUnavailable.delete(input.applicationPageBindingKey);
-          if (preparedFormStore) {
-            const key = input.applicationPageBindingKey;
-            const page = preparedApplicationPages.get(key)!;
-            let snapshot = await capturePreparedForm(page).catch(() => null);
-            let reason: PreparedApplicationForm["reason"] = snapshot ? null : "unsupported_form";
-            const descriptors = snapshot ? describePreparedFormAttachments(snapshot, available) : null;
-            if (snapshot && !descriptors) { snapshot = null; reason = "attachment_unavailable"; }
-            const saved: PreparedApplicationForm = {id: key,
-              label: [input.job.location, input.job.title.slice(0, 120), input.job.company.slice(0, 80)].filter(Boolean).join(" · ").slice(0, 280),
-              savedAt: new Date().toISOString(), snapshot,
-              attachments: snapshot ? descriptors ?? [] : [], reason,
-            };
-            await preparedFormStore.save(saved);
-            formRecovery.get(key)!.saved = saved;
+          // A Ready or Needs-you form the caller can refill may have its page
+          // closed to save memory, snapshot or not.
+          if (
+            input.applicationPageBindingKey &&
+            input.restorableByRefill === true &&
+            (executionResult.state === "ready" ||
+              executionResult.state === "paused") &&
+            preparedApplicationPages.has(input.applicationPageBindingKey)
+          ) {
+            const recovery = formRecovery.get(input.applicationPageBindingKey);
+            if (recovery) recovery.refillable = true;
+            else
+              formRecovery.set(input.applicationPageBindingKey, {
+                files: [],
+                attachments: [],
+                guard: (page) => ensurePrepareOnlyMutationGuard(page, false),
+                refillable: true,
+              });
           }
-        }
 
-        // A Ready or Needs-you form the caller can refill may have its page
-        // closed to save memory, snapshot or not.
-        if (
-          input.applicationPageBindingKey &&
-          input.restorableByRefill === true &&
-          (executionResult.state === "ready" ||
-            executionResult.state === "paused") &&
-          preparedApplicationPages.has(input.applicationPageBindingKey)
-        ) {
-          const recovery = formRecovery.get(input.applicationPageBindingKey);
-          if (recovery) recovery.refillable = true;
-          else
-            formRecovery.set(input.applicationPageBindingKey, {
-              files: [],
-              attachments: [],
-              guard: (page) => ensurePrepareOnlyMutationGuard(page, false),
-              refillable: true,
-            });
-        }
-
-        if (
-          executionResult.state === "submitted" ||
-          executionResult.state === "failed" ||
-          executionResult.state === "unsupported"
-        ) {
-          if (input.applicationPageBindingKey)
-            await releaseApplicationPage(input.applicationPageBindingKey);
-          else if (
-            applicationPageForVisuals &&
-            !applicationPageForVisuals.isClosed()
-          )
-            await applicationPageForVisuals.close().catch(() => undefined);
-        }
-        const result = ApplyExecutionResultSchema.parse({
-          ...executionResult,
-          checkpoints: executionResult.checkpoints.map((checkpoint, index) =>
-            index === lastCheckpointIndex
-              ? {
-                  ...checkpoint,
-                  visualEvidence: visualDiagnostics.visualEvidence,
-                }
-              : checkpoint,
-          ),
-          visualEvidence: visualDiagnostics.visualEvidence,
-          visualObservationSets: visualDiagnostics.visualObservationSets,
-          visualCheckpoints: visualDiagnostics.visualCheckpoints,
-          executionTimings,
-        });
-        if (result.state === "ready" && input.submitAuthorized && input.applicationPageBindingKey) {
-          handedOff = true;
-          handoffExecution(input.applicationPageBindingKey, preparationLease, options?.signal);
-        }
-        return result;
+          if (
+            executionResult.state === "submitted" ||
+            executionResult.state === "failed" ||
+            executionResult.state === "unsupported"
+          ) {
+            if (input.applicationPageBindingKey)
+              await releaseApplicationPage(input.applicationPageBindingKey);
+            else if (
+              applicationPageForVisuals &&
+              !applicationPageForVisuals.isClosed()
+            )
+              await applicationPageForVisuals.close().catch(() => undefined);
+          }
+          const result = ApplyExecutionResultSchema.parse({
+            ...executionResult,
+            checkpoints: executionResult.checkpoints.map((checkpoint, index) =>
+              index === lastCheckpointIndex
+                ? {
+                    ...checkpoint,
+                    visualEvidence: visualDiagnostics.visualEvidence,
+                  }
+                : checkpoint,
+            ),
+            visualEvidence: visualDiagnostics.visualEvidence,
+            visualObservationSets: visualDiagnostics.visualObservationSets,
+            visualCheckpoints: visualDiagnostics.visualCheckpoints,
+            executionTimings,
+          });
+          if (
+            result.state === "ready" &&
+            input.submitAuthorized &&
+            input.applicationPageBindingKey
+          ) {
+            handedOff = true;
+            handoffExecution(
+              input.applicationPageBindingKey,
+              preparationLease,
+              options?.signal,
+            );
+          }
+          return result;
         } finally {
           if (!handedOff) preparationLease.release();
         }
@@ -3525,9 +3726,17 @@ export function createBrowserAgentRuntime(
 
       const agentConfig: AgentConfig = {
         source,
-        ...(agentOptions.browserPermissions ? { browserPermissions: agentOptions.browserPermissions } : {}),
-        ...(agentOptions.prepareBrowserCredentials ? { prepareBrowserCredentials: agentOptions.prepareBrowserCredentials } : {}),
-        ...(agentOptions.readBrowserPermissions ? { readBrowserPermissions: agentOptions.readBrowserPermissions } : {}),
+        ...(agentOptions.browserPermissions
+          ? { browserPermissions: agentOptions.browserPermissions }
+          : {}),
+        ...(agentOptions.prepareBrowserCredentials
+          ? {
+              prepareBrowserCredentials: agentOptions.prepareBrowserCredentials,
+            }
+          : {}),
+        ...(agentOptions.readBrowserPermissions
+          ? { readBrowserPermissions: agentOptions.readBrowserPermissions }
+          : {}),
         ...(agentOptions.inventoryOnly ? { inventoryOnly: true } : {}),
         ...(agentOptions.lookupKnownUrls
           ? { lookupKnownUrls: agentOptions.lookupKnownUrls }
@@ -3643,11 +3852,27 @@ export function createBrowserAgentRuntime(
         });
       };
       agentOptions.signal?.throwIfAborted();
-      const reused = await readCachedSearchResult(searchResultCache, agentConfig);
+      const reused = await readCachedSearchResult(
+        searchResultCache,
+        agentConfig,
+      );
       if (reused) {
-        const reason = "This source has not changed; reused the previous search results.";
-        agentOptions.onProgress?.({currentUrl:agentConfig.startingUrls[0] ?? "about:blank", jobsFound:reused.jobs.length,stepCount:0,currentAction:"finish",message:reason,targetId:null,adapterKind:source});
-        return toDiscoveryResult({...reused,steps:0,phaseCompletionReason:reason});
+        const reason =
+          "This source has not changed; reused the previous search results.";
+        agentOptions.onProgress?.({
+          currentUrl: agentConfig.startingUrls[0] ?? "about:blank",
+          jobsFound: reused.jobs.length,
+          stepCount: 0,
+          currentAction: "finish",
+          message: reason,
+          targetId: null,
+          adapterKind: source,
+        });
+        return toDiscoveryResult({
+          ...reused,
+          steps: 0,
+          phaseCompletionReason: reason,
+        });
       }
       let page: Page | null = null;
       // Set when the agent stopped on a page only the person can continue
@@ -3676,15 +3901,19 @@ export function createBrowserAgentRuntime(
             6,
           );
         }
-        page = await getAgentRunPage(source, agentOptions, async (resolvedPage) => {
-          releaseReservedTab?.();
-          releaseReservedTab = null;
-          page = resolvedPage;
-          releaseDiscoveryPageUse?.();
-          releaseDiscoveryPageUse = usePage(resolvedPage);
-          pageAbortBinding.onPageResolved(resolvedPage);
-          await agentOptions.onAutomationPage?.(resolvedPage);
-        });
+        page = await getAgentRunPage(
+          source,
+          agentOptions,
+          async (resolvedPage) => {
+            releaseReservedTab?.();
+            releaseReservedTab = null;
+            page = resolvedPage;
+            releaseDiscoveryPageUse?.();
+            releaseDiscoveryPageUse = usePage(resolvedPage);
+            pageAbortBinding.onPageResolved(resolvedPage);
+            await agentOptions.onAutomationPage?.(resolvedPage);
+          },
+        );
 
         const navigationTarget =
           agentOptions.startingUrls.find((url) => isHttpUrlLike(url)) ??
@@ -3722,14 +3951,17 @@ export function createBrowserAgentRuntime(
         if (!hasSourceCatalog && !warmPageReusable) {
           if (navigationTarget) {
             allowPrepareOnlyRunNavigation(page, navigationTarget);
-            const response = await page.goto(navigationTarget, {
-              waitUntil: "domcontentloaded",
-            }).catch((error: unknown) => {
-              // A navigation deadline does not mean the page is unusable.
-              // Let the agent inspect it and wait or retry, keeping its work.
-              if (error instanceof Error && error.name === "TimeoutError") return null;
-              throw error;
-            });
+            const response = await page
+              .goto(navigationTarget, {
+                waitUntil: "domcontentloaded",
+              })
+              .catch((error: unknown) => {
+                // A navigation deadline does not mean the page is unusable.
+                // Let the agent inspect it and wait or retry, keeping its work.
+                if (error instanceof Error && error.name === "TimeoutError")
+                  return null;
+                throw error;
+              });
             const status = response?.status() ?? null;
             if (status === 404 || status === 410) {
               throw new Error(
@@ -3738,8 +3970,6 @@ export function createBrowserAgentRuntime(
             }
           }
         }
-
-
 
         const result = await runJobSearchAgent({
           resultCache: searchResultCache,

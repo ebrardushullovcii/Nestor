@@ -84,7 +84,9 @@ function setup(kind: "signIn" | "createAccounts" | "solveCaptchas") {
       Promise.resolve(
         buildApplyFormObservation(raw, "2026-10-29T10:00:00.000Z"),
       ),
-    navigate: vi.fn((url: string) => Promise.resolve({ ok: true as const, url })),
+    navigate: vi.fn((url: string) =>
+      Promise.resolve({ ok: true as const, url }),
+    ),
     goBack: () =>
       Promise.resolve({
         ok: true,
@@ -112,6 +114,101 @@ function setup(kind: "signIn" | "createAccounts" | "solveCaptchas") {
 }
 
 describe("browser permissions at the action boundary", () => {
+  test("a separate Sign In can reveal providers beside an empty registration form", async () => {
+    const { hands, raw } = setup("createAccounts");
+    raw.controls[1].value = "";
+    raw.actions.push({
+      index: 1,
+      label: "Sign In",
+      visible: true,
+      disabled: false,
+    });
+    const guarded = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({ signIn: true }),
+    });
+    expect((await guarded.observe()).blocker?.code).toBe(
+      "account_creation_required",
+    );
+    expect(
+      browserStepReadyForAgent(
+        await guarded.observe(),
+        BrowserAgentPermissionsSchema.parse({
+          signIn: true,
+          googleSignIn: true,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      browserStepReadyForAgent(
+        await guarded.observe(),
+        BrowserAgentPermissionsSchema.parse({ signIn: true }),
+      ),
+    ).toBe(false);
+    expect(await guarded.clickElement("a1")).toMatchObject({ ok: true });
+    expect(hands.clickElement).toHaveBeenCalledExactlyOnceWith("a1");
+    expect(await guarded.clickElement("a0")).toMatchObject({ ok: false });
+    expect(await guarded.fillText("c1", "never-enter-this")).toMatchObject({
+      ok: false,
+    });
+    expect(hands.fillText).not.toHaveBeenCalled();
+    expect(hands.clickAuthorizedFormAction).not.toHaveBeenCalled();
+    expect(await guarded.clickElement("a1")).toMatchObject({ ok: false });
+  });
+
+  test("a Sign In entry still needs sign-in permission and cannot grant Google permission", async () => {
+    const { hands, raw } = setup("signIn");
+    raw.controls[1].value = "";
+    raw.actions.push({
+      index: 1,
+      label: "Sign In",
+      visible: true,
+      disabled: false,
+    });
+    raw.actions.push({
+      index: 2,
+      label: "Sign in with Google",
+      visible: true,
+      disabled: false,
+    });
+    const googleOnly = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({
+        googleSignIn: true,
+      }),
+    });
+    expect(await googleOnly.clickElement("a1")).toMatchObject({ ok: false });
+    const passwordOnly = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({ signIn: true }),
+    });
+    expect(await passwordOnly.clickElement("a2")).toMatchObject({ ok: false });
+    expect(await passwordOnly.clickElement("a0")).toMatchObject({ ok: false });
+    expect(hands.clickElement).not.toHaveBeenCalled();
+    expect(hands.clickAuthorizedFormAction).not.toHaveBeenCalled();
+  });
+
+  test("a Sign In entry that becomes a credential submit is refused before the press", async () => {
+    const { hands, raw } = setup("signIn");
+    raw.controls[1].value = "";
+    raw.actions.push({
+      index: 1,
+      label: "Sign In",
+      visible: true,
+      disabled: false,
+    });
+    const read = hands.observe;
+    let reads = 0;
+    hands.observe = async () => {
+      const page = await read();
+      if (++reads === 1) raw.actions[1] = { ...raw.actions[0], index: 1 };
+      return page;
+    };
+    const guarded = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({ signIn: true }),
+    });
+    expect(await guarded.clickElement("a1")).toMatchObject({ ok: false });
+    expect(hands.clickElement).not.toHaveBeenCalled();
+    expect(hands.clickAuthorizedFormAction).not.toHaveBeenCalled();
+  });
+
   test.each(["Continue with Google", "Sign up with Google", "Google"])(
     "%s has its own opt-in and ignores an unrelated empty password form",
     async (label) => {

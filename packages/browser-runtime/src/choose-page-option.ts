@@ -1,5 +1,6 @@
 import type { ApplyWriteResult } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
+import { collectCustomComboboxStates } from "./custom-combobox-state";
 
 /** How long a list may take to load or settle before it counts as uncertain. */
 const SETTLE_MS = 5_000;
@@ -367,18 +368,21 @@ async function selectRow(
   // widget's blur validation run before reporting what it kept.
   await locator.blur();
   await pause(STABLE_MS);
+  const selected = (
+    await locator.evaluateAll(collectCustomComboboxStates, [0])
+  )[0]?.[1];
   const retained = await locator.evaluate((element) => {
     const input = element as HTMLInputElement;
-    const root = element.closest(
-      "[class*='__control'], [class*='-control'], .select-shell, [class*='select-shell']",
-    );
-    const selected = root?.querySelector(
-      "[class*='__single-value'], [class*='-singleValue'], [class*='single-value'], [role='option'][aria-selected='true']",
-    );
-    return selected?.textContent?.trim() || input.value || "";
+    return element.getAttribute("aria-invalid") === "true"
+      ? ""
+      : input.value || "";
   });
-  if (normalizeOptionLabel(retained) === normalizeOptionLabel(text))
-    return { ok: true, observedValue: retained.replace(/\s+/gu, " ").trim() };
+  const committed = selected?.selectedOptionLabel || retained;
+  if (
+    normalizeOptionLabel(committed) === normalizeOptionLabel(text) &&
+    (await locator.getAttribute("aria-invalid")) !== "true"
+  )
+    return { ok: true, observedValue: committed.replace(/\s+/gu, " ").trim() };
   await locator.fill("", { timeout: 2_000 }).catch(() => undefined);
   await locator.press("Escape").catch(() => undefined);
   return uncertain(`The list did not keep "${text}" selected.`);

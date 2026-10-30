@@ -36,6 +36,24 @@ const inspectMutationResponse = (
     { permit },
   );
 
+test("a file scanner's receipt never confirms the attachment before storage", async () => {
+  for (const status of [200, 201, 204])
+    expect(
+      (
+        await inspectStructuralResponse(
+          {
+            status: () => status,
+            headers: () => ({ "content-type": "application/json" }),
+            url: () => endpoint,
+            request: () => carrier,
+            text: () => Promise.resolve('{"fileId":"synthetic-scan-001"}'),
+          },
+          { permit: { ...permit, uploadLeg: "scan" } },
+        )
+      ).judgment,
+    ).toBe("unconfirmed");
+});
+
 test("a resume parser's returned storage handle confirms the exact permitted file carrier", async () => {
   const url = `https://form.example.test${resumeReceipt.request.path}`;
   const request = { ...carrier, url: () => url };

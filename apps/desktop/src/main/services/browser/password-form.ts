@@ -1,30 +1,55 @@
 /** Metadata only. Also run by main in a target frame; never returns field values. */
-export function readPasswordForms(): { action: string; login: boolean }[] {
-  const inputs = Array.from(
+export function readPasswordForms(): {
+  action: string;
+  login: boolean;
+  passwordIndex: number;
+}[] {
+  const visible = (element: Element) =>
+    !element.closest('[hidden], [inert], [aria-hidden="true"]') &&
+    getComputedStyle(element).visibility !== "hidden" &&
+    getComputedStyle(element).opacity !== "0" &&
+    element.getClientRects().length > 0;
+  const allInputs = Array.from(
     document.querySelectorAll<HTMLInputElement>('input[type="password"]'),
-  ).filter(
-    (input) =>
-      !input.disabled &&
-      !input.readOnly &&
-      getComputedStyle(input).visibility !== "hidden" &&
-      getComputedStyle(input).opacity !== "0" &&
-      input.getClientRects().length > 0,
   );
+  const visibleInputs = allInputs.filter(
+    (input) => !input.disabled && !input.readOnly && visible(input),
+  );
+  // A sign-in dialog can sit over a still-rendered registration form. Only
+  // the dialog is interactive; background passwords and headings are not its
+  // account-creation intent. Multiple dialogs remain ambiguous.
+  const dialogs = Array.from(
+    document.querySelectorAll(
+      'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]',
+    ),
+  ).filter(
+    (dialog) =>
+      visible(dialog) && visibleInputs.some((input) => dialog.contains(input)),
+  );
+  const dialog = dialogs.length === 1 ? dialogs[0] : undefined;
+  const inputs = dialog
+    ? visibleInputs.filter((input) => dialog.contains(input))
+    : visibleInputs;
   return inputs.map((input) => {
     const form = input.form;
+    const controls =
+      dialog && (!form || !dialog.contains(form))
+        ? dialog
+        : (form ?? dialog ?? document);
     const buttons = Array.from(
-      (form ?? document).querySelectorAll('button, input[type="submit"]'),
+      controls.querySelectorAll('button, input[type="submit"]'),
     )
       .map((button) => button.textContent || button.getAttribute("value") || "")
       .join(" ");
     const registration =
+      dialogs.length > 1 ||
       inputs.length !== 1 ||
       input.autocomplete === "new-password" ||
       /create|register|sign\s*up|reset|change\s*password|delete|remove|purchase|pay\b/i.test(
         buttons,
       );
     const headings = Array.from(
-      document.querySelectorAll("h1, h2, [role=heading]"),
+      (dialog ?? document).querySelectorAll("h1, h2, [role=heading]"),
     )
       .map((heading) => heading.textContent ?? "")
       .join(" ");
@@ -52,6 +77,7 @@ export function readPasswordForms(): { action: string; login: boolean }[] {
             .href
         : action,
       login: !registration && !registrationIntent && loginIntent,
+      passwordIndex: allInputs.indexOf(input),
     };
   });
 }

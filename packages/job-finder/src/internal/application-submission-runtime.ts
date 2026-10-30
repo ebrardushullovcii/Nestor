@@ -2,6 +2,7 @@ import type {
   ApplicationAutomationMode,
   JobSource,
   SubmissionAnswerSnapshotIdentity,
+  SubmissionExecutionGrant,
   SubmissionFinalControlIdentity,
   SubmissionOutcomeRetryEligibility,
   SubmissionPreflightRecord,
@@ -183,6 +184,38 @@ function hasExactOneFinalControl(
   return observation.complete && observation.controls.length === 1;
 }
 
+function consumedGrantMatchesAttempt(input: {
+  grant: SubmissionExecutionGrant | null;
+  grantId: string | null;
+  preflight: SubmissionPreflightRecord;
+  armedAt: string;
+  now: string;
+}): boolean {
+  const { grant, preflight } = input;
+  if (!grant) {
+    return false;
+  }
+  const now = Date.parse(input.now);
+  const expiresAt = Date.parse(grant.expiresAt);
+  return (
+    grant.id === input.grantId &&
+    grant.status === "consumed" &&
+    grant.consumedAt === input.armedAt &&
+    grant.revokedAt === null &&
+    Number.isFinite(now) &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > now &&
+    grant.preflightId === preflight.id &&
+    grant.idempotencyKey === preflight.idempotencyKey &&
+    grant.runId === preflight.runId &&
+    grant.jobId === preflight.jobId &&
+    grant.resultId === preflight.resultId &&
+    grant.applicationRecordId === preflight.applicationRecordId &&
+    grant.authorityEnvelopeId === preflight.authorityEnvelopeId &&
+    grant.authorityRevision === preflight.authorityRevision
+  );
+}
+
 /**
  * Compose the generic browser hands with Job Finder's durable authority
  * orchestrator for one local attempt. This is intentionally an internal seam:
@@ -191,8 +224,9 @@ function hasExactOneFinalControl(
  *
  * The sequence is observe -> exact-one preflight -> durable authority
  * orchestrator -> one browser hand. The veto callback rereads the envelope on
- * every browser-hands last-instant check, so revocation or revision drift
- * prevents the action from crossing the browser boundary.
+ * every browser-hands last-instant check with a fresh clock. Confirm mode also
+ * rereads the exact grant consumed when this attempt was armed, so expiry,
+ * revocation, or lineage drift prevents the action crossing the browser boundary.
  */
 export async function runApplicationSubmissionRuntime(
   input: ApplicationSubmissionRuntimeInput,
@@ -238,7 +272,10 @@ export async function runApplicationSubmissionRuntime(
     initialEnvelope.id !== input.authorityEnvelopeId ||
     initialEnvelope.revision !== input.authorityRevision ||
     initialEnvelope.mode !== input.savedMode ||
-    !isActiveApplicationAuthorityEnvelope(initialEnvelope, input.now) ||
+    !isActiveApplicationAuthorityEnvelope(
+      initialEnvelope,
+      new Date().toISOString(),
+    ) ||
     !samePolicyIdentity(
       initialEnvelope.decisionPolicy,
       input.currentPolicyFacts.policy,
@@ -328,6 +365,12 @@ export async function runApplicationSubmissionRuntime(
     );
   }
   const preflightOrigin = preflight.origin;
+  const executionGrantId =
+    input.savedMode === "confirm_before_submit"
+      ? input.personConfirmation
+        ? `grant_${preflight.id}`
+        : (input.executionGrantId ?? null)
+      : null;
 
   let authorityVetoed = false;
   const veto = async (): Promise<boolean> => {
@@ -336,7 +379,12 @@ export async function runApplicationSubmissionRuntime(
     }
 
     let currentEnvelope: NonNullable<typeof initialEnvelope> | null;
+    let currentGrant: SubmissionExecutionGrant | null = null;
     try {
+      if (executionGrantId) {
+        currentGrant =
+          await input.repository.getSubmissionExecutionGrant(executionGrantId);
+      }
       currentEnvelope = await input.repository.getApplicationAuthorityEnvelope(
         preflight.authorityEnvelopeId,
       );
@@ -345,16 +393,30 @@ export async function runApplicationSubmissionRuntime(
       return false;
     }
 
+    if (input.signal?.aborted) {
+      return false;
+    }
+    // Read the clock after the durable reads: those reads and the preceding
+    // browser observations may themselves have outlasted either expiry.
+    const now = new Date().toISOString();
     const authorityStillMatches = Boolean(
       currentEnvelope &&
       currentEnvelope.id === preflight.authorityEnvelopeId &&
       currentEnvelope.revision === preflight.authorityRevision &&
       currentEnvelope.mode === input.savedMode &&
-      isActiveApplicationAuthorityEnvelope(currentEnvelope, input.now) &&
+      isActiveApplicationAuthorityEnvelope(currentEnvelope, now) &&
       samePolicyIdentity(
         currentEnvelope.decisionPolicy,
         input.currentPolicyFacts.policy,
-      ),
+      ) &&
+      (input.savedMode !== "confirm_before_submit" ||
+        consumedGrantMatchesAttempt({
+          grant: currentGrant,
+          grantId: executionGrantId,
+          preflight,
+          armedAt: input.now,
+          now,
+        })),
     );
     if (!authorityStillMatches) {
       authorityVetoed = true;
