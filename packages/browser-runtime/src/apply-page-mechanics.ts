@@ -1,6 +1,7 @@
 import { attachFile } from "./file-attachment";
 import { createHash } from "node:crypto";
 import { choosePageOption } from "./choose-page-option";
+import { collectCustomComboboxStates } from "./custom-combobox-state";
 import { pickCalendarDate } from "./date-picker";
 import type {
   ApplyBlockedAttempt,
@@ -95,7 +96,76 @@ async function settlePage(page: Page, timeout = 4_000): Promise<void> {
 }
 
 export async function readRawApplyPage(page: Page): Promise<RawApplyPage> {
-  return withPageMessages(page, await readRawApplyPageContent(page));
+  const raw = await readRawApplyPageContent(page);
+  // A dropzone's inner input often says only "Choose a file". Its actual
+  // question lives outside the shadow root, beside the widget's host.
+  for (const [index, frame] of page.frames().entries()) {
+    const fields = raw.controls.filter(
+      (control) =>
+        control.inputType === "file" &&
+        (index === 0
+          ? !control.ref?.startsWith("f")
+          : control.ref?.startsWith(`f${index - 1}c`)),
+    );
+    if (!fields.length) continue;
+    const labels = await frame
+      .locator("input[type='file']")
+      .evaluateAll(readFileFieldLabels)
+      .catch(() => []);
+    fields.forEach((control, ordinal) => {
+      if (labels[ordinal]) control.label = labels[ordinal]!;
+    });
+  }
+  return withPageMessages(page, raw);
+}
+
+/** Self-contained for evaluation in each frame, including open shadow roots. */
+function readFileFieldLabels(inputs: Element[]): string[] {
+  const headings = (root: Element | ShadowRoot): Element[] => {
+    const result = [
+      ...root.querySelectorAll("h1,h2,h3,h4,legend,[role='heading']"),
+    ];
+    for (const node of root.querySelectorAll("*"))
+      if (node.shadowRoot) result.push(...headings(node.shadowRoot));
+    return result;
+  };
+  const parent = (node: Element): Element | null =>
+    node.parentElement ?? (node.getRootNode() as ShadowRoot).host ?? null;
+  return inputs.map((input) => {
+    const own =
+      input.getAttribute("aria-label")?.trim() ||
+      Array.from((input as HTMLInputElement).labels ?? [])
+        .map((label) => label.textContent?.trim())
+        .join(" ");
+    if (
+      own &&
+      !/^(?:choose|select|attach|upload|drop)\b.*\b(?:file|document)\b/iu.test(
+        own,
+      )
+    )
+      return "";
+    for (
+      let node = parent(input), depth = 0;
+      node && depth < 12;
+      node = parent(node), depth++
+    ) {
+      if (node.matches("form,body,main")) break;
+      if (
+        Array.from(node.querySelectorAll("input,textarea,select")).some(
+          (other) => other !== input && !other.matches("input[type='hidden']"),
+        )
+      )
+        break;
+      const names = headings(node)
+        .filter((heading) => heading.getClientRects().length > 0)
+        .map(
+          (heading) => heading.textContent?.replace(/\s+/gu, " ").trim() ?? "",
+        )
+        .filter((name) => name.length > 0 && name.length < 120);
+      if (names.length === 1) return names[0]!;
+    }
+    return "";
+  });
 }
 
 /** Adds what the page said through its own alert, confirm or prompt. */
@@ -885,18 +955,31 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
       section = nearby;
       if (section) sectionBox = box;
     }
+    // A field's menu may live inside several custom-element shadow roots.
+    // Follow their hosts as well as DOM parents; do not treat the body as a
+    // field group just because some other part of the page has an input.
+    const parent = (node: Element): Element | null =>
+      node.parentElement ?? (node.getRootNode() as ShadowRoot).host ?? null;
+    const hasFields = (root: Element | ShadowRoot): boolean =>
+      Boolean(
+        root.querySelector(
+          "input:not([type='hidden']):not([type='button']):not([type='submit']), select, textarea",
+        ),
+      ) ||
+      Array.from(root.querySelectorAll("*")).some(
+        (node) => node.shadowRoot && hasFields(node.shadowRoot),
+      );
     let inForm = Boolean(
       element.closest("form, fieldset, [role='form'], [role='group']"),
     );
     for (
-      let box = element.parentElement, depth = 0;
-      !inForm && box && box !== document.body && depth < 4;
-      box = box.parentElement, depth += 1
+      let box = parent(element), depth = 0;
+      !inForm && box && box !== document.body && depth < 12;
+      box = parent(box), depth += 1
     )
       inForm = Boolean(
-        box.querySelector(
-          "input:not([type='hidden']):not([type='button']):not([type='submit']), select, textarea",
-        ),
+        box.matches("form, fieldset, [role='form'], [role='group']") ||
+        hasFields(box),
       );
     // A toggle button answers the question around it; whether that question
     // is required is said by its label (a "required" class, as Ashby's
@@ -918,24 +1001,75 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
   });
 }
 
+export { personSubmissionObserverSource } from "./person-submission-observer";
+
 /** Pure DOM snapshot, also usable after the person detaches the automation connection. */
 export function collectApplyDocumentSnapshot(
   elements: Element[],
   selectors: typeof APPLY_PAGE_SELECTORS,
   redactCredentials = false,
+  readSubmissionEvidence?: (text: string) => {
+    messages: string[];
+    refused: boolean;
+  },
 ) {
   const matching = (selector: string) =>
     elements.filter((element) => element.matches(selector));
+  const renderedText = (root: ParentNode): string => {
+    const parts: string[] = [];
+    for (const node of root.childNodes) {
+      if (node instanceof Text) {
+        parts.push(node.textContent ?? "");
+        continue;
+      }
+      if (
+        !(node instanceof HTMLElement) ||
+        ["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(node.tagName)
+      )
+        continue;
+      const style = getComputedStyle(node);
+      if (
+        style.display === "none" ||
+        ["hidden", "collapse"].includes(style.visibility) ||
+        Number(style.opacity || "1") === 0 ||
+        (style.display !== "contents" && !node.getClientRects().length)
+      )
+        continue;
+      const block = !["inline", "inline-block", "contents"].includes(
+        style.display,
+      );
+      if (block) parts.push("\n");
+      parts.push(renderedText(node));
+      if (node.shadowRoot) parts.push(renderedText(node.shadowRoot));
+      if (block) parts.push("\n");
+    }
+    return parts.join(" ");
+  };
   // When the page's send was last pressed while sends were let through.
-  const sendPressed = (): { sendPressedAt?: string } => {
-    const at = (
+  const sendPressed = (): {
+    sendPressedAt?: string;
+    sendConfirmationBefore?: string[];
+    sendOrigin?: string;
+  } => {
+    const send = (
       window as unknown as Record<
         string,
-        { sendPressedAt?: number } | undefined
+        | {
+            sendPressedAt?: number;
+            sendConfirmationBefore?: string[];
+            sendOrigin?: string;
+          }
+        | undefined
       >
-    )["__nestorPrepareOnlyMutationGuardV1"]?.sendPressedAt;
-    return typeof at === "number"
-      ? { sendPressedAt: new Date(at).toISOString() }
+    )["__nestorPrepareOnlyMutationGuardV1"];
+    return typeof send?.sendPressedAt === "number"
+      ? {
+          sendPressedAt: new Date(send.sendPressedAt).toISOString(),
+          ...(send.sendConfirmationBefore
+            ? { sendConfirmationBefore: send.sendConfirmationBefore }
+            : {}),
+          ...(send.sendOrigin ? { sendOrigin: send.sendOrigin } : {}),
+        }
       : {};
   };
   const safe = <T>(read: () => T, fallback: T): T => {
@@ -996,18 +1130,28 @@ export function collectApplyDocumentSnapshot(
       section = nearby;
       if (section) sectionBox = box;
     }
+    const parent = (node: Element): Element | null =>
+      node.parentElement ?? (node.getRootNode() as ShadowRoot).host ?? null;
+    const hasFields = (root: Element | ShadowRoot): boolean =>
+      Boolean(
+        root.querySelector(
+          "input:not([type='hidden']):not([type='button']):not([type='submit']), select, textarea",
+        ),
+      ) ||
+      Array.from(root.querySelectorAll("*")).some(
+        (node) => node.shadowRoot && hasFields(node.shadowRoot),
+      );
     let inForm = Boolean(
       element.closest("form, fieldset, [role='form'], [role='group']"),
     );
     for (
-      let box = element.parentElement, depth = 0;
-      !inForm && box && box !== document.body && depth < 4;
-      box = box.parentElement, depth += 1
+      let box = parent(element), depth = 0;
+      !inForm && box && box !== document.body && depth < 12;
+      box = parent(box), depth += 1
     )
       inForm = Boolean(
-        box.querySelector(
-          "input:not([type='hidden']):not([type='button']):not([type='submit']), select, textarea",
-        ),
+        box.matches("form, fieldset, [role='form'], [role='group']") ||
+        hasFields(box),
       );
     // A toggle button answers the question around it; whether that question
     // is required is said by its label (a "required" class, as Ashby's
@@ -1621,6 +1765,7 @@ export function collectApplyDocumentSnapshot(
         }))(matching(selectors.clickables)),
     [],
   );
+  const bodyText = renderedText(document.body ?? document);
   return {
     controls,
     actions,
@@ -1630,7 +1775,13 @@ export function collectApplyDocumentSnapshot(
     clickables,
     url: window.location.href,
     title: document.title,
-    bodyText: document.body?.innerText.slice(0, 20_000) ?? "",
+    bodyText: bodyText.slice(0, 20_000),
+    ...(readSubmissionEvidence
+      ? {
+          submissionConfirmationMessages:
+            readSubmissionEvidence(bodyText).messages,
+        }
+      : {}),
     loading: document.readyState !== "complete",
     ...sendPressed(),
   };
@@ -2015,79 +2166,7 @@ async function readCustomComboboxStates(
   const wanted = new Set(indexes);
   const states = await page
     .locator(APPLY_CONTROL_SELECTOR)
-    .evaluateAll(
-      (elements, selected: number[]) => {
-        const want = new Set(selected);
-        const readOne = (
-          element: Element,
-        ): { selectedOptionLabel: string; compositeVisible: boolean } => {
-          const controlRoot =
-            element.closest("[class*='__control']") ??
-            element.closest("[class*='-control']") ??
-            element.closest(".select-shell, [class*='select-shell']");
-          const compositeVisible = Boolean(
-            controlRoot &&
-            controlRoot.getAttribute("aria-hidden") !== "true" &&
-            controlRoot.getAttribute("hidden") === null &&
-            controlRoot.getClientRects().length > 0,
-          );
-          const selectedValue = controlRoot?.querySelector<HTMLElement>(
-            "[class*='__single-value'], [class*='-singleValue'], [class*='single-value'], [role='option'][aria-selected='true']",
-          );
-          if (!selectedValue) {
-            return { selectedOptionLabel: "", compositeVisible };
-          }
-
-          const selectedText = selectedValue.textContent?.trim() ?? "";
-          const regionCode = [
-            selectedValue,
-            ...Array.from(
-              controlRoot?.querySelectorAll<HTMLElement>("[class*='iti__']") ??
-                [],
-            ),
-            ...Array.from(
-              selectedValue.querySelectorAll<HTMLElement>("[class]"),
-            ),
-          ]
-            .flatMap((candidate) =>
-              (candidate.getAttribute("class") ?? "").split(/\s+/u),
-            )
-            .map(
-              (className) => /^iti__([a-z]{2})$/iu.exec(className)?.[1] ?? "",
-            )
-            .find(Boolean);
-          if (!regionCode) {
-            return { selectedOptionLabel: selectedText, compositeVisible };
-          }
-
-          let regionName = "";
-          try {
-            regionName =
-              new Intl.DisplayNames(["en"], { type: "region" }).of(
-                regionCode.toUpperCase(),
-              ) ?? "";
-          } catch {
-            // A flag without a verified country name stays insufficient: several
-            // countries share a calling code.
-          }
-
-          return {
-            selectedOptionLabel: [regionName, selectedText]
-              .filter(Boolean)
-              .join(" ")
-              .trim(),
-            compositeVisible,
-          };
-        };
-
-        return elements.map((element, index) =>
-          want.has(index)
-            ? ([index, readOne(element)] as const)
-            : ([index, null] as const),
-        );
-      },
-      [...wanted],
-    )
+    .evaluateAll(collectCustomComboboxStates, [...wanted])
     .catch(
       () =>
         [] as ReadonlyArray<
