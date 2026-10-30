@@ -2,13 +2,13 @@
 
 ## Automated checks by change
 
-| Change                                             | Run                                                                                                        |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| package-local code                                 | `pnpm validate:package <alias>` (`desktop`, `job-finder`, `browser-agent`, `browser-runtime`, `contracts`) |
-| contracts or IPC                                   | `pnpm validate:contracts` plus typecheck of affected packages                                              |
-| discovery or source-debug                          | `pnpm source-generic:check` plus focused package tests                                                     |
-| desktop UI                                         | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                  |
-| broad cross-package behavior                       | `pnpm verify:affected`                                                                                     |
+| Change                       | Run                                                                                                        |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| package-local code           | `pnpm validate:package <alias>` (`desktop`, `job-finder`, `browser-agent`, `browser-runtime`, `contracts`) |
+| contracts or IPC             | `pnpm validate:contracts` plus typecheck of affected packages                                              |
+| discovery or source-debug    | `pnpm source-generic:check` plus focused package tests                                                     |
+| desktop UI                   | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                  |
+| broad cross-package behavior | `pnpm verify:affected`                                                                                     |
 
 Other entry points: `pnpm test:correctness`, `pnpm test:coverage`, `pnpm format`, `pnpm knip`, `pnpm structure:check`.
 
@@ -99,4 +99,4 @@ From the repo root, run `node apps/desktop/test-fixtures/job-sites/serve.mjs` wi
 
 Run `node apps/desktop/test-fixtures/job-sites/check.mjs` for the HTTP self-check. It starts its own server on a random port, visits every original job/application, walks every new listing page, opens representative details and forms, submits one synthetic application per site, checks confirmations and POST logs, then stops that server. It also checks filters, duplicates, unavailable jobs, local redirects, validation, delays and HTTP 429 recovery. It checks iframe and wizard markup but does not execute browser JavaScript.
 
-Every parsed POST is logged as JSON to stdout and the gitignored `apps/desktop/test-fixtures/job-sites/submissions.log`; passwords are redacted and uploads record metadata only. All content is local and synthetic. Agent runs may send real applications to these fixtures, and only to them; read `submissions.log` to prove a send. Runs against any other site stay prepare-only. See the fixture folder's `README.md` for details.
+Every parsed POST is logged as JSON to stdout and the gitignored `apps/desktop/test-fixtures/job-sites/submissions.log`; passwords are redacted and uploads record metadata only. A logged POST proves receipt of a request, not acceptance of an application: validation failures and intermediate saves are logged too. Submission tests must separately assert the server's accepted-application count and the app's outcome, then verify that retries or restarts add no acceptance. All content is local and synthetic. Agent runs may send applications to these fixtures, and only to them. Runs against any other site stay prepare-only. See the fixture folder's `README.md` for details.
