@@ -343,7 +343,7 @@ function pickerHandover(
     answer: null,
     controlRef: control.ref,
     observation,
-    note: `${detail} ${exhausted ? "No further automatic attempts will be made on this picker; it is now with the person." : "Choose a different option only if the person saved a rule for this question; otherwise it is with the person."}`,
+    note: `${detail} ${exhausted ? "Do not retry choices in this picker." : "Do not repeat the refused choice or substitute an unrelated answer."} Inspect the returned page for another supported way to enter the same fact, such as a manual-entry control. Use its observed handle, then fill the newly exposed fields from the person's facts. If no supported path remains, leave this question for the person.`,
     question: {
       ...buildPendingQuestion({
         control,

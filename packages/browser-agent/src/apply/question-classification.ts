@@ -25,7 +25,7 @@ import { requiresOwnWords } from "./own-words";
  */
 export interface ApplyQuestionClassification {
   asksAboutPay: boolean;
-  /** Two page reads failed; the application must hand these questions over. */
+  /** Every read of this question failed; it goes to the person unanswered. */
   readFailed?: boolean;
   answerTags?: ApplyAnswerTags | null;
   eligibilityKind?: "work_authorization" | "visa_sponsorship" | null;
@@ -81,38 +81,49 @@ export async function classifyApplicationQuestions(
 ): Promise<Map<string, ApplyQuestionClassification>> {
   const result = new Map<string, ApplyQuestionClassification>();
   let missing = [...input.questions];
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     input.signal?.throwIfAborted();
-    // A failed whole-page report gets one smaller retry per question, in
-    // at most three calls. One bad response then leaves only its own group
-    // unread rather than handing every known field back to the person.
+    // A failed whole-page report is retried in at most three smaller groups,
+    // then what is still unread once more, one question per call when only
+    // a few remain. One bad or stalled response then leaves only its own
+    // question unread rather than handing every known field back to the
+    // person. The calls of a retry run side by side, so one stalled call
+    // costs one timeout rather than one per group.
     const size =
-      attempt === 1 && missing.length > 4
-        ? Math.ceil(missing.length / 3)
-        : missing.length;
+      attempt === 0
+        ? missing.length
+        : attempt === 2 && missing.length <= 6
+          ? 1
+          : Math.ceil(missing.length / 3);
     const batches = [];
     for (let start = 0; start < missing.length; start += size)
       batches.push(missing.slice(start, start + size));
-    const unread: typeof missing = [];
-    for (const questions of batches) {
-      input.signal?.throwIfAborted();
-      try {
-        const readings = await readApplicationQuestions(
-          { ...input, questions },
-          attempt,
-        );
-        for (const question of questions) {
-          const key = question.identity ?? question.prompt;
-          const reading = readings.get(key);
-          if (!reading || (input.sources !== undefined && !reading.answerTags))
-            unread.push(question);
-          else result.set(key, reading);
-        }
-      } catch {
-        input.signal?.throwIfAborted();
-        unread.push(...questions);
-      }
-    }
+    const unread = (
+      await Promise.all(
+        batches.map(async (questions) => {
+          try {
+            const readings = await readApplicationQuestions(
+              { ...input, questions },
+              attempt,
+            );
+            return questions.filter((question) => {
+              const key = question.identity ?? question.prompt;
+              const reading = readings.get(key);
+              if (
+                !reading ||
+                (input.sources !== undefined && !reading.answerTags)
+              )
+                return true;
+              result.set(key, reading);
+              return false;
+            });
+          } catch {
+            return questions;
+          }
+        }),
+      )
+    ).flat();
+    input.signal?.throwIfAborted();
     missing = unread;
     if (!missing.length) return result;
   }

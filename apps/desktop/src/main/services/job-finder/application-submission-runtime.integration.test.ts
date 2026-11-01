@@ -28,8 +28,8 @@ import {
 import { chromium, type Browser, type BrowserContext } from "playwright";
 import { afterEach, describe, expect, test } from "vitest";
 
-const NOW = "2026-08-27T10:00:00.000Z";
-const EXPIRES_AT = "2026-08-27T11:00:00.000Z";
+const NOW = new Date().toISOString();
+const EXPIRES_AT = new Date(Date.now() + 60 * 60_000).toISOString();
 const ANSWER_SHA256 = "b".repeat(64);
 const RESUME_BYTES = new TextEncoder().encode("trusted resume bytes");
 const RESUME_SHA256 = createHash("sha256").update(RESUME_BYTES).digest("hex");

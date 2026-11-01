@@ -385,6 +385,55 @@ test("Settings saves one in-app browser permission without touching the others",
   ]);
 });
 
+test("Settings can enable Google's default-off permission in an upgraded workspace", async () => {
+  const preferences = createPreferencesStore(store);
+  preferences.settings.patch({
+    fields: { "aiBehavior.browserPermissions.signIn": true },
+  });
+  // An existing settings row gets NULL when this permission is added.
+  store
+    .sql(
+      "UPDATE profile_settings SET ai_behavior_browser_permissions_google_sign_in=NULL",
+    )
+    .run();
+  const view = render(
+    <MemoryRouter>
+      <StoredSettingsScreen />
+    </MemoryRouter>,
+  );
+  const label = "Use Google to sign in or sign up";
+  const toggle = await screen.findByRole("switch", { name: label });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(toggle);
+  await screen.findByText("AI behavior saved.");
+  expect(preferences.settings.read().aiBehavior?.browserPermissions).toEqual({
+    solveCaptchas: false,
+    signIn: true,
+    googleSignIn: true,
+    createAccounts: false,
+  });
+  expect(calls.filter((call) => call.name === "patch_settings")).toEqual([
+    {
+      name: "patch_settings",
+      input: {
+        fields: { "aiBehavior.browserPermissions.googleSignIn": true },
+        expected: { "aiBehavior.browserPermissions.googleSignIn": false },
+      },
+    },
+  ]);
+  view.unmount();
+  render(
+    <MemoryRouter>
+      <StoredSettingsScreen />
+    </MemoryRouter>,
+  );
+  expect(
+    (await screen.findByRole("switch", { name: label })).getAttribute(
+      "aria-checked",
+    ),
+  ).toBe("true");
+});
+
 test("Reset everything clears the workspace and opens guided setup", async () => {
   const resetWorkspace = vi.fn(() => Promise.resolve());
   Object.assign(window.nestor, { jobFinder: { resetWorkspace } });

@@ -43,6 +43,19 @@ beforeAll(async () => {
         "Set-Cookie": "syntheticGoogleSession=yes; Path=/; SameSite=Lax",
       });
       response.end();
+    } else if (path === "/account-choices") {
+      response.end(`<!doctype html><title>Sign In</title>
+        <header><button onclick="document.querySelector('dialog').showModal()">Sign In</button></header>
+        <main><h1>Sign In</h1><form method="post" action="/session">
+          <label>Email Address<input type="email" name="email"></label>
+          <label>Password<input type="password" name="password"></label>
+          <button>Sign In</button></form><button>Create Account</button></main>
+        <dialog><h2>Sign In</h2>
+          <button type="button" aria-label="Sign in with Apple">Sign in with Apple</button>
+          <button type="button" aria-label="Sign in with Google" onclick="location.href='/google-session'">Sign in with Google</button>
+          <button type="button" aria-label="Sign in with LinkedIn">Sign in with LinkedIn</button>
+          <button onclick="document.querySelector('dialog').close()">Sign in with email</button>
+        </dialog>`);
     } else if (path === "/register/google") {
       response.end(
         "<h1>Create an account to continue</h1><form method='post' action='/account'><label>Password<input type='password'></label><button>Create account</button><button type='button' onclick=\"location.href='/google-session'\">Continue with Google</button></form>",
@@ -93,6 +106,61 @@ async function enterSyntheticLogin(page: Page) {
   await page.getByLabel("Email").fill("synthetic@example.test");
   await page.getByLabel("Password").fill("synthetic-replica-password");
 }
+
+test("two-stage sign-in opens provider choices without a password or registration grant, then uses only enabled Google", async () => {
+  const context = await browser.newContext();
+  try {
+    const { page, hands } = await open(context, "/account-choices");
+    const before = posts.length;
+    const guarded = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({ signIn: true }),
+    });
+    const first = await guarded.observe();
+    expect(first.blocker?.code).toBe("account_creation_required");
+    const entry = first.actions.find(
+      (action) => action.label === "Sign In" && !action.inForm,
+    )!;
+    const submit = first.actions.find(
+      (action) => action.label === "Sign In" && action.inForm,
+    )!;
+    const password = first.controls.find(
+      (control) => control.credentialRole === "password",
+    )!;
+    expect(await guarded.clickElement(submit.ref)).toMatchObject({ ok: false });
+    expect(
+      await guarded.fillText(password.ref, "not-an-agent-credential"),
+    ).toMatchObject({ ok: false });
+    expect(await guarded.clickElement(entry.ref)).toMatchObject({ ok: true });
+    await expect(page.locator("dialog").isVisible()).resolves.toBe(true);
+    const google = (await guarded.observe()).actions.find(
+      (action) => action.label === "Sign in with Google",
+    )!;
+    expect(google.visible).toBe(true);
+    expect(await guarded.clickElement(google.ref)).toMatchObject({ ok: false });
+    const googleOnly = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({
+        googleSignIn: true,
+      }),
+    });
+    expect(await googleOnly.clickElement(google.ref)).toMatchObject({
+      ok: true,
+    });
+    await page.waitForURL(`${base}/jobs`);
+    expect(
+      (await context.cookies(base)).some(
+        (cookie) => cookie.name === "syntheticGoogleSession",
+      ),
+    ).toBe(true);
+    await page.evaluate(() =>
+      fetch("/application", { method: "POST", body: "blocked" }).catch(
+        () => undefined,
+      ),
+    );
+    expect(posts.slice(before)).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
 
 test("Google sign-up opt-in follows the provider button beside an empty password form without authorizing other writes", async () => {
   const context = await browser.newContext();

@@ -479,6 +479,40 @@ it("opens a failed-upload form from its file task without resolving or answering
   expect(applications.getApplication(claimed[0]!.id)?.state).toBe("needs_you");
 });
 
+it("identifies the attempted CV and defaults its file type from the recorded upload", async () => {
+  const row = claimed[0]!;
+  applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "upload_repair",
+    key: "upload_repair",
+    scope: {},
+    prompt: "Choose a file or drop it here — upload failed",
+    kind: "question",
+    input: "file",
+    options: [],
+    askReason: {
+      kind: "page_refused",
+      check: "upload_acceptance",
+      detail: "network/file_size",
+      selectedDocument: {
+        kind: "resume",
+        label: "Your CV",
+        fileName: "synthetic-resume.pdf",
+      },
+    },
+  });
+  show();
+  expect(
+    await screen.findByText(
+      "Attempted resume/CV: Your CV (synthetic-resume.pdf)",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByLabelText<HTMLSelectElement>("File type").value).toBe(
+    "resume",
+  );
+});
+
 it("hands Fill's Next to the person: open the form, press it, and continue", async () => {
   const task = ask(
     0,
@@ -802,6 +836,50 @@ it("updates a single site card as sign-in reaches MFA and applications continue"
   await waitFor(() => expect(applications.needsYou.list().total).toBe(0));
 });
 
+it("keeps a resumed sign-in application's context and reports checking as status", async () => {
+  const row = claimed[0]!;
+  const requested = applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "site_access",
+    key: "access",
+    kind: "sign_in",
+    scope: { siteOrigin: "https://jobs.example.test" },
+    prompt: "Sign in first",
+    input: "text",
+    options: [],
+  });
+  if (requested.status !== "needs_you") throw new Error("Missing sign-in task");
+  const run = createNeedsYouCommandRunner(() => applications, {
+    retry: async () => {},
+    open: () => Promise.resolve(false),
+    check: () => {
+      jobs
+        .sql("UPDATE applications SET state='running' WHERE id=?")
+        .run(row.id);
+      return Promise.resolve(false);
+    },
+  });
+  Object.assign(window.nestor, { needsYou: { run } });
+  show();
+  await screen.findByRole("heading", { name: "Sign in to continue" });
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  const checking = await screen.findByText(
+    "Job Finder is checking the application with your browser sign-in. This item stays until access is confirmed.",
+  );
+  expect(checking.getAttribute("role")).toBe("status");
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(
+    applications.needsYou.details(requested.task.id)?.applications,
+  ).toMatchObject([{ id: row.id, state: "running" }]);
+  fireEvent.click(screen.getByRole("button", { name: "Open in browser" }));
+  const opening = await screen.findByText(
+    "Job Finder is opening or working on this application. You can open its tab once it is ready.",
+  );
+  expect(opening.getAttribute("role")).toBe("status");
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 it("updates tab counts while a saved answer is being edited, without moving the editor", async () => {
   applications.needsYou.remember({
     key: "notice",
@@ -1082,7 +1160,52 @@ it("lists filled forms under their own group, and says so when nothing is blocke
   await waitFor(() => expect(openApplication).toHaveBeenCalledWith({ id: 31 }));
 });
 
-it("says why a question was asked when Apply recorded a reason", async () => {
+it("says why a Send for me form waits for the person's Send", async () => {
+  const reason =
+    "Send for me filled this form but could not confirm it was ready to send, so it waits for you. Review it and press Send.";
+  Object.assign(window.nestor, {
+    jobFinder: {
+      listApplications: vi.fn(() =>
+        Promise.resolve({
+          rows: [
+            {
+              id: 32,
+              jobId: 9,
+              mode: "autonomous_submit",
+              title: "Software Developer",
+              company: "Harbor Works",
+              location: "Remote",
+              state: "ready",
+              attempt: 2,
+              queuedAt: "2026-10-27T09:00:00.000Z",
+              updatedAt: "2026-10-27T09:05:00.000Z",
+              submittedAt: null,
+              error: reason,
+            },
+          ],
+          nextCursor: null,
+        }),
+      ),
+      openApplication: vi.fn(() => Promise.resolve(true)),
+    },
+  });
+  show();
+  expect(await screen.findByText(reason)).toBeTruthy();
+  expect(screen.queryByText("Filled in. Review it and send.")).toBeNull();
+});
+
+it.each([
+  {
+    check: "answer_grounding",
+    detail: "The saved salary is in another currency than the form asks.",
+    lead: "An answer was found, but the check before sending could not confirm it fits.",
+  },
+  {
+    check: "question_classification",
+    detail: "The question could not be read after three tries.",
+    lead: "Nestor could not read this question, so it could not check your profile or saved answers.",
+  },
+])("explains a recorded $check reason", async ({ check, detail, lead }) => {
   const row = claimed[0]!;
   applications.needsYou.request({
     applicationId: row.id,
@@ -1096,21 +1219,13 @@ it("says why a question was asked when Apply recorded a reason", async () => {
     options: [],
     askReason: {
       kind: "source_rejected",
-      check: "answer_grounding",
-      detail: "The saved salary is in another currency than the form asks.",
+      check,
+      detail,
     },
   });
   show();
   const why = await screen.findByText("Why am I asked this?");
   fireEvent.click(why);
-  expect(
-    screen.getByText(
-      "An answer was found, but the check before sending could not confirm it fits.",
-    ),
-  ).toBeTruthy();
-  expect(
-    screen.getByText(
-      "The saved salary is in another currency than the form asks.",
-    ),
-  ).toBeTruthy();
+  expect(screen.getByText(lead)).toBeTruthy();
+  expect(screen.getByText(detail)).toBeTruthy();
 });

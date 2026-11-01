@@ -36,6 +36,13 @@ export interface AttachmentUploadWindow {
 // A résumé parser (Lever's `/parseResume`) takes the file the same way.
 const uploadSignal =
   /(?:^|[^a-z0-9])(?:uploads?|attachments?|files?|objects?|blobs?|storage|documents?|resumes?|cvs?)(?:[^a-z0-9]|$)/iu;
+// Some file widgets use lowercase compound actions such as `scanfile`
+// before `uploadfile`. Only the form's own site may take this parser leg;
+// it still has to carry the exact selected file and upload metadata alone.
+const compoundFileAction =
+  /(?:^|\/)(?:scan|parse|upload)(?:files?|attachments?|documents?|resumes?|cvs?)\/?$/iu;
+const fileScanAction =
+  /(?:^|\/)scan[-_/]?(?:files?|attachments?|documents?|resumes?|cvs?)\/?$/iu;
 
 /**
  * A file's name as a site may rewrite it before sending: Lever turns spaces
@@ -43,6 +50,10 @@ const uploadSignal =
  * exactly; this only stops a renamed copy from reading as another file.
  */
 export function sameAttachmentName(sent: string, chosen: string): boolean {
+  // FormData gives an unnamed Blob the filename "blob". Sites that wrap the
+  // selected File this way still send the same attachment; the network fence
+  // below verifies its exact size and digest before permitting the request.
+  if (sent === "blob") return true;
   const plain = (name: string) =>
     name
       .normalize("NFC")
@@ -303,30 +314,43 @@ export async function classifyAttachmentUpload(input: {
   contentType: string;
   body: Uint8Array | null;
   preparedValues?: readonly string[];
-}): Promise<{ allowed: boolean; containsFile: boolean }> {
+}): Promise<{
+  allowed: boolean;
+  containsFile: boolean;
+  /** A scanner inspects these bytes; its answer does not prove storage. */
+  scanOnly?: boolean;
+  guardRefusal?: string;
+}> {
   const multipart = /\bmultipart\/form-data\b/iu.test(input.contentType);
   const binary =
     /^(?:application\/(?!json|x-www-form-urlencoded)|image\/|audio\/|video\/)/iu.test(
       input.contentType,
     );
-  const denied = { allowed: false, containsFile: multipart || binary };
+  const denied = {
+    allowed: false,
+    containsFile: multipart || binary,
+    guardRefusal: "network/unsupported_payload",
+  };
   const grant = input.window;
-  if (
-    !grant ||
-    input.nowMs > grant.expiresAtMs ||
-    grant.remainingRequests < 1 ||
-    !["POST", "PUT"].includes(input.method.toUpperCase()) ||
-    !input.body ||
-    input.body.byteLength > grant.byteLength + 65_536
-  )
-    return denied;
+  if (!grant) return { ...denied, guardRefusal: "network/window_closed" };
+  if (input.nowMs > grant.expiresAtMs)
+    return { ...denied, guardRefusal: "network/window_expired" };
+  if (grant.remainingRequests < 1)
+    return { ...denied, guardRefusal: "network/window_exhausted" };
+  if (!["POST", "PUT"].includes(input.method.toUpperCase()))
+    return { ...denied, guardRefusal: "network/upload_method" };
+  if (!input.body)
+    return { ...denied, guardRefusal: "network/body_unavailable" };
+  if (input.body.byteLength > grant.byteLength + 65_536)
+    return { ...denied, guardRefusal: "network/body_size" };
   let url: URL;
   try {
     url = new URL(input.url);
   } catch {
-    return denied;
+    return { ...denied, guardRefusal: "network/invalid_url" };
   }
-  if (!["https:", "http:"].includes(url.protocol)) return denied;
+  if (!["https:", "http:"].includes(url.protocol))
+    return { ...denied, guardRefusal: "network/invalid_url" };
   const preparedAnswers = (input.preparedValues ?? []).filter(
     (value) => value !== grant.fileName,
   );
@@ -336,14 +360,15 @@ export async function classifyAttachmentUpload(input: {
       preparedAnswers,
     )
   )
-    return denied;
+    return { ...denied, guardRefusal: "network/answer_in_url" };
   let signal: string;
   try {
     signal = splitCase(decodeURIComponent(url.pathname + url.search));
   } catch {
     return denied;
   }
-  if (finalSignal.test(signal)) return denied;
+  if (finalSignal.test(signal))
+    return { ...denied, guardRefusal: "network/final_action" };
   if (
     /\/(?:applications?|users?|accounts?|candidates?)(?:\/|$)/iu.test(
       url.pathname,
@@ -376,12 +401,24 @@ export async function classifyAttachmentUpload(input: {
       (value) => typeof value !== "string",
     );
     const issued = new Set([...(grant.issued ?? []), ...(grant.handles ?? [])]);
-    if (
-      files.length !== 1 ||
-      !sameAttachmentName(files[0]!.name, grant.fileName) ||
-      files[0]!.size !== grant.byteLength
-    )
-      return { allowed: false, containsFile: files.length > 0 };
+    if (files.length !== 1)
+      return {
+        allowed: false,
+        containsFile: files.length > 0,
+        guardRefusal: "network/file_count",
+      };
+    if (!sameAttachmentName(files[0]!.name, grant.fileName))
+      return {
+        allowed: false,
+        containsFile: true,
+        guardRefusal: "network/file_name",
+      };
+    if (files[0]!.size !== grant.byteLength)
+      return {
+        allowed: false,
+        containsFile: true,
+        guardRefusal: "network/file_size",
+      };
     for (const [key, value] of form) {
       if (typeof value !== "string") continue;
       // Storage signing fields have constrained values. They are never an
@@ -409,7 +446,11 @@ export async function classifyAttachmentUpload(input: {
           )) ||
         finalSignal.test(splitCase(`${key} ${value}`))
       )
-        return { allowed: false, containsFile: true };
+        return {
+          allowed: false,
+          containsFile: true,
+          guardRefusal: "network/mixed_or_unsupported_metadata",
+        };
       if (/^(?:x-amz-signature|x-goog-signature)$/iu.test(key))
         storageSignature = true;
     }
@@ -423,12 +464,27 @@ export async function classifyAttachmentUpload(input: {
     url.pathname.endsWith(`/${grant.fileName}`);
   const isUpload =
     uploadSignal.test(signal) ||
+    (url.origin === grant.sourceOrigin &&
+      compoundFileAction.test(url.pathname)) ||
     storageSignature ||
     (input.method.toUpperCase() === "PUT" && namedObject);
+  const sameBytes =
+    createHash("sha256").update(fileBytes).digest("hex") === grant.sha256;
   return {
-    allowed:
-      isUpload &&
-      createHash("sha256").update(fileBytes).digest("hex") === grant.sha256,
+    allowed: isUpload && sameBytes,
+    ...(isUpload &&
+    sameBytes &&
+    url.origin === grant.sourceOrigin &&
+    fileScanAction.test(url.pathname)
+      ? { scanOnly: true }
+      : {}),
+    ...(!isUpload || !sameBytes
+      ? {
+          guardRefusal: !isUpload
+            ? "network/upload_endpoint"
+            : "network/file_digest",
+        }
+      : {}),
     containsFile: true,
   };
 }

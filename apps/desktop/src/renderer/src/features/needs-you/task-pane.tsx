@@ -61,6 +61,7 @@ export function TaskPane(props: {
     revision: 0,
   });
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [fileKind, setFileKind] = useState<CandidateAssetKind>("other");
   const latest = useRef(draft);
@@ -77,6 +78,7 @@ export function TaskPane(props: {
         if (!live.current) return;
         if (!value) onMissing.current?.(id);
         setDetails(value);
+        setFileKind(value?.task.askReason?.selectedDocument?.kind ?? "other");
         const restored = value?.draft ?? {
           answer: "",
           remember: true,
@@ -173,6 +175,7 @@ export function TaskPane(props: {
   async function act(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
+    setStatus(null);
     try {
       await action();
     } catch (reason) {
@@ -242,7 +245,11 @@ export function TaskPane(props: {
               <summary className="cursor-pointer text-foreground-soft">
                 Why am I asked this?
               </summary>
-              <p className="mt-2">{ASK_REASON_LEAD[task.askReason.kind]}</p>
+              <p className="mt-2">
+                {task.askReason.check === "question_classification"
+                  ? "Nestor could not read this question, so it could not check your profile or saved answers."
+                  : ASK_REASON_LEAD[task.askReason.kind]}
+              </p>
               <p className="mt-1 break-words text-foreground-soft">
                 {task.askReason.detail}
               </p>
@@ -298,6 +305,16 @@ export function TaskPane(props: {
               {task.input === "file" ? (
                 <div className="grid gap-3">
                   <h2 className="font-medium">{task.prompt}</h2>
+                  {task.askReason?.selectedDocument ? (
+                    <p className="text-sm text-foreground-soft">
+                      Attempted{" "}
+                      {task.askReason.selectedDocument.kind === "resume"
+                        ? "resume/CV"
+                        : "document"}
+                      : {task.askReason.selectedDocument.label} (
+                      {task.askReason.selectedDocument.fileName})
+                    </p>
+                  ) : null}
                   <p className="text-sm text-foreground-soft">
                     Your other answers are kept. Open the application to finish
                     attaching the file on the site.
@@ -356,6 +373,8 @@ export function TaskPane(props: {
                       {(
                         [
                           ["other", "Other document"],
+                          ["resume", "Resume / CV"],
+                          ["cover_letter", "Cover letter"],
                           ["work_sample", "Work sample"],
                           ["portfolio", "Portfolio"],
                           ["certificate", "Certificate"],
@@ -479,14 +498,24 @@ export function TaskPane(props: {
                       const now = await window.nestor.needsYou.run("get_need", {
                         id,
                       });
-                      throw new Error(
-                        now?.applications.length &&
-                          now.applications.every(
-                            (application) => application.state === "running",
-                          )
-                          ? "Job Finder is working on this application right now. If the site still needs you, it comes back here."
-                          : "This application tab is unavailable. Open the application again from Applications.",
-                      );
+                      if (!now) {
+                        onResolved(
+                          id,
+                          "The browser step is complete. Applications continue.",
+                        );
+                      } else if (
+                        now.applications.some((application) =>
+                          ["queued", "running"].includes(application.state),
+                        )
+                      ) {
+                        setStatus(
+                          "Job Finder is opening or working on this application. You can open its tab once it is ready.",
+                        );
+                      } else {
+                        throw new Error(
+                          "This application tab could not be opened. Try again.",
+                        );
+                      }
                     }
                   })
                 }
@@ -508,12 +537,25 @@ export function TaskPane(props: {
                           id,
                           "The browser step is complete. Applications continue.",
                         );
-                      else
-                        setError(
-                          task.kind === "sign_in"
-                            ? "Job Finder is opening the application again with your sign-in. If the site still asks, this stays here."
-                            : "The page is still waiting. Finish the browser step, then check again.",
+                      else {
+                        const now = await window.nestor.needsYou.run(
+                          "get_need",
+                          { id },
                         );
+                        if (!now)
+                          onResolved(
+                            id,
+                            "The browser step is complete. Applications continue.",
+                          );
+                        else
+                          setStatus(
+                            now.applications.some((application) =>
+                              ["queued", "running"].includes(application.state),
+                            )
+                              ? "Job Finder is checking the application with your browser sign-in. This item stays until access is confirmed."
+                              : "The page is still waiting. Finish the browser step, then check again.",
+                          );
+                      }
                     })
                   }
                 >
@@ -524,6 +566,11 @@ export function TaskPane(props: {
           )}
         </div>
       )}
+      {status ? (
+        <p role="status" className="mt-4 text-sm text-foreground-soft">
+          {status}
+        </p>
+      ) : null}
       {error ? (
         <div className="mt-4 grid gap-3">
           <p role="alert" className="text-sm text-destructive">

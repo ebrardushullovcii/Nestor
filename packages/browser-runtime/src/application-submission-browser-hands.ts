@@ -8,7 +8,7 @@ import {
   type SubmissionObservationIdentity,
   type ApplyFinalActionTarget,
 } from "@nestor/contracts";
-import type { Page, Request, Response } from "playwright";
+import type { Page, Request, Response, Route } from "playwright";
 import { actionLocator } from "./apply-page-mechanics";
 import {
   employerPageConfirmsSubmission,
@@ -17,72 +17,324 @@ import {
 } from "./submission-confirmation-policy";
 
 import { readPageMessages } from "./page-messages";
+import { mutationResponseSaysError } from "./mutation-response";
 import {
   closePrepareOnlyFinalActionWindow,
+  isPrepareOnlyFinalActionWindowOpen,
   openPrepareOnlyFinalActionWindow,
 } from "./playwright-application-flow";
 
 /** Read the site's explicit field feedback; do not infer rejection from page prose. */
 async function readApplicationValidationErrors(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+  const feedback = await page.evaluate(() => {
     const errors = new Set<string>();
-    for (const control of document.querySelectorAll<
-      HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
-    >("form input, form select, form textarea")) {
-      if (
-        control.disabled ||
-        control.type === "hidden" ||
-        control.getClientRects().length === 0
-      )
-        continue;
-      if (
-        control.willValidate &&
-        !control.validity.valid &&
-        control.validationMessage
-      ) {
-        const label = control.labels?.[0]?.textContent?.trim();
-        errors.add(
-          label
-            ? `${label}: ${control.validationMessage}`
-            : control.validationMessage,
-        );
-      }
-      for (const id of (control.getAttribute("aria-describedby") ?? "").split(
-        /\s+/u,
-      )) {
-        const feedback = document.getElementById(id);
+    const roots: (Document | ShadowRoot)[] = [document];
+    for (let index = 0; index < roots.length; index++)
+      for (const element of roots[index]!.querySelectorAll("*"))
+        if (element.shadowRoot) roots.push(element.shadowRoot);
+    for (const root of roots) {
+      for (const control of root.querySelectorAll<
+        HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+      >("input, select, textarea")) {
         if (
-          !feedback ||
-          feedback.getAttribute("role") !== "alert" ||
-          feedback.getClientRects().length === 0
+          control.disabled ||
+          control.type === "hidden" ||
+          control.getClientRects().length === 0
         )
           continue;
-        const message = feedback.textContent?.trim();
-        if (message) errors.add(message);
+        if (
+          control.willValidate &&
+          !control.validity.valid &&
+          control.validationMessage
+        ) {
+          const label = control.labels?.[0]?.textContent?.trim();
+          errors.add(
+            label
+              ? `${label}: ${control.validationMessage}`
+              : control.validationMessage,
+          );
+        }
+        for (const id of (control.getAttribute("aria-describedby") ?? "").split(
+          /\s+/u,
+        )) {
+          const feedback = root.getElementById(id);
+          if (
+            !feedback ||
+            feedback.getAttribute("role") !== "alert" ||
+            feedback.getClientRects().length === 0
+          )
+            continue;
+          const message = feedback.textContent?.trim();
+          if (message) errors.add(message);
+        }
       }
     }
-    return [...errors];
+    const alerts = roots.flatMap((root) =>
+      [...root.querySelectorAll<HTMLElement>("[role=alert]")]
+        .filter(
+          (element) =>
+            element.getClientRects().length > 0 &&
+            getComputedStyle(element).visibility !== "hidden",
+        )
+        .map((element) => element.innerText.trim())
+        .filter(Boolean),
+    );
+    return { errors: [...errors], alerts };
   });
+  return [
+    ...new Set([
+      ...feedback.errors,
+      ...feedback.alerts.filter((text) => mutationResponseSaysError(text)),
+    ]),
+  ];
 }
 
 async function readSubmissionPageState(
   page: Page,
 ): Promise<SubmissionPageState> {
-  return page.evaluate(() => ({
-    url: location.href,
-    text: document.body?.innerText ?? "",
-    ready: document.readyState !== "loading",
-    editableControls: [
-      ...document.querySelectorAll<HTMLElement>(
-        "input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select,[contenteditable=true]",
-      ),
-    ].filter(
-      (element) =>
-        !element.matches(":disabled") &&
-        element.getClientRects().length > 0 &&
-        getComputedStyle(element).visibility !== "hidden",
-    ).length,
-  }));
+  return page.evaluate(() => {
+    const text: string[] = [];
+    let editableControls = 0;
+    const appendVisibleText = (root: Element | ShadowRoot): void => {
+      for (const child of root.childNodes) {
+        if (child instanceof HTMLElement) {
+          if (
+            ["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"].includes(child.tagName)
+          )
+            continue;
+          const style = getComputedStyle(child);
+          if (
+            style.display === "none" ||
+            style.visibility === "hidden" ||
+            style.visibility === "collapse" ||
+            Number(style.opacity || "1") === 0
+          )
+            continue;
+          if (
+            style.display !== "contents" &&
+            child.getClientRects().length === 0
+          )
+            continue;
+          if (
+            child.matches(
+              "input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select,[contenteditable=true]",
+            ) &&
+            !child.matches(":disabled") &&
+            child.getClientRects().length > 0
+          )
+            editableControls += 1;
+          const block = !["inline", "inline-block", "contents"].includes(
+            style.display,
+          );
+          if (block) text.push("\n");
+          appendVisibleText(child);
+          if (child.shadowRoot) appendVisibleText(child.shadowRoot);
+          if (block) text.push("\n");
+        } else if (
+          child.nodeType === Node.TEXT_NODE &&
+          child.textContent?.trim()
+        ) {
+          text.push(child.textContent);
+        }
+      }
+    };
+    if (document.body) appendVisibleText(document.body);
+    return {
+      url: location.href,
+      text: text.join(" "),
+      ready: document.readyState !== "loading",
+      editableControls,
+    };
+  });
+}
+
+/** A successful HTTP status can still carry a refusal or an unfinished operation. */
+async function finalResponseAllowsConfirmation(response: {
+  status: () => number;
+  headers: () => Record<string, string>;
+  text: () => Promise<string>;
+}): Promise<boolean> {
+  if (![200, 201, 204].includes(response.status())) return false;
+  const headers = response.headers();
+  if (
+    !/\b(?:application\/(?:[\w.+-]*\+)?json|text\/plain)\b/iu.test(
+      headers["content-type"] ?? "",
+    )
+  )
+    return true;
+  if (Number(headers["content-length"] ?? 0) > 65_536) return false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const body = await Promise.race([
+    response.text().catch(() => null),
+    new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), 2_000);
+    }),
+  ]).finally(() => clearTimeout(timer));
+  if (body === null || body.length > 65_536) return false;
+  if (!body.trim()) return true;
+  let value: unknown = body;
+  if (/\bjson\b/iu.test(headers["content-type"] ?? "")) {
+    try {
+      value = JSON.parse(body);
+    } catch {
+      return false;
+    }
+  }
+  if (mutationResponseSaysError(value)) return false;
+  const pending = (item: unknown, depth = 0): boolean => {
+    if (depth > 8) return true;
+    if (!item || typeof item !== "object") return false;
+    if (Array.isArray(item))
+      return item.some((entry) => pending(entry, depth + 1));
+    return Object.entries(item as Record<string, unknown>).some(
+      ([key, entry]) =>
+        (/^(?:status|state|phase)$/iu.test(key) &&
+          typeof entry === "string" &&
+          /^(?:pending|queued|processing|in[-_ ]?progress|awaiting|started)$/iu.test(
+            entry.trim(),
+          )) ||
+        (/^(?:submitted|completed|complete)$/iu.test(key) && entry === false) ||
+        pending(entry, depth + 1),
+    );
+  };
+  return !pending(value);
+}
+
+interface SelectedFinalFormFile {
+  name: string;
+  size: number;
+  sha256: string;
+}
+
+/** Keep the actual selected files byte-identical while making their bytes observable to CDP. */
+async function normalizeSelectedFinalFormFiles(
+  page: Page,
+  ordinal: number,
+): Promise<SelectedFinalFormFile[] | null> {
+  return page.evaluate(
+    async ({ selector, ordinal }) => {
+      const submitter = document.querySelectorAll<
+        HTMLButtonElement | HTMLInputElement
+      >(selector)[ordinal];
+      const form = submitter?.form;
+      if (!form) return [];
+      try {
+        const files: SelectedFinalFormFile[] = [];
+        for (const element of form.elements) {
+          if (
+            !(element instanceof HTMLInputElement) ||
+            element.type !== "file" ||
+            element.disabled ||
+            !element.files?.length
+          )
+            continue;
+          const originals = [...element.files];
+          const transfer = new DataTransfer();
+          for (const file of originals) {
+            if (file.webkitRelativePath) return null;
+            const bytes = await file.arrayBuffer();
+            if (bytes.byteLength !== file.size) return null;
+            transfer.items.add(
+              new File([bytes], file.name, {
+                type: file.type,
+                lastModified: file.lastModified,
+              }),
+            );
+          }
+          element.files = transfer.files;
+          const selected = [...(element.files ?? [])];
+          if (selected.length !== originals.length) return null;
+          for (let index = 0; index < originals.length; index++) {
+            const original = originals[index]!,
+              copy = selected[index]!;
+            if (
+              copy.name !== original.name ||
+              copy.type !== original.type ||
+              copy.size !== original.size ||
+              copy.lastModified !== original.lastModified
+            )
+              return null;
+            const [before, after] = await Promise.all([
+              original.arrayBuffer(),
+              copy.arrayBuffer(),
+            ]);
+            const prior = new Uint8Array(before),
+              current = new Uint8Array(after);
+            if (
+              prior.length !== current.length ||
+              prior.some((byte, offset) => byte !== current[offset])
+            )
+              return null;
+            if (element.name)
+              files.push({
+                name: copy.name,
+                size: copy.size,
+                sha256: [
+                  ...new Uint8Array(
+                    await crypto.subtle.digest("SHA-256", after),
+                  ),
+                ]
+                  .map((byte) => byte.toString(16).padStart(2, "0"))
+                  .join(""),
+              });
+          }
+        }
+        return files;
+      } catch {
+        return null;
+      }
+    },
+    { selector: APPLICATION_FINAL_CONTROL_SELECTOR, ordinal },
+  );
+}
+
+async function completeFinalMultipartBody(
+  body: Buffer | null,
+  contentType: string,
+  selectedFiles: readonly SelectedFinalFormFile[],
+  hasLength: boolean,
+): Promise<boolean> {
+  if (body === null) return false;
+  const boundary = contentType.match(/\bboundary=(?:"([^"]+)"|([^;\s]+))/iu);
+  const marker = boundary?.[1] ?? boundary?.[2];
+  if (
+    !marker ||
+    !body
+      .toString("latin1", Math.max(0, body.length - marker.length - 10))
+      .trimEnd()
+      .endsWith(`--${marker}--`)
+  )
+    return false;
+  try {
+    const form = await new globalThis.Request("http://localhost/", {
+      method: "POST",
+      headers: { "content-type": contentType },
+      body: new Uint8Array(body),
+    }).formData();
+    const actual = [...form.values()].filter(
+      (value): value is File =>
+        typeof value !== "string" && (value.size > 0 || value.name !== ""),
+    );
+    if (selectedFiles.length === 0) return hasLength || actual.length === 0;
+    if (actual.length !== selectedFiles.length) return false;
+    const remaining = [...selectedFiles];
+    for (const file of actual) {
+      const sha256 = createHash("sha256")
+        .update(Buffer.from(await file.arrayBuffer()))
+        .digest("hex");
+      const index = remaining.findIndex(
+        (selected) =>
+          selected.name === file.name &&
+          selected.size === file.size &&
+          selected.sha256 === sha256,
+      );
+      if (index < 0) return false;
+      remaining.splice(index, 1);
+    }
+    return remaining.length === 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -242,6 +494,183 @@ export interface ExecuteExactlyOneFinalActionInput {
   readonly confirmationTimeoutMs?: number;
 }
 
+export type RecheckLastFinalActionInput = Pick<
+  ExecuteExactlyOneFinalActionInput,
+  "expectedObservation" | "expectedControl" | "pageBindingKey"
+>;
+
+type ConfirmedFinalActionResult = Extract<
+  ApplicationFinalActionResult,
+  { outcome: "submitted" }
+>;
+
+const lastFinalActionChecks = new WeakMap<
+  Page,
+  {
+    key: string;
+    pageBindingKey: string | undefined;
+    read: () => Promise<ConfirmedFinalActionResult | null>;
+    dispose: () => void;
+  }
+>();
+
+const finalActionNetworkFences = new WeakMap<
+  Page,
+  { dispose: () => Promise<void> }
+>();
+
+interface FinalTransportResponseJudgment {
+  status: number;
+  allowsConfirmation: boolean;
+}
+
+/**
+ * One trusted click can fan out through duplicate site handlers. Reserve its
+ * first terminal request before yielding, and keep denying additional terminal
+ * requests after the receipt too. A later authorized action replaces this fence.
+ * Fallback preserves the existing preparation guard and unrelated traffic.
+ */
+async function installFinalActionNetworkFence(
+  page: Page,
+  isFinalRequest: (request: Request) => boolean,
+  selectedFiles: readonly SelectedFinalFormFile[],
+  rememberResponse: (
+    request: Request,
+    judgment: FinalTransportResponseJudgment,
+  ) => void,
+): Promise<{ open: () => void; close: () => void }> {
+  await finalActionNetworkFences.get(page)?.dispose();
+  let admitted: Request | null = null;
+  let allowedUntil = 0;
+  const handler = async (route: Route): Promise<void> => {
+    const request = route.request();
+    if (!request.redirectedFrom() && isFinalRequest(request)) {
+      if (
+        admitted ||
+        Date.now() >= allowedUntil ||
+        isPrepareOnlyFinalActionWindowOpen(page) === false
+      ) {
+        await route.abort("blockedbyclient");
+        return;
+      }
+      admitted = request;
+      try {
+        const headers = await request.allHeaders();
+        const body = request.postDataBuffer();
+        const declared = headers["content-length"];
+        const multipart = /^multipart\//iu.test(headers["content-type"] ?? "");
+        // Electron can expose multipart headers while its file bytes remain
+        // disk-backed. Never reconstruct those bytes or forward a partial body.
+        if (
+          (declared !== undefined &&
+            (!/^\d+$/u.test(declared) ||
+              Number(declared) !== (body?.length ?? 0))) ||
+          (multipart &&
+            !(await completeFinalMultipartBody(
+              body,
+              headers["content-type"] ?? "",
+              selectedFiles,
+              declared !== undefined,
+            )))
+        ) {
+          await route.abort("blockedbyclient");
+          return;
+        }
+        if (
+          Date.now() >= allowedUntil ||
+          isPrepareOnlyFinalActionWindowOpen(page) === false
+        ) {
+          await route.abort("blockedbyclient");
+          return;
+        }
+        // Chromium may silently replay one POST after a reset. This transport
+        // explicitly disables retries; the page receives only the one result.
+        const response = await route.fetch<unknown>({
+          maxRetries: 0,
+          maxRedirects: 0,
+          // APIRequestContext otherwise adds its cookie jar even when the
+          // actual browser request explicitly used credentials: "omit".
+          headers: { ...headers, cookie: headers["cookie"] ?? "" },
+          ...(body === null ? {} : { postData: body }),
+        });
+        try {
+          if (
+            [307, 308].includes(response.status()) &&
+            !["GET", "HEAD"].includes(request.method())
+          ) {
+            // A browser-followed POST redirect can replay below Playwright's
+            // route boundary. Keep this unsupported rather than sending twice.
+            await route.abort("blockedbyclient");
+            return;
+          }
+          // A page can navigate as soon as its fetch resolves. Inspect the
+          // correlated transport body before fulfill makes that possible;
+          // retain only this judgment, never the response body.
+          rememberResponse(request, {
+            status: response.status(),
+            allowsConfirmation: await finalResponseAllowsConfirmation(response),
+          });
+          await route.fulfill({ response });
+        } finally {
+          await response.dispose().catch(() => undefined);
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "";
+        const failure = /\bECONNREFUSED\b/u.test(detail)
+          ? "connectionrefused"
+          : /\bENOTFOUND\b/u.test(detail)
+            ? "namenotresolved"
+            : /\bEHOSTUNREACH\b/u.test(detail)
+              ? "addressunreachable"
+              : "failed";
+        await route.abort(failure).catch(() => undefined);
+      }
+      return;
+    }
+    await route.fallback();
+  };
+  const onClose = (): void => {
+    void fence.dispose();
+  };
+  const fence = {
+    dispose: async (): Promise<void> => {
+      page.off("close", onClose);
+      if (finalActionNetworkFences.get(page) === fence)
+        finalActionNetworkFences.delete(page);
+      await page.unroute("**/*", handler).catch(() => undefined);
+    },
+  };
+  await page.route("**/*", handler);
+  finalActionNetworkFences.set(page, fence);
+  page.once("close", onClose);
+  return {
+    open: () => {
+      allowedUntil = Date.now() + 20_000;
+    },
+    close: () => {
+      allowedUntil = 0;
+    },
+  };
+}
+
+/** Read fresh proof for the exact prior action. This never clicks or opens a write window. */
+export async function recheckLastFinalAction(
+  page: Page,
+  input: RecheckLastFinalActionInput,
+): Promise<ConfirmedFinalActionResult | null> {
+  const check = lastFinalActionChecks.get(page);
+  if (
+    !check ||
+    check.pageBindingKey !== input.pageBindingKey ||
+    check.key !== actionKey(input.expectedObservation, input.expectedControl)
+  )
+    return null;
+  const confirmation = await check.read().catch(() => null);
+  if (lastFinalActionChecks.get(page) !== check) return null;
+  if (confirmation) check.dispose();
+  return confirmation;
+}
+
 interface RawApplicationControl {
   ordinal: number;
   kind: ApplicationFinalControlKind;
@@ -249,6 +678,10 @@ interface RawApplicationControl {
   formIndex: number;
   actionOrigin: string | null;
   actionPath: string | null;
+  /** Transient only: participates in the digest, never in receipts or diagnostics. */
+  actionUrl: string;
+  actionMethod: string;
+  actionTarget: string;
 }
 
 interface RawApplicationFormSnapshot {
@@ -316,7 +749,10 @@ function isRawApplicationControl(
     Number.isInteger(record.formIndex) &&
     (record.formIndex as number) >= -1 &&
     (typeof record.actionOrigin === "string" || record.actionOrigin === null) &&
-    (typeof record.actionPath === "string" || record.actionPath === null)
+    (typeof record.actionPath === "string" || record.actionPath === null) &&
+    typeof record.actionUrl === "string" &&
+    typeof record.actionMethod === "string" &&
+    typeof record.actionTarget === "string"
   );
 }
 
@@ -360,6 +796,11 @@ function buildControl(raw: RawApplicationControl): ApplicationFinalControl {
       label: raw.label,
       ordinal: raw.ordinal,
       ref,
+      actionBinding: {
+        url: raw.actionUrl,
+        method: raw.actionMethod,
+        target: raw.actionTarget,
+      },
     }),
   );
   return {
@@ -552,6 +993,16 @@ async function readRawApplicationFormSnapshot(
           formIndex: form ? Array.from(document.forms).indexOf(form) : -1,
           actionOrigin: isHttpAction ? actionUrl.origin : null,
           actionPath: isHttpAction ? actionUrl.pathname : null,
+          actionUrl: actionUrl.href,
+          actionMethod: (
+            element.getAttribute("formmethod") ??
+            form?.getAttribute("method") ??
+            "GET"
+          ).toUpperCase(),
+          actionTarget:
+            element.getAttribute("formtarget") ??
+            form?.getAttribute("target") ??
+            "_self",
         });
       });
       if (matchedTargets.size !== targets.length) complete = false;
@@ -583,6 +1034,11 @@ async function readRawApplicationFormSnapshot(
 const finalActionTargets = new WeakMap<
   Page,
   { url: string; targets: readonly ApplyFinalActionTarget[] }
+>();
+
+const nativeActionBindings = new WeakMap<
+  Page,
+  Map<string, { query: string; method: string }>
 >();
 
 function emptyFacts(
@@ -641,7 +1097,7 @@ function clickWasNeverDispatched(error: unknown): boolean {
  * here: the site may have read the form before they happened.
  */
 const SITE_UNREACHABLE_ERROR =
-  /ERR_(?:CONNECTION_REFUSED|NAME_NOT_RESOLVED|NAME_RESOLUTION_FAILED|ADDRESS_UNREACHABLE|INTERNET_DISCONNECTED|NETWORK_CHANGED)\b/;
+  /ERR_(?:CONNECTION_REFUSED|NAME_NOT_RESOLVED|NAME_RESOLUTION_FAILED|ADDRESS_UNREACHABLE)\b/;
 
 export function isSiteUnreachableError(errorText: string | undefined): boolean {
   return (
@@ -735,9 +1191,21 @@ export async function observeApplicationForm(
           Number.isInteger(requestedMaxControls)
         ? Math.max(1, Math.min(requestedMaxControls, DEFAULT_MAX_CONTROLS))
         : DEFAULT_MAX_CONTROLS;
-  return buildObservation(
-    await readRawApplicationFormSnapshot(page, maxControls),
+  const raw = await readRawApplicationFormSnapshot(page, maxControls);
+  const observation = buildObservation(raw);
+  nativeActionBindings.set(
+    page,
+    new Map(
+      raw.controls.map((control, index) => [
+        observation.controls[index]!.identity.signature,
+        {
+          query: new URL(control.actionUrl).search,
+          method: control.actionMethod,
+        },
+      ]),
+    ),
   );
+  return observation;
 }
 
 /**
@@ -891,6 +1359,20 @@ export async function executeExactlyOneFinalAction(
       });
     }
 
+    // Normalize only these actual selected files, without dispatching change.
+    // Fresh observation and the final veto still happen after this local copy.
+    const selectedFiles = await normalizeSelectedFinalFormFiles(
+      page,
+      control.ordinal,
+    ).catch(() => null);
+    if (selectedFiles === null) {
+      return blockedResult({
+        reason: "action_error",
+        observation,
+        control,
+        facts: emptyFacts(initialPage),
+      });
+    }
     // The veto may itself trigger a rerender. Re-observe after it and before
     // obtaining a locator so a stale control can never be clicked.
     let finalObservation: ApplicationFormObservation;
@@ -976,7 +1458,9 @@ export async function executeExactlyOneFinalAction(
         liveControl.label === finalControl.label &&
         liveControl.formIndex === finalControl.formIndex &&
         liveControl.actionOrigin === finalControl.action.origin &&
-        liveControl.actionPath === finalControl.action.safePath;
+        liveControl.actionPath === finalControl.action.safePath &&
+        buildControl(liveControl).identity.signature ===
+          finalControl.identity.signature;
     } catch {
       liveControlMatches = false;
     }
@@ -1102,11 +1586,15 @@ export async function executeExactlyOneFinalAction(
     const postVetoLocator = page
       .locator(APPLICATION_FINAL_CONTROL_SELECTOR)
       .nth(postVetoControl.ordinal);
+    const nativeBinding = nativeActionBindings
+      .get(page)
+      ?.get(postVetoControl.identity.signature);
 
     // Consume this page/observation/control tuple before entering Playwright.
     // A timeout or a black-holed request is therefore not retried by a second
     // caller that happens to hold the same preflight.
     rememberIssuedAction(page, key);
+    lastFinalActionChecks.get(page)?.dispose();
     let requestsObservedDuringAction = 0;
     const requestLog = new Map<
       Request,
@@ -1119,9 +1607,14 @@ export async function executeExactlyOneFinalAction(
       }
     >();
     const finalRequests = new Set<Request>();
+    let mutationObserved = false;
     const answeredFinalRequests = new Set<Request>();
     const unreachableFinalRequests = new Set<Request>();
     const successfulFinalRequests = new Set<Request>();
+    const transportResponseJudgments = new WeakMap<
+      Request,
+      FinalTransportResponseJudgment
+    >();
     const originalRequest = (request: Request): Request => {
       let original = request;
       for (
@@ -1132,8 +1625,28 @@ export async function executeExactlyOneFinalAction(
         original = previous;
       return original;
     };
+    const isFinalRequest = (request: Request): boolean => {
+      try {
+        return isFinalSubmissionRequest({
+          url: request.url(),
+          method: request.method(),
+          body: request.postData(),
+          mainFrame: request.frame() === page.mainFrame(),
+          navigation: request.isNavigationRequest(),
+          allowedOrigins,
+          nativeAction:
+            postVetoControl.formIndex >= 0
+              ? { ...postVetoControl.action, ...nativeBinding }
+              : null,
+        });
+      } catch {
+        return false;
+      }
+    };
     const requestListener = (request: Request): void => {
       requestsObservedDuringAction += 1;
+      if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method()))
+        mutationObserved = true;
       if (!request.redirectedFrom() && requestLog.size < ACTION_REQUESTS_KEPT)
         try {
           const url = new URL(request.url());
@@ -1150,17 +1663,9 @@ export async function executeExactlyOneFinalAction(
         }
       try {
         if (
+          finalRequests.size < 2 &&
           !request.redirectedFrom() &&
-          isFinalSubmissionRequest({
-            url: request.url(),
-            method: request.method(),
-            body: request.postData(),
-            mainFrame: request.frame() === page.mainFrame(),
-            navigation: request.isNavigationRequest(),
-            allowedOrigins,
-            nativeAction:
-              postVetoControl.formIndex >= 0 ? postVetoControl.action : null,
-          })
+          isFinalRequest(request)
         )
           finalRequests.add(request);
       } catch {
@@ -1178,10 +1683,20 @@ export async function executeExactlyOneFinalAction(
       if (finalRequests.has(request)) answeredFinalRequests.add(request);
       if (
         finalRequests.has(request) &&
-        response.status() >= 200 &&
-        response.status() < 300
-      )
-        successfulFinalRequests.add(request);
+        ![301, 302, 303, 307, 308].includes(response.status())
+      ) {
+        // Do not race visible optimistic UI against a JSON refusal body.
+        successfulFinalRequests.delete(request);
+        const transported = transportResponseJudgments.get(response.request());
+        if (transported && transported.status === response.status()) {
+          if (transported.allowsConfirmation)
+            successfulFinalRequests.add(request);
+          return;
+        }
+        void finalResponseAllowsConfirmation(response).then((allowed) => {
+          if (allowed) successfulFinalRequests.add(request);
+        });
+      }
     };
     const requestFailedListener = (request: Request): void => {
       const errorText = request.failure()?.errorText;
@@ -1211,9 +1726,37 @@ export async function executeExactlyOneFinalAction(
       unreachableFinalRequests.size === 1 &&
       answeredFinalRequests.size === 0;
     let actionCompleted = false;
+    let actionError: unknown = null;
+    let networkFence: Awaited<
+      ReturnType<typeof installFinalActionNetworkFence>
+    >;
+    try {
+      networkFence = await installFinalActionNetworkFence(
+        page,
+        isFinalRequest,
+        selectedFiles,
+        (request, judgment) => {
+          transportResponseJudgments.set(request, judgment);
+        },
+      );
+    } catch {
+      stopWatchingNetwork();
+      forgetIssuedAction(page, key);
+      return blockedResult({
+        reason: "action_error",
+        observation: finalObservation,
+        control: finalControl,
+        facts: emptyFacts(initialPage),
+      });
+    }
     // The prepare-only guard stays on the page from preparation; this is the
     // one press it is opened for.
     await openPrepareOnlyFinalActionWindow(page);
+    networkFence.open();
+    const closeActionWindow = async (): Promise<void> => {
+      networkFence.close();
+      await closePrepareOnlyFinalActionWindow(page);
+    };
     const clickedAt = Date.now();
     try {
       await postVetoLocator.click({
@@ -1223,20 +1766,19 @@ export async function executeExactlyOneFinalAction(
       actionCompleted = true;
     } catch (clickError) {
       const pageAfterError = readSafePageUrl(page.url());
-      page.off("request", requestListener);
-      stopWatchingNetwork();
       if (
         clickWasNeverDispatched(clickError) &&
         requestsObservedDuringAction === 0 &&
         pageAfterError.origin === pageBefore.origin &&
         pageAfterError.safePath === pageBefore.safePath
       ) {
+        stopWatchingNetwork();
         // Playwright gave up while waiting for the control to be clickable
         // (for example a cookie banner over it), so no click reached the
         // page. Nothing was sent; the prepared form stays for another try
         // instead of an "uncertain" outcome that blocks every retry.
         forgetIssuedAction(page, key);
-        await closePrepareOnlyFinalActionWindow(page).catch(() => undefined);
+        await closeActionWindow().catch(() => undefined);
         return blockedResult({
           reason: "action_error",
           observation: finalObservation,
@@ -1253,29 +1795,14 @@ export async function executeExactlyOneFinalAction(
           },
         });
       }
-      return {
-        outcome: "outcome_uncertain",
-        reason: "action_error",
-        observation: finalObservation,
-        control: finalControl,
-        facts: {
-          actionAttempted: true,
-          actionIssued: false,
-          actionCompleted: false,
-          pageBefore,
-          pageAfter: pageAfterError,
-          urlChanged:
-            pageBefore.origin !== pageAfterError.origin ||
-            pageBefore.safePath !== pageAfterError.safePath,
-          requestsObservedDuringAction,
-          requestsAfterClick: requestsAfterClick(),
-        },
-      };
+      // A dispatched click can throw while its navigation is already on the
+      // way. Keep observing that one action rather than losing a later receipt.
+      actionError = clickError;
     }
     const pageAfter = readSafePageUrl(page.url());
     const facts: ApplicationExternalActionFacts = {
       actionAttempted: true,
-      actionIssued: true,
+      actionIssued: actionError === null,
       actionCompleted,
       pageBefore,
       pageAfter,
@@ -1285,51 +1812,85 @@ export async function executeExactlyOneFinalAction(
       requestsObservedDuringAction,
       requestsAfterClick: [],
     };
+    const readConfirmation =
+      async (): Promise<ConfirmedFinalActionResult | null> => {
+        if (finalRequests.size !== 1 || successfulFinalRequests.size !== 1)
+          return null;
+        const currentPage = await readSubmissionPageState(page);
+        if (
+          (await readApplicationValidationErrors(page)).length > 0 ||
+          !employerPageConfirmsSubmission(
+            beforeConfirmation,
+            currentPage,
+            allowedOrigins,
+          )
+        )
+          return null;
+        const destination = readSafePageUrl(currentPage.url);
+        // A second request or refusal may have arrived while the DOM was read.
+        if (finalRequests.size !== 1 || successfulFinalRequests.size !== 1)
+          return null;
+        return {
+          outcome: "submitted",
+          reason: "employer_confirmation",
+          observation: finalObservation,
+          control: finalControl,
+          confirmation: {
+            observedAt: new Date().toISOString(),
+            destination,
+            summary: submissionConfirmationSummary(currentPage.text),
+          },
+          facts: {
+            ...facts,
+            requestsObservedDuringAction,
+            requestsAfterClick: requestsAfterClick(),
+            pageAfter: destination,
+            urlChanged:
+              pageBefore.origin !== destination.origin ||
+              pageBefore.safePath !== destination.safePath,
+          },
+        };
+      };
+    // A late employer receipt can resolve the projection without issuing the
+    // action again. Keep only this page's last exact context, for two minutes.
+    const disposeCheck = (): void => {
+      stopWatchingNetwork();
+      clearTimeout(retentionTimer);
+      page.off("close", disposeCheck);
+      if (lastFinalActionChecks.get(page)?.key === key)
+        lastFinalActionChecks.delete(page);
+    };
+    const retentionTimer = setTimeout(disposeCheck, 120_000);
+    retentionTimer.unref();
+    page.once("close", disposeCheck);
+    lastFinalActionChecks.set(page, {
+      key,
+      pageBindingKey: input.pageBindingKey,
+      read: readConfirmation,
+      dispose: disposeCheck,
+    });
     const confirmationDeadline =
       Date.now() + (input.confirmationTimeoutMs ?? 15_000);
     do {
       if (input.signal?.aborted) break;
       if (siteNeverReached()) break;
       try {
-        const currentPage = await readSubmissionPageState(page);
-        if (
-          finalRequests.size === 1 &&
-          successfulFinalRequests.size === 1 &&
-          employerPageConfirmsSubmission(
-            beforeConfirmation,
-            currentPage,
-            allowedOrigins,
-          )
-        ) {
-          stopWatchingNetwork();
-          await closePrepareOnlyFinalActionWindow(page);
-          return {
-            outcome: "submitted",
-            reason: "employer_confirmation",
-            observation: finalObservation,
-            control: finalControl,
-            confirmation: {
-              observedAt: new Date().toISOString(),
-              destination: readSafePageUrl(page.url()),
-              summary: submissionConfirmationSummary(currentPage.text),
-            },
-            facts: {
-              ...facts,
-              requestsObservedDuringAction,
-              requestsAfterClick: requestsAfterClick(),
-              pageAfter: readSafePageUrl(page.url()),
-              urlChanged:
-                pageBefore.origin !== readSafePageUrl(page.url()).origin ||
-                pageBefore.safePath !== readSafePageUrl(page.url()).safePath,
-            },
-          };
+        const confirmation = await readConfirmation();
+        if (confirmation) {
+          disposeCheck();
+          await closeActionWindow();
+          return confirmation;
         }
         const validationErrors = await readApplicationValidationErrors(page);
         // Client validation can be corrected only before a final request
         // leaves. Once one was issued, missing receipt evidence is uncertain.
-        if (validationErrors.length > 0 && finalRequests.size === 0) {
-          stopWatchingNetwork();
-          await closePrepareOnlyFinalActionWindow(page);
+        if (
+          validationErrors.length > 0 &&
+          finalRequests.size === 0 &&
+          !mutationObserved
+        ) {
+          disposeCheck();
+          await closeActionWindow();
           forgetIssuedAction(page, key);
           return {
             outcome: "not_submitted",
@@ -1350,9 +1911,9 @@ export async function executeExactlyOneFinalAction(
       }
       await page.waitForTimeout(100);
     } while (Date.now() < confirmationDeadline);
-    stopWatchingNetwork();
-    await closePrepareOnlyFinalActionWindow(page);
+    await closeActionWindow();
     if (siteNeverReached()) {
+      disposeCheck();
       return blockedResult({
         reason: "site_unreachable",
         observation: finalObservation,
@@ -1371,7 +1932,7 @@ export async function executeExactlyOneFinalAction(
     const said = (await readPageMessages(page, clickedAt)).at(-1)?.text;
     return {
       outcome: "outcome_uncertain",
-      reason: "confirmation_timeout",
+      reason: actionError === null ? "confirmation_timeout" : "action_error",
       observation: finalObservation,
       control: finalControl,
       facts: {

@@ -1,5 +1,9 @@
 import http from "node:http";
+import { mkdtemp, writeFile, unlink, rmdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { installPageMessageRecorderInPage } from "./page-messages";
+import { ensurePrepareOnlyMutationGuard } from "./playwright-application-flow";
 import type { AddressInfo } from "node:net";
 import {
   chromium,
@@ -10,6 +14,8 @@ import {
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "vitest";
 import {
   executeExactlyOneFinalAction,
+  recheckLastFinalAction,
+  isSiteUnreachableError,
   observeApplicationForm,
   type ExecuteExactlyOneFinalActionInput,
 } from "./application-submission-browser-hands";
@@ -17,18 +23,129 @@ import {
 interface FixtureServer {
   readonly baseUrl: string;
   readonly requests: string[];
+  readonly acceptedSubmissions: string[];
   readonly close: () => Promise<void>;
 }
 
 let browser: Browser | null = null;
 const activeContexts: BrowserContext[] = [];
 const activeServers: FixtureServer[] = [];
+const LARGE_SYNTHETIC_FINAL_ATTACHMENT = Buffer.from(
+  "Synthetic final form test bytes only.\n".repeat(3_000),
+);
 
 function startFixtureServer(): Promise<FixtureServer> {
   const requests: string[] = [];
+  const acceptedSubmissions: string[] = [];
   const server = http.createServer((request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
     requests.push(`${request.method ?? "GET"} ${requestUrl.pathname}`);
+    if (requestUrl.pathname === "/api/apply" && request.method === "POST") {
+      const mode = requestUrl.searchParams.get("mode") ?? "accepted";
+      if (mode === "accepted") acceptedSubmissions.push(requestUrl.pathname);
+      response.writeHead(mode === "pending" ? 202 : 200, {
+        "content-type": "application/json",
+      });
+      response.end(
+        JSON.stringify(
+          mode === "refused"
+            ? { ok: false, errors: ["Application rejected"], next: "/thanks" }
+            : mode === "pending"
+              ? { ok: true, status: "pending", next: "/thanks" }
+              : { ok: true, next: "/thanks" },
+        ),
+      );
+      return;
+    }
+    if (requestUrl.pathname === "/thanks") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<h1>Thanks for applying</h1><p>We'll be in touch.</p>");
+      return;
+    }
+    if (
+      ["/submit-json-refused", "/submit-pending"].includes(requestUrl.pathname)
+    ) {
+      response.writeHead(
+        requestUrl.pathname === "/submit-pending" ? 202 : 200,
+        { "content-type": "application/json" },
+      );
+      response.end(
+        requestUrl.pathname === "/submit-pending"
+          ? JSON.stringify({ status: "pending" })
+          : JSON.stringify({ errors: [{ message: "Validation rejected" }] }),
+      );
+      return;
+    }
+    if (
+      requestUrl.pathname === "/submit-no-cookies" &&
+      request.method === "POST"
+    ) {
+      if (request.headers.cookie) {
+        response.writeHead(403);
+        response.end("Application not submitted: unexpected credentials.");
+        return;
+      }
+      acceptedSubmissions.push(requestUrl.pathname);
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<h1>We have received your application.</h1>");
+      return;
+    }
+    if (
+      requestUrl.pathname === "/submit-multipart" &&
+      request.method === "POST"
+    ) {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => {
+        chunks.push(chunk);
+      });
+      request.on("end", () => {
+        const body = Buffer.concat(chunks);
+        if (
+          !body.includes(LARGE_SYNTHETIC_FINAL_ATTACHMENT) ||
+          !body.includes(Buffer.from("Synthetic Example"))
+        ) {
+          response.writeHead(400);
+          response.end(
+            "Application not submitted: incomplete file or answers.",
+          );
+          return;
+        }
+        acceptedSubmissions.push(requestUrl.pathname);
+        response.writeHead(200, { "content-type": "text/html" });
+        response.end("<h1>We have received your application.</h1>");
+      });
+      return;
+    }
+    if (
+      ["/submit-redirect307", "/submit-redirect308"].includes(
+        requestUrl.pathname,
+      )
+    ) {
+      response.writeHead(requestUrl.pathname.endsWith("307") ? 307 : 308, {
+        location: "/submit-lost",
+      });
+      response.end();
+      return;
+    }
+    if (
+      requestUrl.pathname === "/submit-late-response" &&
+      request.method === "POST"
+    ) {
+      acceptedSubmissions.push(requestUrl.pathname);
+      setTimeout(() => {
+        response.writeHead(200, { "content-type": "text/html" });
+        response.end("<main>fixture submitted page</main>");
+      }, 400);
+      return;
+    }
+    if (requestUrl.pathname === "/submit-lost" && request.method === "POST") {
+      request.resume();
+      request.on("end", () => {
+        acceptedSubmissions.push(requestUrl.pathname);
+        request.socket.destroy();
+      });
+      return;
+    }
     if (requestUrl.pathname === "/api/graphql") {
       response.writeHead(
         Number(requestUrl.searchParams.get("status") ?? "200"),
@@ -39,8 +156,21 @@ function startFixtureServer(): Promise<FixtureServer> {
       );
       return;
     }
-    if (requestUrl.pathname === "/submit-state") {
-      response.writeHead(303, { location: "/application/confirmation" });
+    if (
+      ["/submit-state", "/submit-state-received"].includes(requestUrl.pathname)
+    ) {
+      if (request.method !== "POST") {
+        response.writeHead(405);
+        response.end("Application not submitted.");
+        return;
+      }
+      acceptedSubmissions.push(requestUrl.pathname);
+      response.writeHead(303, {
+        location:
+          requestUrl.pathname === "/submit-state-received"
+            ? "/application/confirmation-received"
+            : "/application/confirmation",
+      });
       response.end();
       return;
     }
@@ -49,10 +179,22 @@ function startFixtureServer(): Promise<FixtureServer> {
       response.end("<h1>Your request is now in the queue.</h1>");
       return;
     }
+    if (requestUrl.pathname === "/application/confirmation-received") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<h1>We have received your application.</h1>");
+      return;
+    }
     if (
       requestUrl.pathname === "/submit" ||
+      requestUrl.pathname === "/apply" ||
       requestUrl.pathname === "/submit-confirmed"
     ) {
+      if (request.method !== "POST") {
+        response.writeHead(405);
+        response.end("Application not submitted.");
+        return;
+      }
+      acceptedSubmissions.push(requestUrl.pathname);
       response.writeHead(200, { "content-type": "text/html" });
       response.end(
         requestUrl.pathname === "/submit-confirmed"
@@ -74,6 +216,7 @@ function startFixtureServer(): Promise<FixtureServer> {
       resolve({
         baseUrl: `http://127.0.0.1:${address.port}`,
         requests,
+        acceptedSubmissions,
         close: () =>
           new Promise<void>((resolveClose, rejectClose) => {
             server.close((error) =>
@@ -201,7 +344,8 @@ describe("source-generic application browser hands", () => {
   });
 
   test("a JS-enhanced native form confirms its one POST to the exact action", async () => {
-    const {page,server} = await createPage(`<form action='/submit-confirmed'><button type=submit>Send application</button></form><script>
+    const { page, server } =
+      await createPage(`<form action='/submit-confirmed'><button type=submit>Send application</button></form><script>
       document.querySelector('form').onsubmit = async event => {
         event.preventDefault();
         const response = await fetch(event.target.action, {method:'POST',body:'synthetic=yes'});
@@ -210,13 +354,26 @@ describe("source-generic application browser hands", () => {
     </script>`);
     const observation = await observeApplicationForm(page);
     const result = await executeExactlyOneFinalAction(page, {
-      expectedObservation: observation.identity, expectedControl: observation.controls[0]!.identity,
-      expectedPageOrigin: expectedOrigin(page), allowedOrigins: [expectedOrigin(page)],
-      confirmationTimeoutMs: 1000, veto: () => true,
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      confirmationTimeoutMs: 1000,
+      veto: () => true,
     });
     expect(result.outcome).toBe("submitted");
-    expect(result.facts.requestsAfterClick).toEqual([expect.objectContaining({method:"POST",path:"/submit-confirmed",status:200,finalSubmit:true})]);
-    expect(server.requests.filter(request => request === "POST /submit-confirmed")).toHaveLength(1);
+    expect(result.facts.requestsAfterClick).toEqual([
+      expect.objectContaining({
+        method: "POST",
+        path: "/submit-confirmed",
+        status: 200,
+        finalSubmit: true,
+      }),
+    ]);
+    expect(
+      server.requests.filter((request) => request === "POST /submit-confirmed"),
+    ).toHaveLength(1);
+    expect(server.acceptedSubmissions).toEqual(["/submit-confirmed"]);
   });
 
   test("rejects a rerendered observation before any click", async () => {
@@ -455,7 +612,7 @@ describe("source-generic application browser hands", () => {
 
   test("counts the employer page's receipt confirmation as submitted", async () => {
     const { page, server } = await createPage(
-      "<form action='/submit-confirmed'><button id=send type=submit>Send application</button></form>",
+      "<form method=post action='/submit-confirmed'><button id=send type=submit>Send application</button></form>",
     );
     const observation = await observeApplicationForm(page);
     const result = await executeExactlyOneFinalAction(page, {
@@ -481,6 +638,7 @@ describe("source-generic application browser hands", () => {
         request.includes("/submit-confirmed"),
       ),
     ).toHaveLength(1);
+    expect(server.acceptedSubmissions).toEqual(["/submit-confirmed"]);
   });
 
   test("an overlay that prevents click dispatch leaves the form not submitted, not uncertain", async () => {
@@ -761,27 +919,33 @@ test.each([
   },
 );
 
-test("the final form response can move to an explicit confirmation state without a phrase match", async () => {
-  const { page, server } = await createPage(
-    "<form method=post action='/submit-state'><button>Submit Application</button></form>",
-  );
-  const observation = await observeApplicationForm(page);
-  const input = {
-    expectedObservation: observation.identity,
-    expectedControl: observation.controls[0]!.identity,
-    expectedPageOrigin: expectedOrigin(page),
-    allowedOrigins: [expectedOrigin(page)],
-    confirmationTimeoutMs: 1_000,
-    veto: () => true,
-  };
-  expect((await executeExactlyOneFinalAction(page, input)).outcome).toBe(
-    "submitted",
-  );
-  await executeExactlyOneFinalAction(page, input);
-  expect(
-    server.requests.filter((request) => request === "POST /submit-state"),
-  ).toHaveLength(1);
-});
+test.each([false, true])(
+  "a final-form redirect still needs visible employer receipt: received=%s",
+  async (received) => {
+    const path = received ? "/submit-state-received" : "/submit-state";
+    const { page, server } = await createPage(
+      `<form method=post action='${path}'><button>Submit Application</button></form>`,
+    );
+    await ensurePrepareOnlyMutationGuard(page, false);
+    const observation = await observeApplicationForm(page);
+    const input = {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      confirmationTimeoutMs: 1_000,
+      veto: () => true,
+    };
+    expect((await executeExactlyOneFinalAction(page, input)).outcome).toBe(
+      received ? "submitted" : "outcome_uncertain",
+    );
+    await executeExactlyOneFinalAction(page, input);
+    expect(
+      server.requests.filter((request) => request === `POST ${path}`),
+    ).toHaveLength(1);
+    expect(server.acceptedSubmissions).toEqual([path]);
+  },
+);
 
 test.each([true, false])(
   "a browser alert and a failed unrelated request do not decide submission: receipt=%s",
@@ -958,4 +1122,465 @@ test("an uncertain send keeps each request after the click: method, host, path, 
   expect(result.facts.requestsObservedDuringAction).toBe(3);
   // The query string never reaches the record: it can carry answers.
   expect(JSON.stringify(result.facts)).not.toContain("fixture-secret");
+});
+
+test.each(["json refusal", "accepted pending", "field rejection"])(
+  "a receipt-looking page cannot override the final operation's %s",
+  async (shape) => {
+    const submitPath =
+      shape === "json refusal"
+        ? "/submit-json-refused"
+        : shape === "accepted pending"
+          ? "/submit-pending"
+          : "/submit";
+    const { page, server } =
+      await createPage(`<form action='${submitPath}'><label>Email<input id=email aria-describedby=error></label><p id=error role=alert></p><button>Send application</button></form>
+      <script>document.querySelector('form').onsubmit=async event=>{event.preventDefault();
+        await fetch('${submitPath}',{method:'POST'});
+        ${shape === "field rejection" ? "document.getElementById('error').textContent='Please enter a valid email.';" : ""}
+        document.body.insertAdjacentHTML('beforeend','<h1>We have received your application.</h1>');
+      };</script>`);
+    const observation = await observeApplicationForm(page);
+    const input = {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      veto: () => true,
+      confirmationTimeoutMs: 500,
+    };
+    const result = await executeExactlyOneFinalAction(page, input);
+    expect(result.outcome).toBe("outcome_uncertain");
+    await executeExactlyOneFinalAction(page, input);
+    expect(
+      server.requests.filter((request) => request === `POST ${submitPath}`)
+        .length,
+    ).toBeLessThanOrEqual(1);
+  },
+);
+
+test("the no-retry carrier preserves an outgoing request that omits credentials", async () => {
+  const { page, server } =
+    await createPage(`<form action='/submit-no-cookies' method=post><button>Send application</button></form><script>
+    document.querySelector('form').onsubmit=async event=>{event.preventDefault();const response=await fetch('/submit-no-cookies',{method:'POST',credentials:'omit',body:'synthetic=yes'});document.body.innerHTML=await response.text();};
+  </script>`);
+  await page
+    .context()
+    .addCookies([
+      { name: "synthetic-account", value: "fixture-only", url: server.baseUrl },
+    ]);
+  await ensurePrepareOnlyMutationGuard(page, false);
+  const observation = await observeApplicationForm(page);
+  const result = await executeExactlyOneFinalAction(page, {
+    expectedObservation: observation.identity,
+    expectedControl: observation.controls[0]!.identity,
+    expectedPageOrigin: expectedOrigin(page),
+    allowedOrigins: [expectedOrigin(page)],
+    veto: () => true,
+    confirmationTimeoutMs: 700,
+  });
+  expect(result.outcome).toBe("submitted");
+  expect(server.acceptedSubmissions).toEqual(["/submit-no-cookies"]);
+});
+
+test.each(["accepted", "refused", "pending"])(
+  "a JavaScript redirect retains its exact final JSON response judgment: %s",
+  async (mode) => {
+    const { page, server } =
+      await createPage(`<form><button>Apply</button></form><script>
+    document.querySelector('form').onsubmit=event=>{event.preventDefault();fetch('/api/apply?mode=${mode}',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'Synthetic Example'})})
+      .then(response=>response.json()).then(data=>{location.href=data.next;});};
+  </script>`);
+    await ensurePrepareOnlyMutationGuard(page, false);
+    const observation = await observeApplicationForm(page);
+    const input = {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      veto: () => true,
+      confirmationTimeoutMs: 700,
+    };
+    const result = await executeExactlyOneFinalAction(page, input);
+    expect(await page.locator("h1").innerText()).toBe("Thanks for applying");
+    expect(result.outcome).toBe(
+      mode === "accepted" ? "submitted" : "outcome_uncertain",
+    );
+    expect(server.acceptedSubmissions).toEqual(
+      mode === "accepted" ? ["/api/apply"] : [],
+    );
+    expect(
+      server.requests.filter((request) => request === "POST /api/apply"),
+    ).toHaveLength(1);
+    await executeExactlyOneFinalAction(page, input);
+    expect(
+      server.requests.filter((request) => request === "POST /api/apply"),
+    ).toHaveLength(1);
+  },
+);
+
+test.each(["shadow receipt", "stale FAQ receipt"])(
+  "reads fresh employer proof in a %s",
+  async (shape) => {
+    const prior =
+      shape === "stale FAQ receipt"
+        ? "<aside>FAQ: Thank you for applying is the receipt message.</aside>"
+        : "";
+    const receipt =
+      shape === "shadow receipt"
+        ? "const host=document.createElement('section'); document.body.append(host);host.attachShadow({mode:'open'}).innerHTML='<h1>We have received your application.</h1>';"
+        : "document.body.insertAdjacentHTML('beforeend','<h1>We have received your application.</h1>');";
+    const { page, server } =
+      await createPage(`${prior}<form action='/submit'><button>Send application</button></form>
+      <script>document.querySelector('form').onsubmit=async event=>{event.preventDefault();await fetch('/submit',{method:'POST'});${receipt}};</script>`);
+    const observation = await observeApplicationForm(page);
+    const result = await executeExactlyOneFinalAction(page, {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      veto: () => true,
+      confirmationTimeoutMs: 500,
+    });
+    expect(result.outcome).toBe("submitted");
+    expect(
+      server.requests.filter((request) => request === "POST /submit"),
+    ).toHaveLength(1);
+  },
+);
+
+test.each(["late receipt", "late response"])(
+  "read-only recheck observes a %s without retrying",
+  async (shape) => {
+    const submitPath =
+      shape === "late response" ? "/submit-late-response" : "/submit";
+    const { page, server } =
+      await createPage(`<form action='${submitPath}'><button>Send application</button></form><script>
+    document.querySelector('form').onsubmit=async event=>{event.preventDefault();
+      await fetch('${submitPath}',{method:'POST'});
+      ${shape === "late receipt" ? "await new Promise(resolve=>setTimeout(resolve,400));" : ""}
+      document.body.innerHTML='<h1>We have received your application.</h1>';
+    };</script>`);
+    const observation = await observeApplicationForm(page);
+    const input = {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      veto: () => true,
+      confirmationTimeoutMs: 100,
+      pageBindingKey: "synthetic-application-one",
+    };
+    expect((await executeExactlyOneFinalAction(page, input)).outcome).toBe(
+      "outcome_uncertain",
+    );
+    expect(
+      await recheckLastFinalAction(page, {
+        ...input,
+        expectedObservation: { ...observation.identity, revision: 2 },
+      }),
+    ).toBeNull();
+    await page.waitForTimeout(500);
+    expect(
+      await recheckLastFinalAction(page, {
+        expectedObservation: input.expectedObservation,
+        expectedControl: input.expectedControl,
+      }),
+    ).toBeNull();
+    expect(
+      await recheckLastFinalAction(page, {
+        ...input,
+        pageBindingKey: "synthetic-application-two",
+      }),
+    ).toBeNull();
+    const rechecks = await Promise.all([
+      recheckLastFinalAction(page, input),
+      recheckLastFinalAction(page, input),
+    ]);
+    expect(rechecks.filter(Boolean)).toHaveLength(1);
+    expect(rechecks.find(Boolean)).toMatchObject({
+      outcome: "submitted",
+      confirmation: {
+        summary: "The site confirmed receipt of the application.",
+      },
+    });
+    expect(await recheckLastFinalAction(page, input)).toBeNull();
+    await executeExactlyOneFinalAction(page, input);
+    expect(
+      server.requests.filter((request) => request === `POST ${submitPath}`),
+    ).toHaveLength(1);
+    expect(server.acceptedSubmissions).toEqual([submitPath]);
+  },
+);
+
+test("a hidden shadow receipt does not confirm an application", async () => {
+  const { page } =
+    await createPage(`<form action='/submit'><button>Send application</button></form><script>
+    document.querySelector('form').onsubmit=async event=>{event.preventDefault();await fetch('/submit',{method:'POST'});
+      const host=document.createElement('section');document.body.append(host);host.attachShadow({mode:'open'}).innerHTML='<h1 style="opacity:0">We have received your application.</h1>';
+    };</script>`);
+  const observation = await observeApplicationForm(page);
+  const input = {
+    expectedObservation: observation.identity,
+    expectedControl: observation.controls[0]!.identity,
+    expectedPageOrigin: expectedOrigin(page),
+    allowedOrigins: [expectedOrigin(page)],
+    veto: () => true,
+    confirmationTimeoutMs: 200,
+  };
+  expect((await executeExactlyOneFinalAction(page, input)).outcome).toBe(
+    "outcome_uncertain",
+  );
+  expect(await recheckLastFinalAction(page, input)).toBeNull();
+});
+
+test.each(["query", "method", "target"])(
+  "the private native action %s participates in preflight identity",
+  async (shape) => {
+    const { page, server } = await createPage(
+      `<form action='/submit?job=synthetic-one' method=post><button>Send application</button></form>`,
+    );
+    const observation = await observeApplicationForm(page);
+    await page.locator("form").evaluate((form, kind) => {
+      if (kind === "query")
+        form.setAttribute("action", "/submit?job=synthetic-two");
+      if (kind === "method") form.setAttribute("method", "get");
+      if (kind === "target") form.setAttribute("target", "_blank");
+    }, shape);
+    const changed = await observeApplicationForm(page);
+    expect(changed.identity).not.toEqual(observation.identity);
+    expect(JSON.stringify(observation)).not.toContain("synthetic-one");
+    expect(
+      (
+        await executeExactlyOneFinalAction(page, {
+          expectedObservation: observation.identity,
+          expectedControl: observation.controls[0]!.identity,
+          expectedPageOrigin: expectedOrigin(page),
+          allowedOrigins: [expectedOrigin(page)],
+          veto: () => true,
+          confirmationTimeoutMs: 100,
+        })
+      ).outcome,
+    ).toBe("not_submitted");
+    expect(
+      server.requests.filter((request) => request === "POST /submit"),
+    ).toHaveLength(0);
+  },
+);
+
+test.each([
+  "net::ERR_NETWORK_CHANGED",
+  "net::ERR_INTERNET_DISCONNECTED",
+  "net::ERR_CONNECTION_RESET",
+  "net::ERR_TIMED_OUT",
+])("%s does not prove a request never reached the employer", (error) => {
+  expect(isSiteUnreachableError(error)).toBe(false);
+});
+
+test.each(["parallel", "serial", "different endpoints", "after receipt"])(
+  "one trusted press cannot deliver duplicate %s submit handlers",
+  async (shape) => {
+    const { page, server } =
+      await createPage(`<form action='/submit' method=post><button>Send application</button></form><script>
+    window.syntheticClicks=0;window.syntheticNonFinalFinished=false;
+    document.querySelector('form').onsubmit=async event=>{event.preventDefault();window.syntheticClicks++;
+      const send=(path='/submit')=>fetch(path,{method:'POST',body:'synthetic-attempt=one'});
+      ${shape === "parallel" ? "await Promise.allSettled([send(),send()]);" : "await send();"}
+      ${shape === "serial" ? "await send().catch(()=>undefined);" : ""}
+      ${shape === "different endpoints" ? "await send('/apply').catch(()=>undefined);" : ""}
+      document.body.insertAdjacentHTML('beforeend','<h1>We have received your application.</h1>');
+      ${shape === "after receipt" ? "await new Promise(resolve=>setTimeout(resolve,250));await send().catch(()=>undefined);" : ""}
+      await fetch('/events',{method:'POST',body:'synthetic-event=completed'});window.syntheticNonFinalFinished=true;
+    };</script>`);
+    if (shape !== "after receipt")
+      await ensurePrepareOnlyMutationGuard(page, false);
+    const observation = await observeApplicationForm(page);
+    const input = {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      veto: () => true,
+      confirmationTimeoutMs: 600,
+    };
+    const result = await executeExactlyOneFinalAction(page, input);
+    await page.waitForFunction(
+      () =>
+        (window as unknown as Record<string, unknown>)
+          .syntheticNonFinalFinished === true,
+    );
+    expect(
+      await page.evaluate(
+        () => (window as unknown as Record<string, unknown>).syntheticClicks,
+      ),
+    ).toBe(1);
+    expect(server.acceptedSubmissions).toEqual(["/submit"]);
+    expect(
+      server.requests.filter((request) => request === "POST /events"),
+    ).toHaveLength(1);
+    expect(result.outcome).toBe(
+      shape === "after receipt" ? "submitted" : "outcome_uncertain",
+    );
+    await executeExactlyOneFinalAction(page, input);
+    await page.waitForTimeout(100);
+    expect(server.acceptedSubmissions).toEqual(["/submit"]);
+  },
+);
+
+test("a lost response cannot deliver the accepted final POST twice", async () => {
+  const { page, server } =
+    await createPage(`<form action='/submit-lost' method=post><button>Send application</button></form><script>
+    window.syntheticClicks=0;document.querySelector('form').onsubmit=async event=>{event.preventDefault();window.syntheticClicks++;
+      await fetch('/submit-lost',{method:'POST',body:'synthetic-attempt=lost-response'}).catch(()=>undefined);
+    };</script>`);
+  await ensurePrepareOnlyMutationGuard(page, false);
+  const observation = await observeApplicationForm(page);
+  const input = {
+    expectedObservation: observation.identity,
+    expectedControl: observation.controls[0]!.identity,
+    expectedPageOrigin: expectedOrigin(page),
+    allowedOrigins: [expectedOrigin(page)],
+    veto: () => true,
+    confirmationTimeoutMs: 700,
+  };
+  expect((await executeExactlyOneFinalAction(page, input)).outcome).toBe(
+    "outcome_uncertain",
+  );
+  expect(server.acceptedSubmissions).toEqual(["/submit-lost"]);
+  expect(
+    await page.evaluate(
+      () => (window as unknown as Record<string, unknown>).syntheticClicks,
+    ),
+  ).toBe(1);
+  await executeExactlyOneFinalAction(page, input);
+  expect(server.acceptedSubmissions).toEqual(["/submit-lost"]);
+});
+
+test.each([false, true])(
+  "native multipart transport preserves a >64KiB disk File or refuses incomplete bytes: truncated=%s",
+  async (truncated) => {
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "nestor-final-multipart-"),
+    );
+    const filePath = path.join(directory, "synthetic-resume.txt");
+    try {
+      await writeFile(filePath, LARGE_SYNTHETIC_FINAL_ATTACHMENT);
+      const { page, server } = await createPage(
+        `<form action='/submit-multipart' method=post enctype='multipart/form-data'><input name=fullName value='Synthetic Example'><input type=file name=resume><button>Send application</button></form>`,
+      );
+      await page.locator("input[type=file]").setInputFiles(filePath);
+      await page.evaluate(() => {
+        window.name = "selected-file-unchanged";
+        document
+          .querySelector("input[type=file]")!
+          .addEventListener("change", () => {
+            window.name = "selected-file-changed";
+          });
+      });
+      await ensurePrepareOnlyMutationGuard(page, false);
+      const observed: { bytes: number; declared: string } = {
+        bytes: -1,
+        declared: "missing",
+      };
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname === "/submit-multipart") {
+          observed.bytes = request.postDataBuffer()?.length ?? -1;
+          void request.allHeaders().then((headers) => {
+            observed.declared = headers["content-length"] ?? "missing";
+          });
+        }
+      });
+      if (truncated)
+        page.on("request", (request) => {
+          if (new URL(request.url()).pathname === "/submit-multipart")
+            request.postDataBuffer = () =>
+              Buffer.from("incomplete multipart headers only");
+        });
+      const observation = await observeApplicationForm(page);
+      const input = {
+        expectedObservation: observation.identity,
+        expectedControl: observation.controls[0]!.identity,
+        expectedPageOrigin: expectedOrigin(page),
+        allowedOrigins: [expectedOrigin(page)],
+        veto: () => true,
+        confirmationTimeoutMs: 700,
+      };
+      const result = await executeExactlyOneFinalAction(page, input);
+      expect(
+        result.outcome,
+        JSON.stringify({
+          observed,
+          accepted: server.acceptedSubmissions.length,
+          failures: result.facts.requestsAfterClick.map(
+            (request) => request.failure,
+          ),
+        }),
+      ).toBe(truncated ? "outcome_uncertain" : "submitted");
+      expect(server.acceptedSubmissions).toEqual(
+        truncated ? [] : ["/submit-multipart"],
+      );
+      expect(await page.evaluate(() => window.name)).toBe(
+        "selected-file-unchanged",
+      );
+      await executeExactlyOneFinalAction(page, input);
+      expect(server.acceptedSubmissions).toEqual(
+        truncated ? [] : ["/submit-multipart"],
+      );
+    } finally {
+      await unlink(filePath);
+      await rmdir(directory);
+    }
+  },
+);
+
+test.each([307, 308])(
+  "a %s POST redirect stays uncertain without replaying its body",
+  async (status) => {
+    const { page, server } = await createPage(
+      `<form action='/submit-redirect${status}' method=post><button>Send application</button></form>`,
+    );
+    await ensurePrepareOnlyMutationGuard(page, false);
+    const observation = await observeApplicationForm(page);
+    const input = {
+      expectedObservation: observation.identity,
+      expectedControl: observation.controls[0]!.identity,
+      expectedPageOrigin: expectedOrigin(page),
+      allowedOrigins: [expectedOrigin(page)],
+      veto: () => true,
+      confirmationTimeoutMs: 400,
+    };
+    expect((await executeExactlyOneFinalAction(page, input)).outcome).toBe(
+      "outcome_uncertain",
+    );
+    expect(
+      server.requests.filter(
+        (request) => request === `POST /submit-redirect${status}`,
+      ),
+    ).toHaveLength(1);
+    expect(server.acceptedSubmissions).toEqual([]);
+    await executeExactlyOneFinalAction(page, input);
+    expect(server.acceptedSubmissions).toEqual([]);
+  },
+);
+
+test("read-only retention never opens authority for a late new final request", async () => {
+  const { page, server } =
+    await createPage(`<form action='/submit' method=post><button>Send application</button></form><script>
+    document.querySelector('form').onsubmit=async event=>{event.preventDefault();await new Promise(resolve=>setTimeout(resolve,400));await fetch('/submit',{method:'POST'}).catch(()=>undefined);};
+  </script>`);
+  const observation = await observeApplicationForm(page);
+  const input = {
+    expectedObservation: observation.identity,
+    expectedControl: observation.controls[0]!.identity,
+    expectedPageOrigin: expectedOrigin(page),
+    allowedOrigins: [expectedOrigin(page)],
+    veto: () => true,
+    confirmationTimeoutMs: 100,
+  };
+  expect((await executeExactlyOneFinalAction(page, input)).outcome).toBe(
+    "outcome_uncertain",
+  );
+  await page.waitForTimeout(500);
+  expect(await recheckLastFinalAction(page, input)).toBeNull();
+  expect(server.acceptedSubmissions).toEqual([]);
 });

@@ -656,9 +656,9 @@ export function createApplicationStore(store: JobStore) {
     },
 
     /**
-     * The person checked the site after a send whose outcome was uncertain.
-     * Only their word moves the row: sent becomes Applied, not sent stops
-     * here so nothing sends it again by itself.
+     * Fresh employer proof or the person's checked outcome settles this
+     * attempt. The original guarded-send history and consumed key remain
+     * intact; this projection never grants another send.
      */
     resolveUncertainSend(
       id: number,

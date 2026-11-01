@@ -19,6 +19,7 @@ import {
   ipcMain,
   screen,
   session,
+  shell,
   WebContentsView,
   type Session,
   type BrowserWindowConstructorOptions,
@@ -26,6 +27,7 @@ import {
 import type { Browser } from "playwright";
 import {
   DesktopBrowserStateSchema,
+  readApplicationSubmissionConfirmationEvidence,
   EMBEDDED_BROWSER_MAX_WORKING_TABS,
   EMBEDDED_BROWSER_MAX_TOTAL_TABS,
   resolveBrowserAddress,
@@ -161,6 +163,14 @@ export class EmbeddedBrowser {
    * application" step, a new document without the guard) cannot erase it.
    */
   private readonly personSendPressedAt = new Map<string, number>();
+  private readonly personSendContext = new Map<
+    string,
+    {
+      confirmationBefore: string[];
+      frameTreeNodeId?: number;
+      origin?: string;
+    }
+  >();
 
   /** A prompt to record an outcome, never evidence that the site received it. */
   /**
@@ -202,10 +212,18 @@ export class EmbeddedBrowser {
   }
 
   /** The person's own press of a prepared form's send, just after their input. */
-  private noteBoundSend(tabId: string): void {
+  private noteBoundSend(
+    tabId: string,
+    context: {
+      confirmationBefore: string[];
+      frameTreeNodeId?: number;
+      origin?: string;
+    } = { confirmationBefore: [] },
+  ): void {
     if (!this.personInputTabs.has(tabId)) return;
     if (Date.now() - (this.personInputAt.get(tabId) ?? 0) > 2_000) return;
     this.personSendPressedAt.set(tabId, Date.now());
+    this.personSendContext.set(tabId, context);
   }
 
   private noteUnboundSend(tabId: string): void {
@@ -502,6 +520,17 @@ export class EmbeddedBrowser {
   markPreparedForm(owner: string): boolean {
     if (!this.ownedTabs.get(owner)?.size) return false;
     this.preparedForms.set(owner, Date.now());
+    for (const id of this.ownedTabs.get(owner) ?? []) {
+      const page = this.pageMap.get(id);
+      if (!page || page.contents.isDestroyed()) continue;
+      for (const frame of page.contents.mainFrame.framesInSubtree)
+        void frame
+          .executeJavaScript(
+            "window.__nestorNativePreparedApplication = true",
+            false,
+          )
+          .catch(() => undefined);
+    }
     const label = this.discardedFormLabels.get(owner);
     if (label) {
       for (const id of this.ownedTabs.get(owner) ?? []) {
@@ -917,16 +946,26 @@ export class EmbeddedBrowser {
   async readTab<T>(
     tabId: string,
     script: string,
+    frameTreeNodeId?: number,
   ): Promise<{ url: string; value: T } | null> {
     const page = this.pageMap.get(tabId);
     if (!page || page.contents.isDestroyed() || page.contents.isLoading())
       return null;
-    const url = page.contents.getURL();
+    const frame =
+      frameTreeNodeId === undefined
+        ? null
+        : page.contents.mainFrame.framesInSubtree.find(
+            (candidate) => candidate.frameTreeNodeId === frameTreeNodeId,
+          );
+    if (frameTreeNodeId !== undefined && !frame) return null;
+    const url = frame ? frame.url : page.contents.getURL();
     await this.noteAutomationCommand(tabId, true, false);
     let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
       const value = (await Promise.race([
-        page.contents.executeJavaScript(script, false),
+        frame
+          ? frame.executeJavaScript(script, false)
+          : page.contents.executeJavaScript(script, false),
         new Promise((_resolve, reject) => {
           deadline = setTimeout(
             () => reject(new Error("The page did not answer.")),
@@ -1016,6 +1055,7 @@ export class EmbeddedBrowser {
       this.personInputTabs.has(id),
     );
     if (tabs.length !== 1) return null;
+    const context = this.personSendContext.get(tabs[0]!);
     // The person can detach CDP while signing in. Read the exact owned native
     // page with the same DOM collector, including checked challenge controls.
     const read = await this.readTab<
@@ -1031,23 +1071,50 @@ export class EmbeddedBrowser {
             if (element.shadowRoot) collect(element.shadowRoot);
         };
         collect(document);
-        return (${collectApplyDocumentSnapshot.toString()})(elements, ${JSON.stringify(APPLY_PAGE_SELECTORS)},true);
+        return (${collectApplyDocumentSnapshot.toString()})(elements, ${JSON.stringify(APPLY_PAGE_SELECTORS)},true,${readApplicationSubmissionConfirmationEvidence.toString()});
       })()`,
+      context?.frameTreeNodeId,
     );
     if (!read) return null;
-    const pressedAt = Math.max(
-      this.personSendPressedAt.get(tabs[0]!) ?? 0,
-      read.value.sendPressedAt ? Date.parse(read.value.sendPressedAt) : 0,
-    );
+    // Only the native input-gated observation establishes a person's send.
+    // A page script or an intermediate form can write the raw guard timestamp.
+    const snapshot = { ...read.value };
+    delete snapshot.sendPressedAt;
+    delete snapshot.sendConfirmationBefore;
+    delete snapshot.sendOrigin;
+    const pressedAt = this.personSendPressedAt.get(tabs[0]!) ?? 0;
     return {
-      ...read.value,
+      ...snapshot,
       url: read.url,
       stepLabel: null,
       openedTabs: [],
       ...(pressedAt
-        ? { sendPressedAt: new Date(pressedAt).toISOString() }
+        ? {
+            sendPressedAt: new Date(pressedAt).toISOString(),
+            ...(context?.confirmationBefore
+              ? { sendConfirmationBefore: context.confirmationBefore }
+              : {}),
+            ...(context?.origin ? { sendOrigin: context.origin } : {}),
+          }
         : {}),
     };
+  }
+
+  applicationPageWithPerson(owner: string): boolean {
+    return [...(this.ownedTabs.get(owner) ?? [])].some((id) =>
+      this.personInputTabs.has(id),
+    );
+  }
+  focusRetainedApplicationPage(owner: string): boolean {
+    const tabs = [...(this.ownedTabs.get(owner) ?? [])].filter((id) => {
+      const page = this.pageMap.get(id);
+      return page && !page.contents.isDestroyed();
+    });
+    const tab =
+      this.activeTabId && tabs.includes(this.activeTabId)
+        ? this.activeTabId
+        : tabs.at(-1);
+    return tab ? this.showTab(tab) : false;
   }
 
   /** Every open tab, the person's own included; the limit counts them all. */
@@ -1418,14 +1485,50 @@ export class EmbeddedBrowser {
     // automation; this message can only create a dismissible recording hint.
     const submitNoticeToken = `nestor-unbound-send-${randomUUID()}`;
     const boundSendToken = `nestor-bound-send-${randomUUID()}`;
+    const boundSendFrames = new Map<
+      string,
+      { frameTreeNodeId: number; origin: string }
+    >();
     const installSubmitNotice = () => {
       if (page.contents.isDestroyed()) return;
-      for (const frame of page.contents.mainFrame.framesInSubtree)
+      for (const frame of page.contents.mainFrame.framesInSubtree) {
+        // Electron can attribute a child console notice to the main frame.
+        // Bind a separate document token while installing in the native frame.
+        const token = `${boundSendToken}:${randomUUID()}:`;
+        let context: { frameTreeNodeId: number; origin: string };
+        try {
+          context = {
+            frameTreeNodeId: frame.frameTreeNodeId,
+            origin: new URL(frame.url).origin,
+          };
+        } catch {
+          continue;
+        }
+        boundSendFrames.set(token, context);
         void frame
           .executeJavaScript(
-            sendObserverSource(submitNoticeToken, boundSendToken),
+            ([...this.preparedForms.keys()].some((owner) =>
+              this.ownedTabs.get(owner)?.has(page.id),
+            )
+              ? "window.__nestorNativePreparedApplication = true;"
+              : "") +
+              sendObserverSource(submitNoticeToken, token) +
+              ";window.__nestorNativePersonSubmissionObserver",
           )
+          .then((installed: unknown) => {
+            if (
+              typeof installed === "string" &&
+              installed.startsWith(boundSendToken)
+            )
+              boundSendFrames.set(installed, context);
+            if (installed !== token) boundSendFrames.delete(token);
+            if (boundSendFrames.size > 512) {
+              const oldest = boundSendFrames.keys().next().value;
+              if (oldest) boundSendFrames.delete(oldest);
+            }
+          })
           .catch(() => undefined);
+      }
     };
     page.contents.on("dom-ready", installSubmitNotice);
     page.contents.on("did-frame-finish-load", installSubmitNotice);
@@ -1444,8 +1547,33 @@ export class EmbeddedBrowser {
     page.contents.on("did-frame-finish-load", installPageMessages);
     page.contents.on("console-message", (details) => {
       if (details.message === submitNoticeToken) this.noteUnboundSend(page.id);
-      else if (details.message === boundSendToken) this.noteBoundSend(page.id);
-      else if (details.message.startsWith(PAGE_MESSAGE_CONSOLE_PREFIX))
+      else if (details.message.startsWith(boundSendToken)) {
+        try {
+          const payloadAt = details.message.indexOf("{");
+          const frame = boundSendFrames.get(
+            details.message.slice(0, payloadAt),
+          );
+          if (!frame) return;
+          const payload: unknown = JSON.parse(details.message.slice(payloadAt));
+          if (
+            !payload ||
+            typeof payload !== "object" ||
+            !("confirmationBefore" in payload) ||
+            !Array.isArray(payload.confirmationBefore) ||
+            payload.confirmationBefore.length > 20 ||
+            !payload.confirmationBefore.every(
+              (item: unknown) => typeof item === "string" && item.length <= 160,
+            )
+          )
+            return;
+          this.noteBoundSend(page.id, {
+            confirmationBefore: payload.confirmationBefore as string[],
+            ...frame,
+          });
+        } catch {
+          /* An unreadable page notice supplies no send evidence. */
+        }
+      } else if (details.message.startsWith(PAGE_MESSAGE_CONSOLE_PREFIX))
         this.notePageMessage(
           page.id,
           details.message.slice(PAGE_MESSAGE_CONSOLE_PREFIX.length),
@@ -1581,6 +1709,7 @@ export class EmbeddedBrowser {
       this.personInputTabs.delete(page.id);
       this.personInputAt.delete(page.id);
       this.personSendPressedAt.delete(page.id);
+      this.personSendContext.delete(page.id);
       this.parkedTabs.delete(page.id);
       this.heldTabs.delete(page.id);
       this.personTabs.delete(page.id);
@@ -1815,6 +1944,7 @@ export class EmbeddedBrowser {
     this.personInputTabs.delete(tabId);
     this.personInputAt.delete(tabId);
     this.personSendPressedAt.delete(tabId);
+    this.personSendContext.delete(tabId);
     const page = this.pageMap.get(tabId);
     if (!page || page.contents.isDestroyed()) return;
     await Promise.all(
@@ -2131,6 +2261,21 @@ export class EmbeddedBrowser {
       return this.getState();
     }
     if (this.closing) return this.getState();
+    if (command.type === "open_in_browser") {
+      const page = this.activeTabId
+        ? this.pageMap.get(this.activeTabId)
+        : undefined;
+      if (page && !page.contents.isDestroyed()) {
+        // Export only the address already shown to the person, never OAuth
+        // query/fragment tokens, cookies, or a prepared form's answers.
+        const url = browserDisplayUrl(page.contents.getURL());
+        if (url && url !== "about:blank") {
+          this.takeTabByPerson(page.id, true);
+          await shell.openExternal(normalizeBrowserNavigation(url));
+        }
+      }
+      return this.getState();
+    }
     if (command.type === "open") {
       this.closed = false;
       this.presentation = "peek";

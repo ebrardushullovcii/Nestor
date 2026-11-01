@@ -105,28 +105,41 @@ const resume = {
   bytes: new TextEncoder().encode("%PDF-1.4 synthetic replica resume"),
 };
 
-test("Greenhouse: the resume reaches storage, with a name filled in", async () => {
-  const { page, session } = await fillPage("greenhouse-shape");
-  const controls = (await session.readPage()).controls;
-  const ref = (id: string) => {
-    const control = controls.find((entry) => entry.id === id)!;
-    return control.ref ?? `c${control.index}`;
-  };
-  await registerPrepareOnlyPreparedValue(page, "Alex");
-  await session.fillText(ref("first_name"), "Alex");
-  await session.uploadFile(ref("resume"), resume);
-  await page.waitForFunction(
-    () => (document.getElementById("resume_url") as HTMLInputElement).value,
-  );
-  expect(
-    posts()
-      .filter((post) => post.path === "/greenhouse-shape/storage")
-      .map((post) => (post.fields.file as { filename: string }).filename),
-  ).toEqual([resume.name]);
-  expect(
-    posts().filter((post) => post.path === "/greenhouse-shape/apply/1"),
-  ).toEqual([]);
-});
+test.each([false, true])(
+  "Greenhouse: the resume reaches storage, with a name filled in (binary: %s)",
+  async (binary) => {
+    const { page, session } = await fillPage("greenhouse-shape");
+    const controls = (await session.readPage()).controls;
+    const ref = (id: string) => {
+      const control = controls.find((entry) => entry.id === id)!;
+      return control.ref ?? `c${control.index}`;
+    };
+    await registerPrepareOnlyPreparedValue(page, "Alex");
+    await session.fillText(ref("first_name"), "Alex");
+    const selected = binary
+      ? {
+          ...resume,
+          name: "synthetic-binary-resume.pdf",
+          bytes: new Uint8Array([
+            ...resume.bytes,
+            ...Array.from({ length: 256 }, (_, value) => value),
+          ]),
+        }
+      : resume;
+    await session.uploadFile(ref("resume"), selected);
+    await page.waitForFunction(
+      () => (document.getElementById("resume_url") as HTMLInputElement).value,
+    );
+    expect(
+      posts()
+        .filter((post) => post.path === "/greenhouse-shape/storage")
+        .map((post) => (post.fields.file as { filename: string }).filename),
+    ).toContain(selected.name);
+    expect(
+      posts().filter((post) => post.path === "/greenhouse-shape/apply/1"),
+    ).toEqual([]);
+  },
+);
 
 test.each([
   [false, "127.0.0.1"],

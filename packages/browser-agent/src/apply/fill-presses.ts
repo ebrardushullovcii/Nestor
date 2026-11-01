@@ -122,6 +122,29 @@ function pressables(observation: ApplyFormObservation): Pressable[] {
   );
 }
 
+/** An observed local field-mode switch, never a submit or a saved answer. */
+export function manualEntryPressFor(
+  observation: ApplyFormObservation,
+  ref: string,
+): FillPress | null {
+  const entry = pressables(observation).find(
+    (candidate) => candidate.ref === ref,
+  );
+  if (
+    !entry ||
+    entry.inForm !== true ||
+    (entry.formAction &&
+      !("submitsForm" in entry && entry.submitsForm === false)) ||
+    ("submitsForm" in entry && entry.submitsForm)
+  )
+    return null;
+  const label = normalizeSignal(entry.label);
+  return !FORM_STEP_WORDS.test(label) &&
+    /\b(?:enter|fill|type)\b.*\bmanually\b|\bmanual entry\b/u.test(label)
+    ? { kind: "field_part", ref }
+    : null;
+}
+
 /** Routine privacy mechanics, shared by Fill and Send modes. A banner with
  * only an opt-in is never permission to accept optional tracking. */
 export function cookieConsentChoice(
@@ -175,6 +198,8 @@ export function fillPressFor(input: {
   if (!entry) return null;
   if ("role" in entry && FIELD_PART_ROLES.has(entry.role.toLowerCase()))
     return { kind: "field_part", ref };
+  const manual = manualEntryPressFor(observation, ref);
+  if (manual) return manual;
   const label = normalizeSignal(entry.label);
 
   const cookie = cookieConsentChoice(observation, ref);
