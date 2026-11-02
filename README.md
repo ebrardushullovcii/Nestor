@@ -1,4 +1,7 @@
-<p><img src="assets/brand/in-app/wordmark.svg" alt="Nestor" width="240"></p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/in-app/wordmark-on-dark.svg">
+  <img src="assets/brand/in-app/wordmark.svg" alt="Nestor" width="240">
+</picture>
 
 # Nestor
 
