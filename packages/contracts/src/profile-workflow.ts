@@ -84,10 +84,13 @@ export interface ProfileWorkflowResult {
 /** The renderer's bridge for Profile and guided setup. */
 export interface DesktopProfileWorkflowBridge {
   run(command: ProfileWorkflowCommand): Promise<ProfileWorkflowResult>;
-  /** Opens the file picker, or imports the saved working copy again. */
+  /**
+   * Opens the file picker, imports a file dropped on the import card, or
+   * imports the saved working copy again.
+   */
   importResume(
     onProgress: (event: ResumeImportProgressEvent) => void,
-    options?: { retryInterrupted?: boolean },
+    options?: { retryInterrupted?: boolean; droppedFile?: File },
   ): Promise<ProfileWorkflowResult>;
   /** Stops a picker, or with `stopProcessing` an import already reading. */
   cancelImportResume(stopProcessing?: boolean): void;

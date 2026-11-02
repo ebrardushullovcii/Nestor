@@ -102,6 +102,7 @@ it("repeats edit after the person chooses Resume on the kept job, consumes reque
     saveError: null,
     preview: null,
     previewError: null,
+    loadError: null,
     edit: vi.fn(),
     flush: vi.fn(() => Promise.resolve()),
     saveMyEdits: vi.fn(() => Promise.resolve()),
@@ -196,8 +197,107 @@ it("repeats edit after the person chooses Resume on the kept job, consumes reque
   await waitFor(() =>
     expect(
       document.querySelector('[data-resume-pane="edit"]')!.className,
-    ).toContain("2xl:flex"),
+    ).toContain("@min-[88rem]/resume:flex"),
   );
   expect(draft).toEqual(before);
   expect(view.edit).not.toHaveBeenCalled();
+});
+
+it("says Saving… on the title line, so autosave never reflows the toolbar row", () => {
+  const at = "2026-10-26T00:00:00.000Z";
+  const draft = ResumeDraftSchema.parse({
+    id: "synthetic-draft",
+    jobId: "7",
+    status: "draft",
+    templateId: "classic_ats",
+    createdAt: at,
+    updatedAt: at,
+  });
+  const job = JobDetailSchema.parse({
+    id: 7,
+    stage: "shortlisted",
+    stageChangedAt: at,
+    stageNote: null,
+    title: "Synthetic analyst",
+    company: "Synthetic employer",
+    location: "Remote",
+    workModes: ["remote"],
+    salaryText: null,
+    fitScore: null,
+    fitSummary: null,
+    postedAt: null,
+    foundAt: at,
+    searchId: null,
+    sourceLabel: "Replica",
+    sourceCount: 1,
+    url: "https://example.test/jobs/7",
+    applyUrl: null,
+    seenAt: at,
+    description: "Synthetic listing",
+    summary: null,
+    seniority: null,
+    employmentType: null,
+    salary: null,
+    facts: {},
+    fit: null,
+    sightings: [],
+  });
+  const view = (saving: boolean) =>
+    ({
+      job,
+      resume: {
+        jobId: 7,
+        level: "light",
+        state: "ready",
+        updatedAt: at,
+        draft,
+        approvedAt: null,
+        error: null,
+        previousLevel: null,
+        levelChangeId: null,
+        pdfPath: null,
+        pdfSha256: null,
+      },
+      draft,
+      templates: [],
+      dirty: saving,
+      saveStatus: saving ? "saving" : "saved",
+      saveError: null,
+      preview: null,
+      previewError: null,
+      loadError: null,
+      edit: vi.fn(),
+      flush: vi.fn(() => Promise.resolve()),
+      saveMyEdits: vi.fn(() => Promise.resolve()),
+      loadSaved: vi.fn(),
+      refresh: vi.fn(() => Promise.resolve()),
+    }) satisfies ReturnType<typeof useResume>;
+  const pane = (saving: boolean) => (
+    <MemoryRouter initialEntries={["/job-finder/review-queue?jobId=7"]}>
+      <ToastProvider>
+        <ResumePane
+          view={view(saving)}
+          onApprove={() => undefined}
+          approving={false}
+          onApply={() => undefined}
+          applying={false}
+          onMoveBack={() => undefined}
+        />
+      </ToastProvider>
+    </MemoryRouter>
+  );
+  const { rerender } = render(pane(false));
+  const status = document.querySelector("[data-resume-save-status]")!;
+  // Always there (a polite live region), empty at rest.
+  expect(status.getAttribute("aria-live")).toBe("polite");
+  expect(status.textContent).toBe("");
+  rerender(pane(true));
+  expect(status.textContent).toBe("Saving…");
+  // On the title's own line, not in the row with the level and Approve.
+  const title = screen.getByRole("heading", { name: "Synthetic analyst" });
+  expect(status.parentElement).toBe(title.parentElement);
+  const levelRow = screen.getByRole("group", {
+    name: "Resume level",
+  }).parentElement!;
+  expect(levelRow.textContent).not.toContain("Saving…");
 });

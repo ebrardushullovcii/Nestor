@@ -57,9 +57,15 @@ export function ProfileCoreTab({ profileForm }: ProfileCoreTabProps) {
     shortSummaryDiffers || professionalStoryDiffers;
 
   return (
-    <div className="grid gap-6">
+    // One column no wider than the pane: an auto column grew to the
+    // sections' own width at larger text, running the fields past the edge.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       <section className="grid content-start gap-(--gap-card)">
-        <ProfileSectionHeader eyebrow="Basics" title="Personal details" />
+        {/* The Basics tab's own groups ("Name and headline", "Contact", …)
+            are the visible headings; a "Personal details" title above them
+            stacked two headings before the first field. Kept for assistive
+            tech so the section still has a name. */}
+        <h2 className="sr-only">Personal details</h2>
 
         {/* One shared field list with guided setup › Basics: same fields,
             same order, same labels. */}
@@ -110,20 +116,11 @@ export function ProfileCoreTab({ profileForm }: ProfileCoreTabProps) {
           description="How you describe the way you work. Your professional summary is edited once, in Basics above."
         />
 
-        <article className="surface-card-tint grid gap-4 rounded-(--radius-panel) border border-(--surface-panel-border) p-4">
-          <div className="grid gap-1">
-            <p className="text-[0.98rem] font-semibold text-(--text-headline)">
-              Strengths
-            </p>
-            {/* The rule lives in the panel that owns the field, not floating
-                between the summary and the chip box where it read as a second
-                sentence about the summary. */}
-            <ProfileFieldHint>
-              Short phrases about how you work. Resumes use these in your
-              summary; named technologies belong in Skills further down.
-            </ProfileFieldHint>
-          </div>
+        <article className="grid gap-4 border-t border-(--surface-panel-border) pt-5 first:border-t-0 first:pt-0">
+          {/* One "Strengths": the field's own label, with its rule under
+              it (it was a heading and the label again). */}
           <ProfileListEditor
+            description="Short phrases about how you work. Resumes use these in your summary; named technologies belong in Skills further down."
             label="Strengths"
             onChange={(values) =>
               setValue("summary.strengths", joinListInput(values), {
@@ -275,20 +272,15 @@ export function ProfileCoreTab({ profileForm }: ProfileCoreTabProps) {
       </section>
 
       <section className={PROFILE_LATER_SECTION_CLASS}>
+        {/* One heading and one hint: the section title, then the field's own
+            label. A second "Main skills" title and a second explanation
+            repeated the same sentence three times over. */}
         <ProfileSectionHeader
-          eyebrow="Skills"
           title="Skills"
-          description="One list of skills, kept where resumes and application forms read it."
+          description="Main skills is the one list resumes and application forms read. The optional groupings below only change wording order."
         />
 
-        <article className="surface-card-tint grid gap-4 rounded-(--radius-panel) border border-(--surface-panel-border) p-4">
-          <p className="text-[0.98rem] font-semibold text-(--text-headline)">
-            Main skills
-          </p>
-          <ProfileFieldHint>
-            One list is enough. This is the list resumes and application forms
-            read; the optional groupings below only change wording order.
-          </ProfileFieldHint>
+        <article className="grid gap-4">
           <ProfileListEditor
             label="Main skills"
             onChange={(values) =>

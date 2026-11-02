@@ -8,21 +8,21 @@ export const PROFILE_SECTION_SCROLL_AREA_ID = "profile-section-scroll-area";
 
 export const PROFILE_SM_MIN_VIEWPORT_WIDTH_PX = 640;
 export const PROFILE_XL_MIN_VIEWPORT_WIDTH_PX = 1280;
-// Between sm and xl the shell pins its header over the page and pads content
-// by 7.25rem (`sm:fixed ... sm:pt-[7.25rem]` in job-finder-shell). Owned
+// Between sm and xl the shell pins its 48px header over the page and pads
+// content by 3rem (`sm:fixed ... sm:pt-12` in job-finder-shell). Owned
 // Profile targets render their scroll margins from
 // PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES below, so the classes cannot drift
 // from these constants.
-export const PROFILE_FIXED_HEADER_HEIGHT_PX = 116;
+export const PROFILE_FIXED_HEADER_HEIGHT_PX = 48;
 export const PROFILE_DEEP_LINK_TOP_GAP_PX = 16;
 
 export const PROFILE_MAX_OUTER_ALIGNMENT_ATTEMPTS = 4;
 
 // Tailwind scale: `scroll-mt-4` = 16px gap; the sm band adds the fixed-header
-// height (116px + 16px = 132px = 8.25rem).
+// height (48px + 16px = 64px = 4rem).
 export const PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES = {
   base: "scroll-mt-4",
-  fixedHeader: "sm:scroll-mt-[8.25rem]",
+  fixedHeader: "sm:scroll-mt-[4rem]",
   internalScroller: "xl:scroll-mt-4",
 } as const;
 

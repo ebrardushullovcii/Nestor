@@ -13,51 +13,51 @@ import { cn } from "@renderer/lib/utils";
 // identical to an enabled `Save` beside it, and `Save appearance` (the primary
 // commit on Settings) was unreadable as a state. Removing the fill makes the
 // state legible without relying on a body-text colour.
+//
+// Disabled is a flat, edgeless chip: no outline (every enabled outline,
+// secondary or primary button has an edge or a fill) and a quiet secondary
+// surface. A disabled outline button used to keep a grey outline, so it
+// differed from an enabled one only by its label's grey. Ghost and link
+// controls stay without a surface when disabled.
 const buttonVariants = cva(
-  "relative inline-flex shrink-0 items-center justify-center gap-2 rounded-(--radius-button) whitespace-nowrap transition-[background-color,border-color,color,opacity,box-shadow,transform] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:border-(--disabled-border) disabled:bg-(--disabled-surface) disabled:text-(--disabled-foreground) disabled:shadow-none disabled:saturate-100 disabled:opacity-100 aria-disabled:cursor-not-allowed aria-disabled:border-(--disabled-border) aria-disabled:bg-(--disabled-surface) aria-disabled:text-(--disabled-foreground) aria-disabled:shadow-none aria-disabled:saturate-100 aria-disabled:opacity-100 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "relative inline-flex shrink-0 items-center justify-center gap-2 rounded-(--radius-button) whitespace-nowrap transition-[background-color,border-color,color,box-shadow] duration-(--duration-fast) ease-(--ease-standard) outline-none focus-ring disabled:cursor-not-allowed disabled:border-(--disabled-border-button) disabled:bg-(--disabled-surface-button) disabled:text-(--disabled-foreground) disabled:shadow-none aria-disabled:cursor-not-allowed aria-disabled:border-(--disabled-border-button) aria-disabled:bg-(--disabled-surface-button) aria-disabled:text-(--disabled-foreground) aria-disabled:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
+        // The one filled control: pine fill, white label. Hover darkens one
+        // step and pressed one more, so every press answers immediately.
         primary:
-          // The one filled control. --primary-fill is split from the --primary
-          // accent text/tint colour so the fill can sit calmly on dark panels
-          // behind light label text; no outer glow ring.
-          "border border-primary-fill bg-primary-fill text-primary-fill-foreground shadow-[inset_0_1px_0_var(--focus-inset-highlight)] hover:bg-primary-fill/90",
+          "border border-primary-fill bg-primary-fill text-primary-fill-foreground hover:border-(--primary-fill-hover) hover:bg-(--primary-fill-hover) active:border-(--primary-fill-pressed) active:bg-(--primary-fill-pressed)",
         destructive:
-          "border border-destructive/35 bg-destructive text-destructive-foreground hover:opacity-90",
+          "border border-destructive bg-destructive text-destructive-foreground hover:opacity-90 active:opacity-80",
         // Outline and secondary have no fill difference from the surface they
-        // sit on, so the border is their entire boundary and has to clear the
-        // 3:1 non-text floor against both --card and --background in both
-        // themes. `--control-border` is the token that guarantees that;
-        // `--border`, `--surface-panel-border` and `--surface-well-border` are
-        // inert chrome and must never be a control's only boundary.
+        // sit on, so the border is their entire boundary and clears the 3:1
+        // non-text floor (`--control-border`). Hover adds a neutral wash;
+        // pressed a deeper one.
         outline:
-          "border border-(--control-border) bg-transparent text-foreground hover:border-(--control-border-hover) hover:bg-accent hover:text-accent-foreground",
+          "border border-(--control-border) bg-transparent text-foreground hover:border-(--control-border-hover) hover:bg-accent active:bg-pressed",
         secondary:
-          "border border-(--control-border) bg-secondary text-secondary-foreground hover:border-(--control-border-hover) hover:bg-surface-strong",
+          "border border-(--control-border) bg-secondary text-secondary-foreground hover:border-(--control-border-hover) hover:bg-accent active:bg-pressed",
+        // Ghost is quiet chrome: no border at rest, a neutral wash on hover.
         ghost:
-          "border border-transparent bg-transparent text-foreground-soft hover:border-(--control-border) hover:bg-secondary hover:text-foreground",
+          "border border-transparent bg-transparent text-foreground-soft hover:bg-accent hover:text-foreground active:bg-pressed disabled:bg-transparent aria-disabled:bg-transparent",
         // One link treatment app-wide: hue is never the sole carrier, so the
         // underline is always painted rather than appearing on hover.
-        link: "text-(--link) underline decoration-from-font underline-offset-4 hover:text-(--link-hover)",
+        link: "text-(--link) underline decoration-from-font underline-offset-4 hover:text-(--link-hover) disabled:bg-transparent aria-disabled:bg-transparent",
       },
       size: {
-        default: "h-10 px-5 text-sm font-semibold has-[>svg]:px-4",
-        // `field` is the named pairing with `Input`/`SelectTrigger`'s 44px box.
-        // Profile forced `h-11` through `className` in 12 places purely to line
-        // a button up with the field beside it; the pairing is a size, not an
-        // override, so a form row can be one declared height everywhere.
-        field: "h-11 px-5 text-sm font-semibold has-[>svg]:px-4",
-        // `toolbar` is the named 32px toolbar box. It matches
-        // `DISCOVERY_RESULTS_TOOLBAR_CONTROL_CLASS` exactly (h-8 / button
-        // radius / text-xs / font-medium), which was the only place a toolbar
-        // height was named once and tested. `compact` stays semibold for
-        // in-content compact actions; toolbar controls are ambient chrome.
-        toolbar: "h-8 gap-1.5 px-3 text-xs font-medium has-[>svg]:px-2.5",
-        compact: "h-8 px-3 text-xs font-semibold has-[>svg]:px-2.5",
+        default: "h-9 px-4 text-sm font-medium has-[>svg]:px-3",
+        // `field` is the named pairing with `Input`/`SelectTrigger`'s 40px box.
+        field: "h-10 px-4 text-sm font-medium has-[>svg]:px-3",
+        // `toolbar` is the named 32px toolbar box (h-8 / button radius /
+        // 13px / medium). `compact` is the same box for in-content actions.
+        toolbar:
+          "h-8 gap-1.5 px-3 text-(length:--text-small) font-medium has-[>svg]:px-2.5",
+        compact:
+          "h-8 px-3 text-(length:--text-small) font-medium has-[>svg]:px-2.5",
         xs: "h-6 gap-1 rounded-(--radius-small) px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-8 gap-1.5 px-3 text-sm font-semibold has-[>svg]:px-2.5",
-        lg: "h-10 px-6 has-[>svg]:px-4",
+        sm: "h-8 gap-1.5 px-3 text-(length:--text-small) font-medium has-[>svg]:px-2.5",
+        lg: "h-10 px-5 text-sm font-medium has-[>svg]:px-4",
         icon: "size-9",
         "icon-xs":
           "size-6 rounded-(--radius-small) [&_svg:not([class*='size-'])]:size-3",

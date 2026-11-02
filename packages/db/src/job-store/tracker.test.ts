@@ -76,6 +76,41 @@ describe("applications tracker", () => {
     expect(tracker.counts()).toMatchObject({ applying: 1, applied: 1 });
   });
 
+  it("counts and lists an application Apply could not finish apart from Applying", () => {
+    const { store, tracker, ids } = sent(3);
+    store
+      .sql(
+        "UPDATE applications SET state = 'failed', error = 'Page did not load' WHERE job_id = ?",
+      )
+      .run(ids[0]!);
+    // Stopped by the person is not a failure: it stays where it was.
+    store
+      .sql("UPDATE applications SET state = 'stopped' WHERE job_id = ?")
+      .run(ids[1]!);
+    expect(tracker.counts()).toMatchObject({ applying: 2, not_sent: 1 });
+    expect(
+      tracker
+        .list({ statuses: ["applying"] })
+        .rows.map((row) => row.id)
+        .sort(),
+    ).toEqual([ids[1]!, ids[2]!].sort());
+    const notSent = tracker.list({ statuses: ["not_sent"] });
+    expect(
+      notSent.rows.map((row) => [row.id, row.work, row.workError]),
+    ).toEqual([[ids[0]!, "failed", "Page did not load"]]);
+    expect(notSent.total).toBe(1);
+    expect(tracker.list().total).toBe(3);
+    expect(
+      tracker.selectedIds({ filter: { statuses: ["not_sent"] }, except: [] }),
+    ).toEqual([ids[0]!]);
+    expect(
+      tracker
+        .list({ statuses: ["applying", "not_sent"] })
+        .rows.map((row) => row.id)
+        .sort(),
+    ).toEqual([...ids].sort());
+  });
+
   it("moves applications on with Undo and keeps the history", () => {
     const { tracker, ids, send } = sent(3);
     send(ids);

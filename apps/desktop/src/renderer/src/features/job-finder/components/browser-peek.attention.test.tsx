@@ -51,6 +51,10 @@ describe("BrowserPeek handoff attention", () => {
         importCsv: vi.fn(),
         importFromBrowser: vi.fn(),
       },
+      siteIcons: {
+        get: vi.fn().mockResolvedValue({ icons: {} }),
+        onChanged: vi.fn().mockReturnValue(() => undefined),
+      },
       addCurrentJob: vi.fn(),
       getState: vi.fn().mockResolvedValue(staleAttentionState),
       command: vi.fn().mockResolvedValue(staleAttentionState),

@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef, useCallback } from "react";
+import { FormSectionsSkeleton } from "@renderer/features/job-finder/components/route-skeleton";
 import {
   Navigate,
   useLocation,
@@ -17,6 +18,8 @@ import { Input } from "@renderer/components/ui/input";
 import { LockedScreenLayout } from "@renderer/features/job-finder/components/locked-screen-layout";
 import { PageHeaderStack } from "@renderer/features/job-finder/components/page-header";
 import { Button } from "@renderer/components/ui/button";
+import { ListReadError } from "@renderer/features/job-lists";
+import { ScreenReadWarning } from "./screen-read-warning";
 import { useStoredSettings } from "./use-stored-settings";
 import { useStoredProfile, useProfileRecordPage } from "./use-stored-profile";
 import { editorProfile, profileEdits } from "./profile-edits";
@@ -195,19 +198,24 @@ export function StoredProfileScreen() {
         }
       >
         {(store.error ?? workflow.error) ? (
-          <p role="alert">
-            {store.error ?? workflow.error}{" "}
-            <Button
-              onClick={() => {
+          <div className="grid place-items-center p-10">
+            <ListReadError
+              error={store.error ?? workflow.error ?? ""}
+              kept={null}
+              onRetry={() => {
                 void store.refresh();
                 void workflow.refresh();
               }}
-            >
-              Try again
-            </Button>
-          </p>
+              what="Your profile"
+            />
+          </div>
         ) : (
-          <p role="status">Loading your profile…</p>
+          <>
+            <p className="sr-only" role="status">
+              Loading your profile…
+            </p>
+            <FormSectionsSkeleton tabs={6} />
+          </>
         )}
       </LockedScreenLayout>
     );
@@ -280,9 +288,15 @@ export function StoredProfileScreen() {
   );
   return (
     <>
-      {store.error || settings.error ? (
-        <p role="alert">{store.error ?? settings.error}</p>
-      ) : null}
+      <ScreenReadWarning
+        onRetry={() => {
+          void store.refresh();
+          void settings.refresh();
+        }}
+        readError={store.readError ?? settings.readError}
+        saveError={store.error ?? settings.error}
+        what="Your profile"
+      />
       <RecoveredProfileDraft onRestored={store.refresh} />
       <ProfileLeaveGuard
         dirty={blockLeave}
@@ -327,7 +341,7 @@ export function StoredProfileScreen() {
         recordPaging={paging}
         recordSummary={store.overview}
         recordStatus={
-          pages.some(({ page }) => page.loading) ? (
+          pages.some(({ page }) => page.loading || page.error) ? (
             <div role="status">
               {pages
                 .filter(({ page }) => page.loading || page.error)

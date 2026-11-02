@@ -6,6 +6,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -333,7 +334,7 @@ describe("JobFinderGlobalSearch", () => {
     typeQuery("platform engineer");
     expect(input.getAttribute("aria-expanded")).toBe("true");
 
-    fireEvent.keyDown(input, { key: "ArrowDown" });
+    // The first result is highlighted before any key, so Enter's target shows.
     expect(input.getAttribute("aria-activedescendant")).toMatch(/-option-0$/);
     expect(
       screen
@@ -412,14 +413,12 @@ describe("JobFinderGlobalSearch", () => {
     typeQuery("typescript");
 
     // Composition-phase ArrowDown must not move the active option...
+    expect(input.getAttribute("aria-activedescendant")).toMatch(/-option-0$/);
     fireEvent.keyDown(input, {
       isComposing: true,
       key: "ArrowDown",
       keyCode: 229,
     });
-    expect(input.getAttribute("aria-activedescendant")).toBeNull();
-
-    fireEvent.keyDown(input, { key: "ArrowDown" });
     expect(input.getAttribute("aria-activedescendant")).toMatch(/-option-0$/);
 
     // ...and a composing Enter must never commit a selection.
@@ -469,7 +468,8 @@ describe("JobFinderGlobalSearch", () => {
 
     typeQuery("zzzz");
     expect(screen.getByText("0 results")).toBeTruthy();
-    expect(screen.getByText(/Nothing in your saved jobs/i));
+    expect(screen.getByText("No results for “zzzz”")).toBeTruthy();
+    expect(screen.getByText(/Try a company, a job title/)).toBeTruthy();
   });
 
   it("adds the saved jobs the store finds, and says it is searching until they arrive", async () => {
@@ -498,7 +498,7 @@ describe("JobFinderGlobalSearch", () => {
     typeQuery("platform");
     await waitFor(() => expect(searchMore).toHaveBeenCalledWith("platform"));
     expect(screen.getByText("Searching your saved jobs…")).toBeTruthy();
-    expect(screen.queryByText(/Nothing in your saved jobs/i)).toBeNull();
+    expect(screen.queryByText(/^No results for/)).toBeNull();
     answer({ entries: [sampleEntries[0]!], incomplete: false, failed: false });
     expect(
       await screen.findByRole("option", { name: /Platform Engineer/ }),
@@ -560,7 +560,7 @@ describe("JobFinderGlobalSearch", () => {
     typeQuery("platform");
     await screen.findByText("Your saved jobs could not be searched.");
     expect(screen.queryByText("0 results")).toBeNull();
-    expect(screen.queryByText(/Nothing in your saved jobs/i)).toBeNull();
+    expect(screen.queryByText(/^No results for/)).toBeNull();
   });
 
   it("shows what came back when part of the search fails", async () => {
@@ -623,5 +623,38 @@ describe("JobFinderGlobalSearch", () => {
     expect(title?.getAttribute("title")).toBe(longTitle);
     expect(subtitle?.className).toContain("break-words");
     expect(subtitle?.getAttribute("title")).toBe(longSubtitle);
+  });
+});
+
+describe("JobFinderGlobalSearch recent items", () => {
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => window.localStorage.clear());
+
+  it("offers what was opened lately while nothing is typed", () => {
+    const onNavigate = vi.fn();
+    render(
+      <JobFinderGlobalSearch
+        entries={sampleEntries}
+        onNavigate={onNavigate}
+        resultsLayout="in-flow"
+      />,
+    );
+    // Nothing opened yet: no Recent list.
+    expect(screen.queryByRole("region", { name: "Recent" })).toBeNull();
+
+    typeQuery("Globex");
+    fireEvent.click(
+      screen.getByRole("option", { name: /Senior Platform Engineer/ }),
+    );
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+
+    // The box empties after opening; the job is now one press away.
+    const recent = screen.getByRole("region", { name: "Recent" });
+    fireEvent.click(
+      within(recent).getByRole("button", { name: /Senior Platform Engineer/ }),
+    );
+    expect(onNavigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "two" }),
+    );
   });
 });

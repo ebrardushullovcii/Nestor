@@ -37,8 +37,8 @@ function formatProfileDisplayedLocation(input: {
 
 function BasicsGroup(props: { children: React.ReactNode; title: string }) {
   return (
-    <article className="surface-card-tint grid gap-4 rounded-(--radius-panel) border border-(--surface-panel-border) p-4">
-      <p className="text-[0.98rem] font-semibold text-(--text-headline)">
+    <article className="grid gap-4 border-t border-(--surface-panel-border) pt-5 first:border-t-0 first:pt-0">
+      <p className="text-base font-semibold text-(--text-headline)">
         {props.title}
       </p>
       {props.children}

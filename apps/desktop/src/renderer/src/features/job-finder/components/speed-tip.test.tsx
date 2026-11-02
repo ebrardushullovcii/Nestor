@@ -8,6 +8,7 @@ import {
   screen,
 } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { ToastProvider } from "@renderer/components/ui/toast";
 import { SpeedTip, isStrongComputer } from "./speed-tip";
 
 function Where() {
@@ -15,12 +16,28 @@ function Where() {
   return <p data-testid="where">{`${location.pathname}${location.hash}`}</p>;
 }
 
+let found = 12;
+let notify: ((change: { stages: string[] }) => void) | null = null;
+
 function install(device: { memoryGb: number; cores: number }, speed?: string) {
   Object.assign(window, {
     nestor: {
       ping: () => Promise.resolve({ ok: true, platform: "win32", ...device }),
       jobs: {
-        run: () => Promise.resolve(speed ? { speedLevel: speed } : {}),
+        run: (name: string) =>
+          Promise.resolve(
+            name === "stage_counts"
+              ? { found, hidden: 0, shortlisted: 0, resume: 0, applied: 0 }
+              : speed
+                ? { speedLevel: speed }
+                : {},
+          ),
+        onChange: (listener: (change: { stages: string[] }) => void) => {
+          notify = listener;
+          return () => {
+            notify = null;
+          };
+        },
       },
     },
   });
@@ -29,10 +46,12 @@ function install(device: { memoryGb: number; cores: number }, speed?: string) {
 function renderTip() {
   render(
     <MemoryRouter initialEntries={["/job-finder/home"]}>
-      <SpeedTip />
-      <Routes>
-        <Route element={<Where />} path="*" />
-      </Routes>
+      <ToastProvider>
+        <SpeedTip />
+        <Routes>
+          <Route element={<Where />} path="*" />
+        </Routes>
+      </ToastProvider>
     </MemoryRouter>,
   );
 }
@@ -46,6 +65,7 @@ async function waitForTip() {
 beforeEach(() => {
   vi.useFakeTimers();
   localStorage.clear();
+  found = 12;
 });
 afterEach(() => {
   cleanup();
@@ -82,7 +102,7 @@ test("the tip goes twelve seconds after it shows, unless the person is on it", a
     await vi.advanceTimersByTimeAsync(10_000);
   });
   expect(tip()).toBeTruthy();
-  const aside = tip()!.closest("aside")!;
+  const aside = tip()!.closest("[data-toast]")!;
   fireEvent.mouseEnter(aside);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(30_000);
@@ -103,9 +123,7 @@ test("dismissing the tip ends it for good", async () => {
   install({ memoryGb: 31.8, cores: 16 });
   renderTip();
   await waitForTip();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Dismiss the Speed tip" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   cleanup();
   renderTip();
   await waitForTip();
@@ -140,4 +158,17 @@ test("the tip is a quiet side note: no main button, gone by itself, and seen onc
   renderTip();
   await waitForTip();
   expect(screen.queryByText(/can run more at once/u)).toBeNull();
+});
+
+test("waits for the first search: no tip over a first run's empty screens", async () => {
+  found = 0;
+  install({ memoryGb: 31.8, cores: 16 });
+  renderTip();
+  await waitForTip();
+  expect(screen.queryByText(/can run more at once/u)).toBeNull();
+  // The first search finds jobs; the tip follows a moment later.
+  found = 9;
+  act(() => notify?.({ stages: ["found"] }));
+  await waitForTip();
+  expect(screen.getByText(/can run more at once/u)).toBeTruthy();
 });

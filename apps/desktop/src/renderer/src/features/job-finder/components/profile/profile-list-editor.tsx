@@ -4,10 +4,15 @@ import { Button } from "@renderer/components/ui/button";
 import { FieldLabel } from "@renderer/components/ui/field";
 import { Input } from "@renderer/components/ui/input";
 import { cn } from "@renderer/lib/cn";
-import { profileInputClassName } from "./profile-form-primitives";
+import {
+  ProfileFieldHint,
+  profileInputClassName,
+} from "./profile-form-primitives";
 
 interface ProfileListEditorProps {
   className?: string;
+  /** The rule for what goes in the list, under its label. */
+  description?: string;
   displayMode?: "chips" | "rows";
   draftParser?: (value: string) => readonly string[];
   emptyMessage?: string;
@@ -32,6 +37,7 @@ export function parseProfileLocationDraft(value: string): string[] {
 
 export function ProfileListEditor({
   className,
+  description,
   displayMode = "chips",
   draftParser,
   emptyMessage = "No items added yet.",
@@ -102,12 +108,9 @@ export function ProfileListEditor({
     : "min-h-14";
 
   return (
-    <section
-      className={cn(
-        "grid min-w-0 gap-3 rounded-(--radius-field) border border-(--surface-panel-border) bg-(--surface-panel-raised) p-4 shadow-[inset_0_1px_0_var(--surface-inset-highlight)]",
-        className,
-      )}
-    >
+    // No box of its own: a label, a field with its Add button, and the
+    // items under it. Profile sections already frame it.
+    <section className={cn("grid min-w-0 content-start gap-2", className)}>
       <div className="flex items-baseline justify-between gap-3">
         <FieldLabel
           className="text-(length:--text-tiny) font-medium tracking-(--tracking-label) text-foreground-soft"
@@ -115,10 +118,15 @@ export function ProfileListEditor({
         >
           {label}
         </FieldLabel>
-        <span className="text-(length:--text-count) uppercase tracking-(--tracking-label) text-foreground-muted">
+        <span className="text-(length:--text-count) tracking-(--tracking-label) text-foreground-muted">
           {values.length}
         </span>
       </div>
+      {description ? (
+        <div className="max-w-[70ch]">
+          <ProfileFieldHint>{description}</ProfileFieldHint>
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-[minmax(0,1fr)_5rem] gap-3">
         <Input
@@ -136,8 +144,9 @@ export function ProfileListEditor({
           value={draft}
         />
         <Button
-          className="h-11 w-full px-0"
+          className="w-full px-0"
           disabled={!draft.trim()}
+          size="field"
           onClick={addValue}
           type="button"
           variant="secondary"
@@ -146,20 +155,23 @@ export function ProfileListEditor({
         </Button>
       </div>
 
+      {/* An empty list is one quiet line, not an empty box. */}
       <div
         className={cn(
-          "rounded-(--radius-field) border border-border/70 bg-(--surface-overlay-list) p-3",
-          displayMode === "chips"
-            ? "flex flex-wrap content-start items-start gap-2"
-            : "grid content-start gap-2",
+          values.length === 0
+            ? "flex items-start pt-1"
+            : displayMode === "chips"
+              ? "flex flex-wrap content-start items-start gap-2 pt-1"
+              : "grid content-start gap-2 pt-1",
           traySizingClassName,
         )}
+        data-profile-list-tray={values.length === 0 ? "empty" : "filled"}
       >
         {values.map((value) =>
           displayMode === "chips" ? (
             <div
               key={`${label}_${value}`}
-              className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-(--border) bg-(--surface-fill-chip) px-3 py-2 text-(length:--text-item) text-foreground-soft"
+              className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-(--surface-panel-border) bg-(--surface-fill-chip) py-1 pl-3 pr-1 text-(length:--text-item) text-foreground"
               title={value}
             >
               <span className="min-w-0 whitespace-normal break-words">
@@ -167,13 +179,14 @@ export function ProfileListEditor({
               </span>
               <button
                 aria-label={`Remove ${value}`}
-                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-(length:--text-icon-small) leading-none text-muted-foreground transition-colors hover:bg-(--surface-panel) hover:text-foreground"
+                // A 24px mark with a 32px target around it.
+                className="relative inline-flex size-6 shrink-0 items-center justify-center rounded-full text-(length:--text-icon-small) leading-none text-muted-foreground outline-none transition-colors before:absolute before:-inset-1 before:content-[''] hover:bg-(--surface-panel) hover:text-foreground focus-ring"
                 onClick={() =>
                   updateValues(values.filter((entry) => entry !== value))
                 }
                 type="button"
               >
-                <X aria-hidden className="size-3" />
+                <X aria-hidden className="size-3.5" />
               </button>
             </div>
           ) : (
@@ -187,7 +200,7 @@ export function ProfileListEditor({
                 </span>
                 <button
                   aria-label={`Remove ${value}`}
-                  className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-(length:--text-icon-small) leading-none text-muted-foreground transition-colors hover:bg-(--surface-panel) hover:text-foreground"
+                  className="-my-1.5 -mr-2 inline-flex size-8 shrink-0 items-center justify-center rounded-full text-(length:--text-icon-small) leading-none text-muted-foreground outline-none transition-colors hover:bg-(--surface-panel) hover:text-foreground focus-ring"
                   onClick={() =>
                     updateValues(values.filter((entry) => entry !== value))
                   }
@@ -201,7 +214,7 @@ export function ProfileListEditor({
         )}
 
         {values.length === 0 ? (
-          <p className="m-auto px-4 py-2 text-center text-(length:--text-description) leading-6 text-foreground-muted">
+          <p className="text-(length:--text-description) leading-5 text-foreground-muted">
             {emptyMessage}
           </p>
         ) : null}

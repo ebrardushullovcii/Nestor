@@ -12,6 +12,12 @@ interface ToggleFieldProps {
   onCheckedChange: (checked: boolean) => void;
 }
 
+/**
+ * One settings row: the label and its help on the left at a reading measure,
+ * the switch on the right. Rows are plain and separated by one hairline, so a
+ * section is never a card of cards; a list of rows draws the rule between
+ * them (`border-t` on every row after the first).
+ */
 export function ToggleField({
   checked,
   className,
@@ -27,39 +33,41 @@ export function ToggleField({
   return (
     <div
       className={cn(
-        "surface-card-tint grid min-w-0 content-start gap-(--gap-field) h-full rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4",
+        // The switch sits at the end of the text's reading measure, not
+        // across a wide empty middle at the pane's far edge.
+        "grid min-w-0 grid-cols-[minmax(0,70ch)_auto] items-start justify-start gap-x-6 gap-y-1 border-t border-(--surface-panel-border) py-3 first:border-t-0 first:pt-0 last:pb-0",
         disabled && "opacity-50",
         className,
       )}
+      data-settings-row
     >
-      {/* A switch's label is a sentence, not a form-field caption: the
-          uppercase field label made it read as a section eyebrow. */}
-      <label
-        className="text-(length:--text-body) font-semibold leading-5 text-foreground"
-        htmlFor={switchId}
-      >
-        {label}
-      </label>
-      <div className="flex min-w-0 flex-1 items-start justify-between gap-4">
+      <div className="grid min-w-0 max-w-[70ch] gap-0.5">
+        <label
+          className="text-(length:--text-body) font-medium leading-5 text-foreground"
+          htmlFor={switchId}
+        >
+          {label}
+        </label>
         <span
+          className="text-(length:--text-small) leading-5 text-foreground-soft"
           id={descriptionId}
-          className="min-w-0 text-(length:--text-small) leading-5 text-muted-foreground"
         >
           <span className="block">{description}</span>
           {hint ? (
-            <span className="mt-2 block text-(length:--text-tiny) leading-5">
+            <span className="mt-1 block text-(length:--text-tiny) leading-4 text-foreground-muted">
               {hint}
             </span>
           ) : null}
         </span>
-        <Switch
-          id={switchId}
-          checked={checked}
-          disabled={disabled}
-          onCheckedChange={onCheckedChange}
-          aria-describedby={descriptionId}
-        />
       </div>
+      <Switch
+        aria-describedby={descriptionId}
+        checked={checked}
+        className="mt-0.5"
+        disabled={disabled}
+        id={switchId}
+        onCheckedChange={onCheckedChange}
+      />
     </div>
   );
 }

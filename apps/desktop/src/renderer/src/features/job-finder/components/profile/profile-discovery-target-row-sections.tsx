@@ -47,7 +47,7 @@ export function DiscoveryTargetFormFields(
     <>
       <div className="grid gap-(--gap-content) md:col-span-2 lg:grid-cols-2 lg:items-start">
         <div className="grid h-full min-w-0 content-start gap-(--gap-field)">
-          <FieldLabel htmlFor={labelId}>Source name</FieldLabel>
+          <FieldLabel htmlFor={labelId}>Site name</FieldLabel>
           <ProfileInput
             id={labelId}
             onChange={onLabelChange}
@@ -69,7 +69,7 @@ export function DiscoveryTargetFormFields(
           </p>
         </div>
         <div className="grid h-full min-w-0 content-start gap-(--gap-field) lg:col-start-2 lg:row-span-2 lg:row-start-1">
-          <FieldLabel htmlFor={instructionsId}>Source notes</FieldLabel>
+          <FieldLabel htmlFor={instructionsId}>Site notes</FieldLabel>
           <ProfileTextarea
             className="min-h-(--textarea-tall)"
             id={instructionsId}
@@ -82,7 +82,7 @@ export function DiscoveryTargetFormFields(
         <div className="grid gap-2 lg:col-start-2">
           <CheckboxField
             checked={targetEnabled}
-            label="Include this source in searches"
+            label="Include this site in searches"
             onCheckedChange={onToggleEnabled}
           />
           <p

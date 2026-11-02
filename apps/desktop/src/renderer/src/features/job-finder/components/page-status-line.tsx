@@ -405,7 +405,7 @@ export function PageStatusLine(props: {
               focus, so hiding an item costs no room on the line. */}
           <button
             aria-label={`Hide for now: ${item.text}`}
-            className="-ml-1.5 inline-flex h-6 w-0 shrink-0 items-center justify-center overflow-hidden rounded-(--radius-small) text-foreground-muted opacity-0 outline-none hover:bg-secondary hover:text-foreground focus-visible:ml-0 focus-visible:w-6 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover/status-item:ml-0 group-hover/status-item:w-6 group-hover/status-item:opacity-100"
+            className="-ml-1.5 inline-flex h-6 w-0 shrink-0 items-center justify-center overflow-hidden rounded-(--radius-small) text-foreground-muted opacity-0 outline-none hover:bg-secondary hover:text-foreground focus-visible:ml-0 focus-visible:w-6 focus-visible:opacity-100 focus-ring group-hover/status-item:ml-0 group-hover/status-item:w-6 group-hover/status-item:opacity-100"
             data-page-status-hide
             onClick={() => hideItem(item.id)}
             type="button"

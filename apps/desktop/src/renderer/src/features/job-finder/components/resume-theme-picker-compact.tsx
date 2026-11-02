@@ -80,7 +80,7 @@ function CompactVariantCard(props: {
       className={cn(
         "grid gap-2 rounded-(--radius-field) border px-3 py-2.5 transition-[border-color,background-color,box-shadow]",
         selected
-          ? "border-primary/38 bg-primary/8 shadow-[inset_0_1px_0_var(--focus-inset-highlight)]"
+          ? "border-primary/38 bg-primary/8 selected-bar"
           : "border-(--surface-panel-border) bg-background/45",
       )}
     >

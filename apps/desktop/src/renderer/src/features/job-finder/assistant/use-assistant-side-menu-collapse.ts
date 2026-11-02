@@ -1,11 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 /** Below this much page width beside it, the assistant switches to page/chat. */
 export const ASSISTANT_NARROW_CONTENT_MIN_WIDTH = 520;
-/** The side menu only shows as a rail from this window width. */
-export const SIDE_MENU_RAIL_MIN_WIDTH = 1440;
-/** The expanded side menu (17rem). */
-const EXPANDED_SIDE_MENU_WIDTH = 272;
+/**
+ * The sidebar can be expanded from this window width; below it the shell
+ * always shows the icon rail, so there is nothing to fold.
+ */
+export const SIDE_MENU_RAIL_MIN_WIDTH = 1200;
+/** The expanded side menu (13.5rem). */
+const EXPANDED_SIDE_MENU_WIDTH = 216;
 
 function useWindowWidth(): number {
   const [width, setWidth] = useState(() =>
@@ -55,7 +64,9 @@ export function useAssistantSideMenuCollapse(input: {
     windowWidth - EXPANDED_SIDE_MENU_WIDTH - assistantWidth >=
     ASSISTANT_NARROW_CONTENT_MIN_WIDTH;
 
-  useEffect(() => {
+  // Before paint, in the frame the assistant docks or leaves: the menu folds
+  // and opens on the same timing as the panel slides, never a frame ahead.
+  useLayoutEffect(() => {
     if (!assistantOpen || !enabled) {
       if (!assistantOpen) personToggledWhileOpen.current = false;
       if (foldedByAssistant.current) {

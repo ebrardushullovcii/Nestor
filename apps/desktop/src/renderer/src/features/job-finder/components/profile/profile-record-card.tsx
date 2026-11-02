@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Badge } from "@renderer/components/ui/badge";
 import { cn } from "@renderer/lib/cn";
 
@@ -56,32 +56,28 @@ export function ProfileRecordCard({
       }}
       open={isOpen}
     >
+      {/* The shared disclosure's summary: a leading chevron on the title's
+          first line that turns a quarter on open, the same focus ring and
+          hover, the whole row the target. */}
       <summary
-        className="flex items-start justify-between gap-3 list-none cursor-pointer"
+        className="-m-1 flex cursor-pointer list-none items-start gap-1.5 rounded-(--radius-button) p-1 outline-none select-none focus-ring"
+        data-slot="disclosure-summary"
         // Mount the fields on the press itself, before the toggle event, so
         // the opened card paints with its fields in the same frame.
         onClick={() => setHasOpened(true)}
       >
-        <span className="grid gap-1 min-w-0">
-          <span className="text-[0.96rem] font-semibold text-(--text-headline)">
+        <ChevronRight
+          aria-hidden="true"
+          className="mt-1 size-4 shrink-0 text-foreground-soft opacity-75 transition-transform duration-(--duration-base) ease-(--ease-standard) [details[open]>summary>&]:rotate-90"
+        />
+        <span className="grid min-w-0 gap-1">
+          <span className="text-base font-semibold text-(--text-headline)">
             {title}
           </span>
           {statusLabel ? <Badge variant="status">{statusLabel}</Badge> : null}
-          <span className="text-(length:--text-description) leading-6 text-foreground-muted">
+          <span className="text-(length:--text-description) leading-5 text-foreground-muted">
             {detailSummary}
           </span>
-        </span>
-
-        {/* Visual affordance only: the native <details> element already
-            exposes expanded/collapsed state, and an always-flipping
-            "Expand"/"Collapse" label inside <summary> would make the
-            accessible name unstable for screen readers. */}
-        <span
-          aria-hidden="true"
-          className="inline-flex items-center gap-1 rounded-full border border-(--surface-well-border) bg-(--surface-well) px-2.5 py-1 text-(length:--text-tiny) font-medium uppercase tracking-(--tracking-mono) text-foreground-muted transition-transform group-open:[&_svg]:rotate-180"
-        >
-          <ChevronDown className="size-3 transition-transform duration-200" />
-          <span>{isOpen ? "Collapse" : "Expand"}</span>
         </span>
       </summary>
 

@@ -1,10 +1,12 @@
+import { Disclosure } from "@renderer/components/ui/disclosure";
 import {
   AlertCircle,
   ArrowRight,
-  CheckCircle2,
+  Check,
   FolderOpen,
+  Upload,
 } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type DragEvent } from "react";
 import type {
   ProfileSetupReviewActionOptions,
   ProfileSetupState,
@@ -45,6 +47,11 @@ import {
   isOptionalPendingReviewItem,
 } from "./profile-setup-screen-helpers";
 
+/** Whether a drag carries files (not text or a link from the page). */
+function hasFiles(event: DragEvent<HTMLElement>): boolean {
+  return [...event.dataTransfer.types].includes("Files");
+}
+
 function formatConfidence(confidence: number): string {
   return `${Math.round(confidence * 100)}% confidence`;
 }
@@ -84,10 +91,13 @@ export function ProfileSetupSummaryCards(props: {
   resumeImportProgress: ResumeImportProgressEvent | null;
   hasImportedResume: boolean;
   onImportResume: () => void;
+  /** Imports a file dropped on the import card, without the picker. */
+  onDropResume?: (file: File) => void;
   onStartManually: () => void;
   profileSetupState: ProfileSetupState;
 }) {
   const importDisabledReasonId = useId();
+  const [isDraggingResume, setDraggingResume] = useState(false);
   // The import control mirrors the shared Button pending contract: in-flight
   // work keeps it focusable via aria-disabled/aria-busy with guarded
   // activation, while a hard import guard (no workspace write access,
@@ -100,6 +110,10 @@ export function ProfileSetupSummaryCards(props: {
     props.isImportResumePending || props.isProfileSetupPending;
   const isManualControlLocked = props.isProfileSetupPending;
   const isImportDisabledByReason = Boolean(props.importDisabledReason);
+  const canDropResume =
+    Boolean(props.onDropResume) &&
+    !isImportControlLocked &&
+    !isImportDisabledByReason;
   const isPristine =
     props.profileSetupState.status === "not_started" &&
     !props.hasImportedResume;
@@ -109,7 +123,7 @@ export function ProfileSetupSummaryCards(props: {
       <Card className="min-w-0 overflow-hidden border-(--surface-panel-border) bg-(--surface-panel)">
         <CardHeader className="gap-3 border-b border-border/30 pb-5">
           <CardTitle>Start with the resume you already have.</CardTitle>
-          <CardDescription className="max-w-2xl">
+          <CardDescription className="max-w-[70ch]">
             Job Finder fills in your profile from it and asks only about the
             gaps. The file stays on this device. The text read from it is sent
             to Job Finder&apos;s AI to fill in your profile; nothing is sent
@@ -142,51 +156,85 @@ export function ProfileSetupSummaryCards(props: {
             </div>
           ) : null}
           <div className="grid items-stretch gap-3 sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-            <button
-              // F49: this card was `bg-foreground text-background`, which in
-              // dark mode paints a ~650x195px near-white slab carrying a
-              // near-black CTA - the exact inverse of the primary treatment
-              // the user learns everywhere else, and the lowest-contrast text
-              // measured in either theme. It now uses the app's own primary
-              // accent on the normal surface, so the recommended path reads as
-              // recommended without inverting the theme.
-              className="group flex h-full flex-col rounded-(--radius-field) border border-primary/45 bg-primary/10 p-5 text-left transition-colors hover:border-primary hover:bg-primary/15"
-              data-profile-setup-import-path
-              aria-busy={props.isImportResumePending || undefined}
-              aria-describedby={
-                isImportDisabledByReason ? importDisabledReasonId : undefined
+            <div
+              // The recommended path: a real drop target around a real
+              // button. Dropping a file imports it without the picker; the
+              // button still opens the picker for people who never drag.
+              className={cn(
+                "flex h-full flex-col items-start rounded-(--radius-panel) border-2 border-dashed p-5 transition-colors duration-(--duration-fast)",
+                isDraggingResume
+                  ? "border-primary bg-accent-tint"
+                  : "border-(--control-border) bg-(--surface-well)",
+              )}
+              data-profile-setup-drop-zone={
+                isDraggingResume ? "active" : "idle"
               }
-              aria-disabled={isImportControlLocked || undefined}
-              disabled={isImportDisabledByReason && !isImportControlLocked}
-              onClick={(event) => {
-                if (isImportControlLocked) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  return;
-                }
-                props.onImportResume();
+              onDragEnter={(event) => {
+                if (!canDropResume || !hasFiles(event)) return;
+                event.preventDefault();
+                setDraggingResume(true);
               }}
-              type="button"
+              onDragLeave={(event) => {
+                if (event.currentTarget.contains(event.relatedTarget as Node))
+                  return;
+                setDraggingResume(false);
+              }}
+              onDragOver={(event) => {
+                if (!canDropResume || !hasFiles(event)) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDraggingResume(false);
+                const file = event.dataTransfer.files[0];
+                if (canDropResume && file && props.onDropResume)
+                  props.onDropResume(file);
+              }}
             >
-              <span className="sr-only">Recommended. </span>
-              <span className="inline-flex w-fit items-center gap-2 rounded-(--radius-button) border border-primary-fill bg-primary-fill px-4 py-2 font-semibold text-primary-fill-foreground shadow-[0_1px_0_var(--surface-inset-highlight)] group-hover:bg-primary-fill/90">
-                <FolderOpen className="size-4 shrink-0" />
+              <span className="flex items-center gap-2 text-(length:--text-body) font-semibold text-(--text-headline)">
+                <Upload aria-hidden className="size-4 text-primary" />
+                {isDraggingResume
+                  ? "Drop it to import"
+                  : "Drop your resume here"}
+              </span>
+              <span className="mt-1 text-sm text-foreground-soft">
+                or choose it from your files.
+              </span>
+              <button
+                className="mt-4 inline-flex min-h-9 w-fit items-center gap-2 rounded-(--radius-button) bg-primary-fill px-4 py-2 text-sm font-medium text-primary-fill-foreground transition-colors duration-(--duration-fast) hover:bg-(--primary-fill-hover) focus-ring disabled:cursor-not-allowed disabled:opacity-60"
+                data-profile-setup-import-path
+                aria-busy={props.isImportResumePending || undefined}
+                aria-describedby={
+                  isImportDisabledByReason ? importDisabledReasonId : undefined
+                }
+                aria-disabled={isImportControlLocked || undefined}
+                disabled={isImportDisabledByReason && !isImportControlLocked}
+                onClick={(event) => {
+                  if (isImportControlLocked) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    return;
+                  }
+                  props.onImportResume();
+                }}
+                type="button"
+              >
+                <span className="sr-only">Recommended. </span>
+                <FolderOpen aria-hidden className="size-4 shrink-0" />
                 {props.isImportResumePending
                   ? props.resumeImportProgress === null
                     ? "File browser open…"
                     : "Importing resume…"
                   : "Choose my resume file"}
-              </span>
-              <span className="mt-3 block text-sm leading-6 text-foreground-soft">
+              </button>
+              <span className="mt-4 block max-w-[70ch] text-sm leading-6 text-foreground-soft">
                 PDF, DOCX, TXT, or Markdown. You review everything before it is
-                used.
+                used. Scanned image PDFs have no readable text.
               </span>
-              <span className="mt-1 block text-(length:--text-small) leading-5 text-foreground-muted">
-                Scanned image PDFs have no readable text.
-              </span>
-            </button>
+            </div>
             <button
-              className="group flex h-full flex-col rounded-(--radius-field) border border-(--control-border) bg-(--surface-panel) p-5 text-left transition-colors hover:border-(--control-border-hover) hover:bg-secondary/35"
+              className="group flex h-full flex-col rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-panel) p-5 text-left transition-colors duration-(--duration-fast) hover:bg-secondary/35 focus-ring"
               data-profile-setup-manual-path
               aria-busy={props.isProfileSetupPending || undefined}
               aria-disabled={isManualControlLocked || undefined}
@@ -211,7 +259,7 @@ export function ProfileSetupSummaryCards(props: {
               </span>
               {/* Both paths carry a real button face; a text link beside a
                   filled card made the second path read as an afterthought. */}
-              <span className="mt-auto inline-flex w-fit items-center gap-1.5 rounded-(--radius-button) border border-(--border-strong) bg-background px-4 py-2 pt-2 text-sm font-semibold text-foreground group-hover:bg-secondary/50">
+              <span className="mt-auto inline-flex min-h-9 w-fit items-center gap-1.5 rounded-(--radius-button) border border-(--control-border) bg-(--surface-panel) px-4 py-2 text-sm font-medium text-foreground group-hover:bg-secondary/50">
                 {props.isImportResumePending &&
                 props.resumeImportProgress !== null
                   ? "Stop import and start manually"
@@ -238,11 +286,11 @@ export function ProfileSetupSummaryCards(props: {
               scale in the softest text colour, which made the one list that
               explains the whole flow the least legible block on the screen.
               It reads at the body scale in the body colour now. */}
-          <div className="rounded-(--radius-field) border border-border/25 bg-background/60 p-4">
+          <div className="border-t border-(--surface-panel-border) pt-5">
             <p className="text-(length:--text-body) font-semibold text-(--text-headline)">
               What guided setup will ask for
             </p>
-            <ul className="mt-2 grid list-none gap-1.5 p-0 text-(length:--text-body) leading-7 text-foreground">
+            <ul className="mt-2 grid max-w-prose list-disc gap-1 pl-5 text-(length:--text-body) leading-6 text-foreground">
               <li>Your resume, or the same details entered by hand.</li>
               <li>At least one contact method, such as an email address.</li>
               <li>
@@ -254,7 +302,7 @@ export function ProfileSetupSummaryCards(props: {
                 job board you already browse.
               </li>
             </ul>
-            <p className="mt-3 border-t border-border/25 pt-3 text-(length:--text-body) leading-7 text-foreground">
+            <p className="mt-3 max-w-[70ch] text-sm leading-6 text-foreground-soft">
               Five short steps, saved as you go. Stop after any step and pick up
               later.
             </p>
@@ -310,7 +358,11 @@ export function ProfileSetupPathCard(props: {
       className="min-w-0"
       data-profile-setup-stepper
     >
-      <ol className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+      {/* The shared underline-tab idiom: the current step is the one accent
+          underline; a finished step shows a check; a step with required
+          input left shows one amber dot. Nothing else is boxed, so two steps
+          can never both look current. */}
+      <ol className="m-0 flex list-none flex-wrap gap-x-1 border-b border-(--border-subtle) p-0">
         {profileSetupStepDefinitions.map((step, index) => {
           const isActive = props.currentStep === step.id;
           const stepReviewItems = (
@@ -350,10 +402,23 @@ export function ProfileSetupPathCard(props: {
                 setupStatus: props.profileSetupState.status,
                 stepId: step.id,
               }));
-          const stateBadge =
-            awaitingImportedReview &&
-            !hasUnsavedChanges &&
-            requiredSetupItemCount === 0
+          // The manual path never imports. Once setup has moved past Import,
+          // that step is settled, not open: it shows a quiet check and says
+          // it was skipped, so the manual path's first step looks as finished
+          // as the import path's without claiming a resume was read.
+          const isSkippedImport =
+            step.id === "import" &&
+            !props.hasImportedResume &&
+            !isActive &&
+            (props.profileSetupState.status === "completed" ||
+              profileSetupStepDefinitions.findIndex(
+                (entry) => entry.id === props.currentStep,
+              ) > index);
+          const stateBadge = isSkippedImport
+            ? { label: "Skipped", variant: "outline" as const }
+            : awaitingImportedReview &&
+                !hasUnsavedChanges &&
+                requiredSetupItemCount === 0
               ? { label: "Ready to review", variant: "outline" as const }
               : hasUnsavedChanges
                 ? { label: "Unsaved changes", variant: "outline" as const }
@@ -391,12 +456,22 @@ export function ProfileSetupPathCard(props: {
               <button
                 aria-current={isActive ? "step" : undefined}
                 className={cn(
-                  "inline-flex min-h-9 max-w-full items-center gap-2 rounded-(--radius-field) border px-2.5 py-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60",
+                  "relative inline-flex min-h-10 max-w-full items-center gap-2 rounded-t-(--radius-small) px-3 py-2 text-left text-sm transition-colors duration-(--duration-fast) focus-visible:outline-none focus-ring disabled:cursor-not-allowed disabled:opacity-60",
+                  "after:absolute after:inset-x-2 after:-bottom-px after:h-0.5 after:rounded-full",
                   isActive
-                    ? "border-primary bg-accent text-(--text-headline) shadow-[inset_0_-2px_0_var(--primary)]"
-                    : "border-border/30 bg-background/50 text-foreground-soft hover:border-border hover:bg-secondary/35 hover:text-foreground",
+                    ? "font-medium text-(--text-headline) after:bg-primary"
+                    : "text-foreground-soft after:bg-transparent hover:bg-secondary/40 hover:text-foreground",
                 )}
                 data-profile-setup-stepper-step={step.id}
+                data-step-state={
+                  isActive
+                    ? "current"
+                    : isComplete || isSkippedImport
+                      ? "done"
+                      : stateBadge?.variant === "status"
+                        ? "needs-input"
+                        : "todo"
+                }
                 disabled={props.disabled}
                 onClick={() => props.onGoToStep(step.id)}
                 title={step.summary}
@@ -405,27 +480,41 @@ export function ProfileSetupPathCard(props: {
                 <span
                   aria-hidden
                   className={cn(
-                    "inline-flex size-5 shrink-0 items-center justify-center rounded-full border text-(length:--text-tiny) font-semibold",
+                    "inline-flex size-5 shrink-0 items-center justify-center rounded-full text-xs tabular-nums",
                     isComplete
-                      ? "border-transparent bg-(--success-surface,transparent) text-(--success-text,inherit)"
-                      : isActive
-                        ? "border-primary text-(--text-headline)"
-                        : "border-border/50 text-foreground-muted",
+                      ? "text-(--success-text)"
+                      : isSkippedImport
+                        ? "text-foreground-muted"
+                        : isActive
+                          ? "bg-primary text-primary-foreground"
+                          : "border border-(--border-subtle) text-foreground-muted",
                   )}
                 >
-                  {isComplete ? <CheckCircle2 className="size-4" /> : index + 1}
+                  {isComplete || isSkippedImport ? (
+                    <Check className="size-4" />
+                  ) : (
+                    index + 1
+                  )}
                 </span>
-                <span className="truncate text-sm font-medium">
-                  {step.label}
-                </span>
-                {/* The numbered circle already turns into a check, so a second
-                    "Complete" chip only widened the chip and reflowed the
+                <span className="truncate">{step.label}</span>
+                {/* The number already turns into a check, so a second
+                    "Complete" chip only widened the step and reflowed the
                     whole stepper (and the page under it) on every advance. */}
                 {isComplete ? <span className="sr-only">Complete</span> : null}
-                {stateBadge ? (
-                  <Badge className="shrink-0" variant={stateBadge.variant}>
+                {stateBadge?.variant === "status" ? (
+                  // Required input left: one amber dot. The footer names
+                  // exactly what is missing; the words stay for assistive tech.
+                  <>
+                    <span
+                      aria-hidden
+                      className="size-2 shrink-0 rounded-full bg-(--warning-text)"
+                    />
+                    <span className="sr-only">{stateBadge.label}</span>
+                  </>
+                ) : stateBadge ? (
+                  <span className="shrink-0 text-xs text-foreground-muted">
                     {stateBadge.label}
-                  </Badge>
+                  </span>
                 ) : null}
               </button>
             </li>
@@ -527,7 +616,7 @@ export function ProfileSetupReviewQueueCard(props: {
 
   return (
     <Card
-      className="min-h-0 flex-1 overflow-hidden rounded-(--radius-panel) border-border/40 scroll-mt-4 sm:scroll-mt-[8.25rem] xl:scroll-mt-[4.5rem]"
+      className="min-h-0 flex-1 overflow-hidden rounded-(--radius-panel) border-border/40 scroll-mt-4 sm:scroll-mt-[4rem] xl:scroll-mt-[4rem]"
       id="profile-setup-review-queue"
       tabIndex={-1}
     >
@@ -624,7 +713,7 @@ export function ProfileSetupReviewQueueCard(props: {
                       </div>
                       {item.status === "pending" && savedValue ? (
                         <div className="mt-3 rounded-(--radius-field) border border-border/40 bg-background/70 p-3">
-                          <p className="text-(length:--text-tiny) uppercase tracking-[0.2em] text-muted-foreground">
+                          <p className="text-(length:--text-tiny) text-muted-foreground">
                             Currently saved
                           </p>
                           <p className="mt-2 text-sm text-foreground">
@@ -634,7 +723,7 @@ export function ProfileSetupReviewQueueCard(props: {
                       ) : null}
                       {item.status === "pending" && item.proposedValue ? (
                         <div className="mt-3 rounded-(--radius-field) border border-dashed border-border/40 bg-background/70 p-3">
-                          <p className="text-(length:--text-tiny) uppercase tracking-[0.2em] text-muted-foreground">
+                          <p className="text-(length:--text-tiny) text-muted-foreground">
                             Suggested value
                           </p>
                           <p className="mt-2 text-sm text-foreground">
@@ -645,7 +734,7 @@ export function ProfileSetupReviewQueueCard(props: {
                       {(linkedCandidate?.conflictChoices?.length ?? 0) >= 2 ? (
                         <div className="mt-3 rounded-(--radius-field) border border-(--surface-panel-border) p-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-(length:--text-tiny) uppercase tracking-[0.2em] text-(--warning-text)">
+                            <p className="text-(length:--text-tiny) text-(--warning-text)">
                               Import comparison
                             </p>
                             {conflictLabel ? (
@@ -677,7 +766,7 @@ export function ProfileSetupReviewQueueCard(props: {
                                           ? "Recommended"
                                           : "Alternative"}
                                       </Badge>
-                                      <span className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                                      <span className="text-xs font-medium text-muted-foreground">
                                         {choice.sourceLabel}
                                       </span>
                                       <span className="text-xs text-muted-foreground">
@@ -829,13 +918,14 @@ export function ProfileSetupReviewQueueCard(props: {
                     {cards}
                   </div>
                 ) : items.length > 0 ? (
-                  <details className="md:col-span-2" key="optional">
-                    <summary className="cursor-pointer text-sm font-medium">
-                      {items.length} optional suggestion
-                      {items.length === 1 ? "" : "s"}
-                    </summary>
-                    <div className="mt-3 grid gap-3">{cards}</div>
-                  </details>
+                  <Disclosure
+                    className="md:col-span-2"
+                    contentClassName="pt-3 grid gap-3"
+                    key="optional"
+                    summary={`${items.length} optional suggestion${items.length === 1 ? "" : "s"}`}
+                  >
+                    {cards}
+                  </Disclosure>
                 ) : null;
               })}
             </div>

@@ -1,9 +1,17 @@
+import { cn } from "@renderer/lib/cn";
 import type {
   JobSelectionInput,
   ShortlistedPage,
   ShortlistedRow,
 } from "@nestor/contracts";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Button } from "@renderer/components/ui/button";
@@ -20,19 +28,25 @@ import {
   ListPane,
   ListRowFrame,
   NO_SELECTION,
+  clearSelected,
+  CountFigure,
+  countText,
   plural,
-  selectAll,
+  stepSelectAll,
   toggleSelection,
+  useDetailSheet,
   useListKeys,
   useSelectAllCount,
   useStoreList,
   type ListRowState,
   type ListSelection,
+  besideList,
 } from "@renderer/features/job-lists";
 
 import {
   APPLICATION_BADGE,
   describeResume,
+  LEVEL_HINT,
   LEVEL_LABEL,
 } from "./resume-format";
 import { ResumePane } from "./resume-pane";
@@ -40,6 +54,7 @@ import { describeError, useResume } from "./use-resume";
 import { ListEmpty } from "../job-lists/list-empty";
 import { useAssistantListView } from "../job-lists/use-assistant-list-view";
 import { useEffectWhileKeptRouteShown } from "../job-finder/lib/kept-route-visibility";
+import { applyFailureLine } from "../applications/apply-failure";
 
 type Tab = "shortlisted" | "resume";
 
@@ -64,6 +79,24 @@ export function ShortlistedScreen() {
   );
   const [text, setText] = useState("");
   const [activeId, setActiveId] = useState<number | null>(null);
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+  // The paper needs its width: beside a narrowed list where the split can
+  // give it complete lines at a readable scale, and as a sheet over the list
+  // where it cannot (1024 wide, or beside the docked assistant).
+  const reading = useReadingLayout();
+  const sheet = useDetailSheet({ always: reading.sheet });
+  // The window narrows (or the assistant docks) while a resume is read
+  // beside the list: the resume stays in front, now as the sheet.
+  const readingWas = useRef<boolean | null>(null);
+  const { setOpen: setSheetOpen } = sheet;
+  useEffect(() => {
+    if (!reading.measured) return;
+    const was = readingWas.current;
+    readingWas.current = reading.sheet;
+    if (was === false && reading.sheet && activeIdRef.current !== null)
+      setSheetOpen(true);
+  }, [reading.measured, reading.sheet, setSheetOpen]);
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const [busy, setBusy] = useState<"approve" | "apply" | "move" | null>(null);
   const approvalPending = useRef(false);
@@ -88,8 +121,13 @@ export function ShortlistedScreen() {
     refreshOn: (change) =>
       change.stages.includes("shortlisted") || change.stages.includes("resume"),
   });
-  const { selectedCount, counting, totalCapped } = useSelectAllCount({
-    key: JSON.stringify([tab, text]),
+  const {
+    selectedCount,
+    counting,
+    total: matching,
+    totalCapped,
+  } = useSelectAllCount({
+    key: JSON.stringify([tab, text, list.counts[tab]]),
     selection,
     total: list.total,
     totalCapped: list.totalCapped,
@@ -101,14 +139,24 @@ export function ShortlistedScreen() {
   const selectedText = `${selectedCount.toLocaleString()}${
     totalCapped && selection.all ? "+" : ""
   }`;
+  // Ticked resumes still being written cannot be approved yet. Counted over
+  // explicit ticks (every ticked row is loaded); "all matching" is checked
+  // when it runs, and those still writing stay in To review.
+  const stillWriting =
+    tab === "shortlisted" && !selection.all
+      ? list.rows.filter(
+          (row) => selection.ids.has(row.id) && row.resume?.state !== "ready",
+        ).length
+      : 0;
+  const approvable = selection.all
+    ? selectedCount
+    : Math.max(0, selectedCount - stillWriting);
 
   // Arriving with nothing to review while approved jobs wait opens Approved,
   // where the jobs are. A link, a tab or an Assistant view chooses for itself.
   const [arriving, setArriving] = useState(false);
   const choosesTab =
-    requestedApproved ||
-    searchParams.has("jobId") ||
-    searchParams.has("jobs");
+    requestedApproved || searchParams.has("jobId") || searchParams.has("jobs");
   useEffectWhileKeptRouteShown(() => {
     if (!choosesTab) setArriving(true);
   }, [choosesTab, navigationKey]);
@@ -138,9 +186,10 @@ export function ShortlistedScreen() {
     });
   }, [linkedJob, navigationKey]);
 
-  // A new list starts with nothing ticked and its first (or linked) job open.
+  // A new list starts with nothing ticked (still in select mode, if it was)
+  // and its first (or linked) job open.
   useEffect(() => {
-    setSelection(NO_SELECTION);
+    setSelection(clearSelected);
     setActiveId(pinnedId.current);
     pinnedId.current = null;
   }, [tab, text]);
@@ -252,6 +301,20 @@ export function ShortlistedScreen() {
     );
   }, []);
 
+  /**
+   * An action that empties a filtered list takes the filter away too: the
+   * person is never left on "No job matches" while jobs still wait here.
+   */
+  const clearFilterIfEmptied = useCallback((gone: (id: number) => boolean) => {
+    const { list, text } = latest.current;
+    if (
+      text.trim() !== "" &&
+      list.nextCursor === null &&
+      list.rows.every((row) => gone(row.id))
+    )
+      setText("");
+  }, []);
+
   /** Approves the open resume, or the ticked ones, and opens the next. */
   const approve = useCallback(async () => {
     const { activeId, view, selection, tab, text, busy } = latest.current;
@@ -317,6 +380,7 @@ export function ShortlistedScreen() {
       latest.current.list.removeRows((id) => gone.has(id));
       setActiveId(next?.id ?? null);
       setSelection(NO_SELECTION);
+      clearFilterIfEmptied((id) => gone.has(id));
       setBusy(null);
       approvalPending.current = false;
       if (approved.length > 0)
@@ -327,9 +391,51 @@ export function ShortlistedScreen() {
               ? `Approved ${view.job?.title ?? "the resume"}`
               : `Approved ${plural(approved.length, "resume")}`,
           description: "Apply can take it now, from Approved.",
+          tone: "success",
         });
     }
-  }, [nextAfter, showToast]);
+  }, [clearFilterIfEmptied, nextAfter, showToast]);
+
+  // Jobs this screen just sent to Apply: if Apply fails one before it is
+  // sent, the "Applying to…" toast is replaced by the failure, naming the
+  // job, wherever the person is in the app.
+  const applyWatch = useRef(new Set<number>());
+  useEffect(() => {
+    // Absent where only resumes are bridged (some screen tests).
+    const jobFinder = (window.nestor as Partial<typeof window.nestor>)
+      .jobFinder;
+    if (!jobFinder) return undefined;
+    return jobFinder.onApplicationsChange((change) => {
+      const watched = [...applyWatch.current].filter(
+        (id) => change.ids === null || change.ids.includes(id),
+      );
+      if (watched.length === 0) return;
+      void jobFinder
+        .applicationsForJobs({ jobIds: watched })
+        .then((rows) => {
+          const failed = rows.filter((row) => row.state === "failed");
+          for (const row of rows)
+            if (!["queued", "running"].includes(row.state))
+              applyWatch.current.delete(row.jobId);
+          const first = failed[0];
+          if (!first) return;
+          showToast({
+            id: "shortlisted-apply",
+            title:
+              failed.length === 1
+                ? `Couldn’t apply to ${first.title}${first.company ? ` at ${first.company}` : ""}`
+                : `Couldn’t apply to ${plural(failed.length, "job")}`,
+            description:
+              failed.length === 1
+                ? `${applyFailureLine(first.error)} It’s marked in Approved, with Try again.`
+                : "Nothing was sent. They’re marked in Approved, with Try again.",
+            tone: "warning",
+            duration: 15_000,
+          });
+        })
+        .catch(() => undefined);
+    });
+  }, [showToast]);
 
   /**
    * Applies the ticked jobs or the open one, every matching approved job, or
@@ -355,6 +461,19 @@ export function ShortlistedScreen() {
           ...(scope === "page" ? { bulk: true } : {}),
         });
         setSelection(NO_SELECTION);
+        if (result.queued > 0) {
+          const ids =
+            "ids" in input
+              ? input.ids
+              : latest.current.list.rows
+                  .filter(
+                    (row) =>
+                      !("except" in input) ||
+                      !(input.except ?? []).includes(row.id),
+                  )
+                  .map((row) => row.id);
+          for (const id of ids) applyWatch.current.add(id);
+        }
         showToast({
           id: "shortlisted-apply",
           title:
@@ -391,6 +510,7 @@ export function ShortlistedScreen() {
     latest.current.list.removeRows(gone);
     setActiveId(next?.id ?? null);
     setSelection(NO_SELECTION);
+    clearFilterIfEmptied(gone);
     setBusy("move");
     try {
       const result = await window.nestor.jobs.run("move_jobs", {
@@ -403,6 +523,7 @@ export function ShortlistedScreen() {
       showToast({
         id: "shortlisted-move",
         title: `Moved ${plural(result.moved, "job")} back to Find jobs`,
+        tone: "success",
         ...(moveId !== null
           ? {
               action: {
@@ -419,7 +540,7 @@ export function ShortlistedScreen() {
     } finally {
       setBusy(null);
     }
-  }, [nextAfter, showToast, target]);
+  }, [clearFilterIfEmptied, nextAfter, showToast, target]);
 
   useListKeys({
     rows: list.rows,
@@ -429,7 +550,16 @@ export function ShortlistedScreen() {
       setSelection((current) =>
         toggleSelection(current, id, shiftKey, list.rows),
       ),
-    selectAll: () => setSelection(selectAll()),
+    selectAll: () =>
+      setSelection((current) =>
+        stepSelectAll(
+          current,
+          latest.current.list.rows,
+          latest.current.list.nextCursor === null &&
+            !latest.current.list.totalCapped &&
+            latest.current.list.rows.length >= latest.current.list.total,
+        ),
+      ),
     clearSelection: () => setSelection(NO_SELECTION),
     loadMore: () => void list.loadMore(),
     filterSelector: `#${FILTER_ID}`,
@@ -469,12 +599,87 @@ export function ShortlistedScreen() {
     onClick: () => void navigate("/job-finder/discovery"),
   };
 
+  // The tab says some jobs are here but the list came back empty: the list
+  // or the count is a moment behind (an approval just moved a job). Read
+  // once more before saying "nothing here", instead of showing "No approved
+  // resumes yet" under "Approved 2".
+  const listKey = JSON.stringify([tab, text]);
+  const disagree =
+    !list.loading &&
+    text === "" &&
+    list.rows.length === 0 &&
+    list.nextCursor === null &&
+    list.counts[tab] > 0;
+  const rechecked = useRef<string | null>(null);
+  const [rechecking, setRechecking] = useState(false);
+  useEffect(() => {
+    if (!disagree || rechecked.current === listKey) return;
+    rechecked.current = listKey;
+    setRechecking(true);
+    void latest.current.list.refresh().finally(() => setRechecking(false));
+  }, [disagree, listKey]);
+
+  const jobsText = (count: number, capped = false) =>
+    `${count.toLocaleString()}${capped ? "+" : ""} ${count === 1 ? "job" : "jobs"}`;
+  // Every approved job here already has Apply at work: nothing to press.
+  const allApplying =
+    tab === "resume" &&
+    selectedCount === 0 &&
+    list.rows.length > 0 &&
+    list.nextCursor === null &&
+    list.rows.every(
+      (row) => row.application !== null && row.application.status !== "failed",
+    );
+  // The pending label follows where each one really is: an application
+  // waiting on an answer or a Send is no longer "applying".
+  const appliesBy = (status: "applying" | "ready" | "needs_you") =>
+    list.rows.filter((row) => row.application?.status === status).length;
+  const applyingLabel = (() => {
+    const parts = [
+      appliesBy("applying") > 0
+        ? `Applying to ${jobsText(appliesBy("applying"))}`
+        : null,
+      appliesBy("needs_you") > 0
+        ? `${appliesBy("needs_you").toLocaleString()} waiting on you`
+        : null,
+      appliesBy("ready") > 0
+        ? `${appliesBy("ready").toLocaleString()} ready to send`
+        : null,
+    ].filter(Boolean);
+    return parts.length > 0
+      ? parts.join(" · ")
+      : `Applying to ${jobsText(list.rows.length)}`;
+  })();
+  const applyLabel = allApplying
+    ? applyingLabel
+    : counting
+      ? "Apply"
+      : selectedCount > 0
+        ? `Apply to ${jobsText(selectedCount, totalCapped && selection.all)}`
+        : list.totalCapped
+          ? "Apply to all matching jobs"
+          : list.total === 1
+            ? "Apply to 1 job"
+            : `Apply to all ${jobsText(list.total)}`;
+
   return (
     <LockedScreenLayout
-      contentClassName="xl:overflow-hidden"
+      contentClassName="flex flex-col overflow-hidden"
       lockContentHeight
+      lockStacked
       topContent={
-        <div className="grid gap-3">
+        // A resume open as a sheet over the list (1024, or beside the
+        // docked assistant) folds the page title and tabs away: the paper
+        // takes their height, and "Back to the list" brings them back.
+        <div
+          className={cn(
+            "grid gap-3",
+            reading.sheet && sheet.open && activeId !== null && "hidden",
+          )}
+          data-page-chrome-folded={
+            reading.sheet && sheet.open && activeId !== null ? "" : undefined
+          }
+        >
           <PageHeader
             actions={
               tab === "resume" && list.total > 0 ? (
@@ -487,22 +692,25 @@ export function ShortlistedScreen() {
                       size="toolbar"
                       variant="outline"
                     >
-                      {`Apply to the ${plural(list.rows.length, "job")} on this page`}
+                      {`Apply to the ${jobsText(list.rows.length)} on this page`}
                     </Button>
                   ) : null}
                   <Button
-                    disabled={busy !== null || list.loading || counting}
+                    disabled={
+                      busy !== null || list.loading || counting || allApplying
+                    }
                     onClick={() =>
                       void apply(selectedCount === 0 ? "all" : "target")
                     }
                     pending={busy === "apply"}
                     size="toolbar"
+                    title={
+                      allApplying
+                        ? "Apply is already working on each of these. Follow them in Applications."
+                        : undefined
+                    }
                   >
-                    {counting
-                      ? "Apply"
-                      : selectedCount > 0
-                        ? `Apply to ${selectedText} job${selectedCount === 1 ? "" : "s"}`
-                        : `Apply to all ${list.totalCapped ? "matching jobs" : plural(list.total, "job")}`}
+                    {applyLabel}
                   </Button>
                 </>
               ) : null
@@ -517,10 +725,37 @@ export function ShortlistedScreen() {
           <SegmentedControl<Tab>
             className="self-start"
             label="Which shortlisted jobs"
+            variant="tabs"
             onValueChange={setTab}
             options={[
-              { value: "shortlisted", label: `To review ${toReview}` },
-              { value: "resume", label: `Approved ${approved}` },
+              {
+                value: "shortlisted",
+                label: (
+                  <span className="flex items-center gap-1.5">
+                    To review
+                    <CountFigure
+                      count={toReview}
+                      known={list.countsKnown}
+                      slot="shortlisted:to-review"
+                    />
+                  </span>
+                ),
+                ariaLabel: `To review ${countText(toReview, list.countsKnown)}`,
+              },
+              {
+                value: "resume",
+                label: (
+                  <span className="flex items-center gap-1.5">
+                    Approved
+                    <CountFigure
+                      count={approved}
+                      known={list.countsKnown}
+                      slot="shortlisted:approved"
+                    />
+                  </span>
+                ),
+                ariaLabel: `Approved ${countText(approved, list.countsKnown)}`,
+              },
             ]}
             value={tab}
           />
@@ -528,6 +763,12 @@ export function ShortlistedScreen() {
       }
     >
       <ListDetailLayout
+        columnsClassName={reading.columnsClassName}
+        rootRef={reading.ref}
+        rootStyle={reading.style}
+        sheet={{ open: sheet.open && activeId !== null, onClose: sheet.close }}
+        sheetAlways={reading.sheet}
+        sheetOverAssistant
         state={{
           stage: tab,
           text,
@@ -541,9 +782,17 @@ export function ShortlistedScreen() {
             }
             applying={busy === "apply"}
             approving={busy === "approve"}
+            list={rechecking ? "rows" : besideList(list)}
+            listLoading={
+              list.loading ||
+              rechecking ||
+              (activeId !== null && view.job === null)
+            }
             onApply={() => void apply()}
             onApprove={() => void approve()}
+            onBack={sheet.close}
             onMoveBack={() => void moveBack()}
+            bulkActive={selectedCount > 0}
             view={view}
           />
         }
@@ -552,28 +801,76 @@ export function ShortlistedScreen() {
             activeId={activeId}
             bulkActions={
               <>
+                {stillWriting > 0 ? (
+                  // Why Approve counts fewer than are ticked, or is off.
+                  <span className="hidden truncate text-(length:--text-small) text-foreground-soft @2xl/listbar:inline">
+                    {`${stillWriting.toLocaleString()} still writing`}
+                  </span>
+                ) : null}
                 <Button
-                  disabled={busy !== null || counting}
-                  onClick={() => void moveBack()}
-                  size="toolbar"
-                  variant="outline"
-                >
-                  {counting ? "Move back" : `Move ${selectedText} back`}
-                </Button>
-                <Button
-                  disabled={busy !== null || counting}
+                  aria-label={
+                    tab !== "shortlisted"
+                      ? `Apply to ${selectedText} selected`
+                      : stillWriting > 0
+                        ? `Approve ${approvable.toLocaleString()} of ${selectedText} selected`
+                        : `Approve ${selectedText} selected`
+                  }
+                  disabled={
+                    busy !== null ||
+                    counting ||
+                    (tab === "shortlisted" && approvable === 0)
+                  }
+                  title={
+                    stillWriting > 0
+                      ? `${plural(stillWriting, "resume")} still writing ${stillWriting === 1 ? "stays" : "stay"} in To review`
+                      : undefined
+                  }
                   onClick={() =>
                     void (tab === "shortlisted" ? approve() : apply())
                   }
+                  pending={busy === "approve" || busy === "apply"}
                   size="toolbar"
                 >
-                  {`${tab === "shortlisted" ? "Approve" : "Apply"}${counting ? "" : ` ${selectedText}`}`}
+                  {`${tab === "shortlisted" ? "Approve" : "Apply"} ${
+                    counting
+                      ? ""
+                      : tab === "shortlisted" && !selection.all
+                        ? approvable.toLocaleString()
+                        : selectedText
+                  }`.trim()}
+                </Button>
+                <Button
+                  aria-label={`Move back ${selectedText} selected`}
+                  disabled={busy !== null || counting}
+                  onClick={() => void moveBack()}
+                  size="toolbar"
+                  title={`Move back ${selectedText} to Find jobs`}
+                  variant="outline"
+                >
+                  {/* In words at every width: a narrow reading list gives
+                      its verbs a row of their own. */}
+                  {`Move back ${counting ? "" : selectedText}`.trim()}
                 </Button>
               </>
             }
+            endNote={
+              text
+                ? null
+                : tab === "shortlisted"
+                  ? "Jobs you shortlist next appear here once their resumes are written."
+                  : "Approved resumes wait here until Apply sends them."
+            }
             empty={
               text ? (
-                <ListEmpty title="No shortlisted job matches." />
+                <ListEmpty
+                  action={{ label: "Clear filter", onClick: () => setText("") }}
+                  detail={
+                    list.counts[tab] > 0
+                      ? `${jobsText(list.counts[tab])} in ${tab === "shortlisted" ? "To review" : "Approved"} don't match it.`
+                      : null
+                  }
+                  title={`No job matches “${text.trim()}”`}
+                />
               ) : tab === "shortlisted" ? (
                 <ListEmpty
                   action={
@@ -602,19 +899,25 @@ export function ShortlistedScreen() {
                 />
               )
             }
+            fillStacked
             hasMore={list.nextCursor !== null}
             label={
               tab === "shortlisted" ? "Resumes to review" : "Approved resumes"
             }
             loading={list.loading}
+            error={list.error}
+            onRetry={() => void list.refresh()}
+            pending={rechecking}
             counting={counting}
-            onClearSelection={() => setSelection(NO_SELECTION)}
             onLoadMore={() => void list.loadMore()}
-            onSelectAll={() => setSelection(selectAll())}
+            onSelectionChange={setSelection}
             renderRow={(row, state) => (
               <ShortlistedListRow
                 {...state}
-                onActivate={setActiveId}
+                onActivate={(id) => {
+                  setActiveId(id);
+                  sheet.openIfStacked();
+                }}
                 onToggle={toggle}
                 row={row}
               />
@@ -628,12 +931,12 @@ export function ShortlistedScreen() {
                 className="h-8 min-w-0 flex-1"
                 id={FILTER_ID}
                 onChange={(event) => setText(event.target.value)}
-                placeholder="Find a job"
+                placeholder="Find a job  /"
                 type="search"
                 value={text}
               />
             }
-            total={list.total}
+            total={matching}
             totalCapped={totalCapped}
             windowed
           />
@@ -642,6 +945,67 @@ export function ShortlistedScreen() {
     </LockedScreenLayout>
   );
 }
+
+/**
+ * The width the resume pane needs for a complete Letter line at the readable
+ * 75%: the 612 px page, the desk's padding and edge (50), the pane's padding
+ * and edge (34) and room for the desk's scrollbar (14).
+ */
+export const READING_DETAIL_MIN = 710;
+/** The list beside it: never narrower than its rows can be read at. */
+const READING_LIST_MIN = 240;
+const READING_LIST_MAX = 352;
+const READING_GAP = 16;
+
+/**
+ * Shortlisted's layout while resumes are read: the list narrows so the paper
+ * gets the width (its own split, never the shared ratio), and where even a
+ * narrowed list leaves less than the paper needs, the list takes the width
+ * and the resume opens as a sheet over it. The page then shows complete
+ * lines at fit width; zoom stays the person's choice.
+ */
+function useReadingLayout() {
+  const [width, setWidth] = useState<number | null>(null);
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback((node: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!node) return;
+    if (node.clientWidth > 0) setWidth(node.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    observer.current = new ResizeObserver(([entry]) => {
+      const next = entry?.contentRect.width ?? 0;
+      if (next > 0) setWidth(next);
+    });
+    observer.current.observe(node);
+  }, []);
+  const sheet =
+    width !== null &&
+    width < READING_LIST_MIN + READING_GAP + READING_DETAIL_MIN;
+  const list =
+    width === null
+      ? READING_LIST_MAX
+      : Math.min(
+          READING_LIST_MAX,
+          Math.max(
+            READING_LIST_MIN,
+            width - READING_GAP - READING_DETAIL_MIN - 96,
+          ),
+        );
+  return {
+    ref,
+    sheet,
+    measured: width !== null,
+    columnsClassName: "split:grid-cols-[var(--reading-list)_minmax(0,1fr)]",
+    // Snapped to 16 px, so resizing the window settles in a few steps.
+    style: {
+      "--reading-list": `${Math.round(list / 16) * 16}px`,
+    } as CSSProperties,
+  };
+}
+
+/** Each tab's own name, which its rows' badges need not repeat. */
+const TAB_NAMES: ReadonlySet<string> = new Set(["To review", "Approved"]);
 
 /** One shortlisted job and its resume's state; memoized like every list row. */
 const ShortlistedListRow = memo(function ShortlistedListRow(
@@ -658,16 +1022,35 @@ const ShortlistedListRow = memo(function ShortlistedListRow(
   return (
     <ListRowFrame
       active={props.active}
+      exiting={props.exiting}
+      motion={props.motion}
       index={props.index}
       setSize={props.setSize}
       top={props.top}
-      badge={<StatusBadge tone={status.tone}>{status.label}</StatusBadge>}
+      // A badge that only repeats the tab ("To review" on every row of To
+      // review) says nothing and took the title's width ("Product Desi…"):
+      // only a state the tab does not already say gets one.
+      badge={
+        TAB_NAMES.has(status.label) ? undefined : (
+          <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+        )
+      }
       checked={props.checked}
       id={row.id}
       meta={[row.company, row.location].filter(Boolean).join(" · ")}
+      nameParts={{
+        badge: TAB_NAMES.has(status.label) ? null : status.label,
+        status: row.resume ? `${LEVEL_LABEL[row.resume.level]} resume` : null,
+      }}
       onActivate={props.onActivate}
       onToggle={props.onToggle}
-      status={row.resume ? LEVEL_LABEL[row.resume.level] : null}
+      status={
+        row.resume ? (
+          <span title={LEVEL_HINT[row.resume.level]}>
+            {LEVEL_LABEL[row.resume.level]} resume
+          </span>
+        ) : null
+      }
       title={row.title}
     />
   );

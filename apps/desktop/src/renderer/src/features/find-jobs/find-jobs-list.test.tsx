@@ -86,9 +86,8 @@ function FoundJobs(props: { rows: readonly JobRow[] }) {
       hasMore={false}
       label="Found jobs"
       loading={false}
-      onClearSelection={() => setSelection(NO_SELECTION)}
       onLoadMore={() => undefined}
-      onSelectAll={() => undefined}
+      onSelectionChange={setSelection}
       renderRow={(job, state) => (
         <FindJobsRow
           {...state}
@@ -153,7 +152,9 @@ it("draws only the rows in view of 2,000, and a J press re-renders at most two",
   act(() => {
     fireEvent.keyDown(window, { key: "j" });
   });
-  expect(renders.count).toBeLessThanOrEqual(2);
+  // Two fit reads per row drawn (its mark and its accessible name): at
+  // most two rows re-render.
+  expect(renders.count).toBeLessThanOrEqual(4);
   expect(items().length).toBeLessThan(40);
   expect(
     rowNamed("Designer 2")
@@ -161,12 +162,12 @@ it("draws only the rows in view of 2,000, and a J press re-renders at most two",
       ?.getAttribute("tabindex"),
   ).toBe("0");
 
-  // Ticking one row re-renders that row alone.
+  // Ticking one row re-renders that row alone (two fit reads).
   renders.count = 0;
   act(() => {
     fireEvent.keyDown(window, { key: "x" });
   });
-  expect(renders.count).toBe(1);
+  expect(renders.count).toBe(2);
 });
 
 it("keeps the open row drawn when the person scrolls far from it", () => {

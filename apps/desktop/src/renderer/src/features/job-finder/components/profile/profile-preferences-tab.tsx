@@ -29,7 +29,9 @@ export function ProfilePreferencesTab({
   resumeApplicationMode,
 }: ProfilePreferencesTabProps) {
   return (
-    <div className="grid gap-6">
+    // One column no wider than the pane: an auto column grew to the
+    // sections' own width at larger text, running the fields past the edge.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       <ProfilePreferencesEligibilitySection
         busy={busy}
         limitedPermissionArray={limitedPermissionArray}

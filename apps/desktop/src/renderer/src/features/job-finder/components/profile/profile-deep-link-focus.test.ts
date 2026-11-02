@@ -28,7 +28,7 @@ function setupPageScrollFixture() {
     <div class="page-scroll">
       <div id="${PROFILE_SECTION_SCROLL_AREA_ID}">
         <article id="profile-job-sources">
-          <h3 id="profile-job-sources-heading" tabindex="-1">Job sources</h3>
+          <h3 id="profile-job-sources-heading" tabindex="-1">Job sites</h3>
         </article>
       </div>
     </div>
@@ -122,7 +122,7 @@ describe("PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES", () => {
     expect(PROFILE_DEEP_LINK_SCROLL_MARGIN_CLASSES.internalScroller).toBe(
       `xl:scroll-mt-${PROFILE_DEEP_LINK_TOP_GAP_PX / 4}`,
     );
-    expect(fixedClearancePx / 16).toBe(8.25);
+    expect(fixedClearancePx / 16).toBe(4);
   });
 });
 
@@ -141,7 +141,7 @@ describe("computeProfileDeepLinkScrollTop", () => {
       targetViewportTopPx,
     });
 
-    expect(scrollTop).toBe(684);
+    expect(scrollTop).toBe(752);
     const targetViewportTopAfterScroll =
       scrollerScrollTopPx +
       targetViewportTopPx -
@@ -223,7 +223,7 @@ describe("focusProfileDeepLink", () => {
       <div class="screen-scroll-area">
         <div id="${PROFILE_SECTION_SCROLL_AREA_ID}">
           <article id="profile-job-sources">
-            <h3 id="profile-job-sources-heading" tabindex="-1">Job sources</h3>
+            <h3 id="profile-job-sources-heading" tabindex="-1">Job sites</h3>
           </article>
         </div>
       </div>
@@ -324,7 +324,7 @@ describe("focusProfileDeepLink", () => {
       behavior: "auto",
       block: "start",
     });
-    expect(pageScroller.scrollTop).toBe(384);
+    expect(pageScroller.scrollTop).toBe(452);
     const alignedSectionViewportTop =
       sectionTopAtInitialScroll - (pageScroller.scrollTop - 500);
     expect(alignedSectionViewportTop).toBeGreaterThan(
@@ -418,7 +418,7 @@ describe("focusProfileDeepLink", () => {
 
     expect(focusProfileDeepLink("job-sources")).toBe(true);
 
-    expect(scrollTopValue).toBe(384);
+    expect(scrollTopValue).toBe(452);
     expect(16 + (500 - scrollTopValue)).toBe(
       resolveProfileDeepLinkClearancePx("fixed-header"),
     );

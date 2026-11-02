@@ -201,4 +201,37 @@ describe("JobFinderKeptRoutesOutlet", () => {
     // Home mounts fresh per visit.
     expect(screen.getByText("Home count 0")).toBeTruthy();
   });
+
+  it("keeps a hidden screen in the box it was shown in, so showing it moves nothing", () => {
+    // jsdom lays nothing out: give the shown frame a place and a size.
+    const box = {
+      offsetTop: 54,
+      offsetLeft: 16,
+      offsetWidth: 1192,
+      offsetHeight: 729,
+    };
+    const spies = Object.entries(box).map(([key, value]) =>
+      vi
+        .spyOn(HTMLElement.prototype, key as keyof typeof box, "get")
+        .mockReturnValue(value),
+    );
+    try {
+      renderApp();
+      act(() => {
+        fireEvent.click(screen.getByText("go home"));
+      });
+      const frame = screen
+        .getByText("Find jobs count 0")
+        .closest<HTMLElement>("[data-kept-route]");
+      expect(frame?.dataset.keptRoute).toBe("hidden");
+      // Not pinned to the corner of the scroll area: where it was shown.
+      expect(frame?.style.position).toBe("absolute");
+      expect(frame?.style.top).toBe("54px");
+      expect(frame?.style.left).toBe("16px");
+      expect(frame?.style.width).toBe("1192px");
+      expect(frame?.style.height).toBe("729px");
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
 });

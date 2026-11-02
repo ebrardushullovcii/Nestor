@@ -15,7 +15,7 @@ import type {
   NeedsYouTask,
   SavedFormAnswerSummary,
 } from "@nestor/contracts";
-import { useLocation, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAssistantNeedsView } from "@renderer/features/job-lists/use-assistant-list-view";
 import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
@@ -24,17 +24,25 @@ import { useToast } from "@renderer/components/ui/toast";
 import { LockedScreenLayout } from "@renderer/features/job-finder/components/locked-screen-layout";
 import { PageHeader } from "@renderer/features/job-finder/components/page-header";
 import {
+  DetailSheetBack,
+  useDetailSheet,
+  EmptyPane,
+  clearSelected,
   countSelected,
   isSelected,
+  LIST_ROW_SELECT_PAD_CLASS,
   ListDetailLayout,
   ListPane,
   ListRowFrame,
   NO_SELECTION,
-  selectAll,
+  stepSelectAll,
   toggleSelection,
   useListKeys,
   useStoreList,
   type ListSelection,
+  CountFigure,
+  countText,
+  besideList,
 } from "@renderer/features/job-lists";
 import { TaskPane, describeError } from "./task-pane";
 import { SavedAnswerPane } from "./saved-answer-pane";
@@ -56,6 +64,7 @@ import {
   jobFinderListRowTitleClassName,
 } from "@renderer/features/job-finder/components/list-row";
 import { cn } from "@renderer/lib/cn";
+import { ListEmpty } from "@renderer/features/job-lists/list-empty";
 
 /** Job sites on one host share one sign-in, so they are one row. */
 interface SiteRow {
@@ -75,7 +84,7 @@ const EMPTY_COUNTS: NeedsYouCounts = {
   saved: 0,
 };
 const KIND = {
-  question: "Your answer",
+  question: "Needs your answer",
   sign_in: "Sign in",
   captcha: "CAPTCHA",
   mfa: "Verification",
@@ -124,6 +133,38 @@ function mergeSites(tasks: readonly NeedsYouTask[]): SiteRow[] {
       });
   }
   return [...byHost.values()];
+}
+
+/**
+ * Every item the Needs you filter matches, page by page: the items holding
+ * up applications, then the sign-ins for job sites merged by site, as the
+ * list shows them. What "all selected" covers, loaded or not.
+ */
+export async function readEveryMatchingTask(filter: {
+  text: string;
+  kind: NeedsYouKind | null;
+}): Promise<(NeedsYouTask | SiteRow)[]> {
+  const read = async (group: "applications" | "sites") => {
+    const rows: NeedsYouTask[] = [];
+    let after = 0;
+    for (;;) {
+      const page = await window.nestor.needsYou.run("list_needs_you", {
+        after,
+        limit: 200,
+        text: filter.text,
+        kind: filter.kind,
+        group,
+      });
+      rows.push(...page.rows);
+      if (page.nextCursor === null || page.rows.length === 0) return rows;
+      after = page.nextCursor;
+    }
+  };
+  const [applications, sites] = await Promise.all([
+    read("applications"),
+    read("sites"),
+  ]);
+  return [...applications, ...mergeSites(sites)];
 }
 
 function toWorkItem(row: NeedsYouTask | SiteRow): WorkItem {
@@ -243,8 +284,13 @@ export function NeedsYouScreen() {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
+  const navigateTo = useNavigate();
   const pinned = useRef<number | null>(null);
   const [counts, setCounts] = useState(EMPTY_COUNTS);
+  // Until the counts are read they are unknown ("–"), never 0.
+  const [countsKnown, setCountsKnown] = useState(false);
+  // Read the counts again (Try again on the list reads them with it).
+  const refreshCounts = useRef<() => void>(() => undefined);
   useEffect(() => {
     let live = true;
     let reading = false;
@@ -262,7 +308,10 @@ export function NeedsYouScreen() {
             "needs_you_counts",
             {},
           );
-          if (live) setCounts(value);
+          if (live) {
+            setCounts(value);
+            setCountsKnown(true);
+          }
         } while (live && again);
       } catch {
         /* A later store change retries the read; keep the last known count. */
@@ -273,9 +322,11 @@ export function NeedsYouScreen() {
     const unsubscribe = window.nestor.jobs.onChange((change) => {
       if (change.cause === "application") void refresh();
     });
+    refreshCounts.current = () => void refresh();
     void refresh();
     return () => {
       live = false;
+      refreshCounts.current = () => undefined;
       unsubscribe();
     };
   }, []);
@@ -311,6 +362,11 @@ export function NeedsYouScreen() {
       };
     },
   });
+  // A list read that lands while the counts are still unknown reads them
+  // again too, so a recovered list never sits under "–" tabs.
+  useEffect(() => {
+    if (list.countsKnown && !countsKnown) refreshCounts.current();
+  }, [list.countsKnown, list.rows, countsKnown]);
   // Sign-ins for job sites search could not read, after the items holding
   // up applications; sites on one host merge into one row.
   const sites = useStoreList<NeedsYouTask, NeedsYouCounts>({
@@ -352,6 +408,23 @@ export function NeedsYouScreen() {
     () => (showSites ? [...list.rows, ...siteRows] : list.rows),
     [showSites, list.rows, siteRows],
   );
+  // Site sign-ins are counted as the list shows them and Work through takes
+  // them, one row per site, so every site page is read even while the group
+  // is folded (one page holds 50 sign-ins; a site with 51 would otherwise
+  // count as two rows, or the raw 51). Until then the count is the raw one
+  // and a selection that covers it says "Counting…".
+  const sitesPending =
+    tab === "tasks" && sites.nextCursor !== null && sites.error === null;
+  // A later site page that failed leaves the count unknown, not raw: the
+  // reading stops (it would fail again by itself), a selection covering the
+  // sites says it couldn't count, and Work through waits for Try again.
+  const sitesFailed =
+    tab === "tasks" && sites.nextCursor !== null && sites.error !== null;
+  const sitesUnresolved = sitesPending || sitesFailed;
+  const { loadMore: loadMoreSites } = sites;
+  useEffect(() => {
+    if (sitesPending && !sites.loading) void loadMoreSites();
+  }, [sitesPending, sites.loading, sites.rows, loadMoreSites]);
   const siteCount = sites.nextCursor === null ? siteRows.length : sites.total;
   const ready = useReadyForms();
   const { walk, checks } = useWorkThrough();
@@ -360,7 +433,7 @@ export function NeedsYouScreen() {
   walkThroughState.current = walk;
   useEffect(() => {
     setActiveId(null);
-    setSelection(NO_SELECTION);
+    setSelection(clearSelected);
     setEditing(false);
     setCreating(false);
     setSitesExpanded(null);
@@ -383,12 +456,22 @@ export function NeedsYouScreen() {
       setActiveId(rows[0]?.id ?? null);
   }, [activeId, creating, editing, list.loading, rows]);
 
+  // Stacked beside a docked assistant, an item opens as a sheet over the
+  // list instead of below it on a scrolling page.
+  const sheet = useDetailSheet();
   const activate = useCallback((id: number) => {
     setEditing(false);
     setActiveId(id);
     pinned.current = null;
     setCreating(false);
   }, []);
+  const openRow = useCallback(
+    (id: number) => {
+      activate(id);
+      sheet.openIfStacked();
+    },
+    [activate, sheet.openIfStacked],
+  );
   useAssistantNeedsView(searchParams.get("needs"), {
     requestId: useLocation().key,
     canApply: !editing,
@@ -433,7 +516,9 @@ export function NeedsYouScreen() {
     kind,
   });
   const visibleSelection = resolvedSelection.selection;
-  const total = list.total + (tab === "tasks" ? sites.total : 0);
+  // Counted the way the list shows them (and Work through takes them): the
+  // sign-ins of one site are one row once every site is read.
+  const total = list.total + (tab === "tasks" ? siteCount : 0);
   const selectedCount = countSelected(visibleSelection, total);
   const missing = useCallback((id: number) => {
     if (pinned.current === id) pinned.current = null;
@@ -448,7 +533,16 @@ export function NeedsYouScreen() {
     activeId,
     setActiveId: activate,
     toggle,
-    selectAll: () => setSelection(selectAll()),
+    selectAll: () =>
+      setSelection((current) =>
+        stepSelectAll(
+          current,
+          latest.current.rows,
+          latest.current.list.nextCursor === null &&
+            !latest.current.list.totalCapped &&
+            latest.current.rows.length >= latest.current.total,
+        ),
+      ),
     clearSelection: () => setSelection(NO_SELECTION),
     loadMore: () =>
       void (list.nextCursor !== null || !showSites
@@ -456,8 +550,20 @@ export function NeedsYouScreen() {
         : sites.loadMore()),
     filterSelector: "#needs-you-filter",
   });
-  const latest = useRef({ list, rows, selection: visibleSelection, activeId });
-  latest.current = { list, rows, selection: visibleSelection, activeId };
+  const latest = useRef({
+    list,
+    rows,
+    selection: visibleSelection,
+    activeId,
+    total,
+  });
+  latest.current = {
+    list,
+    rows,
+    selection: visibleSelection,
+    activeId,
+    total,
+  };
   const resolved = useCallback(
     (id: number, message: string) => {
       const { list, rows, selection } = latest.current;
@@ -479,7 +585,7 @@ export function NeedsYouScreen() {
               ids: new Set([...value.ids].filter((value) => value !== id)),
             },
       );
-      showToast({ title: message });
+      showToast({ title: message, tone: "success" });
       void list.refresh();
     },
     [showToast],
@@ -495,9 +601,41 @@ export function NeedsYouScreen() {
     setSelection(NO_SELECTION);
     setEditing(false);
     showToast({
-      title: `${forgotten} saved ${forgotten === 1 ? "answer" : "answers"} forgotten.`,
+      title: `Forgot ${plural(forgotten, "saved answer", "saved answers")}`,
+      tone: "success",
     });
     void list.refresh();
+  }
+  // "Work through N" starts exactly the N selected items: every one the
+  // filter matches (less the ones left out) when all are selected, and
+  // ticked items that are not on a loaded page, read from the store first.
+  // A failed read starts nothing and says so beside the button.
+  const [workError, setWorkError] = useState<string | null>(null);
+  const [resolvingWork, setResolvingWork] = useState(false);
+  useEffect(() => setWorkError(null), [selection]);
+  async function startWork() {
+    const loaded = [...list.rows, ...siteRows];
+    const shown = new Set(loaded.map((row) => row.id));
+    const complete =
+      !selection.all && [...selection.ids].every((id) => shown.has(id));
+    setWorkError(null);
+    let rows: readonly Item[] = loaded;
+    if (!complete) {
+      setResolvingWork(true);
+      try {
+        rows = await readEveryMatchingTask({ text, kind });
+      } catch (error) {
+        setWorkError(describeError(error));
+        return;
+      } finally {
+        setResolvingWork(false);
+      }
+    }
+    const items = rows
+      .filter((row) => isSelected(selection, row.id))
+      .map((row) => toWorkItem(row as NeedsYouTask | SiteRow));
+    setSelection(NO_SELECTION);
+    workThrough.start(items);
   }
   const totalTasks =
     counts.question + counts.sign_in + counts.captcha + counts.mfa;
@@ -522,12 +660,54 @@ export function NeedsYouScreen() {
       action={walk ? null : { label: "Sign in to each", onClick: walkSites }}
       group="sites"
       inList={inList}
-      label={`${plural(siteCount, "job site needs", "job sites need")} you to sign in`}
+      // Counted as the rows: one job site per host. Until every site page
+      // is read (or after one failed) the sites are not counted, so the
+      // label never states the raw number of sign-in tasks as sites.
+      label={
+        sitesUnresolved
+          ? `Job sites need you to sign in · ${sitesFailed ? "couldn’t count them" : "counting…"}`
+          : `${plural(siteRows.length, "job site needs", "job sites need")} you to sign in`
+      }
       onToggle={() => setSitesExpanded(!sitesOpen)}
       open={sitesOpen}
     />
   );
   const showGroups = tab === "tasks" && !text;
+  // The list's count in the tab's own terms: the items holding things up
+  // (the same number as the tab and the header badge), and the filled-in
+  // forms as their own collection beside it.
+  // Until the counts are read, the rows read so far are the only count
+  // there is: never an all-clear beside items that wait.
+  const blocked = text || kind || !countsKnown ? total : totalTasks;
+  const summary =
+    tab === "tasks" ? (
+      <span className="tabular-nums">
+        {!list.countsKnown || (!countsKnown && list.error !== null)
+          ? list.loading
+            ? "Reading what needs you…"
+            : "Not read yet"
+          : blocked === 0
+            ? "Nothing needs you"
+            : `${plural(blocked, "item needs", "items need")} you`}
+        {/* The badge counts every waiting item; sign-ins on one host are
+            one row and one step: say how many Work through takes when the
+            two differ. */}
+        {tab === "tasks" &&
+        !text &&
+        !kind &&
+        countsKnown &&
+        !sitesUnresolved &&
+        list.nextCursor === null &&
+        list.total + siteRows.length !== blocked
+          ? ` · ${(list.total + siteRows.length).toLocaleString()} to work through`
+          : ""}
+        {readyCount > 0 ? ` · ${readyLabel} ready to send` : ""}
+      </span>
+    ) : (
+      <span className="tabular-nums">
+        {plural(total, "saved answer", "saved answers")}
+      </span>
+    );
   const footer =
     tab !== "tasks" ? null : (
       <>
@@ -538,15 +718,16 @@ export function NeedsYouScreen() {
           <section aria-label="Ready for you to send" data-needs-group="ready">
             <GroupHeader
               group="ready"
-              label={`Ready for you to send (${readyLabel})`}
+              label={`Ready to send · ${readyLabel}`}
             />
             <ul className="m-0 grid list-none p-0">
               {ready.rows.map((row) => (
-                <li className="pl-10" key={row.id}>
+                <li key={row.id}>
                   <button
                     className={cn(
                       jobFinderListRowClassName,
-                      "w-full text-left hover:bg-(--accent)",
+                      LIST_ROW_SELECT_PAD_CLASS,
+                      "w-full text-left outline-none hover:bg-(--surface-overlay-list) focus-ring",
                     )}
                     onClick={() => openReady(row.id)}
                     title={
@@ -583,7 +764,9 @@ export function NeedsYouScreen() {
     );
   return (
     <LockedScreenLayout
+      contentClassName="flex flex-col overflow-hidden"
       lockContentHeight
+      lockStacked
       topContent={
         <div
           className="grid gap-3 pb-4"
@@ -606,6 +789,7 @@ export function NeedsYouScreen() {
                     setCreating(true);
                     setEditing(false);
                     setSelection(NO_SELECTION);
+                    sheet.openIfStacked();
                   }}
                 >
                   Add answer
@@ -618,11 +802,38 @@ export function NeedsYouScreen() {
           <SegmentedControl
             className="self-start"
             label="Needs you view"
+            variant="tabs"
             value={tab}
             onValueChange={setTab}
             options={[
-              { value: "tasks", label: `Needs you ${totalTasks}` },
-              { value: "saved", label: `Saved answers ${counts.saved}` },
+              {
+                value: "tasks",
+                label: (
+                  <span className="flex items-center gap-1.5">
+                    Needs you
+                    <CountFigure
+                      count={totalTasks}
+                      known={countsKnown}
+                      slot="needs-you:tasks"
+                    />
+                  </span>
+                ),
+                ariaLabel: `Needs you ${countText(totalTasks, countsKnown)}`,
+              },
+              {
+                value: "saved",
+                label: (
+                  <span className="flex items-center gap-1.5">
+                    Saved answers
+                    <CountFigure
+                      count={counts.saved}
+                      known={countsKnown}
+                      slot="needs-you:saved"
+                    />
+                  </span>
+                ),
+                ariaLabel: `Saved answers ${countText(counts.saved, countsKnown)}`,
+              },
             ]}
           />
           {tab === "tasks" && kind ? (
@@ -676,25 +887,57 @@ export function NeedsYouScreen() {
               </Button>
             </p>
           ) : null}
-          {list.error ? <p role="alert">{list.error}</p> : null}
+          {/* A failed list read is shown in the list itself (ListPane's
+              error state, with Try again); a failed selection check is
+              here, with its own way on. */}
           {resolvedSelection.error ? (
-            <p role="alert">{resolvedSelection.error}</p>
+            <p
+              className="flex flex-wrap items-center gap-2 text-(length:--text-small) text-foreground"
+              role="alert"
+            >
+              <span>{resolvedSelection.error}</span>
+              <Button
+                onClick={resolvedSelection.retry}
+                size="toolbar"
+                type="button"
+                variant="outline"
+              >
+                Check again
+              </Button>
+            </p>
           ) : null}
         </div>
       }
     >
       <ListDetailLayout
+        sheet={{
+          open: sheet.open && (activeId !== null || creating),
+          onClose: sheet.close,
+        }}
         list={
           <ListPane<Item>
             activeId={activeId}
+            fillStacked
             label={
               tab === "tasks" ? "Things needing you" : "Saved form answers"
             }
             noun={tab === "tasks" ? "item" : "answer"}
             rows={rows}
             total={total}
-            totalCapped={list.totalCapped || sites.totalCapped}
+            // Until every site page is read the merged count is unknown:
+            // "Select all matching", never the raw sign-in count.
+            totalCapped={
+              list.totalCapped || sites.totalCapped || sitesUnresolved
+            }
             loading={list.loading}
+            error={list.error}
+            onRetry={() => {
+              // List, site rows and counts recover together: the summary
+              // and tabs never stay behind the rows they describe.
+              void list.refresh();
+              void sites.refresh();
+              refreshCounts.current();
+            }}
             hasMore={
               !editing &&
               (list.nextCursor !== null ||
@@ -708,8 +951,12 @@ export function NeedsYouScreen() {
             footer={footer}
             selection={visibleSelection}
             selectedCount={selectedCount}
-            onSelectAll={() => setSelection(selectAll())}
-            onClearSelection={() => setSelection(NO_SELECTION)}
+            counting={visibleSelection.all && sitesPending}
+            countText={
+              visibleSelection.all && sitesFailed ? "Couldn’t count" : undefined
+            }
+            onSelectionChange={setSelection}
+            summary={summary}
             toolbar={
               <Input
                 id="needs-you-filter"
@@ -723,22 +970,59 @@ export function NeedsYouScreen() {
             }
             bulkActions={
               tab === "tasks" ? (
-                <Button
-                  size="toolbar"
-                  onClick={() => {
-                    const items = [...list.rows, ...siteRows]
-                      .filter((row) => isSelected(selection, row.id))
-                      .map((row) => toWorkItem(row as NeedsYouTask | SiteRow));
-                    setSelection(NO_SELECTION);
-                    workThrough.start(items);
-                  }}
-                >
-                  Work through selected
-                </Button>
+                visibleSelection.all && sitesFailed ? (
+                  // A site page failed: the sign-ins it holds are not
+                  // counted, so nothing starts until they are.
+                  <span className="flex items-center gap-2" role="alert">
+                    <span className="hidden truncate text-(length:--text-small) text-(--warning-text) @2xl/listbar:inline">
+                      Couldn’t read every job site
+                    </span>
+                    <Button
+                      onClick={() => void sites.loadMore()}
+                      size="toolbar"
+                      title={sites.error ?? undefined}
+                      variant="outline"
+                    >
+                      Try again
+                    </Button>
+                  </span>
+                ) : workError ? (
+                  // The full selection could not be read: say so here,
+                  // with the way on, rather than start a part of it.
+                  <span className="flex items-center gap-2" role="alert">
+                    <span className="hidden truncate text-(length:--text-small) text-(--warning-text) @2xl/listbar:inline">
+                      Couldn’t read every selected item
+                    </span>
+                    <Button
+                      onClick={() => void startWork()}
+                      size="toolbar"
+                      title={workError}
+                      variant="outline"
+                    >
+                      Try again
+                    </Button>
+                  </span>
+                ) : (
+                  <Button
+                    aria-label={`Work through ${plural(selectedCount, "selected item", "selected items")}`}
+                    disabled={
+                      resolvingWork || (visibleSelection.all && sitesPending)
+                    }
+                    pending={resolvingWork}
+                    size="toolbar"
+                    onClick={() => void startWork()}
+                  >
+                    {visibleSelection.all && sitesPending
+                      ? "Work through"
+                      : `Work through ${selectedCount.toLocaleString()}`}
+                  </Button>
+                )
               ) : (
                 <Button
+                  aria-label={`Forget ${plural(selectedCount, "selected answer", "selected answers")}`}
                   size="toolbar"
                   variant="outline"
+                  pending={busy}
                   disabled={
                     busy ||
                     resolvedSelection.pending ||
@@ -765,13 +1049,16 @@ export function NeedsYouScreen() {
                       .finally(() => setBusy(false));
                   }}
                 >
-                  Forget selected
+                  {`Forget ${selectedCount.toLocaleString()}`}
                 </Button>
               )
             }
             empty={
               text ? (
-                "No matching questions or answers."
+                <ListEmpty
+                  action={{ label: "Clear filter", onClick: () => setText("") }}
+                  title={`Nothing matches “${text.trim()}”`}
+                />
               ) : tab === "tasks" && readyCount > 0 ? (
                 <div
                   className="grid justify-items-start gap-3"
@@ -782,7 +1069,7 @@ export function NeedsYouScreen() {
                     {readyCount === 1 && !ready.more
                       ? "1 application is"
                       : `${readyLabel} applications are`}{" "}
-                    filled in and waiting for your Send.
+                    filled in and waiting for your Send, listed below.
                   </p>
                   <Button
                     onClick={() => openReady(ready.rows[0]!.id)}
@@ -792,9 +1079,27 @@ export function NeedsYouScreen() {
                   </Button>
                 </div>
               ) : tab === "tasks" ? (
-                "You're all caught up. Applications keep running in the background."
+                <ListEmpty
+                  action={{
+                    label: "See applications",
+                    onClick: () => void navigateTo("/job-finder/applications"),
+                  }}
+                  detail="When a form asks something your profile cannot answer, or a site needs you to sign in, it waits here. Applications keep running meanwhile."
+                  title="You're all caught up"
+                />
               ) : (
-                "No saved answers yet. Choose Save this answer for next time when a form needs you."
+                <ListEmpty
+                  action={{
+                    label: "Add answer",
+                    onClick: () => {
+                      setCreating(true);
+                      setEditing(false);
+                      setSelection(NO_SELECTION);
+                    },
+                  }}
+                  detail="Answers you save fill the same question on later forms. Save one from a question, or add one now."
+                  title="No saved answers yet"
+                />
               )
             }
             renderRow={(row, state) =>
@@ -807,7 +1112,10 @@ export function NeedsYouScreen() {
                     title={`Sign in to ${row.label}`}
                     meta={
                       row.tasks.length > 1
-                        ? `${row.host} · ${row.tasks.length} sites`
+                        ? // Sign-ins, the unit of the items: the group
+                          // header counts job sites (hosts), so "51 sites"
+                          // under "2 job sites" read as a contradiction.
+                          `${row.host} · ${row.tasks.length.toLocaleString()} sign-ins`
                         : row.host
                     }
                     status={
@@ -822,7 +1130,7 @@ export function NeedsYouScreen() {
                         ) ?? "none"
                       ]
                     }
-                    onActivate={activate}
+                    onActivate={openRow}
                     onToggle={toggle}
                   />
                 </Fragment>
@@ -868,7 +1176,7 @@ export function NeedsYouScreen() {
                           ? "Blocked"
                           : KIND[row.kind]
                     }
-                    onActivate={activate}
+                    onActivate={openRow}
                     onToggle={toggle}
                   />
                 </Fragment>
@@ -877,63 +1185,76 @@ export function NeedsYouScreen() {
           />
         }
         detail={
-          tab === "saved" && creating ? (
-            <CreateAnswerPane
-              onEditing={setEditing}
-              onCreated={(value) => {
-                setCreating(false);
-                setEditing(false);
-                pinned.current = value.id;
-                setActiveId(value.id);
-                showToast({ title: "Answer saved for future forms." });
-                void list.refresh();
-              }}
-            />
-          ) : activeId === null ? (
-            <section
-              id="list-detail"
-              className="surface-panel-shell rounded-(--radius-panel) border border-(--surface-panel-border) p-5 text-sm text-foreground-soft"
-            >
-              Choose an item to see it here.
-            </section>
-          ) : tab === "tasks" && site ? (
-            <section
-              id="list-detail"
-              aria-label="Source sign-in"
-              data-needs-detail-id={activeId}
-              className="surface-panel-shell overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
-            >
-              <SourceNeedPane
-                key={site.id}
-                check={siteCheck(
-                  checks,
-                  site.tasks.map((task) => task.id),
-                )}
-                host={site.host}
-                site={toWorkItem(site)}
+          // As a sheet, one card: Back and the item share the frame (the
+          // item's own border and corners went inside the sheet's, two
+          // nested cards with the outer corners showing above).
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col stacked:overflow-hidden stacked:rounded-(--radius-panel) stacked:border stacked:border-(--surface-panel-border) stacked:bg-(--surface-panel-shell) [&>*:last-child]:flex-1 stacked:[&>section]:rounded-none stacked:[&>section]:border-0">
+            <DetailSheetBack onBack={sheet.close} />
+            {tab === "saved" && creating ? (
+              <CreateAnswerPane
+                onEditing={setEditing}
+                onCreated={(value) => {
+                  setCreating(false);
+                  setEditing(false);
+                  pinned.current = value.id;
+                  setActiveId(value.id);
+                  showToast({
+                    title: "Answer saved for future forms.",
+                    tone: "success",
+                  });
+                  void list.refresh();
+                }}
               />
-            </section>
-          ) : tab === "tasks" ? (
-            <TaskPane
-              key={`task:${activeId}`}
-              id={activeId}
-              onEditing={setEditing}
-              onMissing={missing}
-              onResolved={resolved}
-            />
-          ) : (
-            <SavedAnswerPane
-              key={`answer:${activeId}`}
-              id={activeId}
-              onEditing={setEditing}
-              onMissing={missing}
-              onSaved={(message) => {
-                showToast({ title: message });
-                void list.refresh();
-              }}
-              onForget={forget}
-            />
-          )
+            ) : activeId === null ? (
+              <EmptyPane
+                label="Details"
+                list={besideList({
+                  rows,
+                  loading: list.loading,
+                  error: list.error,
+                })}
+              >
+                Pick an item to see it here.
+              </EmptyPane>
+            ) : tab === "tasks" && site ? (
+              <section
+                id="list-detail"
+                aria-label="Site sign-in"
+                data-needs-detail-id={activeId}
+                className="surface-panel-shell overflow-y-auto rounded-(--radius-panel) border border-(--surface-panel-border) p-5"
+              >
+                <SourceNeedPane
+                  key={site.id}
+                  check={siteCheck(
+                    checks,
+                    site.tasks.map((task) => task.id),
+                  )}
+                  host={site.host}
+                  site={toWorkItem(site)}
+                />
+              </section>
+            ) : tab === "tasks" ? (
+              <TaskPane
+                key={`task:${activeId}`}
+                id={activeId}
+                onEditing={setEditing}
+                onMissing={missing}
+                onResolved={resolved}
+              />
+            ) : (
+              <SavedAnswerPane
+                key={`answer:${activeId}`}
+                id={activeId}
+                onEditing={setEditing}
+                onMissing={missing}
+                onSaved={(message) => {
+                  showToast({ title: message, tone: "success" });
+                  void list.refresh();
+                }}
+                onForget={forget}
+              />
+            )}
+          </div>
         }
       />
     </LockedScreenLayout>

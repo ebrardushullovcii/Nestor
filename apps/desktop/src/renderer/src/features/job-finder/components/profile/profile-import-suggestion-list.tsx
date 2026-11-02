@@ -1,5 +1,5 @@
+import { Disclosure } from "@renderer/components/ui/disclosure";
 import type { ResumeImportFieldCandidateSummary } from "@nestor/contracts";
-import { ChevronDown } from "lucide-react";
 import { Badge } from "@renderer/components/ui/badge";
 import { Button } from "@renderer/components/ui/button";
 import { formatStatusLabel } from "@renderer/features/job-finder/lib/job-finder-utils";
@@ -151,18 +151,14 @@ export function ProfileImportSuggestionList(props: {
             </div>
 
             {rawPayload ? (
-              <details className="group border-t border-(--surface-panel-border) pt-2 [&_summary::-webkit-details-marker]:hidden">
-                <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-xs font-medium text-foreground-muted">
-                  <ChevronDown
-                    aria-hidden="true"
-                    className="size-3 transition-transform group-open:rotate-180"
-                  />
-                  View source value
-                </summary>
-                <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-(--radius-field) bg-background/70 p-3 text-xs leading-5 text-foreground-muted">
+              <Disclosure
+                className="border-t border-(--surface-panel-border) pt-2"
+                summary="View source value"
+              >
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-(--radius-field) bg-background/70 p-3 text-xs leading-5 text-foreground-muted">
                   {rawPayload}
                 </pre>
-              </details>
+              </Disclosure>
             ) : null}
 
             {props.onReviewCandidate ? (

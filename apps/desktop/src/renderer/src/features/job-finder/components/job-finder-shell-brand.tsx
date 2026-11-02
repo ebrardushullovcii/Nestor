@@ -6,10 +6,12 @@ import { ModuleSwitch } from "@renderer/components/module-switch";
 import { cn } from "@renderer/lib/cn";
 
 /**
- * One brand lockup for both workspace opening and the interactive shell.
- * macOS traffic lights occupy the leading title-bar area; callers keep that
- * reservation on the containing brand row so the centered module switcher is
- * never shifted with the wordmark.
+ * One brand lockup for both workspace opening and the interactive shell: the
+ * Nestor wordmark, a hairline divider and the module name with a chevron, on
+ * one line. In the interactive shell the whole lockup is the module switch,
+ * so it reads as one control with one hover state. macOS traffic lights
+ * occupy the leading title-bar area; callers keep that reservation on the
+ * containing brand row.
  */
 export interface JobFinderShellBrandModuleSwitch {
   activeModule?: SuiteModule;
@@ -17,13 +19,22 @@ export interface JobFinderShellBrandModuleSwitch {
   style?: CSSProperties;
 }
 
+const BRAND_WORDMARK = (
+  <span
+    className="inline-flex shrink-0 items-center gap-2 pr-1"
+    data-desktop-brand-wordmark
+  >
+    <NestorWordmark className="block h-3.5 w-auto text-(--headline-primary)" />
+    <span aria-hidden="true" className="h-4 w-px bg-(--surface-panel-border)" />
+  </span>
+);
+
 export function JobFinderShellBrand(props: {
   className?: string;
   /**
-   * When given, the subtitle under the wordmark is the module switcher: the
-   * active module's name in small caps with a chevron, which opens the menu
-   * naming both modules. Without it (static opening frames), the subtitle is
-   * the plain module name in the same place and size, so nothing jumps when
+   * When given, the lockup is the module switcher: pressing it opens the
+   * menu naming both modules. Without it (static opening frames), the same
+   * lockup renders inert in the same place and size, so nothing jumps when
    * the interactive shell takes over.
    */
   moduleSwitch?: JobFinderShellBrandModuleSwitch;
@@ -32,28 +43,17 @@ export function JobFinderShellBrand(props: {
   return (
     <div
       className={cn(
-        // Keep the system face's painted ascenders/descenders away from the
-        // hiddenInset edge. The 56px shell row still has room for the full
-        // lockup at native 125% and when the sidebar is collapsed.
-        "relative z-20 flex h-full w-max shrink-0 flex-col justify-center gap-0.5 whitespace-nowrap py-1",
+        "relative z-20 flex h-full w-max shrink-0 items-center whitespace-nowrap",
         props.className,
       )}
       data-desktop-brand-lockup
       style={props.style}
     >
-      <span className="max-[639px]:hidden" data-desktop-brand-wordmark>
-        <NestorWordmark className="block h-[1.05rem] w-auto text-(--headline-primary) sm:h-[1.3rem]" />
-      </span>
-      {/* The module name is the subtitle of the wordmark, and that subtitle is
-          the module switcher: one line, always visible, in the one place a
-          person expects to read which part of the product they are in. It
-          sits in the brand block rather than in the sidebar or the top bar's
-          middle, so it never competes with navigation or drifts with the
-          utilities. */}
       {props.moduleSwitch ? (
         <div data-desktop-brand-subtitle>
           <ModuleSwitch
             activeModule={props.moduleSwitch.activeModule ?? "job-finder"}
+            leading={BRAND_WORDMARK}
             onSelectModule={props.moduleSwitch.onSelectModule}
             variant="caption"
             {...(props.moduleSwitch.style
@@ -63,9 +63,10 @@ export function JobFinderShellBrand(props: {
         </div>
       ) : (
         <span
-          className="whitespace-nowrap text-[0.72rem] font-semibold uppercase leading-none tracking-(--tracking-caps) text-foreground sm:text-[0.78rem]"
+          className="inline-flex h-8 items-center gap-1 text-(length:--text-small) font-medium leading-none text-foreground"
           data-desktop-brand-subtitle
         >
+          {BRAND_WORDMARK}
           Job Finder
         </span>
       )}

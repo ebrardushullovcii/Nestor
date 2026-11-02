@@ -115,6 +115,24 @@ describe("SettingsApplyingWritingSection", () => {
     );
   });
 
+  it("saves typed text still waiting for its pause when Settings closes", () => {
+    const onUpdateAiBehavior = vi
+      .fn<(input: UpdateAiBehaviorInput) => Promise<boolean>>()
+      .mockResolvedValue(true);
+    const view = renderSection(onUpdateAiBehavior);
+    fireEvent.change(
+      screen.getByPlaceholderText(/Leave empty to match the job posting/i),
+      { target: { value: "Dutch" } },
+    );
+    expect(onUpdateAiBehavior).not.toHaveBeenCalled();
+    // Navigating away unmounts the section before the pause ends.
+    view.unmount();
+    expect(onUpdateAiBehavior).toHaveBeenCalledTimes(1);
+    expect(onUpdateAiBehavior.mock.calls[0]?.[0]).toMatchObject({
+      coverLetter: { language: "Dutch" },
+    });
+  });
+
   it("shows the saved choice rather than the default", () => {
     renderSection(
       vi.fn(() => Promise.resolve(true)),

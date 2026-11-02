@@ -1,8 +1,11 @@
 import { BrowserWindow, dialog } from "electron";
 import type { IpcMain, IpcMainInvokeEvent, OpenDialogOptions } from "electron";
+import { stat } from "node:fs/promises";
+import path from "node:path";
 import {
   CancelResumeImportRequestSchema,
   ImportResumeRequestSchema,
+  RESUME_IMPORT_EXTENSIONS,
   ResumeImportProgressEventSchema,
   SourceDebugProgressEventSchema,
   type ResumeImportRun,
@@ -113,7 +116,7 @@ export async function importResumeForRequest(
     filters: [
       {
         name: "Resume documents",
-        extensions: ["pdf", "docx", "txt", "md"],
+        extensions: [...RESUME_IMPORT_EXTENSIONS],
       },
       { name: "All files", extensions: ["*"] },
     ],
@@ -129,6 +132,19 @@ export async function importResumeForRequest(
       return await retryInterruptedResumeImport(await latestRun(), {
         ...(reportProgress ? { onProgress: reportProgress } : {}),
         signal: abortController.signal,
+      });
+    }
+    // A file dropped on the import card skips the picker: the person
+    // already chose it. Only a regular file of a resume kind is read.
+    if (importRequest.droppedFilePath) {
+      const dropped = await readableDroppedResume(
+        importRequest.droppedFilePath,
+      );
+      if (request?.cancelled) return null;
+      if (request) request.phase = "processing";
+      return await importResumeFromSourcePath(dropped, {
+        signal: abortController.signal,
+        ...(reportProgress ? { onProgress: reportProgress } : {}),
       });
     }
     const usableParentWindow =
@@ -167,6 +183,22 @@ export async function importResumeForRequest(
       activeResumeImportRequests.delete(event.sender);
     }
   }
+}
+
+/** The dropped path when it is a regular file of a resume kind. */
+async function readableDroppedResume(filePath: string): Promise<string> {
+  const extension = path.extname(filePath).slice(1).toLowerCase();
+  if (
+    !path.isAbsolute(filePath) ||
+    !(RESUME_IMPORT_EXTENSIONS as readonly string[]).includes(extension)
+  )
+    throw new Error(
+      "Drop a PDF, DOCX, TXT or Markdown file, or choose one instead.",
+    );
+  const info = await stat(filePath).catch(() => null);
+  if (!info?.isFile())
+    throw new Error("That file could not be read. Choose it instead.");
+  return filePath;
 }
 
 /**

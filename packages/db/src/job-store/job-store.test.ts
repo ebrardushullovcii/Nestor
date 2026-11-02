@@ -689,6 +689,41 @@ it("numeric floors share assessed-only paging, counts and filtered bulk selectio
   expect(store.getJob(added[2]!)?.stage).toBe("found");
 });
 
+it("keeps a fit's short reason beside its summary, for narrow rows", () => {
+  const store = open();
+  const { added } = store.saveFoundJobs({
+    searchId: "s",
+    jobs: [found(1), found(2), found(3)],
+  });
+  store.setFit([
+    {
+      id: added[0]!,
+      score: 70,
+      summary: "Fewer frontend duties than you want; mostly backend services.",
+      short: "Less frontend than you want",
+      reasons: [],
+      gaps: [],
+    },
+    // An older fit with no short form.
+    { id: added[1]!, score: 80, summary: "Strong", reasons: [], gaps: [] },
+    // A short form with no summary to stand for is not kept.
+    {
+      id: added[2]!,
+      score: 60,
+      summary: "",
+      short: "Odd",
+      reasons: [],
+      gaps: [],
+    },
+  ]);
+  const rows = new Map(
+    store.listJobs({ stage: "found" }).rows.map((row) => [row.id, row]),
+  );
+  expect(rows.get(added[0]!)?.fitShort).toBe("Less frontend than you want");
+  expect(rows.get(added[1]!)?.fitShort).toBeNull();
+  expect(rows.get(added[2]!)?.fitShort).toBeNull();
+});
+
 it("age restoration leaves person hides and closed listings hidden and clears obsolete notes", () => {
   const store = open();
   const { hidden } = store.saveFoundJobs({

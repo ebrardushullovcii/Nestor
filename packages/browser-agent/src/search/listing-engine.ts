@@ -6,7 +6,11 @@ import {
 } from "./listing-screening";
 import { listingClosedReason } from "./listing-status";
 import { z } from "zod";
-import { DiscoveryPageReadError, JOB_FIT_BANDS } from "@nestor/contracts";
+import {
+  DiscoveryPageReadError,
+  FIT_SHORT_MAX,
+  JOB_FIT_BANDS,
+} from "@nestor/contracts";
 import type {
   FoundJob,
   JobFitUpdate,
@@ -931,6 +935,8 @@ const fitSchema = z.object({
   id: z.number().int().positive(),
   s: z.number().int().min(0).max(100),
   why: z.string(),
+  /** The why in a few words, for a narrow row (JobRow.fitShort). */
+  w: z.string().default(""),
   r: explanation,
   p: explanation,
   c: explanation,
@@ -949,6 +955,31 @@ const fitSchema = z.object({
     ]),
 });
 
+/** Words a short reason may hold: "UI overlap; Go not listed". */
+const FIT_SHORT_WORDS = 5;
+
+/**
+ * The model's few-word reason, when it is one: the comparison first, and
+ * the reason's material caveat after a semicolon when both fit ("UI
+ * overlap; Go not listed"), or the comparison alone ("Less frontend than
+ * you want"). Kept only when non-empty, within FIT_SHORT_WORDS words and
+ * FIT_SHORT_MAX characters, made of at most those two parts, and shorter
+ * than the reason it stands for. Null otherwise (the row then cuts the full
+ * reason with "…"); never cut here.
+ */
+export function shortFitReason(short: string, why: string): string | null {
+  const text = short
+    .trim()
+    .replace(/[.;,\s]+$/u, "")
+    .replace(/\s*;\s*/gu, "; ");
+  if (!text || text.length > FIT_SHORT_MAX) return null;
+  if (text.split(/\s+/u).length > FIT_SHORT_WORDS) return null;
+  const parts = text.split("; ");
+  if (parts.length > 2 || parts.some((part) => !part)) return null;
+  if (text.length >= why.trim().length) return null;
+  return text;
+}
+
 // Keep batch ids and sizes out of the provider's cached schema prefix.
 function fitResponseSchema() {
   const pair = {
@@ -965,11 +996,12 @@ function fitResponseSchema() {
       e: { type: "array", items: { type: "string" }, minItems: 4, maxItems: 4 },
       s: { type: "integer", minimum: 0, maximum: 100 },
       why: { type: "string" },
+      w: { type: "string" },
       r: pair,
       p: pair,
       c: pair,
     },
-    required: ["id", "s", "why", "r", "p", "c", "e"],
+    required: ["id", "s", "why", "w", "r", "p", "c", "e"],
   };
   return {
     name: "job_fits",
@@ -1077,7 +1109,7 @@ export async function fitJobs(
         }));
         const answer = await ask(
           input,
-          `${FIT_WORK_ELIGIBILITY} Judge each job from the complete listing and candidate evidence. Each listing's passages indexes, in order, reconstruct its unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : ""} Structured profile edits take priority over the resume. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":["compatible|review|blocked","verbatim scope quote","location kind","ISO country codes"],"s":score,"why":"short overall reason","r":["strong|related|stretch|unrelated|unknown","role reason"],"p":["aligned|mixed|conflict|unknown","preferences reason"],"c":["strong|partial|unknown","candidate evidence"]}]}. Include every id exactly once, including low scores. Keep each explanation under 12 words without repeating sentences.`,
+          `${FIT_WORK_ELIGIBILITY} Judge each job from the complete listing and candidate evidence. Each listing's passages indexes, in order, reconstruct its unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : ""} Structured profile edits take priority over the resume. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":["compatible|review|blocked","verbatim scope quote","location kind","ISO country codes"],"s":score,"why":"short overall reason","w":"the why in 5 words or fewer: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":["strong|related|stretch|unrelated|unknown","role reason"],"p":["aligned|mixed|conflict|unknown","preferences reason"],"c":["strong|partial|unknown","candidate evidence"]}]}. Include every id exactly once, including low scores. Keep each explanation under 12 words without repeating sentences.`,
           {
             ...context,
             passages,
@@ -1144,6 +1176,11 @@ export async function fitJobs(
                     ? fit.p[1]
                     : eligibilityReason
                   : fit.why,
+              // Only beside its own reason (a capped score reads another
+              // one), whole and within the row's cap, never cut.
+              ...(fit.s <= cap && shortFitReason(fit.w, fit.why)
+                ? { short: shortFitReason(fit.w, fit.why)! }
+                : {}),
               reasons: [],
               gaps: [],
               role: { assessment: fit.r[0], explanation: fit.r[1] },

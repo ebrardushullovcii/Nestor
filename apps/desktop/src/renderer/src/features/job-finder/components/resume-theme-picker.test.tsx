@@ -205,7 +205,11 @@ describe("ResumeThemePicker", () => {
     expect(container?.textContent).toContain("Current selection");
     expect(container?.textContent).toContain("Chronology Classic");
     expect(container?.textContent).toContain("Choose a template");
-    expect(container?.textContent).toContain("Engineering Spec · Skills First");
+    // Each name once on screen; the variant stays in the button's name.
+    expect(container?.textContent).toContain("Engineering Spec");
+    expect(container?.textContent).not.toContain(
+      "Engineering Spec · Skills First",
+    );
     expect(container?.textContent).toContain("Recommended");
     expect(container?.textContent).toContain(
       "The preview below uses sample content, not your resume.",

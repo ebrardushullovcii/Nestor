@@ -5,7 +5,7 @@ import {
   TrackerListQuerySchema,
   TrackerSelectionSchema,
   UpdateTrackerEventInputSchema,
-  trackerStatusValues,
+  trackerFilterStatusValues,
   type AddTrackerEventInput,
   type TrackerEvent,
   type TrackerFilter,
@@ -96,12 +96,29 @@ function toEvent(row: EventRecord): TrackerEvent {
 const parseTime = (value: string | null | undefined) =>
   value ? Date.parse(value) : null;
 
+/** A tracker row whose application Apply could not finish (one per job). */
+const NOT_SENT = `EXISTS (SELECT 1 FROM applications f
+  WHERE f.job_id = t.job_id AND f.state = 'failed' AND f.disposition IS NULL)`;
+
 function toFilterSql(filter: TrackerFilter, now: number) {
   const clauses: string[] = [];
   const params: SQLInputValue[] = [];
   if (filter.statuses.length > 0) {
-    clauses.push(`t.status IN (${filter.statuses.map(() => "?").join(", ")})`);
-    params.push(...filter.statuses);
+    // `applying` is the ones still in flight; `not_sent` the ones Apply
+    // could not finish (status still `applying`, nothing sent).
+    const plain = filter.statuses.filter(
+      (status) => status !== "applying" && status !== "not_sent",
+    );
+    const any: string[] = [];
+    if (plain.length > 0) {
+      any.push(`t.status IN (${plain.map(() => "?").join(", ")})`);
+      params.push(...plain);
+    }
+    if (filter.statuses.includes("applying"))
+      any.push(`(t.status = 'applying' AND NOT ${NOT_SENT})`);
+    if (filter.statuses.includes("not_sent"))
+      any.push(`(t.status = 'applying' AND ${NOT_SENT})`);
+    clauses.push(`(${any.join(" OR ")})`);
   }
   if (filter.tag) {
     clauses.push("t.job_id IN (SELECT job_id FROM tracker_tags WHERE tag = ?)");
@@ -147,13 +164,20 @@ export function createTrackerStore(store: JobStore) {
 
   const counts = (): TrackerStatusCounts => {
     const result = Object.fromEntries(
-      trackerStatusValues.map((status) => [status, 0]),
+      trackerFilterStatusValues.map((status) => [status, 0]),
     ) as TrackerStatusCounts;
     for (const row of sql("SELECT status, n FROM tracker_counts").all() as {
       status: TrackerStatus;
       n: number;
     }[])
       result[row.status] = row.n;
+    // Not sent and not in flight: counted apart from Applying.
+    const { n: notSent } = sql(
+      `SELECT count(*) AS n FROM tracker t
+       WHERE t.status = 'applying' AND ${NOT_SENT}`,
+    ).get() as { n: number };
+    result.not_sent = notSent;
+    result.applying = Math.max(0, result.applying - notSent);
     return result;
   };
 

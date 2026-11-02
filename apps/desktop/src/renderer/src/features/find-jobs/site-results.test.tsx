@@ -13,7 +13,7 @@ import {
   type JobSearchSourceQuery,
 } from "@nestor/contracts";
 import { createSearchSourcesStore, openJobStore } from "@nestor/db/job-store";
-import { SiteResults } from "./site-results";
+import { describeCounts, siteDisplayName, SiteResults } from "./site-results";
 
 afterEach(cleanup);
 test("900 source results page on demand and repeat totals distinguish listings from new jobs", async () => {
@@ -60,9 +60,9 @@ test("900 source results page on demand and repeat totals distinguish listings f
     expect(document.querySelectorAll("[data-site-result]")).toHaveLength(25);
     const first = document.querySelector<HTMLElement>("[data-site-result]")!;
     expect(first.textContent).toContain("8 listings · 0 new jobs");
-    expect(within(first).getByText(/0 new related/).textContent).toContain(
-      "8 already seen",
-    );
+    expect(
+      within(first).getByText(/0 new matches for your search/).textContent,
+    ).toContain("8 found before");
     fireEvent.click(screen.getByRole("button", { name: "Next sites" }));
     await screen.findByText("26–50 of 900");
     await waitFor(() =>
@@ -76,21 +76,18 @@ test("900 source results page on demand and repeat totals distinguish listings f
 test.each([
   [
     "The site took too long to respond. Open it to check it loads, then retry the search. Other sites continue normally.",
-    "This site took too long to respond. Open it to check it loads, then search again. Other sites continue normally.",
+    "This site took too long to respond. Other sites carried on.",
   ],
   [
     "page.goto: Timeout 20000ms exceeded.",
-    "This site took too long to respond. Open it to check it loads, then search again. Other sites continue normally.",
+    "This site took too long to respond. Other sites carried on.",
   ],
   [
     "page.goto: net::ERR_CONNECTION_REFUSED.",
-    "This site could not be reached. Check its address and your connection.",
+    "This site could not be reached.",
   ],
-  ["Listing read returned HTTP 404.", "Page not found. Check the URL."],
-  [
-    "Listing read returned HTTP 500.",
-    "The site returned an error. Check the address or try again later.",
-  ],
+  ["Listing read returned HTTP 404.", "The page was not found."],
+  ["Listing read returned HTTP 500.", "The site returned an error."],
 ])(
   "failed sites show a plain reason for %s before diagnostics",
   async (message, reason) => {
@@ -125,6 +122,8 @@ test.each([
         },
       });
       render(<SiteResults searchId={search.id} revision={1} showFailures />);
+      // The report opens over the list, on the failed sites, when asked.
+      fireEvent.click(screen.getByText("What each site found"));
       await screen.findByText(reason);
       const diagnostics = screen
         .getByText("Technical details")
@@ -192,4 +191,27 @@ test("a site Quick stopped early reads More to read, never Stopped, and Keep rea
   } finally {
     store.close();
   }
+});
+
+test("a site with no name of its own reads by its address", () => {
+  expect(
+    siteDisplayName("127.0.0.1:59693/atlas", "http://127.0.0.1:59693/atlas/"),
+  ).toBe("Atlas");
+  expect(
+    siteDisplayName("", "https://www.example.com/careers/open-roles"),
+  ).toBe("Open roles");
+  expect(siteDisplayName("www.example.com", "https://www.example.com/")).toBe(
+    "example.com",
+  );
+  expect(siteDisplayName("Lever replica", "http://127.0.0.1:1/lever/")).toBe(
+    "Lever replica",
+  );
+});
+
+test("site counts read in plain words", () => {
+  expect(
+    describeCounts({ related: 1, unrelated: 3, seen: 3, failedReads: 1 }),
+  ).toBe(
+    "1 new match for your search · 3 not a match · 3 found before · 1 page couldn’t be read",
+  );
 });

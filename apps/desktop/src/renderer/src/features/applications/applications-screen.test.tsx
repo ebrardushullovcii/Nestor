@@ -161,7 +161,7 @@ describe("Applications", () => {
   it("keeps an unfinished note with its application when another row opens", async () => {
     const list = renderScreen();
     fireEvent.click(
-      await within(list).findByRole("button", { name: /^Northfield 1 / }),
+      await within(list).findByRole("button", { name: /^Northfield 1,/ }),
     );
     const first = await screen.findByRole("region", {
       name: "Application to Northfield 1",
@@ -174,7 +174,7 @@ describe("Applications", () => {
       },
     );
     fireEvent.click(
-      within(list).getByRole("button", { name: /^Northfield 2 / }),
+      within(list).getByRole("button", { name: /^Northfield 2,/ }),
     );
     const second = await screen.findByRole("region", {
       name: "Application to Northfield 2",
@@ -185,7 +185,7 @@ describe("Applications", () => {
       }).value,
     ).toBe("");
     fireEvent.click(
-      within(list).getByRole("button", { name: /^Northfield 1 / }),
+      within(list).getByRole("button", { name: /^Northfield 1,/ }),
     );
     const restored = await screen.findByRole("region", {
       name: "Application to Northfield 1",
@@ -255,16 +255,21 @@ describe("Applications", () => {
     const board = await screen.findByRole("region", {
       name: "Applications by stage",
     });
-    const heardBack = await within(board).findByRole("region", {
+    // Empty stages fold into one strip of named, horizontal drop targets.
+    const emptyStages = await within(board).findByRole("region", {
+      name: "Stages with no applications",
+    });
+    const heardBack = within(emptyStages).getByRole("listitem", {
       name: "Heard back, 0",
     });
-    // An empty stage is a thin rail that still names itself and takes drops.
-    await waitFor(() =>
-      expect(heardBack.hasAttribute("data-board-rail")).toBe(true),
-    );
-    expect(heardBack.textContent).toBe("Heard back0");
-    const applied = within(board).getByRole("region", { name: "Applied, 1" });
-    expect(applied.hasAttribute("data-board-rail")).toBe(false);
+    // A quiet line under "Empty stages": the name, no "0" placeholder.
+    expect(heardBack.textContent).toBe("Heard back");
+    expect(heardBack.querySelector("[data-stage-dot]")).not.toBeNull();
+    expect(board.innerHTML).not.toContain("writing-mode");
+    const applied = await within(board).findByRole("region", {
+      name: "Applied, 1",
+    });
+    expect(applied.querySelector('[data-stage-dot="applied"]')).not.toBeNull();
     // No details pane beside the board until a card is clicked.
     expect(
       screen.queryByRole("dialog", { name: "Application details" }),
@@ -289,18 +294,18 @@ describe("Applications", () => {
   it("moves a sent application on, and Undo takes it back", async () => {
     const list = renderScreen();
     fireEvent.click(
-      await within(list).findByRole("button", { name: /^Northfield 1 / }),
+      await within(list).findByRole("button", { name: /^Northfield 1,/ }),
     );
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 1",
     });
-    fireEvent.click(
-      within(
-        within(detail).getByRole("group", {
-          name: "Where this application stands",
-        }),
-      ).getByRole("button", { name: "Heard back" }),
-    );
+    // One status menu, with a progress line through the open stages.
+    expect(
+      within(detail).getByRole("list", { name: "Stage 1 of 5: Applied" }),
+    ).toBeTruthy();
+    fireEvent.change(within(detail).getByRole("combobox", { name: "Status" }), {
+      target: { value: "replied" },
+    });
 
     const undo = await screen.findByRole("button", { name: "Undo" });
     const tracker = createTrackerStore(store);
@@ -315,7 +320,7 @@ describe("Applications", () => {
   it("follows Apply's work while an application is in flight", async () => {
     const list = renderScreen();
     const row = await within(list).findByRole("button", {
-      name: /^Northfield 2 /,
+      name: /^Northfield 2,/,
     });
     expect(row.textContent).toContain("Waiting to apply");
 
@@ -354,7 +359,7 @@ describe("Applications", () => {
       expect(
         within(screen.getByRole("list", { name: "Applications" })).queryByRole(
           "button",
-          { name: /^Northfield 2 / },
+          { name: /^Northfield 2,/ },
         ),
       ).toBeNull(),
     );
@@ -363,7 +368,7 @@ describe("Applications", () => {
   it("offers an independent Undo for a note and updates the history", async () => {
     const list = renderScreen();
     fireEvent.click(
-      await within(list).findByRole("button", { name: /^Northfield 1 / }),
+      await within(list).findByRole("button", { name: /^Northfield 1,/ }),
     );
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 1",
@@ -395,7 +400,7 @@ describe("Applications", () => {
     applyWrites(ids[1]!, "state = 'ready'");
     const list = renderScreen();
     fireEvent.click(
-      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+      await within(list).findByRole("button", { name: /^Northfield 2,/ }),
     );
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 2",
@@ -432,16 +437,42 @@ describe("a failed application is never a dead end", () => {
       "state = 'failed', error = 'The page tried to send the application on its own.'",
     );
     const list = renderScreen();
-    fireEvent.click(
-      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+    // Its own status: not counted or listed as Applying, never "Applying
+    // since", and a stage of its own while it has any.
+    const row = await within(list).findByRole("button", {
+      name: /^Northfield 2,/,
+    });
+    await waitFor(() =>
+      expect(row.getAttribute("aria-label")).toMatch(
+        /, Could not apply, Tried [A-Z][a-z]{2} \d{1,2}(,|$)/,
+      ),
     );
+    expect(row.getAttribute("aria-label")).not.toContain("Applying since");
+    expect(
+      await screen.findByRole("option", { name: "Could not apply (1)" }),
+    ).toBeTruthy();
+    // Still one of All: counted once, under its own stage.
+    expect(
+      screen.getByRole("option", {
+        name: `All stages (${createApplicationStore(store).forJobs(ids).length})`,
+      }),
+    ).toBeTruthy();
+    const applying = screen.getByRole("option", { name: /^Applying \(/ });
+    expect(applying.textContent).not.toContain(
+      `(${createApplicationStore(store).forJobs(ids).length})`,
+    );
+    fireEvent.click(row);
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 2",
     });
+    // One cause line, then "Nothing was sent.", in body text.
+    const line = await within(detail).findByText(
+      "The page tried to send the application on its own. Nothing was sent.",
+    );
+    expect(line.className).not.toContain("warning");
+    // Both ways on, as its row says.
     expect(
-      await within(detail).findByText(
-        "Apply couldn’t finish this application. Nothing was sent.",
-      ),
+      within(detail).getByRole("button", { name: "Apply by hand" }),
     ).toBeTruthy();
     fireEvent.click(
       await within(detail).findByRole("button", { name: "Try again" }),
@@ -464,7 +495,7 @@ describe("a failed application is never a dead end", () => {
     } as unknown as ApplicationDetails["receipt"];
     const list = renderScreen();
     fireEvent.click(
-      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+      await within(list).findByRole("button", { name: /^Northfield 2,/ }),
     );
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 2",
@@ -484,7 +515,7 @@ describe("a stopped or unconfirmed application is never a dead end", () => {
     applyWrites(ids[1]!, "state = 'stopped'");
     const list = renderScreen();
     fireEvent.click(
-      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+      await within(list).findByRole("button", { name: /^Northfield 2,/ }),
     );
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 2",
@@ -513,7 +544,7 @@ describe("a stopped or unconfirmed application is never a dead end", () => {
     } as unknown as ApplicationDetails["receipt"];
     const list = renderScreen();
     fireEvent.click(
-      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+      await within(list).findByRole("button", { name: /^Northfield 2,/ }),
     );
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 2",
@@ -540,7 +571,7 @@ describe("a stopped or unconfirmed application is never a dead end", () => {
     } as unknown as ApplicationDetails["receipt"];
     const list = renderScreen();
     fireEvent.click(
-      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+      await within(list).findByRole("button", { name: /^Northfield 2,/ }),
     );
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 2",
@@ -590,7 +621,7 @@ describe("one main action per screen", () => {
       name: "Follow up on 1 application",
     });
     fireEvent.click(
-      await within(list).findByRole("button", { name: /^Northfield 2 / }),
+      await within(list).findByRole("button", { name: /^Northfield 2,/ }),
     );
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 2",
@@ -606,10 +637,19 @@ describe("one main action per screen", () => {
 });
 
 describe("an empty Applications list", () => {
-  it("offers the approved resumes, where Apply starts one", async () => {
+  it("leads to the next real step: the approved resumes, where Apply starts one", async () => {
     store.sql("DELETE FROM tracker_events").run();
     store.sql("DELETE FROM tracker").run();
     store.sql("DELETE FROM applications").run();
+    // Two approved resumes wait for Apply.
+    Object.assign(window.nestor.jobs, {
+      run: (name: string) =>
+        Promise.resolve(
+          name === "stage_counts"
+            ? { found: 4, hidden: 0, shortlisted: 0, resume: 2, applied: 0 }
+            : null,
+        ),
+    });
     function Where() {
       const location = useLocation();
       return <p>{`At ${location.pathname}${location.search}`}</p>;
@@ -628,9 +668,38 @@ describe("an empty Applications list", () => {
       </MemoryRouter>,
     );
     fireEvent.click(
-      await screen.findByRole("button", { name: "Go to approved resumes" }),
+      await screen.findByRole("button", { name: "Apply to 2 approved jobs" }),
     );
     await screen.findByText("At /job-finder/review-queue?tab=approved");
+  });
+
+  it("with nothing found yet, leads to a first search, not an empty tab", async () => {
+    store.sql("DELETE FROM tracker_events").run();
+    store.sql("DELETE FROM tracker").run();
+    store.sql("DELETE FROM applications").run();
+    Object.assign(window.nestor.jobs, {
+      run: () =>
+        Promise.resolve({
+          found: 0,
+          hidden: 0,
+          shortlisted: 0,
+          resume: 0,
+          applied: 0,
+        }),
+    });
+    render(
+      <MemoryRouter initialEntries={["/job-finder/applications"]}>
+        <ToastProvider>
+          <ApplicationsScreen />
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByRole("button", { name: "Find jobs" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Go to approved resumes" }),
+    ).toBeNull();
   });
 });
 
@@ -670,5 +739,62 @@ describe("saved application views", () => {
     expect(await window.nestor.tracker.run("list_views", {})).toEqual({
       views: [],
     });
+  });
+});
+
+describe("an application waiting on the person", () => {
+  it("leads with Answer in Needs you, opening Needs you on its question", async () => {
+    applyWrites(ids[1]!, "state = 'needs_you'");
+    const run = vi.fn((name: string) =>
+      Promise.resolve(
+        name === "application_needs" ? [{ id: 42, kind: "question" }] : [],
+      ),
+    );
+    Object.assign(window.nestor, { needsYou: { run } });
+    let path = "";
+    function Where() {
+      const location = useLocation();
+      path = `${location.pathname}${location.search}`;
+      return null;
+    }
+    render(
+      <MemoryRouter initialEntries={["/job-finder/applications"]}>
+        <ToastProvider>
+          <Routes>
+            <Route
+              element={<ApplicationsScreen />}
+              path="/job-finder/applications"
+            />
+            <Route element={null} path="/job-finder/actions" />
+          </Routes>
+          <Where />
+        </ToastProvider>
+      </MemoryRouter>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: /^Northfield 2,/ }),
+    );
+    const answer = await screen.findByRole("button", {
+      name: "Answer in Needs you",
+    });
+    // The filled action; opening the site is the secondary one beside it.
+    expect(answer.getAttribute("data-variant")).toBe("primary");
+    expect(
+      screen
+        .getByRole("button", { name: "Open application" })
+        .getAttribute("data-variant"),
+    ).toBe("outline");
+    // Stop rides quietly on Apply's status line, not in the action row, so
+    // the two forward actions keep one row.
+    const stop = screen.getByRole("button", { name: "Stop" });
+    expect(stop.getAttribute("data-variant")).toBe("ghost");
+    expect(stop.parentElement?.contains(answer)).toBe(false);
+    expect(answer.parentElement?.children).toHaveLength(2);
+    fireEvent.click(answer);
+    await waitFor(() => expect(path).toContain("/job-finder/actions?needs="));
+    const view: unknown = JSON.parse(
+      new URLSearchParams(path.split("?")[1]).get("needs")!,
+    );
+    expect(view).toEqual({ tab: "tasks", focusId: 42 });
   });
 });

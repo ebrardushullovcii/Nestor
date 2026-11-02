@@ -5,7 +5,7 @@ Job Finder searches the sites the person adds. Sites live in the indexed `job_si
 ## Entry points
 
 - Guided setup > Job targets > Where to look: the `Job site URLs` textarea accepts several addresses. `Add and turn on` saves them and explains duplicates or invalid entries. Save, Continue and Finish also flush a pending textarea before leaving the step.
-- Profile > Job sources: `Add sources` opens the same textarea. The shared list/detail layout has `Find a source`, All/Enabled/Disabled/Needs attention, selection and Turn on/Turn off. `Previous sources` and `Next sources` page the list. Select a row to edit Source name, Starting page URL and Source notes; edits save on blur. `Include this source in searches` switches just that row. `Remove` removes the site and keeps its saved jobs.
+- Profile > Job sites: `Add sites` opens the same textarea. The shared list/detail layout has `Find a site`, All/Enabled/Disabled/Needs attention, Select (select mode: tick rows, Select all N matching, Clear, Done) and Turn on/Turn off. `Previous sites` and `Next sites` page the list. Select a row to edit Site name, Starting page URL and Site notes; edits save on blur. `Include this site in searches` switches just that row. `Remove` removes the site and keeps its saved jobs.
 - Find jobs > the sites button opens `Sites to search`. Only enabled sites appear. All/None, `Find a site`, per-site checkboxes and Previous/Next work across pages. Selecting all except one keeps a compact exclusion, rather than downloading or sending every id.
 - `Open site`, `Check source` and the learned-guidance review remain in the Profile detail pane. Source-debug updates guidance pointers on the site row.
 
@@ -27,7 +27,7 @@ Find jobs > What each site found reports listings observed, new jobs and jobs sa
 
 - The default `--net replica` refuses requests outside loopback. Use `--net web` only for authorized read-only checks and never send a real application.
 - A restarted verify instance may get a different replica port. Update stored site URLs before another search.
-- The sidebar uses the same list_sites/get_site/add_sites/update_site/remove_site/set_sites_enabled commands as the screens. Changes have separate persisted Undo receipts; later site edits are preserved. Ask to show Profile > Job sources after the change, then compare the screen with job_sites.
+- The sidebar uses the same list_sites/get_site/add_sites/update_site/remove_site/set_sites_enabled commands as the screens. Changes have separate persisted Undo receipts; later site edits are preserved. Ask to show Profile > Job sites after the change, then compare the screen with job_sites.
 
 
 ## Browser permissions and saved passwords

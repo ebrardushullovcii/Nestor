@@ -66,7 +66,7 @@ const STAGES = {
     const board = new URL("board/", sites.url).href;
     await fill("Job site URLs", board);
     await click("Add and turn on");
-    await waitFor("/^Added and turned on 1 source/", 15);
+    await waitFor("/^Added and turned on 1 site/", 15);
     await fill("Target roles", TARGET_ROLE);
     await press("Enter");
     await fill("Preferred job locations", "Remote");
@@ -108,9 +108,10 @@ const STAGES = {
       await go(click, "Find jobs");
       await click("Search", { role: "button", within: "/^Search$/" });
     }
-    await waitFor("Stop", 30, { role: "button", within: "/^Search$/" }).catch(
-      () => {},
-    );
+    await waitFor("Stop search", 30, {
+      role: "button",
+      within: "/^Search$/",
+    }).catch(() => {});
     await shot("jf-search-running");
     await waitFor("Search", 600, { role: "button", within: "/^Search$/" });
     await waitFor("/^Last search/", 10);
@@ -178,7 +179,11 @@ const STAGES = {
       "ready",
       `a written resume is stored (got ${written?.state}: ${written?.error ?? ""})`,
     );
-    await click("Approve", { role: "button", within: pane });
+    // The button names the level it approves ("Approve Tailored").
+    await click("/^Approve (Original|Light|Tailored|Aggressive)$/", {
+      role: "button",
+      within: pane,
+    });
     await waitFor("Apply can take it now, from Approved.", 15);
     const [resume] = db("resumes", { limit: 1 });
     assert.ok(resume.approved_at, "the resume is approved");

@@ -1,6 +1,7 @@
 export * from "./base";
 export * from "./prepared-application-form";
 export * from "./desktop-browser";
+export * from "./site-icons";
 export * from "./browser-permissions";
 export * from "./apply-form-mechanics";
 export * from "./browser-errors";

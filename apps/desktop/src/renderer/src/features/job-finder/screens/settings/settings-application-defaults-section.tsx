@@ -8,11 +8,11 @@ import type {
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
 } from "@nestor/contracts";
-import { Field, FieldLabel } from "@renderer/components/ui/field";
 import { FormSelect } from "../../components/form-select";
 import { ResumeThemePicker } from "../../components/resume-theme-picker";
 import { useRegisterSettingsDirtySection } from "./settings-dirty-sections";
 import { SettingsSectionSaveControl } from "./settings-section-save-control";
+import { SettingsRow } from "./settings-row";
 import { SettingsWriteOnShortlist } from "./settings-write-on-shortlist";
 import {
   hasOutstandingSectionChanges,
@@ -147,16 +147,17 @@ export function SettingsApplicationDefaultsSection({
   return (
     <section className="surface-panel-shell relative grid min-w-0 content-start gap-3 overflow-hidden rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-        <div className="grid min-w-0 max-w-[72ch] flex-1 gap-1">
-          <h3 className="min-w-0 font-semibold text-(--text-headline)">
+        <div className="grid min-w-0 max-w-[70ch] flex-1 gap-1">
+          <h3
+            className="min-w-0 font-semibold text-(--text-headline)"
+          >
             {SETTINGS_RESUME_LOOK_LABEL}
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
             The template is the default for new tailored resumes. The font
-            applies to all generated resumes; changing it requires approving
+            applies to every generated resume, and changing it means approving
             existing drafts again. The resume level lives in Profile, under
-            Preferences. Your resume and any extra files for applications are
-            managed in{" "}
+            Preferences, and your files are in{" "}
             <Link
               className="text-(--link) underline underline-offset-2 hover:text-(--link-hover)"
               to={JOB_FINDER_ROUTE_PATHS.profile}
@@ -175,53 +176,47 @@ export function SettingsApplicationDefaultsSection({
         />
       </div>
 
-      <Field>
-        <FieldLabel id={resumeTemplateLabelId}>
+      <div className="grid min-w-0 gap-2 border-t border-(--surface-panel-border) pt-4">
+        <h4
+          className="text-(length:--text-body) font-medium text-foreground"
+          id={resumeTemplateLabelId}
+        >
           Default resume template
-        </FieldLabel>
-        <p className="max-w-(--workspace-state-card-max-width) text-(length:--text-description) leading-5 text-foreground-soft">
-          The preview uses example content so you can see the layout.
-        </p>
-        <div className="grid min-w-0 gap-2.5">
-          <ResumeThemePicker
-            disabled={isSavePending}
-            labelledBy={resumeTemplateLabelId}
-            onChange={pickResumeTemplate}
-            selectedThemeId={draftResumeTemplateId}
-            themes={availableResumeTemplates}
-          />
-        </div>
-      </Field>
+        </h4>
+        <ResumeThemePicker
+          disabled={isSavePending}
+          labelledBy={resumeTemplateLabelId}
+          onChange={pickResumeTemplate}
+          selectedThemeId={draftResumeTemplateId}
+          themes={availableResumeTemplates}
+        />
+      </div>
 
-      <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <Field className="min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/45 px-3.5 py-3">
-          <FieldLabel htmlFor={fontPresetId}>Resume font</FieldLabel>
-          <FormSelect
-            disabled={isSavePending}
-            onValueChange={pickFontPreset}
-            options={fontPresetOptions.map((fontPreset) => ({
-              label: fontPreset.label,
-              value: fontPreset.value,
-            }))}
-            placeholder="Select font"
-            triggerId={fontPresetId}
-            value={draftFontPreset}
-          />
-          <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-            Pick the default font pairing for exported resumes. It changes how
-            the exported PDF looks, not the wording in your resume.
-          </p>
-        </Field>
-        <div className="surface-card-tint min-w-0 rounded-(--radius-field) border border-(--surface-panel-border) px-3.5 py-3 md:col-span-2">
-          <span className="label-mono-xs">Selected font</span>
-          <strong className="mt-1.5 block text-(length:--text-body) font-semibold text-foreground">
-            {selectedFontPreset?.label ?? "Font not available"}
-          </strong>
-          <p className="mt-1.5 text-(length:--text-description) leading-5 text-foreground-soft">
-            {selectedFontPreset?.description ??
-              "Choose the default font pairing for resume exports."}
-          </p>
-        </div>
+      <div className="grid min-w-0 border-t border-(--surface-panel-border) pt-4">
+        <SettingsRow
+          control={
+            <div className="w-64 max-w-full">
+              <FormSelect
+                disabled={isSavePending}
+                onValueChange={pickFontPreset}
+                options={fontPresetOptions.map((fontPreset) => ({
+                  label: fontPreset.label,
+                  value: fontPreset.value,
+                }))}
+                placeholder="Select font"
+                triggerId={fontPresetId}
+                value={draftFontPreset}
+              />
+            </div>
+          }
+          description={
+            <>
+              The font pairing for exported resumes. It changes how the PDF
+              looks, not the wording. {selectedFontPreset?.description ?? ""}
+            </>
+          }
+          label={<label htmlFor={fontPresetId}>Resume font</label>}
+        />
       </div>
       {onUpdateWorkspaceBehavior ? (
         <SettingsWriteOnShortlist

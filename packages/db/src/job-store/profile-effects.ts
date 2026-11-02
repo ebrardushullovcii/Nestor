@@ -115,7 +115,7 @@ export function applySettingsResumeEffects(
     // the next search judges these rows again with the new policy.
     const ids = store
       .sql(
-        `UPDATE jobs SET fit_score=-1,fit_summary=NULL
+        `UPDATE jobs SET fit_score=-1,fit_summary=NULL,fit_short=NULL
        WHERE stage IN ('found','shortlisted','resume','hidden') AND fit_score>=0 RETURNING id`,
       )
       .all() as { id: number }[];

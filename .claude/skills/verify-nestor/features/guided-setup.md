@@ -4,12 +4,14 @@ A new person starts on Profile › Guided setup. They pick their resume file (or
 
 ## Sub-features
 
-- `setup-import-file`: "Recommended. Choose my resume file" opens the native picker; PDF, DOCX, TXT or Markdown; Basics and Work history then show "Ready to review".
+- `setup-import-file`: "Recommended. Choose my resume file" opens the native picker; PDF, DOCX, TXT or Markdown; Basics and Work history then show "Ready to review". The button sits in a dashed drop zone ("Drop your resume here", `[data-profile-setup-drop-zone]`); a dropped file imports without the picker (main checks the extension and that it is a regular file). Drag and drop cannot be driven through `drive`; the picker path is the one to prove.
 - `setup-manual`: "Enter details manually" skips the file.
 - `setup-basics`: name, headline, years, contact, location, links, summary; "Save and continue to Work history".
 - `setup-work-history`: one card per role, education, projects, links, languages, proof; "Save and continue to Job targets".
 - `setup-job-targets`: four blocks. "What to look for" (target roles, related areas, preferred locations, work modes, hours); "Where to look" (job sources, see `job-sources.md`); "Two answers every application asks" (Required: countries where you can work, visa sponsorship); "More about you (optional)", folded (relocation, remote, travel).
 - `setup-finish`: "Finish setup and find jobs" once "Everything required is in. You can finish setup." shows.
+- Footer: at most two buttons, one filled. Every step before Extras has "Save and continue to …" (`[data-profile-setup-primary]`). "Finish setup and find jobs" (`[data-profile-setup-finish]`) shows on any step once setup can finish; then it is the filled button, last in the row, and Continue is outlined. While something is missing it is outlined and disabled on Job targets (described by the "Still needed to finish" line). On Extras, Finish is the primary; "Save changes" appears only there, while Finish is blocked and the person has edits.
+- Step strip (`nav "Setup steps"`): underline tabs; the current step has the accent underline, a finished step a check, a step with required input an amber dot (its words stay for screen readers); the manual path shows Import as "Skipped" with a check. `data-step-state` is `current`, `done`, `needs-input` or `todo`.
 - `setup-resume`: leaving and coming back to Profile resumes at the same step.
 
 ## How to get to it (user POV)

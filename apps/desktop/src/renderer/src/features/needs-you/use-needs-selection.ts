@@ -1,4 +1,10 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import type { NeedsYouKind } from "@nestor/contracts";
 import type { ListSelection } from "@renderer/features/job-lists";
 
@@ -22,6 +28,9 @@ export function useNeedsSelection(options: {
   }>({ key: "", source: null, existing: new Set(), matching: new Set() });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Bumped by `retry`: checks the same selection again after a failed read.
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
   useEffect(() => {
     if (loading) return;
     if (!selection.ids.size) {
@@ -61,13 +70,13 @@ export function useNeedsSelection(options: {
         if (!live) return;
         setPending(false);
         setError(
-          "Could not check the selection. Try selecting again before forgetting answers.",
+          "Couldn’t check the selection, so nothing can be forgotten yet.",
         );
       });
     return () => {
       live = false;
     };
-  }, [selection, setSelection, rows, loading, tab, text, kind, key]);
+  }, [selection, setSelection, rows, loading, tab, text, kind, key, attempt]);
   const shown = new Set(rows.map((row) => row.id));
   const current = checked.key === key && checked.source === selection;
   return {
@@ -86,5 +95,6 @@ export function useNeedsSelection(options: {
         (id) => !shown.has(id) && !(current && checked.existing.has(id)),
       ),
     error,
+    retry,
   };
 }

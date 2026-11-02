@@ -14,7 +14,6 @@ const globalsCss = read("./globals.css");
 // window draw every frame for as long as the work ran.
 const longLivedSignals = [
   ["../features/job-finder/assistant/assistant-toggle.tsx", "{assistant.working && !assistant.open ? ("],
-  ["../components/ui/progress-bar.tsx", "data-progress-indeterminate"],
 ] as const;
 
 describe("working signals rest", () => {
@@ -28,6 +27,29 @@ describe("working signals rest", () => {
   it("the brief pulse and spin stop after three turns", () => {
     expect(globalsCss).toMatch(/--animate-pulse-brief: pulse [^;]* 3;/);
     expect(globalsCss).toMatch(/--animate-spin-brief: spin [^;]* 3;/);
+  });
+
+  // Work of unknown length (searching, checking fit, writing a resume) shows
+  // an indicator that keeps going until the work ends: one that pulsed three
+  // times and stopped read as finished. It moves by transform alone, so the
+  // compositor animates it without repainting the page each frame.
+  it("long work keeps moving, by transform only", () => {
+    const progress = read("../components/ui/progress-bar.tsx");
+    const at = progress.indexOf("data-progress-indeterminate");
+    expect(progress.slice(at, at + 600)).toMatch(/progress-indeterminate/);
+    const keyframes = (name: string) =>
+      globalsCss.slice(globalsCss.indexOf(`@keyframes ${name}`)).split(/\n}\n/)[0]!;
+    for (const name of ["progress-indeterminate", "skeleton-shimmer"]) {
+      const block = keyframes(name);
+      expect(block).toMatch(/transform:/);
+      expect(block).not.toMatch(/background|width|left|opacity/);
+    }
+    expect(globalsCss).toMatch(/\.progress-indeterminate \{\s*animation: progress-indeterminate [^;]* infinite;/);
+    // Reduced motion parks it.
+    const reduced = globalsCss.slice(
+      globalsCss.indexOf("@media (prefers-reduced-motion: reduce)"),
+    );
+    expect(reduced).toMatch(/\.progress-indeterminate \{\s*animation: none;/);
   });
 
   it.each(longLivedSignals)("%s uses a brief animation", (path, marker) => {

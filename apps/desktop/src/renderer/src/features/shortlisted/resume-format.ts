@@ -4,6 +4,7 @@ import type {
   ShortlistedApplication,
 } from "@nestor/contracts";
 
+import { APPLICATION_WORK_TONE } from "@renderer/features/job-finder/lib/application-status-tone";
 import type { BadgeTone } from "@renderer/features/job-finder/lib/job-finder-types";
 
 export const LEVELS: readonly ResumeLevel[] = [
@@ -18,6 +19,15 @@ export const LEVEL_LABEL: Record<ResumeLevel, string> = {
   light: "Light",
   tailored: "Tailored",
   aggressive: "Aggressive",
+};
+
+/** What each level means, as a short hint beside its name. */
+export const LEVEL_HINT: Record<ResumeLevel, string> = {
+  original: "Your imported resume, unchanged.",
+  light: "Your resume with light edits: wording and order for this job.",
+  tailored: "Rewritten for this job from your real experience.",
+  aggressive:
+    "Rewritten hard for this job: the most emphasis, still only true facts.",
 };
 
 /** What a row and the resume header say about where a resume is. */
@@ -39,7 +49,7 @@ export function describeResume(
       return {
         label: "Waiting",
         tone: "muted",
-        detail: `Writes at ${LEVEL_LABEL[resume.level]} as soon as a writer is free.`,
+        detail: `Writes the ${LEVEL_LABEL[resume.level]} resume as soon as a writer is free.`,
       };
     case "writing":
       return {
@@ -48,7 +58,7 @@ export function describeResume(
         detail:
           resume.level === "original"
             ? null
-            : `Writing at ${LEVEL_LABEL[resume.level]}. You can keep browsing while it finishes.`,
+            : `Writing the ${LEVEL_LABEL[resume.level]} resume. You can keep browsing while it finishes.`,
       };
     case "failed":
       return { label: "Not written", tone: "warning", detail: resume.error };
@@ -62,7 +72,8 @@ export const APPLICATION_BADGE: Record<
   ShortlistedApplication["status"],
   { label: string; tone: BadgeTone }
 > = {
-  applying: { label: "Applying…", tone: "active" },
-  ready: { label: "Ready to send", tone: "positive" },
-  needs_you: { label: "Needs you", tone: "warning" },
+  applying: { label: "Applying…", tone: APPLICATION_WORK_TONE.running },
+  ready: { label: "Ready to send", tone: APPLICATION_WORK_TONE.ready },
+  needs_you: { label: "Needs you", tone: APPLICATION_WORK_TONE.needs_you },
+  failed: { label: "Could not apply", tone: APPLICATION_WORK_TONE.failed },
 };

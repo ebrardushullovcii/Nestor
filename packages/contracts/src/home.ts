@@ -47,8 +47,22 @@ export interface HomeSummary {
   readyToApply: number;
   /** Applications Apply has not finished: queued, running, waiting on the person, or sending. */
   applyWorking: number;
-  /** Open Needs you items: questions for applications, site sign-ins, and CAPTCHA or verification codes. */
-  needsYou: { questions: number; signIns: number; checks: number };
+  /**
+   * Of those, the ones that wait on the person rather than on Apply: a
+   * question only they can answer, and a filled form waiting for their Send.
+   */
+  applyWaiting: { needsYou: number; ready: number };
+  /**
+   * Open Needs you items: questions for applications, site sign-ins, and
+   * CAPTCHA or verification codes. `signInSites` counts the sign-ins as
+   * Needs you shows them, one per job site (host, without "www.").
+   */
+  needsYou: {
+    questions: number;
+    signIns: number;
+    signInSites: number;
+    checks: number;
+  };
   /** Open interviews from the start of today through the next 7 days. */
   interviewsThisWeek: number;
   /** Applications whose next interview or reminder is due. */

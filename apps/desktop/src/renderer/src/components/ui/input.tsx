@@ -11,8 +11,8 @@ import { cn } from "../../lib/utils";
  * height instead of an `h-9` input beside `h-8` segments.
  */
 const INPUT_SIZE_CLASS = {
-  default: "h-11 px-3.5 text-(length:--text-field)",
-  toolbar: "h-8 px-2.5 text-xs",
+  default: "h-10 px-3 text-(length:--text-field)",
+  toolbar: "h-8 px-2.5 text-(length:--text-small)",
 } as const;
 
 type InputSize = keyof typeof INPUT_SIZE_CLASS;
@@ -29,7 +29,7 @@ function Input({
       data-slot="input"
       data-size={size}
       className={cn(
-        "w-full min-w-0 rounded-(--radius-field) border border-(--field-border) bg-(--field) py-0 tracking-normal text-foreground shadow-[var(--field-shadow)] transition-[border-color,background-color,color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground hover:border-(--field-border-hover)",
+        "w-full min-w-0 rounded-(--radius-field) border border-(--field-border) bg-(--field) py-0 tracking-normal text-foreground transition-[border-color,background-color,color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground hover:border-(--field-border-hover)",
         INPUT_SIZE_CLASS[size],
         // Disabled is a painted state, not a transparency: a 50% wash left the
         // field readable-but-muddy and put its border, text and placeholder on
@@ -37,7 +37,7 @@ function Input({
         // it. All three now bind the shared disabled tokens, so a disabled
         // field is the same inert box wherever it renders.
         "disabled:cursor-not-allowed disabled:border-(--disabled-border) disabled:bg-(--disabled-surface) disabled:text-(--disabled-foreground) disabled:opacity-100 disabled:placeholder:text-(--disabled-foreground)",
-        "focus-visible:border-(--field-focus-border) focus-visible:bg-(--field-strong) focus-visible:shadow-[var(--field-focus-shadow)] focus-visible:ring-0",
+        "focus-visible:border-(--field-focus-border) focus-visible:bg-(--field-strong) focus-visible:shadow-(--field-focus-shadow) focus-visible:ring-0",
         "aria-invalid:border-destructive aria-invalid:ring-0",
         className,
       )}

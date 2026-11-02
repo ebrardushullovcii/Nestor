@@ -3,6 +3,7 @@ import {
   BrowserPasswordPromptSchema,
   type BrowserPasswordsBridge,
 } from "./browser-passwords";
+import type { SiteIconsBridge } from "./site-icons";
 
 const BrowserTabIdSchema = z.string().min(1).max(100);
 // Measured on a 16 GiB PC: replica forms used ~29 MiB private memory;
@@ -221,6 +222,8 @@ export type AddBrowserJobResult = z.infer<typeof AddBrowserJobResultSchema>;
 
 export interface DesktopBrowserBridge {
   passwords: BrowserPasswordsBridge;
+  /** Job sites' own icons, from the local cache the browser fills. */
+  siteIcons: SiteIconsBridge;
   addCurrentJob(input: AddBrowserJobInput): Promise<AddBrowserJobResult>;
   getState(): Promise<DesktopBrowserState>;
   command(command: DesktopBrowserCommand): Promise<DesktopBrowserState>;

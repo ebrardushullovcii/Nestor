@@ -13,7 +13,7 @@ import {
   type ResumeImportRun,
   type ResumeTimelineRepairAction,
 } from "@nestor/contracts";
-import { Sparkles, Upload } from "lucide-react";
+import { ChevronDown, ChevronUp, RefreshCw, Upload } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import {
   formatDateOnly,
@@ -94,6 +94,11 @@ function getImportedIdentityStatus(input: {
 interface ProfileResumePanelProps {
   sourceInfo?: { hasResumeText: boolean; hasSavedResumeFile: boolean };
   compact?: boolean;
+  /**
+   * The strip and the full panel are one surface: the strip offers Details,
+   * which swaps in the full panel; the full panel offers Hide details.
+   */
+  onToggleDetails?: () => void;
   importDisabledReason?: string | null;
   isProfileReady?: boolean;
   isAnalyzeProfilePending: boolean;
@@ -284,7 +289,7 @@ function getResumePanelCopy(input: {
     if (isProfileReady) {
       return {
         headline: "Resume ready — optional suggestions available",
-        description: `${pendingReviewCount} optional imported suggestion${pendingReviewCount === 1 ? " is" : "s are"} saved for later review. ${pendingReviewCount === 1 ? "It does" : "They do"} not block job search or safe application preparation.`,
+        description: `${pendingReviewCount} optional suggestion${pendingReviewCount === 1 ? " from your resume is" : "s from your resume are"} saved for later review across your profile. ${pendingReviewCount === 1 ? "It does" : "They do"} not stop a search or an application.`,
       };
     }
 
@@ -327,6 +332,7 @@ function getResumePanelCopy(input: {
 export function ProfileResumePanel({
   sourceInfo,
   compact = false,
+  onToggleDetails,
   importDisabledReason,
   isProfileReady = false,
   isAnalyzeProfilePending,
@@ -484,12 +490,16 @@ export function ProfileResumePanel({
   if (compact) {
     return (
       <section
-        className="grid gap-2 border-b border-(--surface-panel-border) bg-(--surface-overlay-strong) px-3 py-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:px-4"
+        // The file and its actions share a row while the file has room
+        // (18rem); otherwise the actions wrap under it. A grid column sized
+        // to the buttons squeezed the file name to a letter a line at
+        // larger text.
+        className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-(--surface-panel-border) bg-(--surface-overlay-strong) px-3 py-2 sm:px-4"
         data-profile-resume-summary
       >
-        <div className="grid min-w-0 gap-1">
+        <div className="grid min-w-0 flex-[1_1_18rem] gap-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <p className="text-(length:--text-eyebrow) font-medium uppercase tracking-(--tracking-mono) text-foreground-muted">
+            <p className="text-(length:--text-eyebrow) font-medium tracking-(--tracking-mono) text-foreground-muted">
               Resume
             </p>
             <StatusBadge tone={getAssetTone(resumeStatusTone)}>
@@ -508,7 +518,7 @@ export function ProfileResumePanel({
             ) : null}
           </div>
           {compactDescription ? (
-            <p className="text-sm leading-5 text-foreground-muted">
+            <p className="max-w-[70ch] text-sm leading-5 text-foreground-muted">
               {compactDescription}
             </p>
           ) : null}
@@ -537,7 +547,7 @@ export function ProfileResumePanel({
           ) : null}
         </div>
 
-        <div className="flex flex-wrap gap-2 sm:justify-end">
+        <div className="flex min-w-0 flex-wrap gap-2">
           {interruptedImport && onRetryInterruptedImport ? (
             <Button
               disabled={Boolean(importDisabledReason)}
@@ -573,7 +583,7 @@ export function ProfileResumePanel({
             type="button"
             variant="outline"
           >
-            <Sparkles className="size-4" />
+            <RefreshCw className="size-4" />
             {/* F80: "Refresh" alone is a verb with no object, and the full
                 panel below already calls the same action "Refresh from
                 resume". One name for one action. */}
@@ -581,22 +591,52 @@ export function ProfileResumePanel({
               ? "Refresh from resume"
               : "Read my resume again"}
           </Button>
+          {onToggleDetails ? (
+            <Button
+              aria-expanded={false}
+              data-profile-resume-details-toggle
+              onClick={onToggleDetails}
+              size="compact"
+              type="button"
+              variant="ghost"
+            >
+              Details
+              <ChevronDown aria-hidden className="size-4" />
+            </Button>
+          ) : null}
         </div>
       </section>
     );
   }
 
   return (
-    <section className="relative overflow-hidden border-y border-(--surface-panel-border) bg-transparent py-4 sm:py-5">
+    <section
+      className="relative overflow-hidden border-b border-(--surface-panel-border) bg-transparent py-4 sm:py-5"
+      data-profile-resume-details
+    >
+      {onToggleDetails ? (
+        <Button
+          aria-expanded
+          className="absolute right-0 top-3"
+          data-profile-resume-details-toggle
+          onClick={onToggleDetails}
+          size="compact"
+          type="button"
+          variant="ghost"
+        >
+          Hide details
+          <ChevronUp aria-hidden className="size-4" />
+        </Button>
+      ) : null}
       <div className="grid gap-5 xl:items-start xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
         <div className="grid gap-5">
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
             <div className="grid gap-2">
-              <p className="text-(length:--text-eyebrow) font-medium uppercase tracking-(--tracking-mono) text-foreground-muted">
+              <p className="text-(length:--text-eyebrow) font-medium tracking-(--tracking-mono) text-foreground-muted">
                 Resume
               </p>
               <div className="grid gap-2">
-                <h2 className="font-semibold tracking-[-0.03em] text-(--text-headline)">
+                <h2 className="font-semibold tracking-(--tracking-page-title) text-(--text-headline)">
                   {panelHeadline}
                 </h2>
                 <p className="max-w-[62ch] text-(length:--text-description) leading-6 text-foreground-muted">
@@ -612,7 +652,7 @@ export function ProfileResumePanel({
 
           <article className="grid gap-4 rounded-(--radius-panel) border border-(--surface-panel-border-warm) bg-(--surface-overlay-heavy) p-4">
             <div className="grid gap-1.5">
-              <strong className="text-[1.22rem] font-semibold text-(--text-headline)">
+              <strong className="text-lg font-semibold text-(--text-headline)">
                 {resumeFileName}
               </strong>
               <span className="text-(length:--text-body) text-foreground-soft">
@@ -700,7 +740,7 @@ export function ProfileResumePanel({
                 type="button"
                 variant="primary"
               >
-                <Sparkles className="size-4" />
+                <RefreshCw className="size-4" />
                 {hasModelReadResumeHeader(latestResumeImportRun)
                   ? "Refresh from resume"
                   : "Read my resume again"}
@@ -753,7 +793,7 @@ export function ProfileResumePanel({
           latestResumeImportReviewCandidates.length > 0 ||
           (latestResumeImportRun?.timelineRepairProposals?.length ?? 0) > 0 ? (
             <article className="grid gap-3 rounded-(--radius-panel) border border-(--surface-panel-border-warm) bg-(--surface-overlay-strong) p-4">
-              <p className="text-(length:--text-eyebrow) font-medium uppercase tracking-(--tracking-mono) text-foreground-muted">
+              <p className="text-(length:--text-eyebrow) font-medium tracking-(--tracking-mono) text-foreground-muted">
                 {isProfileReady ? "Optional review" : "Review before saving"}
               </p>
               {visibleAnalysisWarnings.length > 0 ? (
@@ -798,7 +838,7 @@ export function ProfileResumePanel({
 
         <aside className="grid gap-3 self-start rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-overlay-strong) p-4">
           <div className="grid gap-1">
-            <p className="text-(length:--text-eyebrow) font-medium uppercase tracking-(--tracking-mono) text-foreground-muted">
+            <p className="text-(length:--text-eyebrow) font-medium tracking-(--tracking-mono) text-foreground-muted">
               {hasImportedResume ? "Imported details" : "Profile details"}
             </p>
             <p className="text-(length:--text-description) leading-6 text-foreground-muted">
@@ -810,34 +850,34 @@ export function ProfileResumePanel({
 
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
             <div className="rounded-(--radius-field) border border-(--surface-well-border) bg-(--surface-well) p-4">
-              <span className="text-(length:--text-eyebrow) font-medium uppercase tracking-(--tracking-mono) text-foreground-muted">
+              <span className="text-(length:--text-eyebrow) font-medium tracking-(--tracking-mono) text-foreground-muted">
                 Name
               </span>
-              <strong className="mt-2 block text-[1rem] text-(--text-headline)">
+              <strong className="mt-2 block text-base text-(--text-headline)">
                 {displayName}
               </strong>
             </div>
             <div className="rounded-(--radius-field) border border-(--surface-well-border) bg-(--surface-well) p-4">
-              <span className="text-(length:--text-eyebrow) font-medium uppercase tracking-(--tracking-mono) text-foreground-muted">
+              <span className="text-(length:--text-eyebrow) font-medium tracking-(--tracking-mono) text-foreground-muted">
                 Headline
               </span>
-              <strong className="mt-2 block text-[1rem] text-(--text-headline)">
+              <strong className="mt-2 block text-base text-(--text-headline)">
                 {headline}
               </strong>
             </div>
             <div className="rounded-(--radius-field) border border-(--surface-well-border) bg-(--surface-well) p-4">
-              <span className="text-(length:--text-eyebrow) font-medium uppercase tracking-(--tracking-mono) text-foreground-muted">
+              <span className="text-(length:--text-eyebrow) font-medium tracking-(--tracking-mono) text-foreground-muted">
                 Location
               </span>
-              <strong className="mt-2 block text-[1rem] text-(--text-headline)">
+              <strong className="mt-2 block text-base text-(--text-headline)">
                 {location}
               </strong>
             </div>
             <div className="rounded-(--radius-field) border border-(--surface-well-border) bg-(--surface-well) p-4">
-              <span className="text-(length:--text-eyebrow) font-medium uppercase tracking-(--tracking-mono) text-foreground-muted">
+              <span className="text-(length:--text-eyebrow) font-medium tracking-(--tracking-mono) text-foreground-muted">
                 Experience
               </span>
-              <strong className="mt-2 block text-[1rem] text-(--text-headline)">
+              <strong className="mt-2 block text-base text-(--text-headline)">
                 {experienceLabel}
               </strong>
             </div>

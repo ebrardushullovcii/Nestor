@@ -3,7 +3,8 @@ import * as React from "react";
 import { cn } from "@renderer/lib/utils";
 
 /**
- * The small uppercase label that sits above a heading.
+ * The small label that sits above a heading: 12px medium, muted, sentence
+ * case. The app has exactly one eyebrow style and no tracked capitals.
  *
  * 48 sites hand-rolled this span across seven recipes - three weights, three
  * tracking tokens and four foreground tokens - and an eighth using the field
@@ -15,7 +16,7 @@ import { cn } from "@renderer/lib/utils";
  * section and lets a card's real title read as its subtitle.
  */
 export const EYEBROW_CLASS =
-  "font-display text-(length:--text-eyebrow) leading-none font-medium uppercase tracking-(--tracking-caps) text-foreground-muted";
+  "font-display text-(length:--text-eyebrow) leading-4 font-medium text-foreground-muted";
 
 function Eyebrow({ className, ...props }: React.ComponentProps<"span">) {
   return (

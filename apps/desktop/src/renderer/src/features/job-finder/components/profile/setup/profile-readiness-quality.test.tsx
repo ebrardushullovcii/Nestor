@@ -16,6 +16,7 @@ import {
 import { PreferredApplicationLinksField } from "../preferred-application-links-field";
 import {
   formatProfileSetupFinishReadiness,
+  getProfileSetupStepFooterFinish,
   getProfileSetupStepFooterPrimary,
 } from "./profile-setup-step-footer";
 
@@ -71,15 +72,14 @@ describe("profile readiness quality", () => {
     const onSaveAndFinish = vi.fn();
     const onSaveAndGoToStep = vi.fn<(step: ProfileSetupStep) => void>();
 
-    const ready = getProfileSetupStepFooterPrimary({
+    const ready = getProfileSetupStepFooterFinish({
       canFinishSetup: true,
       currentStep: "targeting",
       onSaveAndFinish,
-      onSaveAndGoToStep,
     });
-    expect(ready.label).toBe("Finish setup and find jobs");
-    expect(ready.disabled).toBe(false);
-    ready.onPrimary?.();
+    expect(ready?.label).toBe("Finish setup and find jobs");
+    expect(ready?.disabled).toBe(false);
+    ready?.onFinish?.();
     expect(onSaveAndFinish).toHaveBeenCalledTimes(1);
 
     // Not finishable yet: Job targets still continues to the optional step.

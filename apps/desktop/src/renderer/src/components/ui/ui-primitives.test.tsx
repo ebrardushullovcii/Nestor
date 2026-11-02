@@ -20,10 +20,10 @@ afterEach(() => {
 });
 
 describe("Input size scale and disabled binding", () => {
-  it("keeps the 44px field box by default and exposes the 32px toolbar box", () => {
+  it("keeps the 40px field box by default and exposes the 32px toolbar box", () => {
     const { rerender } = render(<Input aria-label="Search" />);
     const field = screen.getByLabelText("Search");
-    expect(field.className).toContain("h-11");
+    expect(field.className).toContain("h-10");
     expect(field.getAttribute("data-size")).toBe("default");
 
     rerender(<Input aria-label="Search" size="toolbar" />);
@@ -62,7 +62,7 @@ describe("SelectTrigger size scale and disabled binding", () => {
     const trigger = renderTrigger("toolbar");
     expect(trigger.getAttribute("data-size")).toBe("toolbar");
     expect(trigger.className).toContain("data-[size=toolbar]:h-8");
-    expect(trigger.className).toContain("data-[size=default]:h-11");
+    expect(trigger.className).toContain("data-[size=default]:h-10");
   });
 
   it("paints disabled with the shared tokens instead of an opacity wash", () => {
@@ -306,22 +306,29 @@ describe("Count", () => {
     expect(marker.className).toContain("rounded-full");
   });
 
-  it("caps the rail marker at 99+ and keeps the full number readable", () => {
+  it("shows the exact figure on the rail where it fits, then the same number shortened, with the exact one kept", () => {
     const { container, rerender } = render(
       <Count value={678} variant="rail-marker" />,
     );
-    const marker = container.querySelector(
-      "[data-slot='count']",
-    ) as HTMLElement;
-    expect(marker.textContent).toContain("99+");
-    expect(screen.getByText("678").className).toContain("sr-only");
+    const marker = () =>
+      container.querySelector("[data-slot='count']") as HTMLElement;
+    expect(marker().textContent).toBe("678");
+
+    // Exact to 9,999: never "999+" beside a tab that says 1,234.
+    rerender(<Count value={1234} variant="rail-marker" />);
+    expect(marker().textContent).toBe("1,234");
+    expect(marker().getAttribute("title")).toBeNull();
+
+    // Past that, the same number shortened, the exact one in the tooltip
+    // and for assistive tech.
+    rerender(<Count value={12_345} variant="rail-marker" />);
+    expect(marker().textContent).toContain("12.3k");
+    expect(marker().getAttribute("title")).toBe("12,345");
+    expect(screen.getByText("12,345").className).toContain("sr-only");
 
     // The other variants keep the whole figure.
-    rerender(<Count value={678} variant="pill" />);
-    expect(
-      (container.querySelector("[data-slot='count']") as HTMLElement)
-        .textContent,
-    ).toBe("678");
+    rerender(<Count value={12_345} variant="pill" />);
+    expect(marker().textContent).toBe("12,345");
   });
 });
 
@@ -334,8 +341,9 @@ describe("Eyebrow", () => {
     expect(eyebrow.tagName).toBe("SPAN");
     expect(eyebrow.getAttribute("role")).toBeNull();
     expect(screen.queryByRole("heading")).toBeNull();
-    expect(eyebrow.className).toContain("uppercase");
-    expect(eyebrow.className).toContain("tracking-(--tracking-caps)");
+    // Sentence case: no tracked capitals anywhere in the app.
+    expect(eyebrow.className).not.toContain("uppercase");
+    expect(eyebrow.className).not.toMatch(/tracking-/);
     expect(eyebrow.className).toContain("text-(length:--text-eyebrow)");
   });
 });

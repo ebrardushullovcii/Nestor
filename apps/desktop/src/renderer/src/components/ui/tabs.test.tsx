@@ -18,43 +18,23 @@ function extractLine(name: string): string {
   return line;
 }
 
-describe("Tabs line variant chrome", () => {
-  it("owns exactly one shared divider on the line list", () => {
-    const lineVariant = extractLine('line: "gap-0');
-
-    expect((lineVariant.match(/border-b/g) ?? []).length).toBe(1);
-    expect(lineVariant).toContain("border-(--surface-panel-border)");
+describe("Tabs: one underline idiom for page sections", () => {
+  it("draws both list variants as a hairline with no filled strip", () => {
+    const line = extractLine('line: "');
+    const byDefault = extractLine('default: "');
+    expect(line).toBe(byDefault.replace("default:", "line:"));
+    expect((line.match(/border-b/g) ?? []).length).toBe(1);
+    expect(line).toContain("border-(--border-subtle)");
+    expect(tabsSource).not.toContain('"bg-muted"');
   });
 
-  it("keeps one active indicator: the underline, with no second border indicator for line tabs", () => {
+  it("marks the active tab with a 2px accent underline and a weight step", () => {
     const indicatorRule = extractLine("after:opacity-100");
-    const borderRule = extractLine("border-b-2");
-
-    expect(indicatorRule).toContain(
-      "group-data-[variant=line]/tabs-list:data-[state=active]:after:bg-primary",
-    );
-    // The underline is 2px, not a hairline: it is drawn directly on the
-    // list's 1px --surface-panel-border, where --primary measures 2.64:1
-    // (dark) / 2.79:1 (light) - under the 3:1 non-text floor for a state
-    // carrier. Neither colour can move, so the weight step is the channel.
-    // Still exactly one indicator; only its thickness changed.
+    expect(indicatorRule).toContain("data-[state=active]:after:bg-primary");
     expect(indicatorRule).toContain("after:h-0.5");
     expect(indicatorRule).not.toContain("after:h-px");
-    expect(borderRule).not.toMatch(
-      /"group-data-\[orientation=horizontal\]\/tabs:data-\[state=active\]:border-b-2/u,
-    );
-    expect(borderRule).toMatch(
-      /group-data-\[variant=default\]\/tabs-list:[^\s"]*border-b-2/u,
-    );
-    expect(extractLine("tabs-list:bg-transparent")).not.toContain(
-      "data-[state=active]:bg-secondary",
-    );
-  });
-
-  it("preserves the default variant pill indicator", () => {
-    expect(tabsSource).toContain('default: "bg-muted"');
-    expect(extractLine("border-b-2")).toContain(
-      "data-[state=active]:border-primary",
+    expect(extractLine("data-[state=active]:font-medium")).toContain(
+      "data-[state=active]:text-foreground",
     );
   });
 
@@ -71,7 +51,7 @@ describe("Tabs line variant chrome", () => {
     );
 
     const list = screen.getByRole("tablist");
-    expect(list.className).toContain("border-(--surface-panel-border)");
+    expect(list.className).toContain("border-(--border-subtle)");
     expect(screen.getByRole("tab", { name: "Preview" }).className).toContain(
       "after:h-0.5",
     );

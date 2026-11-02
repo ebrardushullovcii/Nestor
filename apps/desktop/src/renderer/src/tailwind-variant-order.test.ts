@@ -394,9 +394,7 @@ describe("tailwind arbitrary-variant emission order", () => {
     // purpose.
     //
     // Everything else must be empty, so a NEW occurrence still fails here.
-    const AUDITED_EXCEPTIONS = [
-      "features/job-finder/components/job-finder-shell.tsx: max-[899px]:pr-40 loses to sm:pr-64",
-    ];
+    const AUDITED_EXCEPTIONS: string[] = [];
 
     const unowned = offenders.filter(
       (offender) => !AUDITED_EXCEPTIONS.includes(offender),

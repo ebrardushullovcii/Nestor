@@ -1,7 +1,7 @@
 import {
   TRACKER_STATUS_LABEL,
   matchesAssistantListView,
-  trackerStatusValues,
+  trackerFilterStatusValues,
   type TrackerFilterInput,
   type TrackerFilter,
   type TrackerRow,
@@ -11,7 +11,11 @@ import {
   type TrackerView,
   type TrackerSelectionInput,
 } from "@nestor/contracts";
-import { Download, Save } from "lucide-react";
+import {
+  FILTER_CHIP_ACTIVE_CLASS,
+  FILTER_CHIP_CLASS,
+} from "@renderer/components/ui/chip";
+import { Download, ListChecks, Save } from "lucide-react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -25,25 +29,37 @@ import { LockedScreenLayout } from "@renderer/features/job-finder/components/loc
 import { PageHeader } from "@renderer/features/job-finder/components/page-header";
 import { StatusBadge } from "@renderer/features/job-finder/components/status-badge";
 import {
+  useDetailSheet,
+  clearSelected,
   countSelected,
   isSelected,
   LIST_DETAIL_REGION_ID,
+  LIST_ROW_SELECT_PAD_CLASS,
   ListDetailLayout,
   ListPane,
+  ListRowCheck,
   listRowPlacement,
   NO_SELECTION,
+  SELECTING,
   plural,
-  selectAll,
+  stepSelectAll,
   toggleSelection,
   useListKeys,
+  useRowPress,
   useStoreList,
   type ListRowState,
   type ListSelection,
+  CountFigure,
+  countText,
+  besideList,
 } from "@renderer/features/job-lists";
 import { cn } from "@renderer/lib/cn";
 
 import { useAssistantContextSource } from "@renderer/features/job-finder/assistant/assistant-provider";
 import { ListEmpty } from "@renderer/features/job-lists/list-empty";
+import { useStageCounts } from "@renderer/features/job-lists/use-stage-counts";
+import { JOB_FINDER_ROUTE_PATHS } from "@renderer/features/job-finder/lib/job-finder-route-hrefs";
+import { useLaunchReads } from "@renderer/features/job-finder/lib/launch-reads";
 import { useAssistantTrackerView } from "@renderer/features/job-lists/use-assistant-list-view";
 
 import {
@@ -54,13 +70,17 @@ import {
 import { ApplicationsBoard, BoardDetailSheet } from "./applications-board";
 import {
   countGroup,
+  describeSince,
+  shownGroups,
   describeDue,
+  describeNext,
   describeStatus,
   formatDay,
   OPEN_STATUSES,
   STAGE_GROUPS,
 } from "./tracker-format";
 import { describeError } from "./use-application";
+import { savedFileToast } from "@renderer/features/job-finder/lib/saved-file-toast";
 
 type Layout = "list" | "board";
 type Density = "compact" | "comfortable";
@@ -79,7 +99,7 @@ const QUIET_DAYS = 14;
 const FILTER_ID = "applications-filter";
 
 const EMPTY_COUNTS = Object.fromEntries(
-  trackerStatusValues.map((status) => [status, 0]),
+  trackerFilterStatusValues.map((status) => [status, 0]),
 ) as TrackerStatusCounts;
 
 interface Prefs {
@@ -130,11 +150,15 @@ export function ApplicationsScreen() {
   const [activeId, setActiveId] = useState<number | null>(null);
   // On the board, details open only when a card is clicked.
   const [sheetOpen, setSheetOpen] = useState(false);
+  // The list view's details, stacked beside a docked assistant, open as a
+  // sheet over the list (the board has its own sheet above).
+  const listSheet = useDetailSheet();
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const [views, setViews] = useState<TrackerView[]>([]);
   const [tags, setTags] = useState<{ tag: string; count: number }[]>([]);
   const [naming, setNaming] = useState<string | null>(null);
   const [dueCount, setDueCount] = useState(0);
+  const [moving, setMoving] = useState(false);
   const query = filter;
   const groupId =
     STAGE_GROUPS.find(
@@ -187,10 +211,12 @@ export function ApplicationsScreen() {
     if (!Number.isInteger(linked) || linked <= 0) return;
     setActiveId(linked);
     setSheetOpen(true);
-  }, [linked, navigationKey]);
+    listSheet.openIfStacked();
+  }, [linked, navigationKey, listSheet.openIfStacked]);
 
-  // A new list starts with nothing ticked; its first application opens.
-  useEffect(() => setSelection(NO_SELECTION), [query]);
+  // A new list starts with nothing ticked (still in select mode, if it
+  // was); its first application opens.
+  useEffect(() => setSelection(clearSelected), [query]);
   useEffect(() => {
     if (activeId === null && !list.loading)
       setActiveId(list.rows[0]?.id ?? null);
@@ -286,7 +312,16 @@ export function ApplicationsScreen() {
     activeId,
     setActiveId,
     toggle,
-    selectAll: () => setSelection(selectAll()),
+    selectAll: () =>
+      setSelection((current) =>
+        stepSelectAll(
+          current,
+          latest.current.list.rows,
+          latest.current.list.nextCursor === null &&
+            !latest.current.list.totalCapped &&
+            latest.current.list.rows.length >= latest.current.list.total,
+        ),
+      ),
     clearSelection: () => setSelection(NO_SELECTION),
     loadMore: () => void list.loadMore(),
     filterSelector: `#${FILTER_ID}`,
@@ -297,10 +332,11 @@ export function ApplicationsScreen() {
       const result = await window.nestor.tracker.exportCsv(query);
       showToast(
         result.outputPath
-          ? {
-              title: `Exported ${plural(result.rows, "application")}`,
-              description: result.outputPath,
-            }
+          ? savedFileToast(
+              `Exported ${plural(result.rows, "application")}`,
+              result.outputPath,
+              showToast,
+            )
           : { title: "Export cancelled. Nothing was saved." },
       );
     } catch (error) {
@@ -328,27 +364,71 @@ export function ApplicationsScreen() {
     setFilter({ ...view.filter, sort: view.sort });
 
   const counts = list.counts;
-  const total = trackerStatusValues.reduce((sum, s) => sum + counts[s], 0);
+  const firstStep = useFirstApplicationStep();
+  // Every application once: the tracker's statuses (Applying counts only
+  // those in flight) plus the ones Apply could not finish.
+  const total = trackerFilterStatusValues.reduce(
+    (sum, s) => sum + (counts[s] ?? 0),
+    0,
+  );
   const showColumns = prefs.columns;
   const singleView = views.length === 1 ? (views[0] ?? null) : null;
 
+  // One row at every width: the stage chips where they fit, a compact
+  // stage menu where they would wrap, and Save view never on a line alone.
   const filters = (
-    <div className="flex flex-wrap items-center gap-2">
+    <div
+      className="@container/filters -m-1 flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto p-1"
+      data-application-filters
+    >
+      <select
+        aria-label="Stage"
+        // On the board the columns are the stages, so the stage filter is
+        // this one compact menu at every width, never a second row of the
+        // same stages as chips above the columns.
+        className={cn(
+          "h-8 shrink-0 rounded-(--radius-field) border border-(--field-border) bg-card px-2 text-(length:--text-small)",
+          prefs.layout !== "board" && "@6xl/filters:hidden",
+        )}
+        onChange={(event) => {
+          const group = STAGE_GROUPS.find((g) => g.id === event.target.value);
+          setFilter((f) => ({
+            ...f,
+            statuses: group ? [...group.statuses] : [],
+          }));
+        }}
+        value={groupId ?? ""}
+      >
+        <option value="">
+          All stages ({countText(total, list.countsKnown)})
+        </option>
+        {shownGroups(counts).map((group) => (
+          <option key={group.id} value={group.id}>
+            {group.label} (
+            {countText(countGroup(counts, group.statuses), list.countsKnown)})
+          </option>
+        ))}
+      </select>
       <div
         aria-label="Which applications"
-        className="flex flex-wrap gap-1"
+        className={cn(
+          "hidden shrink-0 gap-1",
+          prefs.layout !== "board" && "@6xl/filters:flex",
+        )}
         role="group"
       >
         <FilterChip
           active={filter.statuses.length === 0}
           count={total}
+          countKnown={list.countsKnown}
           label="All"
           onClick={() => setFilter((f) => ({ ...f, statuses: [] }))}
         />
-        {STAGE_GROUPS.map((group) => (
+        {shownGroups(counts).map((group) => (
           <FilterChip
             active={groupId === group.id}
             count={countGroup(counts, group.statuses)}
+            countKnown={list.countsKnown}
             key={group.id}
             label={group.label}
             onClick={() =>
@@ -378,7 +458,7 @@ export function ApplicationsScreen() {
       {tags.length > 0 ? (
         <select
           aria-label="Tag"
-          className="h-8 rounded-(--radius-field) border border-(--control-border) bg-card px-2 text-xs"
+          className="h-8 shrink-0 rounded-(--radius-field) border border-(--field-border) bg-card px-2 text-xs"
           onChange={(event) =>
             setFilter((f) => ({ ...f, tag: event.target.value || null }))
           }
@@ -395,7 +475,7 @@ export function ApplicationsScreen() {
       {singleView ? (
         <Button
           aria-label={`Open view ${singleView.name}`}
-          className="max-w-56 min-w-0"
+          className="max-w-56 min-w-0 shrink"
           onClick={() => applyView(singleView)}
           size="toolbar"
           title={singleView.name}
@@ -406,7 +486,7 @@ export function ApplicationsScreen() {
       ) : views.length > 1 ? (
         <select
           aria-label="Saved views"
-          className="h-8 rounded-(--radius-field) border border-(--control-border) bg-card px-2 text-xs"
+          className="h-8 shrink-0 rounded-(--radius-field) border border-(--field-border) bg-card px-2 text-xs"
           onChange={(event) => {
             const view = views.find((v) => String(v.id) === event.target.value);
             if (view) applyView(view);
@@ -422,13 +502,20 @@ export function ApplicationsScreen() {
         </select>
       ) : null}
       {naming === null ? (
-        <Button onClick={() => setNaming("")} size="toolbar" variant="ghost">
+        <Button
+          aria-label="Save view"
+          className="ml-auto shrink-0"
+          onClick={() => setNaming("")}
+          size="toolbar"
+          title="Save these filters as a view"
+          variant="ghost"
+        >
           <Save aria-hidden />
-          Save view
+          <span className="hidden @3xl/filters:inline">Save view</span>
         </Button>
       ) : (
         <form
-          className="flex items-center gap-1"
+          className="ml-auto flex shrink-0 items-center gap-1"
           onSubmit={(event) => {
             event.preventDefault();
             if (naming.trim()) void saveView(naming.trim());
@@ -461,12 +548,24 @@ export function ApplicationsScreen() {
     </div>
   );
 
-  const detail = <ApplicationDetail jobId={activeId} />;
+  const detail = <ApplicationDetail framed={false} jobId={activeId} />;
+  const listDetail = (
+    <ApplicationDetail
+      jobId={activeId}
+      list={besideList(list)}
+      onBack={listSheet.close}
+    />
+  );
 
   return (
     <LockedScreenLayout
-      contentClassName="xl:overflow-hidden"
+      contentClassName={
+        prefs.layout === "board"
+          ? "split:overflow-hidden"
+          : "flex flex-col overflow-hidden"
+      }
       lockContentHeight
+      lockStacked={prefs.layout !== "board"}
       topContent={
         <div className="grid gap-3">
           <PageHeader
@@ -492,6 +591,22 @@ export function ApplicationsScreen() {
                   <Download aria-hidden />
                   Export
                 </Button>
+                {prefs.layout === "board" ? (
+                  // Bulk work across stages happens in the list: Select on
+                  // the board opens the list in select mode, filters kept.
+                  <Button
+                    onClick={() => {
+                      setPrefs((p) => ({ ...p, layout: "list" }));
+                      setSelection(SELECTING);
+                    }}
+                    size="toolbar"
+                    title="Select applications to move several at once (opens the list)"
+                    variant="ghost"
+                  >
+                    <ListChecks aria-hidden />
+                    Select
+                  </Button>
+                ) : null}
                 <SegmentedControl<Layout>
                   label="Show as"
                   onValueChange={(layout) =>
@@ -515,7 +630,7 @@ export function ApplicationsScreen() {
       {prefs.layout === "board" ? (
         // The board takes the whole width; a card's details open over it.
         <div
-          className="relative flex min-h-0 flex-1 xl:h-full"
+          className="relative flex min-h-0 flex-1 split:h-full"
           data-application-list-state={JSON.stringify({
             ...query,
             layout: prefs.layout,
@@ -525,6 +640,11 @@ export function ApplicationsScreen() {
         >
           <ApplicationsBoard
             activeId={sheetOpen ? activeId : null}
+            counts={counts}
+            emptyAction={{
+              label: firstStep.label,
+              onClick: () => void navigate(firstStep.to),
+            }}
             filter={withoutStatuses(query)}
             onActivate={(id) => {
               setActiveId(id);
@@ -546,7 +666,11 @@ export function ApplicationsScreen() {
             selectedIds: [...selection.ids],
             all: selection.all,
           }}
-          detail={detail}
+          detail={listDetail}
+          sheet={{
+            open: listSheet.open && activeId !== null,
+            onClose: listSheet.close,
+          }}
           table
           list={
             <ListPane<TrackerRow>
@@ -554,8 +678,10 @@ export function ApplicationsScreen() {
               bulkActions={
                 <>
                   <select
-                    aria-label="Move the ticked applications to"
-                    className="h-8 rounded-(--radius-field) border border-(--control-border) bg-card px-2 text-xs"
+                    aria-busy={moving || undefined}
+                    aria-label={`Move ${plural(selectedCount, "selected application")} to`}
+                    className="h-8 rounded-(--radius-button) border border-(--control-border) bg-card px-2 text-(length:--text-small) font-medium disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={moving}
                     onChange={(event) => {
                       const status = event.target.value as Exclude<
                         TrackerStatus,
@@ -564,9 +690,10 @@ export function ApplicationsScreen() {
                       if (!status) return;
                       const selection = target();
                       if (!selection) return;
-                      void setStatus(selection, status).then(() =>
-                        setSelection(NO_SELECTION),
-                      );
+                      setMoving(true);
+                      void setStatus(selection, status)
+                        .then(() => setSelection(NO_SELECTION))
+                        .finally(() => setMoving(false));
                     }}
                     value=""
                   >
@@ -584,35 +711,65 @@ export function ApplicationsScreen() {
                   </select>
                 </>
               }
+              endNote={
+                filter.statuses.length > 0 ||
+                filter.tag ||
+                filter.text.trim() ||
+                filter.due ||
+                filter.quietForDays !== null
+                  ? null
+                  : "Applications appear here as Apply starts them."
+              }
               empty={
                 total === 0 ? (
                   <ListEmpty
                     action={{
-                      label: "Go to approved resumes",
-                      onClick: () =>
-                        void navigate("/job-finder/review-queue?tab=approved"),
+                      label: firstStep.label,
+                      onClick: () => void navigate(firstStep.to),
                     }}
-                    detail="Approve resumes in Shortlisted and Apply sends them; each one shows up here."
+                    detail={firstStep.detail}
                     title="No applications yet"
                   />
                 ) : (
-                  <ListEmpty title="No application matches these filters." />
+                  <ListEmpty
+                    action={{
+                      label: "Clear filters",
+                      onClick: () =>
+                        setFilter((current) => ({
+                          ...NO_FILTER,
+                          sort: current.sort,
+                        })),
+                    }}
+                    title="No application matches these filters."
+                  />
                 )
               }
+              fillStacked
               hasMore={list.nextCursor !== null}
               label="Applications"
               loading={list.loading}
+              error={list.error}
+              onRetry={() => void list.refresh()}
               noun="application"
               windowed
-              onClearSelection={() => setSelection(NO_SELECTION)}
               onLoadMore={() => void list.loadMore()}
-              onSelectAll={() => setSelection(selectAll())}
+              onSelectionChange={setSelection}
+              renderSkeletonRow={(index) => (
+                <ApplicationRowSkeleton
+                  columns={showColumns}
+                  density={prefs.density}
+                  index={index}
+                />
+              )}
               renderRow={(row, state) => (
                 <ApplicationRow
                   {...state}
                   columns={showColumns}
                   density={prefs.density}
-                  onActivate={setActiveId}
+                  onActivate={(id) => {
+                    setActiveId(id);
+                    listSheet.openIfStacked();
+                  }}
                   onToggle={toggle}
                   row={row}
                 />
@@ -629,7 +786,7 @@ export function ApplicationsScreen() {
                     onChange={(event) =>
                       setFilter((f) => ({ ...f, text: event.target.value }))
                     }
-                    placeholder="Find an application"
+                    placeholder="Find an application  /"
                     type="search"
                     value={filter.text}
                   />
@@ -675,6 +832,8 @@ function withoutStatuses(
 function FilterChip(props: {
   label: string;
   count?: number;
+  /** False while the count is unread (a failed first read): "–", not 0. */
+  countKnown?: boolean;
   active: boolean;
   onClick: () => void;
 }) {
@@ -682,19 +841,20 @@ function FilterChip(props: {
     <button
       aria-pressed={props.active}
       className={cn(
-        "inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs",
-        props.active
-          ? "border-primary-fill bg-primary-fill text-primary-fill-foreground"
-          : "border-(--control-border) bg-card text-foreground hover:bg-accent",
+        FILTER_CHIP_CLASS,
+        props.active && FILTER_CHIP_ACTIVE_CLASS,
       )}
       onClick={props.onClick}
       type="button"
     >
       {props.label}
       {props.count !== undefined ? (
-        <span className="tabular-nums opacity-80">
-          {props.count.toLocaleString()}
-        </span>
+        <CountFigure
+          className="text-muted-foreground"
+          count={props.count}
+          known={props.countKnown ?? true}
+          slot={`applications:${props.label}`}
+        />
       ) : null}
     </button>
   );
@@ -773,37 +933,46 @@ const ApplicationRow = memo(function ApplicationRow(
   // Two lines a column, so the company keeps its room beside the dates.
   const stage = shows("status") || shows("since");
   const timing = shows("next") || shows("applied");
+  const press = useRowPress(row.id, props.onActivate, props.onToggle);
+  // Wide rows fill their third column with the next step: the scheduled
+  // one, else what the stage waits on, so no row ends in empty width.
+  const next = shows("next") ? describeNext(row) : null;
   return (
     <li
-      className="relative min-w-0 pl-10"
+      className="@container/approw relative min-w-0"
       data-list-row-id={row.id}
       {...listRowPlacement(props)}
     >
-      <div className="absolute inset-y-0 left-0 z-10 flex w-10 items-center justify-center">
-        <Checkbox
-          aria-label={`Select ${row.company}, ${row.title}`}
-          checked={props.checked}
-          onClick={(event) => {
-            event.preventDefault();
-            props.onToggle(row.id, event.shiftKey);
-          }}
-        />
-      </div>
+      <ListRowCheck
+        align="center"
+        checked={props.checked}
+        id={row.id}
+        label={`${row.company}, ${row.title}`}
+        onToggle={props.onToggle}
+      />
       <SelectableRow
         aria-controls={LIST_DETAIL_REGION_ID}
+        // Named from its data, the same at every width: the narrow row
+        // folds its next step into the status column.
+        aria-label={[
+          row.company,
+          row.title,
+          tags,
+          shows("status") ? status.label : null,
+          shows("since") ? describeSince(row) : null,
+          next?.text,
+        ]
+          .filter(Boolean)
+          .join(", ")}
         className={cn(
-          "grid w-full items-center gap-3 pr-3 text-left text-sm",
-          stage && timing
-            ? "grid-cols-[minmax(10rem,1fr)_7rem_11rem]"
-            : stage
-              ? "grid-cols-[minmax(10rem,1fr)_7rem]"
-              : timing
-                ? "grid-cols-[minmax(10rem,1fr)_11rem]"
-                : "grid-cols-1",
+          applicationRowGridClassName(stage, timing),
+          LIST_ROW_SELECT_PAD_CLASS,
           props.density === "compact" ? "py-1.5" : "py-3",
         )}
-        onClick={() => props.onActivate(row.id)}
+        onClick={press.onClick}
+        onMouseDown={press.onMouseDown}
         selected={props.active}
+        checked={props.checked}
         tabIndex={props.active ? 0 : -1}
       >
         <span className="grid min-w-0">
@@ -825,24 +994,61 @@ const ApplicationRow = memo(function ApplicationRow(
                 {status.label}
               </StatusBadge>
             ) : null}
+            {/* A narrow list has no timing column: the next step, when
+                there is one, takes the "Since" line's place. */}
+            {timing && shows("next") && row.nextAt ? (
+              <span
+                className="max-w-full truncate font-medium @2xl/approw:hidden"
+                title={row.nextTitle ?? ""}
+              >
+                {describeDue(row.nextAt)}
+              </span>
+            ) : null}
             {shows("since") ? (
-              <span className="text-foreground-soft">
-                Since {formatDay(row.statusAt)}
+              <span
+                className={cn(
+                  "text-foreground-soft",
+                  timing &&
+                    shows("next") &&
+                    row.nextAt &&
+                    "hidden @2xl/approw:inline",
+                )}
+              >
+                {describeSince(row)}
               </span>
             ) : null}
           </span>
         ) : null}
         {timing ? (
-          <span className="grid min-w-0 gap-0.5 text-xs">
-            {shows("next") && row.nextAt ? (
+          // Only where the list is wide enough to give it room: at 1024 a
+          // mostly empty third column took the company's and title's width.
+          <span
+            className={cn(
+              "min-w-0 gap-0.5 text-xs",
+              stage ? "hidden @2xl/approw:grid" : "grid",
+            )}
+          >
+            {next ? (
               <span
-                className="truncate font-medium"
-                title={row.nextTitle ?? ""}
+                className={cn(
+                  "truncate",
+                  next.act ? "font-medium" : "text-foreground-soft",
+                )}
+                data-next-step={next.act ? "act" : "wait"}
+                title={next.text}
               >
-                {describeDue(row.nextAt)}: {row.nextTitle}
+                {next.text}
               </span>
             ) : null}
-            {shows("applied") && row.appliedAt ? (
+            {/* One date per row: an application still at Applied already
+                says "Since" that day. */}
+            {shows("applied") &&
+            row.appliedAt &&
+            !(
+              shows("since") &&
+              row.status === "applied" &&
+              formatDay(row.statusAt) === formatDay(row.appliedAt)
+            ) ? (
               <span className="text-foreground-soft">
                 Applied {formatDay(row.appliedAt)}
               </span>
@@ -853,3 +1059,146 @@ const ApplicationRow = memo(function ApplicationRow(
     </li>
   );
 });
+
+/**
+ * The row box: the same flat divider rows as every other list (no rounded
+ * card of its own), with the columns the person chose.
+ */
+/**
+ * The status column fits the longest status chip ("Sent? Check the site",
+ * "Filling in the form") whole, at every width: the company and title
+ * truncate first, a chip never does.
+ */
+function applicationRowGridClassName(stage: boolean, timing: boolean) {
+  return cn(
+    "grid w-full items-center gap-3 rounded-none border-x-0 border-t-0 border-b border-b-(--surface-panel-border) pr-3 text-left text-sm focus-visible:z-10",
+    stage && timing
+      ? "grid-cols-[minmax(8rem,1fr)_9.5rem] @2xl/approw:grid-cols-[minmax(10rem,1fr)_9.5rem_minmax(11rem,1fr)]"
+      : stage
+        ? "grid-cols-[minmax(8rem,1fr)_9.5rem]"
+        : timing
+          ? "grid-cols-[minmax(10rem,1fr)_minmax(11rem,1fr)]"
+          : "grid-cols-1",
+  );
+}
+
+/** A loading row laid out like `ApplicationRow` with the same columns. */
+function ApplicationRowSkeleton(props: {
+  columns: readonly Column[];
+  density: Density;
+  index: number;
+}) {
+  const shows = (column: Column) => props.columns.includes(column);
+  const stage = shows("status") || shows("since");
+  const timing = shows("next") || shows("applied");
+  const widths = ["w-2/5", "w-1/2", "w-1/3", "w-3/5"] as const;
+  return (
+    <li
+      aria-hidden="true"
+      className="@container/approw min-w-0"
+      data-list-row-skeleton
+    >
+      <div
+        className={cn(
+          applicationRowGridClassName(stage, timing),
+          "px-4",
+          props.density === "compact" ? "py-1.5" : "py-3",
+        )}
+      >
+        <span className="grid min-w-0">
+          <span className="flex h-5 items-center">
+            <span
+              className={cn(
+                "skeleton block h-3",
+                widths[props.index % widths.length],
+              )}
+            />
+          </span>
+          <span className="flex h-4 items-center">
+            <span className="skeleton block h-2.5 w-3/5" />
+          </span>
+        </span>
+        {stage ? (
+          <span className="grid gap-0.5">
+            {shows("status") ? (
+              <span className="skeleton block h-5 w-20" />
+            ) : null}
+            {shows("since") ? (
+              <span className="flex h-4 items-center">
+                <span className="skeleton block h-2.5 w-16" />
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+        {timing ? (
+          <span
+            className={cn(
+              "gap-0.5",
+              stage ? "hidden @2xl/approw:grid" : "grid",
+            )}
+          >
+            {shows("next") ? (
+              <span className="flex h-4 items-center">
+                <span className="skeleton block h-2.5 w-28" />
+              </span>
+            ) : null}
+            {shows("applied") ? (
+              <span className="flex h-4 items-center">
+                <span className="skeleton block h-2.5 w-20" />
+              </span>
+            ) : null}
+          </span>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * With no applications yet, the empty list leads to the step that comes
+ * next from where the person is: finishing setup, approving the resumes that
+ * are written, reading the ones to review, sorting found jobs, or a first
+ * search. Never to an empty Approved tab.
+ */
+function useFirstApplicationStep(): {
+  label: string;
+  detail: string;
+  to: string;
+} {
+  const stages = useStageCounts();
+  const setup = useLaunchReads().context?.profileSetupState?.status ?? null;
+  if (setup === "not_started" || setup === "in_progress")
+    return {
+      label: setup === "not_started" ? "Set up your profile" : "Finish setup",
+      detail:
+        "Apply sends approved resumes with your profile; each application shows up here.",
+      to: "/job-finder/profile/setup",
+    };
+  if (stages && stages.resume > 0)
+    return {
+      label: `Apply to ${plural(stages.resume, "approved job")}`,
+      detail:
+        "Their resumes are approved. Apply sends them; each one shows up here.",
+      to: "/job-finder/review-queue?tab=approved",
+    };
+  if (stages && stages.shortlisted > 0)
+    return {
+      label: `Review ${plural(stages.shortlisted, "resume")}`,
+      detail:
+        "Approve a resume in Shortlisted and Apply sends it; it shows up here.",
+      to: "/job-finder/review-queue",
+    };
+  if (stages && stages.found > 0)
+    return {
+      label: "Sort found jobs",
+      detail:
+        "Shortlist the jobs you want; each gets a resume to approve, then Apply sends it.",
+      to: JOB_FINDER_ROUTE_PATHS.discovery,
+    };
+  return {
+    label: "Find jobs",
+    detail:
+      "Search your job sites, shortlist, approve a resume, and Apply sends it here.",
+    to: JOB_FINDER_ROUTE_PATHS.discovery,
+  };
+}

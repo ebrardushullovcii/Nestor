@@ -1,5 +1,7 @@
 import { useMemo, type CSSProperties } from 'react'
 
+import { cn } from '@renderer/lib/utils'
+
 /**
  * The empty meter has to read as a meter.
  *
@@ -13,7 +15,7 @@ import { useMemo, type CSSProperties } from 'react'
  * (3.99 / 3.88). Pinned by styles/globals.test.ts.
  */
 const PROGRESS_TRACK_CLASS_NAME =
-  'h-2 w-full rounded-full bg-(--surface-progress-track) shadow-[inset_0_0_0_1px_var(--control-border)]'
+  'h-2 w-full rounded-full bg-(--surface-progress-track)'
 
 function clampPercent(value: number): number {
   if (!Number.isFinite(value)) {
@@ -53,11 +55,17 @@ export function ProgressBar({
         aria-label={ariaLabel}
         aria-valuemax={100}
         aria-valuemin={0}
-        className={className ?? PROGRESS_TRACK_CLASS_NAME}
+        className={cn(
+          className ?? PROGRESS_TRACK_CLASS_NAME,
+          "overflow-hidden",
+        )}
         data-progress-indeterminate
         role="progressbar"
       >
-        <div className="h-full w-2/5 rounded-full bg-primary/70 motion-safe:animate-pulse-brief" />
+        {/* Keeps sliding for as long as the work runs (a fit check can take
+            minutes): transform only, so the compositor moves it without
+            repainting the page. Parked mid-track with reduced motion. */}
+        <div className="progress-indeterminate h-full w-2/5 rounded-full bg-primary-fill" />
       </div>
     )
   }

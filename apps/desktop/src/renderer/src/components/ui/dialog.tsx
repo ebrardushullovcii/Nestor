@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 
 import { cn } from "@renderer/lib/utils";
 import { Button } from "./button";
+import { usePresence } from "./use-presence";
 
 /**
  * The one modal shell.
@@ -154,31 +155,45 @@ function Dialog({
     };
   }, [initialFocus, open]);
 
-  if (!open) {
+  // Arrives and leaves with a 160 ms fade and a 0.98 -> 1 scale.
+  const presence = usePresence(open);
+  // What the dialog showed when it closed, drawn while it leaves.
+  const lastContent = React.useRef({ children, description, footer, title });
+  if (open) lastContent.current = { children, description, footer, title };
+  const shown = lastContent.current;
+
+  if (!presence.mounted) {
     return null;
   }
 
   return createPortal(
-    <div className={DIALOG_SCRIM_CLASS} onClick={onClose}>
+    <div
+      aria-hidden={presence.exiting || undefined}
+      className={DIALOG_SCRIM_CLASS}
+      data-scrim-motion={presence.motion}
+      inert={presence.exiting || undefined}
+      onClick={presence.exiting ? undefined : onClose}
+    >
       <div
-        aria-describedby={description ? descriptionId : undefined}
+        aria-describedby={shown.description ? descriptionId : undefined}
         aria-labelledby={titleId}
-        aria-modal="true"
+        aria-modal={presence.exiting ? undefined : "true"}
         className={cn(
           "surface-panel-shell grid w-full max-h-[calc(100dvh-3rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-4 rounded-(--radius-panel) border border-(--surface-panel-border) p-5 shadow-(--modal-shadow)",
           DIALOG_WIDTH_CLASS[size],
           className,
         )}
+        data-dialog-motion={presence.motion}
         data-slot="dialog"
         onClick={(event) => event.stopPropagation()}
         ref={dialogRef}
-        role="dialog"
+        role={presence.exiting ? undefined : "dialog"}
         tabIndex={-1}
       >
         <div className="grid gap-2">
           <div className="flex items-start justify-between gap-4">
             <h2 className="text-(--text-headline)" id={titleId}>
-              {title}
+              {shown.title}
             </h2>
             {/* The single close affordance for every dialog in the app. */}
             <Button
@@ -193,12 +208,12 @@ function Dialog({
               <X aria-hidden="true" className="size-4" />
             </Button>
           </div>
-          {description ? (
+          {shown.description ? (
             <p
               className="text-(length:--text-small) leading-5 text-foreground-soft"
               id={descriptionId}
             >
-              {description}
+              {shown.description}
             </p>
           ) : null}
         </div>
@@ -206,14 +221,14 @@ function Dialog({
           className="min-h-0 overflow-y-auto overscroll-contain"
           data-slot="dialog-body"
         >
-          {children}
+          {shown.children}
         </div>
-        {footer ? (
+        {shown.footer ? (
           <div
             className="flex flex-wrap items-center justify-end gap-2"
             data-slot="dialog-footer"
           >
-            {footer}
+            {shown.footer}
           </div>
         ) : null}
       </div>

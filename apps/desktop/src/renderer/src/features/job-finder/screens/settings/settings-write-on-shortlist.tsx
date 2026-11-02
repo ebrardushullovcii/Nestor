@@ -41,7 +41,10 @@ export function SettingsWriteOnShortlist(props: {
     }
   };
   return (
-    <div data-testid="settings-resume-writing">
+    <div
+      className="border-t border-(--surface-panel-border) pt-4"
+      data-testid="settings-resume-writing"
+    >
       <ToggleField
         checked={checked}
         description="A job's resume starts writing at your Profile resume level as soon as you shortlist it, so it is ready when you open it."

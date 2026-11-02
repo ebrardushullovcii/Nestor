@@ -41,14 +41,15 @@ describe("PageHeader", () => {
     ).toBeTruthy();
   });
 
-  it("truncates the description to one line and keeps the full text available", () => {
+  it("keeps the description whole: one line beside the title, wrapped under it, never cut", () => {
     const description =
       "A long supporting sentence that would wrap onto a second line in a narrow window.";
     render(<PageHeader description={description} title="Needs you" />);
 
     const heading = screen.getByRole("heading", { name: "Needs you" });
     const text = screen.getByText(description);
-    expect(text.className).toContain("truncate");
+    expect(text.className).not.toContain("truncate");
+    expect(text.className).toContain("window-wide:whitespace-nowrap");
     expect(text.className).not.toContain("max-w-[68ch]");
     expect(text.getAttribute("title")).toBe(description);
     expect(heading.getAttribute("aria-describedby")).toBe(text.id);
@@ -61,8 +62,8 @@ describe("PageHeader", () => {
       name: "Outcomes",
     }).parentElement;
     expect(titleBlock?.className).toContain("flex-col");
-    expect(titleBlock?.className).toContain("lg:flex-row");
-    expect(titleBlock?.className).toContain("lg:items-baseline");
+    expect(titleBlock?.className).toContain("window-wide:flex-row");
+    expect(titleBlock?.className).toContain("window-wide:items-baseline");
   });
 
   it("omits the actions region when no actions are given", () => {

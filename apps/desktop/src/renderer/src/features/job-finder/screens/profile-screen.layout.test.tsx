@@ -386,6 +386,9 @@ describe("ProfileScreen ready-state density and save-bar footprint", () => {
         section === "experience"
           ? /Review in Experience:/
           : /Review in Background:/;
+      // The resume summary is shown once: its Details opens the full import
+      // summary in place of the strip.
+      fireEvent.click(screen.getByRole("button", { name: /^Details/ }));
       fireEvent.click(screen.getByRole("button", { name: action }));
       expect(screen.getByText("Currently saved")).toBeTruthy();
       expect(
@@ -616,36 +619,33 @@ describe("ProfileScreen ready-state density and save-bar footprint", () => {
     expect(screen.queryByText("Optional review")).toBeNull();
   });
 
-  it("puts the editable Basics content before the detailed resume review surface", () => {
+  it("shows the resume once: a strip whose Details swaps in the full summary", () => {
     renderProfileScreen({
       initialEntry: "/job-finder/profile?section=basics",
     });
 
+    // One resume surface: the strip above the editor, no second block at
+    // the foot of Basics.
+    expect(
+      document.querySelectorAll("[data-profile-resume-summary]"),
+    ).toHaveLength(1);
+    expect(document.querySelector("[data-profile-resume-review]")).toBeNull();
+    expect(screen.queryByText("Imported details")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Details/ }));
+    expect(document.querySelector("[data-profile-resume-summary]")).toBeNull();
+    expect(
+      document.querySelector("[data-profile-resume-details]"),
+    ).toBeTruthy();
+    expect(screen.getByText("Imported details")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Hide details/ }));
     expect(
       document.querySelector("[data-profile-resume-summary]"),
     ).toBeTruthy();
-    expect(document.querySelector("[data-profile-resume-review]")).toBeTruthy();
-    expect(screen.getByText("Imported details")).toBeTruthy();
-
-    const summary = document.querySelector("[data-profile-resume-summary]");
     const basicsEditor = document.querySelector(
       '[aria-labelledby="basics-tab"][role="tabpanel"]',
     );
-    const detailedReview = document.querySelector(
-      "[data-profile-resume-review]",
-    );
-
-    expect(summary).toBeTruthy();
     expect(basicsEditor).toBeTruthy();
-    expect(detailedReview).toBeTruthy();
-    if (!basicsEditor || !detailedReview) {
-      throw new Error(
-        "Expected the Basics editor and detailed resume review surface to render.",
-      );
-    }
-    expect(
-      basicsEditor.compareDocumentPosition(detailedReview) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
   });
 });

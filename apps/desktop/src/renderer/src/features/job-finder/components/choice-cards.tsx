@@ -7,7 +7,7 @@ export interface ChoiceCardOption<Id extends string> {
   id: Id;
   label: string;
   /** One short line under the label; what picking this card means. */
-  detail: string;
+  detail?: string;
   disabled?: boolean;
   /** Small trailing note, e.g. why the option is unavailable. */
   note?: ReactNode;
@@ -34,36 +34,34 @@ export function ChoiceCards<Id extends string>(props: {
 }) {
   const groupRef = useRef<HTMLDivElement | null>(null);
   const size = props.size ?? "regular";
-  const columns = props.columns ?? Math.min(4, Math.max(2, props.options.length));
+  const columns =
+    props.columns ?? Math.min(4, Math.max(2, props.options.length));
 
-  const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>) => {
-      const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
-      const backward = event.key === "ArrowLeft" || event.key === "ArrowUp";
-      if (!forward && !backward) {
-        return;
-      }
-      const buttons = [
-        ...(groupRef.current?.querySelectorAll<HTMLButtonElement>(
-          "button[role='radio']:not([disabled])",
-        ) ?? []),
+  const handleKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
+    const backward = event.key === "ArrowLeft" || event.key === "ArrowUp";
+    if (!forward && !backward) {
+      return;
+    }
+    const buttons = [
+      ...(groupRef.current?.querySelectorAll<HTMLButtonElement>(
+        "button[role='radio']:not([disabled])",
+      ) ?? []),
+    ];
+    const activeIndex = buttons.indexOf(
+      document.activeElement as HTMLButtonElement,
+    );
+    if (buttons.length < 2 || activeIndex === -1) {
+      return;
+    }
+    event.preventDefault();
+    const next =
+      buttons[
+        (activeIndex + (forward ? 1 : -1) + buttons.length) % buttons.length
       ];
-      const activeIndex = buttons.indexOf(
-        document.activeElement as HTMLButtonElement,
-      );
-      if (buttons.length < 2 || activeIndex === -1) {
-        return;
-      }
-      event.preventDefault();
-      const next =
-        buttons[
-          (activeIndex + (forward ? 1 : -1) + buttons.length) % buttons.length
-        ];
-      next?.focus();
-      next?.click();
-    },
-    [],
-  );
+    next?.focus();
+    next?.click();
+  }, []);
 
   return (
     <div
@@ -87,12 +85,15 @@ export function ChoiceCards<Id extends string>(props: {
           <button
             aria-checked={selected}
             className={cn(
-              "flex h-full flex-col justify-center gap-0.5 rounded-(--radius-small) border text-left font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+              "flex h-full flex-col justify-center gap-0.5 rounded-(--radius-small) border text-left font-semibold transition-colors focus-visible:outline-none focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
               size === "compact"
                 ? "min-h-9 px-2.5 py-1 text-(length:--text-small)"
                 : "min-h-11 px-3 py-2 text-(length:--text-small)",
+              // Cards are not inputs: a panel hairline at rest, and the
+              // chosen card gets the accent ring (border plus a 1 px ring)
+              // and a check, so selection never rests on a tint alone.
               selected
-                ? "border-primary bg-primary/10 text-(--text-headline) shadow-[inset_2px_0_0_var(--primary)]"
+                ? "border-primary bg-primary/10 text-(--text-headline) ring-1 ring-primary"
                 : "border-(--surface-panel-border) bg-background/30 text-foreground-soft hover:border-primary/35",
               disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer",
             )}
@@ -118,16 +119,18 @@ export function ChoiceCards<Id extends string>(props: {
                 </span>
               ) : null}
             </span>
-            <span
-              className={cn(
-                "font-normal text-foreground-soft",
-                size === "compact"
-                  ? "text-xs leading-4"
-                  : "text-(length:--text-small) leading-5",
-              )}
-            >
-              {option.detail}
-            </span>
+            {option.detail ? (
+              <span
+                className={cn(
+                  "font-normal text-foreground-soft",
+                  size === "compact"
+                    ? "text-xs leading-4"
+                    : "text-(length:--text-small) leading-5",
+                )}
+              >
+                {option.detail}
+              </span>
+            ) : null}
           </button>
         );
       })}
@@ -141,7 +144,8 @@ export const APPLY_MODE_OPTIONS: readonly ChoiceCardOption<
   {
     id: "confirm_before_submit",
     label: "Fill in for me",
-    detail: "Fills the form and attaches your resume. You review it and press Send.",
+    detail:
+      "Fills the form and attaches your resume. You review it and press Send.",
   },
   {
     id: "autonomous_submit",

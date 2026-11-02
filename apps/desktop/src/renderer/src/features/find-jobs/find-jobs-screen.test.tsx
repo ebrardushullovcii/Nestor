@@ -57,6 +57,15 @@ function job(n: number): FoundJob {
 }
 
 /** The side chat moves a job the way `move_jobs` does: a stage change and its event. */
+/** A finished search, so the list's fit floor follows its pickiness. */
+function pastSearch() {
+  const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);
+  searchStatus = {
+    ...searchStatus,
+    search: store.searches.finish(search.id, "done"),
+  };
+}
+
 function hideFromChat(jobId: number) {
   store.setStage([jobId], "hidden");
 }
@@ -154,8 +163,33 @@ it("opens the next found job when the chat moves the open one, and says all caug
   hideFromChat(ids[1]!);
   hideFromChat(ids[2]!);
   await waitFor(() => expect(openTitle()).toBeNull());
-  expect(screen.getByText("All caught up")).toBeTruthy();
+  // The last rows fade out first; then the list says why it is empty.
+  expect(await screen.findByText("All caught up")).toBeTruthy();
   expect(screen.queryByText("No jobs yet")).toBeNull();
+});
+
+it("names the open job's moves by their words, with the key as a shortcut", async () => {
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <FindJobsScreen />
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+  await waitFor(() => expect(openTitle()).not.toBeNull());
+  // "Shortlist", not "ShortlistS": the keycap is decoration.
+  const shortlist = await screen.findByRole("button", {
+    name: "Shortlist",
+  });
+  expect(shortlist.getAttribute("aria-keyshortcuts")).toBe("S");
+  expect(shortlist.querySelector("kbd")?.getAttribute("aria-hidden")).toBe(
+    "true",
+  );
+  expect(
+    screen
+      .getByRole("button", { name: "Hide" })
+      .getAttribute("aria-keyshortcuts"),
+  ).toBe("H");
 });
 
 it("shows failed sites and recovery advice instead of a successful empty search", async () => {
@@ -198,10 +232,14 @@ it("shows failed sites and recovery advice instead of a successful empty search"
   );
   await screen.findByText("Some sites could not be read");
   expect(screen.getByText(/4 of 4 sites could not be read/)).toBeTruthy();
+  // The site report opens over the list, on the failed sites.
+  fireEvent.click(screen.getByRole("button", { name: "What each site found" }));
   await screen.findByText("Unreadable site 4");
   expect(screen.queryByText(/nothing new/i)).toBeNull();
   expect(screen.queryByText("No jobs yet")).toBeNull();
-  expect(screen.getAllByText(/try the board’s main jobs URL/)).toHaveLength(4);
+  expect(
+    screen.getAllByText(/use the board’s main jobs page instead/),
+  ).toHaveLength(4);
   expect(
     screen.getAllByText(
       "The vacancy title or hiring employer could not be identified on this page.",
@@ -286,20 +324,30 @@ it("counts every match before select all acts on a list counted past 1,000", asy
   countGate = new Promise<void>((resolve) => {
     answer = resolve;
   });
+  pastSearch();
   renderScreen();
   // The search's fit floor filters the list, so its count stops at 1,000.
+  const list = await screen.findByRole("region", { name: "Found jobs" });
+  fireEvent.click(await within(list).findByRole("button", { name: "Select" }));
+  // The box takes the 50 rows shown; the bar offers every match, then counts.
   fireEvent.click(
-    await screen.findByRole("checkbox", { name: "Select all 1,000+ jobs" }),
+    within(list).getByRole("checkbox", { name: "Select all 50 shown jobs" }),
   );
-  const list = screen.getByRole("region", { name: "Found jobs" });
+  expect(within(list).getByText("50 selected")).toBeTruthy();
+  fireEvent.click(
+    within(list).getByRole("button", { name: "Select all matching" }),
+  );
   expect(await within(list).findByText("Counting…")).toBeTruthy();
   expect(
-    within(list).getByRole<HTMLButtonElement>("button", { name: "Hide" })
+    within(list).getByRole<HTMLButtonElement>("button", { name: /^Hide/ })
       .disabled,
   ).toBe(true);
   answer();
   expect(await within(list).findByText("1,008 selected")).toBeTruthy();
-  fireEvent.click(within(list).getByRole("button", { name: "Hide 1,008" }));
+  // The bulk button names its exact scope for assistive tech.
+  fireEvent.click(
+    within(list).getByRole("button", { name: "Hide 1,008 jobs" }),
+  );
   await waitFor(() => expect(store.stageCounts().hidden).toBe(1008));
 });
 
@@ -313,35 +361,46 @@ it("keeps the fit floor choice across a restart and counts below it with the tex
       gaps: [],
     })),
   );
+  pastSearch();
   const first = renderScreen();
-  const floor = await screen.findByRole("button", {
-    name: "Fit 65+ · 2 below",
-  });
+  // One fit control on the screen: the list's "Show fit", on Good+.
+  const showFit = await screen.findByRole("group", { name: "Show fit" });
+  const goodPlus = within(showFit).getByRole("button", { name: "Good+" });
+  expect(goodPlus.getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("group", { name: "How picky" })).toBeNull();
+  const scope = () =>
+    document.querySelector("[data-list-scope]")?.textContent ?? "";
+  // The list says its scope plainly: how many show, of how many, and why.
+  await waitFor(() =>
+    expect(scope()).toBe("1 of 3 jobs · 2 below good fit · Show all"),
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "Filter jobs" }), {
     target: { value: "Analyst 2" },
   });
   // Only the matching job counts: the floor hides one of them.
-  await screen.findByRole("button", { name: "Fit 65+ · 1 below" });
+  await waitFor(() =>
+    expect(scope()).toBe("0 jobs · 1 below good fit · Show all"),
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "Filter jobs" }), {
     target: { value: "Analyst 1" },
   });
   // Nothing under the floor: no count at all.
-  await screen.findByRole("button", { name: "Fit 65+" });
-  expect(floor.isConnected).toBe(true);
-  fireEvent.click(floor);
-  const list = screen.getByRole("region", { name: "Found jobs" });
-  await within(list).findByRole("button", { name: "Any fit" });
+  await waitFor(() => expect(scope()).toBe("1 job"));
+  expect(goodPlus.isConnected).toBe(true);
+  const anyFit = within(showFit).getByRole("button", { name: "Any fit" });
+  fireEvent.click(anyFit);
+  await waitFor(() => expect(anyFit.getAttribute("aria-pressed")).toBe("true"));
   fireEvent.change(screen.getByRole("textbox", { name: "Filter jobs" }), {
     target: { value: "" },
   });
   first.unmount();
 
   renderScreen();
+  const restored = await screen.findByRole("group", { name: "Show fit" });
   expect(
-    await within(screen.getByRole("region", { name: "Found jobs" })).findByRole(
-      "button",
-      { name: "Any fit" },
-    ),
-  ).toBeTruthy();
+    within(restored)
+      .getByRole("button", { name: "Any fit" })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
   expect(await screen.findByText("Supply Chain Analyst 2")).toBeTruthy();
 });

@@ -184,6 +184,44 @@ describe("chat history dismissal", () => {
   });
 });
 
+describe("closing the assistant from inside it", () => {
+  it("hands focus to the header button that opens it again, not the page body", async () => {
+    const composer = await renderSidebar(
+      fakeBridge(() => Promise.reject(new Error("unused"))),
+    );
+    // The composer takes focus as the panel opens.
+    await waitFor(() => expect(document.activeElement).toBe(composer));
+    const toggle = document.createElement("button");
+    toggle.setAttribute("data-assistant-toggle", "");
+    document.body.append(toggle);
+    const close = screen.getByRole("button", { name: "Close the assistant" });
+    close.focus();
+    fireEvent.click(close);
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+    toggle.remove();
+  });
+});
+
+describe("undocking", () => {
+  it("slides the docked panel out (inert) on the docking timing, then hides it", async () => {
+    await renderSidebar(fakeBridge(() => Promise.reject(new Error("unused"))));
+    const aside = document.querySelector<HTMLElement>(
+      "aside[data-assistant-sidebar]",
+    )!;
+    if (aside.getAttribute("data-assistant-narrow") === "true") return;
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close the assistant" }),
+    );
+    // Still drawn while it slides out, and nothing in it takes focus.
+    expect(aside.hasAttribute("data-assistant-leaving")).toBe(true);
+    expect(aside.className).not.toMatch(/(^|\s)hidden(\s|$)/);
+    expect(aside.hasAttribute("inert")).toBe(true);
+    fireEvent.animationEnd(aside);
+    expect(aside.hasAttribute("data-assistant-leaving")).toBe(false);
+    expect(aside.className).toMatch(/(^|\s)hidden(\s|$)/);
+  });
+});
+
 describe("assistant composer keeps what the person wrote", () => {
   it("shows progress and Stop for a background resume batch after its model turn replied", async () => {
     const bridge = fakeBridge(() => Promise.reject(new Error("unused")), {

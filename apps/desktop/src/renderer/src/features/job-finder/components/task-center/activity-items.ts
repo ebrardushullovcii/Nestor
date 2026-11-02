@@ -6,6 +6,7 @@ import type {
 } from "@nestor/contracts";
 
 import { JOB_FINDER_ROUTE_PATHS } from "../../lib/job-finder-route-hrefs";
+import { APPLICATION_WORK_TONE } from "../../lib/application-status-tone";
 import type { BadgeTone } from "../../lib/job-finder-types";
 
 export type ActivityStatus = "running" | "done" | "stopped" | "failed";
@@ -37,10 +38,11 @@ const APPLICATION_WORDS: Record<
   submitting: { status: "running", badge: "Sending", detail: "Sending it" },
   ready: {
     status: "done",
-    badge: "Filled in",
-    detail: "Filled in, ready for you to send",
+    badge: "Ready to send",
+    detail: "Filled in, waiting for you to send",
   },
-  submitted: { status: "done", badge: "Sent", detail: "Sent" },
+  // One word for a sent application everywhere: "Applied".
+  submitted: { status: "done", badge: "Applied", detail: "Applied" },
   stopped: {
     status: "stopped",
     badge: "Stopped",
@@ -56,7 +58,12 @@ const APPLICATION_WORDS: Record<
     badge: "Blocked",
     detail: "The site refused this browser; open the job in your browser",
   },
-  failed: { status: "failed", badge: "Failed", detail: "Could not apply" },
+  // The words every other screen uses for it: "Could not apply".
+  failed: {
+    status: "failed",
+    badge: "Could not apply",
+    detail: "Nothing was sent; try again or apply by hand",
+  },
   uncertain: {
     status: "failed",
     badge: "Unclear",
@@ -118,7 +125,9 @@ export function toActivityItems(feed: ActivityFeed): {
             : status === "stopped"
               ? "Stopped"
               : "Failed",
-      tone: tone(status),
+      // Done reads one way in Activity: a neutral pill ("Finished",
+      // "Written"); green stays for what is sent, approved or an offer.
+      tone: status === "done" ? "neutral" : tone(status),
       href: JOB_FINDER_ROUTE_PATHS.discovery,
       at: search.finishedAt ?? search.startedAt,
     });
@@ -152,7 +161,9 @@ export function toActivityItems(feed: ActivityFeed): {
             : resume.state === "ready"
               ? "Written"
               : "Failed",
-      tone: tone(status),
+      // A written resume still waits for review, where Shortlisted shows
+      // it as a neutral "To review": green here read as already approved.
+      tone: resume.state === "ready" ? "neutral" : tone(status),
       href: jobHref(resume.jobId, resume.stage),
       at: resume.at,
     });
@@ -168,7 +179,7 @@ export function toActivityItems(feed: ActivityFeed): {
       title: application.title,
       detail: `${application.company} · ${words.detail}`,
       badge: words.badge,
-      tone: tone(words.status),
+      tone: APPLICATION_WORK_TONE[application.state],
       href: `${JOB_FINDER_ROUTE_PATHS.applications}?jobId=${application.jobId}`,
       at: application.at,
     });

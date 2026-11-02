@@ -21,3 +21,9 @@ For a same-screen request, send the same instruction while remaining on Shortlis
 ## Gotchas
 
 The user move must happen before the model opens the destination. If the model finishes first, repeat with a fresh message; that run did not exercise stale context. Opening a route is proven by the displayed heading and the acknowledged tool result, not by the assistant saying it opened something.
+
+## Chat chrome handles
+
+- Copy is an icon under each assistant reply, "Copy reply" (`[data-assistant-copy]`), shown on hover or focus; it reads "Copied" after a copy.
+- What the assistant can see is a chip above the composer (`[data-assistant-context-chip]`, an eye icon and "Screen · item"; "Looking at:" is for screen readers only).
+- Send (`[data-assistant-send]`) is a filled pine circle while the composer has text. Starter suggestions are pills under `[data-assistant-starters]`. A turn's tool log is one quiet line, "Did N things", that opens on click.

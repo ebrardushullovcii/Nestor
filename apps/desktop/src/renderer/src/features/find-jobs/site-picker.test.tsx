@@ -42,7 +42,7 @@ beforeEach(() => {
   });
 });
 
-it("closes the kept site's picker when opening Profile's Job sources", async () => {
+it("closes the kept site's picker when opening Profile's Job sites", async () => {
   render(
     <MemoryRouter initialEntries={["/job-finder/discovery"]}>
       <SitePicker

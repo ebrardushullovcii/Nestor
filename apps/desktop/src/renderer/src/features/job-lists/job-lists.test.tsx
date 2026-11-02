@@ -25,8 +25,12 @@ import {
   ListPane,
   ListRowFrame,
   NO_SELECTION,
+  SELECTING,
+  clearSelected,
   countSelected,
+  isSelecting,
   selectAll,
+  stepSelectAll,
   toSelectionInput,
   toggleSelection,
   useJobList,
@@ -76,9 +80,10 @@ function installBridge(): void {
   Object.assign(window, { nestor: { jobs: bridge } });
 }
 
-function FoundList() {
+function FoundList(props: { toolbar?: boolean } = {}) {
   const list = useJobList({ stage: "found", sort: "newest" });
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
+  const [opened, setOpened] = useState<number | null>(null);
   return (
     <>
       <button
@@ -101,15 +106,20 @@ function FoundList() {
         hasMore={list.nextCursor !== null}
         label="Found jobs"
         loading={list.loading}
-        onClearSelection={() => setSelection(NO_SELECTION)}
         onLoadMore={() => void list.loadMore()}
-        onSelectAll={() => setSelection(selectAll())}
+        onSelectionChange={setSelection}
+        bulkActions={
+          <button type="button">
+            Hide {countSelected(selection, list.total)}
+          </button>
+        }
+        toolbar={props.toolbar ? <input aria-label="Filter jobs" /> : undefined}
         renderRow={(row, state) => (
           <ListRowFrame
             {...state}
             id={row.id}
             meta={row.company}
-            onActivate={() => undefined}
+            onActivate={setOpened}
             onToggle={(id, shift) =>
               setSelection((s) => toggleSelection(s, id, shift, list.rows))
             }
@@ -122,6 +132,7 @@ function FoundList() {
         total={list.total}
         totalCapped={list.totalCapped}
       />
+      <output aria-label="Opened">{opened ?? "none"}</output>
     </>
   );
 }
@@ -171,8 +182,14 @@ describe("shared list pieces", () => {
     expect(await screen.findByText("60 jobs")).toBeTruthy();
     expect(screen.getAllByRole("listitem")).toHaveLength(50);
 
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    // The box takes the 50 rows shown; the bar then offers every match.
     fireEvent.click(
-      screen.getByRole("checkbox", { name: "Select all 60 jobs" }),
+      screen.getByRole("checkbox", { name: "Select all 50 shown jobs" }),
+    );
+    expect(screen.getByText("50 selected")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Select all 60 matching" }),
     );
     expect(screen.getByText("60 selected")).toBeTruthy();
     fireEvent.click(
@@ -252,6 +269,113 @@ describe("shared list pieces", () => {
     act(() => visibility.setHidden(false));
     expect(await screen.findByText("Designer 3")).toBeTruthy();
     expect(commands.slice(before)).toEqual(["list_jobs"]);
+  });
+});
+
+describe("select mode", () => {
+  it("starts with a Select button, no tick boxes in the way, and leaves with Done", async () => {
+    store.saveFoundJobs({ searchId: null, jobs: [found(1), found(2)] });
+    render(<FoundList toolbar />);
+    expect(await screen.findByText("2 jobs")).toBeTruthy();
+    const pane = screen.getByRole("region", { name: "Found jobs" });
+    expect(pane.dataset.selecting).toBe("false");
+    // A plain click opens a row; it ticks nothing.
+    fireEvent.click(screen.getByRole("button", { name: /Designer 1/ }));
+    expect(screen.getByLabelText("Opened").textContent).not.toBe("none");
+    expect(pane.dataset.selecting).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Select" }));
+    expect(pane.dataset.selecting).toBe("true");
+    // Nothing ticked: the bar says what to do, not "0 selected".
+    expect(screen.getByText("Tick jobs")).toBeTruthy();
+    // The list's tools stay where they were.
+    expect(screen.getByRole("textbox", { name: "Filter jobs" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    // In select mode a click on a row ticks it, and only ticks it: the
+    // open row (and its details or sheet) stay where they were.
+    const openedBefore = screen.getByLabelText("Opened").textContent;
+    fireEvent.click(screen.getByRole("button", { name: /Designer 2/ }));
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    expect(screen.getByLabelText("Opened").textContent).toBe(openedBefore);
+    expect(screen.getByRole("button", { name: "Hide 1" })).toBeTruthy();
+    // Clear unticks and stays; Done leaves.
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.getByText("Tick jobs")).toBeTruthy();
+    expect(pane.dataset.selecting).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(pane.dataset.selecting).toBe("false");
+    expect(screen.getByRole("button", { name: "Select" })).toBeTruthy();
+  });
+
+  it("enters select mode with a Shift or Cmd/Ctrl click on a row", async () => {
+    store.saveFoundJobs({
+      searchId: null,
+      jobs: [found(1), found(2), found(3)],
+    });
+    render(<FoundList />);
+    expect(await screen.findByText("3 jobs")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Designer 3/ }), {
+      metaKey: true,
+    });
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Designer 1/ }), {
+      shiftKey: true,
+    });
+    expect(screen.getByText("3 selected")).toBeTruthy();
+  });
+
+  it("offers no Select on an empty list", async () => {
+    render(<FoundList />);
+    expect(await screen.findByText("Nothing found")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Select", hidden: true }),
+    ).toHaveProperty("disabled", true);
+  });
+
+  it("shows skeleton rows, not the empty message, while the list loads", () => {
+    render(<FoundList />);
+    expect(document.querySelectorAll("[data-list-row-skeleton]").length).toBe(
+      8,
+    );
+    expect(screen.queryByText("Nothing found")).toBeNull();
+  });
+});
+
+describe("selection model", () => {
+  const rows = [{ id: 1 }, { id: 2 }, { id: 3 }];
+
+  it("selects the shown rows first and every match on the second step", () => {
+    const shown = stepSelectAll(NO_SELECTION, rows, false);
+    expect(shown.all).toBe(false);
+    expect([...shown.ids]).toEqual([1, 2, 3]);
+    expect(isSelecting(shown)).toBe(true);
+    expect(stepSelectAll(shown, rows, false)).toMatchObject({ all: true });
+    // Every match already loaded: one step is all.
+    expect(stepSelectAll(NO_SELECTION, rows, true)).toMatchObject({
+      all: true,
+    });
+  });
+
+  it("keeps select mode through Clear and a new filter, and only Done ends it", () => {
+    const ticked = toggleSelection(NO_SELECTION, 2, false, rows);
+    expect(isSelecting(ticked)).toBe(true);
+    expect(clearSelected(ticked)).toBe(SELECTING);
+    expect(clearSelected(NO_SELECTION)).toBe(NO_SELECTION);
+    expect(isSelecting(SELECTING)).toBe(true);
+    expect(isSelecting(selectAll())).toBe(true);
+    expect(isSelecting(NO_SELECTION)).toBe(false);
+  });
+
+  it("counts every match minus exceptions without loading ids", () => {
+    const all = toggleSelection(selectAll(), 2, false, rows);
+    expect(countSelected(all, 1_245)).toBe(1_244);
+    expect(toSelectionInput(all, { stage: "found" })).toEqual({
+      filter: { stage: "found" },
+      except: [2],
+    });
   });
 });
 

@@ -41,7 +41,7 @@ describe("ResumeIdentityEditor", () => {
     );
     expect(details).toBeTruthy();
     expect(details?.open).toBe(false);
-    expect(screen.getByText("Resume identity")).toBeTruthy();
+    expect(screen.getByText("Name and contact")).toBeTruthy();
   });
 
   it("auto-opens and focuses the exact field targeted by preview selection", () => {
@@ -106,12 +106,11 @@ describe("ResumeIdentityEditor", () => {
 
     const summary = container.querySelector("summary");
     expect(summary).toBeTruthy();
-    expect(summary?.className).toContain("focus-visible:ring-2");
-    expect(summary?.className).toContain("focus-visible:ring-ring");
+    // The one focus ring: a 2px full-strength accent outline with an offset.
+    expect(summary?.className).toContain("focus-ring");
     expect(summary?.className).not.toMatch(/ring-primary\/\d/);
-    // Non-focus borders/backgrounds intentionally stay diluted; only the
-    // keyboard indicator is promoted.
+    // The part sits on the editor's hairlines, not in a box of its own.
     const details = container.querySelector("[data-resume-identity-details]");
-    expect(details?.className).toContain("border-(--surface-panel-border)");
+    expect(details?.className).not.toContain("border-(--surface-panel-border)");
   });
 });

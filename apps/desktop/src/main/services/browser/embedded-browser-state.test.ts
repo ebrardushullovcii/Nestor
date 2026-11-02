@@ -474,7 +474,7 @@ test("prepared tabs identify the job even when the site gives them identical tit
   );
   expect(
     browser.getState().tabs.find((tab) => tab.id === "prepared")?.title,
-  ).toBe("Senior Learning Coordinator · Clientnest Cobalt");
+  ).toBe("Clientnest Cobalt · Senior Learning Coordinator");
   pages.get("prepared")!.getURL = () => "https://example.test/another-page";
   expect(
     browser.getState().tabs.find((tab) => tab.id === "prepared")?.title,
@@ -567,7 +567,7 @@ test("a background application does not label the selected prepared tab as worki
   });
 });
 
-test("same-title tabs include place and distinguish the same place by reference", () => {
+test("tabs lead with the company and add the place, then a reference, only to tell twins apart", () => {
   const { browser } = makeBrowser();
   browser.setApplicationTabLabel(
     "prepared",
@@ -585,7 +585,7 @@ test("same-title tabs include place and distinguish the same place by reference"
   );
   expect(
     browser.getState().tabs.find((tab) => tab.id === "prepared")?.title,
-  ).toBe("London · Engineer · Synthetic");
+  ).toBe("Synthetic · Engineer · London");
   browser.setApplicationTabLabel(
     "failed",
     "Engineer",
@@ -595,10 +595,10 @@ test("same-title tabs include place and distinguish the same place by reference"
   );
   expect(
     browser.getState().tabs.find((tab) => tab.id === "prepared")?.title,
-  ).toBe("abc123 · London · Engineer · Synthetic");
+  ).toBe("Synthetic · Engineer · London · abc123");
   expect(
     browser.getState().tabs.find((tab) => tab.id === "failed")?.title,
-  ).toBe("def456 · London · Engineer · Synthetic");
+  ).toBe("Synthetic · Engineer · London · def456");
   browser.setApplicationTabLabel(
     "failed",
     "Engineer",
@@ -883,7 +883,7 @@ test("unfocused scripts still allow autosaves to settle; native probes do not ca
   }
 });
 
-test("different places distinguish prepared tabs before a long job and employer name", () => {
+test("different places distinguish prepared tabs for the same company and role", () => {
   const { browser } = makeBrowser();
   browser.setApplicationTabLabel(
     "prepared",
@@ -899,10 +899,10 @@ test("different places distinguish prepared tabs before a long job and employer 
   );
   expect(
     browser.getState().tabs.find((tab) => tab.id === "prepared")?.title,
-  ).toBe("London · Senior Accountant · Synthetic Workshop");
+  ).toBe("Synthetic Workshop · Senior Accountant · London");
   expect(
     browser.getState().tabs.find((tab) => tab.id === "failed")?.title,
-  ).toBe("Denver · Senior Accountant · Synthetic Workshop");
+  ).toBe("Synthetic Workshop · Senior Accountant · Denver");
 });
 
 test("tabs without a place stay plain and add the short reference only when they match", () => {
@@ -916,7 +916,7 @@ test("tabs without a place stay plain and add the short reference only when they
   );
   expect(
     browser.getState().tabs.find((tab) => tab.id === "prepared")?.title,
-  ).toBe("Engineer · Synthetic");
+  ).toBe("Synthetic · Engineer");
   browser.setApplicationTabLabel(
     "failed",
     "Engineer",
@@ -926,10 +926,10 @@ test("tabs without a place stay plain and add the short reference only when they
   );
   expect(
     browser.getState().tabs.find((tab) => tab.id === "prepared")?.title,
-  ).toBe("abc123 · Engineer · Synthetic");
+  ).toBe("Synthetic · Engineer · abc123");
   expect(
     browser.getState().tabs.find((tab) => tab.id === "failed")?.title,
-  ).toBe("def456 · Engineer · Synthetic");
+  ).toBe("Synthetic · Engineer · def456");
 });
 
 test("pressure reclaims the oldest eligible form and preserves a person's page", async () => {

@@ -4,10 +4,11 @@ Find jobs collects listing cards over HTTP wherever possible and uses a separate
 
 ## Sub-features
 
-- Search: Quick/Thorough, Any fit/Good/Strong, Week/Month/Any time, an optional request and the enabled-site picker. All sites uses a compact selection; the picker reads pages of 25.
+- Search: one row with an optional request, the enabled-site picker, Quick/Thorough and Posted Week/Month/Any time (the segmented group "What to keep by posting date"; when the search card is narrower than 48rem, as at 1024 with the assistant docked, Posted is one menu named "Posted: what to keep by posting date" instead, so a journey that picks Any time runs at a wide window). All sites uses a compact selection; the picker reads pages of 25. Fit is not a search choice: the Found list's "Show fit" control (Any fit/Good+/Strong) decides which found jobs show, and the next search records it as its pickiness. Before any search it starts on Any fit. With no enabled site, Search is replaced by a filled "Add a job site" button (to Profile › Job sites) and the empty list says "Add a job site first".
+- Rows: the title line is the title and its fit (score, four marks, fit word); the age sits at the end of the line under it. A narrow row drops the age first and keeps the fit word. In select mode a press on a row only ticks it (no open, no sheet); J/K still move the open row. Live fit re-checks keep the open row at its place on screen while rows re-sort around it.
 - Progress: completed sites, new jobs, scored jobs, HTTP/browser active and waiting counts, and sites needing the person. The app remains usable while searching.
 - What each site found: paged site results, text/status filters, total listings, new jobs, saved hidden, new related, unrelated and already seen. A repeat can have many listings and zero new jobs.
-- Fit: one stable score with role, preferences and coverage explanations. Work mode and other preference gaps affect fit; they do not discard reasonably related work.
+- Fit: one stable score with role, preferences and coverage explanations. Rows and details draw it with the same Fit component: the score, a four-mark pine meter (`[data-fit-meter]` 4 strong, 3 good, 2 stretch, 1 weak) and one label ("Strong fit", "Good fit", "Stretch fit", "Weak fit", "Not scored yet"). Work mode and other preference gaps affect fit; they do not discard reasonably related work.
 - Conditional permits: the model compares stated hours, dates, permitted work and future sponsorship with each listing. Missing permission is uncertain; contradictory conditions are blocked.
 - Numeric fit filters show assessed jobs only, with checking/re-checking status above the list. An empty fit-filtered list explains dominant limits and links to Profile work eligibility.
 - Date retention: widening Week/Month/Any time restores only age-owned hides, clears their note, and keeps person hides and closed listings hidden.
@@ -17,8 +18,8 @@ Find jobs collects listing cards over HTTP wherever possible and uses a separate
 ## How to get to it (user POV)
 
 - Finish setup and find jobs.
-- Sidebar > Find jobs > choose search settings > Search.
-- Open What each site found for source details; Hidden contains closed or age-filtered results and their reasons.
+- Sidebar > Find jobs > choose search settings > Search. The fit floor is "Show fit" in the list's toolbar.
+- Open What each site found for source details (with the last search line it sits beside the Found/Shortlisted/Hidden tabs on a wide screen, and in the search card's second row when narrow or docked); Hidden contains closed or age-filtered results and their reasons.
 
 ## Driving it with verify-nestor
 

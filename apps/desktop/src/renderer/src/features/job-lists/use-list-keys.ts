@@ -14,11 +14,14 @@ export interface ListKeys {
   rows: readonly { id: number }[];
   activeId: number | null;
   setActiveId: (id: number) => void;
-  /** Ticks or unticks a row (X or Space; Shift for a range). */
+  /** Ticks or unticks a row (X or Space; Shift for a range); starts select mode. */
   toggle: (id: number, shiftKey: boolean) => void;
-  /** Ctrl/Cmd+A. */
+  /**
+   * Ctrl/Cmd+A: the rows shown, then every matching row on a second press
+   * (`stepSelectAll`); starts select mode.
+   */
   selectAll: () => void;
-  /** Escape. */
+  /** Escape: unticks everything and leaves select mode. */
   clearSelection: () => void;
   /** U or Ctrl/Cmd+Z. */
   undo?: () => void;
@@ -34,7 +37,8 @@ export interface ListKeys {
 
 /**
  * The same keys on every list: J/K or arrows to move, X or Space to tick,
- * Ctrl+A for all, Escape to clear, U to undo, O to open, "/" to filter, and
+ * Cmd/Ctrl+A for all, Escape to leave select mode, U to undo, O to open, "/"
+ * to filter, and
  * the screen's own letters. Quiet while typing, while a dialog is open, and
  * while the screen is kept hidden behind another one.
  */

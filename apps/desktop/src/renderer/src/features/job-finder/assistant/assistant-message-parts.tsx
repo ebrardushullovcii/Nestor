@@ -1,3 +1,4 @@
+import { Disclosure } from "@renderer/components/ui/disclosure";
 import { useState } from "react";
 import {
   Check,
@@ -74,34 +75,32 @@ function ChangePart(props: {
           aria-hidden="true"
           className={cn(
             "mt-0.5 size-3.5 shrink-0",
-            undone
-              ? "text-muted-foreground"
-              : "text-(--success-foreground,currentColor)",
+            undone ? "text-muted-foreground" : "text-(--success-text)",
           )}
         />
         <div className="grid min-w-0 flex-1 gap-0.5">
           <span
             className={cn(
-              "text-[13px] font-medium text-foreground",
+              "text-(length:--text-small) font-medium text-foreground",
               undone && "line-through opacity-70",
             )}
           >
             {TARGET_LABELS[part.target] ?? "Saved"}: {part.summary}
           </span>
           {part.fields.length > 0 ? (
-            <span className="text-[12px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {describeChangedFields(part.fields)}
             </span>
           ) : null}
           {part.status === "partially_undone" ? (
-            <span className="text-[12px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               Partly undone.
             </span>
           ) : null}
         </div>
         {part.status !== "undone" ? (
           <button
-            className="inline-flex shrink-0 items-center gap-1 rounded-(--radius-button) px-2 py-1 text-[12px] font-medium text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
+            className="inline-flex shrink-0 items-center gap-1 rounded-(--radius-button) px-2 py-1 text-xs font-medium text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-ring disabled:opacity-50"
             disabled={busy}
             onClick={() => {
               setBusy(true);
@@ -116,15 +115,13 @@ function ChangePart(props: {
             Undo
           </button>
         ) : (
-          <span className="shrink-0 text-[12px] text-muted-foreground">
-            Undone
-          </span>
+          <span className="shrink-0 text-xs text-muted-foreground">Undone</span>
         )}
       </div>
       {part.preview.length > 0 ? (
         <button
           aria-expanded={showDiff}
-          className="inline-flex w-fit items-center gap-1 text-[12px] text-muted-foreground outline-none hover:text-foreground focus-visible:underline"
+          className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:underline"
           onClick={() => setShowDiff((value) => !value)}
           type="button"
         >
@@ -139,7 +136,7 @@ function ChangePart(props: {
         </button>
       ) : null}
       {showDiff ? (
-        <dl className="grid gap-1.5 text-[12px]">
+        <dl className="grid gap-1.5 text-xs">
           {part.preview.map((entry, index) => (
             <div className="grid gap-0.5" key={`${entry.label}_${index}`}>
               <dt className="font-medium text-foreground">{entry.label}</dt>
@@ -158,7 +155,7 @@ function ChangePart(props: {
         </dl>
       ) : null}
       {note ? (
-        <p aria-live="polite" className="text-[12px] text-muted-foreground">
+        <p aria-live="polite" className="text-xs text-muted-foreground">
           {note}
         </p>
       ) : null}
@@ -189,10 +186,10 @@ function ProposalPart(props: {
       data-assistant-proposal={part.proposalId}
       data-assistant-proposal-status={part.status}
     >
-      <span className="text-[13px] font-medium text-foreground">
+      <span className="text-(length:--text-small) font-medium text-foreground">
         Suggested: {part.summary}
       </span>
-      <ul className="grid gap-1 text-[12px] text-muted-foreground">
+      <ul className="grid gap-1 text-xs text-muted-foreground">
         {part.items.map((item) => {
           // A field change reads "Current x: …" then "Proposed x: …". Two
           // near-identical paragraphs buried the change, so the current
@@ -204,10 +201,13 @@ function ProposalPart(props: {
             <li className="grid gap-1 whitespace-pre-wrap" key={item.id}>
               <span>{[item.label, ...rest].join("\n")}</span>
               {current.length > 0 ? (
-                <details>
-                  <summary className="cursor-pointer">Current text</summary>
-                  <span className="mt-1 block">{current.join("\n")}</span>
-                </details>
+                <Disclosure
+                  contentClassName="pt-1"
+                  summary="Current text"
+                  summaryClassName="h-auto px-0 text-xs"
+                >
+                  <span className="block">{current.join("\n")}</span>
+                </Disclosure>
               ) : null}
             </li>
           );
@@ -216,7 +216,7 @@ function ProposalPart(props: {
       {part.status === "pending" ? (
         <div className="flex gap-2">
           <button
-            className="inline-flex items-center gap-1 rounded-(--radius-button) bg-primary px-2.5 py-1 text-[12px] font-medium text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-(--radius-button) bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground outline-none hover:opacity-90 focus-ring disabled:opacity-50"
             disabled={busy}
             onClick={() => resolve("accept")}
             type="button"
@@ -225,7 +225,7 @@ function ProposalPart(props: {
             Apply
           </button>
           <button
-            className="inline-flex items-center gap-1 rounded-(--radius-button) border border-(--control-border) px-2.5 py-1 text-[12px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-(--radius-button) border border-(--control-border) px-2.5 py-1 text-xs font-medium text-muted-foreground outline-none hover:text-foreground focus-ring disabled:opacity-50"
             disabled={busy}
             onClick={() => resolve("reject")}
             type="button"
@@ -235,7 +235,7 @@ function ProposalPart(props: {
           </button>
         </div>
       ) : (
-        <span className="text-[12px] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           {part.status === "applied" ? "Applied." : "Dismissed."}
         </span>
       )}
@@ -261,7 +261,7 @@ function RecordsPart(props: {
   return (
     <div className="grid gap-1" data-assistant-records={part.kind}>
       {heading ? (
-        <span className="text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="text-xs font-medium tracking-wide text-muted-foreground">
           {heading}
         </span>
       ) : null}
@@ -278,20 +278,20 @@ function RecordsPart(props: {
               type="button"
             >
               <span className="flex items-baseline justify-between gap-2">
-                <span className="truncate text-[13px] font-medium text-foreground">
+                <span className="truncate text-(length:--text-small) font-medium text-foreground">
                   <span className="mr-1.5 text-muted-foreground">
                     {index + 1}.
                   </span>
                   {row.title}
                 </span>
                 {row.status ? (
-                  <span className="shrink-0 text-[12px] text-muted-foreground">
+                  <span className="shrink-0 text-xs text-muted-foreground">
                     {row.status}
                   </span>
                 ) : null}
               </span>
               {row.subtitle ? (
-                <span className="truncate text-[12px] text-muted-foreground">
+                <span className="truncate text-xs text-muted-foreground">
                   {row.subtitle}
                 </span>
               ) : null}
@@ -300,7 +300,7 @@ function RecordsPart(props: {
         ))}
       </ul>
       {part.totalCount > part.rows.length ? (
-        <span className="text-[12px] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           Showing {part.rows.length} of {part.totalCount}.
         </span>
       ) : null}
@@ -315,19 +315,17 @@ function ActivityPart(props: {
   if (entries.length === 0) return null;
   const failed = entries.filter((entry) => entry.outcome !== "done").length;
   return (
-    <details
-      className="group text-[12px] text-muted-foreground"
+    // One quiet line until opened: "Did 3 things · 1 did not go through".
+    <Disclosure
+      className="text-xs text-muted-foreground"
+      contentClassName="pt-1"
       data-assistant-activity-log
+      summary={`Did ${entries.length} ${entries.length === 1 ? "thing" : "things"}${
+        failed > 0 ? ` · ${failed} did not go through` : ""
+      }`}
+      summaryClassName="h-5 gap-1 px-0 text-xs font-normal text-muted-foreground hover:bg-transparent [&>svg]:size-3"
     >
-      <summary className="flex cursor-pointer list-none items-center gap-1 outline-none hover:text-foreground focus-visible:underline">
-        <ChevronRight
-          aria-hidden="true"
-          className="size-3 transition-transform group-open:rotate-90"
-        />
-        {entries.length} step{entries.length === 1 ? "" : "s"}
-        {failed > 0 ? `, ${failed} did not go through` : ""}
-      </summary>
-      <ol className="mt-1 grid gap-0.5 pl-4">
+      <ol className="grid gap-0.5 pl-4">
         {entries.map((entry, index) => (
           <li className="flex gap-1.5" key={`${entry.toolName}_${index}`}>
             {entry.outcome === "done" ? (
@@ -347,7 +345,7 @@ function ActivityPart(props: {
           </li>
         ))}
       </ol>
-    </details>
+    </Disclosure>
   );
 }
 
@@ -361,14 +359,14 @@ function QuestionPart(props: {
       className="grid gap-2 rounded-(--radius-field) border border-(--control-border) px-3 py-2"
       data-assistant-question={part.questionId}
     >
-      <span className="text-[13px] font-medium text-foreground">
+      <span className="text-(length:--text-small) font-medium text-foreground">
         {part.prompt}
       </span>
       {part.status === "open" && part.options.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {part.options.map((option) => (
             <button
-              className="rounded-(--radius-button) border border-(--control-border) px-2.5 py-1 text-[12px] text-foreground outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring/40"
+              className="rounded-(--radius-button) border border-(--control-border) px-2.5 py-1 text-xs text-foreground outline-none hover:bg-secondary focus-ring"
               key={option}
               onClick={() => props.actions.onAnswer(part.questionId, option)}
               type="button"
@@ -379,7 +377,7 @@ function QuestionPart(props: {
         </div>
       ) : null}
       {part.status === "answered" && part.answer ? (
-        <span className="text-[12px] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           Answered: {part.answer}
         </span>
       ) : null}
@@ -392,11 +390,11 @@ function PlanPart(props: {
 }) {
   return (
     <div className="grid gap-1" data-assistant-plan={props.part.planId}>
-      <span className="flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground">
+      <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <ListChecks aria-hidden="true" className="size-3.5" />
         {props.part.title}
       </span>
-      <ol className="grid gap-0.5 pl-5 text-[12px]">
+      <ol className="grid gap-0.5 pl-5 text-xs">
         {props.part.steps.map((step) => (
           <li
             className={cn(
@@ -504,7 +502,7 @@ export function AssistantMessageParts(props: {
           case "notice":
             return part.kind === "compacted" || part.kind === "archived" ? (
               <div
-                className="flex items-center gap-2 text-[12px] text-muted-foreground"
+                className="flex items-center gap-2 text-xs text-muted-foreground"
                 data-assistant-notice={part.kind}
                 key={key}
                 role="separator"
@@ -515,7 +513,7 @@ export function AssistantMessageParts(props: {
               </div>
             ) : (
               <p
-                className="text-[13px] text-muted-foreground"
+                className="text-(length:--text-small) text-muted-foreground"
                 data-assistant-notice={part.kind}
                 key={key}
               >
@@ -525,7 +523,7 @@ export function AssistantMessageParts(props: {
           case "attachment":
             return (
               <span
-                className="inline-flex w-fit items-center gap-1.5 rounded-(--radius-button) border border-(--control-border) px-2 py-0.5 text-[12px]"
+                className="inline-flex w-fit items-center gap-1.5 rounded-(--radius-button) border border-(--control-border) px-2 py-0.5 text-xs"
                 key={key}
               >
                 <FileText aria-hidden="true" className="size-3" />

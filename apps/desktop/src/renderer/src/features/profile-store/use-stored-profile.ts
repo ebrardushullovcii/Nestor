@@ -14,6 +14,8 @@ export function useStoredProfile() {
   const [overview, setOverview] = useState<ProfileOverview | null>(null),
     [goals, setGoals] = useState<JobSearchPreferences | null>(null),
     [error, setError] = useState<string | null>(null),
+    // Only the last read's failure: a refused save says so in `error`.
+    [readError, setReadError] = useState<string | null>(null),
     [saving, setSaving] = useState(false);
   const live = useRef(true),
     request = useRef(0);
@@ -28,14 +30,17 @@ export function useStoredProfile() {
         setOverview(next);
         setGoals(nextGoals);
         setError(null);
+        setReadError(null);
       }
     } catch (reason: unknown) {
-      if (live.current && request.current === seq)
-        setError(
+      if (live.current && request.current === seq) {
+        const message =
           reason instanceof Error
             ? reason.message
-            : "Could not load your profile.",
-        );
+            : "Could not load your profile.";
+        setError(message);
+        setReadError(message);
+      }
     }
   }, []);
   useEffect(() => {
@@ -71,7 +76,7 @@ export function useStoredProfile() {
     },
     [refresh],
   );
-  return { overview, goals, error, saving, save, refresh };
+  return { overview, goals, error, readError, saving, save, refresh };
 }
 const EMPTY: ProfileRecordPage = { rows: [], total: 0, nextCursor: null };
 export function useProfileRecordPage(

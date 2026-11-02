@@ -17,7 +17,7 @@ import { cn } from "@renderer/lib/utils";
  * an action gets a real `Button`.
  */
 const textLinkClassName =
-  "inline items-baseline rounded-(--radius-small) text-(--link) underline decoration-from-font underline-offset-4 outline-none transition-colors hover:text-(--link-hover) focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:text-(--disabled-foreground) disabled:no-underline aria-disabled:cursor-not-allowed aria-disabled:text-(--disabled-foreground) aria-disabled:no-underline";
+  "inline items-baseline rounded-(--radius-small) text-(--link) underline decoration-from-font underline-offset-4 outline-none transition-colors hover:text-(--link-hover) focus-ring disabled:cursor-not-allowed disabled:text-(--disabled-foreground) disabled:no-underline aria-disabled:cursor-not-allowed aria-disabled:text-(--disabled-foreground) aria-disabled:no-underline";
 
 function TextLink({
   className,

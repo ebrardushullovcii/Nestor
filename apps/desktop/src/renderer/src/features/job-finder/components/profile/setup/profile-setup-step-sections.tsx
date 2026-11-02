@@ -1,7 +1,6 @@
 import { ProfileHoursField } from "../profile-hours-field";
 import { SetupSites } from "@renderer/features/job-lists/setup-sites";
 import { useId, useRef, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
 import { cn } from "@renderer/lib/cn";
 import { formatProfileSetupReviewValue } from "./profile-setup-screen-helpers";
 import {
@@ -18,6 +17,7 @@ import { getResumeImportStageFallbackSummary } from "../resume-import-quality-no
 import type { UseFormReturn } from "react-hook-form";
 import { Controller } from "react-hook-form";
 import { Badge } from "@renderer/components/ui/badge";
+import { Disclosure } from "@renderer/components/ui/disclosure";
 import { Button } from "@renderer/components/ui/button";
 import { SegmentedControl } from "@renderer/components/ui/segmented-control";
 import {
@@ -234,7 +234,7 @@ export function ProfileSetupImportStep(props: {
       <CardContent className="grid gap-4 pt-6">
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-(--radius-field) border border-border/30 bg-background/60 p-4">
-            <p className="text-(length:--text-tiny) uppercase tracking-[0.2em] text-muted-foreground">
+            <p className="text-(length:--text-tiny) text-muted-foreground">
               Imported file
             </p>
             <p className="mt-2 text-sm font-medium text-foreground">
@@ -242,7 +242,7 @@ export function ProfileSetupImportStep(props: {
             </p>
           </div>
           <div className="rounded-(--radius-field) border border-border/30 bg-background/60 p-4">
-            <p className="text-(length:--text-tiny) uppercase tracking-[0.2em] text-muted-foreground">
+            <p className="text-(length:--text-tiny) text-muted-foreground">
               Import status
             </p>
             <p className="mt-2 text-sm font-medium text-foreground">
@@ -264,7 +264,7 @@ export function ProfileSetupImportStep(props: {
             className="rounded-(--radius-field) border border-border/30 bg-background/60 p-4"
             data-profile-setup-import-summary
           >
-            <p className="text-(length:--text-tiny) uppercase tracking-[0.2em] text-muted-foreground">
+            <p className="text-(length:--text-tiny) text-muted-foreground">
               What came from your resume
             </p>
             <p className="mt-2 text-sm leading-6 text-foreground">
@@ -808,15 +808,12 @@ export function ProfileSetupTargetingStep(props: {
           suggestedCountry={props.suggestedWorkCountry ?? null}
         />
 
-        <details
-          className={cn(SETUP_BLOCK_CLASS, "group")}
+        <Disclosure
+          className={SETUP_BLOCK_CLASS}
+          contentClassName="pt-0"
           data-profile-setup-block="more-about-you"
-        >
-          <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-            <ChevronRight
-              aria-hidden
-              className="size-4 shrink-0 text-foreground-soft transition-transform group-open:rotate-90"
-            />
+          size="block"
+          summary={
             <span className="grid gap-1">
               <span className="text-sm font-semibold text-foreground">
                 More about you{" "}
@@ -825,14 +822,15 @@ export function ProfileSetupTargetingStep(props: {
                 </span>
               </span>
               <span
-                className="text-sm leading-6 text-foreground-soft"
+                className="text-sm font-normal leading-6 text-foreground-soft"
                 data-profile-setup-work-details-intro
               >
                 Relocation, remote work and travel. Leave Not set if you
                 don&apos;t know.
               </span>
             </span>
-          </summary>
+          }
+        >
           <div className="grid gap-(--gap-content) pt-4 md:grid-cols-2">
             <div className="grid min-w-0 content-start gap-(--gap-field)">
               <FieldLabel htmlFor={locationPreferencesId}>
@@ -878,7 +876,7 @@ export function ProfileSetupTargetingStep(props: {
               name="eligibility.willingToTravel"
             />
           </div>
-        </details>
+        </Disclosure>
 
         {props.renderFooter({
           nextLabel: "Save and continue to Extras",

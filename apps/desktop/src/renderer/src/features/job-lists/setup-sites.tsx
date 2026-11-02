@@ -41,8 +41,8 @@ export function SetupSites(props: {
       {list.counts.all > 0 ? (
         <>
           <Input
-            aria-label="Find a source"
-            placeholder="Find a source"
+            aria-label="Find a site"
+            placeholder="Find a site"
             value={text}
             onChange={(event) => setText(event.target.value)}
           />
@@ -106,7 +106,7 @@ export function SetupSites(props: {
           </ul>
           {list.total > 25 ? (
             <nav
-              aria-label="Source pages"
+              aria-label="Site pages"
               className="flex items-center justify-between gap-3"
             >
               <Button
@@ -115,7 +115,7 @@ export function SetupSites(props: {
                 disabled={list.pageIndex === 0 || list.loading}
                 onClick={list.previous}
               >
-                Previous sources
+                Previous sites
               </Button>
               <span className="text-sm">
                 {list.pageIndex * 25 + 1}–
@@ -127,7 +127,7 @@ export function SetupSites(props: {
                 disabled={!list.nextCursor || list.loading}
                 onClick={list.next}
               >
-                Next sources
+                Next sites
               </Button>
             </nav>
           ) : null}

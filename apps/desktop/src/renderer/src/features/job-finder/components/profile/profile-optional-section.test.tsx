@@ -112,8 +112,13 @@ it("scopes the collapsed chevron to its own details inside an open card", () => 
   const inner = screen
     .getByText("Team, ownership and industries")
     .closest("details");
-  expect(inner?.className).toContain("group/optional");
   expect(inner?.hasAttribute("open")).toBe(false);
-  expect(screen.getByText("Show").className).toContain("group-open/optional:");
+  // The chevron turns only with its own details (the shared Disclosure's
+  // summary > svg rule), never with the outer card's `group`.
+  const chevron = inner?.querySelector("summary svg");
+  expect(chevron?.getAttribute("class")).toContain(
+    "[details[open]>summary>&]:rotate-90",
+  );
+  expect(chevron?.getAttribute("class")).not.toMatch(/(^|\s)group-open:/);
   expect(container.querySelector("details")?.open).toBe(true);
 });

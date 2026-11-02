@@ -61,7 +61,7 @@ export function navigationOutcomeCases(): BuiltAppBatch[] {
     ["experience", "Work history"],
     ["background", "Background"],
     ["preferences", "Preferences"],
-    ["sources", "Job sources"],
+    ["sources", "Job sites"],
     ["files", "Files"],
   ] as const)
     cases.push({

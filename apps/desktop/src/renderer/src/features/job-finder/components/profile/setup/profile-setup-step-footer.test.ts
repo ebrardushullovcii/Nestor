@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   formatProfileSetupFinishReadiness,
-  getProfileSetupStepFooterContinue,
+  getProfileSetupStepFooterFinish,
   getProfileSetupStepFooterPrimary,
 } from "./profile-setup-step-footer";
 
@@ -49,18 +49,19 @@ describe("getProfileSetupStepFooterPrimary", () => {
     expect(onSaveAndFinish).toHaveBeenCalledTimes(1);
   });
 
-  it("offers Finish from Job targets, the last required step", () => {
-    const onSaveAndFinish = vi.fn();
-    const primary = getProfileSetupStepFooterPrimary({
-      canFinishSetup: true,
-      currentStep: "targeting",
-      onSaveAndFinish,
-      onSaveAndGoToStep: vi.fn(),
-    });
-
-    expect(primary.label).toBe("Finish setup and find jobs");
-    primary.onPrimary?.();
-    expect(onSaveAndFinish).toHaveBeenCalledTimes(1);
+  it("keeps Save and continue as the filled primary on Job targets, ready or not", () => {
+    const onSaveAndGoToStep = vi.fn();
+    for (const canFinishSetup of [true, false]) {
+      const primary = getProfileSetupStepFooterPrimary({
+        canFinishSetup,
+        currentStep: "targeting",
+        onSaveAndFinish: vi.fn(),
+        onSaveAndGoToStep,
+      });
+      expect(primary.label).toBe("Save and continue to Extras");
+      primary.onPrimary?.();
+    }
+    expect(onSaveAndGoToStep).toHaveBeenCalledWith("extras");
   });
 
   it("resolves a retired stored step onto the step that owns its content", () => {
@@ -73,7 +74,7 @@ describe("getProfileSetupStepFooterPrimary", () => {
         onSaveAndFinish,
         onSaveAndGoToStep: vi.fn(),
       }).label,
-    ).toBe("Finish setup and find jobs");
+    ).toBe("Save and continue to Extras");
     expect(
       getProfileSetupStepFooterPrimary({
         canFinishSetup: false,
@@ -85,42 +86,50 @@ describe("getProfileSetupStepFooterPrimary", () => {
   });
 });
 
-describe("getProfileSetupStepFooterContinue", () => {
-  it("keeps Save and continue to Extras once Finish takes the primary slot", () => {
-    // The finish action replaced the continue action mid-step, so a button
-    // read as "Save and continue to Extras" and then opened Find jobs.
-    const onSaveAndGoToStep = vi.fn();
-    const continueAction = getProfileSetupStepFooterContinue({
-      canFinishSetup: true,
-      currentStep: "targeting",
-      onSaveAndGoToStep,
-    });
-
-    expect(continueAction?.label).toBe("Save and continue to Extras");
-    continueAction?.onContinue();
-    expect(onSaveAndGoToStep).toHaveBeenCalledWith("extras");
+describe("getProfileSetupStepFooterFinish", () => {
+  it("offers an enabled Finish on any step once nothing required is missing", () => {
+    const onSaveAndFinish = vi.fn();
+    for (const currentStep of [
+      "essentials",
+      "background",
+      "targeting",
+    ] as const) {
+      const finish = getProfileSetupStepFooterFinish({
+        canFinishSetup: true,
+        currentStep,
+        onSaveAndFinish,
+      });
+      expect(finish).toMatchObject({
+        disabled: false,
+        label: "Finish setup and find jobs",
+      });
+      finish?.onFinish?.();
+    }
+    expect(onSaveAndFinish).toHaveBeenCalledTimes(3);
   });
 
-  it("offers no second continue action where the primary already continues", () => {
+  it("shows Finish disabled on Job targets while something required is missing", () => {
     expect(
-      getProfileSetupStepFooterContinue({
+      getProfileSetupStepFooterFinish({
         canFinishSetup: false,
         currentStep: "targeting",
-        onSaveAndGoToStep: vi.fn(),
+        onSaveAndFinish: vi.fn(),
       }),
-    ).toBeNull();
+    ).toMatchObject({ disabled: true, onFinish: null });
+    // Earlier steps keep one button until Finish is possible.
     expect(
-      getProfileSetupStepFooterContinue({
-        canFinishSetup: true,
-        currentStep: "extras",
-        onSaveAndGoToStep: vi.fn(),
-      }),
-    ).toBeNull();
-    expect(
-      getProfileSetupStepFooterContinue({
+      getProfileSetupStepFooterFinish({
         canFinishSetup: false,
         currentStep: "essentials",
-        onSaveAndGoToStep: vi.fn(),
+        onSaveAndFinish: vi.fn(),
+      }),
+    ).toBeNull();
+    // On Extras, Finish is the primary itself.
+    expect(
+      getProfileSetupStepFooterFinish({
+        canFinishSetup: true,
+        currentStep: "extras",
+        onSaveAndFinish: vi.fn(),
       }),
     ).toBeNull();
   });
@@ -139,14 +148,14 @@ describe("formatProfileSetupFinishReadiness", () => {
       formatProfileSetupFinishReadiness({
         canFinishSetup: false,
         remainingBlockerLabels: [
-          "Add a job source (Job targets step)",
+          "Add a job site (Job targets step)",
           ...confirms,
           "Fill in bluebird title (Basics step)",
           "Confirm bluebird company (Basics step)",
         ],
       }),
     ).toBe(
-      "Still needed to finish: Add a job source (Job targets step) · Fill in bluebird title (Basics step) · Review 20 imported details on this step · Review 1 imported detail (Basics step).",
+      "Still needed to finish: Add a job site (Job targets step) · Fill in bluebird title (Basics step) · Review 20 imported details on this step · Review 1 imported detail (Basics step).",
     );
     // Three or fewer stay named in full, whatever they are.
     expect(

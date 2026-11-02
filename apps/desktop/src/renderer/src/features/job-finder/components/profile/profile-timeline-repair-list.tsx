@@ -1,3 +1,4 @@
+import { Disclosure } from "@renderer/components/ui/disclosure";
 import type {
   CandidateExperience,
   ResumeTimelineRepairAction,
@@ -31,7 +32,7 @@ function ExperienceList(props: {
 }) {
   return (
     <div className="grid gap-1.5">
-      <p className="text-(length:--text-eyebrow) font-medium uppercase tracking-(--tracking-mono) text-foreground-muted">
+      <p className="text-(length:--text-eyebrow) font-medium tracking-(--tracking-mono) text-foreground-muted">
         {props.label}
       </p>
       <ul className="grid gap-1 text-sm leading-6 text-foreground-soft">
@@ -86,15 +87,15 @@ function TimelineRepairCard(props: {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <span className="rounded-full border border-border-subtle px-2.5 py-1 text-(length:--text-tiny) font-medium uppercase tracking-[0.12em] text-foreground-muted">
+          <span className="rounded-full border border-border-subtle px-2.5 py-1 text-(length:--text-tiny) font-medium text-foreground-muted">
             {formatIssueKind(proposal.issueKind)}
           </span>
-          <span className="rounded-full border border-border-subtle px-2.5 py-1 text-(length:--text-tiny) font-medium uppercase tracking-[0.12em] text-foreground-muted">
+          <span className="rounded-full border border-border-subtle px-2.5 py-1 text-(length:--text-tiny) font-medium text-foreground-muted">
             {proposal.certainty === "deterministic_normalization"
               ? "Evidence-preserving change"
               : "Review only"}
           </span>
-          <span className="rounded-full border border-border-subtle px-2.5 py-1 text-(length:--text-tiny) font-medium uppercase tracking-[0.12em] text-foreground-muted">
+          <span className="rounded-full border border-border-subtle px-2.5 py-1 text-(length:--text-tiny) font-medium text-foreground-muted">
             {proposal.status}
           </span>
         </div>
@@ -111,11 +112,8 @@ function TimelineRepairCard(props: {
         />
       </div>
 
-      <details className="rounded-(--radius-field) border border-border-subtle bg-background/30 px-3 py-2">
-        <summary className="cursor-pointer text-sm font-medium text-foreground">
-          View cited resume evidence
-        </summary>
-        <ul className="mt-2 grid gap-2 text-sm leading-6 text-foreground-muted">
+      <Disclosure summary="View cited resume evidence">
+        <ul className="grid gap-2 text-sm leading-6 text-foreground-muted">
           {proposal.evidence.map((evidence) => (
             <li key={evidence.candidateId + ":" + evidence.excerpt}>
               <blockquote>“{evidence.excerpt}”</blockquote>
@@ -127,7 +125,7 @@ function TimelineRepairCard(props: {
             </li>
           ))}
         </ul>
-      </details>
+      </Disclosure>
 
       {error ? (
         <p

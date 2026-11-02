@@ -54,6 +54,11 @@ import { sendObserverSource } from "./send-observer";
 import { alignClientHintHeaders } from "./browser-identity";
 import { BrowserPasswords } from "./browser-passwords";
 import {
+  getSiteIconCache,
+  refreshSiteIcon,
+  type SiteIconCache,
+} from "./site-icon-cache";
+import {
   browserDisplayUrl,
   browserUserAgent,
   isBrowserNavigationAllowed,
@@ -255,7 +260,13 @@ export class EmbeddedBrowser {
 
   private applicationTabLabels = new Map<
     string,
-    { title: string; url: string; baseLabel: string; reference: string }
+    {
+      title: string;
+      url: string;
+      baseLabel: string;
+      location?: string;
+      reference: string;
+    }
   >();
 
   setApplicationTabLabel(
@@ -269,16 +280,19 @@ export class EmbeddedBrowser {
     const page = this.pageMap.get(tabId);
     if (!page || page.contents.isDestroyed()) return;
     const baseLabel =
-      // The place leads, so two tabs for the same role differ where the tab
-      // text is cut; the short reference is only added when even that matches.
+      // The company leads, then the role ("Pebble Fernwheel · Senior
+      // Software Engineer"): that is how the person names an application.
+      // The place, then a short reference, are added only when two tabs
+      // would otherwise read the same.
       restoredLabel?.slice(0, 280) ??
-      [location, title.slice(0, 120), company.slice(0, 80)]
+      [company.slice(0, 80), title.slice(0, 120)]
         .filter(Boolean)
         .join(" · ")
         .slice(0, 280);
     this.applicationTabLabels.set(tabId, {
       title: baseLabel,
       baseLabel,
+      location: location.slice(0, 80),
       reference,
       url: page.contents.getURL(),
     });
@@ -287,10 +301,18 @@ export class EmbeddedBrowser {
     );
     if (matches.length > 1)
       for (const [index, label] of matches.entries()) {
+        const samePlace = matches.some(
+          (other) =>
+            other !== label &&
+            (other.location ?? "") === (label.location ?? ""),
+        );
         const repeated = matches.some(
           (other) => other !== label && other.reference === label.reference,
         );
-        label.title = `${label.reference}${repeated ? `-${index + 1}` : ""} · ${baseLabel}`;
+        const place = label.location ? ` · ${label.location}` : "";
+        label.title = samePlace
+          ? `${baseLabel}${place} · ${label.reference}${repeated ? `-${index + 1}` : ""}`
+          : `${baseLabel}${place}`;
       }
     this.emit();
   }
@@ -505,7 +527,13 @@ export class EmbeddedBrowser {
   }
   private readonly discardedFormLabels = new Map<
     string,
-    { title: string; url: string; baseLabel: string; reference: string }
+    {
+      title: string;
+      url: string;
+      baseLabel: string;
+      location?: string;
+      reference: string;
+    }
   >();
   private reclaimPreparedForm:
     | ((owner: string, canDiscard: () => boolean) => Promise<boolean>)
@@ -753,6 +781,17 @@ export class EmbeddedBrowser {
           canGoBack: page.contents.navigationHistory.canGoBack(),
           canGoForward: page.contents.navigationHistory.canGoForward(),
         })),
+    });
+  }
+
+  private siteIconsWatched = false;
+  /** Tells the app window when a site's icon lands in the cache. Once. */
+  watchSiteIcons(cache: SiteIconCache): void {
+    if (this.siteIconsWatched) return;
+    this.siteIconsWatched = true;
+    cache.onChanged(() => {
+      if (this.window && !this.window.isDestroyed())
+        this.window.webContents.send("browser:site-icons-changed");
     });
   }
 
@@ -1580,6 +1619,20 @@ export class EmbeddedBrowser {
         );
     });
     page.contents.on("page-title-updated", update);
+    // The site's own icon, for its tab and wherever the app lists the site:
+    // only from the page's own origin, cached in main (site-icon-cache.ts).
+    page.contents.on("page-favicon-updated", (_event, favicons) => {
+      if (page.contents.isDestroyed()) return;
+      const pageUrl = page.contents.getURL();
+      const browserSession = this.getSession();
+      void getSiteIconCache()
+        .then((cache) =>
+          refreshSiteIcon(cache, pageUrl, favicons, (url, init) =>
+            browserSession.fetch(url, init),
+          ),
+        )
+        .catch(() => undefined);
+    });
     page.contents.on("did-navigate", (_event, url) => {
       this.passwordManager?.navigation(page.id, url);
       update();

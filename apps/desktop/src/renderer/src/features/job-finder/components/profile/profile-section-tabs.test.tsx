@@ -42,9 +42,9 @@ const fiveSections = [
     progress: { filled: 3, percent: 75, total: 4 },
   },
   {
-    description: "Job sources",
+    description: "Job sites",
     id: "sources" as const,
-    label: "Job sources",
+    label: "Job sites",
     progress: { filled: 2, percent: 50, total: 4 },
   },
 ];
@@ -158,9 +158,9 @@ describe("ProfileSectionTabs", () => {
           {
             // No required model, nothing filled: the "optional" state, which
             // printed "Optional".
-            description: "Job sources",
+            description: "Job sites",
             id: "sources",
-            label: "Job sources",
+            label: "Job sites",
             progress: { filled: 0, percent: 0, total: 8 },
           },
           {
@@ -190,8 +190,8 @@ describe("ProfileSectionTabs", () => {
       expect(tab.textContent).not.toContain("Empty");
       expect(tab.textContent).not.toContain("17/29");
       expect(tab.textContent).not.toContain("59%");
-      // Only the section's own icon; no check icon in any cell.
-      expect(tab.querySelectorAll("svg")).toHaveLength(1);
+      // Words only (one tab idiom across the app); no check icon either.
+      expect(tab.querySelectorAll("svg")).toHaveLength(0);
       expect(
         tab.querySelector('svg[class*="check"], svg[class*="circle-check"]'),
       ).toBeNull();
@@ -202,7 +202,7 @@ describe("ProfileSectionTabs", () => {
     // So is every section with no required fields to report on, whatever its
     // optional fill state.
     expect(tabs[2]?.textContent).toBe("Background");
-    expect(tabs[3]?.textContent).toBe("Job sources");
+    expect(tabs[3]?.textContent).toBe("Job sites");
     expect(tabs[4]?.textContent).toBe("Experience");
     expect(tabs[3]?.getAttribute("data-profile-section-progress-state")).toBe(
       "optional",
@@ -220,7 +220,7 @@ describe("ProfileSectionTabs", () => {
     const remaining = tabs[1]?.querySelector(
       "[data-profile-section-remaining-count]",
     );
-    expect(remaining?.textContent).toBe("2");
+    expect(remaining?.textContent).toBe("2 to fill");
     expect(remaining?.getAttribute("aria-hidden")).toBe("true");
     expect(tabs[1]?.textContent).toContain("2 to fill");
     expect(tabs[1]?.getAttribute("data-profile-section-progress-state")).toBe(
@@ -250,11 +250,12 @@ describe("ProfileSectionTabs", () => {
 
     // The shared primary underline, not a per-tab border or accent bar
     // invented for this one strip.
-    expect(active.className).toContain(
-      "group-data-[variant=line]/tabs-list:data-[state=active]:after:bg-primary",
-    );
+    expect(active.className).toContain("data-[state=active]:after:bg-primary");
     expect(active.className).toContain("data-[state=active]:text-foreground");
-    expect(active.className).not.toContain("bg-accent");
+    // Horizontal tabs paint no fill: the tint applies to vertical tabs only.
+    expect(active.className).not.toMatch(
+      /(^|\s)(data-\[state=active\]:)?bg-accent(\s|$)/,
+    );
   });
 
   it("never truncates a section label at 1024, 1200 or 1440", () => {
@@ -279,7 +280,7 @@ describe("ProfileSectionTabs", () => {
       "Experience",
       "Background",
       "Preferences",
-      "Job sources",
+      "Job sites",
     ]);
     for (const tab of tabs) {
       expect(tab.className).toContain("whitespace-nowrap");

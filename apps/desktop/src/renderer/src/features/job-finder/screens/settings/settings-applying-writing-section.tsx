@@ -1,4 +1,6 @@
-import { ChevronRight } from "lucide-react";
+import { cn } from "@renderer/lib/cn";
+import { SETTINGS_MEASURE_CLASS } from "./settings-row";
+import { Disclosure } from "@renderer/components/ui/disclosure";
 import { useId, type ReactNode } from "react";
 import {
   AiBehaviorPreferenceSchema,
@@ -165,19 +167,16 @@ function MoreChoices(props: {
   children: ReactNode;
 }) {
   return (
-    <details
-      className="group min-w-0 border-t border-(--surface-panel-border) pt-3"
+    <Disclosure
+      className="border-t border-(--surface-panel-border) pt-3"
+      contentClassName="mt-1 grid min-w-0 gap-3"
       data-testid={props.testId}
+      size="field"
+      summary={props.summary}
+      summaryClassName="h-auto min-h-8 px-0 text-(length:--text-body) text-foreground"
     >
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-(length:--text-body) font-medium text-foreground [&::-webkit-details-marker]:hidden">
-        <ChevronRight
-          aria-hidden="true"
-          className="size-4 shrink-0 transition-transform group-open:rotate-90"
-        />
-        {props.summary}
-      </summary>
-      <div className="mt-3 grid min-w-0 gap-3">{props.children}</div>
-    </details>
+      {props.children}
+    </Disclosure>
   );
 }
 
@@ -251,7 +250,12 @@ export function SettingsApplyingWritingSection(props: {
           effect="Applies from your next application."
         />
       </div>
-      <div className="grid min-w-0 gap-3 lg:grid-cols-[3fr_2fr]">
+      <div
+        className={cn(
+          "grid min-w-0 gap-3 lg:grid-cols-[3fr_2fr]",
+          SETTINGS_MEASURE_CLASS,
+        )}
+      >
         <Field>
           <FieldLabel>Cover letters</FieldLabel>
           <ChoiceCards

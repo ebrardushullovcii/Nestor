@@ -9,7 +9,11 @@ import {
   ProfileBackgroundProofBankSection,
   ProfileBackgroundSupportingDetailSection,
 } from "./profile-background-sections";
-import { ProfileInput, ProfileTextarea } from "./profile-form-primitives";
+import {
+  ProfileInput,
+  ProfileMonthInput,
+  ProfileTextarea,
+} from "./profile-form-primitives";
 import { ProfileRecordCard } from "./profile-record-card";
 import { ProfileSectionHeader } from "./profile-section-header";
 import { useProfileAppendedRecordOpenSignal } from "./use-profile-appended-record-open-signal";
@@ -80,7 +84,9 @@ export function ProfileBackgroundTab({
   }
 
   return (
-    <div className="grid gap-6">
+    // One column no wider than the pane: an auto column grew to the
+    // sections' own width at larger text, running the fields past the edge.
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
       <section className="grid content-start gap-(--gap-card)">
         <ProfileSectionHeader
           eyebrow="Background"
@@ -139,7 +145,7 @@ export function ProfileBackgroundTab({
                 }
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <p className="text-(length:--text-field-label) font-medium uppercase tracking-[0.16em] text-foreground-muted">
+                  <p className="text-(length:--text-field-label) font-medium text-foreground-muted">
                     Education details
                   </p>
                   <Button
@@ -207,9 +213,8 @@ export function ProfileBackgroundTab({
                     >
                       Start date
                     </FieldLabel>
-                    <ProfileInput
+                    <ProfileMonthInput
                       id={buildEducationFieldId(entry.id, "start-date")}
-                      placeholder="YYYY-MM"
                       {...register(`records.education.${index}.startDate`)}
                     />
                   </Field>
@@ -219,9 +224,8 @@ export function ProfileBackgroundTab({
                     >
                       End date
                     </FieldLabel>
-                    <ProfileInput
+                    <ProfileMonthInput
                       id={buildEducationFieldId(entry.id, "end-date")}
-                      placeholder="YYYY-MM"
                       {...register(`records.education.${index}.endDate`)}
                     />
                   </Field>
@@ -264,7 +268,7 @@ export function ProfileBackgroundTab({
               }
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <p className="text-(length:--text-field-label) font-medium uppercase tracking-[0.16em] text-foreground-muted">
+                <p className="text-(length:--text-field-label) font-medium text-foreground-muted">
                   Certification details
                 </p>
                 <Button
@@ -307,9 +311,8 @@ export function ProfileBackgroundTab({
                   >
                     Issue date
                   </FieldLabel>
-                  <ProfileInput
+                  <ProfileMonthInput
                     id={buildCertificationFieldId(entry.id, "issue-date")}
-                    placeholder="YYYY-MM"
                     {...register(`records.certifications.${index}.issueDate`)}
                   />
                 </Field>
@@ -319,9 +322,8 @@ export function ProfileBackgroundTab({
                   >
                     Expiry date
                   </FieldLabel>
-                  <ProfileInput
+                  <ProfileMonthInput
                     id={buildCertificationFieldId(entry.id, "expiry-date")}
-                    placeholder="YYYY-MM"
                     {...register(`records.certifications.${index}.expiryDate`)}
                   />
                 </Field>

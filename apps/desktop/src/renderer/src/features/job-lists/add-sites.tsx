@@ -21,7 +21,7 @@ export function AddSites(props: {
       const result = await window.nestor.jobs.run("add_sites", { text });
       setDuplicateUrls(result.duplicateUrls);
       setMessage(
-        `Added and turned on ${result.added} source${result.added === 1 ? "" : "s"}.` +
+        `Added and turned on ${result.added} site${result.added === 1 ? "" : "s"}.` +
           (result.duplicates
             ? ` ${result.duplicates} ${result.duplicates === 1 ? "was" : "were"} already in your list.`
             : "") +
@@ -43,7 +43,7 @@ export function AddSites(props: {
       setPending(false);
     }
     if (hasInvalid)
-      throw new Error("Fix the remaining source addresses before continuing.");
+      throw new Error("Fix the remaining site addresses before continuing.");
   };
   // One address a line: the count tells a long paste arrived whole.
   const addresses = text.split("\n").filter((line) => line.trim()).length;
@@ -62,7 +62,7 @@ export function AddSites(props: {
           size="sm"
           type="button"
         >
-          {open ? "Done adding" : "Add sources"}
+          {open ? "Done adding" : "Add sites"}
         </Button>
       ) : null}
       {open ? (

@@ -47,7 +47,7 @@ export const JOB_FINDER_SHORTCUTS: readonly JobFinderShortcutDefinition[] = [
   {
     combo: "/",
     id: "focus-list-search",
-    label: "Search this list, or your workspace off a list",
+    label: "Filter the list you are on; elsewhere, search everything",
     scope: "Outside text fields, controls, and dialogs",
   },
   {
@@ -168,7 +168,8 @@ export function formatJobFinderShortcutCombo(
     return combo;
   }
   const key = modifierComboKeycap(combo);
-  return platform === "darwin" ? `⌘${key}` : `Ctrl ${key}`;
+  // One spelling everywhere (owner, 2026-11-02): the keys joined by "+".
+  return platform === "darwin" ? `⌘ + ${key}` : `Ctrl + ${key}`;
 }
 
 export function getJobFinderAriaKeyshortcuts(
@@ -182,8 +183,23 @@ export function getJobFinderAriaKeyshortcuts(
 /** One combo, as the individual keycaps it is pressed with. */
 export type JobFinderShortcutKeycaps = readonly string[];
 
+/** Where a shortcut works, as the reference groups it. */
+export type JobFinderShortcutGroup =
+  | "Everywhere"
+  | "Lists"
+  | "Resume"
+  | "Browser";
+
+export const JOB_FINDER_SHORTCUT_GROUPS: readonly JobFinderShortcutGroup[] = [
+  "Everywhere",
+  "Lists",
+  "Resume",
+  "Browser",
+];
+
 export interface JobFinderShortcutHelpEntry {
   combos: readonly JobFinderShortcutKeycaps[];
+  group: JobFinderShortcutGroup;
   id:
     | JobFinderShortcutId
     | "history-back"
@@ -191,7 +207,9 @@ export interface JobFinderShortcutHelpEntry {
     | "zoom-in"
     | "zoom-out"
     | "actual-size"
-    | `find-jobs-${string}`;
+    | `find-jobs-${string}`
+    | `resume-${string}`
+    | `browser-${string}`;
   /** Stable row key; an id can appear once per distinct scope. */
   rowId: string;
   label: string;
@@ -223,6 +241,7 @@ export function buildJobFinderShortcutHelp(
     }
     entries.set(rowId, {
       combos: [keycaps],
+      group: shortcut.id === "focus-list-search" ? "Lists" : "Everywhere",
       id: shortcut.id,
       rowId,
       label: shortcut.label,
@@ -230,43 +249,99 @@ export function buildJobFinderShortcutHelp(
     });
   }
   const modifier = platform === "darwin" ? "⌘" : "Ctrl";
+  const everywhere = "Everywhere" as const;
   return [
     ...entries.values(),
     {
+      group: everywhere,
       id: "history-back",
       rowId: "history-back",
       label: "Back to the previous screen",
       scope: "Also the mouse's back button",
-      combos: [["Alt", "←"]],
+      combos: [[platform === "darwin" ? "⌥" : "Alt", "←"]],
     },
     {
+      group: everywhere,
       id: "history-forward",
       rowId: "history-forward",
       label: "Forward again",
       scope: "Also the mouse's forward button",
-      combos: [["Alt", "→"]],
+      combos: [[platform === "darwin" ? "⌥" : "Alt", "→"]],
     },
     {
+      group: everywhere,
       id: "zoom-in",
       rowId: "zoom-in",
-      label: "Zoom In",
+      label: "Zoom in",
       scope: "Anywhere in the app",
       combos: [[modifier, "="]],
     },
     {
+      group: everywhere,
       id: "zoom-out",
       rowId: "zoom-out",
-      label: "Zoom Out",
+      label: "Zoom out",
       scope: "Anywhere in the app",
       combos: [[modifier, "-"]],
     },
     {
+      group: everywhere,
       id: "actual-size",
       rowId: "actual-size",
-      label: "Actual Size",
+      label: "Actual size",
       scope: "Anywhere in the app",
       combos: [[modifier, "0"]],
     },
     ...findJobsShortcutHelp(modifier),
+    {
+      group: "Resume",
+      id: "resume-approve",
+      rowId: "resume-approve",
+      label: "Approve and open the next resume",
+      scope: "Shortlisted, while a resume waits for review",
+      combos: [[modifier, "Enter"]],
+    },
+    {
+      group: "Resume",
+      id: "resume-zoom",
+      rowId: "resume-zoom",
+      label: "Zoom the page in or out",
+      scope: "With the resume page focused",
+      combos: [["+"], ["−"]],
+    },
+    {
+      group: "Resume",
+      id: "resume-fit",
+      rowId: "resume-fit",
+      label: "Fit the width, or show actual size",
+      scope: "With the resume page focused",
+      combos: [["0"], ["1"]],
+    },
+    {
+      group: "Browser",
+      id: "browser-address",
+      rowId: "browser-address",
+      label: "Type an address",
+      scope: "While the browser is open",
+      combos: [[modifier, "L"]],
+    },
+    {
+      group: "Browser",
+      id: "browser-close",
+      rowId: "browser-close",
+      label: "Hide the browser",
+      scope: "The agent keeps working in it",
+      combos: [["Esc"]],
+    },
   ];
+}
+
+/** The help rows in the reference's order, one block per group. */
+export function groupJobFinderShortcutHelp(
+  entries: readonly JobFinderShortcutHelpEntry[],
+): { group: JobFinderShortcutGroup; entries: JobFinderShortcutHelpEntry[] }[] {
+  return JOB_FINDER_SHORTCUT_GROUPS.map((group) => ({
+    group,
+    entries: entries.filter((entry) => entry.group === group),
+  })).filter((block) => block.entries.length > 0);
 }

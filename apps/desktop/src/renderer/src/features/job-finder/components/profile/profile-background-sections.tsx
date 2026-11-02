@@ -166,7 +166,7 @@ export function ProfileBackgroundSupportingDetailSection(props: {
             }
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <p className="text-(length:--text-field-label) font-medium uppercase tracking-[0.16em] text-foreground-muted">
+              <p className="text-(length:--text-field-label) font-medium text-foreground-muted">
                 Project details
               </p>
               <Button
@@ -295,7 +295,7 @@ export function ProfileBackgroundSupportingDetailSection(props: {
             title={watch(`links.${index}.label`)?.trim() || `Link ${index + 1}`}
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <p className="text-(length:--text-field-label) font-medium uppercase tracking-[0.16em] text-foreground-muted">
+              <p className="text-(length:--text-field-label) font-medium text-foreground-muted">
                 Link details
               </p>
               <Button
@@ -377,7 +377,7 @@ export function ProfileBackgroundSupportingDetailSection(props: {
             }
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <p className="text-(length:--text-field-label) font-medium uppercase tracking-[0.16em] text-foreground-muted">
+              <p className="text-(length:--text-field-label) font-medium text-foreground-muted">
                 Language details
               </p>
               <Button
@@ -532,7 +532,7 @@ export function ProfileBackgroundProofBankSection(props: {
               }
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <p className="text-(length:--text-field-label) font-medium uppercase tracking-[0.16em] text-foreground-muted">
+                <p className="text-(length:--text-field-label) font-medium text-foreground-muted">
                   Proof details
                 </p>
                 <Button

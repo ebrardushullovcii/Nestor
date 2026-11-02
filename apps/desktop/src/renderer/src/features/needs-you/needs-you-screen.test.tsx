@@ -201,6 +201,7 @@ it("keeps an unchecked answer when a new answer pushes it past the 50-row window
   const checkbox = await screen.findByRole("checkbox", {
     name: `Select ${kept.prompt}`,
   });
+  fireEvent.click(screen.getByRole("button", { name: "Select" }));
   fireEvent.click(
     screen.getByRole("checkbox", { name: "Select all 50 answers" }),
   );
@@ -217,7 +218,7 @@ it("keeps an unchecked answer when a new answer pushes it past the 50-row window
   await screen.findByText("50 selected");
   await waitFor(() =>
     expect(
-      screen.getByRole("button", { name: "Forget selected" }),
+      screen.getByRole("button", { name: /^Forget \d+ selected/ }),
     ).toHaveProperty("disabled", false),
   );
   expect(
@@ -227,7 +228,7 @@ it("keeps an unchecked answer when a new answer pushes it past the 50-row window
         .getAttribute("data-needs-list-state")!,
     ),
   ).toMatchObject({ all: true, selectedIds: [kept.id] });
-  fireEvent.click(screen.getByRole("button", { name: "Forget selected" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Forget \d+ selected/ }));
   await waitFor(() =>
     expect(applications.needsYou.listAnswers().total).toBe(1),
   );
@@ -246,13 +247,13 @@ it("keeps a real explicit selection outside the loaded window and forgets that e
   ).toBeNull();
   await waitFor(() =>
     expect(
-      screen.getByRole("button", { name: "Forget selected" }),
+      screen.getByRole("button", { name: /^Forget \d+ selected/ }),
     ).toHaveProperty("disabled", false),
   );
   expect(
     await waitForDisplayedDestination(route, () => route, 0),
   ).toMatchObject({ status: "displayed" });
-  fireEvent.click(screen.getByRole("button", { name: "Forget selected" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Forget \d+ selected/ }));
   await waitFor(() =>
     expect(applications.needsYou.savedAnswer(chosen.id)).toBeNull(),
   );
@@ -1009,7 +1010,7 @@ it("lists application questions first, then one sign-in row per host under one g
   expect(within(list).queryByText(/^Sign in to /u)).toBeNull();
   fireEvent.click(group);
   const scale = await within(list).findByRole("button", {
-    name: /Sign in to .*scale-853\.example\.test · 2 sites/u,
+    name: /Sign in to .*scale-853\.example\.test, 2 sign-ins/u,
   });
   expect(scale.textContent).toContain("Search couldn't read this site");
   expect(
@@ -1054,12 +1055,17 @@ it("works through selected items: a question in place, then each site in the bro
   const question = ask(0);
   const [scaleCareers] = gatedSites();
   show();
+  fireEvent.click(await screen.findByRole("button", { name: "Select" }));
   fireEvent.click(
-    await screen.findByRole("checkbox", { name: "Select all 4 items" }),
+    await screen.findByRole("checkbox", { name: /^Select all / }),
   );
+  // The shown question first; then every match, the folded sign-ins too.
+  // Counted as the list shows them: scale-853's two sign-ins are one row,
+  // so the advertised count is the work that starts.
   fireEvent.click(
-    screen.getByRole("button", { name: "Work through selected" }),
+    screen.getByRole("button", { name: "Select all 3 matching" }),
   );
+  fireEvent.click(screen.getByRole("button", { name: /^Work through 3 / }));
   const walk = () =>
     document.querySelector("[data-needs-walk]")?.textContent ?? "";
   await waitFor(() => expect(walk()).toContain("1 of 3"));
@@ -1092,7 +1098,7 @@ it("works through selected items: a question in place, then each site in the bro
     createSourceAccessStore(jobs).complete(scaleCareers!);
   });
   const scaleRow = await screen.findByRole("button", {
-    name: /scale-853\.example\.test(?! · 2 sites)/u,
+    name: /scale-853\.example\.test(?! · 2 sign-ins)/u,
   });
   expect(scaleRow.textContent).toContain("Checking…");
   act(() => workThrough.pause());
@@ -1138,11 +1144,13 @@ it("lists filled forms under their own group, and says so when nothing is blocke
   show();
   expect(
     await screen.findByText(
-      "Nothing is blocked. 1 application is filled in and waiting for your Send.",
+      "Nothing is blocked. 1 application is filled in and waiting for your Send, listed below.",
       { exact: false },
     ),
   ).toBeTruthy();
-  expect(screen.getByText("Ready for you to send (1)")).toBeTruthy();
+  // Its own collection, beside a count that agrees with the tab.
+  expect(screen.getByText("Ready to send · 1")).toBeTruthy();
+  expect(screen.getByText("Nothing needs you · 1 ready to send")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Needs you 0" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Review and send" }));
   await waitFor(() => expect(openApplication).toHaveBeenCalledWith({ id: 31 }));
@@ -1152,7 +1160,8 @@ it("lists filled forms under their own group, and says so when nothing is blocke
     ask(0);
   });
   await screen.findByText("What is your notice period?");
-  expect(screen.getByText("Ready for you to send (1)")).toBeTruthy();
+  expect(screen.getByText("Ready to send · 1")).toBeTruthy();
+  expect(screen.getByText("1 item needs you · 1 ready to send")).toBeTruthy();
   expect(screen.queryByText(/Nothing is blocked/)).toBeNull();
   fireEvent.click(
     screen.getByRole("button", { name: /Backend Engineer.*Lantern Services/ }),
@@ -1224,8 +1233,110 @@ it.each([
     },
   });
   show();
-  const why = await screen.findByText("Why am I asked this?");
-  fireEvent.click(why);
+  // The question is the pane's title; why it is asked shows under it, and
+  // what Nestor saw opens on demand.
+  expect(
+    await screen.findByRole("heading", { name: "What salary do you expect?" }),
+  ).toBeTruthy();
   expect(screen.getByText(lead)).toBeTruthy();
+  fireEvent.click(screen.getByText("What Nestor saw"));
   expect(screen.getByText(detail)).toBeTruthy();
+});
+
+it("counts a site's sign-ins past one page as the one row Work through starts", async () => {
+  ask(0);
+  const sites = createJobSitesStore(jobs);
+  const access = createSourceAccessStore(jobs);
+  // 51 sign-ins on one host: more than one 50-row page.
+  for (let index = 0; index < 51; index += 1) {
+    const id = sites.add({
+      text: `https://many.example.test/board-${index}`,
+    }).firstAddedId!;
+    access.request(id, "Open the site and sign in, then Retry.");
+  }
+  show();
+  // The folded group reads every page: one site, not 51 and not two.
+  await screen.findByRole("button", {
+    name: "1 job site needs you to sign in",
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Select" }));
+  fireEvent.click(
+    await screen.findByRole("checkbox", { name: /^Select all / }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Select all 2 matching" }),
+  );
+  expect(
+    screen.getByRole("button", { name: /^Work through 2 selected items/ }),
+  ).toBeTruthy();
+});
+
+it("says it couldn't count when a later site page fails, and starts the right number after Try again", async () => {
+  ask(0);
+  const sites = createJobSitesStore(jobs);
+  const access = createSourceAccessStore(jobs);
+  for (let index = 0; index < 51; index += 1) {
+    const id = sites.add({
+      text: `https://many.example.test/board-${index}`,
+    }).firstAddedId!;
+    access.request(id, "Open the site and sign in, then Retry.");
+  }
+  const { run } = window.nestor.needsYou as {
+    run: (name: string, input: unknown) => Promise<unknown>;
+  };
+  let failLaterPage = true;
+  window.nestor.needsYou.run = ((name: string, input: unknown) => {
+    const request = input as { group?: string; after?: number } | undefined;
+    return failLaterPage &&
+      name === "list_needs_you" &&
+      request?.group === "sites" &&
+      (request.after ?? 0) > 0
+      ? Promise.reject(new Error("The job store could not be read"))
+      : run(name, input);
+  }) as typeof window.nestor.needsYou.run;
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Select" }));
+  // The merged count is unknown: no raw number is promised.
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Select all matching" }),
+  );
+  await screen.findByText("Couldn’t count");
+  expect(screen.queryByRole("button", { name: /^Work through/ })).toBeNull();
+  failLaterPage = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  // One question and one merged site: what the bar says is what starts.
+  expect(
+    await screen.findByRole("button", {
+      name: /^Work through 2 selected items/,
+    }),
+  ).toBeTruthy();
+  expect(screen.getByText("2 selected")).toBeTruthy();
+});
+
+it("recovers its counts with the list on Try again: no all-clear above waiting items", async () => {
+  const question = ask(0);
+  const { run } = window.nestor.needsYou as {
+    run: (name: string, input: unknown) => Promise<unknown>;
+  };
+  let refuse = true;
+  window.nestor.needsYou.run = ((name: string, input: unknown) =>
+    refuse && (name === "needs_you_counts" || name === "list_needs_you")
+      ? Promise.reject(new Error("The job store could not be read"))
+      : run(name, input)) as typeof window.nestor.needsYou.run;
+  show();
+  await screen.findByText("Couldn’t read things needing you");
+  expect(screen.queryByText("Nothing needs you")).toBeNull();
+  refuse = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  const list = await screen.findByRole("list", { name: "Things needing you" });
+  await within(list).findByText(question.prompt);
+  await screen.findByText("1 item needs you");
+  expect(screen.queryByText("Nothing needs you")).toBeNull();
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("button", { name: "Needs you 1" })
+        .getAttribute("aria-pressed") ?? "present",
+    ).toBeTruthy(),
+  );
 });

@@ -120,9 +120,9 @@ describe("Button", () => {
     expect(button?.className).toMatch(/\bbg-primary-fill\b/);
     expect(button?.className).toMatch(/\btext-primary-fill-foreground\b/);
     expect(button?.className).not.toMatch(/border-primary(-fill)?\/\d/);
-    expect(button?.className).toMatch(
-      /shadow-\[inset_0_1px_0_var\(--focus-inset-highlight\)\]/,
-    );
+    // Hover and pressed answer with their own fill steps.
+    expect(button?.className).toMatch(/hover:bg-\(--primary-fill-hover\)/);
+    expect(button?.className).toMatch(/active:bg-\(--primary-fill-pressed\)/);
     expect(button?.className).not.toMatch(/ring-primary\/\d/);
   });
 
@@ -140,10 +140,10 @@ describe("Button", () => {
     expect(container?.querySelector(".button-pending-rail")).not.toBeNull();
   });
 
-  it("gives small header actions the same 14px text as normal buttons", () => {
+  it("gives small header actions the 13px small-control text", () => {
     render(<Button size="sm">Header action</Button>);
     const button = container?.querySelector("button");
-    expect(button?.className).toMatch(/\btext-sm\b/);
+    expect(button?.className).toMatch(/text-\(length:--text-small\)/);
     expect(button?.className).toMatch(/\bh-8\b/);
   });
 
@@ -166,19 +166,19 @@ describe("Button", () => {
     const [field, toolbar, byDefault, compact] = [
       ...(container?.querySelectorAll("button") ?? []),
     ];
-    // `field` is the named pairing with the 44px Input/SelectTrigger box.
+    // `field` is the named pairing with the 40px Input/SelectTrigger box.
     expect(field?.getAttribute("data-size")).toBe("field");
-    expect(field?.className).toMatch(/\bh-11\b/);
+    expect(field?.className).toMatch(/\bh-10\b/);
     // `toolbar` matches DISCOVERY_RESULTS_TOOLBAR_CONTROL_CLASS exactly.
     expect(toolbar?.getAttribute("data-size")).toBe("toolbar");
     expect(toolbar?.className).toMatch(/\bh-8\b/);
-    expect(toolbar?.className).toMatch(/\btext-xs\b/);
+    expect(toolbar?.className).toMatch(/text-\(length:--text-small\)/);
     expect(toolbar?.className).toMatch(/\bfont-medium\b/);
-    // Existing sizes and the default are untouched, so no call site shifts.
+    // Every size sits on the 4px grid with one medium weight.
     expect(byDefault?.getAttribute("data-size")).toBe("default");
-    expect(byDefault?.className).toMatch(/\bh-10\b/);
+    expect(byDefault?.className).toMatch(/\bh-9\b/);
     expect(compact?.className).toMatch(/\bh-8\b/);
-    expect(compact?.className).toMatch(/\bfont-semibold\b/);
+    expect(compact?.className).toMatch(/\bfont-medium\b/);
   });
 
   it("uses the radius tokens rather than literal Tailwind radii on the small sizes", () => {

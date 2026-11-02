@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { formatDate } from "@renderer/features/job-finder/lib/format-date";
 import type { CandidateAsset, CandidateAssetKind } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
 import { FormSelect } from "../form-select";
@@ -32,12 +33,6 @@ function formatByteSize(byteSize: number) {
   if (byteSize < 1024) return `${byteSize} B`;
   if (byteSize < 1024 * 1024) return `${Math.round(byteSize / 1024)} KB`;
   return `${(byteSize / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(timestamp: string) {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(
-    new Date(timestamp),
-  );
 }
 
 function formatKind(kind: CandidateAssetKind): string {
@@ -205,7 +200,7 @@ export function ProfileFilesTab({
   const controlsDisabled = pendingAction !== null || loadState === "loading";
 
   return (
-    <section className="grid content-start gap-(--gap-card)">
+    <section className="grid grid-cols-[minmax(0,1fr)] content-start gap-(--gap-card)">
       <ProfileSectionHeader
         description="Extra files an application form may ask for: a portfolio, transcript, certificate, or work sample. When a form has a matching upload, Job Finder attaches the file for you. Your resume is handled above. Files are copied into Job Finder's own folder on this device."
         eyebrow="Files"

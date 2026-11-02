@@ -175,16 +175,22 @@ describe("ProfileSetupSummaryCards", () => {
     expect(container?.textContent).not.toContain("Employer access stays off");
     expect(container?.textContent).not.toContain("connected in Settings");
     expect(container?.textContent).not.toContain("in good shape");
-    // The recommended import choice names the file-picker affordance while
-    // keeping formats and review truth visible.
+    // The recommended import choice is a drop zone around the file-picker
+    // button, keeping formats and review truth visible beside it.
     expect(
       [...getContainerOrThrow().querySelectorAll("button")].map(
         (button) => button.textContent,
       ),
     ).toEqual([
-      "Recommended. Choose my resume filePDF, DOCX, TXT, or Markdown. You review everything before it is used.Scanned image PDFs have no readable text.",
+      "Recommended. Choose my resume file",
       "Enter details manuallyBegin with contact details and target roles; add the rest when it becomes useful.Start manually",
     ]);
+    expect(
+      getContainerOrThrow().querySelector("[data-profile-setup-drop-zone]")
+        ?.textContent,
+    ).toBe(
+      "Drop your resume hereor choose it from your files.Recommended. Choose my resume filePDF, DOCX, TXT, or Markdown. You review everything before it is used. Scanned image PDFs have no readable text.",
+    );
 
     act(() => {
       const buttons = listButtons();

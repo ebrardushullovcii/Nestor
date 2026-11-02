@@ -353,7 +353,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     ),
   ),
 
-  ...actions("sites", "Job sources", navigate, [
+  ...actions("sites", "Job sites", navigate, [
     ["filter", "Filter visible sources by text"],
     ["status_filter", "Filter sources by status"],
     ["focus", "Show a particular source editor"],
@@ -365,7 +365,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   ]),
   ...actions(
     "sites",
-    "Job sources",
+    "Job sites",
     [
       "add_sites",
       "update_site",

@@ -44,7 +44,9 @@ export function ResumeEditor(props: {
     <div
       data-resume-pane="edit"
       className={cn(
-        "flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1",
+        // Parts on hairlines, like Profile: never a box per part inside
+        // the pane's frame (and entry cards inside those boxes).
+        "flex min-h-0 flex-1 flex-col overflow-y-auto pr-1 [&>*+*]:border-t [&>*+*]:border-(--surface-panel-border)",
         props.className,
       )}
     >

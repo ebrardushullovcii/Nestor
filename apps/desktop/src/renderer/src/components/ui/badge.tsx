@@ -15,24 +15,22 @@ import { cn } from "@renderer/lib/utils";
 // Sentence case at the small text size: uppercase tracked labels stacked
 // down every row read as shouting and took twice the width.
 const badgeVariants = cva(
-  "inline-flex w-fit max-w-full min-w-0 shrink truncate items-center justify-center gap-1 overflow-hidden border px-2 py-0.5 text-(length:--text-small) font-medium leading-4 whitespace-nowrap rounded-(--radius-badge) transition-[color,box-shadow] motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&>svg]:pointer-events-none [&>svg]:size-3",
+  "inline-flex w-fit max-w-full min-w-0 shrink truncate items-center justify-center gap-1 overflow-hidden border px-1.5 py-0.5 text-xs font-medium leading-4 whitespace-nowrap rounded-(--radius-badge) transition-[color,box-shadow] motion-reduce:transition-none outline-none focus-ring [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
       variant: {
-        default:
-          "border-primary/(--badge-border-alpha) bg-primary/15 text-primary",
+        default: "border-transparent bg-accent-tint text-primary",
         secondary:
-          "border-(--surface-panel-border) bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
+          "border-transparent bg-secondary text-secondary-foreground [a&]:hover:bg-accent",
         destructive:
-          "border-destructive/(--badge-border-alpha) bg-destructive/15 text-destructive [a&]:hover:bg-destructive/90",
+          "border-transparent bg-(--danger-surface) text-destructive [a&]:hover:opacity-90",
         outline:
-          "border-(--surface-panel-border) bg-surface-strong text-foreground-soft [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        link: "text-(--link) underline decoration-from-font underline-offset-4",
-        section:
-          "border-(--surface-panel-border) bg-secondary text-muted-foreground",
-        status:
-          "border-(--surface-panel-border) bg-surface text-foreground-soft",
+          "border-(--surface-panel-border) bg-transparent text-foreground-soft [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        ghost:
+          "border-transparent [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        link: "border-transparent text-(--link) underline decoration-from-font underline-offset-4",
+        section: "border-transparent bg-secondary text-muted-foreground",
+        status: "border-transparent bg-secondary text-foreground-soft",
       },
     },
     defaultVariants: {

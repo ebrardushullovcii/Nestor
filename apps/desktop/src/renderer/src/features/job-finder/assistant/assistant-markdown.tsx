@@ -33,7 +33,7 @@ const inlinePatternDefinitions = [
     render: (match: RegExpMatchArray, key: string) => (
       <code
         key={key}
-        className="rounded-(--radius-small) border border-border/35 bg-background/80 px-1.5 py-0.5 font-mono text-[0.78rem] break-all text-foreground"
+        className="rounded-(--radius-small) border border-border/35 bg-background/80 px-1.5 py-0.5 font-mono text-(length:--text-small) break-all text-foreground"
       >
         {match[1]}
       </code>
@@ -312,11 +312,11 @@ function renderMarkdownBlock(block: MarkdownBlock, key: string) {
       return (
         <div className="grid gap-2" key={key}>
           {block.language ? (
-            <p className="font-mono text-(length:--text-label-mono-xs) uppercase tracking-[0.18em] text-muted-foreground">
+            <p className="text-(length:--text-label-mono-xs) text-muted-foreground">
               {block.language}
             </p>
           ) : null}
-          <pre className="overflow-x-auto rounded-(--radius-chip) border border-border/35 bg-background/80 p-3 font-mono text-[0.78rem] leading-6 text-foreground">
+          <pre className="overflow-x-auto rounded-(--radius-chip) border border-border/35 bg-background/80 p-3 font-mono text-(length:--text-small) leading-6 text-foreground">
             <code>{block.content}</code>
           </pre>
         </div>

@@ -1,4 +1,4 @@
-import type { CSSProperties, KeyboardEvent, MouseEvent } from "react";
+import type { CSSProperties, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Briefcase, Check, ChevronDown, MessageSquareText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -75,14 +75,14 @@ const MODULE_SWITCH_MENU_MIN_WIDTH = 200;
  * focus lift it the way the sidebar's own quiet controls lift.
  */
 export const MODULE_SWITCH_TRIGGER_CLASS =
-  "group/module inline-flex h-5 max-w-full items-center gap-1 rounded-(--radius-button) border border-transparent px-1 -mx-1 text-left outline-none transition-colors hover:bg-secondary/50 focus-visible:ring-[3px] focus-visible:ring-ring/40 data-[state=open]:bg-secondary/60";
+  "group/module inline-flex h-8 w-max items-center gap-1 rounded-(--radius-button) border border-transparent px-2 -mx-2 text-left outline-none transition-colors duration-(--duration-fast) hover:bg-accent active:bg-pressed focus-ring data-[state=open]:bg-secondary";
 export const MODULE_SWITCH_CAPTION_CLASS =
-  "min-w-0 whitespace-nowrap text-[0.72rem] font-semibold uppercase leading-none tracking-(--tracking-caps) text-foreground sm:text-[0.78rem]";
+  "shrink-0 whitespace-nowrap text-(length:--text-small) font-medium leading-none text-foreground";
 export const MODULE_SWITCH_CHEVRON_CLASS =
-  "size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/module:rotate-180";
+  "size-3.5 shrink-0 text-muted-foreground transition-transform duration-(--duration-base) group-hover/module:text-foreground group-data-[state=open]/module:rotate-180";
 /** The 4rem rail: icon plus chevron, centred, name in the tooltip. */
 export const MODULE_SWITCH_RAIL_TRIGGER_CLASS =
-  "group/module inline-flex h-9 w-full items-center justify-center gap-0.5 rounded-(--radius-button) border border-transparent outline-none transition-colors hover:bg-secondary/50 focus-visible:ring-[3px] focus-visible:ring-ring/40 data-[state=open]:bg-secondary/60";
+  "group/module inline-flex h-9 w-full items-center justify-center gap-0.5 rounded-(--radius-button) border border-transparent outline-none transition-colors hover:bg-secondary/50 focus-ring data-[state=open]:bg-secondary/60";
 export const MODULE_SWITCH_MENU_CLASS = "p-1";
 export const MODULE_SWITCH_ITEM_CLASS =
   "flex w-full items-center gap-2 rounded-(--radius-button) px-2 py-1.5 text-left text-(length:--text-small) outline-none transition-colors hover:bg-secondary/60 focus-visible:bg-secondary/60";
@@ -95,6 +95,11 @@ export interface ModuleSwitchProps {
   /** Kept for call-site compatibility; the caption never hides its label. */
   labelClassName?: string;
   onSelectModule: (moduleName: SuiteModule) => void;
+  /**
+   * Rendered inside the trigger before the module name, so the wordmark and
+   * the switch read as one control with one hover state.
+   */
+  leading?: ReactNode;
   /** Kept for call-site compatibility; icons are decided by the variant. */
   showIcons?: boolean;
   style?: CSSProperties;
@@ -107,12 +112,13 @@ function placementFor(trigger: HTMLElement): PopoverPlacement {
   const viewportWidth =
     typeof window === "undefined" ? minWidth : window.innerWidth;
   const left = Math.max(8, Math.min(rect.left, viewportWidth - minWidth - 8));
-  return { top: rect.bottom + 10, left, minWidth, maxHeight: 240 };
+  return { top: rect.bottom + 6, left, minWidth, maxHeight: 240 };
 }
 
 export function ModuleSwitch({
   activeModule,
   className,
+  leading,
   onSelectModule,
   style,
   variant = "caption",
@@ -258,9 +264,12 @@ export function ModuleSwitch({
         {isRail ? (
           <ActiveIcon aria-hidden="true" className="size-4 shrink-0" />
         ) : (
-          <span className={MODULE_SWITCH_CAPTION_CLASS}>
-            {MODULE_SWITCH_LABELS[activeModule]}
-          </span>
+          <>
+            {leading}
+            <span className={MODULE_SWITCH_CAPTION_CLASS}>
+              {MODULE_SWITCH_LABELS[activeModule]}
+            </span>
+          </>
         )}
         <ChevronDown aria-hidden="true" className={MODULE_SWITCH_CHEVRON_CLASS} />
       </button>

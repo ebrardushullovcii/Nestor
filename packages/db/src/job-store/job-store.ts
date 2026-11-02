@@ -16,6 +16,7 @@ import {
   type SaveFoundJobsResult,
   type SeenListingCard,
   type TriageStage,
+  FIT_SHORT_MAX,
 } from "@nestor/contracts";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -387,7 +388,7 @@ export function openJobStore(filePath: string): JobStore {
         const now = new Date().toISOString();
         const stageOf = sql("SELECT stage FROM jobs WHERE id = ?");
         const setRow = sql(
-          "UPDATE jobs SET fit_score = ?, fit_summary = ?, fit_stale=0 WHERE id = ?",
+          "UPDATE jobs SET fit_score = ?, fit_summary = ?, fit_short = ?, fit_stale=0 WHERE id = ?",
         );
         const setDetail = sql(
           "UPDATE job_details SET fit_json = ? WHERE job_id = ?",
@@ -397,7 +398,15 @@ export function openJobStore(filePath: string): JobStore {
         for (const { id, scoredAt, ...fit } of updates) {
           const row = stageOf.get(id) as { stage: JobStage } | undefined;
           if (!row) continue;
-          setRow.run(fit.score, fit.summary || null, id);
+          setRow.run(
+            fit.score,
+            fit.summary || null,
+            // Only beside its own summary, and only within the cap.
+            fit.summary && fit.short && fit.short.length <= FIT_SHORT_MAX
+              ? fit.short
+              : null,
+            id,
+          );
           setDetail.run(
             JSON.stringify({ ...fit, scoredAt: scoredAt ?? now }),
             id,

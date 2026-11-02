@@ -9,9 +9,10 @@ import { cn } from "@renderer/lib/utils";
  * density switcher was written three ways inside a single file, and six route
  * switchers carried six tracks, six radii and six selected channels. This is
  * the one implementation - one track, one height from the published control
- * scale, one radius token, one border token, and exactly one selected
- * treatment (filled `secondary` plus an inset primary bar, so the state is
- * never carried by hue alone).
+ * scale, one radius token, and exactly one selected treatment: a sunken
+ * neutral track with a raised white "thumb" under the chosen segment, and a
+ * medium-weight label, so the state is carried by shape and elevation, never
+ * by hue alone. No underline: underlines belong to page-level Tabs.
  *
  * Each segment is an ordinary `aria-pressed` button rather than a
  * `role="radio"` inside a radiogroup. That is deliberate and settled: the
@@ -31,14 +32,20 @@ export interface SegmentedControlOption<TValue extends string> {
 }
 
 export type SegmentedControlSize = "toolbar" | "field";
+/**
+ * `segmented` is the in-toolbar choice (sunken track, raised thumb).
+ * `tabs` is the page-section switch: the same buttons and keyboard model,
+ * drawn as underline tabs on a hairline, matching the `Tabs` primitive.
+ */
+export type SegmentedControlVariant = "segmented" | "tabs";
 
 const SEGMENTED_CONTROL_TRACK_SIZE_CLASS = {
   toolbar: "h-8",
-  field: "h-11",
+  field: "h-10",
 } as const satisfies Record<SegmentedControlSize, string>;
 
 const SEGMENTED_CONTROL_SEGMENT_SIZE_CLASS = {
-  toolbar: "px-2.5 text-xs",
+  toolbar: "px-2.5 text-(length:--text-small)",
   field: "px-3.5 text-sm",
 } as const satisfies Record<SegmentedControlSize, string>;
 
@@ -50,6 +57,7 @@ function SegmentedControl<TValue extends string>({
   segmentClassName,
   size = "toolbar",
   value,
+  variant = "segmented",
   ...props
 }: Omit<React.ComponentProps<"div">, "onChange"> & {
   /** Accessible name for the group. Required: the group is never unlabelled. */
@@ -59,7 +67,9 @@ function SegmentedControl<TValue extends string>({
   segmentClassName?: string;
   size?: SegmentedControlSize;
   value: TValue;
+  variant?: SegmentedControlVariant;
 }) {
+  const isTabs = variant === "tabs";
   const trackRef = React.useRef<HTMLDivElement | null>(null);
 
   const handleKeyDown = React.useCallback(
@@ -103,11 +113,16 @@ function SegmentedControl<TValue extends string>({
     <div
       aria-label={label}
       className={cn(
-        "inline-flex w-fit max-w-full items-center gap-0.5 overflow-hidden rounded-(--radius-button) border border-(--control-border) bg-transparent p-0.5",
-        SEGMENTED_CONTROL_TRACK_SIZE_CLASS[size],
+        isTabs
+          ? "inline-flex h-9 w-fit max-w-full items-stretch gap-1 border-b border-(--border-subtle)"
+          : cn(
+              "inline-flex w-fit max-w-full items-center gap-0.5 overflow-hidden rounded-(--radius-button) bg-(--segment-track) p-0.5",
+              SEGMENTED_CONTROL_TRACK_SIZE_CLASS[size],
+            ),
         className,
       )}
       data-size={size}
+      data-variant={variant}
       data-slot="segmented-control"
       onKeyDown={handleKeyDown}
       ref={trackRef}
@@ -121,12 +136,26 @@ function SegmentedControl<TValue extends string>({
             aria-label={option.ariaLabel}
             aria-pressed={selected}
             className={cn(
-              "inline-flex h-full min-w-0 shrink-0 items-center justify-center gap-1.5 rounded-(--radius-button) border border-transparent whitespace-nowrap font-medium transition-[background-color,border-color,color] outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              SEGMENTED_CONTROL_SEGMENT_SIZE_CLASS[size],
-              selected
-                ? "bg-secondary text-foreground shadow-[inset_0_-2px_0_var(--primary)]"
-                : "text-foreground-soft hover:bg-secondary hover:text-foreground",
-              "disabled:cursor-not-allowed disabled:border-(--disabled-border) disabled:bg-(--disabled-surface) disabled:text-(--disabled-foreground) disabled:opacity-100",
+              "inline-flex h-full min-w-0 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap transition-[background-color,border-color,color,box-shadow] duration-(--duration-fast) outline-none focus-ring",
+              isTabs
+                ? cn(
+                    "-mb-px rounded-none border-b-2 border-transparent px-2.5 text-sm",
+                    selected
+                      ? "border-b-primary font-medium text-foreground"
+                      : "font-normal text-foreground-soft hover:border-b-(--border-strong) hover:text-foreground",
+                  )
+                : cn(
+                    "rounded-(--radius-small) border border-transparent",
+                    SEGMENTED_CONTROL_SEGMENT_SIZE_CLASS[size],
+                    selected
+                      ? "border-(--segment-thumb-border) bg-(--segment-thumb) font-medium text-foreground shadow-sm"
+                      : "font-normal text-foreground-soft hover:bg-(--surface-fill-chip) hover:text-foreground active:bg-pressed",
+                  ),
+              // A disabled segment stays part of its track: no box of its
+              // own (each one outlined read as a row of separate buttons),
+              // the thumb kept under the chosen one, the words dimmed.
+              "disabled:cursor-not-allowed disabled:text-(--disabled-foreground) disabled:opacity-100 disabled:shadow-none disabled:hover:bg-transparent",
+              "disabled:data-[state=on]:border-(--disabled-border) disabled:data-[state=on]:bg-(--disabled-surface)",
               segmentClassName,
             )}
             data-slot="segmented-control-segment"
