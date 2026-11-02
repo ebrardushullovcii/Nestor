@@ -5,31 +5,35 @@ import {
   type WorkMode,
 } from "@nestor/contracts";
 
-export type FitTone = "positive" | "active" | "muted" | "neutral";
+/**
+ * A fit as an ordered step: 4 strong, 3 good, 2 stretch, 1 weak, 0 not
+ * scored. The Fit component draws it as that many filled marks of four.
+ */
+export type FitLevel = 0 | 1 | 2 | 3 | 4;
 
-/** How a fit score reads in a list: the number and a word for it. */
+/** How a fit score reads: one label form and its step on the meter. */
 export function describeFit(
   score: number | null,
   stage: JobStage = "found",
 ): {
   label: string;
-  tone: FitTone;
+  level: FitLevel;
 } {
   if (score === null)
     return {
       // Only jobs in Find jobs and Shortlisted are scored.
+      // Plainly "not scored yet": the list cannot say whether a score is
+      // being written this second or waits its turn.
       label:
         stage === "found" || stage === "shortlisted"
-          ? "Scoring…"
+          ? "Not scored yet"
           : "Not scored",
-      tone: "neutral",
+      level: 0,
     };
-  if (score >= JOB_FIT_BANDS.strong)
-    return { label: "Strong fit", tone: "positive" };
-  if (score >= JOB_FIT_BANDS.good) return { label: "Good fit", tone: "active" };
-  if (score >= JOB_FIT_BANDS.stretch)
-    return { label: "Stretch", tone: "muted" };
-  return { label: "Weak fit", tone: "muted" };
+  if (score >= JOB_FIT_BANDS.strong) return { label: "Strong fit", level: 4 };
+  if (score >= JOB_FIT_BANDS.good) return { label: "Good fit", level: 3 };
+  if (score >= JOB_FIT_BANDS.stretch) return { label: "Stretch fit", level: 2 };
+  return { label: "Weak fit", level: 1 };
 }
 
 const DAY = 86_400_000;
@@ -77,7 +81,9 @@ export const STAGE_LABEL: Record<JobStage, string> = {
   found: "Found",
   hidden: "Hidden",
   shortlisted: "Shortlisted",
-  resume: "Ready to apply",
+  // A job with an approved resume, waiting for Apply. "Ready to send" is the
+  // filled-in application waiting for the person's Send.
+  resume: "Approved",
   applied: "Applied",
 };
 

@@ -125,7 +125,7 @@ describe("Home", () => {
       ).toBeTruthy();
       expect(
         screen.getByRole("row", {
-          name: `Waiting ${waiting.toLocaleString()} ${waitingPercent}`,
+          name: `Applied ${waiting.toLocaleString()} ${waitingPercent}`,
         }),
       ).toBeTruthy();
       expect(
@@ -214,6 +214,54 @@ describe("Home", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Sign in/ }));
     expect(
       await screen.findByText("Needs you opened at ?kind=sign_in"),
+    ).toBeTruthy();
+  });
+
+  it("shows charts only once something was sent", async () => {
+    renderHome();
+    expect(
+      await screen.findByRole("figure", { name: /Sent per day/ }),
+    ).toBeTruthy();
+    cleanup();
+
+    const summary = createHomeStore(store).summary({ utcOffsetMinutes: 0 });
+    const none = Object.fromEntries(
+      Object.keys(summary.recent).map((status) => [status, 0]),
+    ) as typeof summary.recent;
+    window.nestor.home.summary = () =>
+      Promise.resolve({
+        ...summary,
+        days: summary.days.map((day) => ({ ...day, sent: 0, replies: 0 })),
+        recent: none,
+        tracker: { ...summary.tracker, ...none },
+      });
+    renderHome();
+    expect(
+      await screen.findByText(/appear after your first application/),
+    ).toBeTruthy();
+    expect(screen.queryByRole("figure", { name: /Sent per day/ })).toBeNull();
+    expect(screen.queryByText("Point at a day to see its numbers.")).toBeNull();
+    // No week of zeros before anything was sent: the week's numbers wait
+    // ("–") under the path to a first application.
+    const week = screen.getByRole("group", { name: "This week" });
+    expect(week.textContent).not.toMatch(/(^|[^\d])0%?(?!\d)/);
+    expect(week.textContent?.match(/–/g)).toHaveLength(4);
+    expect(
+      screen.getByRole("region", { name: "Your first application" }),
+    ).toBeTruthy();
+  });
+
+  it("offers Try again when the numbers cannot be read", async () => {
+    let calls = 0;
+    const home = createHomeStore(store);
+    window.nestor.home.summary = (input) =>
+      ++calls === 1
+        ? Promise.reject(new Error("Store busy."))
+        : Promise.resolve(home.summary(input));
+    renderHome();
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(
+      await screen.findByRole("group", { name: "This week" }),
     ).toBeTruthy();
   });
 });

@@ -585,8 +585,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       const applications =
         sql(`SELECT DISTINCT a.id, a.job_id AS jobId, j.title, j.company, j.location, COALESCE(a.disposition,a.state) AS state
         FROM application_needs_you n JOIN applications a ON a.id = n.application_id JOIN jobs j ON j.id = a.job_id
-        WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you' ORDER BY a.id LIMIT 50`).all(
+        WHERE n.task_id = ? AND n.attempt = a.attempt
+          AND (a.state = 'needs_you' OR (? <> 'question' AND a.state IN ('queued','running')))
+        ORDER BY a.id LIMIT 50`).all(
           id,
+          task.kind,
         ) as NeedsYouDetails["applications"];
       const draft = sql(
         "SELECT answer, remember, revision FROM needs_you_drafts WHERE task_id = ?",

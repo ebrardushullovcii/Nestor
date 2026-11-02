@@ -16,7 +16,6 @@ import {
   checkClassifiedApplicationAnswers,
   inferQuestionKind,
   fileUploadProblems,
-  hasSubmissionConfirmationText,
   questionPrompt,
   STEP_HANDOVER_QUESTION_ID,
   UPLOAD_REPAIR_QUESTION_ID,
@@ -36,12 +35,14 @@ import {
   isUploadRepairPrompt,
   normalizeFormQuestionPrompt,
   submissionConfirmationSummary,
+  applicationSubmissionConfirmationMessages,
   isActiveApplicationAuthorityEnvelope,
   type ApplicationAuthorityEnvelope,
   type ApplicationRow,
   type ApplicationResumeArtifact,
   type ApplicationReviewCard,
   type ApplyExecutionResult,
+  type RawApplyPage,
   type CandidateProfile,
   type CandidateAnswerKind,
   type JobFinderSettings,
@@ -99,6 +100,18 @@ import {
   resolveActiveSourceInstructionArtifact,
 } from "../internal/workspace-helpers";
 import { uniqueStrings } from "../internal/shared";
+
+/**
+ * Why a Send for me application waits for the person's Send. A Ready row
+ * looks the same in either mode, so each one says why it did not send.
+ */
+const SEND_NOT_COVERED =
+  "Send for me could not confirm permission for this application, so the filled form waits for you to send it.";
+const SEND_NOT_CONFIRMED =
+  "Send for me filled this form but could not confirm it was ready to send, so it waits for you. Review it and press Send.";
+const OPENED_SEND_FORM =
+  "You opened this form to review it, so Job Finder leaves the send to you. Review it and press Send.";
+const RESTORING_FORM = "Restoring the form for your review.";
 
 /** The file fields an upload item names, from its words. */
 function uploadRepairFields(prompt: string): string[] {
@@ -201,9 +214,19 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
    */
   const pressedByPerson = new Map<
     number,
-    { attempt: number; pressedAt: string; until: number }
+    {
+      attempt: number;
+      pressedAt: string;
+      until: number;
+      before: string[];
+      origin: string;
+    }
   >();
   const opening = new Map<number, Promise<boolean>>();
+  const pendingSiteConfirmation = new Map<
+    number,
+    { attempt: number; outcomeId: string; until: number }
+  >();
   // Read at each pump, so a Speed change applies to the next application.
   const capacity = () =>
     applicationPreparationConcurrency(
@@ -233,6 +256,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
 
   async function closePage(id: number, attempt: number): Promise<void> {
     waiting.delete(id);
+    pendingSiteConfirmation.delete(id);
     browserStepReadiness.delete(applicationIdentity(id, attempt).resultId);
     await browser.releaseApplicationPageBinding?.(
       "target_site",
@@ -445,6 +469,15 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     applications.recordOrigin(row.id, new URL(job.url).origin);
     // Apply captures the default. Only task-local authority can narrow it later.
     const mode = await modeFor(row);
+    // A refill Open asked for keeps saying why it waits for the person: the
+    // reason it was refilled, or that a Send for me form was opened to look.
+    const refillReason = applications.isReviewRefill(row.id)
+      ? row.mode === "autonomous_submit"
+        ? OPENED_SEND_FORM
+        : row.error !== RESTORING_FORM
+          ? row.error
+          : null
+      : null;
     if (!mode)
       throw new Error("The instruction for this application was withdrawn.");
     const sends = mode === "autonomous_submit";
@@ -564,8 +597,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       restorableByRefill: true,
       idempotencyKey: identity.resultId,
       ...(startingUrl ? { startingUrl } : {}),
-      accountCreationAuthorized: browserAgentPermissionsOf(settings).createAccounts,
-      readBrowserPermissions: async () => browserAgentPermissionsOf((await deps.readInputs()).settings),
+      accountCreationAuthorized:
+        browserAgentPermissionsOf(settings).createAccounts,
+      readBrowserPermissions: async () =>
+        browserAgentPermissionsOf((await deps.readInputs()).settings),
       // The form's own field saves go out as the run fills, as they do when
       // a person fills the form by hand (Ashby keeps the form only in what
       // it saved). Fill in for me still presses no form button and sends
@@ -1005,7 +1040,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (sends && envelope && prepared?.readyToSend) {
       await send(row, artifact, envelope, profileDigest, signal);
     } else {
-      await leaveForPerson(row);
+      await leaveForPerson(
+        row,
+        (sends
+          ? envelope
+            ? SEND_NOT_CONFIRMED
+            : SEND_NOT_COVERED
+          : refillReason) ?? undefined,
+      );
     }
   }
 
@@ -1380,9 +1422,16 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           });
           if ("outcome" in outcome && outcome.outcome) {
             applications.recordSubmission(row.id, row.attempt, outcome.outcome);
-            if (outcome.outcome.outcome !== "not_submitted")
+            if (outcome.outcome.outcome === "submitted")
               await closePage(row.id, row.attempt);
-            else
+            else if (outcome.outcome.outcome === "outcome_uncertain") {
+              waiting.delete(row.id);
+              pendingSiteConfirmation.set(row.id, {
+                attempt: row.attempt,
+                outcomeId: outcome.outcome.id,
+                until: Date.now() + 120_000,
+              });
+            } else
               await leaveForPerson(
                 row,
                 "The site did not accept a submission. Review the form before trying again.",
@@ -1543,6 +1592,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     pressedByPerson.set(row.id, {
       attempt,
       pressedAt,
+      before:
+        page.sendConfirmationBefore ??
+        applicationSubmissionConfirmationMessages(page.bodyText),
+      origin: page.sendOrigin ?? new URL(page.url).origin,
       // Their page is watched this long for the site's confirmation.
       until: Date.now() + 10 * 60_000,
     });
@@ -1571,13 +1624,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       !page ||
       page.loading ||
       !page.url ||
-      !hasSubmissionConfirmationText(page.bodyText)
+      !freshPersonConfirmation(page, watched.before, watched.origin)
     )
       return;
-    const preparedUrl = applications.getWork(id)?.reviewCard?.pageUrl;
     const destination = new URL(page.url);
-    if (!preparedUrl || destination.origin !== new URL(preparedUrl).origin)
-      return;
     const receipt = personReceipt(row, watched.attempt, {
       kind: "confirmed",
       attemptedAt: watched.pressedAt,
@@ -1604,16 +1654,20 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       !page ||
       page.loading ||
       !page.url ||
-      !hasSubmissionConfirmationText(page.bodyText)
+      !page.sendPressedAt ||
+      Date.parse(page.sendPressedAt) < Date.parse(row.updatedAt) ||
+      !page.sendConfirmationBefore ||
+      !freshPersonConfirmation(
+        page,
+        page.sendConfirmationBefore,
+        page.sendOrigin ?? new URL(page.url).origin,
+      )
     )
       return false;
     const destination = new URL(page.url);
-    const preparedUrl = applications.getWork(id)?.reviewCard?.pageUrl;
-    if (!preparedUrl || destination.origin !== new URL(preparedUrl).origin)
-      return false;
     const receipt = personReceipt(row, attempt, {
       kind: "confirmed",
-      attemptedAt: new Date().toISOString(),
+      attemptedAt: page.sendPressedAt,
       url: destination,
       summary: submissionConfirmationSummary(page.bodyText),
     });
@@ -1621,6 +1675,94 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     notePersonSent(row, identity.resultId);
     await closePage(id, attempt);
     return true;
+  }
+
+  function freshPersonConfirmation(
+    page: RawApplyPage,
+    before: readonly string[],
+    origin: string,
+  ): boolean {
+    if (
+      !page.url ||
+      new URL(page.url).origin !== origin ||
+      page.validationErrors.length
+    )
+      return false;
+    return (
+      page.submissionConfirmationMessages ??
+      applicationSubmissionConfirmationMessages(page.bodyText)
+    ).some((message) => !before.includes(message));
+  }
+
+  /** Observe the exact consumed send again; never repeat or re-arm its action. */
+  async function confirmPendingSiteSubmission(id: number): Promise<void> {
+    const pending = pendingSiteConfirmation.get(id);
+    const row = applications.getApplication(id);
+    const previous = applications.getSubmissionReceipt(id);
+    if (
+      !pending ||
+      !row ||
+      row.attempt !== pending.attempt ||
+      row.state !== "uncertain" ||
+      previous?.id !== pending.outcomeId ||
+      Date.now() > pending.until
+    ) {
+      pendingSiteConfirmation.delete(id);
+      return;
+    }
+    const preflight =
+      await deps.authorityRepository.getSubmissionPreflightRecord(
+        previous.preflightId,
+      );
+    if (
+      !preflight ||
+      preflight.resultId !==
+        applicationIdentity(id, pending.attempt).resultId ||
+      preflight.idempotencyKey !== previous.idempotencyKey
+    )
+      return;
+    const confirmed = await browser.recheckApplicationSubmission?.(
+      "target_site",
+      {
+        pageBindingKey: preflight.resultId,
+        expectedObservation: preflight.formObservation,
+        expectedControl: preflight.finalControl,
+      },
+    );
+    if (
+      !confirmed?.confirmation.destination.origin ||
+      !confirmed.confirmation.destination.safePath
+    )
+      return;
+    const proof = confirmed.confirmation;
+    const receipt = SubmissionOutcomeRecordSchema.parse({
+      ...previous,
+      id: `${previous.id}_site_confirmed`,
+      outcome: "submitted",
+      verifiedAt: proof.observedAt,
+      evidence: [
+        {
+          id: `${previous.id}_late_receipt`,
+          kind: "employer_site_state",
+          observedAt: proof.observedAt,
+          destination: proof.destination,
+          artifactRefId: null,
+          summary: proof.summary,
+        },
+      ],
+      browserAction: {
+        ...previous.browserAction,
+        reason: "employer_confirmation",
+        requestsObservedDuringAction:
+          confirmed.facts.requestsObservedDuringAction,
+        requestsAfterClick: [...confirmed.facts.requestsAfterClick],
+      },
+      retry: { eligible: false, blockReason: "submission_confirmed" },
+    });
+    if (applications.resolveUncertainSend(id, receipt)) {
+      pendingSiteConfirmation.delete(id);
+      await closePage(id, pending.attempt);
+    }
   }
 
   function notePersonSent(row: ApplicationRow, pageKey: string): void {
@@ -1789,6 +1931,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (stopped || watching) return;
     watching = true;
     try {
+      for (const id of [...pendingSiteConfirmation.keys()])
+        await confirmPendingSiteSubmission(id);
       for (const id of [...pressedByPerson.keys()])
         await confirmPersonPress(id);
       for (const [id, attempt] of waiting) {
@@ -2027,6 +2171,24 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
 
   async function open(id: number): Promise<boolean> {
     const row = applications.getApplication(id);
+    if (row?.state === "uncertain") {
+      return (
+        (await browser.focusRetainedApplicationPage?.(
+          "target_site",
+          applicationIdentity(id, row.attempt).resultId,
+        )) ?? false
+      );
+    }
+    // A retry can already be running while its shared access task stays
+    // visible. Show that exact tab without handing it over or queuing again.
+    if (row && ["queued", "running"].includes(row.state)) {
+      return (
+        (await browser.focusApplicationPageBinding?.(
+          "target_site",
+          applicationIdentity(id, row.attempt).resultId,
+        )) ?? false
+      );
+    }
     const work = applications.getWork(id);
     if (!row || !work || !["ready", "needs_you"].includes(row.state))
       return false;
@@ -2063,7 +2225,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     // The page is gone (a restart closes them all): refill the form, and a
     // form still waiting on the person stops at the same items again.
     await closePage(id, work.attempt).catch(onError);
-    const queued = applications.reprepareForReview(id, row.attempt);
+    // A Ready Send for me form opened to look is the person's to send now.
+    const queued = applications.reprepareForReview(
+      id,
+      row.attempt,
+      row.state === "ready" && row.mode === "autonomous_submit"
+        ? OPENED_SEND_FORM
+        : RESTORING_FORM,
+    );
     if (queued) wake();
     return queued;
   }

@@ -137,8 +137,8 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   },
   {
     id: "profile.sources",
-    screen: "Profile › Sources",
-    action: "Add sources, turn them on or off",
+    screen: "Profile › Job sites",
+    action: "Add sites, turn them on or off",
     channels: ["jobs:run"],
     coverage: tools(
       "list_sites",
@@ -152,7 +152,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
   },
   {
     id: "profile.source_check",
-    screen: "Profile › Sources",
+    screen: "Profile › Job sites",
     action: "Check a source, review and accept learned instructions",
     channels: ["profile-workflow:check-site", "profile-workflow:run"],
     coverage: tools(

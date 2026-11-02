@@ -2,24 +2,20 @@ import type { HomeActivityDay, TrackerStatus } from "@nestor/contracts";
 import { useState } from "react";
 
 import { cn } from "@renderer/lib/cn";
+import { formatDate } from "@renderer/features/job-finder/lib/format-date";
 import { formatHomePercent } from "./home-percent";
 
-const dayLabel = new Intl.DateTimeFormat(undefined, {
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
-const weekdayLabel = new Intl.DateTimeFormat(undefined, {
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-  timeZone: "UTC",
-});
-const formatDay = (day: string) => dayLabel.format(new Date(`${day}T00:00Z`));
+// A chart day ("2026-11-02") in the shared date wording, read at local noon
+// so no time zone moves it to the day before.
+const formatDay = (day: string) => formatDate(new Date(`${day}T12:00:00`));
 
-/** A clean top for the axis: 1, 2 or 5 times a power of ten, at least 4. */
-function niceMax(value: number): number {
-  const target = Math.max(4, value);
+/**
+ * A clean top for the axis: 1, 2 or 5 times a power of ten, from the data
+ * (at least 1). A floor of 4 drew one sent application as a stub on an
+ * empty 0–4 scale, which read as an unfinished chart.
+ */
+export function niceMax(value: number): number {
+  const target = Math.max(1, value);
   const power = 10 ** Math.floor(Math.log10(target));
   return (
     [1, 2, 5, 10].map((step) => step * power).find((n) => n >= target) ??
@@ -49,7 +45,7 @@ export function ActivityChart(props: { days: readonly HomeActivityDay[] }) {
   return (
     <figure
       aria-label="Sent per day. Use the arrow keys to read each day."
-      className="grid min-w-0 gap-3 rounded-(--radius-small) outline-none focus-visible:outline-2 focus-visible:outline-offset-8 focus-visible:outline-ring"
+      className="grid min-w-0 gap-3 rounded-(--radius-small) outline-none xl:flex-1 xl:grid-rows-[auto_minmax(0,1fr)_auto] focus-visible:outline-2 focus-visible:outline-offset-8 focus-visible:outline-ring"
       onBlur={() => setHovered(null)}
       onKeyDown={(event) => {
         if (event.key === "ArrowLeft") step(-1);
@@ -70,10 +66,13 @@ export function ActivityChart(props: { days: readonly HomeActivityDay[] }) {
         </span>
       </figcaption>
 
-      <div aria-hidden className="grid min-w-0 gap-2">
+      <div
+        aria-hidden
+        className="grid min-w-0 gap-2 xl:grid-rows-[minmax(4rem,1fr)_auto_auto_auto]"
+      >
         <Columns
           days={days}
-          height="h-40"
+          height="h-40 xl:h-auto"
           hovered={hovered}
           max={sentMax}
           onHover={setHovered}
@@ -90,7 +89,7 @@ export function ActivityChart(props: { days: readonly HomeActivityDay[] }) {
           onHover={setHovered}
           pick={(day) => day.replies}
         />
-        <div className="relative h-4 text-[0.6875rem] text-foreground-muted">
+        <div className="relative h-4 text-xs text-foreground-muted">
           {days.map((day, index) =>
             index % 7 === 0 || index === days.length - 1 ? (
               <span
@@ -121,32 +120,37 @@ export function ActivityChart(props: { days: readonly HomeActivityDay[] }) {
             {" · "}
             {active.replies.toLocaleString()}{" "}
             {active.replies === 1 ? "reply" : "replies"} ·{" "}
-            {weekdayLabel.format(new Date(`${active.day}T00:00Z`))}
+            {formatDay(active.day)}
           </>
         ) : (
           "Point at a day to see its numbers."
         )}
       </p>
 
-      <table className="sr-only">
-        <caption>Applications sent and replies per day</caption>
-        <thead>
-          <tr>
-            <th scope="col">Day</th>
-            <th scope="col">Sent</th>
-            <th scope="col">Replies</th>
-          </tr>
-        </thead>
-        <tbody>
-          {days.map((day) => (
-            <tr key={day.day}>
-              <th scope="row">{formatDay(day.day)}</th>
-              <td>{day.sent}</td>
-              <td>{day.replies}</td>
+      {/* The numbers for a screen reader. In a div: a table ignores the
+          1px height of sr-only and kept its 30 rows' height, which added a
+          blank screen of scroll under Home. */}
+      <div className="sr-only">
+        <table>
+          <caption>Applications sent and replies per day</caption>
+          <thead>
+            <tr>
+              <th scope="col">Day</th>
+              <th scope="col">Sent</th>
+              <th scope="col">Replies</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {days.map((day) => (
+              <tr key={day.day}>
+                <th scope="row">{formatDay(day.day)}</th>
+                <td>{day.sent}</td>
+                <td>{day.replies}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   );
 }
@@ -164,15 +168,16 @@ function Columns(props: {
       className={cn("relative min-w-0", props.height)}
       onPointerLeave={() => props.onHover(null)}
     >
-      {/* Hairline grid at the top, the middle and the baseline. */}
-      {[0, 0.5, 1].map((at) => (
+      {/* Hairline grid at the top, the baseline and, where it is a whole
+          number, the middle. */}
+      {(props.max % 2 === 0 ? [0, 0.5, 1] : [0, 1]).map((at) => (
         <div
           className="absolute inset-x-0 border-t border-(--surface-panel-border)"
           key={at}
           style={{ top: `${at * 100}%` }}
         />
       ))}
-      <span className="absolute -top-2 right-0 bg-(--surface-panel) pl-1 text-[0.6875rem] tabular-nums text-foreground-muted">
+      <span className="absolute -top-2 right-0 bg-(--surface-panel) pl-1 text-xs tabular-nums text-foreground-muted">
         {props.max.toLocaleString()}
       </span>
       <div className="absolute inset-0 flex items-end gap-0.5 pr-8">
@@ -186,7 +191,7 @@ function Columns(props: {
             >
               <div
                 className={cn(
-                  "w-full max-w-6 rounded-t-[4px] bg-primary-fill transition-opacity",
+                  "w-full max-w-6 rounded-t-xs bg-primary-fill transition-opacity",
                   props.hovered !== null &&
                     props.hovered !== index &&
                     "opacity-55",
@@ -208,29 +213,35 @@ function Columns(props: {
 const STANDING: readonly {
   label: string;
   statuses: readonly TrackerStatus[];
-  /** Share of the accent; the further along, the darker. Closed is gray. */
+  /**
+   * One hue per stage, from the palette's chart tokens: waiting and closed
+   * are neutral (mid and light), heard back is indigo (no status hue), an
+   * offer is success green, and "Assessment or interview" carries both of
+   * its stages' marks, the board's violet and plum side by side (split by
+   * their counts in the bar, half and half in its legend dot), never one
+   * stage's colour for both.
+   */
   fill: string;
+  /** A quiet fill below 3:1 on the card keeps a visible shape by its edge. */
+  edge?: string;
 }[] = [
-  {
-    label: "Waiting",
-    statuses: ["applied"],
-    fill: "color-mix(in oklab, var(--primary-fill) 28%, var(--surface-panel))",
-  },
+  { label: "Applied", statuses: ["applied"], fill: "var(--chart-waiting)" },
   {
     label: "Heard back",
     statuses: ["replied"],
-    fill: "color-mix(in oklab, var(--primary-fill) 52%, var(--surface-panel))",
+    fill: "var(--chart-heard-back)",
   },
   {
     label: "Assessment or interview",
     statuses: ["assessment", "interview"],
-    fill: "color-mix(in oklab, var(--primary-fill) 76%, var(--surface-panel))",
+    fill: "linear-gradient(90deg, var(--chart-assessment) 50%, var(--chart-interview) 50%)",
   },
-  { label: "Offer", statuses: ["offer"], fill: "var(--primary-fill)" },
+  { label: "Offer", statuses: ["offer"], fill: "var(--chart-offer)" },
   {
     label: "Closed",
     statuses: ["rejected", "withdrawn", "no_reply"],
-    fill: "color-mix(in oklab, var(--muted-foreground) 45%, var(--surface-panel))",
+    fill: "var(--chart-closed)",
+    edge: "var(--chart-closed-edge)",
   },
 ];
 
@@ -239,13 +250,25 @@ const STANDING: readonly {
  * each stands now, with a legend that is also the table of counts.
  */
 export function StandingBar(props: { recent: Record<TrackerStatus, number> }) {
-  const groups = STANDING.map((group) => ({
-    ...group,
-    count: group.statuses.reduce(
+  const groups = STANDING.map((group) => {
+    const count = group.statuses.reduce(
       (sum, status) => sum + props.recent[status],
       0,
-    ),
-  }));
+    );
+    // The merged stage's bar is split by how many are at each stage.
+    const assessmentShare =
+      group.statuses.length === 2 && group.statuses[0] === "assessment" && count
+        ? Math.round((props.recent.assessment / count) * 100)
+        : null;
+    return {
+      ...group,
+      count,
+      barFill:
+        assessmentShare === null
+          ? group.fill
+          : `linear-gradient(90deg, var(--chart-assessment) ${assessmentShare}%, var(--chart-interview) ${assessmentShare}%)`,
+    };
+  });
   const total = groups.reduce((sum, group) => sum + group.count, 0);
 
   return (
@@ -264,22 +287,37 @@ export function StandingBar(props: { recent: Record<TrackerStatus, number> }) {
         </p>
       ) : (
         <>
-          <div aria-hidden className="flex h-6 min-w-0 gap-0.5">
-            {groups
-              .filter((group) => group.count > 0)
-              .map((group, index, shown) => (
-                <div
-                  className={cn(
-                    "min-w-1",
-                    index === 0 && "rounded-l-[4px]",
-                    index === shown.length - 1 && "rounded-r-[4px]",
-                  )}
-                  key={group.label}
-                  style={{ flexGrow: group.count, background: group.fill }}
-                  title={`${group.label}: ${group.count}`}
-                />
-              ))}
-          </div>
+          {groups.filter((group) => group.count > 0).length === 1 ? (
+            // One stage holds everything: not a solid slab of one colour,
+            // but an outlined bar that says so in words.
+            <SingleStandingBar
+              group={groups.find((group) => group.count > 0) ?? groups[0]!}
+              total={total}
+            />
+          ) : (
+            <div aria-hidden className="flex h-6 min-w-0 gap-0.5">
+              {groups
+                .filter((group) => group.count > 0)
+                .map((group, index, shown) => (
+                  <div
+                    className={cn(
+                      "min-w-1",
+                      index === 0 && "rounded-l-xs",
+                      index === shown.length - 1 && "rounded-r-xs",
+                    )}
+                    key={group.label}
+                    style={{
+                      flexGrow: group.count,
+                      background: group.barFill,
+                      ...(group.edge
+                        ? { boxShadow: `inset 0 0 0 1px ${group.edge}` }
+                        : {}),
+                    }}
+                    title={`${group.label}: ${group.count}`}
+                  />
+                ))}
+            </div>
+          )}
           <table className="w-full text-sm">
             <caption className="sr-only">
               Applications sent in the last 30 days by where they stand now
@@ -291,14 +329,19 @@ export function StandingBar(props: { recent: Record<TrackerStatus, number> }) {
                   key={group.label}
                 >
                   <th
-                    className="py-1.5 text-left font-normal text-foreground-soft"
+                    className="py-1.5 text-left font-normal text-(--text-headline)"
                     scope="row"
                   >
                     <span className="flex items-center gap-2">
                       <span
                         aria-hidden
-                        className="size-2.5 shrink-0 rounded-[2px]"
-                        style={{ background: group.fill }}
+                        className="size-3 shrink-0 rounded-full"
+                        style={{
+                          background: group.fill,
+                          ...(group.edge
+                            ? { boxShadow: `inset 0 0 0 1px ${group.edge}` }
+                            : {}),
+                        }}
                       />
                       {group.label}
                     </span>
@@ -316,5 +359,36 @@ export function StandingBar(props: { recent: Record<TrackerStatus, number> }) {
         </>
       )}
     </figure>
+  );
+}
+
+function SingleStandingBar(props: {
+  group: { label: string; fill: string; edge?: string };
+  total: number;
+}) {
+  const { group } = props;
+  // A split mark (the merged stage) tints and edges the bar in its first
+  // colour; its dot keeps both.
+  const solid = group.fill.startsWith("linear-gradient")
+    ? "var(--chart-assessment)"
+    : group.fill;
+  return (
+    <div
+      className="flex h-6 min-w-0 items-center gap-2 rounded-xs px-2 text-xs text-(--text-headline)"
+      data-standing-single
+      style={{
+        background: `color-mix(in srgb, ${solid} 16%, transparent)`,
+        boxShadow: `inset 0 0 0 1px ${group.edge ?? solid}`,
+      }}
+    >
+      <span
+        aria-hidden
+        className="size-2 shrink-0 rounded-full"
+        style={{ background: group.fill }}
+      />
+      {props.total === 1
+        ? `${group.label}: the 1 sent`
+        : `${group.label}: all ${props.total.toLocaleString()}`}
+    </div>
   );
 }

@@ -114,6 +114,22 @@ describe("Home summary", () => {
     expect(home.summary({ utcOffsetMinutes: 0 }, now).applyWorking).toBe(0);
   });
 
+  it("says which unfinished applications wait on the person", () => {
+    const now = Date.now();
+    const { store } = workspace(now);
+    const home = createHomeStore(store);
+    expect(home.summary({ utcOffsetMinutes: 0 }, now).applyWaiting).toEqual({
+      needsYou: 0,
+      ready: 0,
+    });
+    store
+      .sql(`UPDATE applications SET state = 'ready' WHERE state = 'queued'`)
+      .run();
+    const summary = home.summary({ utcOffsetMinutes: 0 }, now);
+    expect(summary.applyWorking).toBe(1);
+    expect(summary.applyWaiting).toEqual({ needsYou: 0, ready: 1 });
+  });
+
   it("lists interviews first, then due and upcoming reminders, soonest first", () => {
     const now = Date.now();
     const { store, ids, tracker } = workspace(now);
@@ -185,6 +201,56 @@ describe("Home summary", () => {
 
     const home = createHomeStore(store).summary({ utcOffsetMinutes: 0 }, now);
 
-    expect(home.needsYou).toEqual({ questions: 1, signIns: 3, checks: 0 });
+    expect(home.needsYou).toEqual({
+      questions: 1,
+      signIns: 3,
+      signInSites: 3,
+      checks: 0,
+    });
+  });
+
+  it("counts sign-ins by job site the way Needs you merges them", () => {
+    const now = Date.now();
+    const { store } = workspace(now);
+    const add = (label: string, url: string, origin: string) => {
+      const { id: site } = store
+        .sql(
+          `INSERT INTO job_sites (label, url, enabled, lane, health, sign_in_state, instruction_status)
+           VALUES (?, ?, 0, 'auto', 'unknown', 'required', 'missing') RETURNING id`,
+        )
+        .get(label, url) as { id: number };
+      const { id: task } = store
+        .sql(
+          `INSERT INTO needs_you (kind, answer_key, country, site_origin, prompt, input, options_json, opened_at)
+           VALUES ('sign_in', ?, '', ?, 'Sign in', 'text', '[]', ?) RETURNING id`,
+        )
+        .get(url, origin, now) as { id: number };
+      store
+        .sql(
+          "INSERT INTO source_needs_you (source_id, task_id, requested_url) VALUES (?, ?, ?)",
+        )
+        .run(site, task, url);
+    };
+    // Three saved sites on one host (one with "www."), one on another.
+    add(
+      "Board 1",
+      "https://boards.example.test/a/",
+      "https://boards.example.test",
+    );
+    add(
+      "Board 2",
+      "https://boards.example.test/b/",
+      "https://boards.example.test",
+    );
+    add(
+      "Board 3",
+      "https://www.boards.example.test/c/",
+      "https://www.boards.example.test",
+    );
+    add("Other", "https://other.example.test/", "https://other.example.test");
+
+    const home = createHomeStore(store).summary({ utcOffsetMinutes: 0 }, now);
+
+    expect(home.needsYou).toMatchObject({ signIns: 4, signInSites: 2 });
   });
 });

@@ -1,3 +1,5 @@
+import { cn } from "@renderer/lib/cn";
+import { SETTINGS_MEASURE_CLASS } from "./settings-row";
 import type { ReactNode } from "react";
 import { SETTINGS_AI_JOB_SEARCH_ANCHOR_ID } from "../../lib/job-finder-route-hrefs";
 import {
@@ -22,7 +24,7 @@ import { SettingsSectionSaveControl } from "./settings-section-save-control";
  *
  * The groups follow the person's own flow: the side chat, finding jobs,
  * the in-app browser. What it writes while applying lives under Applying,
- * with the send choice it belongs to, and how picky a search is is chosen
+ * with the send choice it belongs to, and how picky a search is gets chosen
  * per search on Find jobs. The first two change what the model is told
  * and how it talks. The in-app browser group is the only one that widens
  * what the agent may do, and each of its switches is off until the person
@@ -62,8 +64,12 @@ const initiativeOptions: readonly ChoiceCardOption<ProfileAssistantInitiative>[]
 function GroupHeading(props: { title: string; description: string }) {
   return (
     <div className="grid min-w-0 gap-1">
-      <h4 className="font-semibold text-(--text-headline)">{props.title}</h4>
-      <p className="max-w-[72ch] text-(length:--text-description) leading-5 text-foreground-soft">
+      <h4
+        className="font-semibold text-(--text-headline)"
+      >
+        {props.title}
+      </h4>
+      <p className="max-w-[70ch] text-(length:--text-description) leading-5 text-foreground-soft">
         {props.description}
       </p>
     </div>
@@ -72,7 +78,7 @@ function GroupHeading(props: { title: string; description: string }) {
 
 function ChoiceField(props: { label: string; children: ReactNode }) {
   return (
-    <div className="grid min-w-0 gap-1.5">
+    <div className={cn("grid min-w-0 gap-1.5", SETTINGS_MEASURE_CLASS)}>
       <p className="text-(length:--text-small) font-medium text-foreground">
         {props.label}
       </p>
@@ -182,7 +188,9 @@ export function SettingsAiBehaviorSection({
     >
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="grid min-w-0 max-w-[72ch] flex-1 gap-1">
-          <h3 className="min-w-0 font-semibold text-(--text-headline)">
+          <h3
+            className="min-w-0 font-semibold text-(--text-headline)"
+          >
             {SETTINGS_AI_BEHAVIOR_LABEL}
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
@@ -199,8 +207,10 @@ export function SettingsAiBehaviorSection({
         />
       </div>
 
+      {/* Groups inside a section are plain: a heading and a hairline above,
+          never a box inside the section's box. */}
       <article
-        className="grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-overlay-subtle) p-3.5"
+        className="grid min-w-0 gap-3 border-t border-(--surface-panel-border) pt-4"
         data-testid="settings-ai-profile-assistant"
       >
         <GroupHeading
@@ -219,14 +229,14 @@ export function SettingsAiBehaviorSection({
       </article>
 
       <article
-        className="scroll-mt-(--settings-subnav-offset) grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-overlay-subtle) p-3.5 outline-none"
+        className="scroll-mt-(--settings-subnav-offset) grid min-w-0 gap-3 border-t border-(--surface-panel-border) pt-4 outline-none"
         data-testid="settings-ai-job-search"
         id={SETTINGS_AI_JOB_SEARCH_ANCHOR_ID}
         tabIndex={-1}
       >
         <GroupHeading
           title="Finding jobs"
-          description="How locations count when a search judges fit. How picky a search is is chosen on Find jobs, before each search."
+          description="How locations count when a search judges fit. You choose how picky each search is on Find jobs."
         />
         <ToggleField
           checked={draft.remoteCountsAsAnyLocation}
@@ -240,14 +250,14 @@ export function SettingsAiBehaviorSection({
       </article>
 
       <article
-        className="grid min-w-0 gap-3 rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-overlay-subtle) p-3.5"
+        className="grid min-w-0 gap-3 border-t border-(--surface-panel-border) pt-4"
         data-testid="settings-ai-browser"
       >
         <GroupHeading
           title="In-app browser"
           description="What the agent may do by itself in the in-app browser, in searches, applications and any other browser work. Each is off until you turn it on. When one is off, or a step needs something only you have, it stops and asks you. Whether an application is sent stays your choice under Applying."
         />
-        <div className="grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid min-w-0">
           {browserPermissionChoices.map((choice) => (
             <ToggleField
               checked={draft.browserPermissions[choice.key]}

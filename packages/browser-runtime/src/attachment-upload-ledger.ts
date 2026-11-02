@@ -4,6 +4,7 @@ import type { RawApplyPage, RawApplyUpload } from "@nestor/contracts";
 import { inspectPageMutationResponse } from "./mutation-response-body";
 import {
   getPrepareOnlyRequestPermit,
+  getAttachmentGuardRefusal,
   onPrepareOnlyUploadPermit,
 } from "./playwright-application-flow";
 
@@ -61,6 +62,7 @@ interface UploadRecord {
    * request with one is a carrier whatever its content type.
    */
   identity: FileIdentity | null;
+  guardRefusal?: string;
 }
 
 interface FileIdentity {
@@ -269,7 +271,7 @@ async function settle(page: Page, record: UploadRecord, response: Response) {
   // The fence's upload permit names the exact file this request carried:
   // it is a carrier whatever its content type (a raw text/plain PUT too).
   const permit = getPrepareOnlyRequestPermit(response.request());
-  if (permit?.uploadLeg === "file") {
+  if (permit && permit.uploadLeg !== "presign") {
     record.carriesFile = true;
     record.identity = { ...permit.file };
   }
@@ -316,7 +318,7 @@ export function watchAttachmentUploads(page: Page): void {
   // a carrier whose answer never comes, or whose connection drops, is then
   // pending or refused, never silently attached.
   onPrepareOnlyUploadPermit(page, (request, permit) => {
-    if (permit.uploadLeg !== "file") return;
+    if (permit.uploadLeg === "presign") return;
     let record = tracked.get(request);
     if (!record) {
       record = add(records, {
@@ -358,6 +360,8 @@ export function watchAttachmentUploads(page: Page): void {
     record.blocked = /BLOCKED_BY_CLIENT/iu.test(
       request.failure()?.errorText ?? "",
     );
+    const guardRefusal = getAttachmentGuardRefusal(request);
+    if (guardRefusal) record.guardRefusal = guardRefusal;
     record.status = "rejected";
     record.completedAt = ++answered;
   });
@@ -424,6 +428,7 @@ function attachmentUploadEvidence(
       endpoint: record.endpoint,
       status: record.httpStatus ?? null,
       blocked: record.blocked,
+      ...(record.guardRefusal ? { guardRefusal: record.guardRefusal } : {}),
     };
   });
   const evidence = (network: NonNullable<RawApplyUpload["network"]>) => ({

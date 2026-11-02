@@ -1,12 +1,6 @@
-import {
-  BriefcaseBusiness,
-  FileText,
-  Globe,
-  GraduationCap,
-  SlidersHorizontal,
-  UserRound,
-  type LucideIcon,
-} from "lucide-react";
+import { useRef } from "react";
+
+import { useScrollEdgeFade } from "@renderer/components/ui/scroll-edge-fade";
 import { Tabs, TabsList, TabsTrigger } from "@renderer/components/ui/tabs";
 import {
   formatSectionProgressLabel,
@@ -30,17 +24,6 @@ interface ProfileSectionTabsProps {
   sections: readonly ProfileSectionDescriptor[];
 }
 
-// Each section carries an icon so the strip reads as navigation, not as a row
-// of column headings.
-const SECTION_ICONS: Record<ProfileSection, LucideIcon> = {
-  basics: UserRound,
-  experience: BriefcaseBusiness,
-  background: GraduationCap,
-  preferences: SlidersHorizontal,
-  sources: Globe,
-  files: FileText,
-};
-
 function countRequiredRemaining(progress: SectionProgress): number {
   if (getSectionProgressState(progress) !== "remaining") {
     return 0;
@@ -58,6 +41,10 @@ export function ProfileSectionTabs({
   panelId,
   sections,
 }: ProfileSectionTabsProps) {
+  // Where the six tabs do not fit (a narrow window, larger text) the strip
+  // scrolls sideways inside the page, its edge faded where more tabs wait.
+  const root = useRef<HTMLDivElement>(null);
+  useScrollEdgeFade(root, "[data-profile-section-tabs]");
   return (
     // These tabs used to be a bespoke full-width grid of bordered boxes, each
     // with a check icon and a truncated "REQUIRED DONE" / "OPTIONAL ADDED"
@@ -69,8 +56,9 @@ export function ProfileSectionTabs({
     //
     // Spread evenly across the page in 12px text, the six labels read as
     // column headings, and people did not notice they could click them. They
-    // now sit left-aligned at body size with an icon each and a hover fill,
-    // the conventional look of section tabs.
+    // now sit left-aligned at body size with a hover fill, the conventional
+    // look of section tabs. No icons: every section tab in the app (Profile,
+    // Settings, the list tabs) is words only, one idiom.
     //
     // Activation is Radix's default `automatic`, deliberately: arrowing to a
     // tab opens that section, which is the expected tab-pattern behaviour and
@@ -88,7 +76,8 @@ export function ProfileSectionTabs({
     // Do not "fix" this to `activationMode="manual"` without a flow that
     // focuses a tab it does not mean to open.
     <Tabs
-      className="gap-0 pb-1"
+      className="min-w-0 gap-0 pb-1"
+      ref={root}
       onValueChange={(value) => onSectionChange(value as ProfileSection)}
       value={activeSection}
     >
@@ -100,11 +89,11 @@ export function ProfileSectionTabs({
         // section's content below the fold at 1200x640 and 1024x720.
         className="w-full max-w-full justify-start gap-1 overflow-x-auto overflow-y-hidden group-data-[orientation=horizontal]/tabs:h-auto"
         data-profile-section-tabs
+        data-scroll-x
         variant="line"
       >
         {sections.map((section) => {
           const remaining = countRequiredRemaining(section.progress);
-          const Icon = SECTION_ICONS[section.id];
 
           return (
             <TabsTrigger
@@ -124,7 +113,6 @@ export function ProfileSectionTabs({
               onClick={() => onSectionChange(section.id)}
               value={section.id}
             >
-              <Icon aria-hidden="true" />
               {section.label}
               {section.needsConfirmationCount ? (
                 <span className="text-(length:--text-tiny) text-(--warning-text)">
@@ -136,17 +124,19 @@ export function ProfileSectionTabs({
                   {/* Completion state is out of the label: no chip words and no
                       check on finished sections. What survives is the one
                       actionable fact - how many required fields a section still
-                      needs - as a quiet trailing count. */}
+                      needs - in words, like "2 to confirm", never a circled
+                      figure (a count beside a tab elsewhere is a plain number
+                      of rows, "Found 1,242"). */}
                   <span
                     aria-hidden
-                    className="inline-flex min-w-4 items-center justify-center rounded-full border border-(--surface-panel-border) px-1 text-(length:--text-tiny) font-medium tabular-nums text-foreground-muted"
+                    className="text-(length:--text-tiny) tabular-nums text-foreground-muted"
                     data-profile-section-remaining-count
                     title={formatSectionProgressLabel(
                       section.id,
                       section.progress,
                     )}
                   >
-                    {remaining}
+                    {remaining} to fill
                   </span>
                   <span className="sr-only">
                     {formatSectionProgressLabel(section.id, section.progress)}

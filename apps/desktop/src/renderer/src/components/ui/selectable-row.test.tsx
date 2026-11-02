@@ -133,7 +133,7 @@ describe("SelectableRow", () => {
 
     expect(className).toContain("data-[selected=true]:bg-(--surface-strong)");
     // `inset` keeps the accent bar inside the border box so it adds no width.
-    expect(className).toMatch(/data-\[selected=true\]:shadow-\[inset_/);
+    expect(className).toContain("data-[selected=true]:selected-bar");
     expect(className).not.toMatch(/data-\[selected=true\]:(p|m|border|gap)-/);
   });
 

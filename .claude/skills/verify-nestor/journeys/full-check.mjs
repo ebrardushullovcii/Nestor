@@ -26,6 +26,8 @@ import { DatabaseSync } from "node:sqlite";
 import { stateDir } from "../bin/lib/common.mjs";
 
 const JAMIE = "test-fixtures/job-finder/resume-import-sample.txt";
+// The Approve button names the level it approves ("Approve Tailored").
+const APPROVE_LEVEL = /^Approve (Original|Light|Tailored|Aggressive)$/;
 const LINA = "test-fixtures/job-finder/resume-import-personas/lina-haddad.txt";
 // Sent with Send for me: two atlas jobs and the Brindle job that asks
 // eligibility questions in Needs you.
@@ -169,14 +171,17 @@ async function until(ctx, fn, seconds, what) {
   }
 }
 
-/** Turns off the Fit 65+ filter, so low-fit jobs are listed too. */
+/** Shows every fit in the Found list (the list's "Show fit" control), so
+ * low-fit jobs are listed too. */
 async function showAllFits(p) {
-  const toggle = p.getByRole("button", { name: /^Fit 65\+/ });
+  const anyFit = p
+    .getByRole("group", { name: "Show fit" })
+    .getByRole("button", { name: "Any fit", exact: true });
   if (
-    (await toggle.count()) &&
-    (await toggle.getAttribute("aria-pressed")) === "true"
+    (await anyFit.count()) &&
+    (await anyFit.getAttribute("aria-pressed")) !== "true"
   )
-    await toggle.click();
+    await anyFit.click();
 }
 
 async function mainText(ctx) {
@@ -188,7 +193,7 @@ async function waitSearchDone(ctx, seconds = 900) {
   const p = await ctx.page;
   const stop = p
     .getByRole("region", { name: "Search", exact: true })
-    .getByRole("button", { name: "Stop", exact: true });
+    .getByRole("button", { name: /^Stop search$/ });
   await until(
     ctx,
     async () => (await stop.count()) === 0,
@@ -245,7 +250,7 @@ const STAGES = {
     const enabled = sql(ctx, "SELECT url FROM job_sites WHERE enabled = 1");
     assert.equal(enabled.length, SOURCES.length, "every replica source is on");
     await click("Finish setup and find jobs");
-    await waitFor("/^(Searching|Checking fit)/", 30).catch(() => {});
+    await waitFor("/^(Reading|Checking fit)/", 30).catch(() => {});
     await shot("fc-first-search-running");
     return {
       importSeconds,
@@ -265,7 +270,7 @@ const STAGES = {
     const end = Date.now() + 900_000;
     const stop = p
       .getByRole("region", { name: "Search", exact: true })
-      .getByRole("button", { name: "Stop", exact: true });
+      .getByRole("button", { name: /^Stop search$/ });
     let navigated = false;
     while (Date.now() < end && (await stop.count())) {
       const rows = await p
@@ -527,7 +532,18 @@ const STAGES = {
         after,
       });
     }
-    await p.getByRole("checkbox", { name: /^Select all/ }).click();
+    // Select mode: the Select button, the box for the rows shown, then
+    // "Select all N matching" for every row the filter matches.
+    const selectAllMatching = async () => {
+      const found = p.getByRole("region", { name: "Found jobs" });
+      await found.getByRole("button", { name: "Select", exact: true }).click();
+      await found.getByRole("checkbox", { name: /^Select all/ }).click();
+      const matching = found.getByRole("button", {
+        name: /^Select all .*matching$/,
+      });
+      if (await matching.count()) await matching.click();
+    };
+    await selectAllMatching();
     await ctx.sleep(400);
     await shot("fc-list-select-all");
     const selected = await p
@@ -554,7 +570,7 @@ const STAGES = {
     const undoMs = Date.now() - t;
     await shot("fc-list-undo");
     // Hide them for good so the rest of the journey sees only searched jobs.
-    await p.getByRole("checkbox", { name: /^Select all/ }).click();
+    await selectAllMatching();
     await ctx.sleep(300);
     await hide.click();
     await fill("Filter jobs", "");
@@ -670,7 +686,7 @@ Object.assign(STAGES, {
     for (const j of chosen) {
       await openShortlisted(ctx, j);
       const pane = resumePane(p, j);
-      await pane.getByRole("button", { name: "Approve", exact: true }).click();
+      await pane.getByRole("button", { name: APPROVE_LEVEL }).click();
       await until(
         ctx,
         () => resumeOf(ctx, j.id)?.approved_at,
@@ -793,7 +809,7 @@ Object.assign(STAGES, {
       job: job.id,
       state: a.state,
       answered,
-      readyListed: /Ready for you to send/.test(needsText),
+      readyListed: /Ready to send/.test(needsText),
       seconds: (Date.parse(new Date().toISOString()) - Date.parse(at)) / 1000,
       usage: sumUsage(aiUsageSince(at, "apply")),
       fieldCount: fields.length,
@@ -911,8 +927,8 @@ Object.assign(STAGES, {
       "the scale manifest lists the gates",
     );
     await go(click, "Profile");
-    await click("Job sources", { role: "tab" }).catch(() => {});
-    await click("Add sources", { role: "button" });
+    await click("Job sites", { role: "tab" }).catch(() => {});
+    await click("Add sites", { role: "button" });
     await fill("Job site URLs", gates.map((x) => x.url).join("\n"));
     await click("Add and turn on");
     await shot("fc-gates-added");
@@ -1022,8 +1038,13 @@ Object.assign(STAGES, {
       width: innerWidth,
       height: innerHeight,
     }));
+    // A stage with applications is a column (a region); stages with none
+    // are drop targets in one "Stages with no applications" strip.
     const columns = await board
-      .getByRole("region")
+      .locator("section[data-board-stage]")
+      .evaluateAll((es) => es.map((e) => e.getAttribute("aria-label")));
+    const emptyStages = await board
+      .locator("li[data-board-stage]")
       .evaluateAll((es) => es.map((e) => e.getAttribute("aria-label")));
     const boxes = [];
     for (const name of columns) {
@@ -1033,9 +1054,9 @@ Object.assign(STAGES, {
     }
     await shot("fc-board");
     assert.equal(
-      columns.length,
+      columns.length + emptyStages.length,
       7,
-      `every stage has a column (${columns.join(", ")})`,
+      `every stage is on the board (${[...columns, ...emptyStages].join(", ")})`,
     );
     const sent = sql(
       ctx,
@@ -1064,6 +1085,7 @@ Object.assign(STAGES, {
     return {
       viewport,
       columns,
+      emptyStages,
       boxes,
       sheet: details.map((t) => t.slice(0, 600)),
     };
@@ -1551,7 +1573,7 @@ async function settleWithAnswers(ctx, jobs, seconds, opts = {}) {
         answer,
         kind,
         at: new Date().toISOString(),
-        why: /Why am I asked/.test(text),
+        why: /Why you are asked/.test(text),
       });
       await ctx.sleep(1200);
       continue;
@@ -1736,7 +1758,7 @@ const EXTRA = {
       if (resumeOf(ctx, j.id).state !== "ready") continue;
       await openShortlisted(ctx, j);
       await resumePane(p, j)
-        .getByRole("button", { name: "Approve", exact: true })
+        .getByRole("button", { name: APPROVE_LEVEL })
         .click();
       await until(ctx, () => resumeOf(ctx, j.id)?.approved_at, 20, "approval");
     }
@@ -2086,8 +2108,8 @@ Object.assign(EXTRA, {
     const { click, fill, shot } = ctx;
     const p = await ctx.page;
     await go(click, "Profile");
-    await click("Job sources", { role: "tab" }).catch(() => {});
-    await click("Add sources", { role: "button" });
+    await click("Job sites", { role: "tab" }).catch(() => {});
+    await click("Add sites", { role: "button" });
     await fill("Job site URLs", new URL("ripple/", ctx.sites.url).href);
     await click("Add and turn on");
     await go(click, "Find jobs");

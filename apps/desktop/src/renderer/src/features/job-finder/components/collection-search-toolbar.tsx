@@ -165,7 +165,7 @@ export function CollectionSearchToolbar(props: {
     props.densities ?? (["compact", "comfortable", "detailed"] as const);
   const showingSubset = props.visibleCount !== props.totalCount;
   const countLabel = showingSubset
-    ? `${props.visibleCount} of ${props.totalCount} results`
+    ? `${props.visibleCount} of ${props.totalCount} ${props.totalCount === 1 ? "result" : "results"}`
     : `${props.totalCount} ${props.totalCount === 1 ? "result" : "results"}`;
   const topSeam =
     props.placement === "panel"
@@ -263,7 +263,7 @@ export function CollectionSearchToolbar(props: {
         <div className="min-w-0 w-full flex-1 sm:min-w-56">
           <div className="mb-1 flex min-w-0 items-center justify-between gap-3">
             <label
-              className="block text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted"
+              className="block text-(length:--text-tiny) tracking-(--tracking-label) text-foreground-muted"
               htmlFor={inputId}
             >
               {props.label}

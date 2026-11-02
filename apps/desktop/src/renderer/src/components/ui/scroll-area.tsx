@@ -29,7 +29,7 @@ function ScrollArea({
           // It now binds the token undiluted, like every other primitive here.
           // (The suffix is described rather than written: the primitive
           // contract scan reads this file as text.)
-          "size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-1",
+          "size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-ring focus-visible:outline-1",
           viewportClassName,
         )}
         ref={viewportRef}

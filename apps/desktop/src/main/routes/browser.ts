@@ -8,8 +8,11 @@ import {
   DesktopBrowserImportSourcesSchema,
   DesktopBrowserSnapshotSchema,
   DesktopBrowserViewportSchema,
+  SiteIconsInputSchema,
+  SiteIconsSchema,
 } from "@nestor/contracts";
 import { loadEmbeddedBrowser } from "../services/browser/load-embedded-browser";
+import { getSiteIconCache } from "../services/browser/site-icon-cache";
 import { getJobStore } from "../services/job-store";
 import { scoreUnscoredJobs } from "../services/job-commands";
 import { registerBrowserPasswordRoutes } from "./browser-passwords";
@@ -65,6 +68,15 @@ export function registerBrowserRoutes(ipc: IpcMain): void {
       company: posting.company,
       planName: null,
     });
+  });
+  // Job sites' own icons from the local cache (never fetched here: only a
+  // page the browser loads adds one, from its own origin).
+  ipc.handle("browser:site-icons", async (event, input: unknown) => {
+    const host = await owner(event);
+    const { urls } = SiteIconsInputSchema.parse(input);
+    const cache = await getSiteIconCache();
+    host.watchSiteIcons(cache);
+    return SiteIconsSchema.parse({ icons: await cache.get(urls) });
   });
   ipc.handle("browser:get-state", async (event) =>
     (await owner(event)).getState(),

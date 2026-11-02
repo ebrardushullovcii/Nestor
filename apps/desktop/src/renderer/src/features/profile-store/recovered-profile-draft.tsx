@@ -1,3 +1,4 @@
+import { Disclosure } from "@renderer/components/ui/disclosure";
 import { useEffect, useState } from "react";
 import { ProfileRecordSchema, type ProfileEditsDraft } from "@nestor/contracts";
 import { Button } from "@renderer/components/ui/button";
@@ -187,8 +188,7 @@ export function RecoveredProfileDraft({
         Your unsaved edits were kept. Review them before replacing the current
         saved values.
       </p>
-      <details>
-        <summary>Review kept changes</summary>
+      <Disclosure summary="Review kept changes">
         <ul>
           {rows.map(([key, item]) => (
             <li key={key}>
@@ -217,7 +217,7 @@ export function RecoveredProfileDraft({
             </li>
           ) : null}
         </ul>
-      </details>
+      </Disclosure>
       {error ? <p role="alert">{error}</p> : null}
       <Button disabled={busy} onClick={() => void recover()}>
         Restore my edits

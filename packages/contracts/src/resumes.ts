@@ -41,13 +41,19 @@ export const ResumeStatusSchema = z.object({
 export type ResumeStatus = z.infer<typeof ResumeStatusSchema>;
 
 /**
- * The job's newest application Apply is still working on: filling it in
- * (`applying`), filled and waiting for the person's Send (`ready`), or
- * waiting on the person (`needs_you`).
+ * The job's newest application while Apply works on it: filling it in
+ * (`applying`), filled and waiting for the person's Send (`ready`), waiting
+ * on the person (`needs_you`), or stopped by a failure before anything was
+ * sent (`failed`, with Apply's reason), so the job never returns to plain
+ * Approved as if nothing had happened.
  */
 export const ShortlistedApplicationSchema = z.object({
   id: z.number().int().positive(),
-  status: z.enum(["applying", "ready", "needs_you"]),
+  status: z.enum(["applying", "ready", "needs_you", "failed"]),
+  /** Why Apply could not finish; only for `failed`. */
+  reason: z.string().max(500).nullable().optional(),
+  /** When Apply last tried it. */
+  triedAt: z.string().optional(),
 });
 export type ShortlistedApplication = z.infer<
   typeof ShortlistedApplicationSchema

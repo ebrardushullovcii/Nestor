@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { personSubmissionObserverSource } from "./person-submission-observer";
 import { installMutationResponseBodyObserver } from "./mutation-response-body";
 import { installPageMessageRecorderInPage } from "./page-messages";
 import {
@@ -131,6 +132,12 @@ export function onPrepareOnlyUploadPermit(
 
 /** Why the fence let each upload through; see `getPrepareOnlyRequestPermit`. */
 const prepareOnlyRequestPermits = new WeakMap<Request, ApplyRequestPermit>();
+const uploadRefusals = new WeakMap<Request, string>();
+export function getAttachmentGuardRefusal(
+  request: Request,
+): string | undefined {
+  return uploadRefusals.get(request);
+}
 
 /**
  * The permit the prepare-only fence issued for an upload request. No permit
@@ -247,15 +254,18 @@ async function noteUploadLeg(
   answer: { status(): number; text(): Promise<string> },
 ): Promise<void> {
   const ok = answer.status() >= 200 && answer.status() < 300;
-  const presign = getPrepareOnlyRequestPermit(request)?.uploadLeg === "presign";
-  if (!presign) grant.fileAnsweredAtMs = Date.now();
+  const leg = getPrepareOnlyRequestPermit(request)?.uploadLeg;
+  const presign = leg === "presign";
+  // A successful scanner still has to be followed by storage. Keep the
+  // existing bounded window open for that second exact-file request.
+  if (!presign && (leg !== "scan" || !ok)) grant.fileAnsweredAtMs = Date.now();
   if (!ok) return;
   if (presign) {
     const text = await answer.text().catch(() => "");
     const url = new URL(request.url());
     grant.presignEndpoint = `${url.origin}${url.pathname}`;
     grant.handles = uploadHandlesIn(text.slice(0, 65_536), grant);
-  } else {
+  } else if (leg !== "scan") {
     grant.bindsRemaining = 1;
     grant.expiresAtMs = Math.max(grant.expiresAtMs, Date.now() + 15_000);
   }
@@ -478,6 +488,11 @@ export async function closePrepareOnlyAuthorizedFormActionWindow(
  * window is short and closed again by the caller; it is only ever opened
  * after preflight, on the exact control the authority covers.
  */
+export function isPrepareOnlyFinalActionWindowOpen(page: Page): boolean | null {
+  const state = prepareOnlyNetworkGuardStates.get(page);
+  return state ? Date.now() < state.finalActionAllowedUntilMs : null;
+}
+
 export async function openPrepareOnlyFinalActionWindow(
   page: Page,
   durationMs = 20_000,
@@ -1142,12 +1157,40 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       files.length !== 1 ||
       files[0]!.size !== grant.byteLength ||
       (files[0] instanceof File &&
+        files[0].name !== "blob" &&
         files[0].name !== grant.fileName &&
         plainName(files[0].name) !== plainName(grant.fileName))
     )
       return false;
     grant.remainingRequests -= 1;
     return true;
+  };
+
+  // Chromium's interception payload omits disk-backed File bytes in a
+  // multipart request. Send a byte-backed copy so the network fence can
+  // verify the actual size and digest, rather than trusting file metadata
+  // or reconstructing a body from the selected document. Keep every text
+  // field: the fence must still refuse mixed answers/application payloads.
+  const attachmentTransportBody = async (
+    body: FormData | Blob,
+  ): Promise<FormData | Blob> => {
+    if (body instanceof FormData) {
+      const entries = [...body];
+      const copy = new FormData();
+      for (const [key, value] of entries) {
+        if (typeof value === "string") copy.append(key, value);
+        else
+          copy.append(
+            key,
+            new File([await value.arrayBuffer()], value.name, {
+              type: value.type,
+              lastModified: value.lastModified,
+            }),
+          );
+      }
+      return copy;
+    }
+    return new Blob([await body.arrayBuffer()], { type: body.type });
   };
 
   const authorizedSubmitter = (
@@ -1181,9 +1224,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         const form =
           event.target instanceof HTMLFormElement ? event.target : null;
         if (state.finalActionAllowed) {
-          // A send that goes out: the form holding the answers was submitted.
-          if (formCarriesPreparedValue(form) === true)
-            state.sendPressedAt = Date.now();
+          // The shared trusted-input observer distinguishes a final send
+          // from a sign-in or intermediate form submission.
           return;
         }
         const submitter =
@@ -1232,9 +1274,6 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
           label,
         );
         if (state.finalActionAllowed) {
-          // A send that goes out, even one a page script holds back for a
-          // check of its own before any request leaves.
-          if (sends) state.sendPressedAt = Date.now();
           return;
         }
         if (form && authorizedSubmitter(form, control)) return;
@@ -1380,9 +1419,12 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       const bodyIsFormData =
         (typeof FormData !== "undefined" && init?.body instanceof FormData) ||
         (typeof File !== "undefined" && init?.body instanceof File);
+      const pageRead = isPageOwnedRead(method, url, bodyText, bodyIsFormData);
+      const attachment =
+        !pageRead && canForwardAttachment(method, init?.body, url);
       if (
-        !isPageOwnedRead(method, url, bodyText, bodyIsFormData) &&
-        !canForwardAttachment(method, init?.body, url) &&
+        !pageRead &&
+        !attachment &&
         !canAllowIntermediateRequest({
           bodyText,
           kind: "fetch",
@@ -1404,6 +1446,13 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
           ),
         );
       }
+      if (
+        attachment &&
+        (init?.body instanceof FormData || init?.body instanceof Blob)
+      )
+        return attachmentTransportBody(init.body).then((body) =>
+          forward(() => originalFetch(resource, { ...init, body })),
+        );
       return forward(() => originalFetch(resource, init));
     };
     window.fetch = guardedFetch;
@@ -1463,14 +1512,17 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
           (typeof FormData !== "undefined" && body instanceof FormData) ||
           (typeof File !== "undefined" && body instanceof File) ||
           (typeof Document !== "undefined" && body instanceof Document);
+        const pageRead = isPageOwnedRead(
+          request.method,
+          request.url,
+          bodyText,
+          bodyIsFormData,
+        );
+        const attachment =
+          !pageRead && canForwardAttachment(request.method, body, request.url);
         if (
-          !isPageOwnedRead(
-            request.method,
-            request.url,
-            bodyText,
-            bodyIsFormData,
-          ) &&
-          !canForwardAttachment(request.method, body, request.url) &&
+          !pageRead &&
+          !attachment &&
           !canAllowIntermediateRequest({
             bodyText,
             kind: "xhr",
@@ -1489,6 +1541,23 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
             "Prepare-only mode blocked a new XMLHttpRequest while field mutations were unauthorized.",
             "AbortError",
           );
+        }
+        if (attachment && (body instanceof FormData || body instanceof Blob)) {
+          void attachmentTransportBody(body)
+            .then((copy) => {
+              // Abort, or reopening this XHR while its disk file was read,
+              // cancels that pending send just as it cancels a normal send.
+              if (
+                this.readyState === XMLHttpRequest.OPENED &&
+                state.xhrMethods.get(this) === request
+              )
+                forward(() => originalSend.call(this, copy));
+            })
+            .catch(() => {
+              this.dispatchEvent(new ProgressEvent("error"));
+              this.dispatchEvent(new ProgressEvent("loadend"));
+            });
+          return;
         }
         forward(() => originalSend.call(this, body ?? null));
       };
@@ -1901,6 +1970,7 @@ async function ensureFramePrepareOnlyMutationGuard(
 ): Promise<PrepareOnlyGuardSnapshot> {
   await frame.evaluate(installMutationResponseBodyObserver);
   await frame.evaluate(installPageMessageRecorderInPage);
+  await frame.evaluate(personSubmissionObserverSource());
   await frame.evaluate(installPrepareOnlyMutationGuardInPage, {
     intermediateMutationsAuthorized,
     finalActionSignal: FINAL_ACTION_SIGNAL.source,
@@ -2239,6 +2309,8 @@ export async function ensurePrepareOnlyMutationGuard(
         body: request.postDataBuffer(),
         preparedValues: [...networkGuardState!.preparedValues],
       });
+      if (!attachment.allowed && uploadGrant && attachment.guardRefusal)
+        uploadRefusals.set(request, attachment.guardRefusal);
       if (attachment.allowed) {
         const grant = networkGuardState!.attachmentUploadWindow!;
         grant.remainingRequests -= 1;
@@ -2255,7 +2327,11 @@ export async function ensurePrepareOnlyMutationGuard(
             size: grant.byteLength,
             sha256: grant.sha256,
           },
-          uploadLeg: attachment.containsFile ? "file" : "presign",
+          uploadLeg: attachment.scanOnly
+            ? "scan"
+            : attachment.containsFile
+              ? "file"
+              : "presign",
         });
         try {
           prepareOnlyPermitListeners.get(page)?.(
@@ -2412,6 +2488,7 @@ export async function ensurePrepareOnlyMutationGuard(
     await page.addInitScript(installMutationResponseBodyObserver);
     // A job page's alert, confirm or prompt never opens a window.
     await page.addInitScript(installPageMessageRecorderInPage);
+    await page.addInitScript({ content: personSubmissionObserverSource() });
     await page.addInitScript(installPrepareOnlyMutationGuardInPage, {
       intermediateMutationsAuthorized: false,
       finalActionSignal: FINAL_ACTION_SIGNAL.source,

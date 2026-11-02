@@ -41,10 +41,10 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex min-w-0 max-w-full w-full items-center justify-between gap-2 rounded-(--radius-field) border border-(--field-border) bg-(--field) py-0 whitespace-nowrap tracking-normal shadow-[var(--field-shadow)] transition-[border-color,background-color,color,box-shadow] outline-none hover:border-(--field-border-hover) focus-visible:border-(--field-focus-border) focus-visible:bg-(--field-strong) focus-visible:shadow-[var(--field-focus-shadow)] focus-visible:ring-0 aria-invalid:border-destructive aria-invalid:ring-0 data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
-        "data-[size=default]:h-11 data-[size=default]:px-3.5 data-[size=default]:text-(length:--text-field)",
-        "data-[size=sm]:h-8 data-[size=sm]:px-2.5 data-[size=sm]:text-xs",
-        "data-[size=toolbar]:h-8 data-[size=toolbar]:px-2.5 data-[size=toolbar]:text-xs",
+        "flex min-w-0 max-w-full w-full items-center justify-between gap-2 rounded-(--radius-field) border border-(--field-border) bg-(--field) py-0 whitespace-nowrap tracking-normal transition-[border-color,background-color,color,box-shadow] outline-none hover:border-(--field-border-hover) focus-visible:border-(--field-focus-border) focus-visible:bg-(--field-strong) focus-visible:shadow-(--field-focus-shadow) focus-visible:ring-0 aria-invalid:border-destructive aria-invalid:ring-0 data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "data-[size=default]:h-10 data-[size=default]:px-3 data-[size=default]:text-(length:--text-field)",
+        "data-[size=sm]:h-8 data-[size=sm]:px-2.5 data-[size=sm]:text-(length:--text-small)",
+        "data-[size=toolbar]:h-8 data-[size=toolbar]:px-2.5 data-[size=toolbar]:text-(length:--text-small)",
         // Same painted disabled state as `Input`: the three shared tokens
         // instead of a 50% wash, and the placeholder follows the disabled
         // foreground so an empty disabled select is not a second contrast.
@@ -73,7 +73,7 @@ function SelectContent({
       <SelectPrimitive.Content
         data-slot="select-content"
         className={cn(
-          "relative z-50 max-h-(--radix-select-content-available-height) min-w-32 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-(--radius-field) border border-border bg-popover text-popover-foreground shadow-(--select-shadow) data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
+          "relative z-50 max-h-(--radix-select-content-available-height) min-w-32 origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-(--radius-panel) border border-border bg-popover text-popover-foreground shadow-(--select-shadow) data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           position === "popper" &&
             "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
           className,
@@ -106,7 +106,7 @@ function SelectLabel({
     <SelectPrimitive.Label
       data-slot="select-label"
       className={cn(
-        "px-2 py-1.5 font-mono text-(length:--text-tiny) uppercase tracking-(--tracking-badge) text-muted-foreground",
+        "px-2 py-1.5 text-(length:--text-tiny) font-medium text-muted-foreground",
         className,
       )}
       {...props}

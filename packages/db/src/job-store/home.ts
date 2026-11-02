@@ -20,6 +20,15 @@ const DAY_MS = 86_400_000;
 const UPCOMING_MS = 7 * DAY_MS;
 const UPCOMING_LIMIT = 6;
 
+/** A site as Needs you names it: its host, without "www.". */
+function siteHost(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./u, "");
+  } catch {
+    return url;
+  }
+}
+
 /**
  * Home's numbers. Each one is a count or a day bucket over an indexed column
  * (stage counts, tracker counts, `applied_at`, event kind and time, `next_at`),
@@ -104,6 +113,21 @@ export function createHomeStore(store: JobStore) {
             | { n: number }
             | undefined
         )?.n ?? 0;
+      // Open sign-ins by job site, as Needs you lists them: a search
+      // sign-in is named by its job site's address, an application's by the
+      // page's origin, and one host (without "www.") is one site however
+      // many saved sites or pages wait on it.
+      const signInSites = () => {
+        const hosts = new Set<string>();
+        for (const { url } of sql(
+          `SELECT DISTINCT COALESCE(s.url, t.site_origin) AS url
+           FROM needs_you t LEFT JOIN source_needs_you n ON n.task_id = t.id
+           LEFT JOIN job_sites s ON s.id = n.source_id
+           WHERE t.kind = 'sign_in' AND t.resolved_at IS NULL`,
+        ).all() as { url: string }[])
+          hosts.add(siteHost(url));
+        return hosts.size;
+      };
 
       // Every open interview and reminder, not just each application's next
       // one: an overdue reminder must not hide an interview on the same job.
@@ -152,9 +176,18 @@ export function createHomeStore(store: JobStore) {
           `SELECT COUNT(*) AS n FROM applications
            WHERE state IN ('queued', 'running', 'needs_you', 'ready', 'submitting')`,
         ),
+        applyWaiting: {
+          needsYou: count(
+            `SELECT COUNT(*) AS n FROM applications WHERE state = 'needs_you'`,
+          ),
+          ready: count(
+            `SELECT COUNT(*) AS n FROM applications WHERE state = 'ready'`,
+          ),
+        },
         needsYou: {
           questions: needsYou("question"),
           signIns: needsYou("sign_in"),
+          signInSites: signInSites(),
           checks: needsYou("captcha") + needsYou("mfa"),
         },
         interviewsThisWeek: count(

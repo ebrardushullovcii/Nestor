@@ -3,6 +3,8 @@ import { useModalFocusTrap } from "@renderer/features/job-finder/components/prof
 import { useId, useRef } from "react";
 import { createPortal } from "react-dom";
 
+import { usePresence } from "@renderer/components/ui/use-presence";
+
 /** What leaving would lose, named for the person. */
 export type JobFinderLeaveConfirmation = {
   title: string;
@@ -30,30 +32,38 @@ export function JobFinderUnsavedChangesDialog(props: {
   // Escape, backdrop, and focus restore all resolve to staying so closing the
   // dialog can never discard a draft by accident.
   useModalFocusTrap(open, dialogRef, props.onStay);
+  const presence = usePresence(open);
+  // What the dialog asked when it closed, drawn while it leaves.
+  const last = useRef(props.confirmation);
+  if (props.confirmation) last.current = props.confirmation;
 
-  if (!open || !props.confirmation) {
+  if (!presence.mounted || !last.current) {
     return null;
   }
 
-  const confirmation = props.confirmation;
+  const confirmation = last.current;
 
   return createPortal(
     <div
+      aria-hidden={presence.exiting || undefined}
       className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-(--modal-scrim) px-4 py-6 backdrop-blur-sm"
-      onClick={props.onStay}
+      data-scrim-motion={presence.motion}
+      inert={presence.exiting || undefined}
+      onClick={presence.exiting ? undefined : props.onStay}
     >
       <div
         aria-describedby={`${descriptionId} ${reasonsId}`}
         aria-labelledby={titleId}
-        aria-modal="true"
+        aria-modal={presence.exiting ? undefined : "true"}
         className="surface-panel-shell grid w-full max-w-lg gap-5 rounded-(--radius-field) border border-(--surface-panel-border) p-5 shadow-(--modal-shadow)"
+        data-dialog-motion={presence.motion}
         onClick={(event) => event.stopPropagation()}
         ref={dialogRef}
-        role="dialog"
+        role={presence.exiting ? undefined : "dialog"}
         tabIndex={-1}
       >
         <div className="grid gap-2">
-          <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+          <p className="text-(length:--text-tiny) tracking-(--tracking-label) text-foreground-muted">
             Unsaved changes
           </p>
           <h2 className="text-(--text-headline)" id={titleId}>

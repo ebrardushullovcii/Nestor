@@ -2,6 +2,12 @@ import { Sparkles } from "lucide-react";
 
 import { cn } from "@renderer/lib/cn";
 import {
+  HEADER_TOOL_ACTIVE_CLASS,
+  HEADER_TOOL_CLASS,
+  HEADER_TOOL_ICON_CLASS,
+  HEADER_TOOL_LABEL_CLASS,
+} from "../components/header-tool";
+import {
   formatJobFinderShortcutCombo,
   getJobFinderAriaKeyshortcuts,
   type JobFinderPlatform,
@@ -24,26 +30,25 @@ export function AssistantToggle(props: { platform: JobFinderPlatform }) {
       }
       aria-pressed={assistant.open}
       className={cn(
-        "relative inline-flex h-10 min-h-10 min-w-10 items-center justify-center gap-2 rounded-(--radius-button) border border-(--control-border) bg-(--surface-panel) px-2.5 text-(length:--text-small) font-medium text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 max-[899px]:min-w-9 max-[899px]:px-1.5",
-        assistant.open &&
-          "border-(--nav-active-bar) bg-(--nav-active-surface) text-(--nav-active-foreground)",
+        HEADER_TOOL_CLASS,
+        assistant.open && HEADER_TOOL_ACTIVE_CLASS,
       )}
       data-assistant-toggle
       onClick={assistant.toggle}
       title={`${label} (${formatJobFinderShortcutCombo("mod+i", props.platform)})`}
       type="button"
     >
-      <Sparkles aria-hidden="true" className="size-4 shrink-0" />
-      <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1440px]:!hidden">
-        Assistant
+      <span className={HEADER_TOOL_ICON_CLASS}>
+        <Sparkles aria-hidden="true" className="size-4 shrink-0" />
+        {assistant.working && !assistant.open ? (
+          <span
+            aria-hidden="true"
+            className="absolute -top-1 -right-1 size-2 rounded-full bg-primary ring-2 ring-(--shell-header-bg) motion-safe:animate-pulse-brief"
+            data-assistant-working-dot
+          />
+        ) : null}
       </span>
-      {assistant.working && !assistant.open ? (
-        <span
-          aria-hidden="true"
-          className="absolute right-1 top-1 size-2 rounded-full bg-primary motion-safe:animate-pulse-brief"
-          data-assistant-working-dot
-        />
-      ) : null}
+      <span className={HEADER_TOOL_LABEL_CLASS}>Assistant</span>
     </button>
   );
 }

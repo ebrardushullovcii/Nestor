@@ -14,6 +14,7 @@ import {
 } from "./profile-setup-screen-helpers";
 import {
   formatProfileSetupFinishReadiness,
+  getProfileSetupStepFooterFinish,
   getProfileSetupStepFooterPrimary,
 } from "./profile-setup-step-footer";
 
@@ -91,7 +92,7 @@ describe("guided setup readiness, stated once", () => {
       "work_eligibility_answers",
     ]);
     expect(text).toBe(
-      "Still needed to finish: Add your name and an email or phone · Add a job source · Say where you can work and whether you need visa sponsorship.",
+      "Still needed to finish: Add your name and an email or phone · Add a job site · Say where you can work and whether you need visa sponsorship.",
     );
   });
 
@@ -136,7 +137,8 @@ describe("guided setup readiness, stated once", () => {
       locations: ["Remote"],
     });
 
-    const blocked = buildReadinessLine({enabledSiteCount:1,
+    const blocked = buildReadinessLine({
+      enabledSiteCount: 1,
       draftProfile: profile,
       draftSearchPreferences: searchPreferencesWithoutWorkMode,
     });
@@ -147,7 +149,8 @@ describe("guided setup readiness, stated once", () => {
 
     // The two eligibility answers are: without them the first application
     // stopped on "Are you authorized to work here?".
-    const withoutEligibility = buildReadinessLine({enabledSiteCount:1,
+    const withoutEligibility = buildReadinessLine({
+      enabledSiteCount: 1,
       draftProfile: CandidateProfileSchema.parse({
         ...profile,
         workEligibility: {
@@ -161,7 +164,8 @@ describe("guided setup readiness, stated once", () => {
     expect(withoutEligibility.text).toBe(
       "Still needed to finish: Say where you can work and whether you need visa sponsorship.",
     );
-    const ready = buildReadinessLine({enabledSiteCount:1,
+    const ready = buildReadinessLine({
+      enabledSiteCount: 1,
       draftProfile: profile,
       draftSearchPreferences: {
         ...searchPreferencesWithoutWorkMode,
@@ -170,13 +174,12 @@ describe("guided setup readiness, stated once", () => {
     });
     expect(ready.text).toBe("Everything required is in. You can finish setup.");
     expect(
-      getProfileSetupStepFooterPrimary({
+      getProfileSetupStepFooterFinish({
         canFinishSetup: ready.presentation.remainingBlockerCount === 0,
         currentStep: "targeting",
         onSaveAndFinish: vi.fn(),
-        onSaveAndGoToStep: vi.fn(),
-      }).label,
-    ).toBe("Finish setup and find jobs");
+      })?.disabled,
+    ).toBe(false);
   });
 
   it("keeps the Mina-style readiness line aligned with the sticky footer gate", () => {
@@ -217,7 +220,7 @@ describe("guided setup readiness, stated once", () => {
       "work_eligibility_answers",
     ]);
     expect(text).toBe(
-      "Still needed to finish: Add a job source · Say where you can work and whether you need visa sponsorship.",
+      "Still needed to finish: Add a job site · Say where you can work and whether you need visa sponsorship.",
     );
     // One readiness system: the footer primary is gated by the same
     // presentation the line above is written from.

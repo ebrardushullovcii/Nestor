@@ -1,6 +1,6 @@
 import {
   ArrowDownAZ,
-  ChevronDown,
+  ChevronRight,
   Eye,
   EyeOff,
   Lock,
@@ -32,6 +32,20 @@ interface ResumeSectionHeaderActionsProps {
 // accessible name and tooltip.
 const sectionActionClassName = "text-foreground-soft";
 
+/**
+ * The app's own default section names in sentence case, like every other
+ * heading ("Core Skills" reads "Core skills"). Display only: the stored
+ * label, which the resume renderer and writer match on, never changes, and
+ * a heading the person typed shows as typed.
+ */
+const DEFAULT_SECTION_LABELS: Record<string, string> = {
+  "Core Skills": "Core skills",
+  "Additional Skills": "Additional skills",
+};
+export function displaySectionLabel(label: string): string {
+  return DEFAULT_SECTION_LABELS[label] ?? label;
+}
+
 export function ResumeSectionHeaderActions(
   props: ResumeSectionHeaderActionsProps,
 ) {
@@ -53,19 +67,21 @@ export function ResumeSectionHeaderActions(
           <button
             aria-controls={bodyId}
             aria-expanded={isExpanded}
-            className="flex min-w-0 items-center gap-1.5 rounded-(--radius-field) font-display text-(length:--text-item) font-semibold text-(--text-headline) outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-0 items-center gap-1.5 rounded-(--radius-field) font-display text-(length:--text-item) font-semibold text-(--text-headline) outline-none focus-ring"
             data-resume-section-toggle={section.id}
             onClick={onToggleExpanded}
             type="button"
           >
-            <ChevronDown
+            <ChevronRight
               aria-hidden="true"
               className={cn(
-                "size-4 shrink-0 transition-transform duration-200 motion-reduce:transition-none",
-                isExpanded ? null : "-rotate-90",
+                "size-4 shrink-0 transition-transform duration-(--duration-base) motion-reduce:transition-none",
+                isExpanded && "rotate-90",
               )}
             />
-            <span className="min-w-0 truncate">{section.label}</span>
+            <span className="min-w-0 truncate">
+              {displaySectionLabel(section.label)}
+            </span>
           </button>
         </h3>
         {/* Only non-default states earn a chip: "Shown", "Editable", and

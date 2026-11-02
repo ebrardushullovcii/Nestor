@@ -60,7 +60,7 @@ it("keeps stored notifications from retired resume gates out of current reads af
     expect(
       createHomeStore(reopened).summary({ utcOffsetMinutes: 0 }, now),
     ).toMatchObject({
-      needsYou: { questions: 0, signIns: 0, checks: 0 },
+      needsYou: { questions: 0, signIns: 0, signInSites: 0, checks: 0 },
       resumes: { writing: 0, toReview: 0, failed: 0 },
     });
     expect(createApplicationStore(reopened).needsYou.list().rows).toEqual([]);

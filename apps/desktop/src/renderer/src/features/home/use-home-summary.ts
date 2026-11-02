@@ -1,5 +1,5 @@
 import type { HomeSummary } from "@nestor/contracts";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 /** Changes come in bursts while Apply works; read again at most this often. */
 const REFRESH_GAP_MS = 500;
@@ -8,9 +8,16 @@ const REFRESH_GAP_MS = 500;
 export function useHomeSummary(): {
   summary: HomeSummary | null;
   error: string | null;
+  /** Reads again after a failed read. */
+  retry: () => void;
 } {
   const [summary, setSummary] = useState<HomeSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => {
+    setError(null);
+    setAttempt((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -40,7 +47,7 @@ export function useHomeSummary(): {
       unsubscribe();
       if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [attempt]);
 
-  return { summary, error };
+  return { summary, error, retry };
 }

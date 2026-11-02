@@ -341,6 +341,94 @@ test.each(replay.refusedPaths)(
     ).toBe(false);
   },
 );
+test("a browser's unnamed Blob carrier is the selected attachment only when its bytes match", async () => {
+  const parse = async (
+    fileBytes = bytes,
+    extra: Record<string, string> = {},
+  ) => ({
+    ...(await multipart(extra, fileBytes, "blob")),
+    url: `${grant.sourceOrigin}/resume/parse`,
+  });
+  const request = await parse();
+  expect((await classifyAttachmentUpload(request)).allowed).toBe(true);
+  expect(
+    (await classifyAttachmentUpload(await parse(new Uint8Array(bytes.length))))
+      .allowed,
+  ).toBe(false);
+  expect(
+    (
+      await classifyAttachmentUpload(
+        await parse(bytes, { email: "other@example.test" }),
+      )
+    ).allowed,
+  ).toBe(false);
+  expect(
+    (await classifyAttachmentUpload({ ...request, window: null })).allowed,
+  ).toBe(false);
+});
+
+test.each(["scanfile", "parsefile", "uploadfile"])(
+  "a same-origin lowercase %s operation carries only the selected attachment",
+  async (operation) => {
+    const request = {
+      ...(await multipart()),
+      url: `${grant.sourceOrigin}/wday/calypso/cxs/common/synthetic/${operation}`,
+    };
+    expect(await classifyAttachmentUpload(request)).toMatchObject({
+      allowed: true,
+      containsFile: true,
+      ...(operation === "scanfile" ? { scanOnly: true } : {}),
+    });
+    for (const override of [
+      { url: `https://unrelated.example.test/common/${operation}` },
+      { url: `${grant.sourceOrigin}/common/scanprofile` },
+      { url: `${grant.sourceOrigin}/common/${operation}?action=submit` },
+      {
+        url: `${grant.sourceOrigin}/common/${operation}?email=alex%40example.test`,
+        preparedValues: ["alex@example.test"],
+      },
+      { window: null },
+      { window: { ...grant, remainingRequests: 0 } },
+      { nowMs: 2001 },
+    ])
+      expect(
+        (await classifyAttachmentUpload({ ...request, ...override })).allowed,
+      ).toBe(false);
+    for (const extra of [
+      { email: "alex@example.test" },
+      { name: "Alex Vanguard" },
+      { final: "true" },
+    ])
+      expect(
+        (
+          await classifyAttachmentUpload({
+            ...request,
+            ...(await multipart(extra)),
+            url: request.url,
+          })
+        ).allowed,
+      ).toBe(false);
+    expect(
+      await classifyAttachmentUpload({
+        ...request,
+        ...(await multipart({}, new Uint8Array(bytes.length))),
+        url: request.url,
+      }),
+    ).toMatchObject({ allowed: false, guardRefusal: "network/file_digest" });
+  },
+);
+
+test("a stored filename beginning with scanfile is not a scanner operation", async () => {
+  const name = "scanfile-resume.pdf";
+  expect(
+    await classifyAttachmentUpload({
+      ...(await multipart({}, bytes, name)),
+      window: { ...grant, fileName: name },
+      url: `${grant.sourceOrigin}/uploads/${name}`,
+    }),
+  ).toEqual({ allowed: true, containsFile: true });
+});
+
 test("a direct object upload must contain exactly the selected file, inside its window", async () => {
   const request = {
     window: grant,

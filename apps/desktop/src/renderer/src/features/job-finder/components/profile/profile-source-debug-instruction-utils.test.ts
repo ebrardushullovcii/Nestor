@@ -15,7 +15,7 @@ describe("describeLearnedInstructionUsage", () => {
       } as SourceInstructionArtifact),
     ).toContain("draft guidance");
     expect(describeLearnedInstructionUsage(null)).toBe(
-      "Saved from the latest source check.",
+      "Saved from the latest site check.",
     );
   });
 });

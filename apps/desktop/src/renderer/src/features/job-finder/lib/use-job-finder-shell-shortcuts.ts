@@ -8,7 +8,7 @@ import {
 import { useHasOpenJobFinderOverlays } from "./job-finder-overlay-ownership";
 import { focusVisibleListSearch } from "./list-search-focus";
 
-const WIDE_LAYOUT_MEDIA_QUERY = "(min-width: 1440px)";
+const WIDE_LAYOUT_MEDIA_QUERY = "(min-width: 1200px)";
 
 function getInitialWideLayout(): boolean {
   try {

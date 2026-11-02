@@ -1,3 +1,4 @@
+import { Disclosure } from "@renderer/components/ui/disclosure";
 import { AlertTriangle, ArrowLeft, Home, RefreshCcw } from "lucide-react";
 import { Button } from "@renderer/components/ui/button";
 import { cn } from "@renderer/lib/cn";
@@ -145,7 +146,7 @@ export function JobFinderRouteErrorBoundary({
           <div className="grid gap-6 p-6 sm:p-8 lg:p-10">
             <div
               className={cn(
-                "inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-(length:--text-count) font-bold uppercase tracking-(--tracking-caps)",
+                "inline-flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-(length:--text-count) font-bold  tracking-(--tracking-caps)",
                 isStaleBundle
                   ? "border-primary/25 bg-primary/10 text-primary"
                   : "border-destructive/25 bg-destructive/10 text-destructive",
@@ -160,7 +161,12 @@ export function JobFinderRouteErrorBoundary({
             </div>
 
             <div className="grid max-w-2xl gap-3">
-              <h1 className="font-display text-(length:--workspace-state-title-size) font-semibold tracking-(--workspace-state-title-tracking) text-(--text-headline)">
+              {/* The page's own title while the page cannot draw: the page
+                  title's size and face (styles/title-fonts.css). */}
+              <h1
+                className="font-display text-(length:--text-page-title-compact) font-semibold text-(--text-headline)"
+                data-page-title
+              >
                 {copy.title}
               </h1>
               <p className="max-w-(--workspace-state-card-max-width) text-sm leading-7 text-foreground-soft sm:text-base">
@@ -199,21 +205,21 @@ export function JobFinderRouteErrorBoundary({
             </div>
 
             {technicalDetails && !isStaleBundle ? (
-              <details className="group rounded-(--radius-field) border border-border/45 bg-background/45 p-4">
-                <summary className="w-fit cursor-pointer list-none text-sm font-medium text-foreground underline decoration-from-font underline-offset-4 transition-colors group-open:text-foreground-soft">
-                  Technical details
-                </summary>
-                <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-border/35 pt-3 text-xs leading-6 text-foreground-soft">
+              <Disclosure
+                className="rounded-(--radius-field) border border-border/45 bg-background/45 p-2"
+                summary="Technical details"
+              >
+                <pre className="mx-2 mb-2 max-h-64 overflow-auto whitespace-pre-wrap break-words border-t border-border/35 pt-3 text-xs leading-6 text-foreground-soft">
                   {technicalDetails}
                 </pre>
-              </details>
+              </Disclosure>
             ) : null}
           </div>
 
           {scope === "route" ? (
             <div className="border-t border-destructive/12 bg-(--workspace-state-card-bg-default) p-6 sm:p-8 lg:border-l lg:border-t-0 lg:p-10">
               <div className="grid gap-4">
-                <p className="font-display text-(length:--text-count) font-bold uppercase tracking-(--tracking-caps) text-primary">
+                <p className="font-display text-(length:--text-count) font-bold tracking-(--tracking-caps) text-primary">
                   Recovery notes
                 </p>
                 <div className="grid gap-3 text-sm leading-6 text-foreground-soft">

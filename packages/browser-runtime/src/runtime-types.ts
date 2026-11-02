@@ -357,6 +357,11 @@ export interface BrowserSessionRuntime {
     source: JobSource,
     pageBindingKey: string,
   ): Promise<boolean>;
+  /** Focus only an already-retained post-action page; never restores or navigates. */
+  focusRetainedApplicationPage?(
+    source: JobSource,
+    pageBindingKey: string,
+  ): Promise<boolean>;
   /** Read the exact retained page for workflow policy, with passwords redacted. */
   readApplicationPageBinding?(
     source: JobSource,
@@ -450,6 +455,17 @@ export interface BrowserSessionRuntime {
     source: JobSource,
     input: ExecuteExactlyOneFinalActionInput,
   ): Promise<ApplicationFinalActionResult>;
+  /** Observe the exact prior final action again; never reloads, clicks or re-arms it. */
+  recheckApplicationSubmission?(
+    source: JobSource,
+    input: Pick<
+      ExecuteExactlyOneFinalActionInput,
+      "expectedObservation" | "expectedControl"
+    > & { pageBindingKey: string },
+  ): Promise<Extract<
+    ApplicationFinalActionResult,
+    { outcome: "submitted" }
+  > | null>;
   captureVisualSnapshot?(
     source: JobSource,
     request: BrowserVisualSnapshotRequest,

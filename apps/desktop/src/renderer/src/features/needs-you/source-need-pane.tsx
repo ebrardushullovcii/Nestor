@@ -21,8 +21,11 @@ export function SourceNeedPane({
       <h2 className="font-medium">Sign in to {site.label}</h2>
       <p className="text-sm text-foreground-soft">
         Search couldn&apos;t read {host}
-        {site.sources.length > 1 ? ` (${site.sources.length} sites)` : ""}. Sign
-        in once, then check it. This item closes when the site is readable.
+        {site.sources.length > 1
+          ? ` (${site.sources.length.toLocaleString()} sign-ins)`
+          : ""}
+        . Sign in once, then check it. This item closes when the site is
+        readable.
       </p>
       <Button
         disabled={check === "checking"}

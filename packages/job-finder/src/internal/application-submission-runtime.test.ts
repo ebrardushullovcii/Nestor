@@ -19,7 +19,7 @@ import type {
   ApplicationFormObservation,
   ApplicationSafePageUrl,
 } from "@nestor/browser-runtime";
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { buildSubmissionPreflightRecord } from "./application-submission-preflight";
 import {
@@ -30,6 +30,7 @@ import {
 
 const NOW = "2026-08-27T10:00:00.000Z";
 const EXPIRES_AT = "2026-08-27T11:00:00.000Z";
+const GRANT_EXPIRES_AT = "2026-08-27T10:05:00.000Z";
 const ORIGIN = "https://boards.example.com";
 const RESUME_BYTES = new TextEncoder().encode("trusted resume bytes");
 const RESUME_SHA256 = createHash("sha256").update(RESUME_BYTES).digest("hex");
@@ -120,6 +121,7 @@ function emptyFacts(): ApplicationFinalActionResult["facts"] {
 
 function buildBrowserRuntime(
   input: {
+    onObserve?: () => void | Promise<void>;
     onBetweenVetoes?: () => void | Promise<void>;
     controls?: ApplicationFinalControl[];
     outcome?: "submitted" | "uncertain" | "not_submitted";
@@ -134,9 +136,10 @@ function buildBrowserRuntime(
       ? OBSERVATION
       : { ...OBSERVATION, controls: input.controls };
   const runtime: ApplicationSubmissionBrowserRuntime = {
-    observeApplicationForm: () => {
+    observeApplicationForm: async () => {
       calls.observe += 1;
-      return Promise.resolve(observation);
+      await input.onObserve?.();
+      return observation;
     },
     executeExactlyOneFinalAction: async (_source, actionInput) => {
       calls.execute += 1;
@@ -293,7 +296,10 @@ async function createHarness(input: {
   };
 }
 
-async function commitConfirmGrant(repository: SendGuards): Promise<void> {
+async function commitConfirmGrant(
+  repository: SendGuards,
+  expiresAt = EXPIRES_AT,
+): Promise<void> {
   const preflight = buildSubmissionPreflightRecord({
     id: "preflight_1",
     idempotencyKey: "idempotency_1",
@@ -331,12 +337,22 @@ async function commitConfirmGrant(repository: SendGuards): Promise<void> {
       status: "active",
       grantedBy: "user",
       grantedAt: NOW,
-      expiresAt: EXPIRES_AT,
+      expiresAt,
       revokedAt: null,
       consumedAt: null,
     }),
   );
 }
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 describe("composed application submission runtime", () => {
   test("consumes one confirm grant, executes one browser action, and records uncertainty", async () => {
@@ -498,6 +514,181 @@ describe("composed application submission runtime", () => {
       });
     }
   });
+
+  test("uses the current clock before observing instead of the attempt timestamp", async () => {
+    const browser = buildBrowserRuntime();
+    const harness = await createHarness({
+      mode: "autonomous_submit",
+      runtime: browser.runtime,
+    });
+    vi.setSystemTime(EXPIRES_AT);
+
+    const result = await runApplicationSubmissionRuntime(harness.runtimeInput);
+
+    expect(result).toMatchObject({
+      status: "blocked",
+      reason: "preflight_authority_mismatch",
+    });
+    expect(browser.calls).toEqual({ observe: 0, execute: 0, action: 0 });
+  });
+
+  test.each(["observation", "final veto"] as const)(
+    "vetoes authority expiring during %s at the exact expiry instant",
+    async (phase) => {
+      const expire = () => {
+        vi.setSystemTime(EXPIRES_AT);
+      };
+      const browser = buildBrowserRuntime(
+        phase === "observation"
+          ? { onObserve: expire }
+          : { onBetweenVetoes: expire },
+      );
+      const harness = await createHarness({
+        mode: "autonomous_submit",
+        runtime: browser.runtime,
+      });
+
+      const result = await runApplicationSubmissionRuntime(
+        harness.runtimeInput,
+      );
+
+      expect(result).toMatchObject({
+        status: "recorded_not_submitted",
+        outcome: {
+          evidence: [],
+          browserAction: { reason: "vetoed", actionIssued: false },
+          retry: { eligible: false, blockReason: "authority_no_longer_valid" },
+        },
+      });
+      expect(browser.calls).toEqual({ observe: 1, execute: 1, action: 0 });
+    },
+  );
+
+  test.each(["saved grant", "person confirmation"] as const)(
+    "vetoes an expired %s even while the authority envelope is current",
+    async (confirmation) => {
+      const browser = buildBrowserRuntime({
+        onBetweenVetoes: () => {
+          vi.setSystemTime(GRANT_EXPIRES_AT);
+        },
+      });
+      const harness = await createHarness({
+        mode: "confirm_before_submit",
+        runtime: browser.runtime,
+      });
+      if (confirmation === "saved grant") {
+        await commitConfirmGrant(harness.repository, GRANT_EXPIRES_AT);
+      }
+
+      const result = await runApplicationSubmissionRuntime({
+        ...harness.runtimeInput,
+        ...(confirmation === "saved grant"
+          ? { executionGrantId: "grant_1" }
+          : {
+              personConfirmation: {
+                grantedAt: NOW,
+                expiresAt: GRANT_EXPIRES_AT,
+              },
+            }),
+      });
+
+      expect(result).toMatchObject({
+        status: "recorded_not_submitted",
+        outcome: {
+          evidence: [],
+          browserAction: { reason: "vetoed", actionIssued: false },
+          retry: { eligible: false, blockReason: "authority_no_longer_valid" },
+        },
+        executionGrant: { status: "consumed", expiresAt: GRANT_EXPIRES_AT },
+      });
+      expect(browser.calls).toEqual({ observe: 1, execute: 1, action: 0 });
+      expect(Date.now()).toBe(Date.parse(GRANT_EXPIRES_AT));
+    },
+  );
+
+  test("reads the clock after a slow final durable authority read", async () => {
+    let atFinalVeto = false;
+    const browser = buildBrowserRuntime({
+      onBetweenVetoes: () => {
+        atFinalVeto = true;
+      },
+    });
+    const harness = await createHarness({
+      mode: "autonomous_submit",
+      runtime: browser.runtime,
+    });
+    const readEnvelope =
+      harness.repository.getApplicationAuthorityEnvelope.bind(
+        harness.repository,
+      );
+    vi.spyOn(
+      harness.repository,
+      "getApplicationAuthorityEnvelope",
+    ).mockImplementation(async (id) => {
+      const envelope = await readEnvelope(id);
+      if (atFinalVeto) {
+        vi.setSystemTime(EXPIRES_AT);
+      }
+      return envelope;
+    });
+
+    const result = await runApplicationSubmissionRuntime(harness.runtimeInput);
+
+    expect(result).toMatchObject({
+      status: "recorded_not_submitted",
+      outcome: {
+        retry: { eligible: false, blockReason: "authority_no_longer_valid" },
+      },
+    });
+    expect(browser.calls).toEqual({ observe: 1, execute: 1, action: 0 });
+  });
+
+  test.each(["resultId", "authorityRevision"] as const)(
+    "vetoes consumed grant %s drift at the browser boundary",
+    async (field) => {
+      let drift = false;
+      const browser = buildBrowserRuntime({
+        onBetweenVetoes: () => {
+          drift = true;
+        },
+      });
+      const harness = await createHarness({
+        mode: "confirm_before_submit",
+        runtime: browser.runtime,
+      });
+      await commitConfirmGrant(harness.repository);
+      const readGrant = harness.repository.getSubmissionExecutionGrant.bind(
+        harness.repository,
+      );
+      vi.spyOn(
+        harness.repository,
+        "getSubmissionExecutionGrant",
+      ).mockImplementation(async (id) => {
+        const grant = await readGrant(id);
+        return grant && drift
+          ? {
+              ...grant,
+              ...(field === "resultId"
+                ? { resultId: "another_result" }
+                : { authorityRevision: 2 }),
+            }
+          : grant;
+      });
+
+      const result = await runApplicationSubmissionRuntime({
+        ...harness.runtimeInput,
+        executionGrantId: "grant_1",
+      });
+
+      expect(result).toMatchObject({
+        status: "recorded_not_submitted",
+        outcome: {
+          retry: { eligible: false, blockReason: "authority_no_longer_valid" },
+        },
+      });
+      expect(browser.calls.action).toBe(0);
+    },
+  );
 
   test("does not call the executor for zero or ambiguous controls and blocks a cancelled attempt", async () => {
     const browser = buildBrowserRuntime({ controls: [] });

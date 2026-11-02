@@ -1,3 +1,5 @@
+import { cn } from "@renderer/lib/cn";
+import { SETTINGS_MEASURE_CLASS } from "./settings-row";
 import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -142,6 +144,7 @@ export function SettingsApplyModeSection(props: {
 
       <ChoiceCards
         aria-label="Default application mode"
+        className={SETTINGS_MEASURE_CLASS}
         disabled={isSaving || modeSaving}
         onChange={chooseMode}
         options={APPLY_MODE_OPTIONS}
@@ -161,7 +164,7 @@ export function SettingsApplyModeSection(props: {
         </p>
       ) : null}
 
-      <p className="text-sm leading-5 text-foreground-soft">
+      <p className="max-w-[70ch] text-(length:--text-small) leading-5 text-foreground-soft">
         Job Finder fills applications and sends them only with your permission.
         It never asks for a password. If you provide sign-in details and
         authorize their use, it may use them for that task without saving them.
@@ -169,9 +172,14 @@ export function SettingsApplyModeSection(props: {
       </p>
 
       <div className="grid gap-2 border-t border-(--surface-panel-border) pt-4">
-        <div className="flex items-start justify-between gap-4">
+        <div
+          className={cn(
+            "flex items-start justify-between gap-6",
+            SETTINGS_MEASURE_CLASS,
+          )}
+        >
           <label
-            className="text-sm font-medium text-foreground"
+            className="max-w-[70ch] text-(length:--text-body) font-medium text-foreground"
             htmlFor={payId}
           >
             Let Job Finder answer expected and current pay questions
@@ -186,7 +194,7 @@ export function SettingsApplyModeSection(props: {
         </div>
         <p
           id={payDescriptionId}
-          className="text-(length:--text-small) leading-5 text-foreground-soft"
+          className="max-w-[70ch] text-(length:--text-small) leading-5 text-foreground-soft"
         >
           Includes pay history. Off: optional pay fields stay blank; required
           questions wait for you. On: answers use your saved facts. Expected pay

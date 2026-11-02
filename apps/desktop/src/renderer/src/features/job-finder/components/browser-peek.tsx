@@ -54,6 +54,7 @@ import {
   workThrough,
 } from "../../needs-you/work-through";
 import "./browser-peek.css";
+import { SiteIcon } from "./site-icon";
 import {
   BrowserPasswordOffer,
   BrowserPasswordPanel,
@@ -111,6 +112,15 @@ function BrowserBrandMark({
       {letter}
     </span>
   );
+}
+
+/** The host a person recognises ("jobs.example.com"), or "" for odd URLs. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
 }
 
 export function BrowserPeek(props: {
@@ -215,6 +225,7 @@ export function BrowserPeek(props: {
       id: "application-sent",
       title: `Sent: ${notice.title}${notice.company ? ` at ${notice.company}` : ""}`,
       description: "Moved to Applied.",
+      tone: "success",
       duration: 10_000,
       ...(props.onOpenApplication
         ? {
@@ -269,6 +280,25 @@ export function BrowserPeek(props: {
     state.phase === "needs_you" && props.hasUnresolvedAttention !== false;
   const paused = state.automationPaused;
   const blank = !active || active.url === "about:blank";
+  // A page's first load paints white until its content arrives. Until a tab
+  // has finished loading its site once (or 4 s pass), the native page stays
+  // hidden and the viewport shows the host and a page-shaped skeleton.
+  const pageHost = active && !blank ? hostOf(active.url) : "";
+  const loadKey = active ? `${active.id}|${pageHost}` : "";
+  const loadedPages = useRef(new Set<string>());
+  const [slowPage, setSlowPage] = useState<string | null>(null);
+  if (active && !blank && !active.loading) loadedPages.current.add(loadKey);
+  const firstLoad =
+    !!active &&
+    !blank &&
+    active.loading &&
+    !loadedPages.current.has(loadKey) &&
+    slowPage !== loadKey;
+  useEffect(() => {
+    if (!firstLoad) return undefined;
+    const timer = setTimeout(() => setSlowPage(loadKey), 4000);
+    return () => clearTimeout(timer);
+  }, [firstLoad, loadKey]);
   const overlayRequested = menuOpen || importPanel !== null || passwordPanel;
   const accept = useCallback(
     (next: DesktopBrowserState) =>
@@ -279,15 +309,17 @@ export function BrowserPeek(props: {
   );
   const command = useCallback(
     async (input: DesktopBrowserCommand) => {
-      if (!bridge) return;
+      if (!bridge) return false;
       try {
         accept(await bridge.command(input));
         setMessage(null);
         setSavedJob(null);
+        return true;
       } catch {
         setMessage(
           "The browser couldn’t complete that action. Try again or close and reopen it.",
         );
+        return false;
       }
     },
     [bridge, accept],
@@ -317,8 +349,22 @@ export function BrowserPeek(props: {
       focus();
     };
   }, [bridge, accept]);
+  // An address sent with Enter stays in the bar, steady, until the page it
+  // asked for reports its own address: the tab passes through a blank or
+  // the old address first, and the bar used to blank for ~200 ms.
+  const sentAddress = useRef<{ tabId: unknown; from: string } | null>(null);
   useEffect(() => {
-    setAddress(active?.url === "about:blank" ? "" : (active?.url ?? ""));
+    const next = active?.url === "about:blank" ? "" : (active?.url ?? "");
+    const sent = sentAddress.current;
+    // Enter on an empty browser opens a new tab, which is blank first: a
+    // blank is never shown over the sent address, in that tab or the old.
+    if (
+      sent &&
+      (next === "" || (sent.tabId === active?.id && next === sent.from))
+    )
+      return;
+    sentAddress.current = null;
+    setAddress(next);
   }, [active?.url, active?.id]);
   // The welcome screen names the browsers it can bring sign-ins from.
   useEffect(() => {
@@ -339,7 +385,7 @@ export function BrowserPeek(props: {
           y: Math.max(0, rect.y),
           width: rect.width,
           height: rect.height,
-          visible: isTopmost() && !blank && !pageHidden,
+          visible: isTopmost() && !blank && !pageHidden && !firstLoad,
         })
         .catch(() => undefined);
     };
@@ -357,7 +403,15 @@ export function BrowserPeek(props: {
         .setViewport({ x: 0, y: 0, width: 0, height: 0, visible: false })
         .catch(() => undefined);
     };
-  }, [bridge, shown, blank, pageHidden, state.presentation, isTopmost]);
+  }, [
+    bridge,
+    shown,
+    blank,
+    pageHidden,
+    firstLoad,
+    state.presentation,
+    isTopmost,
+  ]);
   useEffect(() => {
     if (!bridge || !shown) return;
     if (!overlayRequested) {
@@ -526,6 +580,10 @@ export function BrowserPeek(props: {
           : paused
             ? "paused"
             : "open";
+  // The dot means the browser wants a look: working, waiting on the person,
+  // or theirs to drive. A browser that is only open and idle ("Ready") has
+  // nothing to say, so it shows no mark (its name still says Ready).
+  const quietTrigger = triggerState === "closed" || triggerState === "open";
   const importable = (importSources ?? []).filter((source) => source.supported);
   const importableBrowsers = [
     ...new Set(importable.map((source) => source.browserLabel)),
@@ -544,6 +602,7 @@ export function BrowserPeek(props: {
       <button
         ref={triggerRef}
         className={`browser-peek-trigger is-${triggerState}`}
+        data-status-slot={quietTrigger ? "empty" : "filled"}
         type="button"
         disabled={!bridge}
         aria-label={`${OPEN_JOB_FINDER_BROWSER_ACTION} · ${status}`}
@@ -551,9 +610,14 @@ export function BrowserPeek(props: {
         onClick={() => void command({ type: "open" })}
       >
         <span className="browser-trigger-icon">
-          <BrowserGlyph size={17} />
-          {triggerState !== "closed" && (
-            <span className="browser-trigger-badge" aria-hidden="true">
+          <BrowserGlyph size={16} />
+          {/* Icon only (below 1200px): the status sits at the icon's
+              corner, clear of the glyph, as the other tools' counts do. */}
+          {!quietTrigger && (
+            <span
+              className="browser-trigger-badge is-corner"
+              aria-hidden="true"
+            >
               {triggerState === "needs-you" ? "!" : ""}
             </span>
           )}
@@ -561,9 +625,18 @@ export function BrowserPeek(props: {
         {/* Same collapse as Tasks and Needs you: below 1100px the toolbar has
             to fit beside the section nav, and this label was the one that
             never gave way, so the toolbar overflowed onto "More". */}
-        <span className="browser-trigger-label hidden min-[900px]:inline max-[1099px]:!hidden xl:max-[1440px]:!hidden">
+        <span className="browser-trigger-label hidden @min-[75rem]/shell-header:inline">
           Browser
         </span>
+        {/* With its label (from 1200px) the status follows the label, where
+            the other tools put their counts. With nothing to show the slot
+            goes and its width comes back as even padding, so the button
+            keeps one width and the label stays centred. */}
+        {!quietTrigger && (
+          <span className="browser-trigger-badge is-inline" aria-hidden="true">
+            {triggerState === "needs-you" ? "!" : ""}
+          </span>
+        )}
       </button>
       {shown &&
         createPortal(
@@ -630,6 +703,10 @@ export function BrowserPeek(props: {
                   onSubmit={(event) => {
                     event.preventDefault();
                     if (!address.trim()) return;
+                    sentAddress.current = {
+                      tabId: active?.id,
+                      from: currentAddress,
+                    };
                     void command({ type: "navigate", url: address });
                     addressRef.current?.blur();
                   }}
@@ -733,6 +810,25 @@ export function BrowserPeek(props: {
                           }}
                         >
                           <RotateCw size={14} /> Retry site verification
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={blank}
+                          title="If verification keeps repeating, open the displayed address in your usual browser and apply by hand. Sign-ins and verification do not transfer back to Nestor."
+                          onClick={() => {
+                            setMenuOpen(false);
+                            void command({ type: "open_in_browser" }).then(
+                              (opened) => {
+                                if (opened)
+                                  setMessage(
+                                    "Continue in your usual browser and apply by hand. Its sign-in and verification do not transfer back to Nestor. Nestor cannot observe or continue work in that browser.",
+                                  );
+                              },
+                            );
+                          }}
+                        >
+                          <ArrowUpRight size={14} /> Open in my browser
                         </button>
                         <button
                           type="button"
@@ -846,10 +942,12 @@ export function BrowserPeek(props: {
                           void command({ type: "select_tab", tabId: tab.id })
                         }
                       >
+                        {/* The site's own icon (14px), or a readable
+                            neutral globe, not an 11px grey dot. */}
                         {tab.loading ? (
-                          <LoaderCircle size={11} className="browser-spin" />
+                          <LoaderCircle size={14} className="browser-spin" />
                         ) : (
-                          <Globe2 size={11} />
+                          <SiteIcon url={tab.url} />
                         )}
                         <span>{tab.title}</span>
                       </button>
@@ -960,6 +1058,26 @@ export function BrowserPeek(props: {
                 ref={viewportRef}
                 className={`browser-page-viewport ${blank ? "is-blank" : ""} ${pageHidden && !blank ? "is-covered" : ""}`}
               >
+                {firstLoad && !pageHidden ? (
+                  <div
+                    aria-live="polite"
+                    className="browser-page-loading"
+                    data-browser-page-loading
+                    role="status"
+                  >
+                    <span className="browser-page-loading-host">
+                      <LoaderCircle size={14} className="browser-spin" />
+                      Loading {pageHost || "the page"}…
+                    </span>
+                    <span aria-hidden className="skeleton w-2/5" />
+                    <span aria-hidden className="skeleton w-11/12" />
+                    <span aria-hidden className="skeleton w-4/5" />
+                    <span aria-hidden className="skeleton w-3/5" />
+                    <span aria-hidden className="skeleton mt-4 w-1/3" />
+                    <span aria-hidden className="skeleton w-10/12" />
+                    <span aria-hidden className="skeleton w-9/12" />
+                  </div>
+                ) : null}
                 {pageHidden && !blank && snapshot && (
                   <img
                     className="browser-page-snapshot"
@@ -979,7 +1097,7 @@ export function BrowserPeek(props: {
                 {blank && !importPanel && !passwordPanel && (
                   <div className="browser-welcome">
                     <div className="browser-welcome-icon">
-                      <BrowserGlyph size={30} />
+                      <BrowserGlyph size={24} />
                     </div>
                     <h2>Your browser, right here.</h2>
                     <p>
@@ -992,7 +1110,7 @@ export function BrowserPeek(props: {
                         className="browser-welcome-go"
                         onClick={() => addressRef.current?.focus()}
                       >
-                        Open a website <ArrowUpRight size={15} />
+                        Open a website
                       </button>
                       {importable.length > 0 && (
                         <button

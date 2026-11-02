@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { formatDateTime } from "@renderer/features/job-finder/lib/format-date";
 import type {
   EditableSourceInstructionArtifact,
   JobSite,
@@ -182,7 +183,7 @@ export function ProfileDiscoveryTargetRow(
         <p className="break-all text-sm text-foreground-soft">{site.url}</p>
         <p className="text-xs text-foreground-muted">
           {site.lastSearchedAt
-            ? `Last searched ${new Date(site.lastSearchedAt).toLocaleString()}`
+            ? `Last searched ${formatDateTime(site.lastSearchedAt)}`
             : "Not searched yet"}
         </p>
         <div className="flex flex-wrap gap-2">
@@ -212,6 +213,7 @@ export function ProfileDiscoveryTargetRow(
                   showToast({
                     title: "Site removed",
                     description: "Its saved jobs stay in your list.",
+                    tone: "success",
                   });
                 })
                 .catch((reason: unknown) =>

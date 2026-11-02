@@ -4,22 +4,34 @@ import { Button } from "@renderer/components/ui/button";
 import { Input } from "@renderer/components/ui/input";
 import { useToast } from "@renderer/components/ui/toast";
 import {
+  EmptyPane,
   ListDetailLayout,
   ListPane,
   ListRowFrame,
   NO_SELECTION,
+  clearSelected,
   countSelected,
-  selectAll,
+  stepSelectAll,
   toggleSelection,
+  useListKeys,
   type ListSelection,
 } from "@renderer/features/job-lists";
 import { useSitePage } from "@renderer/features/job-lists/use-site-page";
 import { useSiteDetail } from "@renderer/features/job-lists/use-site-detail";
 import { AddSites } from "@renderer/features/job-lists/add-sites";
+import { ListEmpty } from "@renderer/features/job-lists/list-empty";
+
+/** A source's health in a sentence-case word or two. */
+function describeHealth(health: string): string {
+  if (health === "unknown") return "Not searched yet";
+  const words = health.replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 import {
   ProfileDiscoveryTargetRow,
   type SiteDebugActions,
 } from "./profile-discovery-target-row";
+import { SiteIcon } from "../site-icon";
 
 export function ProfileJobSourcesTab(
   props: SiteDebugActions & {
@@ -37,7 +49,7 @@ export function ProfileJobSourcesTab(
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const { site, error: detailError } = useSiteDetail(activeId);
   useEffect(() => {
-    setSelection(NO_SELECTION);
+    setSelection(clearSelected);
     setActiveId(null);
   }, [text, filter]);
   useEffect(() => {
@@ -45,7 +57,25 @@ export function ProfileJobSourcesTab(
       setActiveId(list.rows[0]?.id ?? null);
   }, [activeId, list.loading, list.rows]);
   const selectedCount = countSelected(selection, list.total);
+  const [changing, setChanging] = useState<boolean | null>(null);
+  useListKeys({
+    rows: list.rows,
+    activeId,
+    setActiveId,
+    toggle: (id, shift) =>
+      setSelection((current) => toggleSelection(current, id, shift, list.rows)),
+    selectAll: () =>
+      setSelection((current) =>
+        stepSelectAll(
+          current,
+          list.rows,
+          list.nextCursor === null && list.rows.length >= list.total,
+        ),
+      ),
+    clearSelection: () => setSelection(NO_SELECTION),
+  });
   const setEnabled = async (enabled: boolean) => {
+    setChanging(enabled);
     try {
       const result = await window.nestor.jobs.run("set_sites_enabled", {
         text,
@@ -57,7 +87,8 @@ export function ProfileJobSourcesTab(
       });
       setSelection(NO_SELECTION);
       showToast({
-        title: `Turned ${enabled ? "on" : "off"} ${result.changed} site${result.changed === 1 ? "" : "s"}`,
+        title: `Turned ${enabled ? "on" : "off"} ${result.changed.toLocaleString()} site${result.changed === 1 ? "" : "s"}`,
+        tone: "success",
       });
     } catch (reason) {
       showToast({
@@ -65,10 +96,15 @@ export function ProfileJobSourcesTab(
           reason instanceof Error ? reason.message : "Could not update sites.",
         tone: "warning",
       });
+    } finally {
+      setChanging(null);
     }
   };
   return (
-    <section className="grid gap-4" aria-label="Job sources">
+    <section
+      className="grid grid-cols-[minmax(0,1fr)] gap-4"
+      aria-label="Job sites"
+    >
       <AddSites
         onAdded={(id) => {
           setActiveId(id);
@@ -81,7 +117,7 @@ export function ProfileJobSourcesTab(
         <ListDetailLayout
           list={
             <ListPane
-              label="Job sources"
+              label="Job sites"
               noun="site"
               rows={list.rows}
               total={list.total}
@@ -92,20 +128,20 @@ export function ProfileJobSourcesTab(
               activeId={activeId}
               selection={selection}
               selectedCount={selectedCount}
-              onSelectAll={() => setSelection(selectAll())}
-              onClearSelection={() => setSelection(NO_SELECTION)}
+              onSelectionChange={setSelection}
               toolbar={
                 <>
                   <Input
-                    aria-label="Find a source"
-                    placeholder="Find a source"
+                    aria-label="Find a site"
+                    className="min-w-0 flex-1"
+                    placeholder="Find a site"
                     size="toolbar"
                     value={text}
                     onChange={(event) => setText(event.target.value)}
                   />
                   <select
-                    aria-label="Source filter"
-                    className="h-8 rounded border bg-transparent px-2 text-xs"
+                    aria-label="Site filter"
+                    className="h-8 rounded-(--radius-button) border border-(--control-border) bg-transparent px-2 text-(length:--text-small)"
                     value={filter}
                     onChange={(event) =>
                       setFilter(event.target.value as typeof filter)
@@ -121,8 +157,10 @@ export function ProfileJobSourcesTab(
               bulkActions={
                 <>
                   <Button
-                    size="sm"
-                    variant="outline"
+                    aria-label={`Turn on ${selectedCount.toLocaleString()} selected`}
+                    disabled={changing !== null}
+                    pending={changing === true}
+                    size="toolbar"
                     onClick={() => {
                       void setEnabled(true);
                     }}
@@ -130,7 +168,10 @@ export function ProfileJobSourcesTab(
                     Turn on
                   </Button>
                   <Button
-                    size="sm"
+                    aria-label={`Turn off ${selectedCount.toLocaleString()} selected`}
+                    disabled={changing !== null}
+                    pending={changing === false}
+                    size="toolbar"
                     variant="outline"
                     onClick={() => {
                       void setEnabled(false);
@@ -145,12 +186,10 @@ export function ProfileJobSourcesTab(
                   {...state}
                   id={row.id}
                   title={row.label}
+                  titleLead={<SiteIcon url={row.url} />}
                   meta={row.url}
-                  status={
-                    row.health === "unknown"
-                      ? "Not searched yet"
-                      : row.health.replaceAll("_", " ")
-                  }
+                  status={describeHealth(row.health)}
+                  nameParts={{ badge: row.enabled ? "On" : "Off" }}
                   badge={
                     <span className="text-xs">
                       {row.enabled ? "On" : "Off"}
@@ -165,11 +204,28 @@ export function ProfileJobSourcesTab(
                 />
               )}
               empty={
-                <p>
-                  {text
-                    ? "No sources match that search."
-                    : "Add the job sites you use, and searches look at them."}
-                </p>
+                text ? (
+                  <ListEmpty
+                    action={{
+                      label: "Clear filter",
+                      onClick: () => setText(""),
+                    }}
+                    title={`No site matches “${text.trim()}”`}
+                  />
+                ) : filter !== "all" ? (
+                  <ListEmpty
+                    action={{
+                      label: "Show all sites",
+                      onClick: () => setFilter("all"),
+                    }}
+                    title="No site fits this filter"
+                  />
+                ) : (
+                  <ListEmpty
+                    detail="Searches look at the job sites you add above."
+                    title="No job sites yet"
+                  />
+                )
               }
             />
           }
@@ -193,19 +249,16 @@ export function ProfileJobSourcesTab(
                 }
               />
             ) : (
-              <section
-                aria-label="Site details"
-                className="surface-panel-shell grid place-items-center rounded-(--radius-panel) border p-6 text-sm text-foreground-muted"
-              >
+              <EmptyPane label="Site details">
                 Pick a site to see it here.
-              </section>
+              </EmptyPane>
             )
           }
         />
       </div>
       {list.total > 25 ? (
         <nav
-          aria-label="Source pages"
+          aria-label="Site pages"
           className="flex items-center justify-between gap-3"
         >
           <Button
@@ -217,7 +270,7 @@ export function ProfileJobSourcesTab(
               list.previous();
             }}
           >
-            Previous sources
+            Previous sites
           </Button>
           <span className="text-sm">
             {list.pageIndex * 25 + 1}–{list.pageIndex * 25 + list.rows.length}{" "}
@@ -232,7 +285,7 @@ export function ProfileJobSourcesTab(
               list.next();
             }}
           >
-            Next sources
+            Next sites
           </Button>
         </nav>
       ) : null}

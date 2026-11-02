@@ -81,6 +81,8 @@ export interface RawApplyUpload {
     endpoint: string;
     status: number | null;
     blocked: boolean;
+    /** Safe guard stage only; never body, answers, local paths or digests. */
+    guardRefusal?: string;
   }[];
 }
 
@@ -200,10 +202,16 @@ export interface RawApplyPage {
   pageMessages?: RawApplyPageMessage[];
   /**
    * When the page's send was last pressed while sends were let through (the
-   * person's own window, or the run's one authorized click): the page's form
-   * holding the prepared answers was submitted, or its send button clicked.
+   * person's own window, or the run's one authorized click): trusted input
+   * pressed a final application control, excluding sign-in and wizard steps.
    */
   sendPressedAt?: string;
+  /** Short receipt statements already present before that exact final press. */
+  sendConfirmationBefore?: string[];
+  /** Origin of the exact document whose final control the person pressed. */
+  sendOrigin?: string;
+  /** Visible receipt statements from the exact document, before body-text truncation. */
+  submissionConfirmationMessages?: string[];
 }
 
 export interface RawApplyPageMessage {
@@ -387,10 +395,11 @@ export interface ApplyRequestPermit {
   /** The exact file the runtime put in the file input. */
   file: { field: string | null; name: string; size: number; sha256: string };
   /**
-   * "file": this request carries the file. "presign": it asks for somewhere
-   * to put it, and attaches nothing by itself.
+   * "file": this request stores the file. "scan": it carries the file for
+   * inspection before storage. "presign": it asks for somewhere to put it.
+   * Neither a scan nor a presign confirms an attachment by itself.
    */
-  uploadLeg: "file" | "presign";
+  uploadLeg: "file" | "scan" | "presign";
 }
 
 export interface ApplyPageSession extends ApplyRawPageHands {

@@ -236,6 +236,50 @@ test("browser permissions start off, save one at a time and survive reader recre
   ).toEqual(off);
 });
 
+test.each([
+  "solveCaptchas",
+  "signIn",
+  "googleSignIn",
+  "createAccounts",
+] as const)(
+  "an upgraded workspace can save %s from its default without losing conflict protection",
+  (permission) => {
+    const { store, preferences } = setup();
+    store
+      .sql(
+        "UPDATE profile_settings SET ai_behavior_browser_permissions_solve_captchas=NULL,ai_behavior_browser_permissions_sign_in=NULL,ai_behavior_browser_permissions_google_sign_in=NULL,ai_behavior_browser_permissions_create_accounts=NULL",
+      )
+      .run();
+    const field = `aiBehavior.browserPermissions.${permission}` as const;
+    const before = preferences.settings.read().aiBehavior!.browserPermissions;
+    expect(before[permission]).toBe(false);
+    preferences.settings.patch({
+      fields: { [field]: true },
+      expected: { [field]: before[permission] },
+    });
+    expect(
+      createPreferencesStore(store).settings.read().aiBehavior
+        ?.browserPermissions,
+    ).toEqual({
+      ...before,
+      [permission]: true,
+    });
+    expect(() =>
+      preferences.settings.patch({
+        fields: { [field]: false },
+        expected: { [field]: false },
+      }),
+    ).toThrow(/changed while you were editing/);
+    preferences.settings.patch({
+      fields: { [field]: false },
+      expected: { [field]: true },
+    });
+    expect(preferences.settings.read().aiBehavior?.browserPermissions).toEqual(
+      before,
+    );
+  },
+);
+
 test("goals retain all constraints and reject an invalid partial range atomically", () => {
   const { preferences } = setup();
   preferences.goals.patch({

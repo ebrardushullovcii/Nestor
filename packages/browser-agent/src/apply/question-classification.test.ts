@@ -161,12 +161,14 @@ test.each([
   },
 );
 
-test("one failed smaller read leaves only its questions unread while the other fields retain their sources", async () => {
+test("a stalled smaller read gets one more split read, so its known fields keep their sources", async () => {
+  // The recorded Amplemarket failure: the whole-page read and one of the
+  // three smaller reads came back with nothing before their timeout.
   let calls = 0;
   const client: LLMClient = {
     chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
       calls += 1;
-      if (calls <= 2) return Promise.resolve({ content: "", toolCalls: [] });
+      if (calls <= 2) return Promise.reject(new Error("timeout"));
       return Promise.resolve(
         reportFor(JSON.parse(messages[1].content) as { question: string }[]),
       );
@@ -182,13 +184,46 @@ test("one failed smaller read leaves only its questions unread while the other f
     })),
   });
   expect(
+    vi
+      .mocked(client.chatWithTools)
+      .mock.calls.map(
+        (call) => (JSON.parse(call[0][1].content) as unknown[]).length,
+      ),
+  ).toEqual([11, 4, 4, 3, 1, 1, 1, 1]);
+  for (const [prompt, sourceId] of formQuestions) {
+    expect(result.get(prompt)?.readFailed).toBeUndefined();
+    expect(result.get(prompt)).toMatchObject({ answerTags: { sourceId } });
+  }
+});
+
+test("a question that fails every read stays unread while the other fields retain their sources", async () => {
+  const client: LLMClient = {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
+      const prompts = JSON.parse(messages[1].content) as {
+        question: string;
+      }[];
+      if (prompts.some((prompt) => prompt.question === "First Name"))
+        return Promise.resolve({ content: "", toolCalls: [] });
+      return Promise.resolve(reportFor(prompts));
+    }),
+  };
+  const result = await classifyApplicationQuestions({
+    client,
+    sources: [],
+    questions: formQuestions.map(([prompt]) => ({
+      prompt,
+      kind: "text",
+      options: [],
+    })),
+  });
+  expect(
     [...result]
       .filter(([, reading]) => reading.readFailed)
       .map(([prompt]) => prompt),
-  ).toEqual(formQuestions.slice(0, 4).map(([prompt]) => prompt));
-  for (const [prompt, sourceId] of formQuestions.slice(4))
+  ).toEqual(["First Name"]);
+  for (const [prompt, sourceId] of formQuestions.slice(1))
     expect(result.get(prompt)).toMatchObject({ answerTags: { sourceId } });
-  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(8);
 });
 
 function clientReplying(questions: unknown): LLMClient {
@@ -371,12 +406,12 @@ test("retries a failed classification once before returning the reading", async 
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
 
-test("caches an incomplete page as a handover after exactly one retry", async () => {
+test("caches an incomplete page as a handover after exactly two retries", async () => {
   const client = clientReplying([]);
   const classify = createQuestionClassifier({ client });
   expect((await classify(controls())).get("Pay")?.readFailed).toBe(true);
   expect((await classify(controls())).get("Pay")?.answerTags).toBeNull();
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
 });
 
 test("a truncated report can recover on its single larger retry", async () => {
@@ -517,7 +552,7 @@ test("an unread remainder is handed over without discarding a read question", as
     readFailed: true,
     answerTags: null,
   });
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
 });
 
 test("filled data and chosen options do not reread the page, but new instructions do", async () => {
@@ -768,7 +803,7 @@ test("incomplete, failed and cancelled reads never become reusable model decisio
       controls(),
     ),
   ).rejects.toThrow("Stopped");
-  expect(client.chatWithTools).toHaveBeenCalledTimes(6);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(8);
 });
 
 test("bounds shared question reads and reads an evicted page with the model again", async () => {

@@ -215,7 +215,9 @@ const desktopApi = {
   tracker: createTrackerBridge(nativeIpcRenderer),
   home: createHomeBridge(nativeIpcRenderer),
   activity: createActivityBridge(nativeIpcRenderer),
-  profileWorkflow: createProfileWorkflowBridge(nativeIpcRenderer),
+  profileWorkflow: createProfileWorkflowBridge(nativeIpcRenderer, (file) =>
+    webUtils.getPathForFile(file),
+  ),
   ping: () => ipcRenderer.invoke("system:ping") as Promise<DesktopPlatformPing>,
   firstScreenShown: () => ipcRenderer.send("system:first-screen-shown"),
   launchContext: () =>

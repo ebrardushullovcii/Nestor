@@ -14,17 +14,15 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import {
   BellRing,
-  Menu,
   ClipboardCheck,
   Compass,
   FileText,
   House,
   Keyboard,
-  Layers3,
   Minus,
+  PanelLeft,
   Search,
   Settings,
   Square,
@@ -69,20 +67,22 @@ import {
 import type { JobFinderGlobalSearchEntry } from "../lib/job-finder-global-search";
 import {
   formatJobFinderShortcutCombo,
+  getJobFinderShortcutKeycaps,
   getJobFinderAriaKeyshortcuts,
 } from "../lib/job-finder-shortcuts";
-import { isImeComposingEvent } from "../lib/job-finder-shortcuts";
-import { useJobFinderOverlayOwnership } from "../lib/job-finder-overlay-ownership";
 import { useJobFinderShellShortcuts } from "../lib/use-job-finder-shell-shortcuts";
 import { useHistoryNavigationShortcuts } from "../lib/use-history-navigation-shortcuts";
 import { getDefaultProfileRoute } from "../lib/job-finder-utils";
 import { JobFinderShellBrand } from "./job-finder-shell-brand";
+import { installScrollActivity } from "@renderer/lib/scroll-activity";
 import {
-  BoundedFloatingSurfaceScrollHint,
-  boundedFloatingSurfaceStyle,
-  useBoundedFloatingSurface,
-  useBoundedFloatingSurfaceScrollState,
-} from "./bounded-floating-surface";
+  HEADER_TOOL_ACTIVE_CLASS,
+  HEADER_TOOL_CLASS,
+  HEADER_TOOL_COUNTED_LABEL_CLASS,
+  HEADER_TOOL_ICON_CLASS,
+  HEADER_TOOL_LABEL_CLASS,
+} from "./header-tool";
+import { HeaderToolCount } from "./header-tool-count";
 import {
   JOB_FINDER_SHORTCUTS_DIALOG_LABEL,
   JobFinderShortcutsDialog,
@@ -133,10 +133,6 @@ export const LOCKED_LAYOUT_SCREENS: readonly JobFinderScreen[] = [
   "actions",
 ];
 
-// The More menu's own preferred width, and the height it needs for seven
-// destinations plus their group labels and the shortcuts entry. Supplying the
-// desired height keeps the menu below its trigger whenever it genuinely fits
-// there and only flips it upward when it does not.
 // The main window is frameless on Windows (`frame: !(isMac || isWindows)` in
 // main/setup/window-shell.ts) and this header paints its own caption buttons,
 // so there is no Window Controls Overlay and no `env(titlebar-area-*)` to read.
@@ -146,28 +142,33 @@ const WINDOWS_CAPTION_CONTROLS_INSET = "8.5rem";
 // macOS uses `titleBarStyle: "hiddenInset"`, so the native traffic lights are
 // painted over the left edge of this header outside native fullscreen.
 const MACOS_TRAFFIC_LIGHT_INSET = "5.5rem";
-const MORE_MENU_WIDTH_PX = 264;
-const MORE_MENU_DESIRED_HEIGHT_PX = 440;
+/**
+ * Below this window width the sidebar is always the icon rail: one navigation
+ * model at every width, never a strip of top tabs.
+ */
+export const SIDEBAR_RAIL_MAX_WIDTH_PX = 1199;
+const SIDEBAR_EXPANDED_WIDTH = "13.5rem";
+const SIDEBAR_RAIL_WIDTH = "3.75rem";
 
-interface CompactRouteScrollEdges {
-  end: boolean;
-  start: boolean;
+function useIsNarrowWindow(): boolean {
+  const query = `(max-width: ${SIDEBAR_RAIL_MAX_WIDTH_PX}px)`;
+  const [narrow, setNarrow] = useState(() => {
+    try {
+      return window.matchMedia?.(query).matches ?? false;
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    const list = window.matchMedia?.(query);
+    if (!list) return undefined;
+    const update = () => setNarrow(list.matches);
+    update();
+    list.addEventListener?.("change", update);
+    return () => list.removeEventListener?.("change", update);
+  }, [query]);
+  return narrow;
 }
-
-function readCompactRouteScrollEdges(
-  element: HTMLDivElement,
-): CompactRouteScrollEdges {
-  const maxScrollLeft = element.scrollWidth - element.clientWidth;
-  return {
-    start: element.scrollLeft > 1,
-    end: element.scrollLeft < maxScrollLeft - 1,
-  };
-}
-
-const NO_ROUTE_SCROLL_EDGES: CompactRouteScrollEdges = {
-  end: false,
-  start: false,
-};
 
 export const SIDEBAR_COLLAPSED_STORAGE_KEY =
   "nestor.job-finder.sidebar-collapsed.v1";
@@ -183,106 +184,62 @@ export const SIDEBAR_COLLAPSED_STORAGE_KEY =
 type ScreenCountKind = "attention" | "inventory";
 
 /**
- * The shell's own layout for a destination count, on top of the shared
- * `<Count variant="inline">` shape: pushed to the row's trailing edge, and
- * `text-current` so the figure follows the active row's colour instead of
- * sitting at the primitive's resting muted tone.
- *
- * The shape itself is no longer restated here. The expanded sidebar (>=1440)
- * and the compact top navigation (<1440) used to paint two shapes for the same
- * number — a plain "13" and a filled pill "13", one breakpoint apart; both now
- * render the one `<Count>` primitive, so they cannot drift again.
+ * A destination count sits in a fixed-width right column of its row, in
+ * tabular figures, so a count changing from 9 to 10 or appearing at all never
+ * moves the label. It follows the row's colour (muted at rest).
  */
-export const DESTINATION_COUNT_INLINE_LAYOUT_CLASS = "mr-1 ml-auto shrink-0";
+export const DESTINATION_COUNT_INLINE_LAYOUT_CLASS =
+  "ml-auto w-9 shrink-0 justify-end text-current";
 /**
- * The attention state, and the one destination count `<Count>` cannot own: the
- * qualifying noun has to render visibly beside the figure ("2 to review", "1
- * blocked"), because a bare number in this position reads as inventory — and
- * `Count` deliberately takes no children. It is a filled marker so a sighted
- * reader can tell "work waiting on you" from inventory before reading the noun.
+ * The attention state (Needs you): the same slot, in the warning colours, so
+ * "work waiting on you" is told apart from inventory before reading.
  */
 export const DESTINATION_COUNT_ATTENTION_CLASS =
-  "mr-1 ml-auto inline-flex h-5 shrink-0 items-center justify-center gap-1 rounded-full bg-primary-fill px-1.5 text-(length:--text-tiny) font-semibold text-primary-fill-foreground tabular-nums";
+  "ml-auto inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-(--warning-surface) px-1.5 text-xs font-medium text-(--warning-text) tabular-nums";
 /**
- * The collapsed rail has no room for an inline number or a noun, so every
- * count moves to the shared `<Count variant="rail-marker">` corner marker —
- * still one treatment, a different state. It is anchored to the icon, not
- * the row, and lifted to the icon's top-right corner so it overlaps only the
- * corner of the glyph the way a badge does. The accessible name still
- * carries the qualifier.
+ * On the icon rail every count moves to its own line under the icon, inside
+ * the 44px item: two and three digits and "999+" fit without touching the
+ * glyph or being cut by the rail's edge.
  */
-export const DESTINATION_COUNT_RAIL_MARKER_LAYOUT_CLASS =
-  // Anchored by its left edge at the icon's right side so a wide "99+" grows
-  // into the free rail instead of back over the glyph; anchored on the right
-  // it covered the top of the Find jobs and Shortlisted icons.
-  "absolute -top-2 left-[calc(100%-0.625rem)] shrink-0";
+export const DESTINATION_COUNT_RAIL_MARKER_LAYOUT_CLASS = "shrink-0";
 
 /* ------------------------------------------------------------------------ *
  * Shell chrome.
  *
- * The opening frame in `pages/job-finder-page.tsx` paints the same header,
- * rail and route wrapper before the loaded shell mounts. It used to hold
- * seventeen hand-copied class strings kept honest only by a parity test, so a
- * drift on either side was a first-paint jump waiting for someone to update
- * one copy. The chrome is exported here instead: both shells now read the same
- * strings and the parity is structural.
+ * One navigation model at every width: a 48px header row and a left sidebar
+ * that is a 216px list of one-line destinations, or a 60px icon rail below
+ * 1200px and while the assistant is docked. There is no top-tab strip.
  * ------------------------------------------------------------------------ */
 
-/**
- * Sticky shell edges use the shared panel border. `border-border/15` was a
- * one-off dilution that rendered the header seam and the rail edge below the
- * 3:1 non-text floor in both themes.
- */
 export const SHELL_HEADER_CLASS =
-  "relative z-50 shrink-0 overflow-visible border-b border-(--surface-panel-shell-border) bg-(--shell-header-bg) backdrop-blur-sm sm:fixed sm:inset-x-0 sm:top-0 xl:h-14";
+  "@container/shell-header relative z-50 h-12 shrink-0 overflow-visible border-b border-(--border-subtle) bg-(--shell-header-bg) sm:fixed sm:inset-x-0 sm:top-0";
 export const SHELL_HEADER_GRID_CLASS =
-  "job-finder-shell-grid grid grid-rows-[3.5rem_auto_auto] items-stretch overflow-visible pl-2 pr-2 sm:grid-rows-[3.5rem_3.75rem] sm:pl-3 sm:pr-3 xl:grid-rows-[3.5rem]";
-/**
- * The module switcher is the subtitle of the brand lockup in the header
- * (`JobFinderShellBrand`), so there is exactly one instance at every width and
- * the sidebar, the compact destination card and the collapsed rail carry none.
- */
-export const SHELL_BRAND_ROW_CLASS = cn(
-  "col-start-1 row-start-1 grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6",
-  // At the wide layout column 1 is the 17rem sidebar column, and it narrows to
-  // 4rem when the rail collapses. The wordmark does not fit there, and it
-  // wrapped onto a second line that spilled out of the 3.5rem header and under
-  // the page title. The brand row therefore spans the sidebar column and the
-  // content column (col-end-3, never the col-span shorthand, which would reset
-  // col-start) so the lockup stays on one line in the top bar.
-  "min-[1440px]:col-end-3",
-);
+  "job-finder-shell-grid grid h-12 grid-rows-[3rem] items-center overflow-visible pl-2 pr-2 sm:pl-3 sm:pr-3";
+export const SHELL_BRAND_ROW_CLASS =
+  "col-start-1 row-start-1 flex h-12 min-w-0 items-center";
 export const SHELL_SIDEBAR_CLASS =
-  "fixed bottom-0 left-0 top-14 z-40 hidden w-(--job-finder-side-width) overflow-hidden border-r border-(--surface-panel-shell-border) bg-(--shell-header-bg) min-[1440px]:block";
+  "fixed bottom-0 left-0 top-12 z-40 hidden w-(--job-finder-side-width) overflow-hidden border-r border-(--border-subtle) bg-(--sidebar-bg) transition-[width] duration-(--duration-base) ease-(--ease-standard) sm:block";
+/** One-line 36px destination: icon, label, right-aligned count. */
 export const SHELL_SIDEBAR_ROW_CLASS =
-  "job-finder-sidebar-row inline-flex min-h-9 w-full min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-(--radius-button) border-l-2 border-transparent px-2 py-1.5 text-left text-sm font-medium text-muted-foreground outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/40";
+  "job-finder-sidebar-row relative inline-flex h-9 w-full min-w-0 max-w-full items-center gap-2.5 overflow-hidden rounded-(--radius-button) px-2.5 text-left text-sm font-normal text-foreground-soft outline-none transition-colors duration-(--duration-fast) focus-ring";
+/**
+ * A rail item: the icon at a fixed height and a line under it for a count,
+ * so every icon on the rail sits at the same place whether or not its
+ * destination has a count.
+ */
 export const SHELL_SIDEBAR_ROW_COLLAPSED_CLASS =
-  "relative min-h-10 justify-center border-l-0 px-0 text-center";
+  "h-11 flex-col justify-start gap-0.5 px-0 pt-2 text-center";
 // The keyboard-shortcuts reference is one small square beside Settings at the
-// foot of the rail, not a destination row: it opens a dialog, so it gets a
-// row's hover and focus treatment in a 36px box rather than a full-width line.
+// foot of the sidebar: it opens a dialog, so it is not a destination row.
 export const SHELL_SIDEBAR_SHORTCUTS_BUTTON_CLASS =
-  "inline-flex size-9 shrink-0 items-center justify-center rounded-(--radius-button) border-l-2 border-transparent text-muted-foreground outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/40";
-// Hover styling is scoped to inactive rows so it cannot wash the selected fill
-// back out. In the light theme a solid hover fill read as a second selection,
-// so hover is a translucent wash plus a border tick: exactly one row is ever
-// filled.
+  "inline-flex size-9 shrink-0 items-center justify-center rounded-(--radius-button) text-foreground-soft outline-none transition-colors duration-(--duration-fast) focus-ring";
 export const SHELL_SIDEBAR_ROW_INACTIVE_CLASS =
-  "hover:border-l-(--border-strong) hover:bg-secondary/50 hover:text-foreground";
-// The selected destination needs a fill the eye separates from the rail, not a
-// 2px bar over a near-identical tint: --nav-active-surface stays >=3:1
-// non-text against --shell-header-bg in both themes, and the bolder label plus
-// the accent bar keep the state legible without relying on colour.
+  "hover:bg-accent hover:text-foreground active:bg-pressed";
+// The selected destination: accent tint, a 2px accent bar on the leading
+// edge (drawn inside the box, so nothing moves), medium weight, accent icon.
+// Identical in both themes.
 export const SHELL_SIDEBAR_ROW_ACTIVE_CLASS =
-  "border-l-(--nav-active-bar) bg-(--nav-active-surface) font-semibold text-(--nav-active-foreground)";
-
-const sidebarDescriptions: Partial<Record<string, string>> = {
-  Home: "Your next step",
-  Profile: "Experience & documents",
-  "Find jobs": "Discover opportunities",
-  Shortlisted: "Review & prepare",
-  Applications: "Track your progress",
-};
+  "selected-bar bg-(--nav-active-surface) font-medium text-(--nav-active-foreground) [&>svg]:text-primary [&>span>svg]:text-primary";
 
 export function SidebarDestinationLabel({
   label,
@@ -291,61 +248,31 @@ export function SidebarDestinationLabel({
   label: string;
   collapsed: boolean;
 }) {
-  const description = sidebarDescriptions[label];
   return (
-    <span className={cn("min-w-0 truncate", collapsed && "sr-only")}>
-      <span className="block truncate">{label}</span>
-      {!collapsed && description ? (
-        <span aria-hidden="true" className="job-finder-sidebar-description">
-          {description}
-        </span>
-      ) : null}
+    <span className={cn("min-w-0 flex-1 truncate", collapsed && "sr-only")}>
+      {label}
     </span>
   );
 }
 export const SHELL_ROOT_CLASS =
   "flex h-dvh min-h-0 flex-col overflow-hidden text-foreground";
 export const SHELL_CONTENT_CLASS =
-  "flex min-h-0 min-w-0 flex-1 flex-col sm:pt-[7.25rem] xl:pt-14 min-[1440px]:pl-(--job-finder-side-width)";
+  "flex min-h-0 min-w-0 flex-1 flex-col transition-[padding] duration-(--duration-base) ease-(--ease-standard) sm:pt-12 sm:pl-(--job-finder-side-width)";
 export const SHELL_MAIN_SCROLLING_CLASS = cn(
   "relative min-h-0 min-w-0 flex-1 overflow-x-hidden outline-none",
-  "screen-scroll-area overflow-y-auto px-3 min-[1440px]:px-4",
+  "screen-scroll-area overflow-y-auto px-4 [scrollbar-gutter:stable]",
   SHELL_SCROLLING_ROUTE_TOP_GUTTER_CLASS,
   SHELL_SCROLLING_ROUTE_BOTTOM_GUTTER_CLASS,
 );
 export const SHELL_MAIN_LOCKED_CLASS = cn(
   "relative min-h-0 min-w-0 flex-1 overflow-x-hidden outline-none",
-  // Important for the same reason the header reserves above: `sm:px-3` still
-  // matches at >=1440px and Tailwind v4 emits it after every arbitrary
-  // variant, so a plain `min-[1440px]:px-4` silently lost and the wide layout
-  // kept the 12px compact gutter. The scrolling branch needs no override: its
-  // narrow value is the unprefixed base, which always loses to a variant.
-  "overflow-hidden px-2 pb-3 pt-0 sm:px-3 min-[1440px]:!px-4",
+  "overflow-hidden px-3 pb-3 pt-0 sm:px-4",
 );
 export const SHELL_ROUTE_CONTAINER_BASE_CLASS =
   "mx-auto w-full max-w-472 min-w-0";
 /**
- * One pill class for every control in the compact top-navigation row,
- * including the `More` trigger.
- */
-export const COMPACT_NAV_PILL_CLASS =
-  "inline-flex h-9 min-h-9 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-(--radius-button) border-b-2 border-transparent px-2 py-2 text-(length:--text-small) font-medium text-muted-foreground transition-colors outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 sm:gap-2 sm:px-3";
-/**
- * The compact row used --accent, which sits at 1.16-1.27:1 on the nav bar and
- * cannot be told from a hovered neighbour. It now uses the same
- * --nav-active-surface treatment the sidebar adopted, plus a bar and a bolder
- * label so the state does not rest on colour alone.
- */
-export const COMPACT_NAV_PILL_ACTIVE_CLASS =
-  "border-b-(--nav-active-bar) bg-(--nav-active-surface) font-semibold text-(--nav-active-foreground)";
-/**
- * One vertical rhythm for every route root. Route roots used to pick their own
- * (`gap-5` Home, `gap-3` Documents and Settings, `gap-(--gap-content)`
- * Profile, `gap-4`/`gap-5` elsewhere) with no rule; the wrapper now declares
- * the token so every route root can spend the same value.
- *
- * TODO(PKG-02): promote this declaration into `:root` in `styles/globals.css`
- * beside `--gap-section` and drop the inline style.
+ * One vertical rhythm for every route root, declared by the wrapper so every
+ * route root spends the same value.
  */
 export const SHELL_ROUTE_SECTION_GAP_STYLE = {
   "--gap-route-section": "var(--gap-card)",
@@ -367,19 +294,18 @@ export function ScreenCountBadge({
   noun,
 }: ScreenCountBadgeProps) {
   if (kind === "attention" && !markerOnly) {
+    // The noun stays in the accessible name; the warning colours are what
+    // tell a sighted reader this number is work waiting on them.
     return (
-      <span className={DESTINATION_COUNT_ATTENTION_CLASS}>
-        {count}
-        {noun ? (
-          <span className="whitespace-nowrap font-medium">{noun}</span>
-        ) : null}
+      <span aria-hidden="true" className={DESTINATION_COUNT_ATTENTION_CLASS}>
+        {count.toLocaleString("en-US")}
+        {noun ? <span className="sr-only"> {noun}</span> : null}
       </span>
     );
   }
 
-  // Inventory, and every count on the collapsed rail: the shared primitive
-  // owns the shape, so the same number cannot change shape one breakpoint
-  // apart. It is announced through the row's own accessible name, never twice.
+  // Inventory, and every count on the rail: the shared primitive owns the
+  // shape. It is announced through the row's own accessible name, never twice.
   return (
     <Count
       aria-hidden="true"
@@ -389,7 +315,7 @@ export function ScreenCountBadge({
           : DESTINATION_COUNT_INLINE_LAYOUT_CLASS
       }
       value={count}
-      variant={markerOnly ? "rail-marker" : "pill"}
+      variant={markerOnly ? "rail-marker" : "inline"}
     />
   );
 }
@@ -401,8 +327,23 @@ function getScreenAccessibleName(
   noun?: string,
 ): string {
   return kind === "attention" && count !== null && count > 0
-    ? `${label}: ${count} ${noun ?? "need attention"}`
+    ? `${label}: ${count.toLocaleString()} ${noun ?? "need attention"}`
     : label;
+}
+
+/**
+ * A destination count in words, exact and with what it counts ("2 to
+ * review"): the row's accessible description and, with its label, its
+ * tooltip, so a count that covers part of a screen says which part and a
+ * rail figure shortened to "12.3k" has the exact number one hover away. The
+ * accessible name stays the destination's own name.
+ */
+function describeScreenCount(screen: {
+  count: number | null;
+  countNoun?: string | undefined;
+}): string | undefined {
+  if (screen.count === null || screen.count <= 0) return undefined;
+  return `${screen.count.toLocaleString()} ${screen.countNoun ?? ""}`.trimEnd();
 }
 
 export function getInitialSidebarCollapsedState(): boolean {
@@ -413,22 +354,6 @@ export function getInitialSidebarCollapsedState(): boolean {
   } catch {
     return false;
   }
-}
-
-function getFocusableElements(excludedRoot: HTMLElement | null): HTMLElement[] {
-  return Array.from(
-    document.querySelectorAll<HTMLElement>(
-      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
-    ),
-  ).filter((element) => {
-    if (excludedRoot?.contains(element)) {
-      return false;
-    }
-
-    return (
-      element.tabIndex >= 0 && element.getAttribute("aria-hidden") !== "true"
-    );
-  });
 }
 
 function getActiveScreen(pathname: string): JobFinderScreen {
@@ -526,44 +451,11 @@ export function JobFinderShell({
   });
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false);
   const [globalSearchFocusRequest, setGlobalSearchFocusRequest] = useState(0);
-  const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isShortcutsDialogOpen, setIsShortcutsDialogOpen] = useState(false);
-  const [focusedMoreMenuItemIndex, setFocusedMoreMenuItemIndex] = useState(0);
-  // Only compact top navigation uses More; the sidebar pins Settings below
-  // its primary destinations.
-  const moreButtonRef = useRef<HTMLButtonElement | null>(null);
-  const moreMenuRef = useRef<HTMLDivElement | null>(null);
-  const moreMenuScrollRef = useRef<HTMLDivElement | null>(null);
-  const moreMenuItemRefs = useRef<Array<HTMLElement | null>>([]);
-  const moreMenuInitialFocusRef = useRef<"first" | "last">("first");
-  const compactRouteScrollRef = useRef<HTMLDivElement | null>(null);
-  const compactMeasureRef = useRef<HTMLDivElement | null>(null);
-  const [compactVisibleCount, setCompactVisibleCount] = useState(5);
-  const [compactPreferredWidth, setCompactPreferredWidth] = useState<
-    number | null
-  >(null);
-  const [compactRouteScrollEdges, setCompactRouteScrollEdges] =
-    useState<CompactRouteScrollEdges>(NO_ROUTE_SCROLL_EDGES);
-  // The header actions sit over the compact navigation row below 1280px, and
-  // with their labels shown (1100px and up) they are wider than the fixed
-  // 20rem the row reserved, so the destinations ran under Search and
-  // Activity. The row reserves the group's measured width instead.
-  const headerActionsRef = useRef<HTMLDivElement | null>(null);
-  const [headerActionsWidth, setHeaderActionsWidth] = useState<number | null>(
-    null,
-  );
-  useLayoutEffect(() => {
-    const actions = headerActionsRef.current;
-    if (!actions) return undefined;
-    const measure = () => {
-      setHeaderActionsWidth(Math.ceil(actions.getBoundingClientRect().width));
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(measure);
-    observer.observe(actions);
-    return () => observer.disconnect();
-  }, []);
+  // Below 1200px the sidebar is always the rail; the person's own saved
+  // preference applies again once the window is wide enough.
+  const isNarrowWindow = useIsNarrowWindow();
+  const isRail = isSidebarCollapsed || isNarrowWindow;
   const activeScreen = useMemo(
     () => getActiveScreen(location.pathname),
     [location.pathname],
@@ -578,8 +470,14 @@ export function JobFinderShell({
     label: string;
     count: number | null;
     countKind: ScreenCountKind;
-    /** Attention destinations only: the noun rendered beside the number. */
+    /** What the count counts ("to review"): its description and tooltip. */
     countNoun?: string | undefined;
+    /**
+     * The count covers part of its screen (Shortlisted's To review tab,
+     * Applications' sent ones): the full sidebar shows the noun at rest
+     * ("2 to review"), so it never reads as the screen's whole total.
+     */
+    countScoped?: boolean;
     icon: LucideIcon;
   }
 
@@ -606,20 +504,28 @@ export function JobFinderShell({
         label: "Find jobs",
         count: toDestinationBadgeCount(stageCounts?.found ?? 0),
         countKind: "inventory",
+        countNoun: "found",
         icon: Compass,
       },
       {
         id: "review-queue",
         label: "Shortlisted",
+        // The screen's "To review" tab; approved resumes are its other tab.
         count: toDestinationBadgeCount(stageCounts?.shortlisted ?? 0),
         countKind: "inventory",
+        countNoun: "to review",
+        countScoped: true,
         icon: ClipboardCheck,
       },
       {
         id: "applications",
         label: "Applications",
+        // Sent applications; the screen's All also counts ones still
+        // being prepared.
         count: toDestinationBadgeCount(stageCounts?.applied ?? 0),
         countKind: "inventory",
+        countNoun: "sent",
+        countScoped: true,
         icon: FileText,
       },
       {
@@ -656,78 +562,9 @@ export function JobFinderShell({
       ),
     [screenDefinitions],
   );
-  const compactPrimaryScreens = primaryScreens.slice(0, compactVisibleCount);
-  const compactHiddenScreens = primaryScreens.slice(compactVisibleCount);
-  // Measured again only when the destinations change. A count changing its
-  // badge's width reaches the observer below; re-measuring on every
-  // workspace update forced a page layout after each Find jobs decision.
-  const primaryScreenKey = primaryScreens
-    .map((screen) => `${screen.id}:${screen.label}`)
-    .join("|");
-  useLayoutEffect(() => {
-    const scroll = compactRouteScrollRef.current;
-    const measurement = compactMeasureRef.current;
-    if (!scroll || !measurement) return undefined;
-    const measure = () => {
-      if (scroll.clientWidth <= 0) return;
-      const widths = Array.from(
-        measurement.children,
-        (child) => (child as HTMLElement).getBoundingClientRect().width,
-      );
-      const gap =
-        Number.parseFloat(getComputedStyle(measurement).columnGap) || 4;
-      setCompactPreferredWidth(
-        widths.reduce((sum, width) => sum + width, 0) +
-          gap * Math.max(0, widths.length - 1) +
-          (moreButtonRef.current?.getBoundingClientRect().width ?? 0) +
-          24,
-      );
-      let used = 0;
-      let count = 0;
-      for (const width of widths) {
-        used += width + (count > 0 ? gap : 0);
-        if (used > scroll.clientWidth - 8) break;
-        count += 1;
-      }
-      setCompactVisibleCount(Math.max(1, count));
-    };
-    measure();
-    if (typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(measure);
-    observer.observe(scroll);
-    observer.observe(measurement);
-    return () => observer.disconnect();
-  }, [primaryScreenKey]);
-  // Grouped by what each destination *is*, not by which part of the product
-  // introduced it. The person's own files live under Profile › Files now, so
-  // the workspace group is Settings alone.
-  // Order follows the declared id list rather than the order the definitions
-  // happen to be built in, so the menu's reading order is the one written here.
-  const selectMenuScreens = (ids: readonly JobFinderScreen[]) =>
-    ids.flatMap((id) => screenDefinitions.filter((screen) => screen.id === id));
-  const menuGroups = [
-    ...(compactHiddenScreens.length > 0
-      ? [{ label: "Your job search", screens: compactHiddenScreens }]
-      : []),
-    {
-      label: "Workspace",
-      screens: selectMenuScreens(["settings"]),
-    },
-  ];
-  const moreMenuItemCount = menuGroups.reduce(
-    (count, group) => count + group.screens.length,
-    0,
-  );
-  const moreMenuItemIndexes = new Map(
-    menuGroups
-      .flatMap((group) => group.screens)
-      .map((screen, index) => [screen.id, index] as const),
-  );
-  const hiddenAttentionCount = 0;
   // The sidebar's scrolling list is the journey alone. Settings is not a step
-  // of it, so it is pinned at the foot of the rail with the keyboard-shortcuts
-  // reference beside it, outside the scroll region. The compact top
-  // navigation, which genuinely has no room, keeps its More menu.
+  // of it, so it is pinned at the foot of the sidebar with the
+  // keyboard-shortcuts reference beside it, outside the scroll region.
   const settingsScreen = screenDefinitions.find(
     (screen) => screen.id === "settings",
   );
@@ -737,123 +574,6 @@ export function JobFinderShell({
       screens: primaryScreens,
     },
   ];
-
-  const moreMenuClose = useCallback(() => {
-    setIsMoreOpen(false);
-    moreButtonRef.current?.focus();
-  }, []);
-
-  // Register the Planning popover on the shared LIFO stack while it is open so
-  // stacked surfaces close one per Escape and shell aliases stay blocked.
-  const { isTopmost: isMoreMenuTopmost } = useJobFinderOverlayOwnership({
-    active: isMoreOpen,
-    close: moreMenuClose,
-  });
-
-  useEffect(() => {
-    const handleOutsidePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (
-        target instanceof Node &&
-        !moreButtonRef.current?.contains(target) &&
-        !moreMenuRef.current?.contains(target)
-      ) {
-        setIsMoreOpen(false);
-      }
-    };
-    const handleEscape = (event: KeyboardEvent) => {
-      // Inner controls and overlays above this menu keep first claim.
-      if (event.defaultPrevented || isImeComposingEvent(event)) {
-        return;
-      }
-      if (event.key !== "Escape" || !isMoreMenuTopmost()) {
-        return;
-      }
-      event.preventDefault();
-      moreMenuClose();
-    };
-
-    document.addEventListener("pointerdown", handleOutsidePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("pointerdown", handleOutsidePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [isMoreMenuTopmost, isMoreOpen, moreMenuClose]);
-
-  // One bounded placement for the menu: it flips above its trigger when the
-  // space below cannot hold it, shifts back inside the viewport horizontally,
-  // and never claims more height than the window actually has.
-  const moreMenuPlacement = useBoundedFloatingSurface({
-    // The compact trigger opens leftward; alignment stays automatic so a
-    // narrow window can still shift the surface back inside the viewport.
-    alignment: "auto",
-    desiredHeight: MORE_MENU_DESIRED_HEIGHT_PX,
-    open: isMoreOpen,
-    preferredWidth: MORE_MENU_WIDTH_PX,
-    minWidth: 96,
-    triggerRef: moreButtonRef,
-  });
-
-  const moreMenuScrollState = useBoundedFloatingSurfaceScrollState(
-    moreMenuScrollRef,
-    isMoreOpen,
-    `${moreMenuItemCount}:${moreMenuPlacement?.maxHeight ?? 0}`,
-  );
-
-  useEffect(() => {
-    if (!isMoreOpen) {
-      return;
-    }
-    // The shortcuts entry is the trailing item at index `moreMenuItemCount`.
-    const initialIndex =
-      moreMenuInitialFocusRef.current === "last" ? moreMenuItemCount : 0;
-    setFocusedMoreMenuItemIndex(initialIndex);
-    const frame = requestAnimationFrame(() => {
-      moreMenuItemRefs.current[initialIndex]?.focus();
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-    };
-  }, [isMoreOpen, moreMenuItemCount]);
-
-  useLayoutEffect(() => {
-    // The header strip only shows below 1440px; scrolling a hidden pill into
-    // view still forced a layout of the whole new screen.
-    if (window.matchMedia?.("(min-width: 1440px)").matches) return;
-    compactRouteScrollRef.current
-      ?.querySelector<HTMLElement>('[aria-current="page"]')
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [activeScreen]);
-
-  useLayoutEffect(() => {
-    const element = compactRouteScrollRef.current;
-    if (!element) {
-      return;
-    }
-    setCompactRouteScrollEdges(readCompactRouteScrollEdges(element));
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => {
-            setCompactRouteScrollEdges(readCompactRouteScrollEdges(element));
-          });
-    const handleWindowResize = () => {
-      setCompactRouteScrollEdges(readCompactRouteScrollEdges(element));
-    };
-    observer?.observe(element);
-    // Route buttons and badges resize without resizing the scrollport box,
-    // so the content wrapper is observed too or fades drift out of truth.
-    const contentElement = element.firstElementChild;
-    if (contentElement instanceof HTMLElement) {
-      observer?.observe(contentElement);
-    }
-    window.addEventListener("resize", handleWindowResize);
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", handleWindowResize);
-    };
-  }, []);
 
   useLayoutEffect(() => {
     const main = mainRef.current;
@@ -991,19 +711,6 @@ export function JobFinderShell({
     void navigate("/live-assistant");
   }
 
-  function closeMoreMenuAndMoveFocus(direction: -1 | 1) {
-    const trigger = moreButtonRef.current;
-    const focusableElements = getFocusableElements(moreMenuRef.current);
-    const triggerIndex = trigger ? focusableElements.indexOf(trigger) : -1;
-    const target =
-      triggerIndex >= 0
-        ? (focusableElements[triggerIndex + direction] ?? trigger)
-        : trigger;
-
-    setIsMoreOpen(false);
-    requestAnimationFrame(() => target?.focus());
-  }
-
   function toggleSidebar() {
     notePersonToggledSideMenu();
     setIsSidebarCollapsed((current) => {
@@ -1021,13 +728,11 @@ export function JobFinderShell({
   }
 
   function openGlobalSearch() {
-    setIsMoreOpen(false);
     setIsGlobalSearchOpen(true);
     setGlobalSearchFocusRequest((request) => request + 1);
   }
 
   function openShortcutsDialog() {
-    setIsMoreOpen(false);
     setIsShortcutsDialogOpen(true);
   }
 
@@ -1039,66 +744,95 @@ export function JobFinderShell({
     void navigate(entry.href);
   }
 
-  // One row treatment for every sidebar destination, primary or secondary, so
-  // the inline "Everything else" groups cannot drift from the journey rows.
+  // One row treatment for every sidebar destination, so Settings at the foot
+  // cannot drift from the journey rows. On the rail the label moves into a
+  // tooltip and the count into a corner pill off the glyph.
   function renderSidebarDestination(screen: ShellScreenDefinition) {
     const isActive = activeScreen === screen.id;
-    return (
-      <Tooltip delayDuration={0} key={screen.id}>
-        <TooltipTrigger asChild>
-          <button
-            aria-current={isActive ? "page" : undefined}
-            aria-label={getScreenAccessibleName(
-              screen.label,
-              screen.count,
-              screen.countKind,
-              screen.countNoun,
-            )}
-            className={cn(
-              SHELL_SIDEBAR_ROW_CLASS,
-              isSidebarCollapsed && SHELL_SIDEBAR_ROW_COLLAPSED_CLASS,
-              isActive ? "" : SHELL_SIDEBAR_ROW_INACTIVE_CLASS,
-              isActive ? SHELL_SIDEBAR_ROW_ACTIVE_CLASS : "",
-            )}
-            onClick={() => handleScreenChange(screen.id)}
-            type="button"
-          >
-            {isSidebarCollapsed && screen.count !== null ? (
-              // The marker is positioned against the icon, so the two share
-              // one relative box; a row without a count keeps the bare icon.
-              <span className="relative inline-flex shrink-0">
-                <screen.icon aria-hidden="true" className="size-4 shrink-0" />
-                <ScreenCountBadge
-                  count={screen.count}
-                  kind={screen.countKind}
-                  markerOnly
-                  noun={screen.countNoun}
-                />
-              </span>
-            ) : (
-              <screen.icon aria-hidden="true" className="size-4 shrink-0" />
-            )}
-            <SidebarDestinationLabel
-              collapsed={isSidebarCollapsed}
-              label={screen.label}
-            />
-            {!isSidebarCollapsed && screen.count !== null ? (
+    const row = (
+      <button
+        aria-current={isActive ? "page" : undefined}
+        aria-label={getScreenAccessibleName(
+          screen.label,
+          screen.count,
+          screen.countKind,
+          screen.countNoun,
+        )}
+        className={cn(
+          SHELL_SIDEBAR_ROW_CLASS,
+          isRail && SHELL_SIDEBAR_ROW_COLLAPSED_CLASS,
+          isActive
+            ? SHELL_SIDEBAR_ROW_ACTIVE_CLASS
+            : SHELL_SIDEBAR_ROW_INACTIVE_CLASS,
+        )}
+        key={isRail ? undefined : screen.id}
+        onClick={() => handleScreenChange(screen.id)}
+        // Inventory counts say what they count; attention counts already
+        // do in their name.
+        aria-description={
+          screen.countKind === "inventory"
+            ? describeScreenCount(screen)
+            : undefined
+        }
+        // The rail's tooltip says it; the full sidebar names the count's
+        // scope on hover.
+        title={
+          !isRail && describeScreenCount(screen)
+            ? `${screen.label} · ${describeScreenCount(screen)}`
+            : undefined
+        }
+        type="button"
+      >
+        <screen.icon aria-hidden="true" className="size-4 shrink-0" />
+        {isRail ? (
+          // The count's line under the icon; kept empty without a count.
+          <span className="flex h-4 w-full justify-center" data-rail-count>
+            {screen.count !== null ? (
               <ScreenCountBadge
                 count={screen.count}
                 kind={screen.countKind}
-                markerOnly={false}
+                markerOnly
                 noun={screen.countNoun}
               />
             ) : null}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right">{screen.label}</TooltipContent>
+          </span>
+        ) : null}
+        <SidebarDestinationLabel collapsed={isRail} label={screen.label} />
+        {!isRail && screen.count !== null && screen.countScoped ? (
+          // The scope in words at rest: "2 to review", "1 sent".
+          <span
+            aria-hidden="true"
+            className="ml-auto shrink-0 whitespace-nowrap text-(length:--text-small) tabular-nums text-current"
+            data-sidebar-count-scoped
+          >
+            {screen.count.toLocaleString("en-US")}{" "}
+            <span className="text-foreground-soft">{screen.countNoun}</span>
+          </span>
+        ) : !isRail && screen.count !== null ? (
+          <ScreenCountBadge
+            count={screen.count}
+            kind={screen.countKind}
+            markerOnly={false}
+            noun={screen.countNoun}
+          />
+        ) : null}
+      </button>
+    );
+    if (!isRail) return row;
+    return (
+      <Tooltip delayDuration={0} key={screen.id}>
+        <TooltipTrigger asChild>{row}</TooltipTrigger>
+        <TooltipContent side="right">
+          {describeScreenCount(screen)
+            ? `${screen.label} · ${describeScreenCount(screen)}`
+            : screen.label}
+        </TooltipContent>
       </Tooltip>
     );
   }
 
   useJobFinderShellShortcuts({
-    isOverlayOpen: isMoreOpen || isGlobalSearchOpen || isShortcutsDialogOpen,
+    isOverlayOpen: isGlobalSearchOpen || isShortcutsDialogOpen,
     isSearchOpen: isGlobalSearchOpen,
     onOpenGlobalSearch: openGlobalSearch,
     onOpenShortcuts: openShortcutsDialog,
@@ -1106,6 +840,8 @@ export function JobFinderShell({
     onToggleSidebar: toggleSidebar,
   });
   useHistoryNavigationShortcuts(stepHistory);
+  // Scroll areas show their thumb while they scroll (styles/globals.css).
+  useEffect(() => installScrollActivity(), []);
   useEffect(
     // A clicked "Search finished" notice opens the screen it is about.
     () =>
@@ -1113,25 +849,25 @@ export function JobFinderShell({
     [navigate],
   );
 
+  const sideWidth = isRail ? SIDEBAR_RAIL_WIDTH : SIDEBAR_EXPANDED_WIDTH;
+  const needsYouBadge = actionScreen?.count ?? 0;
+  const needsYouActive = activeScreen === "actions";
+
   return (
     <div
       data-job-finder-shell
-      data-sidebar-collapsed={isSidebarCollapsed ? "true" : "false"}
+      data-sidebar-collapsed={isRail ? "true" : "false"}
       className={cn(SHELL_ROOT_CLASS, `platform-${platform}`)}
       style={
         {
-          "--job-finder-side-width": isSidebarCollapsed ? "4rem" : "17rem",
-          "--job-finder-side-width-sm": isSidebarCollapsed ? "4rem" : "17rem",
+          "--job-finder-side-width": sideWidth,
         } as CSSProperties
       }
     >
       {/* The first thing Tab reaches, and the only way past the chrome
-          without walking it. Tabbing forward from the end of a route wrapped
-          straight onto Minimize / Restore / Close; from here one keypress
-          lands in the route instead. Visible only while focused, so it costs
-          a pointer user nothing. */}
+          without walking it. Visible only while focused. */}
       <button
-        className="sr-only z-[100] rounded-(--radius-button) bg-(--surface-panel-raised) px-4 py-2 text-(length:--text-small) font-medium text-foreground shadow-xl outline-none focus-visible:not-sr-only focus-visible:fixed focus-visible:left-3 focus-visible:top-3 focus-visible:ring-[3px] focus-visible:ring-ring/45"
+        className="sr-only z-[100] rounded-(--radius-button) bg-popover px-4 py-2 text-(length:--text-small) font-medium text-foreground shadow-lg outline-none focus-ring focus-visible:not-sr-only focus-visible:fixed focus-visible:left-3 focus-visible:top-3"
         data-job-finder-skip-to-content
         onClick={() => {
           const main = mainRef.current;
@@ -1154,25 +890,16 @@ export function JobFinderShell({
             data-desktop-brand
             style={{
               ...dragRegionStyle,
-              // Keep clear of visible macOS traffic lights in normal and
+              // Keep clear of the macOS traffic lights in normal and
               // maximized windows, then reclaim the space in native fullscreen.
-              // This is the reserve the sidebar header inherits: the wordmark
-              // and the module switch below it both sit inside this row's
-              // leading track, so neither can land under the traffic lights.
-              // The trailing edge mirrors the reserve so the row still reads
-              // straight against the caption buttons.
               paddingInlineStart:
-                isMac && !windowControlsState.isFullScreen
-                  ? MACOS_TRAFFIC_LIGHT_INSET
-                  : undefined,
-              paddingInlineEnd:
                 isMac && !windowControlsState.isFullScreen
                   ? MACOS_TRAFFIC_LIGHT_INSET
                   : undefined,
             }}
           >
             <div
-              className="col-start-1 flex min-w-0 items-center justify-self-start"
+              className="flex min-w-0 items-center"
               data-desktop-brand-region
             >
               <JobFinderShellBrand
@@ -1182,500 +909,28 @@ export function JobFinderShell({
                 }}
               />
             </div>
-
-            {/* Trailing region. Windows paints its caption buttons over this
-                edge (the window is frameless, so there is no Window Controls
-                Overlay to measure); reserving their exact width here keeps
-                header content out from under them, and the reserve lives
-                inside the right track rather than as padding on the row. */}
-            <div
-              aria-hidden="true"
-              className="col-start-2 min-w-0 justify-self-end"
-              data-desktop-header-window-control-inset
-              style={{
-                ...dragRegionStyle,
-                inlineSize: isWindows
-                  ? WINDOWS_CAPTION_CONTROLS_INSET
-                  : undefined,
-              }}
-            />
           </div>
 
-          <div
-            className="absolute right-0 top-0 z-40 flex h-14 items-stretch justify-end"
-            style={dragRegionStyle}
-          >
-            {isWindows ? (
-              <div
-                className="flex h-full items-stretch gap-0"
-                role="group"
-                aria-label="Window controls"
-                style={noDragRegionStyle}
-              >
-                <Button
-                  aria-label="Minimize window"
-                  className="h-full w-11 rounded-none border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-(--surface-panel-raised) hover:text-foreground"
-                  disabled={!windowControlsState.isMinimizable}
-                  onClick={minimizeWindow}
-                  size="icon-xs"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Minus className="size-3.5" />
-                </Button>
-                <Button
-                  aria-label={
-                    windowControlsState.isMaximized
-                      ? "Restore window"
-                      : "Maximize window"
-                  }
-                  className="h-full w-11 rounded-none border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-(--surface-panel-raised) hover:text-foreground"
-                  onClick={toggleWindowExpand}
-                  size="icon-xs"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Square className="size-3.5" />
-                </Button>
-                <Button
-                  aria-label="Close window"
-                  className="h-full w-12 rounded-none border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-(--button-close-hover) hover:text-primary-fill-foreground"
-                  disabled={!windowControlsState.isClosable}
-                  onClick={closeWindow}
-                  size="icon-xs"
-                  type="button"
-                  variant="ghost"
-                >
-                  <X className="size-3.5" />
-                </Button>
-              </div>
-            ) : null}
-          </div>
-
-          <nav
-            aria-label="Job Finder sections"
-            // The destination card is centred on the same axis as the module
-            // switcher above it instead of hugging the left edge. The
-            // notification/action group is absolutely positioned over this
-            // row, so its reserved width has to grow with the labels it shows
-            // and the card centres inside whatever space is left: on macOS
-            // that group moves up to the header row at >=900px, so this row is
-            // free and the card lands on the true window centre. Elsewhere the
-            // group stays here until 1440px, and reserving it on both sides
-            // would squeeze the card into a scroller at the 1024px minimum, so
-            // the trailing reserve is kept one-sided and the card centres in
-            // the remaining width rather than clipping or wrapping.
-            // The `min-[900px]` reserve is marked important on purpose.
-            // Tailwind v4 emits arbitrary `min-[…]` media variants *before*
-            // the named breakpoints, so at >=900px the still-matching
-            // `sm:pr-64` came later in the stylesheet and won at equal
-            // specificity: every compact width from 1024 to 1280 reserved
-            // 256px it was not supposed to reserve, and the destination card
-            // sat 127px left of the module switcher it is meant to share an
-            // axis with. Importance is how the rest of this header already
-            // pins a wider band over a narrower one (`min-[900px]:!top-0`,
-            // `min-[1440px]:!pt-14`); do not drop it back to a plain utility.
-            className={cn(
-              "col-span-2 col-start-1 row-start-2 flex min-w-0 items-center justify-center overflow-visible sm:col-span-1 sm:col-start-1 sm:justify-center min-[1440px]:hidden",
-              // From 1280px the header is one row: the card moves up between
-              // the brand and the (icon-only) actions, sized to its content
-              // so the rest of the row stays a window drag area.
-              "xl:row-start-1 xl:justify-self-center",
-              isMac
-                ? "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-0 xl:ml-56 xl:mr-[17rem]"
-                : "sm:pr-64 max-[899px]:pr-40 min-[900px]:!pr-[max(20rem,calc(var(--job-finder-header-actions-width,0px)+0.75rem))] xl:!pr-0 xl:ml-40 xl:mr-[25rem]",
-            )}
-            style={
-              headerActionsWidth === null
-                ? noDragRegionStyle
-                : ({
-                    ...noDragRegionStyle,
-                    "--job-finder-header-actions-width": `${headerActionsWidth}px`,
-                  } as CSSProperties)
-            }
-          >
-            <div
-              className="relative flex w-fit min-w-0 max-w-full flex-nowrap items-center gap-1 overflow-visible rounded-(--radius-panel) border border-(--surface-panel-border) bg-(--surface-panel) p-1 sm:gap-1.5"
-              data-job-finder-compact-navigation
-              style={
-                compactPreferredWidth === null
-                  ? undefined
-                  : { width: compactPreferredWidth }
-              }
-            >
-              <div className="relative min-w-0 flex-1">
-                <div
-                  aria-hidden="true"
-                  className="pointer-events-none invisible absolute flex w-max gap-1 sm:gap-1.5"
-                  ref={compactMeasureRef}
-                >
-                  {primaryScreens.map((screen) => (
-                    <span
-                      className={cn(COMPACT_NAV_PILL_CLASS, "font-semibold")}
-                      key={screen.id}
-                    >
-                      <span className="shrink-0 whitespace-nowrap leading-tight">
-                        {screen.label}
-                      </span>
-                      {screen.count !== null ? (
-                        <ScreenCountBadge
-                          count={screen.count}
-                          kind={screen.countKind}
-                          noun={screen.countNoun}
-                        />
-                      ) : null}
-                    </span>
-                  ))}
-                </div>
-                <div
-                  className="overflow-x-auto overscroll-x-contain px-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
-                  data-job-finder-compact-navigation-scroll
-                  onScroll={(event) => {
-                    setCompactRouteScrollEdges(
-                      readCompactRouteScrollEdges(event.currentTarget),
-                    );
-                  }}
-                  ref={compactRouteScrollRef}
-                >
-                  <div
-                    className="flex min-w-max flex-nowrap items-center gap-1 sm:gap-1.5"
-                    data-job-finder-compact-navigation-content
-                  >
-                    {compactPrimaryScreens.map((screen) => (
-                      <button
-                        aria-current={
-                          activeScreen === screen.id ? "page" : undefined
-                        }
-                        key={screen.id}
-                        className={cn(
-                          COMPACT_NAV_PILL_CLASS,
-                          activeScreen === screen.id
-                            ? COMPACT_NAV_PILL_ACTIVE_CLASS
-                            : "",
-                        )}
-                        onClick={() => handleScreenChange(screen.id)}
-                        onFocus={(event) => {
-                          event.currentTarget.scrollIntoView({
-                            block: "nearest",
-                            inline: "nearest",
-                          });
-                        }}
-                        type="button"
-                      >
-                        <span className="shrink-0 whitespace-nowrap leading-tight">
-                          {screen.label}
-                        </span>
-                        {screen.count !== null ? (
-                          <ScreenCountBadge
-                            count={screen.count}
-                            kind={screen.countKind}
-                            noun={screen.countNoun}
-                          />
-                        ) : null}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {/* Edge fades assume LTR; the product ships LTR-only today. */}
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-(--surface-panel) to-transparent",
-                    compactRouteScrollEdges.start ? "opacity-100" : "opacity-0",
-                  )}
-                  data-job-finder-compact-navigation-fade-start
-                />
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-(--surface-panel) to-transparent",
-                    compactRouteScrollEdges.end ? "opacity-100" : "opacity-0",
-                  )}
-                  data-job-finder-compact-navigation-fade-end
-                />
-              </div>
-              <div className="relative z-10 shrink-0">
-                <button
-                  aria-expanded={isMoreOpen}
-                  aria-label={`More${hiddenAttentionCount > 0 ? `: ${hiddenAttentionCount} need attention` : ""}`}
-                  // The same pill as its neighbours. It used to be a bordered,
-                  // filled, 4px-taller control in a row of flat text pills, so
-                  // it read as a different class of thing; the icon and the
-                  // active treatment are what mark it now.
-                  className={cn(
-                    COMPACT_NAV_PILL_CLASS,
-                    menuGroups.some((group) =>
-                      group.screens.some(
-                        (screen) => activeScreen === screen.id,
-                      ),
-                    )
-                      ? COMPACT_NAV_PILL_ACTIVE_CLASS
-                      : "",
-                  )}
-                  onClick={() => {
-                    moreMenuInitialFocusRef.current = "first";
-                    setIsMoreOpen((open) => !open);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
-                      return;
-                    }
-                    if (!isMoreOpen) {
-                      event.preventDefault();
-                      moreMenuInitialFocusRef.current =
-                        event.key === "ArrowUp" ? "last" : "first";
-                      setIsMoreOpen(true);
-                    }
-                  }}
-                  ref={moreButtonRef}
-                  title="More"
-                  type="button"
-                >
-                  <Layers3 aria-hidden="true" className="size-3.5" />
-                  {/* An icon-only control gave compact widths no readable
-                      label; the accessible name still comes from aria-label. */}
-                  <span
-                    className="whitespace-nowrap leading-tight"
-                    data-job-finder-compact-more-label
-                  >
-                    More
-                  </span>
-                  {hiddenAttentionCount > 0 ? (
-                    <ScreenCountBadge
-                      count={hiddenAttentionCount}
-                      kind="attention"
-                      noun="need you"
-                    />
-                  ) : null}
-                </button>
-                {isMoreOpen
-                  ? createPortal(
-                      <div
-                        aria-label="More"
-                        className="fixed z-[60] grid min-w-0 max-w-[calc(100vw-1rem)] grid-rows-[minmax(0,1fr)_auto] gap-1 overflow-hidden rounded-2xl border border-(--control-border) bg-(--surface-panel-raised) p-2 shadow-xl motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1 motion-safe:duration-150"
-                        data-job-finder-more-menu
-                        data-side={moreMenuPlacement?.side ?? "bottom"}
-                        style={boundedFloatingSurfaceStyle(moreMenuPlacement)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Tab") {
-                            event.preventDefault();
-                            closeMoreMenuAndMoveFocus(event.shiftKey ? -1 : 1);
-                            return;
-                          }
-                          if (
-                            event.key !== "ArrowDown" &&
-                            event.key !== "ArrowUp" &&
-                            event.key !== "Home" &&
-                            event.key !== "End"
-                          ) {
-                            return;
-                          }
-
-                          // Roving order comes from the managed refs so the
-                          // popover never needs menu semantics to stay
-                          // keyboard-navigable.
-                          const menuItems = moreMenuItemRefs.current.filter(
-                            (element): element is HTMLElement =>
-                              element instanceof HTMLElement,
-                          );
-                          if (menuItems.length === 0) {
-                            return;
-                          }
-
-                          event.preventDefault();
-                          const activeIndex = menuItems.findIndex(
-                            (item) => item === document.activeElement,
-                          );
-                          const currentIndex =
-                            activeIndex >= 0
-                              ? activeIndex
-                              : focusedMoreMenuItemIndex;
-                          const nextIndex =
-                            event.key === "Home"
-                              ? 0
-                              : event.key === "End"
-                                ? menuItems.length - 1
-                                : event.key === "ArrowDown"
-                                  ? (currentIndex + 1) % menuItems.length
-                                  : (currentIndex - 1 + menuItems.length) %
-                                    menuItems.length;
-                          setFocusedMoreMenuItemIndex(nextIndex);
-                          menuItems[nextIndex]?.focus();
-                        }}
-                        ref={moreMenuRef}
-                        role="navigation"
-                      >
-                        {/* The scroll row has to be a *bounded* box, not just
-                            a `min-h-0` block: a plain block child sizes to its
-                            content, so at short window heights the destination
-                            list grew past this row, was clipped by the surface,
-                            and painted across the footer entry — Settings and
-                            Keyboard shortcuts overlapped and neither was
-                            hittable. `grid-rows-[minmax(0,1fr)]` pins the
-                            region to the row the surface actually has, which is
-                            what makes `overflow-y-auto` below engage. */}
-                        <div className="relative grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] overflow-hidden">
-                          <div
-                            className="min-h-0 min-w-0 overflow-y-auto overscroll-contain"
-                            data-job-finder-more-menu-scroll-region
-                            ref={moreMenuScrollRef}
-                          >
-                            {menuGroups.map((group) => (
-                              <div
-                                key={group.label}
-                                className="grid gap-1"
-                                role="group"
-                                aria-label={group.label}
-                              >
-                                <span className="px-3 pt-1 text-(length:--text-tiny) font-semibold uppercase tracking-(--tracking-caps) text-muted-foreground">
-                                  {group.label}
-                                </span>
-                                {group.screens.map((screen) => {
-                                  const menuItemIndex =
-                                    moreMenuItemIndexes.get(screen.id) ?? 0;
-                                  return (
-                                    <button
-                                      aria-label={getScreenAccessibleName(
-                                        screen.label,
-                                        screen.count,
-                                        screen.countKind,
-                                        screen.countNoun,
-                                      )}
-                                      aria-current={
-                                        activeScreen === screen.id
-                                          ? "page"
-                                          : undefined
-                                      }
-                                      key={screen.id}
-                                      className={cn(
-                                        "inline-flex min-h-10 min-w-0 items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-(length:--text-small) font-medium text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 max-[899px]:min-h-8 max-[899px]:py-1",
-                                        activeScreen === screen.id
-                                          ? "bg-secondary text-foreground"
-                                          : "",
-                                      )}
-                                      onClick={() => {
-                                        setIsMoreOpen(false);
-                                        handleScreenChange(screen.id);
-                                      }}
-                                      onFocus={() =>
-                                        setFocusedMoreMenuItemIndex(
-                                          menuItemIndex,
-                                        )
-                                      }
-                                      ref={(element) => {
-                                        moreMenuItemRefs.current[
-                                          menuItemIndex
-                                        ] = element;
-                                      }}
-                                      tabIndex={
-                                        menuItemIndex ===
-                                        focusedMoreMenuItemIndex
-                                          ? 0
-                                          : -1
-                                      }
-                                      type="button"
-                                    >
-                                      <span className="flex min-w-0 items-center gap-2">
-                                        <screen.icon
-                                          aria-hidden="true"
-                                          className="size-4 shrink-0"
-                                        />
-                                        <span className="truncate">
-                                          {screen.label}
-                                        </span>
-                                      </span>
-                                      {screen.count !== null ? (
-                                        <ScreenCountBadge
-                                          count={screen.count}
-                                          kind={screen.countKind}
-                                          noun={screen.countNoun}
-                                        />
-                                      ) : null}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            ))}
-                          </div>
-                          {/* Hints sit at the edge they describe; the previous
-                            affordance printed "More content above ↑" in the
-                            popover's bottom footer. */}
-                          <BoundedFloatingSurfaceScrollHint
-                            edge="start"
-                            visible={
-                              moreMenuScrollState.hasOverflow &&
-                              !moreMenuScrollState.atStart
-                            }
-                          />
-                          <BoundedFloatingSurfaceScrollHint
-                            edge="end"
-                            visible={
-                              moreMenuScrollState.hasOverflow &&
-                              !moreMenuScrollState.atEnd
-                            }
-                          />
-                        </div>
-                        {/* Reference material, not a destination: one row that
-                            opens the shortcuts dialog, instead of the ~270px
-                            shortcut table that stopped this menu from showing
-                            its own destinations. */}
-                        <button
-                          className="inline-flex min-h-10 min-w-0 shrink-0 items-center justify-between gap-3 rounded-xl border-t border-(--surface-panel-border) px-3 py-2 text-left text-(length:--text-small) font-medium text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
-                          data-job-finder-more-menu-shortcuts-entry
-                          onClick={openShortcutsDialog}
-                          onFocus={() =>
-                            setFocusedMoreMenuItemIndex(moreMenuItemCount)
-                          }
-                          ref={(element) => {
-                            moreMenuItemRefs.current[moreMenuItemCount] =
-                              element;
-                          }}
-                          tabIndex={
-                            focusedMoreMenuItemIndex === moreMenuItemCount
-                              ? 0
-                              : -1
-                          }
-                          type="button"
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <Keyboard
-                              aria-hidden="true"
-                              className="size-4 shrink-0"
-                            />
-                            <span className="truncate">
-                              {JOB_FINDER_SHORTCUTS_DIALOG_LABEL}
-                            </span>
-                          </span>
-                          <kbd className="inline-flex min-w-6 shrink-0 items-center justify-center rounded-(--radius-field) border border-(--surface-panel-border) bg-(--input) px-1.5 py-0.5 text-(length:--text-tiny) font-medium text-foreground">
-                            ?
-                          </kbd>
-                        </button>
-                      </div>,
-                      document.body,
-                    )
-                  : null}
-              </div>
-            </div>
-          </nav>
-
+          {/* The header tools: quiet ghost buttons of fixed width, icons only
+              below 75rem of header (1200px at default text) with the name
+              in a tooltip, counts in corner badges
+              off the glyph so nothing moves when a count appears. */}
           <div
             aria-label="Notifications and actions"
-            className={cn(
-              // `sm:absolute sm:z-10` made this group its own stacking
-              // context at layer 10, and the Tasks popover inside it declares
-              // `z-40` precisely so it can sit over the page. Nested in a
-              // z-10 ancestor that declaration could never take effect below
-              // 1440px, where the group is not `static`. The group now sits on
-              // the same layer the wide breakpoint already used, so the
-              // popover hit-tests where it paints at every width.
-              "col-span-2 col-start-1 row-start-3 flex min-w-0 items-center justify-center gap-1.5 pr-2 max-[899px]:gap-1 max-[899px]:pr-1 sm:absolute sm:z-40 sm:w-auto sm:justify-end min-[1440px]:gap-2 min-[1440px]:!static min-[1440px]:col-span-1 min-[1440px]:col-start-3 min-[1440px]:row-start-1",
-              isMac
-                ? "sm:right-0 sm:top-14 sm:h-[3.75rem] min-[900px]:!top-0 min-[900px]:!h-14"
-                : "sm:right-0 sm:top-14 sm:h-[3.75rem] xl:top-0 xl:h-14 xl:mr-36 min-[1440px]:!z-40",
-            )}
-            ref={headerActionsRef}
+            // Above the brand row: in a window narrower than the app's
+            // own minimum (zoomed text), the brand's words can run under
+            // the tools, and the tools must still take the click.
+            className="relative z-10 col-start-2 row-start-1 flex h-12 min-w-0 items-center justify-end gap-1"
+            data-header-tools
             role="group"
-            style={noDragRegionStyle}
+            style={{
+              ...noDragRegionStyle,
+              // The last tool's corner count pill (6px past the button)
+              // keeps at least 8px from the window's edge.
+              marginInlineEnd: isWindows
+                ? WINDOWS_CAPTION_CONTROLS_INSET
+                : "0.5rem",
+            }}
           >
             <button
               aria-keyshortcuts={getJobFinderAriaKeyshortcuts(
@@ -1683,12 +938,36 @@ export function JobFinderShell({
                 platform,
               )}
               aria-label={JOB_FINDER_GLOBAL_SEARCH_LABEL}
-              className="inline-flex h-10 min-h-10 min-w-10 items-center justify-center rounded-(--radius-button) border border-(--control-border) bg-(--surface-panel) px-2 text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 max-[899px]:min-w-9 max-[899px]:px-1.5"
+              className={HEADER_TOOL_CLASS}
               onClick={openGlobalSearch}
               title={`${JOB_FINDER_GLOBAL_SEARCH_LABEL} (${formatJobFinderShortcutCombo("mod+k", platform)})`}
               type="button"
             >
               <Search aria-hidden="true" className="size-4 shrink-0" />
+              <span className={HEADER_TOOL_LABEL_CLASS}>Search</span>
+              {/* Key chips joined by "+", as every shortcut is written. */}
+              <span
+                aria-hidden="true"
+                className="hidden items-center gap-0.5 @min-[75rem]/shell-header:inline-flex"
+              >
+                {getJobFinderShortcutKeycaps("mod+k", platform).map(
+                  (keycap, index) => (
+                    <span
+                      className="inline-flex items-center gap-0.5"
+                      key={keycap}
+                    >
+                      {index > 0 ? (
+                        <span className="text-xs leading-4 text-muted-foreground">
+                          +
+                        </span>
+                      ) : null}
+                      <kbd className="rounded-(--radius-small) border border-(--border-subtle) px-1 text-xs leading-4 font-normal text-muted-foreground">
+                        {keycap}
+                      </kbd>
+                    </span>
+                  ),
+                )}
+              </span>
             </button>
             <JobFinderTaskCenter
               onNavigate={(path) => {
@@ -1716,141 +995,128 @@ export function JobFinderShell({
             />
             {actionScreen ? (
               <button
-                aria-current={activeScreen === "actions" ? "page" : undefined}
-                aria-label={`Needs you: ${actionScreen.count ?? 0} unresolved`}
+                aria-current={needsYouActive ? "page" : undefined}
+                aria-label={`Needs you: ${needsYouBadge} unresolved`}
                 className={cn(
-                  "inline-flex h-10 min-h-10 min-w-10 items-center justify-center gap-2 rounded-(--radius-button) border border-(--control-border) bg-(--surface-panel) px-2.5 py-2 text-(length:--text-small) font-medium text-muted-foreground outline-none transition-colors hover:border-primary/50 hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40 min-[1440px]:px-3 max-[899px]:gap-1 max-[899px]:px-2",
-                  activeScreen === "actions"
-                    ? "border-(--nav-active-bar) bg-(--nav-active-surface) font-semibold text-(--nav-active-foreground)"
-                    : "",
+                  HEADER_TOOL_CLASS,
+                  needsYouActive && HEADER_TOOL_ACTIVE_CLASS,
                 )}
                 onClick={() => handleScreenChange("actions")}
-                title={`Needs you: ${actionScreen.count ?? 0} unresolved`}
+                title={`Needs you: ${needsYouBadge} unresolved`}
                 type="button"
               >
-                <BellRing aria-hidden="true" className="size-4 shrink-0" />
-                {/* A bare bell and a number read as an unlabelled glyph pill
-                    beside the task-center pill. The compact navigation row
-                    reserves the width this label needs. */}
-                <span className="hidden whitespace-nowrap min-[900px]:inline max-[1099px]:!hidden xl:max-[1440px]:!hidden">
+                {/* On the bell's corner, inside the button: the pill keeps
+                    10px from the window's top edge. */}
+                <span className={HEADER_TOOL_ICON_CLASS}>
+                  <BellRing aria-hidden="true" className="size-4 shrink-0" />
+                  <HeaderToolCount count={needsYouBadge} tone="attention" />
+                </span>
+                <span className={HEADER_TOOL_COUNTED_LABEL_CLASS}>
                   Needs you
                 </span>
-                {actionScreen.count !== null ? (
-                  <ScreenCountBadge
-                    count={actionScreen.count}
-                    kind="attention"
-                    noun={actionScreen.countNoun}
-                  />
-                ) : null}
               </button>
             ) : null}
           </div>
+
+          {isWindows ? (
+            <div
+              className="absolute right-0 top-0 z-40 flex h-12 items-stretch"
+              role="group"
+              aria-label="Window controls"
+              style={noDragRegionStyle}
+            >
+              <Button
+                aria-label="Minimize window"
+                className="h-full w-11 rounded-none border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-accent hover:text-foreground"
+                disabled={!windowControlsState.isMinimizable}
+                onClick={minimizeWindow}
+                size="icon-xs"
+                type="button"
+                variant="ghost"
+              >
+                <Minus className="size-3.5" />
+              </Button>
+              <Button
+                aria-label={
+                  windowControlsState.isMaximized
+                    ? "Restore window"
+                    : "Maximize window"
+                }
+                className="h-full w-11 rounded-none border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-accent hover:text-foreground"
+                onClick={toggleWindowExpand}
+                size="icon-xs"
+                type="button"
+                variant="ghost"
+              >
+                <Square className="size-3.5" />
+              </Button>
+              <Button
+                aria-label="Close window"
+                className="h-full w-12 rounded-none border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-(--button-close-hover) hover:text-primary-fill-foreground"
+                disabled={!windowControlsState.isClosable}
+                onClick={closeWindow}
+                size="icon-xs"
+                type="button"
+                variant="ghost"
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
+          ) : null}
         </div>
       </header>
 
       <aside
         aria-label="Job Finder sidebar"
-        // The rail owns its own vertical scrolling: at short window heights the
-        // journey plus every secondary destination is taller than the column,
-        // and a clipped rail hides real destinations. `overflow-hidden` here
-        // keeps the pinned toggle row out of that inner scroller.
+        // The sidebar owns its own vertical scrolling: at short window heights
+        // the journey is taller than the column, and a clipped list hides
+        // real destinations. The pinned foot stays out of that scroller.
         className={SHELL_SIDEBAR_CLASS}
         data-job-finder-sidebar
       >
         <div
-          className={cn(
-            "flex h-full min-h-0 flex-col",
-            isSidebarCollapsed ? "px-2 py-3" : "px-4 py-4",
-          )}
+          className="flex h-full min-h-0 flex-col px-2 py-2"
+          // Expanded, the menu is laid out at its full width from the first
+          // frame and the sidebar's growing edge uncovers it, as a drawer
+          // opens: labels never show cut short ("Fin…") while it widens.
+          style={
+            isRail
+              ? undefined
+              : { width: `calc(${SIDEBAR_EXPANDED_WIDTH} - 1px)` }
+          }
         >
-          <div
-            className={cn(
-              "mb-1 flex h-10 shrink-0 items-center",
-              isSidebarCollapsed ? "justify-center" : "justify-between",
-            )}
-            data-job-finder-sidebar-toggle
-            style={{ ...noDragRegionStyle }}
-          >
-            {!isSidebarCollapsed ? (
-              <span className="job-finder-sidebar-heading">
-                Your job search
-              </span>
-            ) : null}
-            <Tooltip delayDuration={0}>
-              <TooltipTrigger asChild>
-                <button
-                  aria-keyshortcuts={getJobFinderAriaKeyshortcuts(
-                    "mod+b",
-                    platform,
-                  )}
-                  aria-label={
-                    isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
-                  }
-                  className="flex size-9 items-center justify-center rounded-(--radius-field) text-foreground-muted outline-none transition-colors hover:bg-(--surface-panel-raised) hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
-                  onClick={toggleSidebar}
-                  type="button"
-                >
-                  <Menu aria-hidden="true" className="size-5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side={isSidebarCollapsed ? "right" : "bottom"}>
-                {`${isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} · ${formatJobFinderShortcutCombo("mod+b", platform)}`}
-              </TooltipContent>
-            </Tooltip>
-          </div>
           <nav
             aria-label="Job Finder sidebar destinations"
-            className={cn(
-              // `content-start` keeps the grid rows at their own height once the
-              // nav becomes the flexible scroll owner, so a short list is not
-              // stretched down the column.
-              "grid min-h-0 min-w-0 flex-1 content-start overflow-x-hidden overflow-y-auto overscroll-contain",
-              isSidebarCollapsed ? "gap-2" : "gap-4",
-            )}
+            data-scroll-gutter="none"
+            className="grid min-h-0 min-w-0 flex-1 content-start gap-0.5 overflow-x-hidden overflow-y-auto overscroll-contain"
             data-job-finder-sidebar-scroll-region
           >
             {sidebarGroups.map((group) => (
               <section
                 key={group.label}
                 aria-label={group.label}
-                className="grid min-w-0 gap-1"
+                className={cn(
+                  "grid min-w-0 gap-0.5",
+                  isRail && "overflow-visible",
+                )}
                 role="group"
               >
-                {/* The group name remains available to assistive technology. */}
-                <div
-                  className={cn(
-                    "grid min-w-0 overflow-hidden",
-                    isSidebarCollapsed ? "gap-1.5" : "gap-0.5",
-                  )}
-                >
-                  {group.screens.map((screen) =>
-                    renderSidebarDestination(screen),
-                  )}
-                </div>
+                {group.screens.map((screen) =>
+                  renderSidebarDestination(screen),
+                )}
               </section>
             ))}
           </nav>
           <div
             aria-label="Workspace"
             className={cn(
-              "mt-2 flex min-w-0 shrink-0 border-t border-(--surface-panel-border) pt-2",
-              isSidebarCollapsed
-                ? "flex-col-reverse gap-0.5"
-                : "flex-wrap items-center gap-1",
+              "mt-2 flex min-w-0 shrink-0 border-t border-(--border-subtle) pt-2",
+              isRail ? "flex-col gap-0.5" : "items-center gap-0.5",
             )}
             data-job-finder-sidebar-footer
             role="group"
           >
-            {/* Settings is the last thing on the rail, pinned under the
-                journey rather than scrolling with it, with the shortcuts
-                reference as one small control beside it (above it on the
-                collapsed rail, so the gear stays at the very bottom). */}
-            {/* Safeguards sits quietly above Settings (ordered last in the
-                collapsed column, which is reversed), so the person can always
-                reach it. It carries no count: what it blocks shows in
-                Activity. */}
-
-            <div className={cn("min-w-0", !isSidebarCollapsed && "flex-1")}>
+            <div className={cn("min-w-0", !isRail && "flex-1")}>
               {settingsScreen ? renderSidebarDestination(settingsScreen) : null}
             </div>
             <Tooltip delayDuration={0}>
@@ -1862,7 +1128,7 @@ export function JobFinderShell({
                   )}
                   aria-label={JOB_FINDER_SHORTCUTS_DIALOG_LABEL}
                   className={cn(
-                    isSidebarCollapsed
+                    isRail
                       ? cn(
                           SHELL_SIDEBAR_ROW_CLASS,
                           SHELL_SIDEBAR_ROW_COLLAPSED_CLASS,
@@ -1880,10 +1146,44 @@ export function JobFinderShell({
                   </span>
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">
+              <TooltipContent side={isRail ? "right" : "top"}>
                 {`${JOB_FINDER_SHORTCUTS_DIALOG_LABEL} · ?`}
               </TooltipContent>
             </Tooltip>
+            {/* The fold control. Below 1200px the rail is the only layout, so
+                the control is not offered there. */}
+            {isNarrowWindow ? null : (
+              <Tooltip delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-keyshortcuts={getJobFinderAriaKeyshortcuts(
+                      "mod+b",
+                      platform,
+                    )}
+                    aria-label={
+                      isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+                    }
+                    className={cn(
+                      isRail
+                        ? cn(
+                            SHELL_SIDEBAR_ROW_CLASS,
+                            SHELL_SIDEBAR_ROW_COLLAPSED_CLASS,
+                          )
+                        : SHELL_SIDEBAR_SHORTCUTS_BUTTON_CLASS,
+                      SHELL_SIDEBAR_ROW_INACTIVE_CLASS,
+                    )}
+                    data-job-finder-sidebar-toggle
+                    onClick={toggleSidebar}
+                    type="button"
+                  >
+                    <PanelLeft aria-hidden="true" className="size-4 shrink-0" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side={isRail ? "right" : "top"}>
+                  {`${isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} · ${formatJobFinderShortcutCombo("mod+b", platform)}`}
+                </TooltipContent>
+              </Tooltip>
+            )}
           </div>
         </div>
       </aside>
@@ -1914,17 +1214,14 @@ export function JobFinderShell({
         role="status"
       />
 
-      {/* Content passes under the fixed header with no seam, so a title or a
-          card sitting at the boundary paints sliced through its glyphs. The
-          mask is opaque across exactly the shell's 12px top gutter and stops
-          there: a fade tail past the gutter sat over the first row of every
-          route at scroll 0 and read as a shadow across its buttons and text. */}
+      {/* Content passes under the fixed header with no seam; the mask is
+          opaque across exactly the shell's 12px top gutter and stops there. */}
       <div
         aria-hidden="true"
         className={cn(
-          "pointer-events-none fixed inset-x-0 top-[7.25rem] z-30 hidden sm:block xl:top-14 min-[1440px]:left-(--job-finder-side-width)",
+          "pointer-events-none fixed right-0 top-12 left-(--job-finder-side-width) z-30 hidden sm:block",
           SHELL_HEADER_MASK_HEIGHT_CLASS,
-          "bg-(--shell-header-bg)",
+          "bg-(--background)",
         )}
         data-job-finder-shell-header-mask
       />
@@ -1937,6 +1234,9 @@ export function JobFinderShell({
         data-job-finder-shell-content
         style={{
           paddingRight: "var(--assistant-sidebar-reserved, 0px)",
+          // With enlarged text a toast takes a band below the content
+          // instead of covering it (components/ui/toast.tsx).
+          paddingBottom: "var(--toast-band, 0px)",
         }}
       >
         <main
@@ -1959,8 +1259,6 @@ export function JobFinderShell({
             )}
             data-job-finder-route-container
             ref={routeContainerRef}
-            // One rhythm token for every route root, declared by the wrapper
-            // that owns the route rather than picked per screen.
             style={SHELL_ROUTE_SECTION_GAP_STYLE}
           >
             {/* Each screen mounts fresh per path inside the outlet, except

@@ -26,12 +26,14 @@ function Tabs({
 }
 
 const tabsListVariants = cva(
-  "group/tabs-list inline-flex w-fit items-center justify-center text-muted-foreground group-data-[orientation=horizontal]/tabs:h-9 group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col",
+  "group/tabs-list inline-flex w-fit items-center justify-center text-muted-foreground group-data-[orientation=horizontal]/tabs:h-9 group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col group-data-[orientation=vertical]/tabs:border-b-0",
   {
     variants: {
       variant: {
-        default: "bg-muted",
-        line: "gap-0 bg-transparent border-b border-(--surface-panel-border)",
+        // Page sections: an underline only. `default` and `line` render the
+        // same idiom so no screen can fall back to a filled tab strip.
+        default: "gap-1 bg-transparent border-b border-(--border-subtle)",
+        line: "gap-1 bg-transparent border-b border-(--border-subtle)",
       },
     },
     defaultVariants: {
@@ -64,22 +66,15 @@ function TabsTrigger({
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 border border-transparent px-2 py-1 whitespace-nowrap transition-all focus-visible:ring-[3px] focus-visible:ring-ring disabled:pointer-events-none disabled:border-(--disabled-border) disabled:bg-(--disabled-surface) disabled:text-(--disabled-foreground) [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative inline-flex h-full items-center justify-center gap-1.5 border border-transparent whitespace-nowrap outline-none transition-colors duration-(--duration-fast) focus-ring disabled:pointer-events-none disabled:border-(--disabled-border) disabled:bg-(--disabled-surface) disabled:text-(--disabled-foreground) [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         "group-data-[orientation=vertical]/tabs:w-full group-data-[orientation=vertical]/tabs:justify-start",
-        "rounded-none px-4 py-2.5 text-xs font-medium text-muted-foreground hover:bg-secondary hover:text-foreground",
-        "group-data-[orientation=horizontal]/tabs:px-4 group-data-[orientation=horizontal]/tabs:py-3 group-data-[orientation=horizontal]/tabs:text-center",
-        "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-[state=active]:text-foreground",
-        "group-data-[orientation=vertical]/tabs:data-[state=active]:border-l-2 group-data-[orientation=vertical]/tabs:data-[state=active]:border-primary group-data-[orientation=vertical]/tabs:data-[state=active]:bg-secondary",
-        "group-data-[variant=default]/tabs-list:group-data-[orientation=horizontal]/tabs:data-[state=active]:border-b-2 group-data-[variant=default]/tabs-list:group-data-[orientation=horizontal]/tabs:data-[state=active]:border-primary",
-        "data-[state=active]:text-foreground",
-        // The `line` indicator is drawn directly on the list's
-        // --surface-panel-border, where --primary measures 2.64:1 (dark) and
-        // 2.79:1 (light) - below the 3:1 non-text floor for a state carrier.
-        // Neither colour can move (the list edge is pinned inert chrome and
-        // --primary is pinned as the fill token), so the indicator takes the
-        // weight step instead: 2px against the 1px rule it sits on, matching
-        // the `default` variant's border-b-2 active edge.
-        "after:absolute after:opacity-0 after:transition-opacity group-data-[orientation=horizontal]/tabs:after:inset-x-0 group-data-[orientation=horizontal]/tabs:after:bottom-0 group-data-[orientation=horizontal]/tabs:after:h-0.5 group-data-[orientation=vertical]/tabs:after:hidden group-data-[variant=line]/tabs-list:data-[state=active]:after:bg-primary group-data-[variant=line]/tabs-list:data-[state=active]:after:opacity-100",
+        "rounded-none px-3 py-2 text-sm font-normal text-foreground-soft hover:text-foreground",
+        "group-data-[orientation=horizontal]/tabs:px-3 group-data-[orientation=horizontal]/tabs:py-2.5 group-data-[orientation=horizontal]/tabs:text-center",
+        "group-data-[orientation=vertical]/tabs:data-[state=active]:selected-bar group-data-[orientation=vertical]/tabs:data-[state=active]:bg-accent-tint",
+        "data-[state=active]:font-medium data-[state=active]:text-foreground",
+        // The active tab is a 2 px accent underline sitting on the list's
+        // hairline, plus a weight step, so the state never rests on colour.
+        "after:absolute after:opacity-0 after:transition-opacity group-data-[orientation=horizontal]/tabs:after:inset-x-2 group-data-[orientation=horizontal]/tabs:after:-bottom-px group-data-[orientation=horizontal]/tabs:after:h-0.5 group-data-[orientation=horizontal]/tabs:after:rounded-full group-data-[orientation=vertical]/tabs:after:hidden data-[state=active]:after:bg-primary data-[state=active]:after:opacity-100",
         className,
       )}
       {...props}

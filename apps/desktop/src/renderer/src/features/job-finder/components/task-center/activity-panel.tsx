@@ -38,17 +38,19 @@ function ActivityRow(props: {
   return (
     <li>
       <button
-        className="grid w-full gap-1 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-2.5 text-left outline-none transition-colors hover:border-primary/50 hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring/40"
+        className="grid w-full gap-1 rounded-(--radius-field) px-2 py-2.5 text-left outline-none transition-colors hover:bg-secondary focus-ring"
         data-activity-kind={item.kind}
         data-activity-status={item.status}
         onClick={() => props.onOpen(item)}
         type="button"
       >
         <span className="flex items-start justify-between gap-2">
-          <strong className="min-w-0 break-words font-semibold text-foreground">
+          <strong className="min-w-0 flex-1 break-words font-semibold text-foreground">
             {item.title}
           </strong>
-          <StatusBadge tone={item.tone}>{item.badge}</StatusBadge>
+          <StatusBadge className="shrink-0 whitespace-nowrap" tone={item.tone}>
+            {item.badge}
+          </StatusBadge>
         </span>
         <span className="break-words text-(length:--text-small) text-foreground-soft">
           {item.detail}
@@ -82,7 +84,7 @@ function MoveRow(props: { move: ActivityMove }) {
     }
   }
   return (
-    <li className="grid gap-1 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/40 px-3 py-2.5">
+    <li className="grid gap-1 px-2 py-2.5">
       <span className="flex items-start justify-between gap-2">
         <span className="grid min-w-0 gap-0.5">
           <strong className="break-words font-semibold text-foreground">
@@ -127,6 +129,37 @@ function MoveRow(props: { move: ActivityMove }) {
 }
 
 /**
+ * The panel while its first read is on the way: the "Running now" heading
+ * and two rows shaped like `ActivityRow` (title and pill, then the detail
+ * line), so the rows that arrive take the same places.
+ */
+function ActivityPanelSkeleton() {
+  return (
+    <div aria-busy="true" className="grid gap-4" data-activity-loading>
+      <span className="sr-only">Loading activity</span>
+      <section aria-hidden="true" className="grid gap-2">
+        <h3 className="text-(length:--text-tiny) tracking-(--tracking-label) text-foreground-muted">
+          Running now
+        </h3>
+        <ul className="grid divide-y divide-(--surface-panel-border)">
+          {["w-2/5", "w-1/2"].map((width) => (
+            <li className="grid gap-1 px-2 py-2.5" key={width}>
+              <span className="flex h-6 items-center justify-between gap-2">
+                <span className={`skeleton block h-3.5 ${width}`} />
+                <span className="skeleton block h-5 w-16 rounded-full" />
+              </span>
+              <span className="flex h-5 items-center">
+                <span className="skeleton block h-3 w-3/5" />
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+/**
  * The open Activity panel's rows: what Job Finder is doing, then what it
  * finished in the last day. Each opens the screen that shows that work.
  */
@@ -153,9 +186,7 @@ export function ActivityPanel(props: {
         </Button>
       </p>
     ) : (
-      <p className="px-1 text-(length:--text-small) text-foreground-soft">
-        Loading activity…
-      </p>
+      <ActivityPanelSkeleton />
     );
   const { running, finished } = toActivityItems(props.feed);
   const visibleFinished = finished.filter((item) => !clearedIds.has(item.id));
@@ -178,7 +209,7 @@ export function ActivityPanel(props: {
   return (
     <div className="grid gap-4">
       <section aria-label="Running now" className="grid gap-2">
-        <h3 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+        <h3 className="text-(length:--text-tiny) tracking-(--tracking-label) text-foreground-muted">
           Running now
         </h3>
         {running.length === 0 ? (
@@ -187,7 +218,7 @@ export function ActivityPanel(props: {
             here while they work.
           </p>
         ) : (
-          <ul className="grid gap-2">
+          <ul className="grid divide-y divide-(--surface-panel-border)">
             {running.map((item) => (
               <ActivityRow item={item} key={item.id} onOpen={open} />
             ))}
@@ -197,7 +228,7 @@ export function ActivityPanel(props: {
       {visibleFinished.length > 0 ? (
         <section aria-label="Finished in the last day" className="grid gap-2">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+            <h3 className="text-(length:--text-tiny) tracking-(--tracking-label) text-foreground-muted">
               Finished in the last day
             </h3>
             <Button
@@ -209,7 +240,7 @@ export function ActivityPanel(props: {
               Clear finished
             </Button>
           </div>
-          <ul className="grid gap-2">
+          <ul className="grid divide-y divide-(--surface-panel-border)">
             {visibleFinished.map((item) => (
               <ActivityRow item={item} key={item.id} onOpen={open} />
             ))}
@@ -218,10 +249,10 @@ export function ActivityPanel(props: {
       ) : null}
       {props.feed.moves.length > 0 ? (
         <section aria-label="Your recent moves" className="grid gap-2">
-          <h3 className="text-(length:--text-tiny) uppercase tracking-(--tracking-label) text-foreground-muted">
+          <h3 className="text-(length:--text-tiny) tracking-(--tracking-label) text-foreground-muted">
             Your recent moves
           </h3>
-          <ul className="grid gap-2">
+          <ul className="grid divide-y divide-(--surface-panel-border)">
             {props.feed.moves.map((move) => (
               <MoveRow key={move.id} move={move} />
             ))}

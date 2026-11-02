@@ -96,14 +96,47 @@ test("a native form navigation is tied to that form's exact destination", () => 
 });
 
 test("a JS POST to the selected native form action supplies final response evidence", () => {
-  const input = {...request(null), url: `${origin}/forms/application/100`, nativeAction: {origin, safePath: "/forms/application/100"}};
+  const input = {
+    ...request(null),
+    url: `${origin}/forms/application/100`,
+    nativeAction: { origin, safePath: "/forms/application/100" },
+  };
   expect(isFinalSubmissionRequest(input)).toBe(true);
-  expect(isFinalSubmissionRequest({...input, url: `${origin}/forms/application/101`})).toBe(false);
-  expect(isFinalSubmissionRequest({...input, nativeAction: null})).toBe(false);
-  expect(isFinalSubmissionRequest({...input, method: "GET"})).toBe(false);
+  expect(
+    isFinalSubmissionRequest({
+      ...input,
+      url: `${origin}/forms/application/101`,
+    }),
+  ).toBe(false);
+  expect(isFinalSubmissionRequest({ ...input, nativeAction: null })).toBe(
+    false,
+  );
+  expect(isFinalSubmissionRequest({ ...input, method: "GET" })).toBe(false);
 });
 
-test("a confirmation-page transition supplies state evidence without guessing a receipt number", () => {
+test("native response correlation preserves the selected action's private query and method", () => {
+  const input = {
+    ...request(null),
+    url: `${origin}/submit?job=synthetic-one`,
+    nativeAction: {
+      origin,
+      safePath: "/submit",
+      query: "?job=synthetic-one",
+      method: "POST",
+    },
+    navigation: true,
+  };
+  expect(isFinalSubmissionRequest(input)).toBe(true);
+  expect(
+    isFinalSubmissionRequest({
+      ...input,
+      url: `${origin}/submit?job=synthetic-two`,
+    }),
+  ).toBe(false);
+  expect(isFinalSubmissionRequest({ ...input, method: "GET" })).toBe(false);
+});
+
+test("a confirmation-page URL and a pending queue do not prove application receipt", () => {
   expect(
     employerPageConfirmsSubmission(
       before,
@@ -115,7 +148,7 @@ test("a confirmation-page transition supplies state evidence without guessing a 
       },
       allowedOrigins,
     ),
-  ).toBe(true);
+  ).toBe(false);
   expect(
     employerPageConfirmsSubmission(
       before,
@@ -125,6 +158,44 @@ test("a confirmation-page transition supplies state evidence without guessing a 
         text: "Check your email.",
         editableControls: 0,
       },
+      allowedOrigins,
+    ),
+  ).toBe(false);
+});
+
+test("an existing receipt phrase does not hide a different fresh acknowledgement", () => {
+  const prior = {
+    ...before,
+    text: "FAQ: Thank you for applying is the receipt message.\nApplication form",
+  };
+  expect(
+    employerPageConfirmsSubmission(
+      prior,
+      {
+        ...confirmed,
+        text: `${prior.text}\nWe have received your application. Reference: SYN-42.`,
+      },
+      allowedOrigins,
+    ),
+  ).toBe(true);
+});
+
+test.each([
+  { url: `${origin}/confirmation`, text: "Your account is ready." },
+  { url: `${origin}/thank-you`, text: "You are subscribed to our newsletter." },
+  {
+    url: `${origin}/application/confirmation`,
+    text: "Verify your email to finish your application.",
+  },
+  {
+    url: before.url,
+    text: "We have received your application. Unable to send: invalid email.",
+  },
+])("unrelated or refused confirmation states stay uncertain: $text", (page) => {
+  expect(
+    employerPageConfirmsSubmission(
+      before,
+      { ...confirmed, ...page },
       allowedOrigins,
     ),
   ).toBe(false);

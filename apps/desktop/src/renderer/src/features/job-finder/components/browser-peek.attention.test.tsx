@@ -51,6 +51,10 @@ describe("BrowserPeek handoff attention", () => {
         importCsv: vi.fn(),
         importFromBrowser: vi.fn(),
       },
+      siteIcons: {
+        get: vi.fn().mockResolvedValue({ icons: {} }),
+        onChanged: vi.fn().mockReturnValue(() => undefined),
+      },
       addCurrentJob: vi.fn(),
       getState: vi.fn().mockResolvedValue(staleAttentionState),
       command: vi.fn().mockResolvedValue(staleAttentionState),
@@ -287,6 +291,44 @@ const openPage: DesktopBrowserState = {
     },
   ],
 };
+
+it("offers a manual browser fallback without retrying or resuming verification", async () => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const previous = window.nestor;
+  const peek = peekBridge(openPage);
+  Object.defineProperty(window, "nestor", {
+    configurable: true,
+    value: { browser: peek.browser },
+  });
+  try {
+    render(<BrowserPeek />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "More browser actions" }),
+    );
+    fireEvent.click(
+      screen.getByRole("menuitem", { name: "Open in my browser" }),
+    );
+    await screen.findByText(
+      /Nestor cannot observe or continue work in that browser/,
+    );
+    expect(peek.command).toHaveBeenCalledExactlyOnceWith({
+      type: "open_in_browser",
+    });
+  } finally {
+    cleanup();
+    Object.defineProperty(window, "nestor", {
+      configurable: true,
+      value: previous,
+    });
+    vi.unstubAllGlobals();
+  }
+});
 
 describe("BrowserPeek after the person's own Send", () => {
   it("says the application was sent and links to it, without an empty browser grabbing focus", async () => {

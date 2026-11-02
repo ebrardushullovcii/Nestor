@@ -149,7 +149,7 @@ export function buildProfileScreenViewModel(
       },
       {
         id: "sources",
-        label: "Job sources",
+        label: "Job sites",
         description:
           "Manage the public careers pages and boards Job Finder can search.",
         progress: sectionProgress.sources,

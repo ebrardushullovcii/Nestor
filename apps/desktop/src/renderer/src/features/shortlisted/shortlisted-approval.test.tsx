@@ -119,17 +119,20 @@ function show() {
 
 it("approves every selected resume across pages, with an excluded job kept", async () => {
   show();
+  const list = await screen.findByRole("region", { name: "Resumes to review" });
+  fireEvent.click(await within(list).findByRole("button", { name: "Select" }));
   fireEvent.click(
-    await screen.findByRole("checkbox", { name: "Select all 120 jobs" }),
+    within(list).getByRole("checkbox", { name: "Select all 50 shown jobs" }),
+  );
+  fireEvent.click(
+    within(list).getByRole("button", { name: "Select all 120 matching" }),
   );
   fireEvent.click(
     screen.getByRole("checkbox", { name: "Select Designer 120" }),
   );
+  expect(within(list).getByText("119 selected")).toBeTruthy();
   fireEvent.click(
-    within(screen.getByRole("region", { name: "Resumes to review" })).getByRole(
-      "button",
-      { name: "Approve 119" },
-    ),
+    within(list).getByRole("button", { name: "Approve 119 selected" }),
   );
   await waitFor(() => expect(store.stageCounts().resume).toBe(119));
   expect(store.getJob(ids.at(-1)!)?.stage).toBe("shortlisted");
@@ -191,7 +194,7 @@ it("shows an approved job's running application instead of offering Apply again"
   fireEvent.click(row);
   await screen.findByRole("heading", { name: "Designer 1" });
   expect(
-    screen.getByRole("button", { name: "Applying · Open in Applications" }),
+    screen.getByRole("button", { name: "Open in Applications" }),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Apply" })).toBeNull();
   act(() => {

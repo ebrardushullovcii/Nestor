@@ -16,6 +16,7 @@ import {
 import {
   ProfileAutoGrowTextarea,
   ProfileInput,
+  ProfileMonthInput,
   profileSelectTriggerClassName,
 } from "./profile-form-primitives";
 import type { ProfileFieldArrayKeyName } from "./profile-field-array-types";
@@ -197,7 +198,7 @@ export function ProfileExperienceTab({
 
   return (
     <section
-      className="grid content-start gap-(--gap-card)"
+      className="grid grid-cols-[minmax(0,1fr)] content-start gap-(--gap-card)"
       id="profile-setup-experience"
     >
       <ProfileSectionHeader
@@ -245,7 +246,7 @@ export function ProfileExperienceTab({
                 title={recordTitle}
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <p className="text-(length:--text-field-label) font-medium uppercase tracking-[0.16em] text-foreground-muted">
+                  <p className="text-(length:--text-field-label) font-medium text-foreground-muted">
                     Role details
                   </p>
                   <Button
@@ -339,7 +340,7 @@ export function ProfileExperienceTab({
                   </Field>
                   <fieldset className="grid min-w-0 gap-(--gap-field)">
                     {/* Same casing as the field labels beside it. */}
-                    <legend className="text-(length:--text-field-label) font-medium uppercase tracking-(--tracking-label) text-muted-foreground">
+                    <legend className="text-(length:--text-field-label) font-medium tracking-(--tracking-label) text-muted-foreground">
                       Work mode at this job
                     </legend>
                     {/* A preference row, not a table header: the boxed
@@ -394,9 +395,8 @@ export function ProfileExperienceTab({
                     >
                       Start date
                     </FieldLabel>
-                    <ProfileInput
+                    <ProfileMonthInput
                       id={buildExperienceFieldId(entry.id, "start-date")}
-                      placeholder="YYYY-MM"
                       {...register(`records.experiences.${index}.startDate`)}
                     />
                   </Field>
@@ -406,10 +406,9 @@ export function ProfileExperienceTab({
                     >
                       End date
                     </FieldLabel>
-                    <ProfileInput
+                    <ProfileMonthInput
                       id={buildExperienceFieldId(entry.id, "end-date")}
                       disabled={currentRole}
-                      placeholder="YYYY-MM"
                       {...register(`records.experiences.${index}.endDate`)}
                     />
                   </Field>

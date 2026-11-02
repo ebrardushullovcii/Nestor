@@ -20,19 +20,84 @@ const log = (file, entry) =>
   );
 
 // --- 1. Focus -------------------------------------------------------------
-const { app, BrowserWindow, dialog, shell, session } = electron;
+const { app, BrowserWindow, dialog, shell, session, Menu } = electron;
+// Unseen windows: macOS draws an accessory app's windows on the active Space,
+// even over a full-screen app, so every window is fully transparent and
+// click-through. Screenshots read the page with capturePage and Playwright
+// input goes through CDP, so neither needs the window to be seen.
+// NESTOR_VERIFY_WINDOWS=visible shows them again (still never focused).
+const unseen = process.env.NESTOR_VERIFY_WINDOWS !== "visible";
+const setOpacity = BrowserWindow.prototype.setOpacity;
+const setIgnoreMouseEvents = BrowserWindow.prototype.setIgnoreMouseEvents;
+const hideFromScreen = (win) => {
+  if (!unseen) return;
+  setOpacity.call(win, 0);
+  setIgnoreMouseEvents.call(win, true);
+};
 // Electron recognises its windows by `constructor.name === "BrowserWindow"`, so the name stays.
 const QuietWindow = class BrowserWindow extends electron.BrowserWindow {
   constructor(options = {}) {
     const wantsShow = options.show !== false;
     // No always-on-top: Live Assistant popups would otherwise float over the owner's apps.
     super({ ...options, show: false, alwaysOnTop: false });
+    hideFromScreen(this);
     if (wantsShow) this.showInactive();
   }
 };
 BrowserWindow.prototype.show = function show() {
+  hideFromScreen(this);
   this.showInactive();
 };
+if (unseen) {
+  // The app may fade or un-ignore its own windows; keep them unseen.
+  BrowserWindow.prototype.setOpacity = function () {};
+  BrowserWindow.prototype.setIgnoreMouseEvents = function () {};
+}
+// Native menus, system notifications and menu-bar icons would appear on the
+// owner's screen; log them instead.
+Menu.prototype.popup = function popup() {
+  log("opened.jsonl", { kind: "menu.popup" });
+};
+class QuietNotification {
+  constructor(options = {}) {
+    this.options = options;
+  }
+  static isSupported() {
+    return true;
+  }
+  show() {
+    log("opened.jsonl", {
+      kind: "notification",
+      title: this.options.title ?? null,
+    });
+  }
+  close() {}
+  on() {
+    return this;
+  }
+  once() {
+    return this;
+  }
+  removeAllListeners() {
+    return this;
+  }
+}
+class QuietTray {
+  constructor() {
+    log("opened.jsonl", { kind: "tray" });
+  }
+  setToolTip() {}
+  setContextMenu() {}
+  setImage() {}
+  setTitle() {}
+  on() {
+    return this;
+  }
+  destroy() {}
+  isDestroyed() {
+    return false;
+  }
+}
 BrowserWindow.prototype.focus = function focus() {};
 BrowserWindow.prototype.moveTop = function moveTop() {};
 BrowserWindow.prototype.setAlwaysOnTop = function setAlwaysOnTop() {};
@@ -48,7 +113,13 @@ app.on("ready", quietPolicy);
 // `import { BrowserWindow } from "electron"` resolves through require; hand out the quiet class.
 const patched = new Proxy(electron, {
   get: (target, key) =>
-    key === "BrowserWindow" ? QuietWindow : Reflect.get(target, key),
+    key === "BrowserWindow"
+      ? QuietWindow
+      : key === "Notification"
+        ? QuietNotification
+        : key === "Tray"
+          ? QuietTray
+          : Reflect.get(target, key),
 });
 const originalLoad = Module._load;
 Module._load = function load(request, ...rest) {

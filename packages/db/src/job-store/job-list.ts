@@ -143,7 +143,7 @@ const SORT_COLUMNS: Record<JobSort, readonly string[]> = {
 };
 
 const ROW_COLUMNS = `j.id, j.stage, j.stage_at, j.stage_note, j.title, j.company, j.location,
-  j.work_modes, j.salary_text, j.fit_score, j.fit_summary, j.posted_at,
+  j.work_modes, j.salary_text, j.fit_score, j.fit_summary, j.fit_short, j.posted_at,
   j.found_at, j.found_by, j.source_label, j.source_count`;
 
 type RowRecord = {
@@ -158,6 +158,7 @@ type RowRecord = {
   salary_text: string | null;
   fit_score: number;
   fit_summary: string | null;
+  fit_short: string | null;
   posted_at: number;
   found_at: number;
   found_by: string | null;
@@ -178,6 +179,7 @@ function toRow(record: RowRecord): JobRow {
     salaryText: record.salary_text,
     fitScore: record.fit_score >= 0 ? record.fit_score : null,
     fitSummary: record.fit_summary,
+    fitShort: record.fit_short,
     postedAt: record.posted_at > 0 ? toIso(record.posted_at) : null,
     foundAt: toIso(record.found_at),
     searchId: record.found_by,

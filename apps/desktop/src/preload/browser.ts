@@ -8,6 +8,7 @@ import type {
   DesktopBrowserImportSources,
   DesktopBrowserSnapshot,
   DesktopBrowserState,
+  SiteIcons,
 } from "@nestor/contracts";
 
 // Main checks every input and result against its schema; the bridge passes
@@ -40,6 +41,15 @@ export const browserBridge: DesktopBrowserBridge = {
         "browser-passwords:import-browser",
         input,
       ) as Promise<BrowserPasswordImportResult>,
+  },
+  siteIcons: {
+    get: (input) =>
+      ipcRenderer.invoke("browser:site-icons", input) as Promise<SiteIcons>,
+    onChanged: (listener) => {
+      const handler = () => listener();
+      ipcRenderer.on("browser:site-icons-changed", handler);
+      return () => ipcRenderer.off("browser:site-icons-changed", handler);
+    },
   },
   addCurrentJob: (input) =>
     ipcRenderer.invoke(

@@ -165,7 +165,10 @@ export function useProfileWorkflow(
     siteInstructions,
     refresh,
     isPending: (key: PendingKey) => pending.has(key),
-    importResume: (importOptions?: { retryInterrupted?: boolean }) =>
+    importResume: (importOptions?: {
+      retryInterrupted?: boolean;
+      droppedFile?: File;
+    }) =>
       run(
         "import",
         async () => {
@@ -240,7 +243,7 @@ export function useProfileWorkflow(
           window.nestor.profileWorkflow.checkSite(targetId, (progress) => {
             if (live.current) setMessage(progress.message);
           }),
-        { action: "check this source" },
+        { action: "check this site" },
       ),
     saveSiteInstructions: (
       targetId: string,

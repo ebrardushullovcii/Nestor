@@ -1,10 +1,11 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   formatMultiChoiceAnswer,
   parseMultiChoiceAnswer,
   type NeedsYouTask,
 } from "@nestor/contracts";
-import { Button } from "@renderer/components/ui/button";
+import { SegmentedControl } from "@renderer/components/ui/segmented-control";
+import { ChoiceCards } from "@renderer/features/job-finder/components/choice-cards";
 import { Input } from "@renderer/components/ui/input";
 import { Textarea } from "@renderer/components/ui/textarea";
 
@@ -13,9 +14,12 @@ export function AnswerField(props: {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  /** The question is already the pane's title; keep it for assistive tech. */
+  labelHidden?: boolean;
 }) {
   const id = useId();
   const { question, value, onChange, disabled } = props;
+  const labelClass = props.labelHidden ? "sr-only" : "mb-3 font-medium";
   if (question.input === "multi_choice")
     return <MultiChoices key={question.prompt} {...props} />;
   if (question.input === "boolean" || question.input === "choice") {
@@ -28,27 +32,20 @@ export function AnswerField(props: {
         <SearchableChoices key={question.prompt} {...props} options={options} />
       );
     return (
-      <fieldset disabled={disabled} className="grid gap-3">
-        <legend className="mb-3 font-medium">{question.prompt}</legend>
-        <div className="flex flex-wrap gap-2">
-          {options.map((option) => (
-            <Button
-              key={option}
-              type="button"
-              aria-pressed={value === option}
-              variant={value === option ? "secondary" : "outline"}
-              onClick={() => onChange(option)}
-            >
-              {option}
-            </Button>
-          ))}
-        </div>
-      </fieldset>
+      <SingleChoice
+        key={question.prompt}
+        {...props}
+        labelClass={labelClass}
+        options={options}
+      />
     );
   }
   return (
     <div className="grid gap-3">
-      <label className="font-medium" htmlFor={id}>
+      <label
+        className={props.labelHidden ? "sr-only" : "font-medium"}
+        htmlFor={id}
+      >
         {question.prompt}
       </label>
       {question.input === "number" ? (
@@ -73,6 +70,77 @@ export function AnswerField(props: {
   );
 }
 
+/**
+ * The width a row of segments needs for `options` at the field size: each
+ * label (about 8 px a character at 14 px, a little over the average glyph),
+ * its 28 px of padding and edge, and the track's own padding.
+ */
+export function segmentedWidth(options: readonly string[]): number {
+  return options.reduce((sum, option) => sum + option.length * 8 + 30, 6);
+}
+
+/**
+ * One answer from a few: short answers (Yes/No, a few words) are the shared
+ * segmented control while the whole row fits the pane; when it would not
+ * (long answers, a narrow pane, the assistant docked) they are the shared
+ * choice cards, one per line, so no answer is ever cut.
+ */
+function SingleChoice(
+  props: Parameters<typeof AnswerField>[0] & {
+    options: string[];
+    labelClass: string;
+  },
+) {
+  const { question, value, onChange, disabled, options } = props;
+  const ref = useRef<HTMLFieldSetElement>(null);
+  const [width, setWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(([entry]) => {
+      const next = entry?.contentRect.width ?? 0;
+      if (next > 0) setWidth(next);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  const short =
+    options.length <= 4 &&
+    options.every((o) => o.length <= 24) &&
+    (width === null || segmentedWidth(options) <= width);
+  return (
+    <fieldset
+      className="grid gap-3"
+      data-answer-layout={short ? "segments" : "cards"}
+      disabled={disabled}
+      ref={ref}
+    >
+      <legend className={props.labelClass}>{question.prompt}</legend>
+      {short ? (
+        <SegmentedControl
+          className="justify-self-start"
+          label={question.prompt}
+          onValueChange={onChange}
+          options={options.map((option) => ({
+            value: option,
+            label: option,
+          }))}
+          size="field"
+          value={value}
+        />
+      ) : (
+        <ChoiceCards
+          aria-label={question.prompt}
+          columns={2}
+          onChange={onChange}
+          options={options.map((option) => ({ id: option, label: option }))}
+          value={value}
+        />
+      )}
+    </fieldset>
+  );
+}
+
 function SearchableChoices(
   props: Parameters<typeof AnswerField>[0] & { options: string[] },
 ) {
@@ -83,7 +151,9 @@ function SearchableChoices(
   );
   return (
     <fieldset disabled={props.disabled} className="grid gap-3">
-      <legend className="mb-3 font-medium">{props.question.prompt}</legend>
+      <legend className={props.labelHidden ? "sr-only" : "mb-3 font-medium"}>
+        {props.question.prompt}
+      </legend>
       <label htmlFor={id} className="text-sm">
         Search options
       </label>
@@ -157,7 +227,9 @@ function MultiChoices(props: Parameters<typeof AnswerField>[0]) {
     .join(" ");
   return (
     <fieldset disabled={props.disabled} className="grid gap-3">
-      <legend className="mb-3 font-medium">{props.question.prompt}</legend>
+      <legend className={props.labelHidden ? "sr-only" : "mb-3 font-medium"}>
+        {props.question.prompt}
+      </legend>
       <p className="text-sm text-foreground-soft" id={`${id}-hint`}>
         {hint}
       </p>

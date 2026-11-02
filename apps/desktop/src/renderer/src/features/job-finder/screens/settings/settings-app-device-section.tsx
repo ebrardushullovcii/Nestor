@@ -5,6 +5,7 @@ import {
   type JobFinderSettings,
   type UpdateWorkspaceBehaviorInput,
 } from "@nestor/contracts";
+import { SegmentedControl } from "@renderer/components/ui/segmented-control";
 import { ToggleField } from "../../components/toggle-field";
 import {
   applyAppearancePreference,
@@ -12,6 +13,7 @@ import {
 } from "@renderer/lib/theme";
 import { useRegisterSettingsDirtySection } from "./settings-dirty-sections";
 import { SettingsSectionSaveControl } from "./settings-section-save-control";
+import { SettingsRow } from "./settings-row";
 import { SettingsSpeedControl } from "./settings-speed-control";
 import {
   hasOutstandingSectionChanges,
@@ -27,12 +29,21 @@ const appearanceThemeOptions: ReadonlyArray<{
   { label: "Dark", value: "dark" },
 ];
 
+function zoomModifier(): string {
+  return typeof navigator !== "undefined" && /mac/i.test(navigator.platform)
+    ? "⌘"
+    : "Ctrl";
+}
+
 function zoomKeysSentence(): string {
-  const mod =
-    typeof navigator !== "undefined" && /mac/i.test(navigator.platform)
-      ? "⌘"
-      : "Ctrl";
+  const mod = zoomModifier();
   return `${mod} + and ${mod} − make text bigger or smaller; ${mod} 0 sets it back.`;
+}
+
+/** The three zoom combos as keycaps, for the row's control side. */
+function zoomKeycaps(): string[] {
+  const mod = zoomModifier();
+  return [`${mod} +`, `${mod} −`, `${mod} 0`];
 }
 
 interface SettingsAppDeviceSectionProps {
@@ -175,17 +186,16 @@ export function SettingsAppDeviceSection({
   });
 
   return (
-    <section className="surface-panel-shell grid min-w-0 content-start gap-3 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
+    <section className="surface-panel-shell grid min-w-0 content-start gap-4 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-        <div className="grid min-w-0 max-w-[72ch] flex-1 gap-1">
+        <div className="grid min-w-0 max-w-[70ch] flex-1 gap-1">
           <h3
             className="min-w-0 font-semibold text-(--text-headline)"
-            id={appearanceHeadingId}
           >
-            Appearance
+            App & device
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">
-            Follow your system's light or dark mode, or pick one.
+            How Nestor looks and how much it does at once on this computer.
           </p>
         </div>
         <SettingsSectionSaveControl
@@ -196,61 +206,68 @@ export function SettingsAppDeviceSection({
         />
       </div>
 
-      {/* One segmented control instead of three separate radio-shaped
-          buttons. Each segment stays an ordinary button with `aria-pressed`,
-          so assistive technology and UI automation both address it by its
-          visible name and pressed state. Nothing is layered over this row:
-          the sticky Settings subnav keeps its own flow space above the first
-          section, and every section clears it with `scroll-mt`. */}
-      <div
-        aria-labelledby={appearanceHeadingId}
-        className="relative flex w-fit min-w-0 max-w-full flex-wrap items-center gap-0.5 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/45 p-0.5"
-        data-settings-appearance-theme-group
-        role="group"
-      >
-        {appearanceThemeOptions.map((option) => {
-          const isSelected = selectedTheme === option.value;
-          return (
-            <button
-              aria-pressed={isSelected}
-              className={`inline-flex min-h-9 items-center justify-center rounded-(--radius-small) px-3.5 text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-60 ${isSelected ? "bg-primary/10 text-foreground ring-1 ring-primary/70" : "text-foreground-soft hover:bg-secondary hover:text-foreground"}`}
-              disabled={isSavePending}
-              key={option.value}
-              onClick={() => updateSelectedTheme(option.value)}
-              type="button"
-            >
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="grid gap-1">
-        <h4 className="font-medium">Text size</h4>
-        <p className="text-sm text-foreground-soft">
-          {/* The window has no menu bar on Windows, so the keys are named
-              rather than a View menu nobody can open. */}
-          {zoomKeysSentence()} Nestor keeps the size you pick.
-        </p>
-      </div>
-      {onUpdateWorkspaceBehavior ? (
-        <ToggleField
-          checked={draftCollapseSideMenu}
-          className="max-w-xl"
-          description="Fold the side menu to icons when the assistant opens beside the page, and open it again when the assistant closes."
-          {...(sideMenuSaveFailed
-            ? { hint: "That change was not saved. Try the switch again." }
-            : {})}
-          label="Collapse the side menu while the assistant is open"
-          onCheckedChange={updateCollapseSideMenu}
+      <div className="grid min-w-0">
+        {/* The shared segmented control: a sunken track and a raised thumb
+            with a 3:1 edge. Each segment stays an ordinary button with
+            `aria-pressed`, so assistive technology and UI automation both
+            address it by its visible name and pressed state. */}
+        <SettingsRow
+          control={
+            <SegmentedControl<AppearanceTheme>
+              aria-labelledby={appearanceHeadingId}
+              data-settings-appearance-theme-group
+              label="Appearance"
+              onValueChange={updateSelectedTheme}
+              options={appearanceThemeOptions.map((option) => ({
+                ...option,
+                disabled: isSavePending,
+              }))}
+              size="field"
+              value={selectedTheme}
+            />
+          }
+          description="Follow your system's light or dark mode, or pick one."
+          label="Appearance"
+          labelId={appearanceHeadingId}
         />
-      ) : null}
-      {onUpdateWorkspaceBehavior ? (
-        <SettingsSpeedControl
-          onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
-          settings={settings}
+        <SettingsRow
+          control={
+            <span className="flex items-center gap-1 text-(length:--text-small) text-foreground-soft">
+              {zoomKeycaps().map((keycap) => (
+                <kbd
+                  className="inline-flex min-w-7 items-center justify-center rounded-(--radius-small) border border-(--surface-panel-border) bg-(--input) px-1.5 py-0.5 text-(length:--text-tiny) font-medium text-foreground"
+                  key={keycap}
+                >
+                  {keycap}
+                </kbd>
+              ))}
+            </span>
+          }
+          description={
+            // The window has no menu bar on Windows, so the keys are named
+            // rather than a View menu nobody can open.
+            <>{zoomKeysSentence()} Nestor keeps the size you pick.</>
+          }
+          label="Text size"
         />
-      ) : null}
+        {onUpdateWorkspaceBehavior ? (
+          <ToggleField
+            checked={draftCollapseSideMenu}
+            description="Fold the side menu to icons when the assistant opens beside the page, and open it again when it closes."
+            {...(sideMenuSaveFailed
+              ? { hint: "That change was not saved. Try the switch again." }
+              : {})}
+            label="Collapse the side menu while the assistant is open"
+            onCheckedChange={updateCollapseSideMenu}
+          />
+        ) : null}
+        {onUpdateWorkspaceBehavior ? (
+          <SettingsSpeedControl
+            onUpdateWorkspaceBehavior={onUpdateWorkspaceBehavior}
+            settings={settings}
+          />
+        ) : null}
+      </div>
     </section>
   );
 }

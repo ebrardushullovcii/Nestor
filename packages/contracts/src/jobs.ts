@@ -1,8 +1,10 @@
 import { JobSiteSelectionSchema } from "./job-sites";
 import { z } from "zod";
-
 import { WorkModeSchema, type WorkMode } from "./base";
 import { JOB_FIT_BANDS } from "./plain-values";
+
+/** The longest short fit reason, in characters: a narrow row's room. */
+export const FIT_SHORT_MAX = 32;
 
 /**
  * Where a job is in the person's hunt. Every job has exactly one stage, kept
@@ -98,6 +100,12 @@ export const JobRowSchema = z.object({
   fitScore: z.number().int().min(0).max(100).nullable(),
   /** One line on why it fits or not. */
   fitSummary: z.string().nullable(),
+  /**
+   * The same reason in a few words, comparison kept ("Less frontend than
+   * you want"), for a row with no room for the line; null where the fit
+   * step wrote none (older rows), which then cut the line with "…".
+   */
+  fitShort: z.string().max(FIT_SHORT_MAX).nullable().optional(),
   postedAt: z.string().nullable(),
   foundAt: z.string(),
   /** The search that found it first. */
@@ -129,6 +137,8 @@ export type JobListPage = z.infer<typeof JobListPageSchema>;
 export const JOB_TOTAL_CAP = 1000;
 
 export const JobFitSchema = z.object({
+  /** {@link JobRow.fitShort}: the summary in a few words. */
+  short: z.string().max(FIT_SHORT_MAX).optional(),
   inputFingerprint: z.string().optional(),
   limit: z
     .object({

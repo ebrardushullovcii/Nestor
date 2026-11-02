@@ -21,6 +21,12 @@ export type StoreListState<
     /** True until the first page of this list arrives. */
     loading: boolean;
     error: string | null;
+    /**
+     * Whether `counts` were read at all. Until a first page arrives they are
+     * placeholders, and a failed first read leaves them unknown: shown as
+     * "–", never as 0.
+     */
+    countsKnown: boolean;
   };
 
 export const LIST_PAGE_SIZE = 50;
@@ -128,6 +134,7 @@ export function useStoreList<
       counts: options.emptyCounts ?? (EMPTY_COUNTS as Counts),
       loading: true,
       error: null,
+      countsKnown: false,
     };
     return empty as StoreListState<Row, Counts, Extra>;
   });
@@ -147,6 +154,7 @@ export function useStoreList<
             : page.counts,
           loading: false,
           error: null,
+          countsKnown: true,
         };
         // A refresh that changed nothing renders nothing.
         return Object.keys(next).every((key) =>

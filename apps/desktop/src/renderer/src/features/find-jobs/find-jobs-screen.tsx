@@ -22,16 +22,23 @@ import { PageHeader } from "@renderer/features/job-finder/components/page-header
 import {
   ListDetailLayout,
   ListPane,
+  ListRowSkeleton,
   NO_SELECTION,
   STAGE_LABEL,
+  clearSelected,
+  isSelecting,
+  isStackedLayout,
   plural,
-  selectAll,
+  stepSelectAll,
   toSelectionInput,
   toggleSelection,
   useJobList,
   useListKeys,
   useSelectAllCount,
   type ListSelection,
+  CountFigure,
+  countWords,
+  besideList,
 } from "@renderer/features/job-lists";
 
 import { takeFirstSearchRequest } from "./first-search";
@@ -39,9 +46,10 @@ import {
   FIND_JOBS_FILTER_SELECTOR,
   FindJobsRow,
   FindJobsToolbar,
+  describeFloor,
 } from "./find-jobs-list";
 import { JobDetailPane } from "./job-detail-pane";
-import { SearchPanel } from "./search-panel";
+import { SearchPanel, SearchStatus } from "./search-panel";
 import { TRIAGE_ACTIONS, type TriageAction } from "./triage-actions";
 import { useSearchStatus } from "./use-search-status";
 import { useAssistantListView } from "../job-lists/use-assistant-list-view";
@@ -106,6 +114,15 @@ function readFloor(): FloorChoice {
   return { fitFloor: null, floorTouched: false };
 }
 
+/** The pickiness a fit floor stands for; null for a floor of its own. */
+function pickyForFloor(
+  floor: number | null,
+): JobSearchSettings["picky"] | null {
+  for (const [picky, min] of Object.entries(PICKY_MIN_FIT))
+    if (min === floor) return picky as JobSearchSettings["picky"];
+  return null;
+}
+
 /** Recent moves for Undo, kept across the same remount. */
 const rememberedMoves: { current: { moveId: number; label: string }[] } = {
   current: [],
@@ -126,7 +143,13 @@ export function FindJobsScreen() {
   const lastPicky = status.search?.settings.picky ?? "balanced";
   const [{ fitFloor, floorTouched }, setFloorChoice] =
     useState<FloorChoice>(readFloor);
-  const floor = floorTouched ? fitFloor : PICKY_MIN_FIT[lastPicky];
+  // Before any search there is no fit to filter by: the list starts on Any
+  // fit, so a first search that finds only stretch jobs still shows them.
+  const floor = floorTouched
+    ? fitFloor
+    : status.loaded && status.search === null
+      ? null
+      : PICKY_MIN_FIT[lastPicky];
   const chooseFloor = useCallback((fitFloor: number | null) => {
     setFloorChoice({ fitFloor, floorTouched: true });
   }, []);
@@ -134,11 +157,35 @@ export function FindJobsScreen() {
   lastPickyRef.current = lastPicky;
   const [selection, setSelection] = useState<ListSelection>(NO_SELECTION);
   const [activeId, setActiveId] = useState(remembered.activeId);
+  // Stacked (beside a docked assistant on a narrow window), the details
+  // open as a sheet over the list when the person opens a row.
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const closeSheet = useCallback(() => setSheetOpen(false), []);
   const [searchParams] = useSearchParams();
   const navigationKey = useLocation().key;
 
   const linkedJob = Number(searchParams.get("job") ?? "");
   const [starting, setStarting] = useState(false);
+  // Sites turned on in Profile, once the search card has read them.
+  const [siteTotal, setSiteTotal] = useState<number | null>(null);
+  // The screen's width decides where the search's status line goes: in the
+  // card under its choices (narrow), or beside the tabs (from the card's
+  // one-row width, 48rem).
+  const [screenWidth, setScreenWidth] = useState(0);
+  const screenObserver = useRef<ResizeObserver | null>(null);
+  const screenRef = useCallback((node: HTMLDivElement | null) => {
+    screenObserver.current?.disconnect();
+    screenObserver.current = null;
+    if (!node) return;
+    setScreenWidth(node.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    screenObserver.current = new ResizeObserver(([entry]) => {
+      const width = entry?.contentRect.width ?? 0;
+      if (width > 0) setScreenWidth(width);
+    });
+    screenObserver.current.observe(node);
+  }, []);
+  const statusBesideTabs = screenWidth >= 768;
   const [searchError, setSearchError] = useState<string | null>(null);
   const undoStack = rememberedMoves;
 
@@ -149,8 +196,14 @@ export function FindJobsScreen() {
     minFit: stage === "found" ? floor : null,
   };
   const list = useJobList({ ...filter, sort });
-  const { selectedCount, counting, totalCapped } = useSelectAllCount({
-    key: JSON.stringify(filter),
+  const {
+    selectedCount,
+    counting,
+    total: matching,
+    totalCapped,
+  } = useSelectAllCount({
+    // A running search moves the count; read it again as the tab grows.
+    key: JSON.stringify([filter, list.counts[stage]]),
     selection,
     total: list.total,
     totalCapped: list.totalCapped,
@@ -176,10 +229,12 @@ export function FindJobsScreen() {
   // A job asked for by link stays open even when it is not on the first page.
   const pinnedId = useRef<number | null>(remembered.activeId);
 
-  // A new list starts with nothing ticked and its first job open.
+  // A new list starts with nothing ticked (still in select mode, if it was)
+  // and its first job open.
   useEffect(() => {
-    setSelection(NO_SELECTION);
+    setSelection(clearSelected);
     setActiveId(pinnedId.current);
+    setSheetOpen(pinnedId.current !== null);
     pinnedId.current = null;
   }, [stage, text, floor]);
   // When the open job leaves this tab from outside the screen (the Assistant
@@ -302,6 +357,7 @@ export function FindJobsScreen() {
             result.moved > 0
               ? `Put ${plural(result.moved, "job")} back`
               : "Those jobs had already moved",
+          ...(result.moved > 0 ? { tone: "success" as const } : {}),
         });
       } catch (error) {
         showToast({ title: describe(error), tone: "warning" });
@@ -333,6 +389,14 @@ export function FindJobsScreen() {
       list.removeRows(moved);
       setActiveId(next?.id ?? null);
       if (ticked) setSelection(NO_SELECTION);
+      // A move that empties a filtered list takes the filter away too, so
+      // the person is not left on "No jobs match" with jobs still waiting.
+      if (
+        (latest.current.filter.text ?? "").trim() !== "" &&
+        !list.rows.some((row) => !moved(row.id)) &&
+        list.nextCursor === null
+      )
+        setText("");
       try {
         const result = await window.nestor.jobs.run("move_jobs", {
           selection: input,
@@ -350,6 +414,7 @@ export function FindJobsScreen() {
         showToast({
           id: "find-jobs-move",
           title: entry.label,
+          tone: "success",
           action: { label: "Undo", onClick: () => void undo(entry) },
         });
       } catch (error) {
@@ -360,7 +425,15 @@ export function FindJobsScreen() {
     [showToast, undo],
   );
 
-  const startSearch = useCallback(async (settings: JobSearchSettings) => {
+  // The list's fit floor is the one fit control on this screen; a search
+  // records it as how picky it was, so the two can never disagree.
+  const floorRef = useRef(floor);
+  floorRef.current = floor;
+  const startSearch = useCallback(async (chosen: JobSearchSettings) => {
+    const settings: JobSearchSettings = {
+      ...chosen,
+      picky: pickyForFloor(floorRef.current) ?? chosen.picky,
+    };
     setStarting(true);
     setSearchError(null);
     try {
@@ -382,7 +455,13 @@ export function FindJobsScreen() {
       void startSearch(JobSearchSettingsSchema.parse({}));
   }, [startSearch, status.loaded, status.search]);
 
-  const activate = useCallback((id: number) => setActiveId(id), []);
+  const activate = useCallback((id: number) => {
+    setActiveId(id);
+    // Only a stacked layout covers the list with the details, and a press in
+    // select mode ticks rows instead.
+    if (!isSelecting(latest.current.selection) && isStackedLayout())
+      setSheetOpen(true);
+  }, []);
   const toggle = useCallback((id: number, shiftKey: boolean) => {
     setSelection((current) =>
       toggleSelection(current, id, shiftKey, latest.current.list.rows),
@@ -394,7 +473,16 @@ export function FindJobsScreen() {
     activeId,
     setActiveId,
     toggle,
-    selectAll: () => setSelection(selectAll()),
+    selectAll: () =>
+      setSelection((current) =>
+        stepSelectAll(
+          current,
+          latest.current.list.rows,
+          latest.current.list.nextCursor === null &&
+            !latest.current.list.totalCapped &&
+            latest.current.list.rows.length >= latest.current.list.total,
+        ),
+      ),
     clearSelection: () => setSelection(NO_SELECTION),
     undo: () => void undo(),
     open: (id) =>
@@ -409,20 +497,31 @@ export function FindJobsScreen() {
   });
 
   const counts = list.counts;
-  const tabOptions: SegmentedControlOption<TriageStage>[] = TABS.map((tab) => ({
-    value: tab,
-    label: (
-      <span className="flex items-center gap-1.5">
-        {STAGE_LABEL[tab]}
-        <span className="tabular-nums text-foreground-muted">
-          {counts[tab].toLocaleString()}
-        </span>
-      </span>
-    ),
-    ariaLabel: `${STAGE_LABEL[tab]}, ${counts[tab]}`,
-  }));
-
   const running = status.search?.state === "running";
+  // A first search with nothing found yet: rows are on their way, so the
+  // list shows skeleton rows rather than an empty message.
+  const firstRowsComing = stage === "found" && running && counts.found === 0;
+  const tabOptions: SegmentedControlOption<TriageStage>[] = TABS.map((tab) => {
+    // "Found 0" is not true while a first search brings rows in: the count
+    // is not known yet, and says so with the same "–" as an unread count.
+    const known = list.countsKnown && !(tab === "found" && firstRowsComing);
+    return {
+      value: tab,
+      label: (
+        <span className="flex items-center gap-1.5">
+          {STAGE_LABEL[tab]}
+          <CountFigure
+            className="text-foreground-muted"
+            count={counts[tab]}
+            known={known}
+            slot={`find-jobs:${tab}`}
+          />
+        </span>
+      ),
+      ariaLabel: `${STAGE_LABEL[tab]}, ${countWords(counts[tab], known)}`,
+    };
+  });
+
   const emptyFit =
     stage === "found" &&
     floor !== null &&
@@ -433,34 +532,46 @@ export function FindJobsScreen() {
   const fitSummary = useEmptyFitSummary(emptyFit, floor, list.rows);
   const fitReason = emptyFitReason(fitSummary, floor);
   const filtered = text.trim() !== "" || (stage === "found" && floor !== null);
-  const lastMove = undoStack.current.at(-1) ?? null;
   // Jobs that left Found (here, in the chat or on another screen) mean the
   // search has run; "No jobs yet" is only true when no stage has any.
   const sortedJobs =
     counts.shortlisted + counts.hidden + counts.resume + counts.applied;
+  // Before any job was found there is no job to pick: the list (its one
+  // explanation and action) takes the width, with no "Pick a job" pane.
+  const noJobsYet =
+    stage === "found" &&
+    list.countsKnown &&
+    !list.loading &&
+    counts.found === 0 &&
+    sortedJobs === 0 &&
+    !running &&
+    !text.trim();
   const emptyMessage =
     stage === "found" && counts.found === 0
-      ? running
-        ? ["Searching your job sites…", "Jobs show up here as they are found."]
-        : (status.progress?.failed ?? 0) > 0 ||
-            (status.search?.state === "failed" && !status.progress?.needsYou)
+      ? (status.progress?.failed ?? 0) > 0 ||
+        (status.search?.state === "failed" && !status.progress?.needsYou)
+        ? [
+            "Some sites could not be read",
+            "Open What each site found above to see why, fix their URLs or search again.",
+          ]
+        : (status.progress?.needsYou ?? 0) > 0
           ? [
-              "Some sites could not be read",
-              "Check the failed sites above, fix their URLs or retry the search.",
+              "Some sites need you",
+              "Open Needs you to sign in, then retry those sites.",
             ]
-          : (status.progress?.needsYou ?? 0) > 0
-            ? [
-                "Some sites need you",
-                "Open Needs you to sign in, then retry those sites.",
-              ]
-            : sortedJobs > 0
-              ? ["All caught up", "Every found job is shortlisted or hidden."]
+          : sortedJobs > 0
+            ? ["All caught up", "Every found job is shortlisted or hidden."]
+            : siteTotal === 0
+              ? [
+                  "Add a job site first",
+                  "Searches read the job sites you add in Profile. Press Add a job site above, then search it here.",
+                ]
               : ["No jobs yet", "Pick how to search above and press Search."]
       : filtered && list.total === 0
         ? [
             text.trim() === "" && stage === "found" && floor !== null
-              ? `No found jobs at fit ${floor}+`
-              : `No ${STAGE_LABEL[stage].toLowerCase()} jobs match`,
+              ? `No found jobs at ${describeFloor(floor).toLowerCase()} or better`
+              : `No ${STAGE_LABEL[stage].toLowerCase()} jobs match “${text.trim()}”`,
             emptyFit ? fitReason.detail : null,
           ]
         : [
@@ -487,36 +598,133 @@ export function FindJobsScreen() {
             Check where you can work
           </Button>
         ) : null}
-        {filtered && list.total === 0 && counts[stage] > 0 ? (
+        {text.trim() !== "" && list.total === 0 ? (
           <Button
-            onClick={() => {
-              setText("");
-              chooseFloor(null);
-            }}
+            onClick={() => setText("")}
             size="sm"
             type="button"
             variant="outline"
           >
-            Show all {counts[stage]}
+            Clear filter
           </Button>
-        ) : null}
-        {lastMove ? (
+        ) : filtered && list.total === 0 && counts[stage] > 0 ? (
           <Button
-            onClick={() => void undo()}
+            onClick={() => chooseFloor(null)}
             size="sm"
-            title="Undo · U"
             type="button"
-            variant="ghost"
+            variant="outline"
           >
-            Undo: {lastMove.label.toLowerCase()}
+            Show all {counts[stage].toLocaleString()}
           </Button>
         ) : null}
       </div>
     </div>
   );
 
+  // The list's scope in plain words, on the row under its tools:
+  // "5 of 11 jobs · 6 below good fit · Show all".
+  const unscoredNow =
+    text.trim() || totalCapped || list.belowFloorCapped
+      ? 0
+      : Math.max(0, counts.found - matching - (list.belowFloor ?? 0));
+  // Hide takes a scored job out of the list at once, before the stage counts
+  // catch up: for a moment "found" still counts it and the difference read
+  // as one more job "not scored yet". With the same number found, the jobs
+  // waiting for a score never grow (new jobs change "found"), so the line
+  // keeps its last set of numbers, all of them together ("14 of 27 · 9
+  // below · 4 not scored", never "13 of 27 · 9 below · 4" adding to 26),
+  // until the counts agree again.
+  const nowScope = {
+    matching,
+    found: counts.found,
+    below: list.belowFloor ?? 0,
+    unscored: unscoredNow,
+  };
+  const scopeSeen = useRef(nowScope);
+  const scope =
+    scopeSeen.current.found === counts.found &&
+    unscoredNow > scopeSeen.current.unscored
+      ? scopeSeen.current
+      : nowScope;
+  useEffect(() => {
+    scopeSeen.current = scope;
+  });
+  const unscored = scope.unscored;
+  const matchingText = `${scope.matching.toLocaleString()}${totalCapped ? "+" : ""}`;
+  const floorScope =
+    stage === "found" && floor !== null
+      ? {
+          below: scope.below,
+          belowText: `${scope.below.toLocaleString()}${list.belowFloorCapped ? "+" : ""}`,
+          // "of all found" only without a text filter, which counts apart.
+          ofAll: !text.trim() && scope.found > scope.matching,
+          unscored,
+        }
+      : null;
+  const checkingFit = (status.fitChecking ?? 0) - (status.fitRechecking ?? 0);
+  const recheckingFit = status.fitRechecking ?? 0;
+  const scopeText = floorScope?.ofAll
+    ? `${matchingText} of ${scope.found.toLocaleString()} jobs`
+    : `${matchingText} ${scope.matching === 1 ? "job" : "jobs"}`;
+  const belowText =
+    floorScope && floorScope.below > 0 && floor !== null
+      ? ` · ${floorScope.belowText} below ${describeFloor(floor).toLowerCase()}`
+      : "";
+  const summary = (
+    <span className="tabular-nums" data-list-scope>
+      {floorScope && floorScope.unscored > 0 ? (
+        <>
+          <span className="hidden @lg/listbar:inline">
+            {`${scopeText}${belowText} · ${floorScope.unscored.toLocaleString()} not scored yet`}
+          </span>
+          {/* A narrow list says every part in short, so the parts still add
+              up to the total ("14 of 27 · 9 below · 4 unscored"). */}
+          <span className="@lg/listbar:hidden">
+            {`${floorScope.ofAll ? `${matchingText} of ${scope.found.toLocaleString()}` : scopeText}${
+              floorScope.below > 0 && floor !== null
+                ? ` · ${floorScope.belowText} below`
+                : ""
+            } · ${floorScope.unscored.toLocaleString()} unscored`}
+          </span>
+        </>
+      ) : (
+        `${scopeText}${belowText}`
+      )}
+      {floorScope && (floorScope.ofAll || floorScope.below > 0) ? (
+        <>
+          {" · "}
+          <button
+            // A link in a 20px line: its own box is 24px tall (2px above
+            // and below the text), and the negative margin keeps the line
+            // at 20px; the summary line's padding keeps the box unclipped.
+            className="inline-block -my-0.5 rounded-(--radius-small) py-0.5 font-medium text-(--link) underline underline-offset-2 outline-none hover:text-(--link-hover) focus-ring"
+            onClick={() => chooseFloor(null)}
+            type="button"
+          >
+            Show all
+          </button>
+        </>
+      ) : null}
+      {recheckingFit > 0 ? (
+        <span role="status">
+          {` · Re-checking fit for ${plural(recheckingFit, "job")}`}
+        </span>
+      ) : checkingFit > 0 ? (
+        <span role="status">
+          {` · Checking fit for ${checkingFit.toLocaleString()} more…`}
+        </span>
+      ) : null}
+    </span>
+  );
+  const countText = `${selectedCount.toLocaleString()}${totalCapped && selection.all ? "+" : ""}`;
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pt-3 xl:overflow-hidden">
+    <div
+      // The same stable scrollbar lane as every other route, so the page's
+      // right edge does not jump between routes.
+      className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto pt-3 [scrollbar-gutter:stable]"
+      ref={screenRef}
+    >
       <PageHeader
         description="Search your job sites, then shortlist the jobs worth a resume."
         title="Find jobs"
@@ -524,28 +732,39 @@ export function FindJobsScreen() {
       <SearchPanel
         error={searchError}
         onStart={(settings) => void startSearch(settings)}
+        onSiteTotal={setSiteTotal}
         onStop={() => void window.nestor.jobs.run("stop_search", {})}
+        siteTotal={siteTotal}
         starting={starting}
         status={status}
+        statusApart={statusBesideTabs}
       />
-      <SegmentedControl
-        label="Which jobs"
-        onValueChange={(value) => setStage(value)}
-        options={tabOptions}
-        value={stage}
-      />
-      {(status.fitRechecking ?? 0) > 0 ? (
-        <p role="status" className="text-xs text-foreground-muted">
-          Re-checking fit for {status.fitRechecking} jobs
-        </p>
-      ) : null}
-      {(status.fitChecking ?? 0) - (status.fitRechecking ?? 0) > 0 ? (
-        <p role="status" className="text-xs text-foreground-muted">
-          Checking fit for{" "}
-          {(status.fitChecking ?? 0) - (status.fitRechecking ?? 0)} more…
-        </p>
-      ) : null}
+      {/* Wide, the search's status line sits beside the tabs, in the room
+          they leave, so the search card is one row and the list gets the
+          height of a row more. */}
+      <div className="flex min-w-0 items-end gap-4">
+        <SegmentedControl
+          className="shrink-0"
+          label="Which jobs"
+          variant="tabs"
+          onValueChange={(value) => setStage(value)}
+          options={tabOptions}
+          value={stage}
+        />
+        {statusBesideTabs ? (
+          <SearchStatus
+            className="mb-0.5 flex-1"
+            error={searchError}
+            noSites={siteTotal === 0}
+            status={status}
+          />
+        ) : null}
+      </div>
       <ListDetailLayout
+        {...(noJobsYet
+          ? { columnsClassName: "split:grid-cols-[minmax(0,1fr)]" }
+          : {})}
+        sheet={{ open: sheetOpen && activeId !== null, onClose: closeSheet }}
         state={{
           stage,
           text,
@@ -555,56 +774,60 @@ export function FindJobsScreen() {
           all: selection.all,
         }}
         detail={
-          <JobDetailPane
-            actions={actions}
-            jobId={activeId}
-            onMove={(to) => {
-              const action = actions.find((a) => a.to === to);
-              if (action) void move(action, true);
-            }}
-            stage={stage}
-          />
+          noJobsYet ? null : (
+            <JobDetailPane
+              actions={actions}
+              jobId={activeId}
+              bulkActive={selectedCount > 0}
+              list={besideList(list)}
+              listLoading={list.loading || firstRowsComing}
+              onBack={closeSheet}
+              onMove={(to) => {
+                const action = actions.find((a) => a.to === to);
+                if (action) void move(action, true);
+              }}
+              stage={stage}
+            />
+          )
         }
         list={
           <ListPane
             onVisibleRows={prioritizeVisible}
             activeId={activeId}
             counting={counting}
-            bulkActions={
-              <>
-                {actions.map((action, index) => (
-                  <Button
-                    disabled={counting}
-                    key={action.to}
-                    onClick={() => void move(action)}
-                    size="sm"
-                    type="button"
-                    variant={index === 0 ? "primary" : "outline"}
-                  >
-                    {counting
-                      ? action.label
-                      : action.bulk(
-                          `${selectedCount.toLocaleString()}${totalCapped && selection.all ? "+" : ""}`,
-                        )}
-                  </Button>
-                ))}
-                <Button
-                  onClick={() => setSelection(NO_SELECTION)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Clear
-                </Button>
-              </>
-            }
+            bulkActions={actions.map((action, index) => (
+              <Button
+                aria-label={
+                  counting
+                    ? undefined
+                    : `${action.bulk(countText)} ${selectedCount === 1 ? "job" : "jobs"}`
+                }
+                disabled={counting}
+                key={action.to}
+                onClick={() => void move(action)}
+                size="toolbar"
+                title={`${action.verb} · ${action.key.toUpperCase()}`}
+                type="button"
+                variant={index === 0 ? "primary" : "outline"}
+              >
+                {/* Named by scope, so it never reads as the open job's own
+                    move: "Shortlist 3", not a second "Shortlist". */}
+                {counting ? action.verb : action.bulk(countText)}
+              </Button>
+            ))}
             empty={empty}
+            fillStacked
             hasMore={list.nextCursor !== null}
             label={`${STAGE_LABEL[stage]} jobs`}
             loading={list.loading}
-            onClearSelection={() => setSelection(NO_SELECTION)}
+            error={list.error}
+            onRetry={() => void list.refresh()}
             onLoadMore={() => void list.loadMore()}
-            onSelectAll={() => setSelection(selectAll())}
+            onSelectionChange={setSelection}
+            pending={firstRowsComing}
+            renderSkeletonRow={(index) => (
+              <ListRowSkeleton index={index} lines={2} />
+            )}
             renderRow={(row, state) => (
               <FindJobsRow
                 {...state}
@@ -616,36 +839,27 @@ export function FindJobsScreen() {
             rows={list.rows}
             selectedCount={selectedCount}
             selection={selection}
+            summary={summary}
             toolbar={
-              <FindJobsToolbar
-                fitFloor={
-                  stage === "found"
-                    ? {
-                        floor,
-                        below:
-                          floor !== null && list.belowFloor
-                            ? `${list.belowFloor.toLocaleString()}${list.belowFloorCapped ? "+" : ""}`
-                            : null,
-                      }
-                    : null
-                }
-                onSort={(next) =>
-                  setSortByStage((current) => ({ ...current, [stage]: next }))
-                }
-                onText={setText}
-                onToggleFloor={() =>
-                  chooseFloor(
-                    floor === null
-                      ? (PICKY_MIN_FIT[lastPicky] ?? PICKY_MIN_FIT.balanced)
-                      : null,
-                  )
-                }
-                sort={sort}
-                sorts={SORTS[stage]}
-                text={text}
-              />
+              // No job in this tab at all (a first run, an empty Hidden):
+              // nothing to filter, sort or set a fit for, so no controls
+              // over the empty message. A filter typed earlier keeps its
+              // field so it can be cleared.
+              list.countsKnown && counts[stage] === 0 && !text.trim() ? null : (
+                <FindJobsToolbar
+                  fitFloor={stage === "found" ? { floor } : null}
+                  onSort={(next) =>
+                    setSortByStage((current) => ({ ...current, [stage]: next }))
+                  }
+                  onFloor={chooseFloor}
+                  onText={setText}
+                  sort={sort}
+                  sorts={SORTS[stage]}
+                  text={text}
+                />
+              )
             }
-            total={list.total}
+            total={matching}
             totalCapped={totalCapped}
             windowed
           />

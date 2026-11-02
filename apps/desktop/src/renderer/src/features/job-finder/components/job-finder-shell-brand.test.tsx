@@ -7,13 +7,12 @@ import { JobFinderShellBrand } from "./job-finder-shell-brand";
 afterEach(cleanup);
 
 /**
- * Tailwind v4's arbitrary-property shorthand takes the custom property
- * directly: `text-(--token)`. Wrapping it in `var()` produces `var(var(--x))`
- * and Tailwind emits no rule at all, so the class silently does nothing. These
- * assertions pin the token form for the brand lockup's type styling.
+ * The brand lockup: the Nestor wordmark, a hairline and the module name on
+ * one line. In the interactive shell the whole lockup is the module switch,
+ * so it reads as one control with one hover state and a chevron.
  */
-describe("JobFinderShellBrand token classes", () => {
-  it("uses the Tailwind v4 custom-property shorthand without a nested var()", () => {
+describe("JobFinderShellBrand lockup", () => {
+  it("renders the wordmark and the module name on one line, in sentence case", () => {
     const { container, getByRole } = render(<JobFinderShellBrand />);
 
     const wordmark = container.querySelector("[data-desktop-brand-wordmark]");
@@ -21,37 +20,32 @@ describe("JobFinderShellBrand token classes", () => {
 
     expect(wordmark).not.toBeNull();
     expect(subtitle).not.toBeNull();
-
     expect(wordmark?.contains(getByRole("img", { name: "Nestor" }))).toBe(true);
     expect(
       getByRole("img", { name: "Nestor" }).getAttribute("class"),
     ).toContain("text-(--headline-primary)");
-    expect(subtitle?.className).toContain("tracking-(--tracking-caps)");
-    expect(subtitle?.className).toContain("text-[0.72rem]");
-    expect(subtitle?.className).toContain("sm:text-[0.78rem]");
+    expect(subtitle?.textContent).toBe("NestorJob Finder");
+    expect(subtitle?.className).toContain("text-(length:--text-small)");
+    expect(subtitle?.className).not.toContain("uppercase");
   });
 
-  it("renders the module switch as the subtitle when one is supplied", () => {
+  it("makes the whole lockup the module switch when one is supplied", () => {
     const { container } = render(
       <JobFinderShellBrand moduleSwitch={{ onSelectModule: () => {} }} />,
     );
 
-    const subtitle = container.querySelector("[data-desktop-brand-subtitle]");
-    expect(subtitle).not.toBeNull();
-
-    // The switcher replaces the static caption in the same slot, so the module
-    // name stays one line under the wordmark whether or not it is interactive.
-    const trigger = subtitle?.querySelector("[data-module-switch-trigger]");
+    const trigger = container.querySelector("[data-module-switch-trigger]");
     expect(trigger).not.toBeNull();
     expect(trigger?.getAttribute("aria-label")).toBe(
       "Job Finder, switch module",
     );
-    expect(trigger?.querySelector("span")?.className).toContain(
-      "tracking-(--tracking-caps)",
-    );
-    expect(trigger?.querySelector("span")?.className).toContain(
-      "sm:text-[0.78rem]",
-    );
+    // Wordmark, module name and chevron all sit inside the one button.
+    expect(
+      trigger?.querySelector("[data-desktop-brand-wordmark]"),
+    ).not.toBeNull();
+    expect(trigger?.textContent).toContain("Job Finder");
+    expect(trigger?.querySelector(".lucide-chevron-down")).not.toBeNull();
+    expect(trigger?.className).toContain("hover:bg-accent");
   });
 
   it("ships no var()-wrapped custom-property class on any brand node", () => {

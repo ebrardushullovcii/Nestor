@@ -394,7 +394,7 @@ export function ResumeEntryEditorCard(props: ResumeEntryEditorCardProps) {
             }}
           />
         </Field>
-        <label className="flex min-h-10 min-w-0 items-center gap-2 whitespace-nowrap text-(length:--text-small) font-semibold uppercase tracking-(--tracking-caps) text-foreground-soft sm:col-span-2">
+        <label className="flex min-h-10 min-w-0 items-center gap-2 whitespace-nowrap text-(length:--text-small) font-semibold tracking-(--tracking-caps) text-foreground-soft sm:col-span-2">
           <Checkbox
             checked={entry.isCurrent}
             data-resume-editor-target={getResumeEntryFieldTargetId(
@@ -462,7 +462,7 @@ export function ResumeEntryEditorCard(props: ResumeEntryEditorCardProps) {
       </Field>
 
       <div className="grid gap-2">
-        <p className="text-(length:--text-tiny) uppercase tracking-(--tracking-caps) text-muted-foreground">
+        <p className="text-(length:--text-tiny) tracking-(--tracking-caps) text-muted-foreground">
           Entry bullets
         </p>
         {/* The per-row controls stay icons so a long entry does not become a

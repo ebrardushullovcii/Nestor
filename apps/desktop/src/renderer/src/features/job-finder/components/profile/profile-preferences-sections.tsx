@@ -46,11 +46,11 @@ export function ProfilePreferencesTargetingSection(props: {
       />
 
       <article
-        className="surface-card-tint grid gap-4 rounded-(--radius-panel) border border-(--surface-panel-border) p-4"
+        className="grid gap-4 border-t border-(--surface-panel-border) pt-5 first:border-t-0 first:pt-0"
         id="profile-target-roles"
       >
         <h3
-          className="scroll-mt-4 text-[0.98rem] font-semibold text-(--text-headline) outline-none"
+          className="scroll-mt-4 text-base font-semibold text-(--text-headline) outline-none"
           id="profile-target-roles-heading"
           tabIndex={-1}
         >
@@ -140,7 +140,7 @@ export function ProfilePreferencesTargetingSection(props: {
         </div>
       </article>
 
-      <article className="surface-card-tint grid gap-4 rounded-(--radius-panel) border border-(--surface-panel-border) p-4">
+      <article className="grid gap-4 border-t border-(--surface-panel-border) pt-5 first:border-t-0 first:pt-0">
         <h3 className="font-semibold text-(--text-headline)">
           Location preferences
         </h3>
@@ -171,7 +171,7 @@ export function ProfilePreferencesTargetingSection(props: {
         </div>
       </article>
 
-      <article className="surface-card-tint grid gap-4 rounded-(--radius-panel) border border-(--surface-panel-border) p-4">
+      <article className="grid gap-4 border-t border-(--surface-panel-border) pt-5 first:border-t-0 first:pt-0">
         <h3 className="font-semibold text-(--text-headline)">
           Company preferences
         </h3>
@@ -228,12 +228,12 @@ export function ProfilePreferencesTargetingSection(props: {
       </article>
 
       <article
-        className="surface-card-tint grid gap-4 rounded-(--radius-panel) border border-(--surface-panel-border) p-4 scroll-mt-4 sm:scroll-mt-[8.25rem] xl:scroll-mt-4"
+        className="grid gap-4 border-t border-(--surface-panel-border) pt-5 first:border-t-0 first:pt-0 scroll-mt-4 sm:scroll-mt-[4rem] xl:scroll-mt-4"
         id="profile-work-modes"
       >
         <div className="grid gap-1">
           <h3
-            className="scroll-mt-4 text-[0.98rem] font-semibold text-(--text-headline) outline-none sm:scroll-mt-[8.25rem] xl:scroll-mt-4"
+            className="scroll-mt-4 text-base font-semibold text-(--text-headline) outline-none sm:scroll-mt-[4rem] xl:scroll-mt-4"
             id="profile-work-modes-heading"
             tabIndex={-1}
           >

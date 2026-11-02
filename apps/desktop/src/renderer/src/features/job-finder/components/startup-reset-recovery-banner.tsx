@@ -138,7 +138,7 @@ export function StartupResetRecoveryBanner() {
       role="status"
     >
       <div className="grid gap-1">
-        <p className="text-(length:--text-tiny) uppercase tracking-[0.18em] text-muted-foreground">
+        <p className="text-(length:--text-tiny) text-muted-foreground">
           Workspace recovery
         </p>
         <p className="text-sm font-medium text-foreground">{heading}</p>

@@ -44,7 +44,8 @@ function setup() {
     decryptString: (value) => value.toString(),
   });
   let url = "https://example.test/login",
-    allowed = true;
+    allowed = true,
+    profileEmail: string | null = null;
   const listeners = new Map<
     string,
     (event: IpcMainEvent, value: unknown) => void
@@ -74,6 +75,7 @@ function setup() {
     host,
     () => vault,
     () => allowed,
+    () => profileEmail,
   );
   manager.attach({
     on: (
@@ -109,6 +111,9 @@ function setup() {
     host,
     permit: (value: boolean) => {
       allowed = value;
+    },
+    profileEmail: (value: string | null) => {
+      profileEmail = value;
     },
   };
 }
@@ -225,4 +230,55 @@ it("agent use requires opt-in, one account and an existing-account login form", 
   expect(await manager.prepareAgentCredentials("tab")).toBe(false);
   expect(manager.list("tab").credentials.length).toBe(2);
   expect(host.chooseAccount).toHaveBeenCalledExactlyOnceWith("tab");
+});
+it("supplies the known profile email only for one username-less saved sign-in without changing the vault", async () => {
+  const { manager, vault, capture, frame, profileEmail } = setup();
+  vault.save({ ...capture, username: "" });
+  profileEmail("synthetic-applicant@example.test");
+  expect(await manager.prepareAgentCredentials("tab")).toBe(true);
+  expect(frame.send).toHaveBeenLastCalledWith(
+    "browser-password:fill",
+    expect.objectContaining({
+      username: "",
+      fallbackUsername: "synthetic-applicant@example.test",
+      agent: true,
+    }),
+  );
+  expect(vault.list()[0]?.username).toBe("");
+  expect(
+    frame.executeJavaScript.mock.calls.every(
+      (args) => !JSON.stringify(args).includes(capture.password),
+    ),
+  ).toBe(true);
+  frame.send.mockClear();
+  await manager.autofill("tab", vault.list()[0]!.id);
+  expect(frame.send.mock.calls[0]?.[1]).not.toHaveProperty("fallbackUsername");
+});
+it("never combines profile email with a named login, multiple accounts, registration or another origin", async () => {
+  const { manager, vault, capture, frame, profileEmail, navigate, permit } =
+    setup();
+  profileEmail("synthetic-applicant@example.test");
+  vault.save(capture);
+  expect(await manager.prepareAgentCredentials("tab")).toBe(true);
+  expect(frame.send.mock.calls[0]?.[1]).not.toHaveProperty("fallbackUsername");
+  vault.clear();
+  vault.save({ ...capture, username: "" });
+  frame.send.mockClear();
+  permit(false);
+  expect(await manager.prepareAgentCredentials("tab")).toBe(false);
+  permit(true);
+  frame.executeJavaScript.mockResolvedValue([
+    { action: capture.action, login: false },
+  ]);
+  expect(await manager.prepareAgentCredentials("tab")).toBe(false);
+  frame.executeJavaScript.mockResolvedValue([
+    { action: capture.action, login: true },
+  ]);
+  navigate("https://other.test/login");
+  expect(await manager.prepareAgentCredentials("tab")).toBe(false);
+  navigate("https://example.test/login");
+  vault.save(capture);
+  expect(await manager.prepareAgentCredentials("tab")).toBe(false);
+  expect(await manager.autofill("tab", vault.list()[0]!.id, true)).toBe(false);
+  expect(frame.send).not.toHaveBeenCalled();
 });

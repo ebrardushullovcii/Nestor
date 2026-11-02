@@ -109,7 +109,7 @@ export function ResumeImportProgress(props: {
             {stageLabel}
           </strong>
           {stageCounter ? (
-            <span className="shrink-0 text-(length:--text-tiny) uppercase tracking-wide text-foreground-muted">
+            <span className="shrink-0 text-(length:--text-tiny) tracking-wide text-foreground-muted">
               {stageCounter}
             </span>
           ) : null}

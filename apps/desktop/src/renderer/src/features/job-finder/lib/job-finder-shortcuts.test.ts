@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildJobFinderShortcutHelp,
+  groupJobFinderShortcutHelp,
   eventMatchesJobFinderShortcut,
   formatJobFinderShortcutCombo,
   getJobFinderAriaKeyshortcuts,
@@ -107,8 +108,8 @@ describe("job finder shortcut registry", () => {
   });
 
   it("formats combos and aria-keyshortcuts per platform", () => {
-    expect(formatJobFinderShortcutCombo("mod+k", "darwin")).toBe("⌘K");
-    expect(formatJobFinderShortcutCombo("mod+k", "win32")).toBe("Ctrl K");
+    expect(formatJobFinderShortcutCombo("mod+k", "darwin")).toBe("⌘ + K");
+    expect(formatJobFinderShortcutCombo("mod+k", "win32")).toBe("Ctrl + K");
     expect(formatJobFinderShortcutCombo("/", "darwin")).toBe("/");
     expect(formatJobFinderShortcutCombo("?", "win32")).toBe("?");
     expect(getJobFinderAriaKeyshortcuts("mod+b", "darwin")).toBe("Meta+b");
@@ -122,6 +123,7 @@ describe("job finder shortcut registry", () => {
     expect(buildJobFinderShortcutHelp("darwin").slice(0, 5)).toEqual([
       {
         combos: [["⌘", "K"]],
+        group: "Everywhere",
         id: "open-global-search",
         rowId: "open-global-search::Anywhere in Job Finder",
         label: "Search your workspace",
@@ -129,13 +131,15 @@ describe("job finder shortcut registry", () => {
       },
       {
         combos: [["/"]],
+        group: "Lists",
         id: "focus-list-search",
         rowId: "focus-list-search::Outside text fields, controls, and dialogs",
-        label: "Search this list, or your workspace off a list",
+        label: "Filter the list you are on; elsewhere, search everything",
         scope: "Outside text fields, controls, and dialogs",
       },
       {
         combos: [["⌘", "B"]],
+        group: "Everywhere",
         id: "toggle-sidebar",
         rowId:
           "toggle-sidebar::Wide layout only, outside overlays, search, and editable fields",
@@ -145,6 +149,7 @@ describe("job finder shortcut registry", () => {
       },
       {
         combos: [["⌘", "I"]],
+        group: "Everywhere",
         id: "toggle-assistant",
         rowId: "toggle-assistant::Anywhere in Job Finder",
         label: "Show or hide the assistant",
@@ -152,6 +157,7 @@ describe("job finder shortcut registry", () => {
       },
       {
         combos: [["?"]],
+        group: "Everywhere",
         id: "open-shortcuts",
         rowId: "open-shortcuts::Outside text fields, controls, and dialogs",
         label: "Show keyboard shortcuts",
@@ -222,9 +228,44 @@ it.each(["darwin", "win32", "linux"] as const)(
         .filter(({ id }) => id.startsWith("zoom") || id === "actual-size")
         .map(({ label, combos }) => ({ label, combos })),
     ).toEqual([
-      { label: "Zoom In", combos: [[modifier, "="]] },
-      { label: "Zoom Out", combos: [[modifier, "-"]] },
-      { label: "Actual Size", combos: [[modifier, "0"]] },
+      { label: "Zoom in", combos: [[modifier, "="]] },
+      { label: "Zoom out", combos: [[modifier, "-"]] },
+      { label: "Actual size", combos: [[modifier, "0"]] },
     ]);
+    // History keys name the platform's own modifier.
+    expect(
+      buildJobFinderShortcutHelp(platform).find(
+        ({ id }) => id === "history-back",
+      )?.combos,
+    ).toEqual([[platform === "darwin" ? "⌥" : "Alt", "←"]]);
   },
 );
+
+it("groups the reference by where the keys work, in a fixed order", () => {
+  const groups = groupJobFinderShortcutHelp(
+    buildJobFinderShortcutHelp("darwin"),
+  );
+  expect(groups.map(({ group }) => group)).toEqual([
+    "Everywhere",
+    "Lists",
+    "Resume",
+    "Browser",
+  ]);
+  const lists = groups.find(({ group }) => group === "Lists")!.entries;
+  expect(lists.map(({ label }) => label)).toContain(
+    "Filter the list you are on; elsewhere, search everything",
+  );
+  expect(
+    groups
+      .find(({ group }) => group === "Resume")!
+      .entries.find(({ id }) => id === "resume-approve")?.combos,
+  ).toEqual([["⌘", "Enter"]]);
+  expect(
+    groupJobFinderShortcutHelp(buildJobFinderShortcutHelp("win32"))
+      .find(({ group }) => group === "Browser")!
+      .entries.find(({ id }) => id === "browser-address")?.combos,
+  ).toEqual([["Ctrl", "L"]]);
+  // Sentence case: no label capitalises a word after its first.
+  for (const { label } of buildJobFinderShortcutHelp("darwin"))
+    expect(label.slice(1)).not.toMatch(/ (?!Find jobs)[A-Z][a-z]+ [A-Z][a-z]/);
+});

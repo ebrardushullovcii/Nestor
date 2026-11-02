@@ -166,7 +166,7 @@ function ProfileSetupStorySection(props: {
                 }
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <p className="text-(length:--text-field-label) font-medium uppercase tracking-[0.16em] text-foreground-muted">
+                  <p className="text-(length:--text-field-label) font-medium text-foreground-muted">
                     Proof details
                   </p>
                   <Button

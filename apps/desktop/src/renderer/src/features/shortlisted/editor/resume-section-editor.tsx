@@ -78,8 +78,9 @@ export function ResumeSectionEditor(props: {
   return (
     <article
       className={cn(
-        "surface-card-tint grid min-w-0 gap-2.5 rounded-(--radius-field) border border-(--surface-panel-border) p-2.5 transition-colors",
-        props.isSelected && "border-primary/35 bg-primary/5",
+        "grid min-w-0 gap-2.5 px-1 py-3 transition-colors",
+        // The part being edited keeps a quiet tint, not a box.
+        props.isSelected && "rounded-(--radius-field) bg-primary/5",
       )}
       data-resume-editor-section={props.section.id}
       data-resume-editor-section-expanded={props.isExpanded ? "true" : "false"}

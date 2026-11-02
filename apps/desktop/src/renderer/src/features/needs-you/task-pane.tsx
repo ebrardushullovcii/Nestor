@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { Disclosure } from "@renderer/components/ui/disclosure";
+import { useEffect, useId, useRef, useState } from "react";
 import type {
   CandidateAssetKind,
   NeedsYouDetails,
@@ -24,11 +25,28 @@ const ASK_REASON_LEAD: Record<
   NonNullable<NeedsYouTask["askReason"]>["kind"],
   string
 > = {
-  no_source: "Nothing in your profile or saved answers answers it.",
+  no_source: "Your profile and saved answers do not cover it.",
   source_rejected:
     "An answer was found, but the check before sending could not confirm it fits.",
   page_refused: "Nestor filled it in, but the site still marks it unanswered.",
 };
+
+/** "For Senior Engineer at Pebble Fernwheel · Remote", and how many more. */
+function formatApplications(
+  applications: readonly {
+    title: string;
+    company: string;
+    location?: string | null;
+  }[],
+): string {
+  const [first] = applications;
+  if (!first) return "";
+  const lead = `For ${first.title} at ${first.company}${first.location ? ` · ${first.location}` : ""}`;
+  const more = applications.length - 1;
+  return more > 0
+    ? `${lead}, and ${more === 1 ? "1 more application" : `${more} more applications`}`
+    : lead;
+}
 
 /** A site as a person names it: its host, without "www.". */
 function siteHost(url: string): string {
@@ -55,12 +73,14 @@ export function TaskPane(props: {
   onMissing.current = props.onMissing;
   const [details, setDetails] = useState<NeedsYouDetails | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const rememberHint = useId();
   const [draft, setDraft] = useState<NeedsYouDraft>({
     answer: "",
     remember: true,
     revision: 0,
   });
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [fileKind, setFileKind] = useState<CandidateAssetKind>("other");
   const latest = useRef(draft);
@@ -77,6 +97,7 @@ export function TaskPane(props: {
         if (!live.current) return;
         if (!value) onMissing.current?.(id);
         setDetails(value);
+        setFileKind(value?.task.askReason?.selectedDocument?.kind ?? "other");
         const restored = value?.draft ?? {
           answer: "",
           remember: true,
@@ -173,6 +194,7 @@ export function TaskPane(props: {
   async function act(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
+    setStatus(null);
     try {
       await action();
     } catch (reason) {
@@ -228,30 +250,50 @@ export function TaskPane(props: {
           }}
         />
       ) : (
-        <div className="grid gap-5">
-          <div className="text-sm text-foreground-soft">
-            {details.applications.map((application) => (
-              <p key={application.id}>
-                {application.title} · {application.company}
-                {application.location ? ` · ${application.location}` : ""}
-              </p>
-            ))}
-          </div>
-          {task.kind === "question" && task.askReason ? (
-            <details className="text-sm" data-needs-ask-reason>
-              <summary className="cursor-pointer text-foreground-soft">
-                Why am I asked this?
-              </summary>
-              <p className="mt-2">{ASK_REASON_LEAD[task.askReason.kind]}</p>
-              <p className="mt-1 break-words text-foreground-soft">
-                {task.askReason.detail}
-              </p>
-            </details>
-          ) : null}
-          {task.kind === "question" && isStepHandoverPrompt(task.prompt) ? (
-            <div className="grid gap-3">
-              <h2 className="font-medium">{task.prompt}</h2>
+        <div className="grid gap-5 [&>button]:justify-self-start">
+          {task.kind === "question" ? (
+            // The question is the pane's title; the job it is for and why
+            // it was asked sit under it, quieter.
+            <header className="grid gap-1.5" data-needs-question-header>
+              <h2 className="text-(length:--text-heading-3) font-semibold text-(--text-headline)">
+                {task.prompt}
+              </h2>
               <p className="text-sm text-foreground-soft">
+                {formatApplications(details.applications)}
+              </p>
+              {task.askReason ? (
+                <div className="mt-1 grid gap-1 text-sm" data-needs-ask-reason>
+                  <p className="max-w-prose text-foreground-soft">
+                    <span className="font-medium text-foreground">
+                      Why you are asked:{" "}
+                    </span>
+                    {task.askReason.check === "question_classification"
+                      ? "Nestor could not read this question, so it could not check your profile or saved answers."
+                      : ASK_REASON_LEAD[task.askReason.kind]}
+                  </p>
+                  {task.askReason.detail ? (
+                    <Disclosure summary="What Nestor saw">
+                      <p className="max-w-prose break-words px-2 pb-1 text-foreground-soft">
+                        {task.askReason.detail}
+                      </p>
+                    </Disclosure>
+                  ) : null}
+                </div>
+              ) : null}
+            </header>
+          ) : (
+            <div className="text-sm text-foreground-soft">
+              {details.applications.map((application) => (
+                <p key={application.id}>
+                  {application.title} · {application.company}
+                  {application.location ? ` · ${application.location}` : ""}
+                </p>
+              ))}
+            </div>
+          )}
+          {task.kind === "question" && isStepHandoverPrompt(task.prompt) ? (
+            <div className="grid gap-3 [&>button]:justify-self-start">
+              <p className="max-w-prose text-sm text-foreground-soft">
                 Job Finder filled what it could on this page. In Fill in for me
                 it never presses the form's own buttons, because one of them
                 could send your application. Open the application, press it
@@ -296,8 +338,17 @@ export function TaskPane(props: {
           ) : task.kind === "question" ? (
             <>
               {task.input === "file" ? (
-                <div className="grid gap-3">
-                  <h2 className="font-medium">{task.prompt}</h2>
+                <div className="grid gap-3 [&>button]:justify-self-start">
+                  {task.askReason?.selectedDocument ? (
+                    <p className="text-sm text-foreground-soft">
+                      Attempted{" "}
+                      {task.askReason.selectedDocument.kind === "resume"
+                        ? "resume/CV"
+                        : "document"}
+                      : {task.askReason.selectedDocument.label} (
+                      {task.askReason.selectedDocument.fileName})
+                    </p>
+                  ) : null}
                   <p className="text-sm text-foreground-soft">
                     Your other answers are kept. Open the application to finish
                     attaching the file on the site.
@@ -351,11 +402,13 @@ export function TaskPane(props: {
                       onChange={(event) =>
                         setFileKind(event.target.value as CandidateAssetKind)
                       }
-                      className="rounded border bg-canvas p-2"
+                      className="h-10 max-w-xs rounded-(--radius-field) border border-(--field-border) bg-(--field) px-3 text-sm"
                     >
                       {(
                         [
                           ["other", "Other document"],
+                          ["resume", "Resume / CV"],
+                          ["cover_letter", "Cover letter"],
                           ["work_sample", "Work sample"],
                           ["portfolio", "Portfolio"],
                           ["certificate", "Certificate"],
@@ -405,10 +458,11 @@ export function TaskPane(props: {
                 </div>
               ) : (
                 <AnswerField
+                  disabled={busy}
+                  labelHidden
+                  onChange={(answer) => edit({ answer })}
                   question={task}
                   value={draft.answer}
-                  onChange={(answer) => edit({ answer })}
-                  disabled={busy}
                 />
               )}
               {perApplication ? (
@@ -424,25 +478,42 @@ export function TaskPane(props: {
                       here.
                     </p>
                   ) : null}
-                  <label className="flex items-center gap-2 text-sm">
+                  <label className="flex items-start gap-2.5 text-sm">
                     <Checkbox
+                      // Named by the short line; the longer one describes it.
+                      aria-describedby={rememberHint}
                       checked={draft.remember}
+                      className="mt-0.5"
                       onCheckedChange={(value) =>
                         edit({ remember: value === true })
                       }
                       disabled={busy}
                     />
-                    Save this answer for next time
+                    <span className="grid gap-0.5">
+                      <span className="font-medium text-foreground">
+                        Save this answer for next time
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className="text-xs text-foreground-muted"
+                        id={rememberHint}
+                      >
+                        It fills this question on later forms. Saved answers
+                        stay in Needs you, where you can change them.
+                      </span>
+                    </span>
                   </label>
                   <p className="text-xs text-foreground-muted">
-                    One answer covers every application waiting on this same
-                    question. Saved answers stay in Needs you.
+                    One answer covers every application waiting on this
+                    question.
                   </p>
                 </>
               )}
+              {/* The pane's one way forward, so it is the filled action. */}
               <Button
                 disabled={busy || !draft.answer.trim()}
                 onClick={() => void act(answer)}
+                variant="primary"
               >
                 {busy ? "Saving…" : "Save and continue"}
               </Button>
@@ -479,14 +550,24 @@ export function TaskPane(props: {
                       const now = await window.nestor.needsYou.run("get_need", {
                         id,
                       });
-                      throw new Error(
-                        now?.applications.length &&
-                          now.applications.every(
-                            (application) => application.state === "running",
-                          )
-                          ? "Job Finder is working on this application right now. If the site still needs you, it comes back here."
-                          : "This application tab is unavailable. Open the application again from Applications.",
-                      );
+                      if (!now) {
+                        onResolved(
+                          id,
+                          "The browser step is complete. Applications continue.",
+                        );
+                      } else if (
+                        now.applications.some((application) =>
+                          ["queued", "running"].includes(application.state),
+                        )
+                      ) {
+                        setStatus(
+                          "Job Finder is opening or working on this application. You can open its tab once it is ready.",
+                        );
+                      } else {
+                        throw new Error(
+                          "This application tab could not be opened. Try again.",
+                        );
+                      }
                     }
                   })
                 }
@@ -508,12 +589,25 @@ export function TaskPane(props: {
                           id,
                           "The browser step is complete. Applications continue.",
                         );
-                      else
-                        setError(
-                          task.kind === "sign_in"
-                            ? "Job Finder is opening the application again with your sign-in. If the site still asks, this stays here."
-                            : "The page is still waiting. Finish the browser step, then check again.",
+                      else {
+                        const now = await window.nestor.needsYou.run(
+                          "get_need",
+                          { id },
                         );
+                        if (!now)
+                          onResolved(
+                            id,
+                            "The browser step is complete. Applications continue.",
+                          );
+                        else
+                          setStatus(
+                            now.applications.some((application) =>
+                              ["queued", "running"].includes(application.state),
+                            )
+                              ? "Job Finder is checking the application with your browser sign-in. This item stays until access is confirmed."
+                              : "The page is still waiting. Finish the browser step, then check again.",
+                          );
+                      }
                     })
                   }
                 >
@@ -524,6 +618,11 @@ export function TaskPane(props: {
           )}
         </div>
       )}
+      {status ? (
+        <p role="status" className="mt-4 text-sm text-foreground-soft">
+          {status}
+        </p>
+      ) : null}
       {error ? (
         <div className="mt-4 grid gap-3">
           <p role="alert" className="text-sm text-destructive">

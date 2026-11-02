@@ -269,3 +269,27 @@ test("setup remains editable while deferred vision is active and saves only the 
     ),
   );
 });
+
+test("a failed first read shows the framed read error under the page header, then recovers", async () => {
+  const jobs = (window as unknown as { nestor: { jobs: DesktopJobsBridge } })
+    .nestor.jobs;
+  const { run } = jobs as { run: DesktopJobsBridge["run"] };
+  let refuse = true;
+  jobs.run = ((name, input) =>
+    refuse && name === "get_profile"
+      ? Promise.reject(
+          new Error(
+            "Error invoking remote method 'jobs:run': Error: The job store could not be read",
+          ),
+        )
+      : run(name, input)) as DesktopJobsBridge["run"];
+  renderSetup();
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Couldn’t read your profile");
+  expect(alert.textContent).toContain("The job store could not be read.");
+  expect(alert.textContent).not.toContain("Error invoking remote method");
+  expect(screen.getByRole("heading", { name: "Guided setup" })).toBeTruthy();
+  refuse = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByLabelText(/^Headline/u)).toBeTruthy();
+});

@@ -50,7 +50,7 @@ describe("LockedScreenLayout pointer-owned scrolling", () => {
 
     // Default: the grid only has a floor, so a long route scrolls as a page.
     expect(grid()?.className).toContain("min-h-full");
-    expect(grid()?.className).not.toContain("xl:h-full");
+    expect(grid()?.className).not.toContain("split:h-full");
     expect(grid()?.dataset.lockedScreenContentHeight).toBeUndefined();
 
     rerender(
@@ -62,7 +62,7 @@ describe("LockedScreenLayout pointer-owned scrolling", () => {
     // Locked: without a definite height the content row resolves to
     // max-content, every pane grows past the fold, and a pane's own
     // overflow-y-auto never activates.
-    expect(grid()?.className).toContain("xl:h-full");
+    expect(grid()?.className).toContain("split:h-full");
     expect(grid()?.dataset.lockedScreenContentHeight).toBe("locked");
   });
 

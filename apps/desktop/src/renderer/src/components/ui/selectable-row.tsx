@@ -30,9 +30,9 @@ const selectableRowClassName = [
   "group/selectable-row relative block w-full min-w-0 text-left",
   // Box metrics. Every one of these is unconditional and identical in both
   // states; nothing below may vary with `selected`.
-  "rounded-(--radius-panel) border border-(--control-border) px-4 py-3",
+  "rounded-(--radius-panel) border border-(--border-subtle) px-4 py-3",
   "transition-[background-color,box-shadow] outline-none",
-  "focus-visible:ring-2 focus-visible:ring-ring",
+  "focus-ring",
   // Resting and hover fills.
   "bg-transparent hover:bg-(--surface-overlay-list)",
   // Selected: tint + inset accent bar. `inset` keeps the bar inside the
@@ -44,7 +44,7 @@ const selectableRowClassName = [
   // --nav-active-surface fill and, reused here on --surface-strong, rendered
   // the light selected row at 1.39:1 against its own fill.
   "data-[selected=true]:bg-(--surface-strong)",
-  "data-[selected=true]:shadow-[inset_3px_0_0_0_var(--row-selected-bar)]",
+  "data-[selected=true]:selected-bar",
 ].join(" ");
 
 /** Class tokens that would change the row's box if they varied with selection. */
@@ -100,12 +100,15 @@ type SelectableRowElement = "button" | "div" | "li";
 type SelectableRowProps<Element extends SelectableRowElement> = {
   as?: Element;
   selected: boolean;
+  /** Ticked in select mode: the row carries the checked tint. */
+  checked?: boolean;
 } & Omit<React.ComponentPropsWithoutRef<Element>, "aria-current">;
 
 function SelectableRow<Element extends SelectableRowElement = "button">({
   as,
   className,
   selected,
+  checked,
   ...props
 }: SelectableRowProps<Element>) {
   useStableBoxMetrics(selected, className);
@@ -121,6 +124,7 @@ function SelectableRow<Element extends SelectableRowElement = "button">({
     "aria-current": selected ? ("true" as const) : undefined,
     className: cn(selectableRowClassName, className),
     "data-selected": selected ? "true" : "false",
+    ...(checked ? { "data-checked": "true" } : {}),
     "data-slot": "selectable-row",
   });
 }

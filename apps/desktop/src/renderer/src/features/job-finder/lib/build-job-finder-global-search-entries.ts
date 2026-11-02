@@ -35,10 +35,10 @@ export const SCREEN_ENTRIES: readonly JobFinderGlobalSearchEntry[] = [
   ),
   screen(
     "job-sources",
-    "Job sources",
+    "Job sites",
     "Profile",
     JOB_FINDER_ROUTE_PATHS.profileSources,
-    ["sites", "boards", "feeds"],
+    ["sources", "boards", "feeds"],
   ),
   screen(
     "discovery",
@@ -121,6 +121,33 @@ export async function searchSavedJobs(
       }),
     ),
   );
+  // An approved job with an application under way reads as that
+  // application stands ("Needs you", "Ready to send", "Applying"), not as
+  // its resume's readiness ("Approved"), so search agrees with Applications.
+  const approved = pages.some(
+    (page) =>
+      page.status === "fulfilled" &&
+      page.value.rows.some((row) => row.stage === "resume"),
+  );
+  const applicationState = new Map<number, string>();
+  if (approved) {
+    const states = [
+      ["queued", "Applying"],
+      ["running", "Applying"],
+      ["needs_you", "Needs you"],
+      ["ready", "Ready to send"],
+    ] as const;
+    const read = await Promise.all(
+      states.map(([state, label]) =>
+        window.nestor.jobFinder
+          .listApplications({ state, limit: 50 })
+          .then((page) => page.rows.map((row) => [row.jobId, label] as const))
+          .catch(() => []),
+      ),
+    );
+    for (const [jobId, label] of read.flat())
+      applicationState.set(jobId, label);
+  }
   const entries = pages.flatMap((page) =>
     page.status === "fulfilled"
       ? page.value.rows.map((row) => ({
@@ -131,7 +158,11 @@ export async function searchSavedJobs(
               ? ("application" as const)
               : ("job" as const),
           metadata: [],
-          subtitle: [row.company, row.location, STAGE_LABEL[row.stage]]
+          subtitle: [
+            row.company,
+            row.location,
+            applicationState.get(row.id) ?? STAGE_LABEL[row.stage],
+          ]
             .filter(Boolean)
             .join(" · "),
           title: row.title,

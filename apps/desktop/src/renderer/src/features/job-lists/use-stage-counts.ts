@@ -6,9 +6,10 @@ export function useStageCounts(): JobStageCounts | null {
   const [counts, setCounts] = useState<JobStageCounts | null>(null);
   useEffect(() => {
     let live = true;
+    // A read that cannot start (a host without the store) is a failed read.
     const load = () =>
-      window.nestor.jobs
-        .run("stage_counts", {})
+      Promise.resolve()
+        .then(() => window.nestor.jobs.run("stage_counts", {}))
         .then((next) => {
           if (live) setCounts(next);
         })

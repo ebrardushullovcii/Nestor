@@ -9,7 +9,7 @@ import {
   getResumeTemplateVisualTags,
 } from "@nestor/contracts";
 import { Badge } from "@renderer/components/ui/badge";
-import { Button } from "@renderer/components/ui/button";
+import { Check } from "lucide-react";
 import { cn } from "@renderer/lib/utils";
 import { renderResumeTemplateCatalogPreviewHtml } from "../../../../../shared/job-finder-resume-renderer";
 import {
@@ -88,164 +88,216 @@ export function ResumeThemePickerFull(props: {
       aria-labelledby={labelledBy}
       role="group"
     >
-      <section className="surface-panel-shell relative min-w-0 overflow-hidden rounded-(--radius-field) border border-(--surface-panel-border)">
-        <div className="grid min-w-0 gap-3 p-3.5 xl:gap-3.5">
-          <div className="flex min-w-0 flex-wrap items-start justify-between gap-2.5">
-            <div className="grid min-w-0 gap-1.5">
-              <p className="label-mono-xs">Current selection</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-display font-semibold tracking-[-0.04em] text-(--text-headline)">
-                  {heroTemplate.label}
-                </h3>
-                {heroVisualTags.map((tag) => (
-                  <Badge key={tag} variant="section">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-              <p className="max-w-[64ch] text-[0.82rem] leading-4.5 text-foreground-soft">
-                {heroTemplate.description}
-              </p>
-              {heroReason ? (
-                <p className="text-[0.72rem] leading-4.5 text-primary/85">
-                  {heroReason}
-                </p>
-              ) : null}
-            </div>
+      {/* Two levels only: the section's card, then one card per template.
+          The chosen template gets the accent ring and a check; the large
+          preview beside the grid shows it at reading size. */}
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)]">
+        <div className="grid min-w-0 content-start gap-3">
+          <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-2">
+            <p className="text-(length:--text-small) font-medium text-foreground">
+              Choose a template
+            </p>
+            <p className="text-xs text-foreground-muted">
+              {themes.length} templates
+            </p>
+          </div>
+          <div
+            className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-3"
+            data-resume-template-grid
+          >
+            {themes.map((theme) => (
+              <TemplateOptionCard
+                disabled={disabled}
+                // The name once: the template's own name, with its variant
+                // only where two templates share that name.
+                displayName={
+                  themes.filter((other) => other.label === theme.label).length >
+                  1
+                    ? getTemplateOptionLabel(theme)
+                    : theme.label
+                }
+                key={theme.id}
+                onChange={onChange}
+                recommended={recommendedThemeIds.has(theme.id)}
+                selected={theme.id === selectedThemeId}
+                showThumbnail={isPreviewNear}
+                theme={theme}
+              />
+            ))}
+          </div>
+        </div>
 
-            {/* "SAMPLE RENDERER PREVIEW" was one more uppercase micro-badge in
-                a screen already carrying eight; it describes the picture below
-                it, so it reads as the sentence it is. */}
+        <section
+          aria-label="Current selection"
+          // Beside the gallery, exactly as tall as it: the preview window
+          // takes what the gallery leaves (never less than 16rem) and adds
+          // no height of its own, so both columns end on one line.
+          className="grid min-w-0 content-start gap-2.5 xl:flex xl:flex-col"
+        >
+          <div className="grid min-w-0 gap-1">
+            <p className="text-xs text-foreground-muted">Current selection</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="font-display font-semibold text-(--text-headline)">
+                {heroTemplate.label}
+              </h3>
+              {heroVisualTags.map((tag) => (
+                <Badge key={tag} variant="section">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+            <p className="max-w-[64ch] text-(length:--text-small) leading-5 text-foreground-soft">
+              {heroTemplate.description}
+            </p>
+            <p className="text-xs leading-5 text-foreground-muted">
+              {getLaneLabel(getResumeTemplateDeliveryLane(heroTemplate))} ·{" "}
+              {getAtsConfidenceLabel(
+                getResumeTemplateAtsConfidence(heroTemplate),
+              )}
+            </p>
+            {heroReason ? (
+              <p className="text-xs leading-5 text-primary">{heroReason}</p>
+            ) : null}
             <p className="text-(length:--text-tiny) leading-5 text-foreground-soft">
               The preview below uses sample content, not your resume.
             </p>
-            <div className="flex min-w-0 flex-wrap gap-2">
-              <Badge variant="section">
-                {getLaneLabel(getResumeTemplateDeliveryLane(heroTemplate))}
-              </Badge>
-              <Badge variant="section">
-                {getAtsConfidenceLabel(
-                  getResumeTemplateAtsConfidence(heroTemplate),
-                )}
-              </Badge>
+          </div>
+          {/* A bounded window on the top of the page at reading size, so
+              the preview never runs a long empty column beside the gallery,
+              nor a screen-long section below it when narrow. It does not
+              scroll (no wheel trap inside the Settings page); the page fades
+              out at the window's foot. Beside the gallery its flex basis is
+              0 px, not 0%: a percentage basis in a column of indefinite
+              height counts the whole page, which made the column outgrow
+              the gallery by ~200 px. */}
+          <div
+            className="relative max-h-[26rem] min-w-0 overflow-hidden rounded-(--radius-field) border border-(--surface-panel-border) bg-(--resume-preview-frame) p-3 xl:max-h-none xl:min-h-[16rem] xl:flex-[1_1_0px]"
+            data-resume-preview-window
+          >
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-12 bg-linear-to-t from-(--resume-preview-frame) to-transparent"
+            />
+            {/* Same script-free contract as the studio preview: the catalog
+                document carries `script-src 'none'` itself. One letter page;
+                the box keeps a page's ratio, so nothing moves when it fills. */}
+            <div
+              className="mx-auto aspect-[8.5/11] w-full min-w-0 bg-white"
+              data-resume-preview-box
+              ref={previewBoxRef}
+              style={{ boxShadow: "var(--resume-preview-shell-shadow)" }}
+            >
+              {isPreviewNear ? (
+                <iframe
+                  aria-hidden="true"
+                  className="pointer-events-none block size-full min-w-0 border-0 bg-transparent"
+                  srcDoc={heroPreviewHtml}
+                  title={`${heroTemplate.label} preview`}
+                />
+              ) : null}
             </div>
           </div>
-
-          <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1.72fr)_minmax(18rem,19.5rem)] xl:items-start">
-            <div className="min-w-0 max-w-full overflow-hidden rounded-(--radius-field) border border-(--surface-panel-border) bg-(--resume-preview-frame) p-1.5 shadow-[var(--resume-preview-shell-shadow)] xl:p-2">
-              {/* Same script-free contract as the studio preview: the
-                  catalog document carries `script-src 'none'` itself, so no
-                  sandbox attribute is needed and Chromium logs no blocked
-                  script execution for this frame. */}
-              {/* One letter page (8.5 x 11) plus the frame's 0.45rem inset;
-                  at full scale the page stops growing, so the box does too. */}
-              <div
-                className="mx-auto aspect-[8.5/11] w-full max-w-[calc(8.5in+0.45rem)] min-w-0"
-                data-resume-preview-box
-                ref={previewBoxRef}
-              >
-                {isPreviewNear ? (
-                  <iframe
-                    aria-hidden="true"
-                    className="block size-full min-w-0 rounded-2xl border-0 bg-transparent"
-                    srcDoc={heroPreviewHtml}
-                    title={`${heroTemplate.label} preview`}
-                  />
-                ) : null}
-              </div>
-            </div>
-
-            <div className="sr-only">
-              This preview uses sample resume content rendered through the
-              shared production template engine.
-            </div>
-
-            <div className="grid min-w-0 gap-2 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/55 px-3 py-3">
-              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-                <p className="label-mono-xs">Choose a template</p>
-                <Badge variant="section">{themes.length} options</Badge>
-              </div>
-
-              <div className="grid gap-1.5">
-                {themes.map((theme) => (
-                  <TemplateOptionCard
-                    disabled={disabled}
-                    key={theme.id}
-                    onChange={onChange}
-                    recommended={recommendedThemeIds.has(theme.id)}
-                    selected={theme.id === selectedThemeId}
-                    theme={theme}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
   );
 }
 
+/** The thumbnail document: flush paper, no rounded tinted shell. */
+function thumbnailHtml(templateId: ResumeTemplateId): string {
+  const html = renderResumeTemplateCatalogPreviewHtml(templateId, {
+    layout: "thumbnail",
+  });
+  const style =
+    "<style>body.catalog-body.catalog-body-thumbnail,.catalog-shell-thumbnail{background:#fff!important;border-radius:0!important}</style>";
+  return html.includes("</head>")
+    ? html.replace("</head>", `${style}</head>`)
+    : `${style}${html}`;
+}
+
 function TemplateOptionCard(props: {
   disabled: boolean;
+  displayName: string;
   onChange: (themeId: ResumeTemplateId) => void;
   recommended: boolean;
   selected: boolean;
+  showThumbnail: boolean;
   theme: ResumeTemplateDefinition;
 }) {
   const { disabled, onChange, recommended, selected, theme } = props;
   const visualTags = getResumeTemplateVisualTags(theme).slice(0, 2);
   const templateName = getTemplateOptionLabel(theme);
-  const actionLabel = selected
-    ? `Selected template: ${templateName}`
-    : `Use ${templateName}`;
+  const thumbnail = useMemo(
+    () => (props.showThumbnail ? thumbnailHtml(theme.id) : ""),
+    [props.showThumbnail, theme.id],
+  );
 
   return (
-    <div
-      data-resume-template-option={theme.id}
+    <button
+      aria-label={
+        selected ? `Selected template: ${templateName}` : `Use ${templateName}`
+      }
+      aria-pressed={selected}
       className={cn(
-        "min-w-0 grid gap-1 rounded-(--radius-field) border px-2.5 py-2 transition-[border-color,background-color,box-shadow]",
+        "group relative grid min-w-0 content-start gap-2 rounded-(--radius-panel) border bg-(--surface-panel) p-2.5 text-left transition-[border-color,box-shadow,background-color] duration-(--duration-fast) focus-ring disabled:cursor-not-allowed disabled:opacity-60",
         selected
-          ? "border-primary/38 bg-primary/8 shadow-[inset_0_1px_0_var(--focus-inset-highlight)]"
-          : "border-(--surface-panel-border) bg-background/55",
+          ? "border-primary ring-1 ring-primary"
+          : "border-(--surface-panel-border) hover:border-primary/40",
       )}
+      data-resume-template-option={theme.id}
+      data-resume-template-select={theme.id}
+      disabled={disabled}
+      onClick={() => {
+        if (!disabled && !selected) onChange(theme.id);
+      }}
+      type="button"
     >
-      <div className="grid gap-2">
-        <div className="grid min-w-0 gap-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <span className="text-[0.8rem] font-semibold leading-4 text-foreground">
-              {templateName}
-            </span>
-            {selected ? <Badge variant="default">Selected</Badge> : null}
-            {recommended ? <Badge variant="section">Recommended</Badge> : null}
-          </div>
-          {visualTags.length > 0 ? (
-            <p className="text-[0.68rem] leading-4 text-foreground-soft">
-              {visualTags.join(" · ")}
-            </p>
-          ) : null}
-        </div>
-
-        <Button
-          aria-label={actionLabel}
-          aria-pressed={selected}
-          className="w-full"
-          data-resume-template-select={theme.id}
-          disabled={disabled}
-          onClick={() => {
-            if (disabled) {
-              return;
-            }
-
-            onChange(theme.id);
-          }}
-          size="compact"
-          type="button"
-          variant={selected ? "primary" : "secondary"}
+      {/* The top of the page: header, rules and type are what tell the
+          templates apart; a whole page per card made the gallery run for
+          several screens of Settings. */}
+      <span
+        aria-hidden="true"
+        className="flex h-32 items-start justify-center overflow-hidden rounded-(--radius-small) bg-(--resume-preview-frame) pt-2"
+      >
+        {/* The whole width of the page, scaled to the card (a 188 px page
+            in a 140 px card was cut on both sides: "hn Doe"). */}
+        <span
+          className="block h-[243px] w-[188px] shrink-0 origin-top scale-[0.72] overflow-hidden bg-white"
+          style={{ boxShadow: "var(--resume-preview-shell-shadow)" }}
         >
-          {selected ? "Selected template" : "Use this template"}
-        </Button>
-      </div>
-    </div>
+          {thumbnail ? (
+            <iframe
+              className="pointer-events-none block h-[243px] w-[188px] border-0"
+              loading="lazy"
+              srcDoc={thumbnail}
+              tabIndex={-1}
+              title=""
+            />
+          ) : null}
+        </span>
+      </span>
+      {selected ? (
+        <span
+          aria-hidden="true"
+          className="absolute right-3.5 top-3.5 inline-flex size-6 items-center justify-center rounded-full bg-primary-fill text-primary-fill-foreground shadow-sm"
+        >
+          <Check className="size-4" />
+        </span>
+      ) : null}
+      <span className="grid min-w-0 gap-0.5 px-0.5">
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <span className="text-(length:--text-small) font-semibold leading-5 text-foreground">
+            {props.displayName}
+          </span>
+          {recommended ? <Badge variant="section">Recommended</Badge> : null}
+        </span>
+        {visualTags.length > 0 ? (
+          // Wraps to a second line rather than stop mid-word ("Clas…").
+          <span className="text-xs leading-4 text-foreground-soft">
+            {visualTags.join(" · ")}
+          </span>
+        ) : null}
+      </span>
+    </button>
   );
 }

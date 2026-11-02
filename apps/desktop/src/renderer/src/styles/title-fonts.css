@@ -1,0 +1,32 @@
+/*
+ * The page title face (council pick, round 7): Newsreader 600 on page titles,
+ * the h1 in [data-page-header], and a workspace-state title that stands in
+ * for the page title at its size (`h1[data-page-title]`, the full-page error).
+ * Dialog, section and card titles, rows and numbers stay in the system face.
+ *
+ * Size stays today's page title (--text-page-title-compact, 24 px); the line
+ * box never grows past the title's 32 px header row, so nothing around it
+ * moves. The face is bundled (OFL, latin subset, variable cut), blocked
+ * until loaded (font-display: block) and loaded at startup by
+ * lib/title-fonts.ts, so the first title draws in it.
+ */
+
+@font-face {
+  font-family: "Title Newsreader";
+  /* The variable cut (opsz + wght): at 24px it takes the matching optical
+     size, as the council's render did. The static 600 cut is the text
+     optical size, ~4% wider and lower in contrast at this size. */
+  src: url("../../../../node_modules/@fontsource-variable/newsreader/files/newsreader-latin-opsz-normal.woff2")
+    format("woff2-variations");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: block;
+}
+
+[data-page-header] h1,
+h1[data-page-title] {
+  font-family: "Title Newsreader", var(--font-headline);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: min(1.2em, 2rem);
+}

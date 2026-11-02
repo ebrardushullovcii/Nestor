@@ -4,8 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-} from "@nestor/contracts";
+import {} from "@nestor/contracts";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,13 +13,17 @@ import { COUNT_VARIANT_CLASS } from "@renderer/components/ui/count";
 import { cn } from "@renderer/lib/utils";
 
 import {
-  COMPACT_NAV_PILL_CLASS,
-  DESTINATION_COUNT_ATTENTION_CLASS,
   DESTINATION_COUNT_INLINE_LAYOUT_CLASS,
   JobFinderShell,
   SHELL_HEADER_CLASS,
   SHELL_SIDEBAR_CLASS,
 } from "./job-finder-shell";
+import {
+  HEADER_TOOL_COUNT_ATTENTION_CLASS,
+  HEADER_TOOL_COUNT_CLASS,
+  HEADER_TOOL_COUNT_SLOT_CLASS,
+  formatHeaderToolCount,
+} from "./header-tool";
 
 const RENDERER_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -44,11 +47,8 @@ const windowControlsState = {
 } as const;
 
 /**
- * The shell renders the wide sidebar and the compact top navigation from the
- * same definitions and hides the wrong one with CSS, so both are in the DOM at
- * every width in jsdom. Width therefore only decides which surface a user
- * sees; the class strings this file compares are the ones that would paint at
- * 1439px (compact navigation) and 1441px (sidebar).
+ * One navigation model at every width: the sidebar (a list, or the icon rail
+ * below 1200px) is the only destination list. There is no top-tab strip.
  */
 const COUNTED_STAGES = {
   found: 2,
@@ -58,23 +58,18 @@ const COUNTED_STAGES = {
   applied: 2,
 };
 
-function renderShell(stageCounts = COUNTED_STAGES) {
+function renderShell(stageCounts = COUNTED_STAGES, needsYouCount = 1) {
   return render(
     <MemoryRouter initialEntries={["/job-finder/home"]}>
       <JobFinderShell
-        needsYouCount={1}
+        needsYouCount={needsYouCount}
         platform="win32"
         stageCounts={stageCounts}
-       
       >
         <div>Current screen</div>
       </JobFinderShell>
     </MemoryRouter>,
   );
-}
-
-function getCompactNavigation(): HTMLElement {
-  return screen.getByRole("navigation", { name: "Job Finder sections" });
 }
 
 function getSidebar(): HTMLElement {
@@ -121,26 +116,71 @@ describe("shell destination counts", () => {
     const needsYou = screen.getByRole("button", { name: /^Needs you:/ });
 
     const inventoryBadge = findJobs.querySelector('[data-slot="count"]');
-    const attentionBadge = needsYou.querySelector("span.tabular-nums");
-
-    // The shape is the shared `<Count variant="pill">` primitive; the shell
-    // adds only its own row placement. Composed the same way the component
-    // does, so the exact painted string is still pinned.
-    expect(inventoryBadge?.className).toBe(
-      cn(COUNT_VARIANT_CLASS.pill, DESTINATION_COUNT_INLINE_LAYOUT_CLASS),
+    const attentionBadge = needsYou.querySelector(
+      '[data-header-tool-count="attention"]',
     );
-    expect(attentionBadge?.className).toBe(DESTINATION_COUNT_ATTENTION_CLASS);
-    expect(inventoryBadge?.className).not.toBe(attentionBadge?.className);
 
-    // A bare number always means inventory, so the attention count also
-    // carries a noun rather than standing alone beside the destination name.
-    expect(attentionBadge?.textContent).toContain("unresolved");
+    // Inventory is the shared `<Count variant="inline">` figure in the row's
+    // fixed-width right column; attention is a warning-coloured pill pinned
+    // to the header tool's corner, out of the flow.
+    expect(inventoryBadge?.className).toBe(
+      cn(COUNT_VARIANT_CLASS.inline, DESTINATION_COUNT_INLINE_LAYOUT_CLASS),
+    );
+    expect(attentionBadge?.className).toBe(
+      cn(HEADER_TOOL_COUNT_CLASS, HEADER_TOOL_COUNT_ATTENTION_CLASS),
+    );
+    expect(attentionBadge?.textContent).toBe("1");
+    // Pinned to the bell's corner, inside the button, so it takes no room
+    // and keeps clear of the window's top edge.
+    const slot = attentionBadge?.parentElement;
+    expect(slot?.className).toBe(HEADER_TOOL_COUNT_SLOT_CLASS);
+    expect(HEADER_TOOL_COUNT_SLOT_CLASS).toMatch(/\babsolute\b/);
+    expect(slot?.parentElement?.nextElementSibling?.textContent).toBe(
+      "Needs you",
+    );
     expect(needsYou.getAttribute("aria-label")).toMatch(
       /^Needs you: \d+ unresolved$/,
     );
-    // The inventory count stays visual-only; the destination name is the sole
-    // announced content.
+    // Both counts stay visual-only; the accessible name carries them.
     expect(inventoryBadge?.getAttribute("aria-hidden")).toBe("true");
+    expect(attentionBadge?.parentElement?.getAttribute("aria-hidden")).toBe(
+      "true",
+    );
+  });
+
+  it("draws no count at zero and keeps no room for one, and shortens big counts without changing them", () => {
+    renderShell(undefined, 0);
+    const needsYou = screen.getByRole("button", { name: /^Needs you/ });
+    // Every tool is its natural width: no reserved slot, no extra padding.
+    expect(
+      needsYou.querySelector(`[class="${HEADER_TOOL_COUNT_SLOT_CLASS}"]`),
+    ).toBeNull();
+    expect(needsYou.querySelector("[data-header-tool-count]")).toBeNull();
+    expect(needsYou.className).not.toMatch(/px-\[/);
+    expect(formatHeaderToolCount(7)).toBe("7");
+    expect(formatHeaderToolCount(1234)).toBe("1,234");
+    expect(formatHeaderToolCount(9999)).toBe("9,999");
+    expect(formatHeaderToolCount(12_345)).toBe("12.3k");
+    expect(formatHeaderToolCount(123_456)).toBe("123k");
+  });
+
+  it("names what a sidebar count counts, exactly, outside the name", () => {
+    renderShell({
+      found: 12_345,
+      hidden: 0,
+      shortlisted: 2,
+      resume: 3,
+      applied: 1,
+    });
+    const sidebar = getSidebar();
+    const row = (name: string) => within(sidebar).getByRole("button", { name });
+    expect(row("Find jobs").getAttribute("aria-description")).toBe(
+      "12,345 found",
+    );
+    expect(row("Shortlisted").getAttribute("aria-description")).toBe(
+      "2 to review",
+    );
+    expect(row("Applications").getAttribute("aria-description")).toBe("1 sent");
   });
 
   it("never renders a badge at zero", () => {
@@ -152,71 +192,28 @@ describe("shell destination counts", () => {
       applied: 0,
     });
 
-    for (const root of [getSidebar(), getCompactNavigation()]) {
-      const counts = Array.from(
-        root.querySelectorAll<HTMLElement>("span.tabular-nums"),
-      );
-      for (const count of counts) {
-        expect(count.textContent?.trim()).not.toBe("0");
-      }
-    }
-    // The lone default plan is not a count worth a badge either.
-    expect(
-      within(getSidebar())
-        .queryByRole("button", { name: /^Search plans/ })
-        ?.querySelector("span.tabular-nums"),
-    ).toBeFalsy();
-  });
-
-  it("paints one identical count class at 1439px and 1441px", () => {
-    renderShell();
-
-    // 1439px paints the compact top navigation; 1441px paints the sidebar.
-    const compactCount = within(getCompactNavigation())
-      .getByRole("button", { name: /^Applications/ })
-      .querySelector("span.tabular-nums");
-    const wideCount = within(getSidebar())
-      .getByRole("button", { name: /^Applications/ })
-      .querySelector("span.tabular-nums");
-
-    expect(compactCount?.textContent).toBe(wideCount?.textContent);
-    // COMP-07: the same count used to be a plain number at 1441 and a filled
-    // pill at 1439 — one number, two shapes, one breakpoint apart.
-    expect(compactCount?.className).toBe(wideCount?.className);
-    expect(compactCount?.className).toBe(
-      cn(COUNT_VARIANT_CLASS.pill, DESTINATION_COUNT_INLINE_LAYOUT_CLASS),
+    const counts = Array.from(
+      getSidebar().querySelectorAll<HTMLElement>("span.tabular-nums"),
     );
+    for (const count of counts) {
+      expect(count.textContent?.trim()).not.toBe("0");
+    }
   });
 
-  it("gives the More trigger the same pill class as its neighbours", () => {
+  it("offers no top-tab navigation at any width", () => {
     renderShell();
-
-    const navigation = getCompactNavigation();
-    const moreButton = within(navigation).getByRole("button", {
-      name: /^More/,
-    });
-    const neighbour = within(navigation).getByRole("button", {
-      name: /^Find jobs/,
-    });
-
-    for (const token of COMPACT_NAV_PILL_CLASS.split(/\s+/)) {
-      expect(moreButton.className).toContain(token);
-      expect(neighbour.className).toContain(token);
-    }
-    expect(moreButton.className).not.toContain("bg-(--surface-panel-raised)");
-    expect(moreButton.className).not.toContain("min-h-10");
+    expect(
+      screen.queryByRole("navigation", { name: "Job Finder sections" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /^More/ })).toBeNull();
   });
 });
 
 describe("shell chrome ownership", () => {
-
   it("uses shared tokens for the sticky shell edges and the search scrim", () => {
-    expect(SHELL_HEADER_CLASS).toContain(
-      "border-(--surface-panel-shell-border)",
-    );
-    expect(SHELL_SIDEBAR_CLASS).toContain(
-      "border-(--surface-panel-shell-border)",
-    );
+    // The header and sidebar edges are hairlines, not control boundaries.
+    expect(SHELL_HEADER_CLASS).toContain("border-(--border-subtle)");
+    expect(SHELL_SIDEBAR_CLASS).toContain("border-(--border-subtle)");
     // Class usage only: a docblock may still name the retired dilution to
     // explain why it was retired.
     for (const source of [SHELL_SOURCE, PAGE_SOURCE]) {

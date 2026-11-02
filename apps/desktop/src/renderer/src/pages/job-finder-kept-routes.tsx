@@ -58,7 +58,12 @@ function KeptRouteFrame(props: {
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const size = useRef<{ width: number; height: number } | null>(null);
+  const box = useRef<{
+    width: number;
+    height: number;
+    top: number;
+    left: number;
+  } | null>(null);
   const { hidden, visibility } = props;
   useLayoutEffect(() => {
     visibility.setHidden(hidden);
@@ -66,18 +71,27 @@ function KeptRouteFrame(props: {
   useLayoutEffect(() => {
     const node = ref.current;
     if (!node || props.hidden) return undefined;
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) {
-        size.current = {
-          width: entry.borderBoxSize[0]?.inlineSize ?? node.offsetWidth,
-          height: entry.borderBoxSize[0]?.blockSize ?? node.offsetHeight,
-        };
-      }
-    });
+    // Where and how big the shown screen is, so hidden it keeps exactly
+    // that box: shown again, nothing in it moves (a hidden screen pinned to
+    // the corner of the scroll area measured as a layout shift on arrival).
+    const measure = () => {
+      box.current = {
+        width: node.offsetWidth,
+        height: node.offsetHeight,
+        top: node.offsetTop,
+        left: node.offsetLeft,
+      };
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(node);
-    return () => observer.disconnect();
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
   }, [props.hidden]);
-  const hiddenSize = size.current;
+  const hiddenBox = box.current;
   return (
     <div
       aria-hidden={props.hidden || undefined}
@@ -89,10 +103,14 @@ function KeptRouteFrame(props: {
         props.hidden
           ? {
               position: "absolute",
-              top: 0,
-              left: 0,
-              width: hiddenSize ? `${hiddenSize.width}px` : "100%",
-              height: hiddenSize ? `${hiddenSize.height}px` : "100%",
+              top: hiddenBox ? `${hiddenBox.top}px` : 0,
+              left: hiddenBox ? `${hiddenBox.left}px` : 0,
+              width: hiddenBox ? `${hiddenBox.width}px` : "100%",
+              // Never wider than the scroll area it sits in: after the window
+              // narrows or the text grows, a box kept at its old width made
+              // the shown screen scroll sideways.
+              maxWidth: hiddenBox ? `calc(100% - ${hiddenBox.left}px)` : "100%",
+              height: hiddenBox ? `${hiddenBox.height}px` : "100%",
               contentVisibility: "hidden",
               visibility: "hidden",
               pointerEvents: "none",

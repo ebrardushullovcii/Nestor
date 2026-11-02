@@ -184,7 +184,7 @@ describe("SettingsScreen information architecture", () => {
       expect(link.className).toContain("min-h-10");
       expect(link.className).toContain("min-w-10");
       // Focus is always visible for keyboard users.
-      expect(link.className).toContain("focus-visible:ring-[3px]");
+      expect(link.className).toContain("focus-ring");
       expect(link.className).toContain("outline-none");
     }
 
@@ -231,7 +231,8 @@ describe("SettingsScreen information architecture", () => {
     });
     const links = within(nav).getAllByRole("link");
     for (const link of links) {
-      expect(link.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+      // Words only, like every section tab in the app (one tab idiom).
+      expect(link.querySelector("svg")).toBeNull();
       expect(link.className).toContain("text-(length:--text-body)");
       // No filled box for the current section any more.
       expect(link.className).not.toContain("bg-(--nav-active-surface)");
@@ -269,7 +270,8 @@ describe("SettingsScreen information architecture", () => {
     // wrapping, without a scrollbar drawn under the tabs.
     const row = nav.querySelector("[data-settings-subnav-row]");
     expect(row?.className).toContain("overflow-x-auto");
-    expect(row?.className).toContain("[scrollbar-width:none]");
+    // Hidden through the one scrollbar system, never scrollbar-width.
+    expect(row?.className).toContain("[&::-webkit-scrollbar]:hidden");
     expect(row?.className).not.toContain("flex-wrap");
     expect(nav.className).not.toContain("bg-(--background)/95");
     expect(nav.className).not.toContain("backdrop-blur");

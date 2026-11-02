@@ -13,14 +13,6 @@ import type {
   UpdateApplicationDefaultsInput,
   UpdateWorkspaceBehaviorInput,
 } from "@nestor/contracts";
-import {
-  Activity,
-  MonitorSmartphone,
-  Palette,
-  Send,
-  Sparkles,
-  Trash2,
-} from "lucide-react";
 import type { CSSProperties, MouseEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
@@ -56,15 +48,17 @@ import { SettingsWorkspaceControls } from "./settings-workspace-controls";
 export const SETTINGS_APPLICATION_AUTHORITY_LABEL =
   JOB_FINDER_SETTINGS_SECTIONS["application-authority"].label;
 
-const sectionIcons: Record<JobFinderSettingsSection, typeof MonitorSmartphone> =
-  {
-    "app-device": MonitorSmartphone,
-    "ai-behavior": Sparkles,
-    "application-defaults": Palette,
-    "application-authority": Send,
-    diagnostics: Activity,
-    "danger-zone": Trash2,
-  };
+/** The nearest ancestor that scrolls vertically (the shell's main). */
+function scrollParentOf(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === "auto" || overflow === "scroll") return node;
+  }
+  return document.scrollingElement instanceof HTMLElement
+    ? document.scrollingElement
+    : null;
+}
+
 const settingsSections = JOB_FINDER_SETTINGS_SECTION_IDS.map((section) => {
   const id = settingsSectionElementId(section);
   const entry = JOB_FINDER_SETTINGS_SECTIONS[section];
@@ -75,7 +69,6 @@ const settingsSections = JOB_FINDER_SETTINGS_SECTION_IDS.map((section) => {
     id,
     headingId: `${id}-heading`,
     href: `#${id}`,
-    icon: sectionIcons[section],
     // The tab that shows this section as current.
     tabId: within ? settingsSectionElementId(within) : id,
   };
@@ -215,51 +208,47 @@ export function SettingsScreen(props: {
     }
   }, [location.hash, location.key]);
 
+  // The current section is the last one whose top has scrolled up to the
+  // sticky band's bottom edge: the heading that just slid under the band, not
+  // whichever section happens to fill most of the window. At the very end of
+  // the page the last section is current even if its top never got there.
   useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") {
-      return;
-    }
-
-    const visibleRatios = new Map<string, number>();
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          visibleRatios.set(
-            entry.target.id,
-            entry.isIntersecting ? entry.intersectionRatio : 0,
-          );
-        }
-
-        let mostVisibleId: string | null = null;
-        let mostVisibleRatio = 0;
-        // Document order breaks ties, so scrolling never flickers between two
-        // equally visible neighbours.
-        for (const section of settingsSections) {
-          const ratio = visibleRatios.get(section.id) ?? 0;
-          if (ratio > mostVisibleRatio) {
-            mostVisibleRatio = ratio;
-            mostVisibleId = section.id;
-          }
-        }
-
-        if (mostVisibleId) {
-          setActiveSectionId(
-            settingsSections.find((section) => section.id === mostVisibleId)
-              ?.tabId ?? mostVisibleId,
-          );
-        }
-      },
-      { threshold: [0, 0.25, 0.5, 0.75, 1] },
-    );
-
-    for (const section of settingsSections) {
-      const target = document.getElementById(section.id);
-      if (target) {
-        observer.observe(target);
+    const root = rootRef.current;
+    const scroller = root ? scrollParentOf(root) : null;
+    if (!root || !scroller) return undefined;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const bandBottom =
+        subnavRef.current?.getBoundingClientRect().bottom ??
+        scroller.getBoundingClientRect().top;
+      const atEnd =
+        scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+      let current: (typeof settingsSections)[number] | null = null;
+      for (const section of settingsSections) {
+        const element = document.getElementById(section.id);
+        if (!element) continue;
+        if (element.getBoundingClientRect().top <= bandBottom + 8)
+          current = section;
       }
-    }
-
-    return () => observer.disconnect();
+      if (atEnd && scroller.scrollTop > 0) {
+        const last = settingsSections.at(-1);
+        if (last) current = last;
+      }
+      const next = current?.tabId ?? settingsSections[0]?.tabId;
+      if (next) setActiveSectionId(next);
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    scroller.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    schedule();
+    return () => {
+      scroller.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, []);
 
   useEffect(() => {
@@ -378,7 +367,11 @@ export function SettingsScreen(props: {
       }
     >
       <PageHeaderStack
-        description="Choose how the AI works for you, and set reusable defaults for resumes and applications."
+        // The save model, said once and the same as Profile's: every pick
+        // and switch saves the moment it changes, typed text when the person
+        // pauses or leaves the field (and when Settings closes). A Save
+        // button appears only to retry a save that failed.
+        description="Everything saves as you go: a choice when you pick it, typed text when you pause or leave the field."
         title="Settings"
       />
 
@@ -397,11 +390,13 @@ export function SettingsScreen(props: {
         // padding and heading. Do not reintroduce a header-height offset here.
         //
         // The links use the same look as the Profile section tabs (the shared
-        // `line` tabs): body-size labels with an icon, a hover fill, and the
+        // `line` tabs): body-size labels in words only, a hover fill, and the
         // primary underline on the current section. One row that scrolls
         // sideways, like Profile's strip, so the band never wraps into a
         // second row of underlined tabs.
-        className="sticky top-0 z-30 -mx-1 min-w-0 border-b border-(--surface-panel-border) bg-(--background) px-1 shadow-[0_6px_16px_rgba(0,0,0,0.12)]"
+        // Exactly as wide as the cards under it: a negative margin made the
+        // band and its rule overhang the column on both sides.
+        className="sticky top-0 z-30 min-w-0 border-b border-(--surface-panel-border) bg-(--background)"
         ref={subnavRef}
       >
         <div
@@ -409,7 +404,7 @@ export function SettingsScreen(props: {
           // rule) and fades the edge that has more sections past it instead.
           // `min-w-0` here and on the band keeps the row's full width from
           // stretching the page; only the row scrolls.
-          className="flex min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden px-3 scroll-px-3 [scrollbar-width:none]"
+          className="flex min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden px-1.5 scroll-px-3 [&::-webkit-scrollbar]:hidden"
           data-settings-subnav-row
           onScroll={(event) => paintSubnavEdges(event.currentTarget)}
           ref={subnavRowRef}
@@ -422,7 +417,7 @@ export function SettingsScreen(props: {
               <a
                 aria-current={isActive ? "location" : undefined}
                 className={cn(
-                  "relative inline-flex min-h-10 min-w-10 flex-none items-center justify-center gap-1.5 rounded-t-(--radius-small) px-2.5 py-2.5 text-(length:--text-body) font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 [&_svg]:size-4 [&_svg]:shrink-0",
+                  "relative inline-flex min-h-10 min-w-10 flex-none items-center justify-center gap-1.5 rounded-t-(--radius-small) px-2.5 py-2.5 text-(length:--text-body) font-medium whitespace-nowrap transition-colors outline-none focus-ring [&_svg]:size-4 [&_svg]:shrink-0",
                   // The current-section underline, drawn like the line tabs'.
                   "after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:opacity-0 after:transition-opacity",
                   isActive &&
@@ -453,7 +448,6 @@ export function SettingsScreen(props: {
                 }}
                 onClick={handleSectionAnchorClick}
               >
-                <section.icon aria-hidden="true" />
                 {section.label}
               </a>
             );

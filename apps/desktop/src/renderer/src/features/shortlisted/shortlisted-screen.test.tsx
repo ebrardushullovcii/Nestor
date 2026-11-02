@@ -172,8 +172,9 @@ it("keeps a finished level change when its older queued command reply arrives la
   });
   await waitFor(() =>
     expect(
-      within(detail).getByRole<HTMLButtonElement>("button", { name: "Approve" })
-        .disabled,
+      within(detail).getByRole<HTMLButtonElement>("button", {
+        name: /^Approve (original|Light|Tailored|Aggressive)$/,
+      }).disabled,
     ).toBe(false),
   );
   expect(within(detail).queryByText("Waiting", { exact: true })).toBeNull();
@@ -193,15 +194,17 @@ it("names the filtered Approved jobs Apply will take and offers no empty batch",
     screen.getByRole("searchbox", { name: "Find a shortlisted job" }),
     { target: { value: "Designer 1" } },
   );
-  await screen.findByRole("checkbox", { name: "Select all 1 jobs" });
+  // One job: "Apply to 1 job", never "Apply to all 1 job".
   expect(
-    screen.getByRole("button", { name: "Apply to all 1 job" }),
+    await screen.findByRole("button", { name: "Apply to 1 job" }),
   ).toBeTruthy();
   fireEvent.change(
     screen.getByRole("searchbox", { name: "Find a shortlisted job" }),
     { target: { value: "No such title" } },
   );
-  await screen.findByText("No shortlisted job matches.");
+  await screen.findByText("No job matches “No such title”");
+  // A no-match list offers the way back.
+  expect(screen.getByRole("button", { name: "Clear filter" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: /^Apply to all / })).toBeNull();
 });
 
@@ -252,7 +255,13 @@ it("applies the jobs on this page of Approved, next to all and the ticked ones",
     (input: Parameters<typeof applications.applyJobs>[0]) =>
       Promise.resolve(applications.applyJobs(input)),
   );
-  Object.assign(window.nestor, { jobFinder: { applyJobs } });
+  Object.assign(window.nestor, {
+    jobFinder: {
+      applyJobs,
+      applicationsForJobs: () => Promise.resolve([]),
+      onApplicationsChange: () => () => undefined,
+    },
+  });
   render(
     <MemoryRouter>
       <ToastProvider>
@@ -306,5 +315,85 @@ it("stays on To review when its last resume is approved during the visit", async
   approveOriginalResumesForTests(store, ids);
   expect(
     await screen.findByRole("button", { name: "See 3 approved jobs" }),
+  ).toBeTruthy();
+});
+
+it("says where Apply failed: the toast names the job, and Approved marks it with Try again and Apply by hand", async () => {
+  approveOriginalResumesForTests(store, ids);
+  const applications = createApplicationStore(store);
+  const applyJobs = vi.fn(
+    (input: Parameters<typeof applications.applyJobs>[0]) =>
+      Promise.resolve(applications.applyJobs(input)),
+  );
+  Object.assign(window.nestor, {
+    jobFinder: {
+      applyJobs,
+      applicationsForJobs: ({ jobIds }: { jobIds: number[] }) =>
+        Promise.resolve(applications.forJobs(jobIds)),
+      onApplicationsChange: (
+        listener: (change: { ids: number[] | null }) => void,
+      ) => store.onChange((change) => listener({ ids: change.ids })),
+    },
+  });
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <ShortlistedScreen />
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+  const first = ids[0]!;
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Instructional Designer 1,/ }),
+  );
+  const pane = await screen.findByRole("region", {
+    name: "Resume for Instructional Designer 1",
+  });
+  fireEvent.click(within(pane).getByRole("button", { name: "Apply" }));
+  await screen.findByText("Applying to 1 job");
+
+  // Apply takes it, then fails before anything is sent.
+  act(() => {
+    const claimed = applications.claimNext()!;
+    expect(claimed.jobId).toBe(first);
+    applications.finishPreparation({
+      id: claimed.id,
+      attempt: claimed.attempt,
+      state: "failed",
+      error: "The application page did not load",
+    });
+  });
+
+  // The failure replaces the Applying toast, naming the job.
+  expect(
+    await screen.findByText(
+      "Couldn’t apply to Instructional Designer 1 at Acorn 1",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText("Applying to 1 job")).toBeNull();
+  expect(
+    screen.getByText(
+      "The application page did not load. Nothing was sent. It’s marked in Approved, with Try again.",
+    ),
+  ).toBeTruthy();
+
+  // Approved says so on the job, with its reason and two ways on.
+  await waitFor(() =>
+    expect(within(pane).getByText("Could not apply")).toBeTruthy(),
+  );
+  expect(
+    within(pane).getByText(
+      "The application page did not load. Nothing was sent.",
+    ),
+  ).toBeTruthy();
+  expect(within(pane).getByRole("button", { name: "Try again" })).toBeTruthy();
+  expect(
+    within(pane).getByRole("button", { name: "Apply by hand" }),
+  ).toBeTruthy();
+  expect(within(pane).queryByRole("button", { name: "Apply" })).toBeNull();
+  expect(
+    await screen.findByRole("button", {
+      name: /^Instructional Designer 1, Could not apply/,
+    }),
   ).toBeTruthy();
 });

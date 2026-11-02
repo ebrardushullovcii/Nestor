@@ -41,6 +41,10 @@ export function useResume(jobId: number | null) {
     pageCount: number | null;
   } | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // The last read of this job's resume failed: with nothing shown yet the
+  // pane says so in place of the page; over a page already shown it is one
+  // line, and the page (and any typing) stays.
+  const [loadError, setLoadError] = useState<string | null>(null);
   const latest = useRef({ jobId, resume, draft, dirty });
   const saving = useRef(new Map<number, Promise<boolean>>());
   const loadSequence = useRef(0);
@@ -52,9 +56,17 @@ export function useResume(jobId: number | null) {
 
   const load = useCallback(async (id: number) => {
     const sequence = ++loadSequence.current;
-    const view = await window.nestor.resumes.run("get_resume", { jobId: id });
+    let view: ResumeCommandOutputs["get_resume"];
+    try {
+      view = await window.nestor.resumes.run("get_resume", { jobId: id });
+    } catch (error) {
+      if (sequence === loadSequence.current && latest.current.jobId === id)
+        setLoadError(describeError(error));
+      return;
+    }
     if (sequence !== loadSequence.current || latest.current.jobId !== id)
       return;
+    setLoadError(null);
     if (saving.current.has(id)) return;
     if (
       latest.current.resume &&
@@ -93,6 +105,7 @@ export function useResume(jobId: number | null) {
     setDraft(null);
     setDirty(false);
     setPreview(null);
+    setLoadError(null);
     setSaveError(null);
     setSaveStatus("saved");
     conflicted.current = false;
@@ -236,6 +249,7 @@ export function useResume(jobId: number | null) {
     saveError,
     preview,
     previewError,
+    loadError,
     edit,
     flush,
     saveMyEdits,

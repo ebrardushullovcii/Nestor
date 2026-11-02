@@ -69,16 +69,16 @@ export function ProfileLearnedInstructionsPanel({
         <p className="text-(length:--text-field-label) font-medium tracking-(--tracking-label) text-muted-foreground">
           Saved guidance
         </p>
-        <p className="text-[0.82rem] leading-6 text-foreground-soft">
+        <p className="text-(length:--text-small) leading-6 text-foreground-soft">
           {instructionArtifactDescription}
         </p>
       </header>
       <ProfileIntelligenceSummaries
         className="grid gap-3 rounded-(--radius-small) border border-(--surface-panel-border) px-3 py-3"
         intelligenceSummaries={intelligenceSummaries}
-        listClassName="grid gap-2 text-[0.84rem] leading-6 text-foreground-soft"
+        listClassName="grid gap-2 text-(length:--text-small) leading-6 text-foreground-soft"
         sectionClassName="grid gap-2"
-        titleClassName="text-[0.72rem] uppercase tracking-(--tracking-label) text-foreground-muted"
+        titleClassName="text-xs  tracking-(--tracking-label) text-foreground-muted"
       />
       {sections.length > 0 ? (
         <div className="grid gap-3">
@@ -87,10 +87,10 @@ export function ProfileLearnedInstructionsPanel({
               key={`${targetId}_${section.label}`}
               className="grid gap-2"
             >
-              <p className="text-[0.72rem] uppercase tracking-(--tracking-label) text-foreground-muted">
+              <p className="text-xs tracking-(--tracking-label) text-foreground-muted">
                 {section.label}
               </p>
-              <ul className="grid gap-2 text-[0.88rem] leading-6 text-foreground">
+              <ul className="grid gap-2 text-sm leading-6 text-foreground">
                 {section.lines.map((line) => {
                   const isEditing =
                     editingInstruction?.field === section.field &&

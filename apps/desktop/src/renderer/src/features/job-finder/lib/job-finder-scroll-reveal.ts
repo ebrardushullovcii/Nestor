@@ -5,14 +5,13 @@ export interface JobFinderRevealView {
 }
 
 // Shell header geometry mirrors `job-finder-shell`: below the sm breakpoint
-// the page header scrolls in flow; from sm up it is fixed over the page
-// (`sm:fixed sm:inset-x-0 sm:top-0`) with content padded by 7.25rem (116px),
-// and from 1280px, where the navigation fits on the brand row, the fixed band
-// is one row: h-14 (`xl:pt-14`, 56px). The persistent sidebar lands at 1440px.
+// the page header scrolls in flow; from sm up it is one fixed 48px row
+// (`sm:fixed sm:inset-x-0 sm:top-0`, content padded by `sm:pt-12`) at every
+// width. The sidebar sits beside the page and never adds to the header.
 export const JOB_FINDER_SM_MIN_VIEWPORT_WIDTH_PX = 640;
 export const JOB_FINDER_WIDE_SHELL_MIN_VIEWPORT_WIDTH_PX = 1280;
-export const JOB_FINDER_FIXED_HEADER_HEIGHT_PX = 116;
-export const JOB_FINDER_WIDE_HEADER_HEIGHT_PX = 56;
+export const JOB_FINDER_FIXED_HEADER_HEIGHT_PX = 48;
+export const JOB_FINDER_WIDE_HEADER_HEIGHT_PX = 48;
 // Shared breathing gap between a revealed target and whatever sits above it.
 export const JOB_FINDER_REVEAL_TOP_GAP_PX = 16;
 // A route header is allowed to be at either rest position only: fully shown
@@ -20,17 +19,14 @@ export const JOB_FINDER_REVEAL_TOP_GAP_PX = 16;
 // position between those boundaries leaves the h1 painted underneath chrome.
 export const JOB_FINDER_ROUTE_HEADER_SCROLL_TOLERANCE_PX = 1;
 
-// Tailwind scale: `scroll-mt-4` = 16px gap; the sm band adds the fixed-header
-// height (116px + 16px = 132px = 8.25rem); the wide band adds the short fixed
-// header (56px + 16px = 72px = 4.5rem). Consumers must render these exact
-// tokens so native `scrollIntoView` reveals cannot drift from this geometry.
-// The wide token is the named `xl` breakpoint (1280px), which Tailwind emits
-// after `sm`, so it wins without `!`. An arbitrary `min-[…]` variant would be
-// emitted before `sm` and lose to it (see `tailwind-variant-order.test.ts`).
+// Tailwind scale: `scroll-mt-4` = 16px gap; from sm up the fixed header adds
+// 48px (48px + 16px = 64px = `scroll-mt-16`) at every width. Consumers must
+// render these exact tokens so native `scrollIntoView` reveals cannot drift
+// from this geometry.
 export const JOB_FINDER_REVEAL_SCROLL_MARGIN_CLASSES = {
   base: "scroll-mt-4",
-  fixedHeader: "sm:scroll-mt-[8.25rem]",
-  wideFixedHeader: "xl:scroll-mt-[4.5rem]",
+  fixedHeader: "sm:scroll-mt-[4rem]",
+  wideFixedHeader: "xl:scroll-mt-[4rem]",
 } as const;
 
 export type JobFinderRevealChromeMode =

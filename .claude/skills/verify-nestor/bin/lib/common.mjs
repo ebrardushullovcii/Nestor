@@ -268,6 +268,9 @@ export function git(args) {
   try {
     return execFileSync("git", ["-C", checkout, ...args], {
       encoding: "utf8",
+      // A large uncommitted diff passed the 1 MB default, the read failed
+      // into "", and the source stamp stopped changing with edits.
+      maxBuffer: 256 * 1024 * 1024,
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
   } catch {

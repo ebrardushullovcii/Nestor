@@ -201,6 +201,7 @@ it("keeps an unchecked answer when a new answer pushes it past the 50-row window
   const checkbox = await screen.findByRole("checkbox", {
     name: `Select ${kept.prompt}`,
   });
+  fireEvent.click(screen.getByRole("button", { name: "Select" }));
   fireEvent.click(
     screen.getByRole("checkbox", { name: "Select all 50 answers" }),
   );
@@ -217,7 +218,7 @@ it("keeps an unchecked answer when a new answer pushes it past the 50-row window
   await screen.findByText("50 selected");
   await waitFor(() =>
     expect(
-      screen.getByRole("button", { name: "Forget selected" }),
+      screen.getByRole("button", { name: /^Forget \d+ selected/ }),
     ).toHaveProperty("disabled", false),
   );
   expect(
@@ -227,7 +228,7 @@ it("keeps an unchecked answer when a new answer pushes it past the 50-row window
         .getAttribute("data-needs-list-state")!,
     ),
   ).toMatchObject({ all: true, selectedIds: [kept.id] });
-  fireEvent.click(screen.getByRole("button", { name: "Forget selected" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Forget \d+ selected/ }));
   await waitFor(() =>
     expect(applications.needsYou.listAnswers().total).toBe(1),
   );
@@ -246,13 +247,13 @@ it("keeps a real explicit selection outside the loaded window and forgets that e
   ).toBeNull();
   await waitFor(() =>
     expect(
-      screen.getByRole("button", { name: "Forget selected" }),
+      screen.getByRole("button", { name: /^Forget \d+ selected/ }),
     ).toHaveProperty("disabled", false),
   );
   expect(
     await waitForDisplayedDestination(route, () => route, 0),
   ).toMatchObject({ status: "displayed" });
-  fireEvent.click(screen.getByRole("button", { name: "Forget selected" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Forget \d+ selected/ }));
   await waitFor(() =>
     expect(applications.needsYou.savedAnswer(chosen.id)).toBeNull(),
   );
@@ -477,6 +478,40 @@ it("opens a failed-upload form from its file task without resolving or answering
   ).toBeTruthy();
   expect(applications.needsYou.details(task.id)?.task.id).toBe(task.id);
   expect(applications.getApplication(claimed[0]!.id)?.state).toBe("needs_you");
+});
+
+it("identifies the attempted CV and defaults its file type from the recorded upload", async () => {
+  const row = claimed[0]!;
+  applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "upload_repair",
+    key: "upload_repair",
+    scope: {},
+    prompt: "Choose a file or drop it here — upload failed",
+    kind: "question",
+    input: "file",
+    options: [],
+    askReason: {
+      kind: "page_refused",
+      check: "upload_acceptance",
+      detail: "network/file_size",
+      selectedDocument: {
+        kind: "resume",
+        label: "Your CV",
+        fileName: "synthetic-resume.pdf",
+      },
+    },
+  });
+  show();
+  expect(
+    await screen.findByText(
+      "Attempted resume/CV: Your CV (synthetic-resume.pdf)",
+    ),
+  ).toBeTruthy();
+  expect(screen.getByLabelText<HTMLSelectElement>("File type").value).toBe(
+    "resume",
+  );
 });
 
 it("hands Fill's Next to the person: open the form, press it, and continue", async () => {
@@ -802,6 +837,50 @@ it("updates a single site card as sign-in reaches MFA and applications continue"
   await waitFor(() => expect(applications.needsYou.list().total).toBe(0));
 });
 
+it("keeps a resumed sign-in application's context and reports checking as status", async () => {
+  const row = claimed[0]!;
+  const requested = applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "site_access",
+    key: "access",
+    kind: "sign_in",
+    scope: { siteOrigin: "https://jobs.example.test" },
+    prompt: "Sign in first",
+    input: "text",
+    options: [],
+  });
+  if (requested.status !== "needs_you") throw new Error("Missing sign-in task");
+  const run = createNeedsYouCommandRunner(() => applications, {
+    retry: async () => {},
+    open: () => Promise.resolve(false),
+    check: () => {
+      jobs
+        .sql("UPDATE applications SET state='running' WHERE id=?")
+        .run(row.id);
+      return Promise.resolve(false);
+    },
+  });
+  Object.assign(window.nestor, { needsYou: { run } });
+  show();
+  await screen.findByRole("heading", { name: "Sign in to continue" });
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  const checking = await screen.findByText(
+    "Job Finder is checking the application with your browser sign-in. This item stays until access is confirmed.",
+  );
+  expect(checking.getAttribute("role")).toBe("status");
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(
+    applications.needsYou.details(requested.task.id)?.applications,
+  ).toMatchObject([{ id: row.id, state: "running" }]);
+  fireEvent.click(screen.getByRole("button", { name: "Open in browser" }));
+  const opening = await screen.findByText(
+    "Job Finder is opening or working on this application. You can open its tab once it is ready.",
+  );
+  expect(opening.getAttribute("role")).toBe("status");
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 it("updates tab counts while a saved answer is being edited, without moving the editor", async () => {
   applications.needsYou.remember({
     key: "notice",
@@ -931,7 +1010,7 @@ it("lists application questions first, then one sign-in row per host under one g
   expect(within(list).queryByText(/^Sign in to /u)).toBeNull();
   fireEvent.click(group);
   const scale = await within(list).findByRole("button", {
-    name: /Sign in to .*scale-853\.example\.test · 2 sites/u,
+    name: /Sign in to .*scale-853\.example\.test, 2 sign-ins/u,
   });
   expect(scale.textContent).toContain("Search couldn't read this site");
   expect(
@@ -976,12 +1055,17 @@ it("works through selected items: a question in place, then each site in the bro
   const question = ask(0);
   const [scaleCareers] = gatedSites();
   show();
+  fireEvent.click(await screen.findByRole("button", { name: "Select" }));
   fireEvent.click(
-    await screen.findByRole("checkbox", { name: "Select all 4 items" }),
+    await screen.findByRole("checkbox", { name: /^Select all / }),
   );
+  // The shown question first; then every match, the folded sign-ins too.
+  // Counted as the list shows them: scale-853's two sign-ins are one row,
+  // so the advertised count is the work that starts.
   fireEvent.click(
-    screen.getByRole("button", { name: "Work through selected" }),
+    screen.getByRole("button", { name: "Select all 3 matching" }),
   );
+  fireEvent.click(screen.getByRole("button", { name: /^Work through 3 / }));
   const walk = () =>
     document.querySelector("[data-needs-walk]")?.textContent ?? "";
   await waitFor(() => expect(walk()).toContain("1 of 3"));
@@ -1014,7 +1098,7 @@ it("works through selected items: a question in place, then each site in the bro
     createSourceAccessStore(jobs).complete(scaleCareers!);
   });
   const scaleRow = await screen.findByRole("button", {
-    name: /scale-853\.example\.test(?! · 2 sites)/u,
+    name: /scale-853\.example\.test(?! · 2 sign-ins)/u,
   });
   expect(scaleRow.textContent).toContain("Checking…");
   act(() => workThrough.pause());
@@ -1060,11 +1144,13 @@ it("lists filled forms under their own group, and says so when nothing is blocke
   show();
   expect(
     await screen.findByText(
-      "Nothing is blocked. 1 application is filled in and waiting for your Send.",
+      "Nothing is blocked. 1 application is filled in and waiting for your Send, listed below.",
       { exact: false },
     ),
   ).toBeTruthy();
-  expect(screen.getByText("Ready for you to send (1)")).toBeTruthy();
+  // Its own collection, beside a count that agrees with the tab.
+  expect(screen.getByText("Ready to send · 1")).toBeTruthy();
+  expect(screen.getByText("Nothing needs you · 1 ready to send")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Needs you 0" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Review and send" }));
   await waitFor(() => expect(openApplication).toHaveBeenCalledWith({ id: 31 }));
@@ -1074,7 +1160,8 @@ it("lists filled forms under their own group, and says so when nothing is blocke
     ask(0);
   });
   await screen.findByText("What is your notice period?");
-  expect(screen.getByText("Ready for you to send (1)")).toBeTruthy();
+  expect(screen.getByText("Ready to send · 1")).toBeTruthy();
+  expect(screen.getByText("1 item needs you · 1 ready to send")).toBeTruthy();
   expect(screen.queryByText(/Nothing is blocked/)).toBeNull();
   fireEvent.click(
     screen.getByRole("button", { name: /Backend Engineer.*Lantern Services/ }),
@@ -1082,7 +1169,52 @@ it("lists filled forms under their own group, and says so when nothing is blocke
   await waitFor(() => expect(openApplication).toHaveBeenCalledWith({ id: 31 }));
 });
 
-it("says why a question was asked when Apply recorded a reason", async () => {
+it("says why a Send for me form waits for the person's Send", async () => {
+  const reason =
+    "Send for me filled this form but could not confirm it was ready to send, so it waits for you. Review it and press Send.";
+  Object.assign(window.nestor, {
+    jobFinder: {
+      listApplications: vi.fn(() =>
+        Promise.resolve({
+          rows: [
+            {
+              id: 32,
+              jobId: 9,
+              mode: "autonomous_submit",
+              title: "Software Developer",
+              company: "Harbor Works",
+              location: "Remote",
+              state: "ready",
+              attempt: 2,
+              queuedAt: "2026-10-27T09:00:00.000Z",
+              updatedAt: "2026-10-27T09:05:00.000Z",
+              submittedAt: null,
+              error: reason,
+            },
+          ],
+          nextCursor: null,
+        }),
+      ),
+      openApplication: vi.fn(() => Promise.resolve(true)),
+    },
+  });
+  show();
+  expect(await screen.findByText(reason)).toBeTruthy();
+  expect(screen.queryByText("Filled in. Review it and send.")).toBeNull();
+});
+
+it.each([
+  {
+    check: "answer_grounding",
+    detail: "The saved salary is in another currency than the form asks.",
+    lead: "An answer was found, but the check before sending could not confirm it fits.",
+  },
+  {
+    check: "question_classification",
+    detail: "The question could not be read after three tries.",
+    lead: "Nestor could not read this question, so it could not check your profile or saved answers.",
+  },
+])("explains a recorded $check reason", async ({ check, detail, lead }) => {
   const row = claimed[0]!;
   applications.needsYou.request({
     applicationId: row.id,
@@ -1096,21 +1228,115 @@ it("says why a question was asked when Apply recorded a reason", async () => {
     options: [],
     askReason: {
       kind: "source_rejected",
-      check: "answer_grounding",
-      detail: "The saved salary is in another currency than the form asks.",
+      check,
+      detail,
     },
   });
   show();
-  const why = await screen.findByText("Why am I asked this?");
-  fireEvent.click(why);
+  // The question is the pane's title; why it is asked shows under it, and
+  // what Nestor saw opens on demand.
   expect(
-    screen.getByText(
-      "An answer was found, but the check before sending could not confirm it fits.",
-    ),
+    await screen.findByRole("heading", { name: "What salary do you expect?" }),
   ).toBeTruthy();
+  expect(screen.getByText(lead)).toBeTruthy();
+  fireEvent.click(screen.getByText("What Nestor saw"));
+  expect(screen.getByText(detail)).toBeTruthy();
+});
+
+it("counts a site's sign-ins past one page as the one row Work through starts", async () => {
+  ask(0);
+  const sites = createJobSitesStore(jobs);
+  const access = createSourceAccessStore(jobs);
+  // 51 sign-ins on one host: more than one 50-row page.
+  for (let index = 0; index < 51; index += 1) {
+    const id = sites.add({
+      text: `https://many.example.test/board-${index}`,
+    }).firstAddedId!;
+    access.request(id, "Open the site and sign in, then Retry.");
+  }
+  show();
+  // The folded group reads every page: one site, not 51 and not two.
+  await screen.findByRole("button", {
+    name: "1 job site needs you to sign in",
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Select" }));
+  fireEvent.click(
+    await screen.findByRole("checkbox", { name: /^Select all / }),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Select all 2 matching" }),
+  );
   expect(
-    screen.getByText(
-      "The saved salary is in another currency than the form asks.",
-    ),
+    screen.getByRole("button", { name: /^Work through 2 selected items/ }),
   ).toBeTruthy();
+});
+
+it("says it couldn't count when a later site page fails, and starts the right number after Try again", async () => {
+  ask(0);
+  const sites = createJobSitesStore(jobs);
+  const access = createSourceAccessStore(jobs);
+  for (let index = 0; index < 51; index += 1) {
+    const id = sites.add({
+      text: `https://many.example.test/board-${index}`,
+    }).firstAddedId!;
+    access.request(id, "Open the site and sign in, then Retry.");
+  }
+  const { run } = window.nestor.needsYou as {
+    run: (name: string, input: unknown) => Promise<unknown>;
+  };
+  let failLaterPage = true;
+  window.nestor.needsYou.run = ((name: string, input: unknown) => {
+    const request = input as { group?: string; after?: number } | undefined;
+    return failLaterPage &&
+      name === "list_needs_you" &&
+      request?.group === "sites" &&
+      (request.after ?? 0) > 0
+      ? Promise.reject(new Error("The job store could not be read"))
+      : run(name, input);
+  }) as typeof window.nestor.needsYou.run;
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Select" }));
+  // The merged count is unknown: no raw number is promised.
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Select all matching" }),
+  );
+  await screen.findByText("Couldn’t count");
+  expect(screen.queryByRole("button", { name: /^Work through/ })).toBeNull();
+  failLaterPage = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  // One question and one merged site: what the bar says is what starts.
+  expect(
+    await screen.findByRole("button", {
+      name: /^Work through 2 selected items/,
+    }),
+  ).toBeTruthy();
+  expect(screen.getByText("2 selected")).toBeTruthy();
+});
+
+it("recovers its counts with the list on Try again: no all-clear above waiting items", async () => {
+  const question = ask(0);
+  const { run } = window.nestor.needsYou as {
+    run: (name: string, input: unknown) => Promise<unknown>;
+  };
+  let refuse = true;
+  window.nestor.needsYou.run = ((name: string, input: unknown) =>
+    refuse && (name === "needs_you_counts" || name === "list_needs_you")
+      ? Promise.reject(new Error("The job store could not be read"))
+      : run(name, input)) as typeof window.nestor.needsYou.run;
+  show();
+  await screen.findByText("Couldn’t read things needing you");
+  expect(screen.queryByText("Nothing needs you")).toBeNull();
+  refuse = false;
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  const list = await screen.findByRole("list", { name: "Things needing you" });
+  await within(list).findByText(question.prompt);
+  await screen.findByText("1 item needs you");
+  expect(screen.queryByText("Nothing needs you")).toBeNull();
+  await waitFor(() =>
+    expect(
+      screen
+        .getByRole("button", { name: "Needs you 1" })
+        .getAttribute("aria-pressed") ?? "present",
+    ).toBeTruthy(),
+  );
 });

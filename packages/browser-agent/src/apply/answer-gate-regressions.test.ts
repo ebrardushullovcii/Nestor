@@ -1644,7 +1644,7 @@ test("a motivation misreading cannot waive a language-of-choice preference", asy
 });
 
 test.each(["truncated", "unparseable"])(
-  "a %s question reading retries once then creates a visible handover",
+  "a %s question reading retries twice then creates a visible handover",
   async (failure) => {
     const { runApplyAgent } = await import("./apply-agent");
     const s = setup(field("Full name"));
@@ -1669,13 +1669,18 @@ test.each(["truncated", "unparseable"])(
       }),
     };
     const result = await runApplyAgent(s.config, client);
-    expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+    expect(client.chatWithTools).toHaveBeenCalledTimes(3);
     expect(s.fillText).not.toHaveBeenCalled();
     expect(result.outcome).toBe("paused");
     const question = result.pauses
       .flatMap((pause) => pause.questions ?? [])
       .find((question) => question.prompt === "Full name");
-    expect(question?.note).toContain("two attempts");
+    expect(question?.note).toContain("three tries");
+    // Not read is not the same as no saved fact.
+    expect(question?.askReason).toMatchObject({
+      kind: "source_rejected",
+      check: "question_classification",
+    });
   },
 );
 

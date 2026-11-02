@@ -103,7 +103,7 @@ async function renderTaskCenter(onNavigate = vi.fn()) {
 }
 
 const summary = () =>
-  screen.getByText("Activity", { selector: "span" }).closest("summary")!;
+  screen.getByText("Activity", { selector: "span" }).closest("button")!;
 
 describe("JobFinderTaskCenter", () => {
   test("counts everything running from the store, and lists it with what just finished", async () => {
@@ -125,7 +125,7 @@ describe("JobFinderTaskCenter", () => {
       name: "Finished in the last day",
     });
     expect(finished.textContent).toContain("Spool · Resume written");
-    expect(finished.textContent).toContain("Ledger · Sent");
+    expect(finished.textContent).toContain("Ledger · Applied");
   });
 
   test("opens the screen that shows a piece of work and closes", async () => {

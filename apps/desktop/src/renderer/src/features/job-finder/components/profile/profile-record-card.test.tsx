@@ -111,7 +111,7 @@ describe("ProfileRecordCard", () => {
     expect(getDetailsCard("Role 1").open).toBe(true);
   });
 
-  it("keeps the Expand/Collapse chip out of the summary accessible name", async () => {
+  it("keeps the disclosure glyph out of the summary accessible name", () => {
     render(
       <ProfileRecordCard
         defaultOpen={false}
@@ -128,15 +128,17 @@ describe("ProfileRecordCard", () => {
       throw new Error("summary element missing");
     }
 
-    // The visual affordance stays rendered but is hidden from the
-    // accessibility tree; the native <details> expanded state carries the
-    // semantics instead of an unstable "Expand"/"Collapse" label.
-    const chip = screen.getByText("Expand").parentElement;
-    expect(chip?.getAttribute("aria-hidden")).toBe("true");
-
-    // The announced content is the useful, stable text only: title and
-    // summary stay outside any aria-hidden subtree.
-    expect(summaryElement.textContent).toContain("Expand");
+    // The one disclosure glyph, a chevron that turns a quarter on open, is
+    // hidden from the accessibility tree; the native <details> state carries
+    // the semantics, and no "Expand"/"Collapse" word is printed at all.
+    // It leads the summary, as on every shared disclosure.
+    const chevron = summaryElement.querySelector("svg");
+    expect(summaryElement.firstElementChild).toBe(chevron);
+    expect(chevron?.getAttribute("aria-hidden")).toBe("true");
+    expect(chevron?.getAttribute("class")).toContain(
+      "[details[open]>summary>&]:rotate-90",
+    );
+    expect(summaryElement.textContent).not.toMatch(/Expand|Collapse/);
     for (const stableText of [
       "Role 1",
       "Senior Engineer - Acme. Lisbon | 2020 to Present",
@@ -148,23 +150,8 @@ describe("ProfileRecordCard", () => {
       expect(owner?.closest('[aria-hidden="true"]')).toBeNull();
     }
 
-    // jsdom queues the details toggle event, so wait for the state flip.
-    fireEvent.click(details.querySelector("summary")!);
+    fireEvent.click(summaryElement);
     expect(details.open).toBe(true);
-    const collapsedChip = await screen
-      .findByText("Collapse")
-      .then((collapsedLabel) => collapsedLabel.parentElement);
-
-    // Toggling must not move any newly announced label into the tree: the
-    // flipped word stays confined to the same hidden chip.
-    expect(collapsedChip).toBe(chip);
-    expect(collapsedChip?.getAttribute("aria-hidden")).toBe("true");
-    for (const unstableWord of ["Expand", "Collapse"]) {
-      for (const owner of [...summaryElement.querySelectorAll("span")].filter(
-        (element) => element.textContent === unstableWord,
-      )) {
-        expect(owner.closest('[aria-hidden="true"]')).toBe(chip ?? null);
-      }
-    }
+    expect(summaryElement.firstElementChild).toBe(chevron);
   });
 });

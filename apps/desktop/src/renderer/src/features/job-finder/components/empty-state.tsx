@@ -17,7 +17,7 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "grid min-h-(--empty-state-min-height) w-full place-items-center overflow-hidden rounded-(--radius-panel) border border-dashed border-(--border-strong) bg-[linear-gradient(180deg,var(--surface-overlay-soft),var(--surface-fill-soft))] px-6 py-8 text-center shadow-[inset_0_1px_0_var(--surface-inset-highlight)]",
+        "grid min-h-(--empty-state-min-height) w-full place-items-center overflow-hidden rounded-(--radius-panel) border border-dashed border-(--surface-panel-border) bg-(--surface-fill-subtle) px-6 py-8 text-center",
         className,
       )}
     >
@@ -25,7 +25,7 @@ export function EmptyState({
         <h2 className="font-display text-(length:--text-section-title) font-semibold tracking-(--tracking-page-title-compact) text-(--text-headline) break-words [overflow-wrap:anywhere]">
           {title}
         </h2>
-        <p className="text-(length:--text-description) leading-6 text-foreground break-words [overflow-wrap:anywhere]">
+        <p className="text-(length:--text-description) leading-5 text-foreground-soft break-words [overflow-wrap:anywhere]">
           {description}
         </p>
         {children}

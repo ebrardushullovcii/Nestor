@@ -6,10 +6,7 @@ import {
   startLaunchReads,
   useLaunchReads,
 } from "@renderer/features/job-finder/lib/launch-reads";
-import {
-  getRouteSkeletonPanes,
-  RouteSkeleton,
-} from "@renderer/features/job-finder/components/route-skeleton";
+import { RouteSkeleton } from "@renderer/features/job-finder/components/route-skeleton";
 import { ThemeProvider } from "@renderer/app/theme-provider";
 import {
   ClipboardCheck,
@@ -157,7 +154,7 @@ function JobFinderPageOutlet() {
       context={null}
       fallback={
         <RouteSkeleton
-          panes={getRouteSkeletonPanes(location.pathname)}
+          pathname={location.pathname}
           title={getOpeningRouteLabel(location.pathname)}
         />
       }

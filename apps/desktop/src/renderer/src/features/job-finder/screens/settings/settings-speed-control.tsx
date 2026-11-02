@@ -9,6 +9,8 @@ import {
   type SpeedLevel,
   type UpdateWorkspaceBehaviorInput,
 } from "@nestor/contracts";
+import { SettingsRow } from "./settings-row";
+import { SegmentedControl } from "@renderer/components/ui/segmented-control";
 
 /** Where the one-time tip and the assistant send the person. */
 export const SETTINGS_SPEED_ANCHOR = "settings-speed";
@@ -69,60 +71,51 @@ export function SettingsSpeedControl({
   };
 
   return (
-    <div
-      className="grid min-w-0 scroll-mt-(--settings-subnav-offset) gap-2 outline-none"
-      id={SETTINGS_SPEED_ANCHOR}
-      tabIndex={-1}
-    >
-      <div className="grid gap-1">
-        <h4 className="font-medium" id={headingId}>
-          Speed
-        </h4>
-        <p className="text-sm text-foreground-soft">
-          How much Job Finder does at once while it searches and applies.
-        </p>
-      </div>
-      <div
-        aria-labelledby={headingId}
-        className="relative flex w-fit min-w-0 max-w-full flex-wrap items-center gap-0.5 rounded-(--radius-field) border border-(--surface-panel-border) bg-background/45 p-0.5"
-        role="group"
-      >
-        {speedLevelValues.map((value) => {
-          const isSelected = level === value;
-          return (
-            <button
-              aria-pressed={isSelected}
-              className={`inline-flex min-h-9 items-center justify-center rounded-(--radius-small) px-3.5 text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40 ${isSelected ? "bg-primary/10 text-foreground ring-1 ring-primary/70" : "text-foreground-soft hover:bg-secondary hover:text-foreground"}`}
-              key={value}
-              onClick={() => choose(value)}
-              type="button"
+    <SettingsRow
+      className="scroll-mt-(--settings-subnav-offset) outline-none"
+      control={
+        <SegmentedControl<SpeedLevel>
+          aria-labelledby={headingId}
+          label="Speed"
+          onValueChange={choose}
+          options={speedLevelValues.map((value) => ({
+            value,
+            label: SPEED_LEVELS[value].label,
+          }))}
+          size="field"
+          value={level}
+        />
+      }
+      description="How much Job Finder does at once while it searches and applies."
+      footer={
+        <>
+          <p className="text-(length:--text-small) leading-5 text-foreground-soft">
+            {describeSpeedLevel(level)}
+            {level === "standard"
+              ? " Works well on most computers."
+              : ` Uses up to about ${extraMemoryText(level)} more memory than Standard when it is busiest.`}
+          </p>
+          {level !== "standard" ? (
+            <p
+              className="rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) px-3 py-2 text-(length:--text-small) leading-5 text-(--warning-text)"
+              role="note"
             >
-              {SPEED_LEVELS[value].label}
-            </button>
-          );
-        })}
-      </div>
-      <p className="max-w-[72ch] text-sm text-foreground-soft">
-        {describeSpeedLevel(level)}
-        {level === "standard"
-          ? " Works well on most computers."
-          : ` Uses up to about ${extraMemoryText(level)} more memory than Standard when it is busiest.`}
-      </p>
-      {level !== "standard" ? (
-        <p
-          className="max-w-[72ch] rounded-(--radius-field) border border-(--warning-border) bg-(--warning-surface) px-3 py-2 text-sm leading-6 text-(--warning-text)"
-          role="note"
-        >
-          {SPEED_LEVELS[level].label} uses more memory and spends your AI limits
-          faster. Choose it on a computer with plenty of memory, and go back to
-          Standard if things slow down.
-        </p>
-      ) : null}
-      {failed ? (
-        <p className="text-sm text-foreground-soft" role="status">
-          That change was not saved. Pick the level again.
-        </p>
-      ) : null}
-    </div>
+              {SPEED_LEVELS[level].label} uses more memory and spends your AI
+              limits faster. Choose it on a computer with plenty of memory, and
+              go back to Standard if things slow down.
+            </p>
+          ) : null}
+          {failed ? (
+            <p className="text-sm text-foreground-soft" role="status">
+              That change was not saved. Pick the level again.
+            </p>
+          ) : null}
+        </>
+      }
+      id={SETTINGS_SPEED_ANCHOR}
+      label="Speed"
+      labelId={headingId}
+      tabIndex={-1}
+    />
   );
 }

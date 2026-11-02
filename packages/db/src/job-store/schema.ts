@@ -97,6 +97,8 @@ export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
     column: "ai_behavior_browser_permissions_solve_captchas",
     definition: "INTEGER",
   },
+  // A few-word form of fit_summary for narrow rows; empty in older rows.
+  { table: "jobs", column: "fit_short", definition: "TEXT" },
   {
     table: "profile_settings",
     column: "ai_behavior_browser_permissions_sign_in",
@@ -131,6 +133,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   -- -1 until scored, so the fit order needs no NULL handling
   fit_score INTEGER NOT NULL DEFAULT -1,
   fit_summary TEXT,
+  fit_short TEXT,
   fit_stale INTEGER NOT NULL DEFAULT 0,
   -- 0 when the listing shows no date
   posted_at INTEGER NOT NULL DEFAULT 0,

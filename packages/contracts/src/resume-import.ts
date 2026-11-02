@@ -441,10 +441,18 @@ export function canRetrySavedResumeImport(
  * channel and the picker a cancel press refers to; `retryInterrupted` imports
  * again the working copy a stopped import saved, with no file picker.
  */
+/** The file kinds a resume import reads, picked or dropped. */
+export const RESUME_IMPORT_EXTENSIONS = ["pdf", "docx", "txt", "md"] as const;
+
 export const ImportResumeRequestSchema = z
   .object({
     requestId: NonEmptyStringSchema.optional(),
     retryInterrupted: z.boolean().optional(),
+    /**
+     * A file the person dropped on the import card. Main imports it without
+     * the picker, after checking it is a readable file of a resume kind.
+     */
+    droppedFilePath: NonEmptyStringSchema.optional(),
   })
   .strict();
 export const CancelResumeImportRequestSchema = z

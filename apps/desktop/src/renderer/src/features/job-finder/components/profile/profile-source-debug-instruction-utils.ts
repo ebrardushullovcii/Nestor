@@ -182,7 +182,7 @@ export function describeLearnedInstructionUsage(
   artifact: SourceInstructionArtifact | null,
 ): string {
   if (!artifact) {
-    return "Saved from the latest source check.";
+    return "Saved from the latest site check.";
   }
 
   if (artifact.status === "validated") {
@@ -190,10 +190,10 @@ export function describeLearnedInstructionUsage(
   }
 
   if (artifact.status === "draft") {
-    return "This draft guidance came from the latest source check and is already used automatically until you replace or re-check it.";
+    return "This draft guidance came from the latest site check and is already used automatically until you replace or re-check it.";
   }
 
-  return "Saved from the latest source check.";
+  return "Saved from the latest site check.";
 }
 
 export function buildLearnedInstructionSections(

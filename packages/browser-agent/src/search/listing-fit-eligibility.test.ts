@@ -494,3 +494,84 @@ test("a stable schema still rejects a verdict for a job outside the batch", asyn
   expect(calls).toBe(2);
   expect(fits.map(({ id }) => id)).toEqual([job.id]);
 });
+
+test("keeps the model's short reason beside its own reason, whole and capped", async () => {
+  const answer = (
+    w: string,
+    e: string,
+    s = 70,
+    why = "Fewer frontend duties than you want; mostly backend services.",
+  ) => ({
+    chatWithTools: () =>
+      Promise.resolve({
+        content: JSON.stringify({
+          fits: [
+            {
+              id: 1,
+              s,
+              why,
+              w,
+              r: ["related", "Backend-leaning role"],
+              p: ["aligned", "Remote work"],
+              c: ["strong", "Direct evidence"],
+              e: [e, "Worldwide remote", "broader_remote", ""],
+            },
+          ],
+        }),
+      }),
+  });
+  const fit = (client: LLMClient) =>
+    fitJobs({
+      client,
+      profile,
+      jobs: [
+        {
+          ...job,
+          location: "Remote, Worldwide",
+          description: "Worldwide remote. Mostly backend services.",
+        },
+      ],
+      goals: { targetRoles: ["Software Engineer"], locations: [] },
+    }).then((fits) => fits[0]);
+
+  const kept = await fit(answer("Less frontend than you want.", "compatible"));
+  expect(kept?.summary).toBe(
+    "Fewer frontend duties than you want; mostly backend services.",
+  );
+  expect(kept?.short).toBe("Less frontend than you want");
+  // Over the cap: none, never cut.
+  expect(
+    (
+      await fit(
+        answer(
+          "Rather less frontend work than you said you want",
+          "compatible",
+        ),
+      )
+    )?.short,
+  ).toBeUndefined();
+  // A capped score reads another reason, so its short form is not this one.
+  expect(
+    (await fit(answer("Less frontend than you want", "blocked", 90)))?.short,
+  ).toBeUndefined();
+  // The comparison and the reason's material caveat, when both fit.
+  const caveat =
+    "Good overlap on product UI; asks for some Go you have not listed.";
+  expect(
+    (await fit(answer("UI overlap ; Go not listed.", "compatible", 70, caveat)))
+      ?.short,
+  ).toBe("UI overlap; Go not listed");
+  // Over five words, or more than a comparison and one caveat: none.
+  expect(
+    (
+      await fit(
+        answer("Good UI overlap; some Go asked", "compatible", 70, caveat),
+      )
+    )?.short,
+  ).toBeUndefined();
+  expect(
+    (await fit(answer("UI; Go; remote", "compatible", 70, caveat)))?.short,
+  ).toBeUndefined();
+  // An older answer without it still reads.
+  expect((await fit(answer("", "compatible")))?.short).toBeUndefined();
+});

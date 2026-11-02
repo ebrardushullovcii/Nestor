@@ -24,7 +24,7 @@ export function ProfileSectionHeader({
         {eyebrow ? <span className="sr-only">{eyebrow}. </span> : null}
         <div className="grid gap-1.5">
           <h2
-            className="text-(length:--text-section-title) font-semibold tracking-[-0.02em] text-(--text-headline) outline-none"
+            className="text-(length:--text-section-title) font-semibold tracking-(--tracking-page-title) text-(--text-headline) outline-none"
             id={headingId}
             tabIndex={headingId ? -1 : undefined}
           >

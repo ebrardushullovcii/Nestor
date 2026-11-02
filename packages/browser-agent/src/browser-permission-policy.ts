@@ -29,6 +29,20 @@ const FINAL_APPLICATION_ACTION =
 const CHALLENGE_ACTION =
   /^(?:verify|check|confirm|submit answer|next challenge|try again|start puzzle)(?:\b|$)/iu;
 
+/** A button that opens account choices, outside the credential form itself. */
+export function isSignInEntryAction(
+  action: ApplyFormObservation["actions"][number],
+): boolean {
+  return (
+    action.visible &&
+    !action.disabled &&
+    /^(?:sign\s?in|log\s?in|login)$/iu.test(action.label.trim()) &&
+    !action.inForm &&
+    !action.formAction &&
+    action.submitsForm !== true
+  );
+}
+
 export type BrowserInteractionKind =
   | keyof BrowserAgentPermissions
   | "google_handoff"
@@ -54,6 +68,8 @@ export function browserInteractionKind(
     if (google) return google;
   }
   if (FINAL_APPLICATION_ACTION.test(label)) return null;
+  const action = page.actions.find((entry) => entry.ref === ref);
+  if (action && isSignInEntryAction(action)) return "signIn";
   if (CREATE_ACCOUNT_ACTION.test(label)) return "createAccounts";
   if (SIGN_IN_ACTION.test(label)) {
     // An SSO button on a registration page creates an account, even if its
@@ -124,6 +140,13 @@ export function browserStepReadyForAgent(
   );
   if (permissions.googleSignIn && hasGoogleSignInAction(page)) return true;
   if (isGoogleAccountPage(page)) return false;
+  if (
+    permissions.googleSignIn &&
+    permissions.signIn &&
+    passwords.some((entry) => !entry.answered) &&
+    page.actions.some(isSignInEntryAction)
+  )
+    return true;
   return Boolean(
     enabled && passwords.length && passwords.every((entry) => entry.answered),
   );
@@ -139,7 +162,7 @@ export function describeBrowserPermissions(
     `Browser permissions: CAPTCHA ${permissions.solveCaptchas ? "ON" : "OFF"}; website sign-in ${permissions.signIn ? "ON" : "OFF"}; Google sign-in/sign-up ${permissions.googleSignIn ? "ON" : "OFF"}; account creation ${permissions.createAccounts ? "ON" : "OFF"}.`,
     ...(permissions.googleSignIn
       ? [
-          "Google: use its button or sole signed-in account, even beside an empty password form. This may register a site account. Hand off Google login, multiple accounts and access requests; never create Google accounts.",
+          "Google: prefer its visible button over email/password, even beside an empty password form. If only email/password is shown, an enabled Sign In button outside that form may open provider choices: inspect it once before handing off missing credentials. This may register a site account. Hand off Google login, multiple accounts and access requests; never create Google accounts. Never repeat a Google attempt whose result is uncertain.",
         ]
       : []),
     "Use visible controls for enabled steps; hand off others. Reuse sessions or host-filled saved logins. Never request or type passwords or MFA codes; the person enters missing credentials on-site. Sending and extra consent stay separate. Check results; never repeat an uncertain account action.",
@@ -181,22 +204,26 @@ export function withBrowserPermissions(
     if (denied) return { ok: false as const, error: denied };
     const kind = browserInteractionKind(page, ref);
     const action = page.actions.find((entry) => entry.ref === ref);
-    if (kind === "googleSignIn") {
+    const signInEntry =
+      kind === "signIn" && action && isSignInEntryAction(action);
+    if (kind === "googleSignIn" || signInEntry) {
       const fresh = await hands.observe();
+      const freshAction = fresh.actions.find((entry) => entry.ref === ref);
       if (
         fresh.url !== page.url ||
         fresh.signature !== page.signature ||
-        browserInteractionKind(fresh, ref) !== "googleSignIn"
+        browserInteractionKind(fresh, ref) !== kind ||
+        (signInEntry && !(freshAction && isSignInEntryAction(freshAction)))
       )
         return {
           ok: false as const,
           error:
-            "The Google step changed. Inspect the page again before continuing.",
+            "The account step changed. Inspect the page again before continuing.",
         };
-      if (!(await currentBrowserPermissions(policy)).googleSignIn)
+      if (!(await currentBrowserPermissions(policy))[kind])
         return {
           ok: false as const,
-          error: "Google sign-in/sign-up was turned off before this action.",
+          error: "The browser permission was turned off before this action.",
         };
     }
     if (
@@ -206,6 +233,7 @@ export function withBrowserPermissions(
     ) {
       if (
         kind !== "googleSignIn" &&
+        !signInEntry &&
         page.controls.some(
           (entry) =>
             entry.visible &&

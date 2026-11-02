@@ -19,6 +19,8 @@ const newRequestId = (prefix: string) =>
  */
 export function createProfileWorkflowBridge(
   ipc: Ipc,
+  /** The path of a dropped file; main reads it, the renderer never does. */
+  pathForFile: (file: File) => string = () => "",
 ): DesktopProfileWorkflowBridge {
   let importRequestId: string | null = null;
   let siteCheckRequestId: string | null = null;
@@ -46,6 +48,11 @@ export function createProfileWorkflowBridge(
     async importResume(onProgress, options) {
       if (importRequestId)
         throw new Error("A resume import is already running.");
+      const droppedFilePath = options?.droppedFile
+        ? pathForFile(options.droppedFile)
+        : "";
+      if (options?.droppedFile && !droppedFilePath)
+        throw new Error("That file could not be read. Choose it instead.");
       const requestId = newRequestId("resume_import");
       importRequestId = requestId;
       try {
@@ -56,6 +63,7 @@ export function createProfileWorkflowBridge(
             ipc.invoke(PROFILE_WORKFLOW_IMPORT_CHANNEL, {
               requestId,
               ...(options?.retryInterrupted ? { retryInterrupted: true } : {}),
+              ...(droppedFilePath ? { droppedFilePath } : {}),
             }),
         );
       } finally {

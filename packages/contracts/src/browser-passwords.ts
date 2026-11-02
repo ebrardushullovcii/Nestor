@@ -69,6 +69,8 @@ export interface BrowserPasswordFill {
   username: string;
   password: string;
   agent: boolean;
+  /** Main-owned profile email, only for one username-less saved sign-in. */
+  fallbackUsername?: string;
 }
 export const BrowserPasswordFormsSchema = z
   .array(z.object({ action: z.string().max(4096), login: z.boolean() }))

@@ -22,7 +22,6 @@ import {
   type TailoringMode,
 } from "@nestor/contracts";
 
-
 import { resolvePendingReviewItemsAfterExplicitSave } from "./profile-setup-review-items";
 import { deriveAndPersistProfileSetupState } from "./profile-workspace-state";
 import {
@@ -628,7 +627,7 @@ export function createWorkspaceProfileCopilotMethods(input: {
         case "replace_search_preferences_fields": {
           if (operation.value.discovery !== undefined)
             throw new Error(
-              "Job sources are managed in Job sources, separately from Profile goals.",
+              "Job sites are managed in Profile › Job sites, separately from Profile goals.",
             );
           const hasLegacyCompensationAmount =
             operation.value.minimumSalaryUsd !== undefined ||

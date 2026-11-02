@@ -119,6 +119,9 @@ function mockLayout({
   sidebarRight = 272,
 }: { stackHeight?: number; pagerTop?: number; sidebarRight?: number } = {}) {
   vi.stubGlobal("innerHeight", 900);
+  // The stack sits at the content's bottom right; this window is just wide
+  // enough that it starts where the content does (288 + 360 + 16).
+  vi.stubGlobal("innerWidth", 664);
   const rect = (left: number, top: number, width: number, height: number) => ({
     left,
     top,
@@ -310,24 +313,34 @@ it.each([112, 260])(
   },
 );
 
-it("follows the current sidebar width when the assistant collapses it", async () => {
+it("sits at the content's bottom right, beside a docked assistant, and follows the sidebar's width", async () => {
   vi.useFakeTimers();
   const layout = mockLayout();
+  vi.stubGlobal("innerWidth", 1440);
+  document.documentElement.style.setProperty(
+    "--assistant-sidebar-reserved",
+    "400px",
+  );
   render(<ScrollFixture />);
   fireEvent.click(screen.getByText("Hide jobs"));
   const viewport = document.querySelector<HTMLElement>(
     "[data-toast-viewport]",
   )!;
-  expect(viewport.style.left).toBe("288px");
+  // 1440 − 400 (assistant) − 16 (gap) − 360 (stack).
+  expect(viewport.style.left).toBe("664px");
+  expect(viewport.style.width).toContain("288px");
   layout.setSidebarRight(64);
   fireEvent(window, new Event("resize"));
   await act(() => vi.advanceTimersByTime(20));
-  expect(viewport.style.left).toBe("80px");
+  expect(viewport.style.left).toBe("664px");
   expect(viewport.style.width).toContain("80px");
-  layout.setSidebarRight(0);
+  document.documentElement.style.setProperty(
+    "--assistant-sidebar-reserved",
+    "0px",
+  );
   fireEvent(window, new Event("resize"));
   await act(() => vi.advanceTimersByTime(20));
-  expect(viewport.style.left).toBe("16px");
+  expect(viewport.style.left).toBe("1064px");
 });
 
 it("remeasures scroll clearance when the toast stack grows or text wraps", async () => {
@@ -549,4 +562,186 @@ it("moves stacked toasts above plan actions without adding page padding", () => 
     document.querySelector<HTMLElement>("[data-toast-avoid]")!.style
       .paddingBottom,
   ).toBe("");
+});
+
+function WithDialog(props: { open: boolean }) {
+  return (
+    <ToastProvider>
+      <Trigger />
+      {props.open ? (
+        <div aria-label="Keyboard shortcuts" aria-modal="true" role="dialog">
+          Shortcuts
+        </div>
+      ) : null}
+    </ToastProvider>
+  );
+}
+
+it("waits behind an open dialog, its time held, and comes back when it closes", async () => {
+  vi.useFakeTimers({
+    toFake: [
+      "setTimeout",
+      "clearTimeout",
+      "requestAnimationFrame",
+      "cancelAnimationFrame",
+      "Date",
+    ],
+  });
+  // jsdom draws nothing: the dialog counts as shown.
+  vi.spyOn(HTMLElement.prototype, "getClientRects").mockImplementation(
+    function (this: HTMLElement) {
+      return (this.getAttribute("role") === "dialog"
+        ? [{}]
+        : []) as unknown as DOMRectList;
+    },
+  );
+  const view = render(<WithDialog open={false} />);
+  fireEvent.click(screen.getByText("Hide jobs"));
+  const stack = () =>
+    document.querySelector<HTMLElement>("[data-toast-viewport]")!;
+  expect(stack().hasAttribute("data-toasts-waiting")).toBe(false);
+  view.rerender(<WithDialog open />);
+  // The DOM change is seen in a microtask, then measured on the next frame.
+  await act(() => Promise.resolve());
+  await act(() => vi.advanceTimersByTime(50));
+  expect(stack().hasAttribute("data-toasts-waiting")).toBe(true);
+  expect(stack().className).toContain("invisible");
+  // Far past its own twenty seconds: held while hidden.
+  await act(() => vi.advanceTimersByTime(60_000));
+  view.rerender(<WithDialog open={false} />);
+  await act(() => Promise.resolve());
+  await act(() => vi.advanceTimersByTime(50));
+  expect(stack().hasAttribute("data-toasts-waiting")).toBe(false);
+  expect(screen.getByRole("button", { name: "Undo" })).toBeTruthy();
+});
+
+function HeaderFixture(props: { action: boolean }) {
+  const { showToast } = useToast();
+  return (
+    <>
+      <header data-job-finder-shell-header>
+        <div data-desktop-brand-region>Nestor</div>
+        <div data-header-tools>
+          <button>Search</button>
+        </div>
+      </header>
+      <button
+        onClick={() =>
+          showToast({
+            title: "Couldn't apply to UX Engineer at Lumen Orchard",
+            description: "The page didn't open.",
+            ...(props.action
+              ? { action: { label: "Speed setting", onClick: vi.fn() } }
+              : {}),
+          })
+        }
+      >
+        Raise
+      </button>
+    </>
+  );
+}
+
+function mockHeader() {
+  const rect = (left: number, right: number, top = 0, bottom = 48) =>
+    ({
+      left,
+      right,
+      top,
+      bottom,
+      width: right - left,
+      height: bottom - top,
+      x: left,
+      y: top,
+    }) as DOMRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: HTMLElement) {
+      if (this.hasAttribute("data-job-finder-shell-header"))
+        return rect(0, 1000);
+      if (this.hasAttribute("data-desktop-brand-region")) return rect(0, 200);
+      if (this.textContent === "Search" && this.tagName === "BUTTON")
+        return rect(616, 640);
+      return rect(0, 0, 0, 0);
+    },
+  );
+}
+
+it("in the header, gives the title the card's whole width and puts the action after it", () => {
+  mockHeader();
+  const view = render(
+    <ToastProvider>
+      <HeaderFixture action={false} />
+    </ToastProvider>,
+  );
+  fireEvent.click(screen.getByText("Raise"));
+  const stack = document.querySelector<HTMLElement>("[data-toast-viewport]")!;
+  expect(stack.getAttribute("data-toast-placement")).toBe("header");
+  const body = stack.querySelector<HTMLElement>("[data-toast-body]")!;
+  // One column: no reserved action column holding the title to half width.
+  expect(body.className).not.toMatch(/grid-cols/u);
+  expect(body.querySelector("[data-toast-action]")).toBeNull();
+  view.unmount();
+
+  render(
+    <ToastProvider>
+      <HeaderFixture action />
+    </ToastProvider>,
+  );
+  fireEvent.click(screen.getByText("Raise"));
+  const title = document.querySelector<HTMLElement>("[data-toast-title]")!;
+  // The action follows the title's words, in the same line box.
+  expect(title.querySelector("[data-toast-action]")?.textContent).toBe(
+    "Speed setting",
+  );
+});
+
+it("leaves the header for the content's bottom when large text needs more room than the header's middle", () => {
+  mockHeader();
+  document.documentElement.style.fontSize = "32px";
+  try {
+    render(
+      <ToastProvider>
+        <HeaderFixture action />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByText("Raise"));
+    const stack = document.querySelector<HTMLElement>("[data-toast-viewport]")!;
+    expect(stack.getAttribute("data-toast-placement")).toBe("content");
+    // Away from the header the action has its own line under the words.
+    expect(
+      document
+        .querySelector("[data-toast-title]")
+        ?.querySelector("[data-toast-action]"),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: "Speed setting" })).toBeTruthy();
+  } finally {
+    document.documentElement.style.fontSize = "";
+  }
+});
+
+it("with large text, takes a band below the content instead of covering it, and gives it back when it leaves", () => {
+  mockHeader();
+  document.documentElement.style.fontSize = "32px";
+  try {
+    render(
+      <ToastProvider>
+        <HeaderFixture action />
+      </ToastProvider>,
+    );
+    fireEvent.click(screen.getByText("Raise"));
+    const stack = document.querySelector<HTMLElement>("[data-toast-viewport]")!;
+    expect(stack.getAttribute("data-toast-placement")).toBe("content");
+    // The shell pads its content by this band, so nothing sits under the toast.
+    expect(
+      document.documentElement.style.getPropertyValue("--toast-band"),
+    ).toMatch(/^\d+px$/);
+    expect(document.querySelector("[data-toast-scroll-spacer]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+    expect(
+      document.documentElement.style.getPropertyValue("--toast-band"),
+    ).toBe("");
+  } finally {
+    document.documentElement.style.fontSize = "";
+    document.documentElement.style.removeProperty("--toast-band");
+  }
 });

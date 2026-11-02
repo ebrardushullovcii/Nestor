@@ -129,7 +129,7 @@ const PROFILE_SETUP_READINESS_BLOCKER_LABELS: Record<
   string
 > = {
   background: "Add work history",
-  discovery_source: "Add a job source",
+  discovery_source: "Add a job site",
   // Any one work or location answer satisfies this gate, so the label must
   // not promise that a location was saved.
   eligibility_preferences: "Answer one work or location detail",

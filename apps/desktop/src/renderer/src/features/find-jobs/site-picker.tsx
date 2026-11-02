@@ -1,3 +1,4 @@
+import { cn } from "@renderer/lib/cn";
 import type { JobSiteSelection } from "@nestor/contracts";
 import { ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -12,6 +13,7 @@ import {
 } from "@renderer/components/ui/popover";
 
 import { useSitePage } from "@renderer/features/job-lists/use-site-page";
+import { SiteIcon } from "@renderer/features/job-finder/components/site-icon";
 import { JOB_FINDER_ROUTE_PATHS } from "@renderer/features/job-finder/lib/job-finder-route-hrefs";
 import { useEffectWhileKeptRouteShown } from "@renderer/features/job-finder/lib/kept-route-visibility";
 
@@ -22,6 +24,8 @@ import { useEffectWhileKeptRouteShown } from "@renderer/features/job-finder/lib/
 export function SitePicker(props: {
   value: JobSiteSelection;
   onChange: (value: JobSiteSelection) => void;
+  /** How many sites are turned on, once known (0: none yet). */
+  onEnabledTotal?: (total: number) => void;
 }) {
   const navigate = useNavigate();
   const button = useRef<HTMLButtonElement>(null);
@@ -63,6 +67,10 @@ export function SitePicker(props: {
     "all" in props.value ? props.value.except : props.value.ids,
   );
   const total = sites.enabledTotal;
+  const { onEnabledTotal } = props;
+  useEffect(() => {
+    if (!sites.loading && !sites.error) onEnabledTotal?.(total);
+  }, [onEnabledTotal, sites.error, sites.loading, total]);
   const label =
     sites.loading && total === 0
       ? "Your sites"
@@ -169,6 +177,7 @@ export function SitePicker(props: {
                         );
                       }}
                     />
+                    <SiteIcon url={site.url} />
                     <span className="min-w-0 truncate text-(length:--text-small) text-foreground">
                       {site.label}
                     </span>
@@ -176,7 +185,13 @@ export function SitePicker(props: {
                 </li>
               ))}
             </ul>
-            <div className="flex items-center justify-between gap-2">
+            {/* Paging only when there is more than one page. */}
+            <div
+              className={cn(
+                "flex items-center justify-between gap-2",
+                sites.pageIndex === 0 && !sites.nextCursor && "hidden",
+              )}
+            >
               <Button
                 size="toolbar"
                 variant="ghost"

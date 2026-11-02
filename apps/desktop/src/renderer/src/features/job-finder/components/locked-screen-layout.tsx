@@ -243,6 +243,11 @@ interface LockedScreenLayoutProps {
    * one and a pane's own `overflow-y-auto` never activates.
    */
   lockContentHeight?: boolean;
+  /**
+   * Keep the content one window tall when stacked too: a list whose details
+   * open as a sheet fills the height instead of scrolling the page.
+   */
+  lockStacked?: boolean;
   lockTopContent?: boolean;
   reserveRightRail?: boolean;
   /** Reset the route-owned scroll containers when the locked view changes. */
@@ -256,6 +261,7 @@ export function LockedScreenLayout({
   children,
   contentClassName,
   lockContentHeight = false,
+  lockStacked = false,
   lockTopContent = true,
   reserveRightRail = false,
   scrollResetKey,
@@ -775,10 +781,11 @@ export function LockedScreenLayout({
     >
       <div
         className={cn(
-          // Leave enough room between route chrome and the native window edge
-          // that controls do not read as clipped by the overlaid scrollbar or
-          // the window shadow at non-fullscreen sizes.
-          "screen-scroll-area overflow-y-auto overflow-x-hidden pr-3",
+          // The scrollbar's stable lane (data-locked-screen-scroll-area) is
+          // the room between the content and the window edge, as it is on
+          // scrolling routes: every route's content ends 27px from the
+          // window's right edge (16px page padding and the 11px lane).
+          "screen-scroll-area overflow-x-hidden overflow-y-auto",
           bottomContent ? "min-h-0 flex-1" : "h-full",
         )}
         data-locked-screen-scroll-area
@@ -787,7 +794,11 @@ export function LockedScreenLayout({
         <div
           className={cn(
             "grid min-h-full min-w-0 grid-rows-[auto_minmax(0,1fr)] transition-[padding-right] duration-200",
-            lockContentHeight ? "xl:h-full" : null,
+            lockContentHeight
+              ? lockStacked
+                ? "h-full"
+                : "split:h-full"
+              : null,
           )}
           data-locked-screen-content-height={
             lockContentHeight ? "locked" : undefined
@@ -814,7 +825,7 @@ export function LockedScreenLayout({
       </div>
       {bottomContent ? (
         <div
-          className="z-20 shrink-0 border-t border-(--surface-panel-border) bg-(--surface-fill-soft)/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-10px_28px_rgba(0,0,0,0.18)] backdrop-blur-sm"
+          className="z-20 shrink-0 border-t border-(--surface-panel-border) bg-(--surface-fill-soft)/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm"
           data-locked-screen-bottom-content
         >
           {bottomContent}

@@ -65,7 +65,9 @@ describe("JobFinderPage launch", () => {
     renderJobFinderPage(path);
 
     expect(
-      await screen.findByRole("navigation", { name: "Job Finder sections" }),
+      await screen.findByRole("navigation", {
+        name: "Job Finder sidebar destinations",
+      }),
     ).toBeTruthy();
   });
 });

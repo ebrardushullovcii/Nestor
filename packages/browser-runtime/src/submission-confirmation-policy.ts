@@ -1,6 +1,8 @@
-import { hasApplicationSubmissionConfirmation } from "@nestor/contracts";
+import {
+  applicationSubmissionConfirmationMessages,
+  hasApplicationSubmissionRefusal,
+} from "@nestor/contracts";
 import { readGraphQlRequest } from "./graphql-request";
-import { mutationResponseSaysError } from "./mutation-response";
 
 export interface SubmissionPageState {
   url: string;
@@ -17,7 +19,13 @@ export function isFinalSubmissionRequest(input: {
   mainFrame: boolean;
   navigation: boolean;
   allowedOrigins: ReadonlySet<string>;
-  nativeAction: { origin: string | null; safePath: string | null } | null;
+  nativeAction: {
+    origin: string | null;
+    safePath: string | null;
+    /** Transient binding only; query values never enter diagnostics. */
+    query?: string;
+    method?: string;
+  } | null;
 }): boolean {
   if (!input.mainFrame) return false;
   let url: URL;
@@ -27,11 +35,30 @@ export function isFinalSubmissionRequest(input: {
     return false;
   }
   if (!input.allowedOrigins.has(url.origin)) return false;
+  const nativeEndpoint =
+    input.nativeAction?.origin === url.origin &&
+    input.nativeAction.safePath === url.pathname;
+  if (
+    nativeEndpoint &&
+    input.nativeAction &&
+    ((input.navigation &&
+      input.nativeAction.method !== undefined &&
+      input.nativeAction.method !== input.method) ||
+      (input.method === "POST" &&
+        input.nativeAction.query !== undefined &&
+        input.nativeAction.query !== url.search))
+  )
+    return false;
   if (
     input.navigation &&
     ["GET", "POST"].includes(input.method) &&
     input.nativeAction?.origin === url.origin &&
-    input.nativeAction.safePath === url.pathname
+    input.nativeAction.safePath === url.pathname &&
+    (!input.nativeAction.method ||
+      input.nativeAction.method === input.method) &&
+    (input.method === "GET" ||
+      input.nativeAction.query === undefined ||
+      input.nativeAction.query === url.search)
   )
     return true;
   if (!["POST", "PUT", "PATCH"].includes(input.method)) return false;
@@ -61,7 +88,9 @@ export function isFinalSubmissionRequest(input: {
   if (
     input.method === "POST" &&
     input.nativeAction?.origin === url.origin &&
-    input.nativeAction.safePath === url.pathname
+    input.nativeAction.safePath === url.pathname &&
+    (input.nativeAction.query === undefined ||
+      input.nativeAction.query === url.search)
   )
     return true;
   // An opaque endpoint or collection create may be an autosave. Only an
@@ -85,17 +114,11 @@ export function employerPageConfirmsSubmission(
     return false;
   }
   if (!allowedOrigins.has(url.origin)) return false;
-  if (
-    hasApplicationSubmissionConfirmation(after.text) &&
-    !hasApplicationSubmissionConfirmation(before.text)
-  )
-    return true;
-  return (
-    after.url !== before.url &&
-    after.editableControls === 0 &&
-    !mutationResponseSaysError(after.text) &&
-    /^(?:\/(?:confirmation|thank[-_]?you)|.*\/(?:applications?|apply)\/(?:confirmation|submitted|received|success|complete))\/?$/iu.test(
-      url.pathname,
-    )
+  if (hasApplicationSubmissionRefusal(after.text)) return false;
+  const priorMessages = new Set(
+    applicationSubmissionConfirmationMessages(before.text),
+  );
+  return applicationSubmissionConfirmationMessages(after.text).some(
+    (message) => !priorMessages.has(message),
   );
 }

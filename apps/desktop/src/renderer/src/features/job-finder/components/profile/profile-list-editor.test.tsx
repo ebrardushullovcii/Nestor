@@ -68,12 +68,14 @@ describe("ProfileListEditor", () => {
     return input as HTMLInputElement;
   }
 
-  it("rests on the neutral panel border instead of an active accent", () => {
+  it("draws no box of its own, and an empty list draws no empty box", () => {
     renderEditor();
 
     const section = container?.querySelector("section");
-    expect(section?.className).toContain("border-(--surface-panel-border)");
-    expect(section?.className).not.toContain("-active-soft");
+    expect(section?.className).not.toContain("border");
+    const tray = container?.querySelector("[data-profile-list-tray]");
+    expect(tray?.getAttribute("data-profile-list-tray")).toBe("empty");
+    expect(tray?.className).not.toContain("border");
   });
 
   it("keeps the value tray mounted while empty so adding items cannot shift the layout", () => {
@@ -84,7 +86,6 @@ describe("ProfileListEditor", () => {
     );
     expect(tray).toBeDefined();
     expect(tray?.textContent).toContain("No items added yet.");
-    expect(tray?.querySelector("p")?.className).toContain("m-auto");
   });
 
   it("collapses the empty chips tray to roughly one control height", () => {
@@ -168,11 +169,7 @@ describe("ProfileListEditor", () => {
       parseProfileLocationDraft(
         "Chicago, IL; Manchester, England\nPrishtina, Kosovo",
       ),
-    ).toEqual([
-      "Chicago, IL",
-      "Manchester, England",
-      "Prishtina, Kosovo",
-    ]);
+    ).toEqual(["Chicago, IL", "Manchester, England", "Prishtina, Kosovo"]);
   });
 
   it("adds multiple locations without turning the region into another place", () => {

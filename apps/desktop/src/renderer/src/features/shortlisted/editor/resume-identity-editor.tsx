@@ -1,6 +1,6 @@
 import type { ResumeDraftIdentity } from "@nestor/contracts";
 import { getResumeIdentityTargetId } from "@nestor/contracts";
-import { ChevronDown } from "lucide-react";
+import { Disclosure } from "@renderer/components/ui/disclosure";
 import { Field, FieldLabel } from "@renderer/components/ui/field";
 import { Input } from "@renderer/components/ui/input";
 import { Textarea } from "@renderer/components/ui/textarea";
@@ -137,30 +137,29 @@ export function ResumeIdentityEditor(props: ResumeIdentityEditorProps) {
   }, [props.selectedTargetId]);
 
   return (
-    <details
-      className="surface-card-tint group min-w-0 rounded-(--radius-field) border border-(--surface-panel-border)"
+    <Disclosure
+      className="min-w-0 px-1 py-3"
+      contentClassName="pt-0"
       data-resume-identity-details
-      onToggle={(event) => setIsOpen(event.currentTarget.open)}
+      onOpenChange={setIsOpen}
       open={isOpen}
       ref={containerRef}
+      size="block"
+      summary={
+        // One disclosure style across the editor: the title is the
+        // control, led by the shared chevron.
+        <span className="flex min-w-0 items-center gap-1.5">
+          <h3 className="font-display text-(length:--text-item) font-semibold text-(--text-headline)">
+            Name and contact
+          </h3>
+          <span className="min-w-0 truncate text-(length:--text-small) font-normal text-foreground-soft">
+            · The header at the top of the page
+          </span>
+        </span>
+      }
       tabIndex={-1}
     >
-      <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 rounded-(--radius-field) px-3 py-2 outline-none [&::-webkit-details-marker]:hidden focus-visible:ring-2 focus-visible:ring-ring">
-        <span className="grid min-w-0 gap-0.5">
-          <h3 className="font-display text-(--text-headline)">
-            Resume identity
-          </h3>
-          <p className="text-(length:--text-small) leading-5 text-foreground-soft">
-            Header content shown at the top of the preview and export.
-          </p>
-        </span>
-        <ChevronDown
-          aria-hidden="true"
-          className="size-4 shrink-0 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none"
-        />
-      </summary>
-
-      <div className="grid min-w-0 gap-3 p-3 pt-0">
+      <div className="grid min-w-0 gap-3 pt-3">
         <Field>
           <FieldLabel htmlFor="resume_identity_full_name">Full name</FieldLabel>
           <Input
@@ -338,6 +337,6 @@ export function ResumeIdentityEditor(props: ResumeIdentityEditorProps) {
           />
         </Field>
       </div>
-    </details>
+    </Disclosure>
   );
 }

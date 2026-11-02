@@ -132,6 +132,8 @@ export function ProfileSetupScreen(props: {
   ) => void;
   onContinueToProfile: () => void;
   onImportResume: () => void;
+  /** Imports a resume dropped on the setup card, without the picker. */
+  onDropResume?: (file: File) => void;
   /** Imports again the file a stopped import saved; no file picker. */
   onRetryInterruptedImport?: () => void;
   /** Reads the saved resume again, for an import the AI never read. */
@@ -179,6 +181,7 @@ export function ProfileSetupScreen(props: {
     onApplyProfileSetupReviewAction,
     onContinueToProfile,
     onImportResume,
+    onDropResume,
     onRetryInterruptedImport,
     onAnalyzeProfileFromResume,
     isAnalyzeProfilePending = false,
@@ -627,6 +630,7 @@ export function ProfileSetupScreen(props: {
                 resumeImportProgress={resumeImportProgress}
                 hasImportedResume={hasImportedResume}
                 onImportResume={onImportResume}
+                {...(onDropResume ? { onDropResume } : {})}
                 onStartManually={() => {
                   if (isImportResumePending) {
                     onCancelImportResume();
@@ -651,7 +655,7 @@ export function ProfileSetupScreen(props: {
         >
           {profileSetupState.currentStep === "targeting" ? reviewQueue : null}
           <div
-            className="grid gap-6 min-h-0 scroll-mt-4 sm:scroll-mt-[8.25rem] xl:scroll-mt-[4.5rem]"
+            className="grid gap-6 min-h-0 scroll-mt-4 sm:scroll-mt-[4rem] xl:scroll-mt-[4rem]"
             id="profile-setup-step-editor"
             tabIndex={-1}
           >

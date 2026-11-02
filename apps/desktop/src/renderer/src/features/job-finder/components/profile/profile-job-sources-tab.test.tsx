@@ -60,7 +60,7 @@ test("bulk add writes sites directly and explains duplicates", async () => {
   const sites = createJobSitesStore(store);
   sites.add({ text: "https://first.example.test/jobs" });
   render(<ProfileJobSourcesTab {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: "Add sources" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add sites" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Job site URLs" }), {
     target: {
       value:
@@ -69,7 +69,7 @@ test("bulk add writes sites directly and explains duplicates", async () => {
   });
   fireEvent.click(screen.getByRole("button", { name: "Add and turn on" }));
   await screen.findByText(
-    "Added and turned on 1 source. 1 was already in your list.",
+    "Added and turned on 1 site. 1 was already in your list.",
   );
   expect(sites.counts().all).toBe(2);
   expect(requests.some((request) => request.name === "add_sites")).toBe(true);
@@ -88,18 +88,18 @@ test("900 sites stay paged; finding, editing and switching one never loads or sa
   await waitFor(() =>
     expect(container.querySelectorAll("[data-list-row-id]").length).toBe(25),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Find a source" }), {
+  fireEvent.change(screen.getByRole("textbox", { name: "Find a site" }), {
     target: { value: "board-899" },
   });
   await waitFor(() =>
     expect(container.querySelectorAll("[data-list-row-id]").length).toBe(1),
   );
-  const name = await screen.findByRole("textbox", { name: "Source name" });
+  const name = await screen.findByRole("textbox", { name: "Site name" });
   fireEvent.change(name, { target: { value: "My last board" } });
   fireEvent.blur(name);
   await waitFor(() => expect(sites.get(900)?.label).toBe("My last board"));
   fireEvent.click(
-    screen.getByRole("checkbox", { name: "Include this source in searches" }),
+    screen.getByRole("checkbox", { name: "Include this site in searches" }),
   );
   await waitFor(() => expect(sites.get(900)?.enabled).toBe(false));
   expect(sites.get(899)?.enabled).toBe(true);

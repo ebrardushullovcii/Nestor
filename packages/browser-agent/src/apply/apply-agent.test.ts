@@ -433,6 +433,156 @@ function scriptedModel(
   };
 }
 
+test("an early credential handoff inspects a separate Sign In and then the offered Google route", async () => {
+  const source = page({
+    title: "Sign In",
+    bodyText: "Create Account/Sign In. Don't have an account? Create Account",
+    controls: [
+      { ...nameControl(), label: "Password", inputType: "password", value: "" },
+    ],
+    actions: [
+      {
+        index: 0,
+        label: "Sign In",
+        visible: true,
+        disabled: false,
+        inForm: true,
+        submitsForm: true,
+        formMethod: "POST",
+        formAction: "https://apply.example.test/session",
+      },
+      { index: 1, label: "Sign In", visible: true, disabled: false },
+      { index: 2, label: "Create Account", visible: true, disabled: false },
+    ],
+  });
+  const input = config(source, {
+    browserPermissions: {
+      signIn: true,
+      googleSignIn: true,
+      createAccounts: false,
+      solveCaptchas: false,
+    },
+  });
+  const click = vi.fn((ref: string) => {
+    if (ref === "a1") {
+      source.actions.push({
+        index: 3,
+        label: "Sign in with Google",
+        visible: true,
+        disabled: false,
+      });
+    } else if (ref === "a3") {
+      source.url = "https://accounts.google.com/v3/signin/identifier";
+      source.bodyText = "Sign in to Google";
+      source.actions = [];
+    }
+    return Promise.resolve({ ok: true as const, observedValue: "clicked" });
+  });
+  input.hands.clickElement = click;
+  const fill = vi.spyOn(input.hands, "fillText");
+  const model = scriptedModel([
+    {
+      name: "finish",
+      args: { reason: "Password is missing", needsPerson: true },
+    },
+    { name: "click", args: { ref: "a1" } },
+    {
+      name: "finish",
+      args: { reason: "An account is required", needsPerson: true },
+    },
+    { name: "click", args: { ref: "a3" } },
+    {
+      name: "finish",
+      args: { reason: "Google needs you to sign in", needsPerson: true },
+    },
+  ]);
+  const result = await runApplyAgent(input, model);
+  expect(click.mock.calls.map(([ref]) => ref)).toEqual(["a1", "a3"]);
+  expect(fill).not.toHaveBeenCalled();
+  expect(result.outcome).toBe("paused");
+  expect(result.pauses[0]?.blocker?.detail).toContain("Google");
+  expect(result.pauses[0]?.questions ?? []).toEqual([]);
+});
+
+test.each([false, true])(
+  "Google handoff is bounded when enabled=%s and never repeats an uncertain provider attempt",
+  async (googleSignIn) => {
+    const source = page({
+      title: "Sign In",
+      bodyText: "Create Account/Sign In",
+      controls: [
+        {
+          ...nameControl(),
+          label: "Password",
+          inputType: "password",
+          value: "",
+        },
+      ],
+      actions: [
+        {
+          index: 0,
+          label: "Sign in with Google",
+          visible: true,
+          disabled: false,
+        },
+      ],
+    });
+    const input = config(source, {
+      browserPermissions: {
+        signIn: true,
+        googleSignIn,
+        createAccounts: true,
+        solveCaptchas: false,
+      },
+    });
+    const click = vi.spyOn(input.hands, "clickElement");
+    const model = scriptedModel([
+      ...(googleSignIn ? [{ name: "click", args: { ref: "a0" } }] : []),
+      {
+        name: "finish",
+        args: { reason: "Sign-in did not complete", needsPerson: true },
+      },
+    ]);
+    const turns = vi.spyOn(model, "chatWithTools");
+    const result = await runApplyAgent(input, model);
+    expect(click).toHaveBeenCalledTimes(googleSignIn ? 1 : 0);
+    expect(turns).toHaveBeenCalledTimes(googleSignIn ? 2 : 1);
+    expect(result.outcome).toBe("paused");
+  },
+);
+
+test("ignoring an enabled Google route gets only one handoff correction", async () => {
+  const source = page({
+    title: "Sign In",
+    bodyText: "Sign in to apply",
+    controls: [],
+    actions: [
+      {
+        index: 0,
+        label: "Sign in with Google",
+        visible: true,
+        disabled: false,
+      },
+    ],
+  });
+  const input = config(source, {
+    browserPermissions: {
+      signIn: false,
+      googleSignIn: true,
+      createAccounts: false,
+      solveCaptchas: false,
+    },
+  });
+  const model = scriptedModel([
+    { name: "finish", args: { reason: "Cannot continue", needsPerson: true } },
+  ]);
+  const turns = vi.spyOn(model, "chatWithTools");
+  const click = vi.spyOn(input.hands, "clickElement");
+  expect((await runApplyAgent(input, model)).outcome).toBe("paused");
+  expect(turns).toHaveBeenCalledTimes(2);
+  expect(click).not.toHaveBeenCalled();
+});
+
 test.each(["Sign in", "Create account", "Continue"])("an enabled %s handoff never asks for credentials as saved-answer questions", async (label) => {
   const source = page({
     title: label, bodyText: label,
@@ -2169,6 +2319,102 @@ describe("apply agent run endings", () => {
         prompt: "Resume, Cover letter — upload failed",
       }),
     ]);
+  });
+
+  test("an upload repair names the selected CV even when the dropzone label is generic", async () => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          inputType: "file",
+          label: "Choose a file or drop it here",
+          value: "synthetic-resume.pdf",
+          upload: {
+            described: "",
+            nearby: "Upload failed",
+            shown: true,
+            network: "rejected",
+          },
+        },
+      ],
+    });
+    const document = {
+      id: "selected",
+      kind: "resume" as const,
+      label: "Your CV",
+      fileName: "synthetic-resume.pdf",
+      mimeType: "application/pdf",
+      loadBytes: () => Promise.resolve(new Uint8Array()),
+    };
+    const result = await runApplyAgent(
+      config(source, {
+        sources: { ...config(source).sources, documents: [document] },
+      }),
+      repeatingModel("finish", { reason: "Upload failed", stuck: true }),
+    );
+    expect(
+      result.pauses
+        .flatMap((p) => p.questions ?? [])
+        .find((q) => q.id === "upload_repair")?.askReason?.selectedDocument,
+    ).toEqual({
+      kind: "resume",
+      label: "Your CV",
+      fileName: "synthetic-resume.pdf",
+    });
+  });
+
+  test("an upload repair keeps the selected CV identity after a supported filename conversion", async () => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          inputType: "file",
+          label: "My Information — Autofill with Resume",
+          value: "",
+          accept: ".txt,text/plain",
+        },
+      ],
+    });
+    const document = {
+      id: "selected-cv",
+      kind: "resume" as const,
+      label: "Your CV",
+      fileName: "synthetic-resume.md",
+      mimeType: "text/markdown",
+      loadBytes: () => Promise.resolve(new TextEncoder().encode("Synthetic CV")),
+    };
+    const input = config(source, {
+      sources: { ...config(source).sources, documents: [document] },
+      uploadWaitMs: 0,
+    });
+    input.hands.uploadFile = (_ref, file) => {
+      source.controls[0].value = file.name;
+      source.controls[0].upload = {
+        described: "",
+        nearby: "Upload failed",
+        shown: true,
+        network: "rejected",
+      };
+      return Promise.resolve({ ok: true, observedValue: file.name });
+    };
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "upload", args: { ref: "c0", documentId: document.id } },
+        { name: "finish", args: { reason: "The upload failed", stuck: true } },
+      ]),
+    );
+    expect(source.controls[0].value).toBe("synthetic-resume.txt");
+    expect(
+      result.pauses
+        .flatMap((pause) => pause.questions ?? [])
+        .find((question) => question.id === "upload_repair")?.askReason
+        ?.selectedDocument,
+    ).toEqual({
+      kind: "resume",
+      label: "Your CV",
+      fileName: "synthetic-resume.md",
+    });
   });
 
   const resumeFile = (

@@ -1,5 +1,6 @@
 import * as React from "react";
 
+import { formatCompactCount } from "@renderer/lib/compact-count";
 import { useEnterMotion } from "@renderer/lib/motion";
 import { cn } from "@renderer/lib/utils";
 
@@ -30,12 +31,15 @@ export type CountVariant = "inline" | "pill" | "rail-marker";
 
 const COUNT_VARIANT_CLASS = {
   inline:
-    "inline-flex h-5 min-w-7 items-center justify-end bg-transparent px-0 text-(length:--text-tiny) tabular-nums text-foreground-muted",
+    "inline-flex h-5 min-w-8 items-center justify-end bg-transparent px-0 text-xs tabular-nums text-foreground-muted",
   // A quiet pill for navigation rows: the figure sits in its own soft shape
   // so it reads as belonging to the row instead of floating at the far edge.
-  pill: "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-(--input) px-1.5 text-(length:--text-tiny) font-medium tabular-nums text-foreground",
+  pill: "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-secondary px-1.5 text-xs font-medium tabular-nums text-foreground-soft",
+  // Off the glyph: a small figure on its own line under the rail icon,
+  // centred in the 44px item, so up to "9,999" (then "12.3k") fits without
+  // touching the glyph or being cut by the rail's edge.
   "rail-marker":
-    "inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-(--surface-panel-border) bg-(--input) px-0.5 text-[0.625rem] leading-none tabular-nums text-foreground",
+    "inline-flex h-4 max-w-full items-center justify-center rounded-full px-1 text-xs leading-4 font-medium tabular-nums text-current",
 } as const satisfies Record<CountVariant, string>;
 
 function Count({
@@ -58,17 +62,21 @@ function Count({
     return null;
   }
 
-  // The rail marker sits on an icon's corner; "678" covered most of the
-  // glyph on the collapsed sidebar. It caps at 99+ and keeps the full number
-  // for assistive technology.
-  const capped = variant === "rail-marker" && rounded > 99;
+  // Thousands separated, as every other count in the app: "1,245".
+  const figure = rounded.toLocaleString();
+  // The rail marker has the rail item's width and no more: exact to 9,999,
+  // then the same number abbreviated ("12.3k"), with the exact figure in its
+  // tooltip and for assistive technology.
+  const short =
+    variant === "rail-marker" ? formatCompactCount(rounded) : figure;
+  const capped = short !== figure;
 
   return (
     <span
       className={cn(COUNT_VARIANT_CLASS[variant], className)}
       data-slot="count"
       data-variant={variant}
-      {...(capped ? { title: String(rounded) } : {})}
+      {...(capped ? { title: figure } : {})}
       {...props}
     >
       <span
@@ -76,12 +84,10 @@ function Count({
         className="inline-block"
         ref={figureRef}
       >
-        {capped ? "99+" : rounded}
+        {short}
       </span>
       {label || capped ? (
-        <span className="sr-only">
-          {label ? `${rounded} ${label}` : String(rounded)}
-        </span>
+        <span className="sr-only">{label ? `${figure} ${label}` : figure}</span>
       ) : null}
     </span>
   );

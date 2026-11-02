@@ -18,12 +18,15 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowDown,
   ArrowUp,
+  Check,
+  CircleStop,
+  Copy,
+  Eye,
   History,
   LoaderCircle,
   Paperclip,
   Plus,
   Search,
-  Square,
   Trash2,
   X,
 } from "lucide-react";
@@ -54,6 +57,17 @@ import {
   useAssistant,
 } from "./assistant-provider";
 import { useAssistantConversation } from "./use-assistant-conversation";
+
+/**
+ * A transcript scrolled away from its start slides under an opaque top edge
+ * that casts a soft shadow, so a message cut there reads as "more above",
+ * not as a bubble clipped by a layout bug (a fade left a half-legible ghost
+ * line under the header). Set on the element, not in state: it changes on
+ * every scroll and needs no render.
+ */
+function markThreadScrolled(thread: HTMLElement) {
+  thread.dataset.scrolled = thread.scrollTop > 2 ? "true" : "false";
+}
 
 /**
  * The one assistant (ADR 0037): a sidebar docked right under the header.
@@ -271,7 +285,7 @@ function HistoryMenu(props: {
       <button
         aria-current={conversation.id === props.currentId ? "true" : undefined}
         className={cn(
-          "min-w-0 flex-1 truncate rounded-(--radius-button) px-2 py-1.5 text-left text-[13px] outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring/40",
+          "min-w-0 flex-1 truncate rounded-(--radius-button) px-2 py-1.5 text-left text-(length:--text-small) outline-none hover:bg-secondary focus-ring",
           conversation.id === props.currentId && "font-semibold",
         )}
         onClick={() => props.onSelect(conversation.id)}
@@ -282,7 +296,7 @@ function HistoryMenu(props: {
       </button>
       {confirming === conversation.id ? (
         <button
-          className="shrink-0 rounded-(--radius-button) px-2 py-1 text-[12px] text-destructive outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring/40"
+          className="shrink-0 rounded-(--radius-button) px-2 py-1 text-xs text-destructive outline-none hover:bg-secondary focus-ring"
           onClick={() => {
             setConfirming(null);
             props.onDelete(conversation.id);
@@ -294,7 +308,7 @@ function HistoryMenu(props: {
       ) : (
         <button
           aria-label={`Delete ${conversation.title}`}
-          className="shrink-0 rounded-(--radius-button) p-1 text-muted-foreground opacity-0 outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:ring-[3px] focus-visible:ring-ring/40 group-hover:opacity-100"
+          className="shrink-0 rounded-(--radius-button) p-1 text-muted-foreground opacity-0 outline-none hover:text-foreground focus-visible:opacity-100 focus-ring group-hover:opacity-100"
           onClick={() => setConfirming(conversation.id)}
           type="button"
         >
@@ -313,7 +327,7 @@ function HistoryMenu(props: {
       tabIndex={-1}
     >
       {active.length === 0 && archived.length === 0 ? (
-        <p className="px-2 py-1 text-[13px] text-muted-foreground">
+        <p className="px-2 py-1 text-(length:--text-small) text-muted-foreground">
           No chats yet.
         </p>
       ) : null}
@@ -322,7 +336,7 @@ function HistoryMenu(props: {
       ) : null}
       {archived.length > 0 ? (
         <div className="grid min-w-0 gap-0.5">
-          <span className="px-2 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="px-2 pt-1 text-xs font-medium tracking-wide text-muted-foreground">
             Earlier chats
           </span>
           <ul className="grid min-w-0 gap-0.5">{archived.map(row)}</ul>
@@ -330,6 +344,15 @@ function HistoryMenu(props: {
       ) : null}
     </div>
   );
+}
+
+/** The person asked for less motion (system setting or the emulated media). */
+function prefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
 }
 
 export function AssistantSidebar() {
@@ -418,11 +441,54 @@ function AssistantSidebarPanel() {
   const width = assistant?.width ?? 400;
   const narrow = contentWidth - width < NARROW_CONTENT_MIN_WIDTH;
   const showPanel = open && (!narrow || assistant?.narrowView === "chat");
+  // Undocking mirrors docking: the panel stays drawn (inert) and slides out
+  // over --duration-base while the page takes its width back on the same
+  // timing, instead of vanishing and leaving an empty strip.
+  const [leaving, setLeaving] = useState(false);
+  const [lastShown, setLastShown] = useState(showPanel);
+  if (lastShown !== showPanel) {
+    setLastShown(showPanel);
+    // Reduced motion jumps straight to the end: no frame with the panel
+    // still drawn beside the widened page.
+    setLeaving(!showPanel && !narrow && !prefersReducedMotion());
+  }
+  useEffect(() => {
+    if (!leaving) return undefined;
+    // The animation's end clears it; this is the fallback.
+    const timer = window.setTimeout(() => setLeaving(false), 400);
+    return () => window.clearTimeout(timer);
+  }, [leaving]);
   useEffect(() => {
     if (showPanel) return;
     setHistoryOpen(false);
     setFindOpen(false);
     setFindQuery("");
+  }, [showPanel]);
+  // Closing the panel from inside it (its ×, Escape) takes the focused
+  // control away with it. The page gets the first say: a list whose detail
+  // sheet goes away with the docked panel puts focus back on its open row.
+  // Otherwise focus goes to the header button that opens the assistant
+  // again, never to the page body.
+  const asideRef = useRef<HTMLElement>(null);
+  const panelShown = useRef(showPanel);
+  useLayoutEffect(() => {
+    const was = panelShown.current;
+    panelShown.current = showPanel;
+    if (!was || showPanel) return undefined;
+    const focused = document.activeElement;
+    const inPanel =
+      focused instanceof HTMLElement && asideRef.current?.contains(focused);
+    if (inPanel) focused.blur();
+    if (!inPanel && focused !== null && focused !== document.body)
+      return undefined;
+    const frame = requestAnimationFrame(() => {
+      if (document.activeElement && document.activeElement !== document.body)
+        return;
+      document
+        .querySelector<HTMLElement>("[data-assistant-toggle]")
+        ?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
   }, [showPanel]);
   const focusLabel = useFocusLabel(
     assistant?.peekFocus,
@@ -434,8 +500,11 @@ function AssistantSidebarPanel() {
     state.activity?.toolName === "generate_resumes";
 
   // Reserve the sidebar's width so the page (and the browser beside it)
-  // shrinks instead of being covered.
-  useEffect(() => {
+  // shrinks instead of being covered. Before paint, in the same frame the
+  // panel appears or goes: after paint, one frame drew the page at full
+  // width under the panel and then re-wrapped it (docking read as a snap
+  // and a stepped reflow).
+  useLayoutEffect(() => {
     const reserved = open && !narrow ? width : 0;
     document.documentElement.style.setProperty(
       "--assistant-sidebar-reserved",
@@ -463,12 +532,19 @@ function AssistantSidebarPanel() {
   useEffect(() => {
     if (!assistant?.focusRequest) return;
     const frame = requestAnimationFrame(() => {
+      const textarea = textareaRef.current;
+      const focused = document.activeElement;
       if (
         historyButtonRef.current?.getAttribute("aria-expanded") === "true" ||
-        findRef.current
+        findRef.current ||
+        // The person already moved focus inside the sidebar (a header
+        // button, the history menu) before this frame: leave it there.
+        (focused instanceof HTMLElement &&
+          focused !== textarea &&
+          textarea?.closest("[data-assistant-sidebar]")?.contains(focused))
       )
         return;
-      textareaRef.current?.focus();
+      textarea?.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [assistant?.focusRequest]);
@@ -522,11 +598,13 @@ function AssistantSidebarPanel() {
   useLayoutEffect(() => {
     scrollToBottom();
     setAtBottom(true);
+    if (threadRef.current) markThreadScrolled(threadRef.current);
   }, [state.conversationId, scrollToBottom]);
 
   const onScroll = () => {
     const thread = threadRef.current;
     if (!thread) return;
+    markThreadScrolled(thread);
     setAtBottom(
       thread.scrollHeight - thread.scrollTop - thread.clientHeight < 40,
     );
@@ -784,7 +862,7 @@ function AssistantSidebarPanel() {
       {open && narrow && !showPanel ? (
         <div
           aria-label="Show the page or the chat"
-          className="fixed bottom-4 left-4 z-[125] flex overflow-hidden rounded-full border border-(--control-border) bg-(--surface-panel) text-[13px] shadow-lg"
+          className="fixed bottom-4 left-4 z-[125] flex overflow-hidden rounded-full border border-(--control-border) bg-(--surface-panel) text-(length:--text-small) shadow-lg"
           data-assistant-narrow-switch
           role="group"
         >
@@ -792,7 +870,7 @@ function AssistantSidebarPanel() {
             <button
               aria-pressed={assistant.narrowView === view}
               className={cn(
-                "px-3 py-1.5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
+                "px-3 py-1.5 outline-none focus-ring",
                 assistant.narrowView === view
                   ? "bg-(--nav-active-surface) font-semibold text-foreground"
                   : "text-muted-foreground hover:text-foreground",
@@ -809,11 +887,16 @@ function AssistantSidebarPanel() {
       <aside
         aria-label="Assistant"
         className={cn(
-          "fixed bottom-0 right-0 z-[120] flex flex-col border-l border-(--surface-panel-shell-border) bg-background text-[14px] leading-[1.55] text-foreground",
-          !showPanel && "hidden",
+          "fixed bottom-0 right-0 z-[120] flex flex-col border-l border-(--surface-panel-shell-border) bg-background text-(length:--text-body) leading-5 text-foreground",
+          !showPanel && !leaving && "hidden",
         )}
+        data-assistant-leaving={leaving ? "" : undefined}
         data-assistant-sidebar
         data-assistant-narrow={narrow ? "true" : "false"}
+        inert={leaving}
+        onAnimationEnd={(event) => {
+          if (event.target === event.currentTarget) setLeaving(false);
+        }}
         onDragLeave={() => setDragging(false)}
         onDragOver={(event) => {
           if (event.dataTransfer.types.includes("Files")) {
@@ -823,12 +906,13 @@ function AssistantSidebarPanel() {
         }}
         onDrop={onDrop}
         onKeyDown={onSidebarKeyDown}
+        ref={asideRef}
         style={panelStyle}
       >
         {open && narrow ? (
           <div
             aria-label="Show the page or the chat"
-            className="flex w-fit shrink-0 overflow-hidden rounded-full border border-(--control-border) bg-(--surface-panel) text-[13px] shadow-lg"
+            className="flex w-fit shrink-0 overflow-hidden rounded-full border border-(--control-border) bg-(--surface-panel) text-(length:--text-small) shadow-lg"
             data-assistant-narrow-switch
             role="group"
           >
@@ -836,7 +920,7 @@ function AssistantSidebarPanel() {
               <button
                 aria-pressed={assistant.narrowView === view}
                 className={cn(
-                  "px-3 py-1.5 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40",
+                  "px-3 py-1.5 outline-none focus-ring",
                   assistant.narrowView === view
                     ? "bg-(--nav-active-surface) font-semibold text-foreground"
                     : "text-muted-foreground hover:text-foreground",
@@ -857,7 +941,7 @@ function AssistantSidebarPanel() {
             aria-valuemax={ASSISTANT_SIDEBAR_MAX_WIDTH}
             aria-valuemin={ASSISTANT_SIDEBAR_MIN_WIDTH}
             aria-valuenow={width}
-            className="absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize"
+            className="absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize outline-none focus-ring"
             onKeyDown={(event) => {
               if (event.key === "ArrowLeft") assistant.setWidth(width + 16);
               if (event.key === "ArrowRight") assistant.setWidth(width - 16);
@@ -869,22 +953,13 @@ function AssistantSidebarPanel() {
         ) : null}
         <header className="relative flex h-11 shrink-0 items-center gap-1 border-b border-(--surface-panel-shell-border) px-2">
           <div className="grid min-w-0 flex-1 px-1">
-            <span className="truncate text-[13px] font-semibold">{title}</span>
-            <span
-              className="truncate text-[11px] text-muted-foreground"
-              data-assistant-context-chip
-            >
-              Looking at:{" "}
-              {browserChip
-                ? `Browser · ${browserChip}`
-                : focusLabel
-                  ? `${describeScreen(screen)} · ${focusLabel}`
-                  : describeScreen(screen)}
+            <span className="truncate text-(length:--text-small) font-semibold">
+              {title}
             </span>
           </div>
           <button
             aria-label="New chat"
-            className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
+            className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-ring"
             onClick={() => {
               setHistoryOpen(false);
               setFindOpen(false);
@@ -899,7 +974,7 @@ function AssistantSidebarPanel() {
           <button
             aria-expanded={historyOpen}
             aria-label="Chat history"
-            className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
+            className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-ring"
             onClick={() => {
               setFindOpen(false);
               setHistoryOpen((value) => !value);
@@ -913,7 +988,7 @@ function AssistantSidebarPanel() {
           <button
             aria-label="Search this chat"
             aria-expanded={findOpen}
-            className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
+            className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-ring"
             onClick={() => {
               setHistoryOpen(false);
               setFindOpen((value) => !value);
@@ -926,7 +1001,7 @@ function AssistantSidebarPanel() {
           </button>
           <button
             aria-label="Close the assistant"
-            className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
+            className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-ring"
             onClick={() => assistant.setOpen(false)}
             title="Close"
             type="button"
@@ -952,7 +1027,7 @@ function AssistantSidebarPanel() {
           <div className="flex shrink-0 items-center gap-1 border-b border-(--surface-panel-shell-border) px-2 py-1.5">
             <input
               aria-label="Find in this chat"
-              className="min-w-0 flex-1 rounded-(--radius-field) border border-(--control-border) bg-(--surface-panel) px-2 py-1 text-[13px] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/40"
+              className="min-w-0 flex-1 rounded-(--radius-field) border border-(--control-border) bg-(--surface-panel) px-2 py-1 text-(length:--text-small) outline-none focus-ring"
               onChange={(event) => {
                 setFindQuery(event.target.value);
                 setFindIndex(0);
@@ -977,7 +1052,7 @@ function AssistantSidebarPanel() {
               ref={findRef}
               value={findQuery}
             />
-            <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
               {findMatches.length > 0
                 ? `${findIndex + 1} of ${findMatches.length}`
                 : findQuery
@@ -990,7 +1065,7 @@ function AssistantSidebarPanel() {
             warns before a message is sent. */}
         {state.status && !state.status.available && !lastReplyIsOutage ? (
           <p
-            className="shrink-0 border-b border-(--surface-panel-shell-border) px-3 py-2 text-[13px] text-muted-foreground"
+            className="shrink-0 border-b border-(--surface-panel-shell-border) px-3 py-2 text-(length:--text-small) text-muted-foreground"
             data-assistant-outage
           >
             {state.status.detail ??
@@ -999,17 +1074,22 @@ function AssistantSidebarPanel() {
         ) : null}
         <div
           aria-live="off"
-          className="relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 py-3"
+          className="relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 pb-3"
           data-assistant-thread
           onScroll={onScroll}
           ref={threadRef}
         >
+          <div
+            aria-hidden="true"
+            className="pointer-events-none sticky top-0 z-10 -mx-3 h-3 bg-background transition-shadow duration-(--duration-fast)"
+            data-assistant-thread-edge
+          />
           {!available ? (
-            <p className="text-[13px] text-muted-foreground">
+            <p className="text-(length:--text-small) text-muted-foreground">
               The assistant is not available in this window.
             </p>
           ) : state.loading ? (
-            <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
+            <p className="flex items-center gap-2 text-(length:--text-small) text-muted-foreground">
               <LoaderCircle
                 aria-hidden="true"
                 className="size-3.5 animate-spin motion-reduce:animate-none"
@@ -1023,10 +1103,10 @@ function AssistantSidebarPanel() {
                 your profile, work on a resume, find and shortlist jobs, apply,
                 or update your tracking.
               </p>
-              <div className="grid gap-1.5">
+              <div className="flex flex-wrap gap-1.5" data-assistant-starters>
                 {starters.map((starter) => (
                   <button
-                    className="rounded-(--radius-field) border border-(--control-border) px-3 py-2 text-left text-[13px] outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring/40"
+                    className="rounded-full border border-(--surface-panel-border) bg-(--surface-panel) px-3 py-1.5 text-left text-(length:--text-small) outline-none transition-colors duration-(--duration-fast) hover:border-primary/40 hover:bg-accent focus-ring"
                     key={starter}
                     onClick={() => void submit(starter)}
                     type="button"
@@ -1047,7 +1127,7 @@ function AssistantSidebarPanel() {
                 return (
                   <li
                     className={cn(
-                      "grid gap-1",
+                      "group/message grid gap-1",
                       isUser ? "justify-items-end" : "justify-items-stretch",
                       highlighted &&
                         "rounded-(--radius-field) outline outline-2 outline-ring/60",
@@ -1060,7 +1140,7 @@ function AssistantSidebarPanel() {
                       className={cn(
                         "min-w-0",
                         isUser
-                          ? "max-w-[88%] rounded-2xl rounded-br-md bg-(--surface-panel-raised) px-3 py-2"
+                          ? "max-w-[88%] rounded-(--radius-panel) rounded-br-(--radius-small) bg-primary/8 px-3 py-2"
                           : "w-full",
                       )}
                     >
@@ -1071,9 +1151,21 @@ function AssistantSidebarPanel() {
                     </div>
                     {!isUser &&
                     message.parts.some((part) => part.type === "text") ? (
+                      // A small icon under the reply, at its start; it shows
+                      // on hover or focus, so a long thread is not a column of
+                      // "Copy" labels.
                       <button
-                        className="text-[12px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
+                        aria-label={
+                          copiedId === message.id ? "Copied" : "Copy reply"
+                        }
+                        className={cn(
+                          "-ml-1 inline-flex size-6 items-center justify-center justify-self-start rounded-(--radius-small) text-muted-foreground outline-none transition-opacity duration-(--duration-fast) hover:bg-secondary hover:text-foreground focus-ring focus-visible:opacity-100 group-hover/message:opacity-100",
+                          copiedId === message.id ? "opacity-100" : "opacity-0",
+                        )}
                         data-assistant-copy
+                        title={
+                          copiedId === message.id ? "Copied" : "Copy reply"
+                        }
                         onClick={() => {
                           const text = message.parts
                             .flatMap((part) =>
@@ -1087,11 +1179,15 @@ function AssistantSidebarPanel() {
                         }}
                         type="button"
                       >
-                        {copiedId === message.id ? "Copied" : "Copy"}
+                        {copiedId === message.id ? (
+                          <Check aria-hidden="true" className="size-3.5" />
+                        ) : (
+                          <Copy aria-hidden="true" className="size-3.5" />
+                        )}
                       </button>
                     ) : null}
                     {isUser && pending.has(message.id) ? (
-                      <span className="text-[12px] text-muted-foreground">
+                      <span className="text-xs text-muted-foreground">
                         Read at the next step
                       </span>
                     ) : null}
@@ -1102,7 +1198,7 @@ function AssistantSidebarPanel() {
                 <li className="grid gap-2" data-assistant-live-turn>
                   {state.progress.map((note, index) => (
                     <p
-                      className="text-[13px] italic text-muted-foreground"
+                      className="text-(length:--text-small) italic text-muted-foreground"
                       key={`${note}_${index}`}
                     >
                       {note}
@@ -1117,7 +1213,7 @@ function AssistantSidebarPanel() {
           )}
           {!atBottom ? (
             <button
-              className="sticky bottom-2 left-1/2 mx-auto flex -translate-x-0 items-center gap-1 rounded-full border border-(--control-border) bg-(--surface-panel) px-3 py-1 text-[12px] shadow outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring/40"
+              className="sticky bottom-2 left-1/2 mx-auto flex -translate-x-0 items-center gap-1 rounded-full border border-(--control-border) bg-(--surface-panel) px-3 py-1 text-xs shadow outline-none hover:bg-secondary focus-ring"
               onClick={() => {
                 setAtBottom(true);
                 scrollToBottom("smooth");
@@ -1131,7 +1227,7 @@ function AssistantSidebarPanel() {
         </div>
         {running ? (
           <div
-            className="flex shrink-0 items-center gap-2 border-t border-(--surface-panel-shell-border) px-3 py-2 text-[12.5px] text-muted-foreground"
+            className="flex shrink-0 items-center gap-2 border-t border-(--surface-panel-shell-border) px-3 py-2 text-(length:--text-small) text-muted-foreground"
             data-assistant-activity
           >
             <LoaderCircle
@@ -1150,7 +1246,7 @@ function AssistantSidebarPanel() {
         ) : null}
         {state.error ? (
           <div
-            className="flex shrink-0 items-start gap-2 border-t border-(--surface-panel-shell-border) px-3 py-2 text-[13px]"
+            className="flex shrink-0 items-start gap-2 border-t border-(--surface-panel-shell-border) px-3 py-2 text-(length:--text-small)"
             role="alert"
           >
             <span className="min-w-0 flex-1">{state.error}</span>
@@ -1166,7 +1262,9 @@ function AssistantSidebarPanel() {
         ) : null}
         <form
           className={cn(
-            "relative grid shrink-0 gap-2 border-t border-(--surface-panel-shell-border) p-2",
+            // One column the panel's width: a long context chip truncates
+            // instead of widening the form and pushing Send off the panel.
+            "relative grid min-w-0 shrink-0 grid-cols-[minmax(0,1fr)] gap-2 border-t border-(--surface-panel-shell-border) p-2",
             dragging && "bg-(--nav-active-surface)",
           )}
           onSubmit={(event) => {
@@ -1195,10 +1293,10 @@ function AssistantSidebarPanel() {
                     role="option"
                     type="button"
                   >
-                    <span className="truncate text-[13px]">
+                    <span className="truncate text-(length:--text-small)">
                       {candidate.label}
                     </span>
-                    <span className="truncate text-[11px] uppercase tracking-wide text-muted-foreground">
+                    <span className="truncate text-xs tracking-wide text-muted-foreground">
                       {candidate.kind}
                       {candidate.detail ? ` · ${candidate.detail}` : ""}
                     </span>
@@ -1211,7 +1309,7 @@ function AssistantSidebarPanel() {
             <div className="flex flex-wrap gap-1">
               {mentions.map((mention) => (
                 <span
-                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-(--surface-panel-raised) px-2 py-0.5 text-[12px]"
+                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-(--surface-panel-raised) px-2 py-0.5 text-xs"
                   key={`${mention.kind}_${mention.id}`}
                 >
                   <span className="truncate">
@@ -1233,7 +1331,7 @@ function AssistantSidebarPanel() {
               ))}
               {attachments.map((attachment) => (
                 <span
-                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-(--surface-panel-raised) px-2 py-0.5 text-[12px]"
+                  className="inline-flex max-w-full items-center gap-1 rounded-full bg-(--surface-panel-raised) px-2 py-0.5 text-xs"
                   key={attachment.documentId}
                 >
                   <Paperclip aria-hidden="true" className="size-3" />
@@ -1255,15 +1353,30 @@ function AssistantSidebarPanel() {
                 </span>
               ))}
               {attachNote ? (
-                <span className="text-[12px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   {attachNote}
                 </span>
               ) : null}
             </div>
           ) : null}
+          <span
+            className="inline-flex w-fit min-w-0 max-w-full items-center gap-1 rounded-full border border-(--surface-panel-border) bg-(--surface-panel) px-2 py-0.5 text-xs text-muted-foreground"
+            data-assistant-context-chip
+            title="What the assistant can see"
+          >
+            <Eye aria-hidden="true" className="size-3 shrink-0" />
+            <span className="sr-only">Looking at: </span>
+            <span className="truncate">
+              {browserChip
+                ? `Browser · ${browserChip}`
+                : focusLabel
+                  ? `${describeScreen(screen)} · ${focusLabel}`
+                  : describeScreen(screen)}
+            </span>
+          </span>
           <textarea
             aria-label="Message the assistant"
-            className="max-h-[min(12rem,25vh)] min-h-[2.5rem] w-full resize-none rounded-(--radius-field) border border-(--control-border) bg-(--surface-panel) px-3 py-2 text-[14px] outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
+            className="max-h-[min(12rem,25vh)] min-h-[2.5rem] w-full resize-none rounded-(--radius-field) border border-(--field-border) bg-(--field) px-3 py-2 text-sm outline-none transition-[border-color,box-shadow] duration-(--duration-fast) placeholder:text-muted-foreground hover:border-(--field-border-hover) focus-visible:border-(--field-focus-border) focus-visible:shadow-(--field-focus-shadow)"
             data-assistant-composer
             onChange={(event) => {
               setText(event.target.value);
@@ -1287,7 +1400,7 @@ function AssistantSidebarPanel() {
           <div className="flex items-center gap-1">
             <button
               aria-label="Attach a file"
-              className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/40"
+              className="rounded-(--radius-button) p-1.5 text-muted-foreground outline-none hover:bg-secondary hover:text-foreground focus-ring"
               onClick={() => void attach(null)}
               title="Attach a file (or drop one here)"
               type="button"
@@ -1298,18 +1411,23 @@ function AssistantSidebarPanel() {
             {running ? (
               <button
                 aria-label="Stop"
-                className="inline-flex items-center gap-1.5 rounded-(--radius-button) border border-(--control-border) px-2.5 py-1.5 text-[13px] font-medium outline-none hover:bg-secondary focus-visible:ring-[3px] focus-visible:ring-ring/40"
+                className="inline-flex items-center gap-1.5 rounded-(--radius-button) border border-(--control-border) px-2.5 py-1.5 text-(length:--text-small) font-medium outline-none hover:bg-secondary focus-ring"
                 data-assistant-stop
                 onClick={() => void stop()}
                 type="button"
               >
-                <Square aria-hidden="true" className="size-3 fill-current" />
+                <CircleStop aria-hidden="true" className="size-4" />
                 Stop
               </button>
             ) : null}
             <button
               aria-label="Send"
-              className="inline-flex items-center justify-center rounded-(--radius-button) bg-primary p-1.5 text-primary-foreground outline-none hover:opacity-90 focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:opacity-40"
+              className={cn(
+                "inline-flex size-8 items-center justify-center rounded-full outline-none transition-colors duration-(--duration-fast) focus-ring",
+                text.trim()
+                  ? "bg-primary-fill text-primary-fill-foreground hover:bg-(--primary-fill-hover) disabled:bg-secondary disabled:text-muted-foreground"
+                  : "bg-secondary text-muted-foreground",
+              )}
               data-assistant-send
               disabled={
                 !text.trim() || text.trim().length > ASSISTANT_MESSAGE_MAX_CHARS
@@ -1321,7 +1439,7 @@ function AssistantSidebarPanel() {
           </div>
           {text.trim().length > ASSISTANT_MESSAGE_MAX_CHARS ? (
             <p
-              className="text-[12px] text-(--status-danger-foreground,currentColor)"
+              className="text-xs text-(--destructive)"
               data-assistant-too-long
               role="status"
             >

@@ -1,53 +1,61 @@
 /* Launcher ------------------------------------------------------------- */
 .browser-peek-trigger {
+  /* The shared header tool (see header-tool.ts): a quiet ghost button with
+     a fixed width, the status as a corner badge off the glyph. */
+  position: relative;
   display: inline-flex;
-  height: 40px;
-  min-width: 40px;
+  height: 32px;
+  min-width: 32px;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0 11px;
-  border: 1px solid var(--control-border);
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid transparent;
   border-radius: var(--radius-button);
-  background: var(--surface-panel);
-  color: var(--muted-foreground);
+  background: transparent;
+  color: var(--foreground-soft);
   font-size: var(--text-small);
-  font-weight: 550;
-  position: relative;
+  font-weight: 500;
+  white-space: nowrap;
   transition:
-    color 140ms ease,
-    background-color 140ms ease,
-    border-color 140ms ease;
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+.browser-peek-trigger:disabled {
+  cursor: not-allowed;
+  color: var(--disabled-foreground);
 }
 .browser-peek-trigger:hover {
   color: var(--foreground);
+  background: var(--accent);
+}
+.browser-peek-trigger:active {
   background: var(--secondary);
-  border-color: var(--control-border-hover);
 }
 .browser-peek-trigger:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
-.browser-peek-trigger.is-open,
-.browser-peek-trigger.is-working,
-.browser-peek-trigger.is-paused {
-  color: var(--foreground);
-}
+/* Open, working or paused, the label stays the quiet header-tool colour
+   like its neighbours; the status dot carries the state. A full-strength
+   label read as a heavier, different tool. */
 .browser-peek-trigger.is-needs-you {
   color: var(--foreground);
-  border-color: color-mix(
-    in srgb,
-    var(--warning-text) 55%,
-    var(--control-border)
-  );
-  background: color-mix(in srgb, var(--warning-text) 9%, var(--surface-panel));
+  background: var(--warning-surface);
 }
 .browser-trigger-icon {
   position: relative;
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  /* 1rem like the other header tools' icons (size-4), so larger text grows
+     it with them; 16px at the default size. */
+  width: 1rem;
+  height: 1rem;
+}
+.browser-trigger-icon .browser-glyph {
+  width: 100%;
+  height: 100%;
 }
 /* Working signals move a few times when the state begins, then rest: an
    endless loop here made the window draw every frame (144 a second) for as
@@ -58,17 +66,17 @@
 }
 .browser-trigger-badge {
   position: absolute;
-  right: -5px;
-  top: -5px;
-  width: 8px;
-  height: 8px;
+  right: -7px;
+  top: -6px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
   background: var(--primary);
-  box-shadow: 0 0 0 2px var(--surface-panel);
+  box-shadow: 0 0 0 2px var(--shell-header-bg);
   font-size: 0;
 }
 .browser-peek-trigger:hover .browser-trigger-badge {
-  box-shadow: 0 0 0 2px var(--secondary);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 .browser-peek-trigger.is-working .browser-trigger-badge::after {
   content: "";
@@ -91,8 +99,8 @@
 .browser-peek-trigger.is-needs-you .browser-trigger-badge {
   width: 13px;
   height: 13px;
-  right: -7px;
-  top: -7px;
+  right: -9px;
+  top: -8px;
   background: var(--warning-text);
   color: #1a1408;
   font-size: 9px;
@@ -104,6 +112,27 @@
 }
 .browser-trigger-label {
   white-space: nowrap;
+}
+.browser-trigger-badge.is-inline {
+  display: none;
+}
+/* The header tools' label breakpoint (header-tool.ts): 75rem of header, a
+   container query so larger text folds the label as a narrow window does. */
+@container shell-header (min-width: 75rem) {
+  .browser-trigger-badge.is-corner {
+    display: none;
+  }
+  .browser-trigger-badge.is-inline {
+    display: inline-block;
+    position: relative;
+    right: auto;
+    top: auto;
+    flex-shrink: 0;
+  }
+  /* No status: the dot's slot (7px) and its gap (6px) as even padding. */
+  .browser-peek-trigger[data-status-slot="empty"] {
+    padding: 0 14.5px;
+  }
 }
 
 /* Peek panel ----------------------------------------------------------- */
@@ -123,7 +152,7 @@
      is open, so the panel does not reserve the header's height: it starts
      just under the macOS traffic lights and takes the rest of the window. */
   padding: 40px 32px 24px;
-  animation: browser-fade 160ms ease-out;
+  animation: browser-fade var(--duration-base) ease-out;
 }
 .browser-peek {
   width: min(1280px, 100%);
@@ -135,22 +164,19 @@
   color: var(--foreground);
   border: 1px solid
     color-mix(in srgb, var(--control-border) 70%, var(--foreground) 12%);
-  border-radius: 18px;
+  border-radius: var(--radius-panel);
   padding: 8px;
-  box-shadow:
-    0 30px 90px rgba(0, 0, 0, 0.42),
-    0 6px 22px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: var(--elevation-overlay);
   font-size: var(--text-small);
   overflow: hidden;
-  animation: browser-rise 220ms cubic-bezier(0.2, 0.85, 0.3, 1.05);
-  transition: box-shadow 220ms ease;
+  animation: browser-rise var(--duration-base)
+    cubic-bezier(0.2, 0.85, 0.3, 1.05);
+  transition: box-shadow var(--duration-base) ease;
 }
 .browser-peek.is-needs-you {
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--warning-text) 40%, transparent),
-    0 30px 90px rgba(0, 0, 0, 0.42),
-    0 6px 22px rgba(0, 0, 0, 0.22);
+    var(--elevation-overlay);
 }
 .browser-peek-backdrop:has(.is-expanded) {
   padding: 0;
@@ -215,11 +241,11 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   height: 30px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-button);
   color: var(--muted-foreground);
   transition:
-    background-color 120ms ease,
-    color 120ms ease;
+    background-color var(--duration-fast) ease,
+    color var(--duration-fast) ease;
 }
 .browser-nav > button:hover:not(:disabled),
 .browser-window-actions > button:hover,
@@ -236,13 +262,13 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   align-items: center;
   gap: 8px;
   padding: 0 6px 0 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-field);
   background: var(--background);
   border: 1px solid var(--control-border);
   color: var(--muted-foreground);
   transition:
-    border-color 140ms ease,
-    box-shadow 140ms ease;
+    border-color var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
 }
 .browser-address:focus-within {
   border-color: var(--ring);
@@ -267,7 +293,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   background: transparent;
   outline: none !important;
   color: var(--foreground);
-  font-size: 12.5px;
+  font-size: var(--text-small);
   letter-spacing: 0.01em;
 }
 .browser-address input::placeholder {
@@ -279,10 +305,10 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   gap: 6px;
   height: 22px;
   padding: 0 8px 0 7px;
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   background: var(--secondary);
   color: var(--foreground);
-  font-size: 11px;
+  font-size: var(--text-tiny);
   font-weight: 550;
   white-space: nowrap;
   max-width: 260px;
@@ -311,13 +337,13 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   align-items: center;
   gap: 4px;
   padding: 0 6px 0 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   color: var(--foreground);
   background: var(--secondary);
-  font-size: 11.5px;
+  font-size: var(--text-tiny);
   font-weight: 600;
   white-space: nowrap;
-  animation: browser-fade 120ms ease-out;
+  animation: browser-fade var(--duration-fast) ease-out;
 }
 .browser-address > .browser-address-go:hover {
   background: var(--primary-fill);
@@ -331,7 +357,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   height: 30px;
   padding: 0 11px 0 9px;
   margin-right: 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-button);
   background: var(--primary-fill);
   color: var(--primary-fill-foreground);
   font-size: var(--text-small);
@@ -359,11 +385,9 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   background: var(--popover);
   color: var(--popover-foreground);
   border: 1px solid var(--control-border);
-  border-radius: 12px;
-  box-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.35),
-    0 2px 8px rgba(0, 0, 0, 0.2);
-  animation: browser-fade 120ms ease-out;
+  border-radius: var(--radius-panel);
+  box-shadow: var(--elevation-overlay);
+  animation: browser-fade var(--duration-fast) ease-out;
 }
 .browser-menu-list button {
   display: flex;
@@ -371,7 +395,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   gap: 9px;
   width: 100%;
   padding: 8px 9px;
-  border-radius: 8px;
+  border-radius: var(--radius-button);
   text-align: left;
   color: var(--foreground);
   font-size: var(--text-small);
@@ -391,7 +415,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
 .browser-menu-hint {
   padding: 2px 9px 6px;
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: var(--text-tiny);
   line-height: 1.45;
 }
 
@@ -402,19 +426,24 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   gap: 4px;
   padding: 0 2px 8px;
   overflow-x: auto;
-  scrollbar-width: none;
+}
+/* Hidden through the one scrollbar system (::-webkit-scrollbar): the
+   standard scrollbar-width is set nowhere in the app. */
+.browser-tabs::-webkit-scrollbar {
+  display: none;
 }
 .browser-tab {
   display: flex;
   align-items: center;
   min-width: 90px;
-  max-width: 200px;
+  /* Wide enough that two employers' tabs are told apart before the cut. */
+  max-width: 240px;
   flex: 1;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-button);
   color: var(--muted-foreground);
   background: color-mix(in srgb, var(--secondary) 55%, transparent);
-  transition: background-color 120ms ease;
+  transition: background-color var(--duration-fast) ease;
 }
 .browser-tab:hover {
   background: var(--secondary);
@@ -437,7 +466,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: var(--text-tiny);
 }
 .browser-tab button:last-child {
   width: 20px;
@@ -445,7 +474,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   display: grid;
   place-items: center;
   margin-right: 4px;
-  border-radius: 5px;
+  border-radius: var(--radius-button);
 }
 .browser-tab button:last-child:hover {
   background: var(--accent);
@@ -455,7 +484,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   height: 28px;
   display: grid;
   place-items: center;
-  border-radius: 8px;
+  border-radius: var(--radius-button);
   color: var(--muted-foreground);
 }
 .browser-add-tab:hover:not(:disabled) {
@@ -472,7 +501,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   padding: 9px 12px;
   margin: 0 0 8px;
   border: 1px solid var(--control-border);
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   background: var(--secondary);
   line-height: 1.5;
 }
@@ -492,7 +521,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   place-items: center;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   color: var(--muted-foreground);
 }
 .browser-notice > button:hover {
@@ -503,7 +532,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   width: auto !important;
   height: 28px !important;
   padding: 0 11px;
-  border-radius: 8px !important;
+  border-radius: var(--radius-button) !important;
   background: var(--primary-fill) !important;
   color: var(--primary-fill-foreground) !important;
   font-weight: 600;
@@ -525,13 +554,35 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   flex: 1;
   min-height: 120px;
   position: relative;
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   background: #fff;
   overflow: hidden;
   border: 1px solid var(--control-border);
 }
 .browser-page-viewport.is-blank {
   background: var(--background);
+}
+/* The first load of a page: the host name, a quiet progress line and a
+   page-shaped skeleton on the paper colour, instead of a blank white box. */
+.browser-page-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 28px 32px;
+  background: var(--card);
+  color: var(--muted-foreground);
+}
+.browser-page-loading-host {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-small);
+}
+.browser-page-loading .skeleton {
+  display: block;
+  height: 10px;
 }
 /* A still of the page shown while app chrome sits where the native view paints. */
 .browser-page-snapshot {
@@ -558,30 +609,28 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   padding: 24px;
   gap: 10px;
 }
+/* The app's own language: a quiet glyph (no icon tile), the page-title
+   face, and the one filled action in pine. It used to have a near-black
+   CTA, a tiled icon and a display title no page used. */
 .browser-welcome-icon {
   display: grid;
   place-items: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 20px;
-  background: var(--secondary);
-  color: var(--foreground);
-  margin-bottom: 8px;
-  border: 1px solid var(--control-border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  color: var(--muted-foreground);
+  margin-bottom: 4px;
 }
 .browser-welcome h2 {
-  font-family: var(--font-headline);
-  font-size: 26px;
-  letter-spacing: -0.03em;
-  font-weight: 550;
-  line-height: 1.2;
+  font-family: var(--font-display);
+  font-size: var(--text-heading-1);
+  letter-spacing: var(--tracking-page-title);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text-headline);
 }
 .browser-welcome p {
-  color: var(--muted-foreground);
-  font-size: 13px;
-  max-width: 380px;
-  line-height: 1.65;
+  color: var(--foreground-soft);
+  font-size: var(--text-description);
+  max-width: 44ch;
+  line-height: 1.5;
 }
 .browser-welcome-actions {
   display: flex;
@@ -594,39 +643,50 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
 .browser-welcome-go {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  height: 38px;
-  padding: 0 16px;
-  background: var(--foreground);
-  color: var(--background);
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 600;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--primary-fill);
+  background: var(--primary-fill);
+  color: var(--primary-fill-foreground);
+  border-radius: var(--radius-button);
+  font-size: var(--text-small);
+  font-weight: 500;
+  transition: background-color var(--duration-fast) var(--ease-standard);
 }
 .browser-welcome-go:hover {
-  filter: brightness(0.94);
+  border-color: var(--primary-fill-hover);
+  background: var(--primary-fill-hover);
+}
+.browser-welcome-go:active {
+  background: var(--primary-fill-pressed);
+}
+.browser-welcome-go:focus-visible,
+.browser-welcome-import:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .browser-welcome-import {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 38px;
+  height: 36px;
   padding: 0 14px;
   border: 1px solid var(--control-border);
-  border-radius: 10px;
+  border-radius: var(--radius-button);
   color: var(--foreground);
-  font-size: 13px;
-  font-weight: 550;
+  font-size: var(--text-small);
+  font-weight: 500;
 }
 .browser-welcome-import:hover {
-  background: var(--secondary);
+  background: var(--accent);
   border-color: var(--control-border-hover);
 }
 .browser-welcome-notes {
   display: flex;
   gap: 18px;
   color: var(--muted-foreground);
-  font-size: 11.5px;
+  font-size: var(--text-tiny);
   margin-top: 22px;
 }
 .browser-welcome-notes span {
@@ -644,7 +704,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
 }
 .browser-password-help {
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--text-tiny);
   line-height: 1.5;
 }
 .browser-import {
@@ -655,7 +715,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   padding: 20px;
   background: color-mix(in srgb, var(--background) 82%, transparent);
   backdrop-filter: blur(6px);
-  animation: browser-fade 140ms ease-out;
+  animation: browser-fade var(--duration-fast) ease-out;
 }
 .browser-import-card {
   width: min(480px, 100%);
@@ -666,11 +726,10 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   padding: 18px;
   background: var(--surface-panel);
   border: 1px solid var(--control-border);
-  border-radius: 16px;
-  box-shadow:
-    0 20px 50px rgba(0, 0, 0, 0.35),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  animation: browser-rise 200ms cubic-bezier(0.2, 0.85, 0.3, 1.05);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--elevation-overlay);
+  animation: browser-rise var(--duration-base)
+    cubic-bezier(0.2, 0.85, 0.3, 1.05);
 }
 .browser-import-head {
   display: flex;
@@ -680,14 +739,14 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
 }
 .browser-import-head h3 {
   font-family: var(--font-headline);
-  font-size: 17px;
+  font-size: var(--text-heading-3);
   font-weight: 600;
   letter-spacing: -0.015em;
   margin-bottom: 4px;
 }
 .browser-import-head p {
   color: var(--muted-foreground);
-  font-size: 12.5px;
+  font-size: var(--text-small);
   line-height: 1.55;
 }
 .browser-import-head > button {
@@ -695,7 +754,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   place-items: center;
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: var(--radius-button);
   color: var(--muted-foreground);
 }
 .browser-import-head > button:hover {
@@ -717,13 +776,13 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   gap: 12px;
   width: 100%;
   padding: 8px 10px 8px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   text-align: left;
   color: var(--foreground);
   border: 1px solid transparent;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
+    background-color var(--duration-fast) ease,
+    border-color var(--duration-fast) ease;
 }
 .browser-import-source:hover:not(:disabled) {
   background: var(--secondary);
@@ -736,7 +795,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
 .browser-import-source > svg:last-child {
   color: var(--muted-foreground);
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: opacity var(--duration-fast) ease;
 }
 .browser-import-source:hover:not(:disabled) > svg:last-child {
   opacity: 1;
@@ -749,11 +808,11 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   flex: 1;
 }
 .browser-import-source-text > span {
-  font-size: 13px;
+  font-size: var(--text-small);
   font-weight: 560;
 }
 .browser-import-source-text > small {
-  font-size: 11.5px;
+  font-size: var(--text-tiny);
   color: var(--muted-foreground);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -764,7 +823,7 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   place-items: center;
   width: 34px;
   height: 34px;
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   font-family: var(--font-headline);
   font-size: 15px;
   font-weight: 700;
@@ -798,10 +857,10 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   align-items: center;
   gap: 10px;
   padding: 14px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   background: var(--secondary);
   color: var(--foreground);
-  font-size: 12.5px;
+  font-size: var(--text-small);
   line-height: 1.5;
 }
 .browser-import-result.is-ok {
@@ -816,13 +875,13 @@ html:has(.browser-peek-backdrop) [data-assistant-sidebar] {
   justify-content: space-between;
   gap: 12px;
   color: var(--muted-foreground);
-  font-size: 11.5px;
+  font-size: var(--text-tiny);
   line-height: 1.45;
 }
 .browser-import-done {
   height: 32px;
   padding: 0 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-button);
   background: var(--foreground);
   color: var(--background);
   font-weight: 600;

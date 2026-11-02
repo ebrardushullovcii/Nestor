@@ -1135,7 +1135,7 @@ describe("ProfileResumePanel", () => {
       "Resume ready — optional suggestions available",
     );
     expect(container?.textContent).toContain(
-      "does not block job search or safe application preparation",
+      "does not stop a search or an application",
     );
     expect(container?.textContent).toContain("Optional review");
     expect(container?.textContent).toContain("Optional imported suggestions");

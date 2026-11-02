@@ -41,6 +41,8 @@ import { describeFormQuestion } from "./questions";
 const preparation = vi.hoisted(() => ({
   answers: [] as ApplicationReviewAnswer[],
   blocker: null as ApplyBlocker | null,
+  /** The run filled the form but could not confirm its send was ready. */
+  notReadyToSend: false,
   uploadsConfirmed: [] as boolean[],
   /** The files each run was told an earlier attempt attached on its page. */
   earlierFiles: [] as string[][],
@@ -95,7 +97,9 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
           notes: [],
           timeline: [],
           modelTurns: 0,
-          readyToSend: { actionRef: "submit", actionLabel: "Apply" },
+          readyToSend: preparation.notReadyToSend
+            ? null
+            : { actionRef: "submit", actionLabel: "Apply" },
         },
         reviewCard: ApplicationReviewCardSchema.parse({
           siteLabel: "Replica",
@@ -208,6 +212,7 @@ it("closes a saved-rule skip without adding a Needs you question", async () => {
 });
 afterEach(async () => {
   preparation.blocker = null;
+  preparation.notReadyToSend = false;
   preparation.answers = [];
   preparation.attachedField = "Resume";
   vi.useRealTimers();
@@ -361,24 +366,198 @@ it("revoking Send authority while filling still prevents the final action", asyn
     return envelope;
   });
   const action = vi.fn();
-  Object.assign(f.browser, { executeExactlyOneFinalAction: action });
+  // A form the send could read and press: only the revocation stops it.
+  Object.assign(f.browser, {
+    executeExactlyOneFinalAction: action,
+    observeApplicationForm: vi.fn(),
+  });
+  f.browser.readApplicationPageBinding.mockResolvedValue({
+    ...f.personPage,
+    bodyText: "Completed form",
+    actions: [
+      {
+        ref: "a0",
+        index: 0,
+        label: "Submit Application",
+        visible: true,
+        disabled: false,
+      },
+    ],
+  });
   f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
   await f.service.start();
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
-  await guards.commitApplicationAuthorityEnvelope({
-    envelope: {
-      ...envelope!,
-      revision: 2,
-      status: "revoked",
+  expect(
+    await guards.revokeApplicationAuthorityEnvelope({
+      id: envelope!.id,
+      expectedRevision: 1,
       revokedAt: new Date().toISOString(),
-    },
-    expectedRevision: 1,
-  });
+    }),
+  ).toMatchObject({ status: "applied" });
   f.releases.shift()!();
   await vi.waitFor(() =>
     expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
   );
   expect(action).not.toHaveBeenCalled();
+  expect(f.applications.listApplications().rows[0]?.error).toBe(
+    "The permission to send this application changed. Review the filled form before trying again.",
+  );
+});
+
+it("a Send for me form that could not be confirmed ready says why, keeps Send, and the person's Send goes out once", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  let envelope: ReturnType<typeof sendEnvelope> | null = null;
+  f.authorizeSending.mockImplementation(async ({ artifact, application }) => {
+    if (envelope) return envelope;
+    envelope = {
+      ...sendEnvelope(application.jobId, artifact.sha256!),
+      mode: "autonomous_submit" as const,
+    };
+    await guards.commitApplicationAuthorityEnvelope({
+      envelope,
+      expectedRevision: null,
+    });
+    return envelope;
+  });
+  const observation = {
+    identity: { id: "short-form", revision: 1, digest: "a".repeat(64) },
+    page: { origin: "https://replica.test", safePath: "/jobs/0" },
+    complete: true,
+    controls: [
+      {
+        identity: { ref: "final-control-0", signature: "c".repeat(64) },
+        ordinal: 0,
+        kind: "button" as const,
+        label: "Submit Application",
+        formIndex: -1,
+        action: { origin: "https://replica.test", safePath: "/jobs/0" },
+      },
+    ],
+  };
+  const action = vi.fn<
+    NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>
+  >(async (_source, input) => {
+    expect(
+      await input.veto({ observation, control: observation.controls[0]! }),
+    ).toBe(true);
+    return {
+      outcome: "submitted",
+      reason: "employer_confirmation",
+      observation,
+      control: observation.controls[0]!,
+      facts: {
+        actionAttempted: true,
+        actionIssued: true,
+        actionCompleted: true,
+        pageBefore: observation.page,
+        pageAfter: observation.page,
+        urlChanged: false,
+        requestsObservedDuringAction: 1,
+        requestsAfterClick: [],
+      },
+      confirmation: {
+        observedAt: new Date().toISOString(),
+        destination: observation.page,
+        summary: "Application received.",
+      },
+    };
+  });
+  Object.assign(f.browser, {
+    observeApplicationForm: () => Promise.resolve(observation),
+    executeExactlyOneFinalAction: action,
+  });
+  f.browser.readApplicationPageBinding.mockResolvedValue({
+    ...f.personPage,
+    bodyText: "Completed form",
+    actions: [
+      {
+        ref: "a0",
+        index: 0,
+        label: "Submit Application",
+        visible: true,
+        disabled: false,
+      },
+    ],
+  });
+  preparation.notReadyToSend = true;
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await f.service.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  expect(f.execute.mock.calls[0]![1]).toMatchObject({
+    submitAuthorized: true,
+    applyAutomationMode: "autonomous_submit",
+  });
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  expect(action).not.toHaveBeenCalled();
+  expect(row).toMatchObject({
+    mode: "autonomous_submit",
+    error:
+      "Send for me filled this form but could not confirm it was ready to send, so it waits for you. Review it and press Send.",
+  });
+  // Its page is still open: Open shows it, with no refill and no new mode.
+  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+  expect(await f.service.open(row.id)).toBe(true);
+  expect(f.execute).toHaveBeenCalledOnce();
+  expect(f.applications.getApplication(row.id)).toMatchObject({
+    state: "ready",
+    mode: "autonomous_submit",
+  });
+  // The person's Send goes out once; a second press sends nothing.
+  expect(await f.service.sendPrepared(row.id)).toBe(true);
+  expect(await f.service.sendPrepared(row.id)).toBe(false);
+  expect(action).toHaveBeenCalledOnce();
+  expect(f.applications.getApplication(row.id)?.state).toBe("submitted");
+  expect(f.onError).not.toHaveBeenCalled();
+});
+
+it("a Send for me form waiting on a question keeps Send through Open's refill and says why the refill waits", async () => {
+  const f = await setup(1);
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  const waitingOnQuestion = () =>
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [
+        {
+          id: "office",
+          prompt: "Which office would you work from?",
+          kind: "other",
+          answerControlType: "text",
+          detectedAt: new Date().toISOString(),
+        },
+      ],
+    });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!(waitingOnQuestion());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  const row = f.applications.listApplications().rows[0]!;
+  // The page is gone: Open refills it, and the refill never sends.
+  expect(await f.service.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(f.execute.mock.calls[1]![1]).toMatchObject({
+    submitAuthorized: false,
+    applyAutomationMode: "confirm_before_submit",
+  });
+  // On the refilled page the person typed the answer in: it comes back Ready.
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
+  );
+  expect(f.applications.getApplication(row.id)).toMatchObject({
+    mode: "autonomous_submit",
+    error:
+      "You opened this form to review it, so Job Finder leaves the send to you. Review it and press Send.",
+  });
+  expect(f.authorizeSending).toHaveBeenCalledOnce();
 });
 
 async function setup(
@@ -463,6 +642,7 @@ async function setup(
   const browser = {
     executeApplicationFlow: execute,
     focusApplicationPageBinding: vi.fn(() => Promise.resolve(false)),
+    focusRetainedApplicationPage: vi.fn(() => Promise.resolve(false)),
     readApplicationPageBinding: vi.fn<
       (source: string, key: string) => Promise<RawApplyPage | null>
     >(() => Promise.resolve(null)),
@@ -902,6 +1082,12 @@ it("without a send envelope Send for me fills as Fill does: field saves, uploads
     expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
   );
   expect(f.authorizeSending).toHaveBeenCalledOnce();
+  // It says why it did not send, and keeps the mode the person chose.
+  expect(f.applications.listApplications().rows[0]).toMatchObject({
+    mode: "autonomous_submit",
+    error:
+      "Send for me could not confirm permission for this application, so the filled form waits for you to send it.",
+  });
 });
 
 it("refuses sendPrepared after a used answer changes post-Ready and refills without a final browser action", async () => {
@@ -987,6 +1173,15 @@ it("refuses sendPrepared after a used answer changes post-Ready and refills with
     attempt: row.attempt + 1,
   });
   expect(arm).not.toHaveBeenCalled();
+  expect(finalAction).not.toHaveBeenCalled();
+  // The refill comes back Ready and still says why it waits.
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
+  );
+  expect(f.applications.getApplication(row.id)?.error).toBe(
+    "The Profile or saved answers for this form need checking again. Refilling it for your review; it will not send automatically.",
+  );
   expect(finalAction).not.toHaveBeenCalled();
 });
 
@@ -1430,6 +1625,12 @@ it("a refill of a closed form gets what the attempt before left, to bring it bac
       formUrl: "https://replica.test/jobs/0",
     },
   ]);
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
+  );
+  // Fill always leaves the send to the person: nothing more to say.
+  expect(f.applications.getApplication(row.id)?.error).toBeNull();
   preparation.answers = [];
 });
 
@@ -1529,6 +1730,10 @@ it("refills a lost Ready form through the bounded queue and never revives its se
     expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
   );
   expect(f.authorizeSending).not.toHaveBeenCalled();
+  // The person opened it to look: the row says the send is theirs now.
+  expect(f.applications.getApplication(row.id)?.error).toBe(
+    "You opened this form to review it, so Job Finder leaves the send to you. Review it and press Send.",
+  );
 });
 
 it("reopens the original account entry after restart and keeps one shared task until both forms continue", async () => {
@@ -1660,7 +1865,12 @@ it("records the person's confirmed submission, moves Approved to applied, and cl
   await vi.waitFor(() =>
     expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
   );
-  f.browser.readApplicationPageWithPerson.mockResolvedValue(f.personPage);
+  f.browser.readApplicationPageWithPerson.mockResolvedValue({
+    ...f.personPage,
+    sendPressedAt: new Date().toISOString(),
+    sendConfirmationBefore: [],
+    sendOrigin: "https://replica.test",
+  });
   await vi.advanceTimersByTimeAsync(2_000);
   const row = f.applications.listApplications().rows[0]!;
   expect(row.state).toBe("submitted");
@@ -1683,6 +1893,192 @@ it("records the person's confirmed submission, moves Approved to applied, and cl
   expect(f.onPersonSent.mock.invocationCallOrder[0]).toBeLessThan(
     f.browser.releaseApplicationPageBinding.mock.invocationCallOrder[0]!,
   );
+  expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
+    0,
+  );
+});
+
+it.each([
+  [
+    "static acknowledgement without a final press",
+    undefined,
+    undefined,
+    "https://replica.test/jobs/0",
+    "https://replica.test",
+    "ready",
+  ],
+  [
+    "acknowledgement already present before the press",
+    true,
+    ["thank you for applying", "your application has been received"],
+    "https://replica.test/jobs/0",
+    "https://replica.test",
+    "uncertain",
+  ],
+  [
+    "receipt in a different origin",
+    true,
+    [],
+    "https://other.test/receipt",
+    "https://replica.test",
+    "uncertain",
+  ],
+  [
+    "receipt in the exact sending iframe",
+    true,
+    [],
+    "https://frame.test/receipt",
+    "https://frame.test",
+    "submitted",
+  ],
+] as const)(
+  "person outcome requires fresh receipt evidence: %s",
+  async (_label, pressed, before, url, sendOrigin, expected) => {
+    const f = await setup(1);
+    vi.useFakeTimers();
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+    );
+    f.browser.readApplicationPageWithPerson.mockResolvedValue({
+      ...f.personPage,
+      url,
+      ...(pressed
+        ? { sendPressedAt: new Date().toISOString(), sendOrigin }
+        : {}),
+      ...(before ? { sendConfirmationBefore: [...before] } : {}),
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(f.applications.listApplications().rows[0]?.state).toBe(expected);
+    expect(f.authorizeSending).not.toHaveBeenCalled();
+  },
+);
+
+it("a late site receipt settles the exact consumed send without another click or fresh Apply", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  f.authorizeSending.mockImplementation(async ({ artifact, application }) => {
+    const envelope = {
+      ...sendEnvelope(application.jobId, artifact.sha256!),
+      mode: "autonomous_submit" as const,
+    };
+    await guards.commitApplicationAuthorityEnvelope({
+      envelope,
+      expectedRevision: null,
+    });
+    return envelope;
+  });
+  const observation = {
+    identity: { id: "late-form", revision: 1, digest: "a".repeat(64) },
+    page: { origin: "https://replica.test", safePath: "/jobs/0" },
+    complete: true,
+    controls: [
+      {
+        identity: { ref: "final-control-0", signature: "c".repeat(64) },
+        ordinal: 0,
+        kind: "button" as const,
+        label: "Submit Application",
+        formIndex: 0,
+        action: { origin: "https://replica.test", safePath: "/submit" },
+      },
+    ],
+  };
+  const facts = {
+    actionAttempted: true,
+    actionIssued: true,
+    actionCompleted: true,
+    pageBefore: observation.page,
+    pageAfter: observation.page,
+    urlChanged: false,
+    requestsObservedDuringAction: 1,
+    requestsAfterClick: [],
+  };
+  const action = vi.fn<
+    NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>
+  >(async (_source, input) => {
+    expect(
+      await input.veto({ observation, control: observation.controls[0]! }),
+    ).toBe(true);
+    return {
+      outcome: "outcome_uncertain",
+      reason: "confirmation_timeout",
+      observation,
+      control: observation.controls[0]!,
+      facts,
+    };
+  });
+  const recheck = vi
+    .fn<NonNullable<BrowserSessionRuntime["recheckApplicationSubmission"]>>()
+    .mockResolvedValue(null);
+  Object.assign(f.browser, {
+    observeApplicationForm: () => Promise.resolve(observation),
+    executeExactlyOneFinalAction: action,
+    recheckApplicationSubmission: recheck,
+  });
+  f.browser.readApplicationPageBinding.mockResolvedValue({
+    ...f.personPage,
+    bodyText: "Completed form",
+    actions: [
+      {
+        ref: "a0",
+        index: 0,
+        label: "Submit Application",
+        visible: true,
+        disabled: false,
+      },
+    ],
+  });
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await f.service.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("uncertain"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  const original = f.applications.getSubmissionReceipt(row.id)!;
+  expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
+  f.browser.focusRetainedApplicationPage.mockResolvedValue(true);
+  expect(await f.service.open(row.id)).toBe(true);
+  expect(f.execute).toHaveBeenCalledOnce();
+  expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalled();
+  expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
+    0,
+  );
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  // Restart only the timer registration, preserving the service's exact retained check.
+  f.service.stop();
+  await f.service.start();
+  recheck.mockResolvedValue({
+    outcome: "submitted",
+    reason: "employer_confirmation",
+    observation,
+    control: observation.controls[0]!,
+    facts,
+    confirmation: {
+      observedAt: new Date().toISOString(),
+      destination: observation.page,
+      summary: "The site confirmed receipt.",
+    },
+  });
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(f.applications.getApplication(row.id)?.state).toBe("submitted");
+  expect(f.applications.getSubmissionReceipt(row.id)?.id).not.toBe(original.id);
+  expect(
+    (await guards.listSubmissionOutcomeRecords({ jobId: String(row.jobId) }))[0]
+      ?.outcome,
+  ).toBe("outcome_uncertain");
+  expect(action).toHaveBeenCalledOnce();
+  expect(recheck).toHaveBeenCalledWith("target_site", {
+    pageBindingKey: `application_${row.id}_attempt_1`,
+    expectedObservation: observation.identity,
+    expectedControl: observation.controls[0]!.identity,
+  });
   expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
     0,
   );
@@ -2236,8 +2632,8 @@ it.each([
     Object.assign(f.browser, { executeExactlyOneFinalAction: action });
     expect(await f.service.sendPrepared(row.id)).toBe(false);
     // The lying answer report is not a usable question reading. It gets
-    // exactly one retry, then the card is returned to Needs you.
-    expect(chatWithTools).toHaveBeenCalledTimes(2);
+    // two bounded retries, then the card is returned to Needs you.
+    expect(chatWithTools).toHaveBeenCalledTimes(3);
     expect(action).not.toHaveBeenCalled();
     expect(f.applications.getApplication(row.id)?.state).toBe("needs_you");
     expect(f.applications.needsYou.list().rows[0]?.prompt).toBe(entry.question);
@@ -2566,6 +2962,17 @@ it("Check again on a sign-in the page still shows runs the application again fro
   // The sign-in finished in another window; this page still shows it.
   expect(await f.service.checkAccess(task.id)).toBe(false);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  // The shared item stays, and Open can show the currently running retry.
+  expect(f.applications.needsYou.details(task.id)?.applications).toHaveLength(
+    1,
+  );
+  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+  expect(await f.service.open(row!.id)).toBe(true);
+  expect(f.browser.focusApplicationPageBinding).toHaveBeenLastCalledWith(
+    "target_site",
+    `application_${row!.id}_attempt_2`,
+  );
+  expect(f.execute).toHaveBeenCalledTimes(2);
   const job = f.jobs.getJob(row!.jobId)!;
   expect(f.browser.reloadApplicationPageBinding).toHaveBeenCalledWith(
     "target_site",

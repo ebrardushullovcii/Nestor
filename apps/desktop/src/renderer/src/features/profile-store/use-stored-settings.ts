@@ -48,7 +48,9 @@ export function settingPatch(
 }
 export function useStoredSettings() {
   const [settings, setSettings] = useState<JobFinderSettings | null>(null),
-    [error, setError] = useState<string | null>(null);
+    [error, setError] = useState<string | null>(null),
+    // Only the last read's failure: a refused save says so in `error`.
+    [readError, setReadError] = useState<string | null>(null);
   const current = useRef(settings);
   current.current = settings;
   const sequence = useRef(0),
@@ -60,12 +62,15 @@ export function useStoredSettings() {
       if (mounted.current && sequence.current === seq) {
         setSettings(next);
         setError(null);
+        setReadError(null);
       }
     } catch (reason: unknown) {
-      if (mounted.current && sequence.current === seq)
-        setError(
-          reason instanceof Error ? reason.message : "Could not load Settings.",
-        );
+      if (mounted.current && sequence.current === seq) {
+        const message =
+          reason instanceof Error ? reason.message : "Could not load Settings.";
+        setError(message);
+        setReadError(message);
+      }
     }
   }, []);
   useEffect(() => {
@@ -141,6 +146,7 @@ export function useStoredSettings() {
   return {
     settings,
     error,
+    readError,
     refresh,
     updateResumeApproach,
     updateAppearanceTheme: useCallback(

@@ -7,7 +7,9 @@ export interface TriageAction {
   key: string;
   /** What the toast says after, e.g. "Shortlisted 3 jobs". */
   done: string;
-  /** The bulk button with the ticked count, e.g. "Hide 6,418". */
+  /** The bulk button in select mode: the verb alone, "N selected" beside it. */
+  verb: string;
+  /** Its accessible name with the ticked count, e.g. "Hide 6,418 jobs". */
   bulk: (count: string) => string;
 }
 
@@ -16,6 +18,7 @@ const SHORTLIST: TriageAction = {
   label: "Shortlist",
   key: "s",
   done: "Shortlisted",
+  verb: "Shortlist",
   bulk: (count) => `Shortlist ${count}`,
 };
 const HIDE: TriageAction = {
@@ -23,6 +26,7 @@ const HIDE: TriageAction = {
   label: "Hide",
   key: "h",
   done: "Hid",
+  verb: "Hide",
   bulk: (count) => `Hide ${count}`,
 };
 const BACK: TriageAction = {
@@ -30,7 +34,8 @@ const BACK: TriageAction = {
   label: "Move back to Find jobs",
   key: "r",
   done: "Moved back",
-  bulk: (count) => `Move ${count} back`,
+  verb: "Move back",
+  bulk: (count) => `Move back ${count}`,
 };
 
 const SHOW_AGAIN: TriageAction = {
@@ -38,7 +43,8 @@ const SHOW_AGAIN: TriageAction = {
   label: "Show again",
   key: "r",
   done: "Showing again",
-  bulk: (count) => `Show ${count} again`,
+  verb: "Show again",
+  bulk: (count) => `Show again ${count}`,
 };
 
 /** The moves each tab offers, main one first. */

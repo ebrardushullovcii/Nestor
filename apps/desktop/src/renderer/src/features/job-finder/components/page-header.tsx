@@ -11,9 +11,10 @@ interface PageHeaderProps {
    */
   actions?: ReactNode;
   /**
-   * One sentence of 90 characters or fewer about what the page is for. It
-   * stays on one line and truncates; the full text is its tooltip and the
-   * heading's accessible description. Instructions belong where they apply.
+   * One sentence of 90 characters or fewer about what the page is for. Beside
+   * the title it shows whole or not at all; under it, it wraps. The full text
+   * is its tooltip and the heading's accessible description. Instructions
+   * belong where they apply.
    */
   description: string;
   title: string;
@@ -21,8 +22,9 @@ interface PageHeaderProps {
 
 /**
  * One row: the title, a one-line description beside it, and the page actions
- * on the right. Below 1024px the description drops under the title, still on
- * one line.
+ * on the right. In a window under 64rem of text (1024px at the default size,
+ * or larger text) the description drops under the title and wraps there,
+ * never cut with "…".
  */
 export function PageHeader({ actions, description, title }: PageHeaderProps) {
   const descriptionId = useId();
@@ -33,7 +35,11 @@ export function PageHeader({ actions, description, title }: PageHeaderProps) {
       data-page-header
       tabIndex={-1}
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-1 lg:flex-row lg:items-baseline lg:gap-3">
+      {/* Beside the title (from 1024px) the description shows whole or not
+          at all: when it does not fit it wraps to a second line that this
+          row clips, instead of ending mid-word ("Read, edit if you lik…").
+          Its words stay the heading's description and its tooltip. */}
+      <div className="flex min-w-0 flex-1 flex-col gap-1 window-wide:max-h-8 window-wide:flex-row window-wide:flex-wrap window-wide:items-baseline window-wide:gap-x-3 window-wide:gap-y-4 window-wide:overflow-hidden">
         <h1
           aria-describedby={descriptionId}
           className="shrink-0 font-display text-(length:--text-page-title-compact) font-semibold leading-none tracking-(--tracking-page-title-compact) text-(--headline-primary)"
@@ -41,7 +47,7 @@ export function PageHeader({ actions, description, title }: PageHeaderProps) {
           {title}
         </h1>
         <p
-          className="min-w-0 truncate text-(length:--text-page-description-compact) leading-5 text-foreground-soft"
+          className="min-w-0 text-(length:--text-page-description-compact) leading-5 text-foreground-soft window-wide:shrink-0 window-wide:whitespace-nowrap"
           id={descriptionId}
           title={description}
         >
@@ -73,7 +79,10 @@ export function PageHeaderStack(
   const { statusItems, subnav, ...headerProps } = props;
 
   return (
-    <div className="mb-(--gap-page-header-body)" data-page-header-stack>
+    // min-w-0: in a grid page the description beside the title (one line)
+    // must not size the column to its whole text (with larger text it ran
+    // the page ~160px past the window).
+    <div className="mb-(--gap-page-header-body) min-w-0" data-page-header-stack>
       <PageHeader {...headerProps} />
       {statusItems && statusItems.length > 0 ? (
         <PageStatusLine items={statusItems} />

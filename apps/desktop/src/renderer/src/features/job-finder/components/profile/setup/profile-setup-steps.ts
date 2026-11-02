@@ -41,7 +41,7 @@ export const profileSetupStepDefinitions: Array<{
     id: "targeting",
     label: "Job targets",
     summary:
-      "Set roles, locations, work mode, and sources — then finish setup from here.",
+      "Set roles, locations, work mode, and job sites — then finish setup from here.",
   },
   {
     id: "extras",

@@ -6,9 +6,12 @@ import type {
   ProfileSetupStep,
   ResumeApplicationMode,
 } from "@nestor/contracts";
-import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
+import { ListReadError } from "@renderer/features/job-lists";
+import { LockedScreenLayout } from "@renderer/features/job-finder/components/locked-screen-layout";
+import { PageHeaderStack } from "@renderer/features/job-finder/components/page-header";
 import { ProfileSetupScreen } from "@renderer/features/job-finder/components/profile/setup/profile-setup-screen";
+import { GuidedSetupSkeleton } from "@renderer/features/job-finder/components/route-skeleton";
 import {
   clearProfileSetupJustFinished,
   isProfileSetupJustFinished,
@@ -75,19 +78,31 @@ export function StoredProfileSetupScreen() {
   const error = store.error ?? recordsError ?? workflow.error;
   if (!profile || !store.goals || !store.overview || !records || !setupState)
     return error ? (
-      <p role="alert">
-        {error}{" "}
-        <Button
-          onClick={() => {
-            void store.refresh();
-            void workflow.refresh();
-          }}
-        >
-          Try again
-        </Button>
-      </p>
+      // The Profile screen's frame (its locked header, then a card) holding
+      // the shared read-failure state: what failed in plain words, without
+      // Electron's IPC prefix, and Try again inside the layout.
+      <LockedScreenLayout
+        topContent={
+          <PageHeaderStack
+            description="Your profile is what Job Finder searches and applies with."
+            title="Guided setup"
+          />
+        }
+      >
+        <div className="surface-panel-shell grid min-h-64 place-items-center rounded-(--radius-panel) border border-(--surface-panel-border) p-10">
+          <ListReadError
+            error={error}
+            kept={null}
+            onRetry={() => {
+              void store.refresh();
+              void workflow.refresh();
+            }}
+            what="Your profile"
+          />
+        </div>
+      </LockedScreenLayout>
     ) : (
-      <p role="status">Loading guided setup…</p>
+      <GuidedSetupSkeleton />
     );
 
   const overview = store.overview;
@@ -153,13 +168,16 @@ export function StoredProfileSetupScreen() {
         setRefused("setup");
         return;
       }
-      if (state.status !== "completed")
+      // The footer's save state is the one answer to "is this saved": a
+      // plain "Saved." toast used to outlive it and sit beside "Unsaved
+      // setup changes." on the next step. A toast stays only where it says
+      // something the footer cannot (a message, or leaving for Profile).
+      if (
+        state.status !== "completed" &&
+        (options.message || options.openProfile)
+      )
         showToast({
-          title:
-            options.message ??
-            (options.openProfile
-              ? "Saved. Opening the full Profile editor."
-              : "Saved."),
+          title: options.message ?? "Saved. Opening the full Profile editor.",
           tone: "success",
         });
       await handOffAfterSetupStep({ state, options, navigate, startedOnSetup });
@@ -207,6 +225,10 @@ export function StoredProfileSetupScreen() {
         onImportResume={() => {
           if (dirty) workflow.setMessage(IMPORT_GUARD);
           else void workflow.importResume();
+        }}
+        onDropResume={(file) => {
+          if (dirty) workflow.setMessage(IMPORT_GUARD);
+          else void workflow.importResume({ droppedFile: file });
         }}
         onRetryInterruptedImport={() =>
           void workflow.importResume({ retryInterrupted: true })

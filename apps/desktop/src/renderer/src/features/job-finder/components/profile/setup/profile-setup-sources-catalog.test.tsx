@@ -51,7 +51,7 @@ test("setup flushes pasted URLs before continuing, retaining duplicate feedback"
       enabled: 1,
     });
     await screen.findByText(
-      "Added and turned on 1 source. 1 was already in your list.",
+      "Added and turned on 1 site. 1 was already in your list.",
     );
     expect(
       screen.getByRole<HTMLTextAreaElement>("textbox", {

@@ -1,8 +1,5 @@
-import { ShieldAlert, ShieldCheck } from "lucide-react";
-import type {
-  DesktopBrowserState,
-  JobFinderSettings,
-} from "@nestor/contracts";
+import { ShieldCheck } from "lucide-react";
+import type { DesktopBrowserState, JobFinderSettings } from "@nestor/contracts";
 import { StatusBadge } from "../../components/status-badge";
 import type { BadgeTone } from "../../lib/job-finder-types";
 
@@ -79,7 +76,7 @@ export function SettingsRuntimeSummary({
       <div className="grid gap-0.5">
         <div className="flex items-center gap-3">
           <ShieldCheck className="size-4 text-primary" />
-          <p className="font-display text-(length:--text-eyebrow) font-semibold uppercase tracking-(--tracking-badge) text-foreground">
+          <p className="font-display text-(length:--text-eyebrow) font-semibold tracking-(--tracking-badge) text-foreground">
             Live status
           </p>
         </div>
@@ -92,9 +89,9 @@ export function SettingsRuntimeSummary({
         </p>
       </div>
 
-      <section className="surface-card-tint grid gap-2.5 rounded-(--radius-field) border border-(--surface-panel-border) px-3.5 py-3.5">
+      <section className="grid gap-2.5 border-t border-(--surface-panel-border) pt-3.5">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-[10px] uppercase tracking-(--tracking-badge) text-muted-foreground">
+          <span className="text-xs tracking-(--tracking-badge) text-muted-foreground">
             Browser
           </span>
           <StatusBadge tone={browserStatus.tone}>
@@ -109,15 +106,15 @@ export function SettingsRuntimeSummary({
         </p>
       </section>
 
-      <section className="surface-card-tint grid gap-2.5 rounded-(--radius-field) border border-(--surface-panel-border) px-3.5 py-3.5">
+      <section className="grid gap-2.5 border-t border-(--surface-panel-border) pt-3.5">
         <div className="flex items-center gap-3">
-          <ShieldAlert className="size-4 text-destructive" />
+          <ShieldCheck className="size-4 text-primary" />
           {/* This was an <h2> styled as a 14px uppercase badge, so it sat
               below the 19px "Runtime guardrails" <h2> it belongs under and
               inverted the scale. An eyebrow is never a heading: the label is
               a div at the eyebrow token, and the card's real title carries
               the heading level under it. */}
-          <div className="font-display text-(length:--text-eyebrow) font-semibold uppercase tracking-(--tracking-badge) text-foreground">
+          <div className="font-display text-(length:--text-eyebrow) font-semibold tracking-(--tracking-badge) text-foreground">
             Apply safeguard
           </div>
         </div>

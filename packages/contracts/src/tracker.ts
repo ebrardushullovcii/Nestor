@@ -31,7 +31,20 @@ export const CLOSED_TRACKER_STATUSES: readonly TrackerStatus[] = [
   "no_reply",
 ];
 
-export type TrackerStatusCounts = Record<TrackerStatus, number>;
+/**
+ * What a list can filter and count by: every status, plus `not_sent`, an
+ * application Apply could not finish (its status is still `applying`, but
+ * nothing is in flight and nothing was sent). `applying` then counts and
+ * lists only the ones still in flight.
+ */
+export const trackerFilterStatusValues = [
+  ...trackerStatusValues,
+  "not_sent",
+] as const;
+export const TrackerFilterStatusSchema = z.enum(trackerFilterStatusValues);
+export type TrackerFilterStatus = z.infer<typeof TrackerFilterStatusSchema>;
+
+export type TrackerStatusCounts = Record<TrackerFilterStatus, number>;
 
 export const TRACKER_STATUS_LABEL: Record<TrackerStatus, string> = {
   applying: "Applying",
@@ -54,7 +67,10 @@ export type TrackerSort = z.infer<typeof TrackerSortSchema>;
 export const TrackerFilterSchema = z
   .object({
     /** Any of these; empty means all. */
-    statuses: z.array(TrackerStatusSchema).max(9).default([]),
+    statuses: z
+      .array(TrackerFilterStatusSchema)
+      .max(trackerFilterStatusValues.length)
+      .default([]),
     tag: z.string().max(60).nullable().default(null),
     /** Words in the title, company or location. */
     text: z.string().max(200).default(""),

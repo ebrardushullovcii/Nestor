@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
+import { FormSectionsSkeleton } from "@renderer/features/job-finder/components/route-skeleton";
 import { useNavigate } from "react-router-dom";
 import type { DesktopBrowserState } from "@nestor/contracts";
-import { Button } from "@renderer/components/ui/button";
+import { ListReadError } from "@renderer/features/job-lists";
 import { useToast } from "@renderer/components/ui/toast";
 import { PageHeaderStack } from "@renderer/features/job-finder/components/page-header";
 import { SettingsScreen } from "@renderer/features/job-finder/screens/settings/settings-screen";
 import { listLocalResumeTemplates } from "../../../../shared/job-finder-resume-catalog";
+import { ScreenReadWarning } from "./screen-read-warning";
 import { useStoredSettings } from "./use-stored-settings";
 
 const RESUME_TEMPLATES = listLocalResumeTemplates();
@@ -40,21 +42,35 @@ export function StoredSettingsScreen() {
       <section aria-label="Settings">
         <PageHeaderStack
           title="Settings"
-          description="Make Job Finder work the way you want."
+          description="Everything saves as you go: a choice when you pick it, typed text when you pause or leave the field."
         />
         {store.error ? (
-          <p role="alert">
-            {store.error}{" "}
-            <Button onClick={() => void store.refresh()}>Try again</Button>
-          </p>
+          <div className="grid place-items-center p-10">
+            <ListReadError
+              error={store.error}
+              kept={null}
+              onRetry={() => void store.refresh()}
+              what="Your settings"
+            />
+          </div>
         ) : (
-          <p role="status">Loading your settings…</p>
+          <>
+            <p className="sr-only" role="status">
+              Loading your settings…
+            </p>
+            <FormSectionsSkeleton tabs={4} />
+          </>
         )}
       </section>
     );
   return (
     <>
-      {store.error ? <p role="alert">{store.error}</p> : null}
+      <ScreenReadWarning
+        onRetry={() => void store.refresh()}
+        readError={store.readError}
+        saveError={store.error}
+        what="Your settings"
+      />
       <SettingsScreen
         availableResumeTemplates={RESUME_TEMPLATES}
         browser={browser}

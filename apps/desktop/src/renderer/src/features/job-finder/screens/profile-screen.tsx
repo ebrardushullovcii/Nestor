@@ -191,6 +191,7 @@ export function ProfileScreen(props: {
   const navigate = useNavigate();
   const requestedSection = searchParams.get("section");
   const requestedFocus = searchParams.get("focus");
+  const [resumeDetailsOpen, setResumeDetailsOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<ProfileSection>(
     parseProfileSection(requestedSection) ?? "basics",
   );
@@ -509,6 +510,12 @@ export function ProfileScreen(props: {
     );
   }
 
+  const [typing, setTyping] = useState(false);
+  const saving = pendingActions.profileMutation || draftDiffers;
+  useEffect(() => {
+    // Typed text reached the draft: the save line follows the save now.
+    if (saving) setTyping(false);
+  }, [saving]);
   const autosave = useProfileAutosave({
     value:
       draftDiffers &&
@@ -614,6 +621,50 @@ export function ProfileScreen(props: {
     });
   }, [backgroundMergeNotice, hasBackgroundConflict, showToast]);
 
+  // F80/F17: the resume strip belongs to the tabs its resume fills, not to
+  // Job sources. One element: the strip (compact) or the full summary.
+  const resumePanel =
+    activeSection === "sources" ? null : (
+      <ProfileResumePanel
+        {...(props.sourceInfo ? { sourceInfo: props.sourceInfo } : {})}
+        // The resume is shown once: this strip, which swaps in
+        // the full import summary (imported details, timeline
+        // repairs) on Details instead of repeating it at the foot
+        // of Basics.
+        compact={!resumeDetailsOpen}
+        onToggleDetails={() => setResumeDetailsOpen((open) => !open)}
+        importDisabledReason={importResumeGuardMessage}
+        isProfileReady={profileSetupState.status === "completed"}
+        isAnalyzeProfilePending={pendingActions.analyzeProfile}
+        isImportResumePending={importPending}
+        latestResumeImportReviewCandidates={latestResumeImportReviewCandidates}
+        latestResumeImportRun={latestResumeImportRun}
+        resumeImportProgress={importProgress}
+        onAnalyzeProfileFromResume={onAnalyzeProfileFromResume}
+        onApplyTimelineRepairAction={(proposalId, action) => {
+          if (!latestResumeImportRun) {
+            return Promise.reject(
+              new Error("The resume import run is no longer available."),
+            );
+          }
+          return onApplyResumeTimelineRepairAction(
+            latestResumeImportRun.id,
+            proposalId,
+            action,
+          );
+        }}
+        onImportResume={onImportResume}
+        {...(props.onRetryInterruptedImport
+          ? {
+              onRetryInterruptedImport: props.onRetryInterruptedImport,
+            }
+          : {})}
+        onReviewImportSuggestion={handleReviewImportSuggestion}
+        profileForm={profileForm}
+        profile={overviewProfile}
+      />
+    );
+
   return (
     <LockedScreenLayout
       bottomContent={
@@ -648,36 +699,53 @@ export function ProfileScreen(props: {
             description="Everything Job Finder knows about you. Edit any field or ask the assistant."
             statusItems={profileStatusItems}
             actions={
-              <AskAssistantButton
-                prompt={starterQuestion ?? undefined}
-                mention={{
-                  kind: "profile_section",
-                  id: copilotSection,
-                  label: `Profile: ${copilotSection}`,
-                }}
-              />
+              <>
+                {/* The save status, in the title row ("Saving…", "Profile
+                      saved.", an error with Try again): it changes words,
+                      never height, so nothing below it moves. */}
+                <div
+                  className="flex min-w-0 max-w-[28rem] items-center gap-2 text-sm text-foreground-muted"
+                  data-profile-save-status
+                  role="status"
+                >
+                  {autosave.error ? (
+                    <>
+                      <span className="min-w-0 truncate" title={autosave.error}>
+                        {autosave.error}
+                      </span>
+                      <Button
+                        onClick={autosave.retry}
+                        size="toolbar"
+                        variant="outline"
+                      >
+                        Try again
+                      </Button>
+                    </>
+                  ) : (
+                    <span className="min-w-0 truncate">
+                      {validationMessage ??
+                        draftProfileResult.validationMessage ??
+                        draftSearchPreferencesResult.validationMessage ??
+                        (pendingActions.profileMutation || draftDiffers
+                          ? "Saving…"
+                          : typing
+                            ? "Not saved yet: saves when you leave the field."
+                            : (props.actionState.message ??
+                              "Changes save automatically."))}
+                    </span>
+                  )}
+                </div>
+                <AskAssistantButton
+                  prompt={starterQuestion ?? undefined}
+                  mention={{
+                    kind: "profile_section",
+                    id: copilotSection,
+                    label: `Profile: ${copilotSection}`,
+                  }}
+                />
+              </>
             }
           />
-          <div
-            role="status"
-            className="flex items-center gap-2 text-sm text-foreground-muted"
-          >
-            {autosave.error ? (
-              <>
-                {autosave.error}
-                <Button onClick={autosave.retry}>Try again</Button>
-              </>
-            ) : (
-              (validationMessage ??
-              draftProfileResult.validationMessage ??
-              draftSearchPreferencesResult.validationMessage ??
-              (pendingActions.profileMutation || draftDiffers
-                ? "Saving…"
-                : (props.actionState.message ?? "Changes save automatically.")))
-            )}
-            <span className="contents" data-profile-assistant-launcher-slot />
-          </div>
-
           {profileSetupState.status === "completed" ? (
             <ProfileReadyBanner
               completedAt={profileSetupState.completedAt}
@@ -687,11 +755,21 @@ export function ProfileScreen(props: {
         </>
       }
     >
-      <section className="grid min-h-124 min-w-0 gap-(--gap-content) xl:h-full xl:min-h-0">
-        <div className="grid min-h-0 min-w-0 gap-2 xl:grid-rows-[auto_minmax(0,1fr)]">
+      <section
+        className="grid min-h-124 min-w-0 grid-cols-[minmax(0,1fr)] gap-(--gap-content) xl:h-full xl:min-h-0"
+        // Text typed into a field that keeps it until the field is left (a
+        // skill, a list entry) is not in the draft yet: the save line says
+        // so instead of "Profile saved." beside it.
+        onBlur={() => setTyping(false)}
+        onInput={() => setTyping(true)}
+      >
+        {/* One column no wider than the page: an auto column took the tab
+            strip's and the resume strip's whole width, running them and the
+            card past the window's edge at larger text. */}
+        <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] gap-2 xl:grid-rows-[auto_minmax(0,1fr)]">
           {/* Clip without creating a scroll owner between the tabs and the
               route scroller, so the tabs stay pinned as the profile moves. */}
-          <div className="sticky top-0 z-30 bg-(--background) shadow-[0_6px_16px_rgba(0,0,0,0.12)]">
+          <div className="sticky top-0 z-30 bg-(--background)">
             <ProfileSectionTabs
               activeSection={activeSection}
               onSectionChange={handleSectionChange}
@@ -701,67 +779,20 @@ export function ProfileScreen(props: {
           </div>
 
           <div className="surface-panel-shell relative flex min-h-0 flex-col overflow-hidden rounded-(--radius-field) border border-(--surface-panel-border-active-soft)">
+            {/* The compact strip heads the card, outside the scroller, so it
+                runs to the card's edge instead of stopping at the scroll
+                lane. The collapsed Assistant is portalled into the pinned
+                save footer, so the strip needs no launcher clearance. */}
+            {resumeDetailsOpen ? null : resumePanel}
             <div
               className="min-h-0 flex-1 overflow-y-auto"
               data-locked-pane-scroll-region
               id={PROFILE_SECTION_SCROLL_AREA_ID}
             >
-              {/* The collapsed Assistant is portalled into the pinned save
-                  footer, so the compact resume strip needs no launcher
-                  clearance. Keeping that old 4.5rem reservation here pushed
-                  the selected editor out of Profile's first compact viewport. */}
-              <div className="p-3 sm:px-4 sm:py-3">
-                {/* F80/F17: the strip repeated on all five tabs, including
-                    Job sources where the resume is irrelevant, and cost ~100px
-                    of the first viewport on every one of them. It belongs to
-                    the tabs whose content the resume actually fills. */}
-                {activeSection === "sources" ? null : (
-                  <ProfileResumePanel
-                    {...(props.sourceInfo
-                      ? { sourceInfo: props.sourceInfo }
-                      : {})}
-                    // Keep the resume source/status useful without allowing the
-                    // imported-review surface to push the selected profile
-                    // editor below the first viewport. The full review surface
-                    // stays available below Basics when that tab is active.
-                    compact
-                    importDisabledReason={importResumeGuardMessage}
-                    isProfileReady={profileSetupState.status === "completed"}
-                    isAnalyzeProfilePending={pendingActions.analyzeProfile}
-                    isImportResumePending={importPending}
-                    latestResumeImportReviewCandidates={
-                      latestResumeImportReviewCandidates
-                    }
-                    latestResumeImportRun={latestResumeImportRun}
-                    resumeImportProgress={importProgress}
-                    onAnalyzeProfileFromResume={onAnalyzeProfileFromResume}
-                    onApplyTimelineRepairAction={(proposalId, action) => {
-                      if (!latestResumeImportRun) {
-                        return Promise.reject(
-                          new Error(
-                            "The resume import run is no longer available.",
-                          ),
-                        );
-                      }
-                      return onApplyResumeTimelineRepairAction(
-                        latestResumeImportRun.id,
-                        proposalId,
-                        action,
-                      );
-                    }}
-                    onImportResume={onImportResume}
-                    {...(props.onRetryInterruptedImport
-                      ? {
-                          onRetryInterruptedImport:
-                            props.onRetryInterruptedImport,
-                        }
-                      : {})}
-                    onReviewImportSuggestion={handleReviewImportSuggestion}
-                    profileForm={profileForm}
-                    profile={overviewProfile}
-                  />
-                )}
-              </div>
+              {/* Open, the full import summary scrolls with the section. */}
+              {resumeDetailsOpen && resumePanel ? (
+                <div className="px-3 sm:px-4">{resumePanel}</div>
+              ) : null}
               <div
                 aria-labelledby={`${activeSection}-tab`}
                 className="relative z-0 p-3 sm:px-4 sm:py-3"
@@ -773,7 +804,14 @@ export function ProfileScreen(props: {
                     <ProfileSetupReviewQueueCard
                       compact
                       title="Review imported suggestions"
-                      description="Compare the resume details with your saved profile, then confirm or dismiss each suggestion."
+                      // Counts agree with the resume strip: it counts every
+                      // suggestion; this card says how many are on this tab.
+                      description={`${
+                        sectionReviewItems.length <
+                        latestResumeImportReviewCandidates.length
+                          ? `${sectionReviewItems.length} of the ${latestResumeImportReviewCandidates.length} suggestions from your resume ${sectionReviewItems.length === 1 ? "is" : "are"} on this tab. `
+                          : ""
+                      }Compare each with your saved profile, then confirm or dismiss it.`}
                       actionsDisabledReason={
                         hasUserDraftChanges
                           ? "Save your profile changes before reviewing imported suggestions."
@@ -884,46 +922,6 @@ export function ProfileScreen(props: {
                     />
                   )}
                 </fieldset>
-                {activeSection === "basics" ? (
-                  <div
-                    className="mt-6 [content-visibility:auto] [contain-intrinsic-size:auto_480px]"
-                    data-profile-resume-review
-                  >
-                    <ProfileResumePanel
-                      {...(props.sourceInfo
-                        ? { sourceInfo: props.sourceInfo }
-                        : {})}
-                      importDisabledReason={importResumeGuardMessage}
-                      isProfileReady={profileSetupState.status === "completed"}
-                      isAnalyzeProfilePending={pendingActions.analyzeProfile}
-                      isImportResumePending={importPending}
-                      latestResumeImportReviewCandidates={
-                        latestResumeImportReviewCandidates
-                      }
-                      latestResumeImportRun={latestResumeImportRun}
-                      resumeImportProgress={importProgress}
-                      onAnalyzeProfileFromResume={onAnalyzeProfileFromResume}
-                      onApplyTimelineRepairAction={(proposalId, action) => {
-                        if (!latestResumeImportRun) {
-                          return Promise.reject(
-                            new Error(
-                              "The resume import run is no longer available.",
-                            ),
-                          );
-                        }
-                        return onApplyResumeTimelineRepairAction(
-                          latestResumeImportRun.id,
-                          proposalId,
-                          action,
-                        );
-                      }}
-                      onImportResume={onImportResume}
-                      onReviewImportSuggestion={handleReviewImportSuggestion}
-                      profileForm={profileForm}
-                      profile={overviewProfile}
-                    />
-                  </div>
-                ) : null}
               </div>
             </div>
           </div>

@@ -199,8 +199,8 @@ describe("side menu while the assistant is open", () => {
     expect(savedPreference()).toBeNull();
   });
 
-  it("leaves the menu alone below 1440px, where it is not a rail", () => {
-    setWindowWidth(1200);
+  it("leaves the menu alone below 1200px, where the shell already shows the rail", () => {
+    setWindowWidth(1150);
     const { rerender } = renderShell();
     assistantState.value = { open: true, width: 400 };
     rerender();

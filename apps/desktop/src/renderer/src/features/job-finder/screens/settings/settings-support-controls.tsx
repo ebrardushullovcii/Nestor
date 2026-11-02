@@ -54,7 +54,7 @@ export function SettingsSupportControls() {
     <>
       <section className="surface-panel-shell grid gap-3.5 rounded-(--radius-field) border border-(--surface-panel-border) px-4 py-4">
         <div className="grid gap-1.5">
-          <p className="text-[10px] uppercase tracking-(--tracking-badge) text-muted-foreground">
+          <p className="text-xs tracking-(--tracking-badge) text-muted-foreground">
             Support
           </p>
           <h2 className="font-display font-semibold text-(--text-headline)">

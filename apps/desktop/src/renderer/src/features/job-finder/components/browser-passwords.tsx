@@ -1,3 +1,4 @@
+import { Disclosure } from "@renderer/components/ui/disclosure";
 import { useEffect, useState } from "react";
 import { KeyRound, X } from "lucide-react";
 import { Dialog } from "@renderer/components/ui/dialog";
@@ -211,8 +212,7 @@ export function BrowserPasswordPanel({
           readable passwords; remove your export yourself after importing.
         </p>
         {sources.length > 0 && (
-          <details>
-            <summary>Import directly from a browser</summary>
+          <Disclosure summary="Import directly from a browser">
             <p className="browser-password-help">
               Windows browser protection and Firefox may require CSV instead.
             </p>
@@ -251,7 +251,7 @@ export function BrowserPasswordPanel({
                 </button>
               ))}
             </div>
-          </details>
+          </Disclosure>
         )}
       </div>
     </Dialog>

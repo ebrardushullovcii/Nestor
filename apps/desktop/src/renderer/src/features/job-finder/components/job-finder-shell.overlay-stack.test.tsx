@@ -7,7 +7,6 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,7 +26,7 @@ const windowControlsState = {
 
 function taskCenterSummary(): HTMLElement {
   const summary = document.querySelector<HTMLElement>(
-    "summary[aria-label^='Activity']",
+    "button[aria-label^='Activity'][aria-expanded]",
   );
   if (!summary)
     throw new Error("Expected the Activity trigger to be rendered.");
@@ -36,41 +35,20 @@ function taskCenterSummary(): HTMLElement {
 
 async function openTaskCenter() {
   const before = isTaskCenterOpen();
-  // The trigger is a <summary>; the open panel carries the same name, so the
-  // element is selected rather than the accessible name alone.
+  // The open panel carries the trigger's name, so the element is selected
+  // rather than the accessible name alone.
   fireEvent.click(taskCenterSummary());
   await waitFor(() => expect(isTaskCenterOpen()).toBe(!before));
 }
 
-function getTaskCenterDetails(): HTMLDetailsElement {
-  const details = document.querySelector("details");
-  if (!(details instanceof HTMLDetailsElement)) {
-    throw new Error("Tasks details element is missing");
-  }
-  return details;
-}
-
 function isTaskCenterOpen(): boolean {
-  return getTaskCenterDetails().open;
+  return taskCenterSummary().getAttribute("aria-expanded") === "true";
 }
 
 async function openSearchDialog() {
   fireEvent.keyDown(document.body, { ctrlKey: true, key: "k" });
   await screen.findByRole("dialog", {
     name: "Search your workspace",
-  });
-}
-
-/** Only the compact top navigation's More trigger; the sidebar has its own. */
-function getCompactMoreButton(): HTMLElement {
-  const compactNavigation = document.querySelector(
-    "[data-job-finder-compact-navigation]",
-  );
-  if (!compactNavigation) {
-    throw new Error("Expected the compact navigation.");
-  }
-  return within(compactNavigation as HTMLElement).getByRole("button", {
-    name: /^More/u,
   });
 }
 
@@ -165,46 +143,6 @@ describe("JobFinderShell stacked overlay ownership", () => {
       name: "Search your workspace",
     });
 
-  it("closes a Planning popover opened above the Task Center one layer per Escape", async () => {
-    renderShell();
-
-    await openTaskCenter();
-    expect(isTaskCenterOpen()).toBe(true);
-
-    const moreButton = getCompactMoreButton();
-    fireEvent.click(moreButton);
-    expect(screen.getByRole("navigation", { name: "More" }));
-
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("navigation", { name: "More" })).toBeNull();
-    // The lower layer survives the first Escape.
-    expect(isTaskCenterOpen()).toBe(true);
-    expect(document.activeElement).toBe(moreButton);
-
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(isTaskCenterOpen()).toBe(false);
-    expect(document.activeElement).toBe(taskCenterSummary());
-  });
-
-  it("closes the Task Center opened above the Planning menu one layer per Escape", async () => {
-    renderShell();
-
-    const moreButton = getCompactMoreButton();
-    fireEvent.click(moreButton);
-    expect(screen.getByRole("navigation", { name: "More" }));
-
-    await openTaskCenter();
-
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(isTaskCenterOpen()).toBe(false);
-    // The menu opened first stays open until its own Escape.
-    expect(screen.getByRole("navigation", { name: "More" }));
-
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("navigation", { name: "More" })).toBeNull();
-    expect(document.activeElement).toBe(moreButton);
-  });
-
   it("summons search above an open Task Center and unwinds the stack with Escape", async () => {
     renderShell();
 
@@ -273,18 +211,6 @@ describe("JobFinderShell stacked overlay ownership", () => {
     fireEvent.keyDown(document, { ctrlKey: true, key: "b" });
 
     expect(shell?.dataset.sidebarCollapsed).toBe("false");
-  });
-
-  it("still summons search with Cmd+K while the Planning menu owns the surface", async () => {
-    renderShell();
-
-    fireEvent.click(getCompactMoreButton());
-    expect(screen.getByRole("navigation", { name: "More" }));
-
-    await openSearchDialog();
-
-    expect(screen.queryByRole("navigation", { name: "More" })).toBeNull();
-    expect(searchDialogQuery()).not.toBeNull();
   });
 
   it("dismisses the search result popup before closing the dialog on repeated Escape", async () => {
