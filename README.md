@@ -1,49 +1,55 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/in-app/wordmark-on-dark.svg">
-  <img src="assets/brand/in-app/wordmark.svg" alt="Nestor" width="240">
-</picture>
-
 # Nestor
 
-A local-first desktop app for job search, in development. Job Finder searches the job sites you choose in its own browser, shows how well each job fits you and why, writes a tailored resume for each job you shortlist, and fills in the applications. You decide what gets sent, and your profile, jobs, resumes and applications stay on your computer.
+A desktop app for job search, in development. Job Finder searches selected job sites in a built-in browser, explains job fit, drafts resumes and fills applications. Electron, React, TypeScript, SQLite and Playwright.
 
-**[Website and 38-second tour](https://trynestor.netlify.app)**
+**Status:** Job Finder and Live Assistant are implemented in the repository. This is an active development project; the checks below do not establish release readiness.
 
 ## How it works
 
-1. **Profile.** Import a resume (PDF, DOCX, TXT or Markdown). Nestor builds your profile and asks only about what is missing.
-2. **Find jobs.** Add job boards or company careers pages. Nestor searches them in its built-in browser and reads every listing.
-3. **Fit.** Every job gets a fit score, with the evidence behind it and what is still unknown.
-4. **Resume per job.** Pick how much each resume is tailored, then review, edit and approve it.
-5. **Apply.** Nestor opens the application, fills it in and attaches the resume. Sign-in, security checks and account creation always pause for you, and nothing is sent unless you allow it.
-6. **Track.** See where each application stands and what it needs from you.
+1. **Profile.** Import a resume in PDF, DOCX, TXT or Markdown and review the extracted profile.
+2. **Find jobs.** Add job boards or company careers pages, then inspect the listings and fit explanations.
+3. **Resume per job.** Choose Original, Light, Tailored or Aggressive. Review the draft before approving it. Aggressive can add skills from a listing that are absent from the imported profile; review every claim before using an export.
+4. **Apply.** Fill forms and attach the resume. Sending modes support confirmation before final submission or automatic submission with saved permission. Filling a form can send details or upload files to the job site before final submission. Saved sign-ins and additional browser permissions are optional.
+5. **Track.** Review application progress and items that need your attention.
 
-A second module, Live Assistant, is an interview companion.
+Live Assistant provides answer and transcript overlays during live interviews, with a hide shortcut and requested screen-capture exclusion. Exclusion across meeting apps has not been verified. Its use depends on the interview's rules and the participants' permission.
+
+## Data and AI
+
+Profile, job, resume and application records are stored locally in SQLite. AI features can send text, browser/tool context and images to the configured provider; audio processing depends on the transcription setup. See [AI provider setup](docs/AI_PROVIDER_SETUP.md) for configuration.
 
 ## How it is built
 
-- Electron, React and TypeScript in a pnpm and Turborepo monorepo, with apps in `apps/` and packages in `packages/`.
-- The renderer talks to the Electron main process only through a typed preload bridge.
-- Browser automation runs on Playwright and stays source-generic: no per-site route builders ([ADR 0007](docs/adr/0007-source-generic-browser-workflows.md)).
-- Local data is stored in SQLite (`node:sqlite`).
-- AI behaviour is checked by evaluation cases in `packages/ai-evals`.
-- Decisions are recorded as ADRs in [docs/adr](docs/adr/README.md).
+- Electron main and the React renderer communicate through a typed preload bridge.
+- Playwright handles browser automation; shared orchestration stays source-generic.
+- A pnpm and Turborepo monorepo separates desktop, browser, data and AI packages.
+- [Architecture](docs/ARCHITECTURE.md) covers package boundaries and data flow.
 
-## Working on the repo
+## Building from source
 
-- Repo contract: [AGENTS.md](AGENTS.md)
-- Docs map: [docs/README.md](docs/README.md)
-- Durable goals: [docs/GOALS.md](docs/GOALS.md)
-- Decisions: [docs/adr/README.md](docs/adr/README.md)
-- UI design references: [docs/Design/README.md](docs/Design/README.md)
-
-Pull in architecture, contract, and testing docs only when the task needs them.
+Use Node.js 24 and pnpm 10.8.0. Install dependencies, configure a local `.env` using [.env.example](.env.example), and follow [AI provider setup](docs/AI_PROVIDER_SETUP.md) for the AI features.
 
 ```bash
 pnpm install
-pnpm format:check
-pnpm verify:quick
-pnpm lsp:typescript
-pnpm knip
 pnpm desktop:dev
 ```
+
+## Checks
+
+- `pnpm verify:quick`: structure and source-generic checks, lint and TypeScript.
+- `pnpm test:correctness`: automated correctness tests.
+- `packages/ai-evals`: deterministic evaluation cases and separate configured-model benchmarks.
+- [CI runs](https://github.com/ebrardushullovcii/Nestor/actions/workflows/ci.yml): Linux static checks and Windows tests. CI does not replace live-model evaluation or packaged-app verification.
+
+[Testing](docs/TESTING.md) maps changes to focused checks and built-app verification. Application tests use synthetic profiles and local replica job sites.
+
+## Documentation
+
+- [Product goals](docs/GOALS.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Testing](docs/TESTING.md)
+- [Documentation index](docs/README.md)
+
+## Contributing
+
+Start with [AGENTS.md](AGENTS.md) for repository rules. Keep changes focused and use the checks relevant to the affected package.
