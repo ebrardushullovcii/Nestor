@@ -9,11 +9,11 @@ import { formatCompactCount } from "@renderer/lib/compact-count";
  * header in rem, not a viewport media query in px: larger text (a bigger root
  * font) folds the labels to icons the way a narrow window does, instead of
  * running "Job Finder" into "Search"; the app's own zoom, which scales the
- * root font and the window alike, keeps the 1200px behaviour. A count is a
- * small pill pinned to the tool's top-right corner, out of the flow: no tool
- * reserves room for one, so every tool is its own natural width and the gaps
- * between them are equal, and a count arriving never resizes the button or
- * moves its neighbours.
+ * root font and the window alike, keeps the 1200px behaviour. Activity's
+ * count is a small pill pinned to the tool's top-right corner, out of the
+ * flow, so it never resizes the button. Needs you's count sits in the row
+ * after the label instead, so a count of any length leaves the bell visible.
+ * No tool reserves room for a count it does not have.
  */
 export const HEADER_TOOL_CLASS =
   "relative inline-flex h-8 min-w-8 shrink-0 items-center justify-center gap-1.5 rounded-(--radius-button) border border-transparent px-2 text-(length:--text-small) font-medium whitespace-nowrap text-foreground-soft outline-none transition-colors duration-(--duration-fast) hover:bg-accent hover:text-foreground active:bg-pressed focus-ring";
@@ -52,6 +52,14 @@ export const HEADER_TOOL_COUNT_SLOT_CLASS =
  */
 export const HEADER_TOOL_COUNT_CLASS =
   "inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-xs leading-none font-medium tabular-nums ring-2 ring-(--shell-header-bg)";
+/**
+ * A count in the tool's own row, after the label (Needs you): the corner
+ * pill grows left over a 16px icon, so from two digits it hid the bell. In
+ * the row, the icon, the label and any number of digits each keep their
+ * room; the button grows by the pill and its 6px gap while it has a count.
+ */
+export const HEADER_TOOL_INLINE_COUNT_CLASS =
+  "inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-full px-1.5 text-xs leading-none font-medium tabular-nums";
 export const HEADER_TOOL_COUNT_NEUTRAL_CLASS =
   "border border-(--border-strong) bg-(--shell-header-bg) text-foreground";
 export const HEADER_TOOL_COUNT_ATTENTION_CLASS =
