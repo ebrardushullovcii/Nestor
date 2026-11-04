@@ -705,7 +705,11 @@ export function FindJobsScreen() {
           </button>
         </>
       ) : null}
-      {recheckingFit > 0 ? (
+      {status.fitRunning === false && checkingFit + recheckingFit > 0 ? (
+        <span role="status">
+          {` · ${plural(checkingFit + recheckingFit, "job")} waiting for a fit score`}
+        </span>
+      ) : recheckingFit > 0 ? (
         <span role="status">
           {` · Re-checking fit for ${plural(recheckingFit, "job")}`}
         </span>

@@ -572,6 +572,32 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   });
   expect(duplicateRequests).toEqual([[1, 2], [1]]);
   expect(duplicates.map((fit) => fit.id)).toEqual([2, 1]);
+  const mixedRequests: number[][] = [];
+  const partial = await fitJobs({
+    profile,
+    goals: { targetRoles: ["Data Analyst"], locations: ["Berlin"] },
+    jobs: [job, { ...job, id: 2 }, { ...job, id: 3 }],
+    client: {
+      chatWithTools: (messages) => {
+        const ids = (
+          JSON.parse(messages[1].content) as {
+            listings: { id: number }[];
+          }
+        ).listings.map((row) => row.id);
+        mixedRequests.push(ids);
+        return Promise.resolve({
+          content: JSON.stringify({
+            fits:
+              mixedRequests.length === 1
+                ? [fit, { ...fit, id: 2, s: "invalid" }, { ...fit, id: 999 }]
+                : ids.map((id) => ({ ...fit, id })),
+          }),
+        });
+      },
+    },
+  });
+  expect(mixedRequests).toEqual([[1, 2, 3], [2], [3]]);
+  expect(partial.map((fit) => fit.id)).toEqual([1, 2, 3]);
   const requestSchema =
     client.chatWithTools.mock.calls[0][2]?.jsonSchema?.schema;
   expect(requestSchema).toMatchObject({

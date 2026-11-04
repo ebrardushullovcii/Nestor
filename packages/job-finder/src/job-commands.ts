@@ -199,6 +199,11 @@ export function createJobCommandRunner(deps: {
       current()?.stop();
       return status();
     },
+    retry_fit: async () => {
+      const runner = await search();
+      void runner.scoreUnscored().catch(() => undefined);
+      return runner.status();
+    },
     search_status: () => status(),
     list_search_sources: (query) => createSearchSourcesStore(store).list(query),
   };

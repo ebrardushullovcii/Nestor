@@ -496,7 +496,7 @@ describe("Live Assistant AI providers", () => {
       "deepseek-v4-flash",
     );
     expect(providers.screenshotVisionProvider.getStatus().detail).toContain(
-      "muse-spark-1.3-contributor",
+      "deepseek-v4.1-flash",
     );
   });
 

@@ -68,6 +68,8 @@ export interface JobSearchEngine {
     signal: AbortSignal;
   }): Promise<ReadListingResult>;
   fitJobs(input: {
+    /** Save complete judgments before another batch or repair can fail. */
+    onBatch?: (fits: readonly JobFitUpdate[]) => Promise<void>;
     onUsage?: (usage: ModelTokenUsage) => void;
     request?: string;
     jobs: readonly JobDetail[];

@@ -51,7 +51,9 @@ const CAPABILITY_TABLE: Record<
     streaming: true,
     contextWindowTokens: 128_000,
     maxOutputTokens: 8_000,
-    images: false,
+    // Simple image input is accepted on the configured gateway route. This
+    // declares transport support, not OCR or visual-task accuracy.
+    images: true,
     continuation: "reasoning_content",
   },
   "muse-spark-1.3-contributor": {
@@ -172,8 +174,7 @@ export function resolveAssistantModelRouteFromEnvironment(
   env: StringMap = process.env,
 ): AssistantModelRouteResolution {
   const apiKey =
-    env.NESTOR_AI_ASSISTANT_API_KEY?.trim() ||
-    env.NESTOR_AI_API_KEY?.trim();
+    env.NESTOR_AI_ASSISTANT_API_KEY?.trim() || env.NESTOR_AI_API_KEY?.trim();
   if (!apiKey) {
     return { available: false, detail: ASSISTANT_MODEL_OUTAGE_DETAIL };
   }

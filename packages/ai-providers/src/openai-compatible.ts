@@ -146,7 +146,7 @@ function isStableFitRoute(route: {
 }): boolean {
   return (
     route.apiMode === "responses" &&
-    route.model === DEFAULT_TEXT_MODEL &&
+    route.model === "muse-spark-1.3-contributor" &&
     isOpenCodeBaseUrl(route.baseUrl)
   );
 }
@@ -269,6 +269,13 @@ export function createOpenAiCompatibleJobFinderAiClient(
     if (!task) return agentReasoningEffort;
     const configured = validatedOptions?.taskReasoningEfforts?.[task];
     if (configured) return configured;
+    // These bounded structured judgments need the answer budget, not a long
+    // reasoning transcript. Other roles keep their independent effort.
+    if (
+      validatedOptions?.model === "deepseek-v4.1-flash" &&
+      (task === "fit_batch" || task === "listing_screen")
+    )
+      return "none";
     // Extraction reads the document into typed fields; unconfigured it
     // runs low like the other read tasks, not at the agent effort.
     if (task === "resume_import") return "low";
@@ -277,7 +284,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
     // the independent claim check and repairs still run at their own effort.
     if (
       task === "resume_writer" &&
-      validatedOptions?.model === DEFAULT_TEXT_MODEL
+      validatedOptions?.model === "muse-spark-1.3-contributor"
     )
       return "medium";
     return task === "resume_writer" || task === "listing_read"
@@ -292,7 +299,9 @@ export function createOpenAiCompatibleJobFinderAiClient(
     baseUrl: validatedOptions?.baseUrl ?? null,
     modelContextWindowTokens: configuredOptions.success
       ? (validatedOptions?.contextWindowTokens ??
-        DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS)
+        (validatedOptions?.model === "deepseek-v4.1-flash"
+          ? 128_000
+          : DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS))
       : null,
     reservedHeadroomTokens: null,
     requestTimeoutMs: configuredOptions.success
@@ -1284,6 +1293,14 @@ export function createJobFinderAiClientFromEnvironment(
       parseModelApiMode(env.NESTOR_AI_API_MODE) ?? DEFAULT_TEXT_MODEL_API_MODE,
   };
   const taskReasoningEfforts = resolveTaskReasoningEffortsFromEnvironment(env);
+  if (primaryRoute.model === "deepseek-v4.1-flash") {
+    if (!parseModelReasoningEffort(env.NESTOR_AI_FIT_REASONING_EFFORT))
+      taskReasoningEfforts.fit_batch = "none";
+    if (
+      !parseModelReasoningEffort(env.NESTOR_AI_LISTING_SCREEN_REASONING_EFFORT)
+    )
+      taskReasoningEfforts.listing_screen = "none";
+  }
   if (
     isStableFitRoute(primaryRoute) &&
     !parseModelReasoningEffort(env.NESTOR_AI_FIT_REASONING_EFFORT)
@@ -1307,28 +1324,8 @@ export function createJobFinderAiClientFromEnvironment(
     resumeExtractionTimeoutMs: parsedResumeExtractionTimeoutMs,
     ...parsedResilience,
   });
-  // Profession classification does not need a reasoning transcript. MiMo Flash
-  // accepts none on Go without a reduced-allowance multiplier.
-  const screeningClient = isStableFitRoute(primaryRoute)
-    ? createOpenAiCompatibleJobFinderAiClient({
-        apiKey,
-        baseUrl: primaryRoute.baseUrl,
-        model: "mimo-v2.6-flash",
-        apiMode: "chat_completions",
-        reasoningEffort: "none",
-        taskReasoningEfforts: {
-          listing_screen:
-            parseModelReasoningEffort(
-              env.NESTOR_AI_LISTING_SCREEN_REASONING_EFFORT,
-            ) ?? "none",
-        },
-        label: "Job title screening",
-        requestTimeoutMs: parsedRequestTimeoutMs,
-        ...parsedResilience,
-      })
-    : primaryClient;
   // Aggressive resume tailoring uses its own model route rather than the
-  // primary provider. DeepSeek V4.1 Flash is text-only, so it uses Chat
+  // primary provider. DeepSeek V4.1 Flash uses Chat
   // Completions; reasoning effort is read from its own env var so it is
   // always applied (defaults to `high` when not configured). See ADR 0019.
   const aggressiveClient = createOpenAiCompatibleJobFinderAiClient({
@@ -1740,11 +1737,7 @@ export function createJobFinderAiClientFromEnvironment(
     },
     async chatWithTools(messages, tools, options?: ChatWithToolsOptions) {
       try {
-        return await (
-          options?.reasoningTask === "listing_screen"
-            ? screeningClient
-            : primaryClient
-        ).chatWithTools(messages, tools, options);
+        return await primaryClient.chatWithTools(messages, tools, options);
       } catch (error) {
         logFallbackError("chatWithTools", error);
         throw error;

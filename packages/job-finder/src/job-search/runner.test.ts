@@ -1194,3 +1194,66 @@ test("a search the person starts may use a browser they closed; background fit m
   await expect(runner.keepReading()).rejects.toThrow();
   expect(onExplicitStart).toHaveBeenCalledTimes(2);
 });
+
+test("failed fit work retains jobs and retries saved listings without reading sites", async () => {
+  const { runner, engine, store } = setup();
+  const original = engine.fitJobs.getMockImplementation()!;
+  engine.fitJobs.mockResolvedValue([]);
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(runner.status()).toMatchObject({ fitRunning: false, fitChecking: 1 });
+  expect(runner.status().search?.error).toContain("waiting");
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(1);
+  const reads = engine.readListings.mock.calls.length;
+  const screens = engine.screenCards.mock.calls.length;
+  const collect = engine.collectSource.mock.calls.length;
+  const gate = deferred<JobFitUpdate[]>();
+  engine.fitJobs.mockImplementationOnce(() => gate.promise);
+  const retry = runner.scoreUnscored();
+  expect(runner.status().fitRunning).toBe(true);
+  await vi.waitFor(() => expect(engine.fitJobs).toHaveBeenCalledTimes(3));
+  runner.stop();
+  await retry;
+  expect(runner.status().fitRunning).toBe(false);
+  expect(store.unscoredJobIds(100)).toHaveLength(1);
+  gate.resolve([]);
+  engine.fitJobs.mockImplementation(original);
+  expect(await runner.scoreUnscored()).toBe(1);
+  expect(runner.status()).toMatchObject({
+    fitRunning: false,
+    fitChecking: 0,
+    fitError: null,
+  });
+  expect(engine.readListings).toHaveBeenCalledTimes(reads);
+  expect(engine.screenCards).toHaveBeenCalledTimes(screens);
+  expect(engine.collectSource).toHaveBeenCalledTimes(collect);
+  await runner.scoreUnscored();
+  expect(engine.fitJobs).toHaveBeenCalledTimes(4);
+});
+
+test("complete fit batches persist before later work is cancelled", async () => {
+  const { runner, engine, store } = setup();
+  const gate = deferred<JobFitUpdate[]>();
+  engine.fitJobs.mockImplementation(async ({ jobs, onBatch }) => {
+    await onBatch?.(
+      jobs.map((job) => ({
+        id: job.id,
+        score: 77,
+        summary: "Complete model judgment",
+        reasons: [],
+        gaps: [],
+      })),
+    );
+    return gate.promise;
+  });
+  await runner.start({ postedWithin: "any" });
+  await vi.waitFor(() =>
+    expect(store.listJobs({ stage: "found" }).rows[0]?.fitScore).toBe(77),
+  );
+  expect(runner.status().fitRunning).toBe(true);
+  runner.stop();
+  await finished(runner);
+  gate.resolve([]);
+  expect(store.listJobs({ stage: "found" }).rows[0]?.fitScore).toBe(77);
+  expect(runner.status()).toMatchObject({ fitRunning: false, fitChecking: 0 });
+});

@@ -117,7 +117,7 @@ async function ask<Output, Input>(
     {
       ...(model.signal ? { signal: model.signal } : {}),
       reasoningTask,
-      maxOutputTokens: Math.max(8000, maxOutputTokens),
+      maxOutputTokens,
       includeUsage: true,
       jsonOutput: true,
       ...(jsonSchema ? { jsonSchema } : {}),
@@ -1115,7 +1115,9 @@ export async function fitJobs(
             passages,
             listings,
           },
-          z.object({ fits: z.array(fitSchema) }),
+          // Validate rows independently: one malformed judgment must not
+          // discard other complete judgments from the same response.
+          z.object({ fits: z.array(z.unknown()) }),
           Math.max(8000, batch.length * 350),
           "fit_batch",
           fitResponseSchema(),
@@ -1125,11 +1127,21 @@ export async function fitJobs(
         });
         if (!answer) return batch;
         const ids = new Set(batch.map((job) => String(job.id)));
-        if (answer.fits.some((fit) => !ids.has(String(fit.id)))) return batch;
+        const rows = answer.fits.flatMap((row) => {
+          const parsed = fitSchema.safeParse(row);
+          return parsed.success && ids.has(String(parsed.data.id))
+            ? [parsed.data]
+            : [];
+        });
         const counts = new Map<number, number>();
-        for (const fit of answer.fits)
-          counts.set(fit.id, (counts.get(fit.id) ?? 0) + 1);
-        const fits = answer.fits
+        for (const row of answer.fits) {
+          // Count even malformed duplicates so a valid-looking duplicate
+          // never chooses between conflicting judgments for one job.
+          const id = z.object({ id: z.number() }).safeParse(row);
+          if (id.success)
+            counts.set(id.data.id, (counts.get(id.data.id) ?? 0) + 1);
+        }
+        const fits = rows
           .filter((fit) => counts.get(fit.id) === 1)
           .map((fit) => {
             const { status: eligibility, reason: eligibilityReason } =
@@ -1206,7 +1218,14 @@ export async function fitJobs(
       const missing = await judge(batch);
       // Preserve valid judgments. An omitted job has no fit to reuse; retry only that job,
       // in smaller groups, once. The runner leaves any remaining omissions unscored.
-      await mapConcurrent(batches(missing, 8), 1, judge);
+      await mapConcurrent(
+        batches(
+          missing,
+          Math.min(8, Math.max(1, Math.floor(batch.length / 2))),
+        ),
+        1,
+        judge,
+      );
     },
   );
   return output;

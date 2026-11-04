@@ -378,17 +378,30 @@ export function SearchStatus(props: {
   className?: string;
 }) {
   const more = useKeepReading();
+  const [fitPending, setFitPending] = useState(false);
+  const [fitError, setFitError] = useState<string | null>(null);
   const partial = props.status.progress?.partial ?? 0;
   const running = props.status.search?.state === "running";
+  const remaining = props.status.fitChecking ?? 0;
+  const fitting = props.status.fitRunning === true;
   const progress = running ? runningLine(props.status) : null;
-  const scoreRetry =
-    !running &&
-    Boolean(props.status.search?.error) &&
-    props.status.search?.state === "done";
+  const scoreRetry = !running && !fitting && remaining > 0;
+  const fitAction = (command: "retry_fit" | "stop_search") => {
+    setFitPending(true);
+    setFitError(null);
+    void window.nestor.jobs
+      .run(command, {})
+      .catch(() => {
+        setFitError(
+          "Could not continue fit scoring. Your saved jobs are kept.",
+        );
+      })
+      .finally(() => setFitPending(false));
+  };
   const failed = (props.status.progress?.failed ?? 0) > 0;
   const extra = `${
     scoreRetry
-      ? " Some jobs still need a fit score; the next search retries them."
+      ? ` ${props.status.fitError ? "Fit scoring did not finish. " : ""}${plural(remaining, "saved job")} ${remaining === 1 ? "needs" : "need"} a fit score. Retry fit continues from saved listings.`
       : ""
   }${
     partial > 0
@@ -412,13 +425,17 @@ export function SearchStatus(props: {
       className={cn("flex min-h-8 min-w-0 items-center gap-2", props.className)}
       data-search-status
     >
-      {props.error ? (
+      {props.error || fitError ? (
         <p
           className="min-w-0 flex-1 truncate text-(length:--text-small) text-(--warning-text)"
           role="alert"
-          title={props.error}
+          title={props.error ?? fitError ?? undefined}
         >
-          {props.error}
+          {props.error ?? fitError}
+        </p>
+      ) : !running && fitting ? (
+        <p role="status" className="min-w-0 flex-1 text-(length:--text-small)">
+          {`Checking fit for ${plural(remaining, "saved job")}…`}
         </p>
       ) : progress ? (
         <FitText
@@ -445,6 +462,33 @@ export function SearchStatus(props: {
           )}
         />
       )}
+      {scoreRetry ? (
+        <Button
+          className="shrink-0"
+          disabled={fitPending}
+          size="toolbar"
+          type="button"
+          variant="outline"
+          onClick={() => fitAction("retry_fit")}
+          title={
+            props.status.fitError ??
+            "Continue scoring saved listings without reading sites again"
+          }
+        >
+          Retry fit
+        </Button>
+      ) : !running && fitting ? (
+        <Button
+          className="shrink-0"
+          disabled={fitPending}
+          size="toolbar"
+          type="button"
+          variant="outline"
+          onClick={() => fitAction("stop_search")}
+        >
+          Stop fit
+        </Button>
+      ) : null}
       {!running && partial > 0 ? (
         <Button
           className="shrink-0"

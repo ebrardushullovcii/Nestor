@@ -156,6 +156,12 @@ export const JOB_COMMANDS = {
     description: "Stops the running search. Jobs already found stay.",
     input: NoInputSchema,
   },
+  retry_fit: {
+    effect: "external",
+    description:
+      "Retries unfinished fit scoring using saved full listings, without reading job sites again. Keeps completed scores and returns at once. Stop search also stops this work.",
+    input: NoInputSchema,
+  },
   list_search_sources: {
     effect: "read",
     description:
@@ -201,6 +207,7 @@ export interface JobCommandOutputs extends ProfileCommandOutputs {
   retry_source: JobSearchStatus;
   keep_reading: JobSearchStatus;
   stop_search: JobSearchStatus;
+  retry_fit: JobSearchStatus;
   search_status: JobSearchStatus;
   list_search_sources: JobSearchSourcePage;
 }

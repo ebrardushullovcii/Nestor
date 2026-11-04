@@ -62,6 +62,7 @@ export function createJobSearchRunner(
     siteDirty = false;
   let continuation: ReturnType<typeof setTimeout> | null = null;
   let recoveryQueue: FitQueue | null = null;
+  let recoveryError: string | null = null;
   let visibleIds: readonly number[] = [];
   const scheduleFit = (delay = 300) => {
     if (continuation) clearTimeout(continuation);
@@ -90,6 +91,12 @@ export function createJobSearchRunner(
       : { sources: [], progress: null };
     const fits = deps.store.fitCounts();
     return {
+      fitRunning: Boolean(
+        (active && !active.controller.signal.aborted) ||
+        (recovery && !recovery.controller.signal.aborted),
+      ),
+      fitError:
+        fits.checking > 0 ? (recoveryError ?? search?.error ?? null) : null,
       fitChecking: fits.checking,
       fitRechecking: fits.rechecking,
       search: search ? structuredClone(search) : null,
@@ -169,6 +176,7 @@ export function createJobSearchRunner(
     targets: JobDiscoveryTarget[],
     forced: { ids: ReadonlySet<string>; full: boolean },
   ) => {
+    recoveryError = null;
     setMaxListeners(0, run.controller.signal);
     const signal = run.controller.signal,
       settings = run.record!.settings;
@@ -777,6 +785,7 @@ export function createJobSearchRunner(
     },
     scoreUnscored() {
       if (recovery) return recovery.result;
+      recoveryError = null;
       const controller = new AbortController();
       const result = Promise.resolve()
         .then(async () => {
@@ -821,7 +830,11 @@ export function createJobSearchRunner(
             controller.signal,
             concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
             () => notify(),
-            () => {},
+            () => {
+              recoveryError =
+                "Some saved jobs could not be scored. Your progress is kept; retry fit to continue.";
+              notify();
+            },
             // The last search's note was for that search only.
             search ? { ...search.settings, note: "" } : undefined,
             () => notify(),
@@ -839,6 +852,8 @@ export function createJobSearchRunner(
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return 0;
+          recoveryError =
+            "Fit scoring did not finish. Your progress is kept; retry fit to continue.";
           throw error;
         })
         .finally(() => {
@@ -847,6 +862,7 @@ export function createJobSearchRunner(
           notify();
         });
       recovery = { controller, result };
+      notify();
       return result;
     },
   };
