@@ -3,6 +3,7 @@ import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/appl
 import fallbackReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-option-fallback.json";
 import {
   CandidateProfileSchema,
+  JobSearchPreferencesSchema,
   normalizeFormQuestionPrompt,
 } from "@nestor/contracts";
 import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/repeated-employment-step.json";
@@ -11437,3 +11438,156 @@ test("long choices advertise and return their complete scoped list through read_
   await runApplyAgent(input, client);
   expect(turn).toBe(2);
 });
+
+test("a direct finish on private pay keeps the field blank and offers the stored range", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        tagName: "select",
+        inputType: "",
+        label: "Expected annual salary range (EUR)",
+        value: "",
+        options: ["70 000 EUR – 80 000 EUR", "80 000 EUR – 90 000 EUR"],
+      },
+    ],
+  });
+  const testConfig = config(source);
+  testConfig.sources.preferences = JobSearchPreferencesSchema.parse({
+    minimumSalaryUsd: null,
+    approvalMode: "review_before_submit",
+    tailoringMode: "balanced",
+    compensation: {
+      maximum: 85000,
+      currency: "EUR",
+      currencyStatus: "explicit",
+      interval: "year",
+    },
+  });
+  const choose = vi.spyOn(testConfig.hands, "chooseOption");
+  const result = await runApplyAgent(
+    testConfig,
+    scriptedModel([
+      {
+        name: "finish",
+        args: {
+          reason: "Please answer Expected annual salary range (EUR).",
+          needsPerson: true,
+          forPerson: ["Expected annual salary range (EUR)"],
+        },
+      },
+    ]),
+  );
+  const questions = result.pauses.flatMap(
+    (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+  );
+  expect(result.outcome).toBe("paused");
+  expect(questions).toHaveLength(1);
+  expect(questions[0]?.askReason?.check).toBe("pay_permission");
+  expect(questions[0]?.askReason?.detail).toContain("85000 EUR per year");
+  expect(questions[0]?.suggestedAnswers[0]?.text).toBe(
+    "80 000 EUR – 90 000 EUR",
+  );
+  expect(choose).not.toHaveBeenCalled();
+  expect(source.controls[0]?.value).toBe("");
+});
+
+test.each([true, false])(
+  "a held expected-pay range uses the recorded target only with disclosure permission (%s)",
+  async (allowed) => {
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          tagName: "select",
+          inputType: "",
+          label: "Expected annual salary range (EUR)",
+          value: "",
+          options: ["70 000 EUR – 80 000 EUR", "80 000 EUR – 90 000 EUR"],
+        },
+      ],
+    });
+    const input = config(source, { modelQuestionClassification: true });
+    input.authority.salaryDisclosure = allowed
+      ? "answer_from_profile"
+      : "pause_for_user";
+    input.sources.preferences = JobSearchPreferencesSchema.parse({
+      minimumSalaryUsd: null,
+      approvalMode: "review_before_submit",
+      tailoringMode: "balanced",
+      compensation: {
+        maximum: 85000,
+        currency: "EUR",
+        currencyStatus: "explicit",
+        interval: "year",
+      },
+    });
+    const choose = vi.fn((_ref: string, value: string) => {
+      source.controls[0].value = value;
+      source.controls[0].selectedOptionLabel = value;
+      return Promise.resolve({ ok: true as const, observedValue: value });
+    });
+    input.hands.chooseOption = choose;
+    const finish = repeatingModel("finish", {
+      reason: "I filled what I could.",
+    });
+    const result = await runApplyAgent(input, {
+      chatWithTools: (messages, definitions, options) => {
+        const name = definitions[0]?.function.name;
+        if (name === "report_question_kinds")
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "kinds",
+                type: "function" as const,
+                function: {
+                  name,
+                  arguments: JSON.stringify({
+                    plainIndexes: [],
+                    flagged: [
+                      {
+                        index: 0,
+                        eligibilityKind: null,
+                        asksAboutPay: true,
+                        asksCurrentPay: false,
+                        asksHiringCountry: false,
+                        required: true,
+                        declarationKind: null,
+                      },
+                    ],
+                    tags: [
+                      {
+                        index: 0,
+                        kind: "salary",
+                        country: null,
+                        sourceId: null,
+                      },
+                    ],
+                  }),
+                },
+              },
+            ],
+          });
+        if (name === "match_application_answer")
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "match",
+                type: "function" as const,
+                function: {
+                  name,
+                  arguments: JSON.stringify({ sourceId: null, answer: null }),
+                },
+              },
+            ],
+          });
+        return finish.chatWithTools(messages, definitions, options);
+      },
+    });
+    expect(result.outcome).toBe(allowed ? "prepared" : "paused");
+    expect(choose).toHaveBeenCalledTimes(allowed ? 1 : 0);
+    expect(source.controls[0]?.value).toBe(
+      allowed ? "80 000 EUR – 90 000 EUR" : "",
+    );
+  },
+);

@@ -66,6 +66,7 @@ import {
   type FillPressState,
 } from "./fill-presses";
 import { matchOption } from "./option-match";
+import { expectedPaySuggestion } from "./expected-pay";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
 import { currentTimezoneAnswer } from "./current-timezone";
@@ -218,7 +219,7 @@ export interface ApplyExecutorDeps {
   checkWrittenAnswer?: (
     question: string,
     answer: string,
-    evidencePolicy?: "factual_summary" | "factual_inference",
+    evidencePolicy?: "factual_summary" | "factual_inference" | "saved_answer",
   ) => Promise<{
     supported: boolean;
     reason: string;
@@ -848,7 +849,7 @@ async function withModelQuestionKinds(
 }
 
 const PAY_KEPT_PRIVATE_REASON =
-  "Job Finder leaves pay questions to you. Answer it yourself if you want to.";
+  "Your pay setting is Pause for me on pay. Choose the amount you want to disclose for this application.";
 
 type AnswerDecision =
   | { kind: "use"; answer: ApplyAnswer }
@@ -935,6 +936,61 @@ function proposedValueSuggestion(
  * themselves is left for them, whatever the model proposed. Without a fact
  * check (an offline run) only stored facts go in.
  */
+/** The pay setting applies to every handoff, including a direct model finish. */
+export function payDisclosurePause(
+  control: ApplyFormControl,
+  config: ApplyAgentConfig,
+  controls: readonly ApplyFormControl[],
+): Extract<AnswerDecision, { kind: "leave" }> | null {
+  const saved = savedSuggestion(control, config);
+  const savedPayRecord = savedAnswerForQuestion(
+    control,
+    config.sources.reusableAnswers,
+    controls,
+  );
+  const ownPay =
+    isAnswerFromThisApplication(
+      savedPayRecord,
+      config.application,
+      config.sources.posting.location,
+    ) ||
+    (savedPayRecord?.id.startsWith("application_") &&
+      !savedPayRecord.applicationScope);
+  if (
+    control.questionKind === "salary_expectation" &&
+    config.authority.salaryDisclosure !== "answer_from_profile" &&
+    !ownPay
+  ) {
+    const suggestion = saved ?? expectedPaySuggestion(control, config.sources);
+    const target =
+      suggestion?.sourceId === "preferences.compensation.maximum"
+        ? suggestion.groundedIn[0]
+        : suggestion?.value;
+    const detail = [
+      PAY_KEPT_PRIVATE_REASON,
+      target ? `Your saved expected pay is ${target}.` : "",
+      suggestion && target !== suggestion.value
+        ? `The matching option is ${suggestion.value}.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 4000);
+    return {
+      kind: "leave",
+      reason: PAY_KEPT_PRIVATE_REASON,
+      suggestion,
+      permission: true,
+      askReason: {
+        kind: "source_rejected",
+        check: "pay_permission",
+        detail,
+      },
+    };
+  }
+  return null;
+}
+
 async function decideAnswer(input: {
   deps: ApplyExecutorDeps;
   control: ApplyFormControl;
@@ -991,6 +1047,8 @@ async function decideAnswer(input: {
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const saved = savedSuggestion(control, config);
+  const payPause = payDisclosurePause(control, config, input.controls);
+  if (payPause) return payPause;
   if (
     control.repeatedQuestion &&
     !saved &&
@@ -1023,6 +1081,7 @@ async function decideAnswer(input: {
       pageInstructions: input.pageText,
       approvedAttestations: config.authority.preApprovedAttestationKinds,
       application: config.application,
+      payDisclosed,
       now: deps.now(),
     });
     if (permission.kind === "needs_you")
@@ -1120,6 +1179,18 @@ async function decideAnswer(input: {
           "This answer could not be checked against your sources.",
         suggestion: null,
         permission: true,
+      };
+    if (permission.evidencePolicy === "saved_answer" && permission.source)
+      return {
+        kind: "use",
+        answer: {
+          value,
+          kind: control.questionKind,
+          sourceKind: "answer_library",
+          sourceId: permission.source.id,
+          provenanceLabel: "your answer to the same question",
+          groundedIn: [permission.source.id],
+        },
       };
     return {
       kind: "use",

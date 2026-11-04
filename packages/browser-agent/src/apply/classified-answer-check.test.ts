@@ -927,7 +927,12 @@ test.each([
     ]);
   }
   expect(client.chatWithTools).toHaveBeenCalledTimes(
-    entry.name === "an uncertain Profile timezone" ? 6 : 2,
+    [
+      "an uncertain Profile timezone",
+      "a saved answer to a different question",
+    ].includes(entry.name)
+      ? 6
+      : 2,
   );
 });
 

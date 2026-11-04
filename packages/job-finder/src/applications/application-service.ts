@@ -412,6 +412,32 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     return row.mode;
   }
 
+  function instructionsFor(
+    job: JobDetail,
+    sourceInstructionArtifacts: readonly SourceInstructionArtifact[] = [],
+  ): string[] {
+    const target = job.applyUrl ?? job.url;
+    const sighting =
+      job.sightings.find((row) => (row.applyUrl ?? row.url) === target) ??
+      job.sightings.find((row) => row.url === job.url);
+    const siteId = Number(sighting?.sourceId);
+    const site =
+      Number.isSafeInteger(siteId) && siteId > 0
+        ? createJobSitesStore(jobs).get(siteId)
+        : null;
+    return site
+      ? uniqueStrings([
+          site.customInstructions ?? "",
+          ...buildInstructionGuidance(
+            resolveActiveSourceInstructionArtifact(
+              jobSiteTarget(site),
+              sourceInstructionArtifacts,
+            ),
+          ),
+        ])
+      : [];
+  }
+
   async function run(row: ApplicationRow, signal: AbortSignal): Promise<void> {
     const job = jobs.getJob(row.jobId);
     const approved = resumes.get(row.jobId);
@@ -514,25 +540,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       : null;
     const identity = applicationIdentity(row.id, row.attempt);
     const target = job.applyUrl ?? job.url;
-    const sighting =
-      job.sightings.find((row) => (row.applyUrl ?? row.url) === target) ??
-      job.sightings.find((row) => row.url === job.url);
-    const siteId = Number(sighting?.sourceId);
-    const site =
-      Number.isSafeInteger(siteId) && siteId > 0
-        ? createJobSitesStore(jobs).get(siteId)
-        : null;
-    const instructions = site
-      ? uniqueStrings([
-          site.customInstructions ?? "",
-          ...buildInstructionGuidance(
-            resolveActiveSourceInstructionArtifact(
-              jobSiteTarget(site),
-              sourceInstructionArtifacts,
-            ),
-          ),
-        ])
-      : [];
+    const instructions = instructionsFor(job, sourceInstructionArtifacts);
     let startingUrl: string | undefined;
     // A continue keeps the page, and with it the files already attached.
     let keptPage = false;
@@ -1369,7 +1377,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         deps.authorityRepository,
         signal,
         async () => {
-          const { settings, profile } = await deps.readInputs();
+          const {
+            settings,
+            profile,
+            searchPreferences,
+            sourceInstructionArtifacts = [],
+          } = await deps.readInputs();
           if (
             !current(row) ||
             (!personClicked && (await modeFor(row)) !== "autonomous_submit")
@@ -1491,10 +1504,36 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                   }
                 : {}),
             }));
-            const queries = questions.map((question) => ({
-              ...describeFormQuestion(question, job, profile),
-              prompt: question.prompt,
-            }));
+            const queries = questions.map((question, index) => {
+              const query = {
+                ...describeFormQuestion(question, job, profile),
+                prompt: question.prompt,
+              };
+              // Hidden prior-step controls no longer expose their options.
+              // Their reconstructed key must not lose the person's own answer.
+              // The dependency keys and values were checked live above, in this
+              // application, with unchanged Profile facts. Bind only the same
+              // whole question, kind and value, and never a repeated entry.
+              const used = proof?.form.filter(
+                (entry) =>
+                  entry.kind === question.kind &&
+                  entry.answer === written[index]?.answer &&
+                  normalizeFormQuestionPrompt(entry.prompt) ===
+                    normalizeFormQuestionPrompt(question.prompt),
+              );
+              return !suggestions[index]?.control &&
+                ["work_authorization", "visa_sponsorship"].includes(
+                  question.kind,
+                ) &&
+                written.filter(
+                  (answer) =>
+                    normalizeFormQuestionPrompt(answer.question) ===
+                    normalizeFormQuestionPrompt(question.prompt),
+                ).length === 1 &&
+                used?.length === 1
+                ? { ...query, key: used[0]!.key, reusePrompt: false }
+                : query;
+            });
             const saved = applications.needsYou
               .answersForQuestions(row.id, queries, origin)
               .map((answer) =>
@@ -1521,6 +1560,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       resultId: identity.resultId,
                       applicationRecordId: identity.applicationRecordId,
                       startingUrl: form.url ?? job.applyUrl ?? job.url,
+                      instructions: instructionsFor(
+                        job,
+                        sourceInstructionArtifacts,
+                      ),
                     },
                     questionReadCacheScope: deps.aiClient,
                     approvedAttestations: AiBehaviorPreferenceSchema.parse(
@@ -1528,6 +1571,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     ).applying.preApprovedDeclarations,
                     formControls,
                     sources: {
+                      preferences: searchPreferences,
                       listingDiscovery: listingDiscovery(job),
                       profile,
                       resumeText: profile.baseResume.textContent,

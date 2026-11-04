@@ -6,6 +6,7 @@ import {
   classifyAnswerPermission,
 } from "./answer-source-catalog";
 import { createApplyTiming } from "./apply-timing";
+import { expectedPaySuggestion } from "./expected-pay";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import {
   localStepAdvanced,
@@ -66,6 +67,7 @@ import {
 } from "./apply-tools";
 import {
   buildPendingQuestion,
+  payDisclosurePause,
   approvedApplicationLetter,
   applicationLetterRequest,
   createApplyGuardState,
@@ -746,6 +748,8 @@ async function runMeasuredApplyAgent(
     matchedAnswers,
     sources: {
       ...config.sources,
+      taskInstructions:
+        config.application.instructions ?? config.sources.taskInstructions,
       documents: documentCatalog,
       reusableAnswers: config.sources.reusableAnswers.filter((answer) => {
         const scope = answer.applicationScope;
@@ -917,7 +921,7 @@ async function runMeasuredApplyAgent(
   const answerCheckKey = (
     question: string,
     answer: string,
-    evidencePolicy?: "factual_summary" | "factual_inference",
+    evidencePolicy?: "factual_summary" | "factual_inference" | "saved_answer",
   ) =>
     JSON.stringify([
       pageTools.state.observation?.url,
@@ -929,7 +933,7 @@ async function runMeasuredApplyAgent(
   const checkOne = (
     question: string,
     answer: string,
-    evidencePolicy?: "factual_summary" | "factual_inference",
+    evidencePolicy?: "factual_summary" | "factual_inference" | "saved_answer",
   ): Promise<WrittenAnswerCheck> => {
     const key = answerCheckKey(question, answer, evidencePolicy);
     const cached = answerChecks.get(key);
@@ -962,7 +966,7 @@ async function runMeasuredApplyAgent(
     question: string;
     answer: string;
     control: ApplyFormObservation["controls"][number];
-    evidencePolicy?: "factual_summary" | "factual_inference";
+    evidencePolicy?: "factual_summary" | "factual_inference" | "saved_answer";
   } | null => {
     const control = observation.controls.find(
       (candidate) => candidate.ref === proposal.ref,
@@ -1016,7 +1020,11 @@ async function runMeasuredApplyAgent(
       case "click":
         return null; // The executor checks files and click-derived answers itself.
     }
-    let evidencePolicy: "factual_summary" | "factual_inference" | undefined;
+    let evidencePolicy:
+      | "factual_summary"
+      | "factual_inference"
+      | "saved_answer"
+      | undefined;
     if (answer !== null && classifyQuestions) {
       const readings = classifyQuestions.settled(
         observation.controls,
@@ -1225,6 +1233,37 @@ async function runMeasuredApplyAgent(
         return null;
       literalSourceIds.set(control.ref, literal.id);
       return literal.value;
+    }
+    const payRange =
+      payDisclosed &&
+      reading?.answerTags?.kind === "salary" &&
+      !reading.asksCurrentPay
+        ? expectedPaySuggestion(control, runConfig.sources)
+        : null;
+    if (
+      payRange &&
+      control.options.includes(payRange.value) &&
+      (!proposed || proposed === payRange.value)
+    ) {
+      const permission = classifyAnswerPermission({
+        control: {
+          ...control,
+          asksCurrentPay:
+            reading?.asksCurrentPay ?? control.asksCurrentPay ?? false,
+        },
+        controls: observation.controls,
+        tags: reading?.answerTags ?? null,
+        sources: runConfig.sources,
+        application: runConfig.application,
+        answer: payRange.value,
+        payDisclosed,
+        pageInstructions: formWritingInstructions(observation),
+        approvedAttestations: config.authority.preApprovedAttestationKinds,
+      });
+      if (permission.kind === "literal") {
+        literalSourceIds.set(control.ref, permission.source.id);
+        return payRange.value;
+      }
     }
     for (const source of answerSourceCatalog(runConfig.sources)) {
       const value = formatProfileUrlAnswer(
@@ -2830,7 +2869,7 @@ async function runMeasuredApplyAgent(
     checkWrittenAnswer: (
       question: string,
       answer: string,
-      evidencePolicy?: "factual_summary" | "factual_inference",
+      evidencePolicy?: "factual_summary" | "factual_inference" | "saved_answer",
     ) => Promise<WrittenAnswerCheck>,
     deferTextCommit?: (commit: () => void) => void,
   ): Promise<ApplyExecutionOutcome> => {
@@ -3451,7 +3490,10 @@ async function runMeasuredApplyAgent(
       const checkFromBatch = (
         question: string,
         answer: string,
-        evidencePolicy?: "factual_summary" | "factual_inference",
+        evidencePolicy?:
+          | "factual_summary"
+          | "factual_inference"
+          | "saved_answer",
       ) => checkOne(question, answer, evidencePolicy);
       const lines: string[] = [];
       let wrote = false;
@@ -4202,6 +4244,12 @@ async function runMeasuredApplyAgent(
           const grounding = await checkOne(
             questionPrompt(control),
             candidate.value,
+            answerSourceCatalog(runConfig.sources).some(
+              (source) =>
+                source.id === candidate.sourceId && source.purpose === "saved",
+            )
+              ? "saved_answer"
+              : undefined,
           );
           if (grounding.supported) {
             matchedAnswers.set(
@@ -5425,6 +5473,27 @@ async function runMeasuredApplyAgent(
       ...(pause.questions ?? []),
       ...(pause.question ? [pause.question] : []),
     ]) {
+      const controls = pageTools.state.observation?.controls ?? [];
+      const control = controls.find(
+        (item) => questionPrompt(item) === question.prompt,
+      );
+      const payPause =
+        control && question.askReason?.kind === "no_source"
+          ? payDisclosurePause(control, runConfig, controls)
+          : null;
+      if (control && payPause)
+        Object.assign(
+          question,
+          buildPendingQuestion({
+            control,
+            jobId: config.application.jobId,
+            detectedAt: question.detectedAt,
+            siblings: controls,
+            suggestion: payPause.suggestion,
+            reason: payPause.reason,
+            askReason: payPause.askReason,
+          }),
+        );
       if (attemptedWrites.has(normalizeFormQuestionPrompt(question.prompt))) {
         question.askReason = {
           kind: "page_refused",

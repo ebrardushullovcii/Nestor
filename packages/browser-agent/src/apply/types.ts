@@ -348,6 +348,8 @@ export interface ApplyAnswer {
 }
 
 export interface ApplyAnswerSources {
+  /** Person-owned task/site notes, never text read from the employer page. */
+  taskInstructions?: readonly string[] | undefined;
   listingDiscovery?: { label: string; url: string };
   profile: CandidateProfile;
   preferences?: JobSearchPreferences | undefined;

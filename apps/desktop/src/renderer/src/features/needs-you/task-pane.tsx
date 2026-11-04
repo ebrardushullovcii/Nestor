@@ -339,15 +339,18 @@ export function TaskPane(props: {
                     <span className="font-medium text-foreground">
                       Why you are asked:{" "}
                     </span>
-                    {task.askReason.check === "question_classification"
-                      ? "Nestor could not read this question, so it could not check your profile or saved answers."
-                      : task.askReason.check === "step_not_confirmed"
-                        ? "Nestor pressed this step's button once, but the form did not show the next step."
-                        : task.askReason.check === "step_handover"
-                          ? "Nestor could not prove this button only moves the form to its next step, so pressing it is yours."
-                          : ASK_REASON_LEAD[task.askReason.kind]}
+                    {task.askReason.check === "pay_permission"
+                      ? task.askReason.detail
+                      : task.askReason.check === "question_classification"
+                        ? "Nestor could not read this question, so it could not check your profile or saved answers."
+                        : task.askReason.check === "step_not_confirmed"
+                          ? "Nestor pressed this step's button once, but the form did not show the next step."
+                          : task.askReason.check === "step_handover"
+                            ? "Nestor could not prove this button only moves the form to its next step, so pressing it is yours."
+                            : ASK_REASON_LEAD[task.askReason.kind]}
                   </p>
-                  {task.askReason.detail ? (
+                  {task.askReason.detail &&
+                  task.askReason.check !== "pay_permission" ? (
                     <Disclosure summary="What Nestor saw">
                       <p className="max-w-prose break-words px-2 pb-1 text-foreground-soft">
                         {task.askReason.detail}

@@ -254,7 +254,7 @@ test.each([
     (
       question: string,
       answer: string,
-      evidencePolicy?: "factual_summary" | "factual_inference",
+      evidencePolicy?: "factual_summary" | "factual_inference" | "saved_answer",
     ) =>
       checkWrittenApplicationAnswer({
         client,

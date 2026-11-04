@@ -4427,3 +4427,81 @@ it("Send binds the seven earlier-step answers of a numbered form through its sto
   expect(reads).toEqual(expect.arrayContaining(card.map(([, q]) => q)));
   expect(f.onError).not.toHaveBeenCalled();
 });
+
+it.each([false, true])(
+  "Send retains an already checked eligibility dependency with hidden options; changed whole question %s",
+  async (changed) => {
+    const f = await setup(1);
+    const original = "Are you authorized to work in the job's country?";
+    const question = {
+      prompt: original,
+      kind: "work_authorization" as const,
+      answerControlType: "boolean" as const,
+      answerOptions: ["Yes", "No"],
+    };
+    preparation.answers = [
+      {
+        question: changed ? original + " permanently?" : original,
+        answer: "Yes",
+        source: "your matching saved answer or profile fact",
+        written: false,
+        groundedIn: [],
+      },
+    ];
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    const row = f.applications.listApplications().rows[0]!;
+    const job = f.jobs.getJob(row.jobId)!;
+    const known = describeFormQuestion(question, job, f.seed.profile);
+    f.applications.needsYou.remember({
+      key: known.key,
+      prompt: original,
+      answer: "Yes",
+      input: "boolean",
+      options: ["Yes", "No"],
+      kind: "work_authorization",
+      scope: {},
+    });
+    expect((await preparation.readAnswers!([question]))[0]?.answer).toBe("Yes");
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
+    );
+    f.authorizeSending.mockResolvedValue(
+      sendEnvelope(
+        row.jobId,
+        f.applications.getWork(row.id)!.resumeArtifact.sha256!,
+      ),
+    );
+    f.browser.readApplicationPageBinding.mockResolvedValue({
+      ...f.personPage,
+      bodyText: "Review the application",
+      controls: [],
+    });
+    f.deps.aiClient = {
+      ...f.deps.aiClient,
+      chatWithTools: vi.fn(() => Promise.resolve({ toolCalls: [] })),
+    };
+    const check = vi
+      .spyOn(browserAgent, "checkClassifiedApplicationAnswers")
+      .mockResolvedValue([
+        {
+          supported: false,
+          reason: "Test holds final action after checking caller inputs.",
+          priorStep: "unverified",
+        },
+      ]);
+    try {
+      expect(await f.service.sendPrepared(row.id)).toBe(false);
+      expect(check).toHaveBeenCalledOnce();
+      const saved = check.mock.calls[0]![0].sources.reusableAnswers;
+      expect(
+        saved.filter((answer) => answer.question === original),
+      ).toHaveLength(changed ? 0 : 1);
+      expect(f.applications.needsYou.list().total).toBe(0);
+    } finally {
+      check.mockRestore();
+    }
+  },
+);

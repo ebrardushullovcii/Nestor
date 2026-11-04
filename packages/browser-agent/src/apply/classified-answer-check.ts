@@ -10,6 +10,7 @@ import { questionPrompt } from "./policy-executor";
 import { phoneCountryPicker } from "./phone-answer";
 import { fieldNamesAnotherPerson } from "./github-username";
 import { choiceAnswerValues } from "./option-match";
+import { matchApplicationAnswer } from "./answer-match";
 import type { LLMClient } from "../agent/contracts";
 import type {
   ApplyAgentConfig,
@@ -135,6 +136,14 @@ export async function checkClassifiedApplicationAnswers(input: {
     stepTotal: number | null;
   };
 }): Promise<(WrittenAnswerCheck & { priorStep?: PriorStepBindingFailure })[]> {
+  input = {
+    ...input,
+    sources: {
+      ...input.sources,
+      taskInstructions:
+        input.application?.instructions ?? input.sources.taskInstructions,
+    },
+  };
   // Earlier wizard steps can remain in the DOM while hidden. Their actual
   // controls and ancestry still bind the answer; an old card alone cannot.
   const formControls = input.formControls?.map((control) => {
@@ -393,109 +402,153 @@ export async function checkClassifiedApplicationAnswers(input: {
       instructions: input.formContext.pageText,
     }),
   );
-  const decisions = input.answers.map(
-    (answer, index): ClassifiedAnswerDecision => {
-      const control = controls[index];
-      const binding = prior[index];
-      if (binding === "no_receipt" || binding === "unverified")
-        return {
-          kind: "needs_you",
-          reason:
-            binding === "no_receipt"
-              ? "An earlier step was continued without Nestor's own confirmed press."
-              : "This earlier-step answer could not be checked against the review page.",
-        };
-      // A fallback label parsed from an old card is not evidence that this
-      // exact applicant field still exists on the live form (for example,
-      // Name may now belong to a reference section).
-      if (
-        !control ||
-        (formControls && !formControls.includes(control) && !binding)
-      )
-        return {
-          kind: "needs_you",
-          reason: "The question is no longer present.",
-        };
-      const reading =
-        readings.get(questionClassificationKey(control, contextControls)) ??
-        readings.get(answer.question);
-      // Each step is checked in its own context: an earlier step's answer
-      // against every field of that step's receipt, a live field against the
-      // live page. Two same-named fields within one step still conflict.
-      const stepControls =
-        binding && typeof binding === "object"
-          ? binding.receipt.fields.map((field, position) =>
-              field === binding.field
-                ? control
-                : { ...receiptControl(field, index), ref: `step${position}` },
-            )
-          : contextControls.filter(
-              (entry) => !receiptRefs.has(entry.ref) || entry === control,
-            );
-      const decide = (control: ApplyFormControl, value: string) =>
-        classifyAnswerPermission({
-          control: {
-            ...control,
-            attestationKind:
-              reading?.declarationKind ?? control.attestationKind,
-            questionKind: modelQuestionKind(
-              control,
-              reading,
-              asksPayCurrency(control, contextControls, readings),
-            ),
-            asksCurrentPay:
-              reading?.asksCurrentPay ?? control.asksCurrentPay ?? false,
-            asksHiringCountry:
-              reading?.asksHiringCountry ?? control.asksHiringCountry ?? false,
-          },
-          controls: stepControls,
-          tags: reading?.answerTags,
-          approvedAttestations: input.approvedAttestations ?? [],
-          sources: input.sources,
-          ...(input.application ? { application: input.application } : {}),
-          answer: value,
-          // An earlier step is read with that step's own instructions.
-          pageInstructions:
-            binding && typeof binding === "object"
-              ? binding.receipt.instructions
-              : input.formContext.pageText,
-          siteUnchanged: siteUnchanged[index],
-        });
-      if (control.answerControlType === "multi_choice") {
-        const group = contextControls.filter(
-          (member) =>
-            member.kind === "checkbox" &&
-            member.choiceGroupKey === control.choiceGroupKey,
-        );
-        const expected = choiceAnswerValues(
-          answer.answer,
-          group.map((member) => member.label || member.value),
-        );
-        const selected = group.filter((member) => member.checked);
+  const decisions = await Promise.all(
+    input.answers.map(
+      async (answer, index): Promise<ClassifiedAnswerDecision> => {
+        const control = controls[index];
+        const binding = prior[index];
+        if (binding === "no_receipt" || binding === "unverified")
+          return {
+            kind: "needs_you",
+            reason:
+              binding === "no_receipt"
+                ? "An earlier step was continued without Nestor's own confirmed press."
+                : "This earlier-step answer could not be checked against the review page.",
+          };
+        // A fallback label parsed from an old card is not evidence that this
+        // exact applicant field still exists on the live form (for example,
+        // Name may now belong to a reference section).
         if (
-          !expected ||
-          selected.length !== expected.length ||
-          selected.some(
-            (member) => !expected.includes(member.label || member.value),
-          )
+          !control ||
+          (formControls && !formControls.includes(control) && !binding)
         )
           return {
             kind: "needs_you",
-            reason: "The selected options no longer match the prepared answer.",
+            reason: "The question is no longer present.",
           };
-        const decisions = selected.map((member) =>
-          decide(member, member.label || member.value),
-        );
-        return (
-          decisions.find((decision) => decision.kind !== "literal") ??
-          decisions[0] ?? {
-            kind: "needs_you",
-            reason: "There is no selected answer to verify.",
-          }
-        );
-      }
-      return decide(control, answer.answer);
-    },
+        const reading =
+          readings.get(questionClassificationKey(control, contextControls)) ??
+          readings.get(answer.question);
+        // Each step is checked in its own context: an earlier step's answer
+        // against every field of that step's receipt, a live field against the
+        // live page. Two same-named fields within one step still conflict.
+        const stepControls =
+          binding && typeof binding === "object"
+            ? binding.receipt.fields.map((field, position) =>
+                field === binding.field
+                  ? control
+                  : { ...receiptControl(field, index), ref: `step${position}` },
+              )
+            : contextControls.filter(
+                (entry) => !receiptRefs.has(entry.ref) || entry === control,
+              );
+        const decide = (
+          control: ApplyFormControl,
+          value: string,
+          matchedSourceId?: string,
+        ) =>
+          classifyAnswerPermission({
+            control: {
+              ...control,
+              attestationKind:
+                reading?.declarationKind ?? control.attestationKind,
+              questionKind: modelQuestionKind(
+                control,
+                reading,
+                asksPayCurrency(control, contextControls, readings),
+              ),
+              asksCurrentPay:
+                reading?.asksCurrentPay ?? control.asksCurrentPay ?? false,
+              asksHiringCountry:
+                reading?.asksHiringCountry ??
+                control.asksHiringCountry ??
+                false,
+            },
+            controls: stepControls,
+            tags: reading?.answerTags,
+            ...(matchedSourceId ? { matchedSourceId } : {}),
+            approvedAttestations: input.approvedAttestations ?? [],
+            sources: input.sources,
+            payDisclosed: input.payDisclosed,
+            ...(input.application ? { application: input.application } : {}),
+            answer: value,
+            // An earlier step is read with that step's own instructions.
+            pageInstructions:
+              binding && typeof binding === "object"
+                ? binding.receipt.instructions
+                : input.formContext.pageText,
+            siteUnchanged: siteUnchanged[index],
+          });
+        if (control.answerControlType === "multi_choice") {
+          const group = contextControls.filter(
+            (member) =>
+              member.kind === "checkbox" &&
+              member.choiceGroupKey === control.choiceGroupKey,
+          );
+          const expected = choiceAnswerValues(
+            answer.answer,
+            group.map((member) => member.label || member.value),
+          );
+          const selected = group.filter((member) => member.checked);
+          if (
+            !expected ||
+            selected.length !== expected.length ||
+            selected.some(
+              (member) => !expected.includes(member.label || member.value),
+            )
+          )
+            return {
+              kind: "needs_you",
+              reason:
+                "The selected options no longer match the prepared answer.",
+            };
+          const decisions = selected.map((member) =>
+            decide(member, member.label || member.value),
+          );
+          return (
+            decisions.find((decision) => decision.kind !== "literal") ??
+            decisions[0] ?? {
+              kind: "needs_you",
+              reason: "There is no selected answer to verify.",
+            }
+          );
+        }
+        const decision = decide(control, answer.answer);
+        if (
+          decision.kind !== "needs_you" ||
+          control.credentialRole ||
+          !["source_lookup", "declaration_permission"].includes(
+            decision.check ?? "",
+          ) ||
+          !catalog.some(
+            (source) =>
+              source.purpose === "saved" &&
+              source.value.trim() === answer.answer.trim(),
+          )
+        )
+          return decision;
+        // Preparation's matcher is not carried as authority. Re-read a saved
+        // answer's meaning here when the current question reader misses it;
+        // the independent answer checker below still verifies the whole match.
+        const candidate = await matchApplicationAnswer({
+          client: input.client,
+          question: questionPrompt(control),
+          sources: catalog,
+          rejection: decision.reason,
+          ...(input.signal ? { signal: input.signal } : {}),
+        }).catch(() => null);
+        if (
+          !candidate ||
+          candidate.value.trim() !== answer.answer.trim() ||
+          !catalog.some(
+            (source) =>
+              source.id === candidate.sourceId && source.purpose === "saved",
+          )
+        )
+          return decision;
+        return decide(control, answer.answer, candidate.sourceId);
+      },
+    ),
   );
   const writing = input.answers.flatMap((answer, index) => {
     const decision = decisions[index];

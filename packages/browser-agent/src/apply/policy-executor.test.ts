@@ -7,6 +7,7 @@ import { createApplyUserPrompt } from "./apply-prompts";
 import { replaceApprovedApplicationLetter } from "./approved-letter";
 import {
   CandidateProfileSchema,
+  JobSearchPreferencesSchema,
   type CandidateProfile,
 } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
@@ -4097,8 +4098,8 @@ describe("one-use answers and compatible originals", () => {
         checkWrittenAnswer,
       },
     );
-    expect(result.kind).toBe("suggestion");
-    expect(checkWrittenAnswer).not.toHaveBeenCalled();
+    expect(result.kind).toBe("filled");
+    expect(checkWrittenAnswer).toHaveBeenCalledTimes(1);
     source.controls[0].label = "Current compensation";
     config.authority.salaryDisclosure = "pause_for_user";
     const current = await executeApplyProposal(
@@ -4125,7 +4126,7 @@ describe("one-use answers and compatible originals", () => {
       },
     );
     expect(current.kind).toBe("suggestion");
-    expect(checkWrittenAnswer).not.toHaveBeenCalled();
+    expect(checkWrittenAnswer).toHaveBeenCalledTimes(1);
   });
 
   test("attaches an unchanged TXT copy when an Original Markdown resume is rejected", async () => {
@@ -4278,7 +4279,7 @@ test.each([
     kind: "suggestion",
     answer: { value: "60000" },
     question: {
-      note: "Job Finder leaves pay questions to you. Answer it yourself if you want to.",
+      note: "Your pay setting is Pause for me on pay. Choose the amount you want to disclose for this application.",
     },
   });
   expect(hands.fillText).not.toHaveBeenCalled();
@@ -5811,3 +5812,51 @@ test.each(["Next", "Review", "Show details"])(
     if (label !== "Next") expect(closed).toHaveBeenCalledOnce();
   },
 );
+
+test("a required pay pause offers the recorded target and exact range without entering it", async () => {
+  const page = rawPage({
+    controls: [
+      rawControl({
+        index: 0,
+        label: "Expected annual salary range (EUR)",
+        required: true,
+        tagName: "select",
+        options: ["70 000 EUR – 80 000 EUR", "80 000 EUR – 90 000 EUR"],
+      }),
+    ],
+  });
+  const { config, hands } = configFor(page);
+  config.sources.preferences = JobSearchPreferencesSchema.parse({
+    minimumSalaryUsd: null,
+    approvalMode: "review_before_submit",
+    tailoringMode: "balanced",
+    compensation: {
+      maximum: 85000,
+      currency: "EUR",
+      currencyStatus: "explicit",
+      interval: "year",
+    },
+  });
+  const choose = vi.spyOn(hands, "chooseOption");
+  const outcome = await executeApplyProposal(
+    { tool: "select", ref: "c0", option: "80 000 EUR – 90 000 EUR" },
+    observationOf(page).signature,
+    { config, now, guardState: createApplyGuardState() },
+  );
+  expect(outcome).toMatchObject({
+    kind: "suggestion",
+    answer: { value: "80 000 EUR – 90 000 EUR" },
+    question: {
+      askReason: {
+        check: "pay_permission",
+      },
+    },
+  });
+  if (outcome.kind === "suggestion") {
+    expect(outcome.question?.askReason?.detail).toContain("85000 EUR per year");
+    expect(outcome.question?.askReason?.detail).toContain(
+      "The matching option is 80 000 EUR – 90 000 EUR",
+    );
+  }
+  expect(choose).not.toHaveBeenCalled();
+});

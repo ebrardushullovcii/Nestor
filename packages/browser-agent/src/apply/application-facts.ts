@@ -164,7 +164,26 @@ export function applicationFacts(
     narrative: profile.narrative,
     targetRoles: profile.targetRoles,
     preferredLocations: profile.locations,
-    preferences: sources.preferences,
+    taskGuidance: sources.taskInstructions,
+    preferences: sources.preferences
+      ? {
+          ...sources.preferences,
+          salaryCurrency:
+            sources.preferences.compensation.currencyStatus === "explicit"
+              ? sources.preferences.compensation.currency
+              : null,
+          ...(sources.preferences.compensation.currencyStatus ===
+          "needs_clarification"
+            ? {
+                salaryCurrency: null,
+                compensation: {
+                  ...sources.preferences.compensation,
+                  currency: null,
+                },
+              }
+            : {}),
+        }
+      : undefined,
     yearsExperience: profile.yearsExperience,
     workEligibility: profile.workEligibility,
     ...(profile.workEligibility.limitedWorkPermissions?.length

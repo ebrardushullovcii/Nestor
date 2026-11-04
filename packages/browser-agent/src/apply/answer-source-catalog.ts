@@ -16,6 +16,7 @@ import {
   storedFacts,
   savedAnswerForQuestion,
   applicantContactGroup,
+  isAnswerFromThisApplication,
   RESIDENCE_COUNTRY_LABELS,
   PROFILE_TEXT_FIELD_LABELS,
 } from "./application-facts";
@@ -49,6 +50,7 @@ import { employmentMonthEvidence, isScalarAnswer } from "./answer-evidence";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import { isShortValueAnswer } from "./written-answer-grounding";
+import { expectedPaySuggestion } from "./expected-pay";
 import { asksGithubUsername, fieldNamesAnotherPerson } from "./github-username";
 import {
   asksForSpecificStory,
@@ -649,6 +651,35 @@ const routineDeclarations: Partial<
   ],
 };
 
+/** Only an explicit instruction to certify the supplied answers grants this
+ * routine acknowledgement. It grants no licence, eligibility or other fact. */
+function taskAllowsTruthfulness(instructions: readonly string[]): boolean {
+  const sentences = instructions.flatMap((instruction) =>
+    instruction.split(/[.!?;\n]+/u),
+  );
+  const certifies = /\b(?:certify|attest|confirm)\b/iu;
+  if (
+    sentences.some(
+      (sentence) =>
+        certifies.test(sentence) &&
+        /\b(?:not|never|unless|only if|provided that|cannot|can t|don t)\b/iu.test(
+          sentence,
+        ),
+    )
+  )
+    return false;
+  return sentences.some(
+    (sentence) =>
+      /^(?:\s*(?:you\s+)?(?:may|can|please)\s+)?\s*(?:certify|attest|confirm)\b/iu.test(
+        sentence,
+      ) &&
+      /\b(?:truthful|true|accurate|accuracy)\b/iu.test(sentence) &&
+      /\b(?:supplied|provided|answers?|responses?|information|facts|details)\b/iu.test(
+        sentence,
+      ),
+  );
+}
+
 /**
  * "Authorized to work in C without sponsorship" is settled only when C is
  * the resolved job country, a listed country covers it unconditionally (no
@@ -743,7 +774,7 @@ export type ClassifiedAnswerDecision =
   | {
       kind: "writing";
       source: ClassifiedAnswerSource | null;
-      evidencePolicy?: "factual_summary";
+      evidencePolicy?: "factual_summary" | "saved_answer";
     }
   | { kind: "needs_you"; reason: string; check?: string }
   /**
@@ -831,6 +862,7 @@ export function classifyAnswerPermission(input: {
   pageInstructions: string;
   approvedAttestations?: readonly ApplicationAttestationKind[];
   application?: ApplyAgentConfig["application"];
+  payDisclosed?: boolean;
   now?: Date;
   /** Supplied only by the host after the independent answer check. */
   matchedSourceId?: string | undefined;
@@ -852,6 +884,15 @@ export function classifyAnswerPermission(input: {
     check,
   });
   const tags = input.tags;
+  const declarationApproved =
+    !!input.control.attestationKind &&
+    (input.approvedAttestations?.includes(input.control.attestationKind) ||
+      (input.control.attestationKind === "truthfulness_certification" &&
+        taskAllowsTruthfulness(
+          input.sources.taskInstructions ??
+            input.application?.instructions ??
+            [],
+        )));
   if (input.control.credentialRole)
     return deny("Credentials and verification codes stay with the person.");
   if (!tags) {
@@ -906,7 +947,47 @@ export function classifyAnswerPermission(input: {
       input.control,
       input.sources.reusableAnswers,
       input.controls,
-    ) ?? pickerRule?.saved;
+    ) ??
+    pickerRule?.saved ??
+    null;
+  if (
+    input.payDisclosed === false &&
+    input.control.questionKind === "salary_expectation" &&
+    !isAnswerFromThisApplication(
+      matchingSaved,
+      input.application ?? {},
+      input.sources.posting.location,
+    ) &&
+    !(
+      matchingSaved?.id.startsWith("application_") &&
+      !matchingSaved.applicationScope
+    )
+  )
+    return deny(
+      "Your pay setting is Pause for me on pay. Choose what to disclose for this application.",
+      "pay_permission",
+    );
+  if (
+    input.payDisclosed === true &&
+    tags.kind === "salary" &&
+    input.control.questionKind === "salary_expectation"
+  ) {
+    const pay = expectedPaySuggestion(input.control, input.sources);
+    if (
+      pay &&
+      pay.value === input.answer &&
+      input.control.options.includes(pay.value)
+    )
+      return {
+        kind: "literal",
+        source: {
+          id: pay.sourceId,
+          value: pay.value,
+          purpose: "profile",
+          country: null,
+        },
+      };
+  }
   const priorCompany =
     tags.kind === "other"
       ? priorCompanyHistory(input.control, input.sources)
@@ -1019,6 +1100,58 @@ export function classifyAnswerPermission(input: {
     );
     if (human && (!legal || human.country === target)) source = human;
   }
+  // A semantic source selection is only a proposal. A second model must
+  // verify that the saved question has the same complete meaning and value.
+  // Current-application answers can settle their own conditional eligibility;
+  // reuse elsewhere still has to fit this jurisdiction and permit conditions.
+  if (
+    !matchingSaved &&
+    source?.purpose === "saved" &&
+    source.value.trim() === input.answer.trim() &&
+    !input.control.repeatedQuestion &&
+    !fieldNamesAnotherPerson(input.control)
+  ) {
+    const record = input.sources.reusableAnswers.find(
+      (entry) => source?.id === `answerLibrary.${entry.id}`,
+    );
+    const conflicting = catalog.some(
+      (entry) =>
+        entry.purpose === "saved" &&
+        normalizeFormQuestionPrompt(entry.question ?? "") ===
+          normalizeFormQuestionPrompt(source?.question ?? "") &&
+        entry.value.trim() !== input.answer.trim(),
+    );
+    if (conflicting)
+      return deny(
+        "Your saved answers conflict for this question. Please confirm which answer to use.",
+        "conflicting_sources",
+      );
+    const scope = record?.applicationScope;
+    const local =
+      !!input.application &&
+      !!scope &&
+      ((!!input.application.applicationRecordId &&
+        scope.applicationRecordId === input.application.applicationRecordId) ||
+        (!!input.application.resultId &&
+          scope.resultId === input.application.resultId));
+    if (
+      !legal ||
+      (target &&
+        source.country === target &&
+        (local ||
+          (permitConditionsFit(input.sources, target) &&
+            !(
+              tags.kind === "sponsorship" &&
+              input.answer === "No" &&
+              input.sources.profile.workEligibility.limitedWorkPermissions?.some(
+                (permit) =>
+                  country(permit.country) === target &&
+                  permit.requiresFutureSponsorship === true,
+              )
+            ))))
+    )
+      return { kind: "writing", source, evidencePolicy: "saved_answer" };
+  }
   // A saved "Phone" answer may omit the repeated Phone group in its key.
   // Bind it to the Profile only when that is independently the same number
   // and exactly one applicant phone field can use it. Unrelated sources stay out.
@@ -1076,10 +1209,10 @@ export function classifyAnswerPermission(input: {
           /^profile\.skills\.\d+$/u.test(row.id) && row.value === input.answer,
       ) ?? source;
   if (
-    !source &&
+    !matchingSaved &&
     tags.kind === "other" &&
     input.control.attestationKind &&
-    input.approvedAttestations?.includes(input.control.attestationKind) &&
+    declarationApproved &&
     ((tags.declarationPurpose !== "personal_fact" &&
       (tags.declarationPurpose === "consent" ||
         tags.declarationPurpose === "acknowledgement")) ||
@@ -1161,11 +1294,7 @@ export function classifyAnswerPermission(input: {
   if (skills) return { kind: "literal", source: skills };
   // A declaration whose kind the person has not allowed is theirs to tick.
   // Say that, rather than that no source answers it.
-  if (
-    !source &&
-    input.control.attestationKind &&
-    !input.approvedAttestations?.includes(input.control.attestationKind)
-  )
+  if (!source && input.control.attestationKind && !declarationApproved)
     return deny(
       "This declaration is not one of those you let Nestor tick for you (Settings, Declarations it may tick for you), so it is yours to confirm.",
       "declaration_permission",
@@ -1684,6 +1813,7 @@ function factualInferenceAllowed(input: {
   tags: ApplyAnswerTags | null | undefined;
   pageInstructions: string;
   answer: string;
+  payDisclosed?: boolean;
 }): boolean {
   const { control, tags } = input;
   const question = [
@@ -1694,14 +1824,24 @@ function factualInferenceAllowed(input: {
   ].join("\n");
   return (
     !!tags &&
-    ["other", "residence_country"].includes(tags.kind) &&
+    (["other", "residence_country"].includes(tags.kind) ||
+      (tags.kind === "salary" && input.payDisclosed === true)) &&
     ["text", "select", "combobox", "radio", "checkbox"].includes(
       control.kind,
     ) &&
-    (control.kind !== "text" || isShortValueAnswer(control, input.answer)) &&
-    !["salary_expectation", "work_authorization", "visa_sponsorship"].includes(
+    (control.kind !== "text" ||
+      isShortValueAnswer(
+        input.payDisclosed === true &&
+          control.questionKind === "salary_expectation"
+          ? { ...control, questionKind: "other" }
+          : control,
+        input.answer,
+      )) &&
+    !["work_authorization", "visa_sponsorship"].includes(
       control.questionKind,
     ) &&
+    (control.questionKind !== "salary_expectation" ||
+      input.payDisclosed === true) &&
     !control.asksCurrentPay &&
     !control.asksHiringCountry &&
     !control.credentialRole &&
