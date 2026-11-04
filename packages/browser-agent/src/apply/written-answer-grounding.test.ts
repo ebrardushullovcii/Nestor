@@ -285,7 +285,7 @@ test.each([
     });
     expect(result[0]?.supported).toBe(false);
     expect(result[0]?.reason).toContain("could not verify");
-    expect(chatWithTools).toHaveBeenCalledOnce();
+    expect(chatWithTools).toHaveBeenCalledTimes(2);
   },
 );
 
@@ -434,5 +434,66 @@ test("conflicts propose wording for person review and omission cannot hide a wor
   expect(prompt).toContain("I enjoy this work.");
   expect(prompt).toContain(
     "review the wording before it goes on this application's form",
+  );
+});
+
+test("a malformed citation gets one correction against the same Profile facts", async () => {
+  let calls = 0;
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(() => {
+    const first = calls++ === 0;
+    return Promise.resolve({
+      toolCalls: [
+        {
+          id: "check",
+          type: "function",
+          function: {
+            name: "report_answer_checks",
+            arguments: JSON.stringify({
+              checks: [
+                {
+                  index: 0,
+                  supported: true,
+                  reason: "Recorded paid work.",
+                  evidence: [
+                    {
+                      claim: "TypeScript",
+                      kind: "applicant_fact",
+                      source: "applicant",
+                      path: first ? "/skills" : "/summary",
+                      quote: first
+                        ? "TypeScript"
+                        : "Paid work with TypeScript.",
+                    },
+                  ],
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    });
+  });
+  const checked = await checkWrittenApplicationAnswers({
+    client: { chatWithTools },
+    sources: {
+      ...sources,
+      profile: CandidateProfileSchema.parse({
+        ...sources.profile,
+        summary: "Paid work with TypeScript.",
+      }),
+    },
+    payDisclosed: false,
+    answers: [
+      {
+        question: "Select technologies used in paid work.",
+        answer: "TypeScript",
+        evidencePolicy: "factual_inference",
+      },
+    ],
+  });
+  expect(checked[0]?.supported).toBe(true);
+  expect(chatWithTools).toHaveBeenCalledTimes(2);
+  expect(JSON.stringify(chatWithTools.mock.calls[1]?.[0])).toContain(
+    "Correct the citation",
   );
 });

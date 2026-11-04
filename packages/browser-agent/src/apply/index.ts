@@ -118,3 +118,5 @@ export { replaceApprovedApplicationLetter } from "./approved-letter";
 
 export { checkClassifiedApplicationAnswers } from "./classified-answer-check";
 export { duplicatedHistoryRows } from "./answer-source-catalog";
+
+export { equivalentApplicationQuestions } from "./question-equivalence";

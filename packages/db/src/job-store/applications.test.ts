@@ -2156,3 +2156,62 @@ it("a select-all-that-apply question takes, saves and reuses a list of options",
     '["Tuesday"]',
   );
 });
+
+it("semantic answer reuse preserves option identity, drafts and a changed snapshot", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const [first, second] = [
+    applications.claimNext()!,
+    applications.claimNext()!,
+  ];
+  const memory = applications.needsYou;
+  const options = ["Tuesday", "Thursday"];
+  const asked = memory.request(
+    question(first.id, first.attempt, {
+      key: "interview-v2",
+      prompt: "Days available for the remote interview",
+      input: "multi_choice",
+      options,
+      reusePrompt: true,
+      scope: {},
+    }),
+    { reuseAnswers: false },
+  );
+  memory.request(
+    question(second.id, second.attempt, {
+      key: "different-options",
+      prompt: "Days available for the remote interview",
+      input: "multi_choice",
+      options: ["Tuesday", "Wednesday"],
+      reusePrompt: true,
+      scope: {},
+    }),
+    { reuseAnswers: false },
+  );
+  if (asked.status !== "needs_you")
+    throw new Error("Expected a waiting question");
+  const saved = memory.remember({
+    key: "interview-v1",
+    prompt: "Remote interview availability",
+    input: "multi_choice",
+    options: [...options].reverse(),
+    answer: JSON.stringify(["Tuesday"]),
+    scope: {},
+  });
+  const candidates = memory.questionReuseCandidates();
+  expect(candidates.map((row) => row.task.id)).toEqual([asked.task.id]);
+  const snapshot = JSON.stringify(candidates);
+  memory.saveDraft({
+    id: asked.task.id,
+    answer: JSON.stringify(["Thursday"]),
+    remember: false,
+    revision: 0,
+  });
+  expect(
+    memory.resolveQuestionReuse({
+      snapshot,
+      matches: [{ taskId: asked.task.id, answerId: saved.id }],
+    }),
+  ).toBe(0);
+  expect(applications.getApplication(first.id)?.state).toBe("needs_you");
+});

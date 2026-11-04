@@ -7,6 +7,7 @@ import type {
 } from "@nestor/contracts";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import { questionPrompt } from "./policy-executor";
+import { questionLabel } from "./question-text";
 import { phoneCountryPicker } from "./phone-answer";
 import { fieldNamesAnotherPerson } from "./github-username";
 import { choiceAnswerValues } from "./option-match";
@@ -170,6 +171,7 @@ export async function checkClassifiedApplicationAnswers(input: {
       return (
         control.visible &&
         (prompt === asked ||
+          normalizeFormQuestionPrompt(questionLabel(control)) === asked ||
           (control.groupLabel.trim().length > 0 &&
             asked.endsWith(` ${prompt}`) &&
             !fieldNamesAnotherPerson({

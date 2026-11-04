@@ -323,9 +323,13 @@ export function SiteResults(props: {
                   ) : source.message ? (
                     <p className="mt-1 whitespace-pre-wrap">{source.message}</p>
                   ) : null}
-                  {source.state === "partial" ? (
+                  {["partial", "failed", "stopped"].includes(source.state) ? (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span>This site has more listings.</span>
+                      <span>
+                        {source.state === "partial"
+                          ? "This site's coverage is unfinished."
+                          : "Saved results are kept. Continue this site's unfinished work."}
+                      </span>
                       <Button
                         size="toolbar"
                         variant="outline"
@@ -334,16 +338,11 @@ export function SiteResults(props: {
                           more.keepReading(Number(source.sourceId))
                         }
                       >
-                        Keep reading
+                        {source.state === "partial"
+                          ? "Keep reading"
+                          : "Continue site"}
                       </Button>
                     </div>
-                  ) : null}
-                  {source.state === "failed" ? (
-                    <p className="mt-2">
-                      Check its address in Profile → Job sites, then search
-                      again. For a single vacancy page, use the board’s main
-                      jobs page instead.
-                    </p>
                   ) : null}
                   {source.state === "failed" && source.message ? (
                     <Disclosure

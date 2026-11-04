@@ -274,7 +274,7 @@ export function fileUploadProblems(
  */
 export function holdsAnswer(control: FileControl): boolean {
   return (
-    control.answered ||
+    (control.answered && !control.answerUnverified) ||
     (control.kind === "file" &&
       (control.upload?.network === "accepted" ||
         (!!control.upload?.selectedFileName &&
@@ -303,7 +303,8 @@ export function unresolvedRequiredControls(observation: ApplyFormObservation) {
       );
       return (
         group.some((candidate) => candidate.required) &&
-        !group.some((candidate) => candidate.checked) &&
+        (!group.some((candidate) => candidate.checked) ||
+          group.some((candidate) => candidate.answerUnverified)) &&
         group[0] === control
       );
     }

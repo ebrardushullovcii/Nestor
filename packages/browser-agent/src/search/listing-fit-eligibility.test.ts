@@ -58,6 +58,55 @@ const job = JobDetailSchema.parse({
   summary: null,
 });
 
+test.each(["conflict", "met", "unknown"] as const)(
+  "B2 hard requirements cannot read Good fit when judgment is %s",
+  async (hard) => {
+    const [fit] = await fitJobs({
+      profile,
+      goals: {
+        targetRoles: ["Software Engineer"],
+        locations: ["Kosovo"],
+        compensation: {
+          minimum: 24,
+          maximum: null,
+          interval: "hour",
+          currency: "EUR",
+          currencyStatus: "explicit",
+        },
+      },
+      jobs: [
+        {
+          ...job,
+          location: "Remote worldwide",
+          description: "Worldwide software role. EUR19 hourly.",
+          salaryText: "EUR19/hour",
+        },
+      ],
+      client: {
+        chatWithTools: () =>
+          Promise.resolve({
+            content: JSON.stringify({
+              fits: [
+                {
+                  id: 1,
+                  s: 92,
+                  why: "Relevant work, pay needs attention",
+                  r: ["strong", "Software duties"],
+                  p: ["conflict", "Below the saved minimum"],
+                  c: ["strong", "Experience"],
+                  e: ["compatible", "Worldwide", "broader_remote", ""],
+                  h: [hard, "Pay compared with the explicit hourly minimum"],
+                },
+              ],
+            }),
+          }),
+      },
+    });
+    expect(fit?.score).toBe(hard === "met" ? 84 : JOB_FIT_BANDS.good - 1);
+    expect(fit?.limit?.kind).toBe("preferences");
+  },
+);
+
 test.each([
   ["20 hours per week", "compatible", 92],
   ["40 hours per week", "blocked", 39],

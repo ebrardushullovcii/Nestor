@@ -135,7 +135,7 @@ export function roleGoalsKey(goals: RoleScreenGoals): string {
   const normalized = (values: readonly string[]) =>
     [...new Set(values.map((value) => value.trim().toLowerCase()))].sort();
   return fingerprint([
-    5,
+    6,
     normalized(goals.targetRoles),
     normalized(goals.relatedRoles),
     goals.strategy,
@@ -334,6 +334,11 @@ export async function collectSource(
           ? ["Browser access was verified after the initial access check."]
           : notes),
         ...fallback.notes,
+        ...(!fallback.complete
+          ? [
+              "Browser inventory coverage is not confirmed. Saved listings are kept; continue this site to check remaining results.",
+            ]
+          : []),
         ...(cards.size || (fallback.complete && fallback.emptyConfirmed)
           ? []
           : [
@@ -380,7 +385,16 @@ export async function screenCards(
   failed: { url: string; reason: string }[];
 }> {
   const key = roleGoalsKey(input.goals);
-  const known = (await input.lookupSeenCards?.(input.cards, key)) ?? [];
+  const screeningFingerprint = (card: ListingCard) =>
+    fingerprint([card.cardFingerprint, professionEvidence(card)]);
+  const known =
+    (await input.lookupSeenCards?.(
+      input.cards.map((card) => ({
+        ...card,
+        cardFingerprint: screeningFingerprint(card),
+      })),
+      key,
+    )) ?? [];
   const seenKeys = new Set(
     known.map((card) => `${card.url}\n${card.cardFingerprint}`),
   );
@@ -390,42 +404,45 @@ export async function screenCards(
   const fresh = input.cards.filter(
     (card) =>
       !saved.has(card.url) &&
-      !seenKeys.has(`${card.url}\n${card.cardFingerprint}`),
+      !seenKeys.has(`${card.url}\n${screeningFingerprint(card)}`),
   );
   // Keep the whole title: stripping rank also erased the distinction between
   // hands-on analytics and a different management or infrastructure profession.
-  const titleKey = (title: string) =>
-    title.toLowerCase().replace(/\s+/gu, " ").trim();
-  const allTitles = [...new Set(fresh.map((card) => titleKey(card.title)))];
+  const title = (card: ListingCard) =>
+    card.title.toLowerCase().replace(/\s+/gu, " ").trim();
+  const titleKey = (card: ListingCard) =>
+    `${title(card)}\n${professionEvidence(card)}`;
+  const allTitles = [...new Set(fresh.map(titleKey))];
   const decisions = input.decisions ?? new Map<string, boolean>();
-  for (const title of allTitles)
-    if (!decisions.has(title) && clearRoleMatch(title, input.goals))
-      decisions.set(title, true);
-  const titles = allTitles.filter((title) => !decisions.has(title));
+  for (const card of fresh)
+    if (
+      !decisions.has(titleKey(card)) &&
+      clearRoleMatch(card.title, input.goals)
+    )
+      decisions.set(titleKey(card), true);
+  const titles = allTitles.filter((key) => !decisions.has(key));
   const evidence = new Map(
-    fresh.map((card) => [titleKey(card.title), professionEvidence(card)]),
+    fresh.map((card) => [titleKey(card), professionEvidence(card)]),
   );
   const unrelated = new Set(
-    allTitles.filter((title) => decisions.get(title) === false),
+    allTitles.filter((key) => decisions.get(key) === false),
   );
   const failedTitles = new Map<string, string>();
   const judge = async (titles: string[], repair = true): Promise<void> => {
+    let remaining = titles;
     try {
-      const answer = await ask(
+      const raw = await ask(
         input,
         professionInstructions(input.goals),
-
         {
           goals: input.goals,
-          titles: titles.map((title, index) => [
+          titles: titles.map((key, index) => [
             index,
-            title,
-            evidence.get(title) || undefined,
+            key.split("\n")[0],
+            evidence.get(key) || undefined,
           ]),
         },
-        z.object({
-          keep: z.record(z.union([z.literal(0), z.literal(1)])),
-        }),
+        z.unknown(),
         2000,
         "listing_screen",
         {
@@ -450,74 +467,104 @@ export async function screenCards(
           },
         },
       );
+      // JSON mode guarantees syntax, not the requested wrapper. Accept only
+      // one unambiguous index map, never infer or coerce a profession verdict.
+      const object = (value: unknown): value is Record<string, unknown> =>
+        value !== null && typeof value === "object" && !Array.isArray(value);
+      const candidate =
+        object(raw) && object(raw.keep)
+          ? raw.keep
+          : object(raw) &&
+              Object.keys(raw).every((key) => /^(?:0|[1-9]\d*)$/u.test(key))
+            ? raw
+            : object(raw) &&
+                Object.keys(raw).length === 1 &&
+                object(Object.values(raw)[0])
+              ? Object.values(raw)[0]
+              : null;
       if (
-        Object.keys(answer.keep).length !== titles.length ||
-        titles.some((_, index) => answer.keep[index] === undefined)
+        !object(candidate) ||
+        Object.keys(candidate).some(
+          (key) =>
+            !/^(?:0|[1-9]\d*)$/u.test(key) || Number(key) >= titles.length,
+        )
       )
         throw new z.ZodError([
           {
             code: "custom",
             path: ["keep"],
-            message: "Role screen did not cover every title exactly once.",
+            message: "Role screen returned no unambiguous title-index map.",
           },
         ]);
-      for (const [index, keep] of Object.entries(answer.keep)) {
-        const title = titles[Number(index)];
-        if (!title) throw new Error("Role screen returned an unknown title.");
-        if (!keep) unrelated.add(title);
-        else unrelated.delete(title);
+      remaining = [];
+      for (const [index, key] of titles.entries()) {
+        const keep = candidate[index];
+        if (keep !== 0 && keep !== 1) {
+          remaining.push(key);
+          continue;
+        }
+        decisions.set(key, keep === 1);
+        failedTitles.delete(key);
+        if (keep === 0) unrelated.add(key);
+        else unrelated.delete(key);
       }
-      for (const title of titles) decisions.set(title, !unrelated.has(title));
     } catch (error) {
       input.signal?.throwIfAborted();
-      if (
-        repair &&
-        titles.length > 20 &&
-        (error instanceof SyntaxError || error instanceof z.ZodError)
-      ) {
-        await mapConcurrent(batches(titles, 20), 2, (batch) =>
-          judge(batch, false),
-        );
+      if (!(error instanceof SyntaxError || error instanceof z.ZodError)) {
+        const reason = error instanceof Error ? error.message : String(error);
+        for (const key of remaining) failedTitles.set(key, reason);
         return;
       }
-      const reason = error instanceof Error ? error.message : String(error);
-      for (const title of titles) failedTitles.set(title, reason);
+    }
+    if (repair && remaining.length) {
+      await mapConcurrent(batches(remaining, 20), 2, (batch) =>
+        judge(batch, false),
+      );
+    } else {
+      for (const key of remaining)
+        failedTitles.set(
+          key,
+          "Role screening did not return a usable decision. Try this site again to continue.",
+        );
     }
   };
   await mapConcurrent(batches(titles, 120), 3, (batch) => judge(batch));
-  const secondLook = titles.filter((title) => {
-    if (!unrelated.has(title)) return false;
+  const secondLook = titles.filter((key) => {
+    if (!unrelated.has(key)) return false;
     const body = fresh
-      .filter((card) => titleKey(card.title) === title)
+      .filter((card) => titleKey(card) === key)
       .map((card) => roleDutyEvidence(card, input.goals))
       .find(Boolean);
     if (!body) return false;
     evidence.set(
-      title,
+      key,
       `Role-duty evidence from the full provider listing: ${body}`,
     );
     return true;
   });
   await mapConcurrent(batches(secondLook, 40), 2, (batch) => judge(batch));
+  for (const key of failedTitles.keys()) {
+    decisions.delete(key);
+    unrelated.delete(key);
+  }
   const seen = fresh
-    .filter((card) => unrelated.has(titleKey(card.title)))
+    .filter((card) => unrelated.has(titleKey(card)))
     .map((card) => ({
       url: card.url,
-      cardFingerprint: card.cardFingerprint,
+      cardFingerprint: screeningFingerprint(card),
       roleGoalsKey: key,
       verdict: "unrelated" as const,
     }));
   return {
     related: fresh.filter(
       (card) =>
-        !unrelated.has(titleKey(card.title)) &&
-        !failedTitles.has(titleKey(card.title)),
+        !unrelated.has(titleKey(card)) && !failedTitles.has(titleKey(card)),
     ),
     failed: fresh
-      .filter((card) => failedTitles.has(titleKey(card.title)))
+      .filter((card) => failedTitles.has(titleKey(card)))
       .map((card) => ({
         url: card.url,
-        reason: failedTitles.get(titleKey(card.title))!,
+        reason: failedTitles.get(titleKey(card))!,
       })),
     seen,
     skipped: input.cards.length - fresh.length,
@@ -940,6 +987,12 @@ const fitSchema = z.object({
   r: explanation,
   p: explanation,
   c: explanation,
+  h: z
+    .tuple([
+      z.enum(["met", "conflict", "unknown", "not_requested"]),
+      z.string().min(1),
+    ])
+    .optional(),
   e: z
     .tuple([
       z.enum(["compatible", "review", "blocked"]),
@@ -1000,8 +1053,9 @@ function fitResponseSchema() {
       r: pair,
       p: pair,
       c: pair,
+      h: pair,
     },
-    required: ["id", "s", "why", "w", "r", "p", "c", "e"],
+    required: ["id", "s", "why", "w", "r", "p", "c", "e", "h"],
   };
   return {
     name: "job_fits",
@@ -1109,7 +1163,7 @@ export async function fitJobs(
         }));
         const answer = await ask(
           input,
-          `${FIT_WORK_ELIGIBILITY} Judge each job from the complete listing and candidate evidence. Each listing's passages indexes, in order, reconstruct its unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : ""} Structured profile edits take priority over the resume. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":["compatible|review|blocked","verbatim scope quote","location kind","ISO country codes"],"s":score,"why":"short overall reason","w":"the why in 5 words or fewer: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":["strong|related|stretch|unrelated|unknown","role reason"],"p":["aligned|mixed|conflict|unknown","preferences reason"],"c":["strong|partial|unknown","candidate evidence"]}]}. Include every id exactly once, including low scores. Keep each explanation under 12 words without repeating sentences.`,
+          `${FIT_WORK_ELIGIBILITY} Judge each job from the complete listing and candidate evidence. Each listing's passages indexes, in order, reconstruct its unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : ""} Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known conflict or unresolved mandatory requirement worth applying or a strong match. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":["compatible|review|blocked","verbatim scope quote","location kind","ISO country codes"],"s":score,"why":"short overall reason","w":"the why in 5 words or fewer: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":["strong|related|stretch|unrelated|unknown","role reason"],"p":["aligned|mixed|conflict|unknown","preferences reason"],"c":["strong|partial|unknown","candidate evidence"],"h":["met|conflict|unknown|not_requested","mandatory requirements reason"]}]}. Include every id exactly once, including low scores. Keep each explanation under 12 words without repeating sentences.`,
           {
             ...context,
             passages,
@@ -1129,7 +1183,10 @@ export async function fitJobs(
         const ids = new Set(batch.map((job) => String(job.id)));
         const rows = answer.fits.flatMap((row) => {
           const parsed = fitSchema.safeParse(row);
-          return parsed.success && ids.has(String(parsed.data.id))
+          return parsed.success &&
+            (!(input.goals.compensation?.minimum != null) ||
+              parsed.data.h !== undefined) &&
+            ids.has(String(parsed.data.id))
             ? [parsed.data]
             : [];
         });
@@ -1151,17 +1208,22 @@ export async function fitJobs(
                 fit.e,
                 input.countryOptionFallbacks,
               );
+            const hardLimited =
+              fit.h?.[0] === "conflict" || fit.h?.[0] === "unknown";
             const cap =
               eligibility === "blocked"
                 ? JOB_FIT_BANDS.stretch - 1
                 : eligibility === "review"
                   ? JOB_FIT_BANDS.good - 1
-                  : fit.p[0] === "conflict"
-                    ? JOB_FIT_BANDS.strong - 1
-                    : 100;
+                  : hardLimited
+                    ? JOB_FIT_BANDS.good - 1
+                    : fit.p[0] === "conflict"
+                      ? JOB_FIT_BANDS.strong - 1
+                      : 100;
             return {
               id: fit.id,
               ...(eligibility !== "compatible" ||
+              hardLimited ||
               fit.p[0] === "conflict" ||
               (fit.r[0] !== "strong" && fit.s < JOB_FIT_BANDS.good)
                 ? {
@@ -1171,7 +1233,7 @@ export async function fitJobs(
                           ? ("eligibility" as const)
                           : eligibility === "review"
                             ? ("eligibility_unconfirmed" as const)
-                            : fit.p[0] === "conflict"
+                            : hardLimited || fit.p[0] === "conflict"
                               ? ("preferences" as const)
                               : ("role" as const),
                       countries:
@@ -1185,7 +1247,9 @@ export async function fitJobs(
               summary:
                 fit.s > cap
                   ? eligibility === "compatible"
-                    ? fit.p[1]
+                    ? hardLimited
+                      ? fit.h![1]
+                      : fit.p[1]
                     : eligibilityReason
                   : fit.why,
               // Only beside its own reason (a capped score reads another
@@ -1202,9 +1266,17 @@ export async function fitJobs(
                     ? "conflict"
                     : eligibility === "review" && fit.p[0] !== "conflict"
                       ? "unknown"
-                      : fit.p[0],
+                      : hardLimited
+                        ? fit.h?.[0] === "conflict"
+                          ? "conflict"
+                          : "unknown"
+                        : fit.p[0],
                 explanation:
-                  eligibility === "compatible" ? fit.p[1] : eligibilityReason,
+                  eligibility === "compatible"
+                    ? hardLimited
+                      ? fit.h![1]
+                      : fit.p[1]
+                    : eligibilityReason,
               },
               coverage: { assessment: fit.c[0], explanation: fit.c[1] },
               scoredAt: new Date().toISOString(),

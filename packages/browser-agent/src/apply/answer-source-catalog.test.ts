@@ -1689,7 +1689,7 @@ describe("D6 job country and eligibility answers", () => {
         "DE",
         true,
       ),
-    ).toBe("needs_you");
+    ).toBe("inference"); // Complete conditional meaning requires independent grounding.
     for (const wording of [
       "Are you authorized to work in Germany without restrictions?",
       "Are you permanently authorized to work in Germany without sponsorship?",

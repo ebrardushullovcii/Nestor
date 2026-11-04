@@ -445,6 +445,7 @@ test.each([
     answer: "synthetic-alex",
     sourceId: "profile.githubUrl",
     supported: true,
+    calls: 1,
   },
   {
     label: "GitHub URL",
@@ -452,6 +453,15 @@ test.each([
     answer: "https://github.com/synthetic-alex",
     sourceId: "profile.githubUrl",
     supported: true,
+    calls: 1,
+  },
+  {
+    label: "GitHub",
+    hint: "Please provide your professional reference's GitHub username.",
+    answer: "synthetic-alex",
+    sourceId: "profile.githubUrl",
+    supported: false,
+    calls: 1,
   },
   {
     label: "Your GitHub handle will be shown publicly",
@@ -459,6 +469,7 @@ test.each([
     answer: "synthetic-alex",
     sourceId: "profile.githubUrl#username",
     supported: false,
+    calls: 3,
   },
 ])("preflight preserves the requested GitHub format: $label", async (row) => {
   const client = reader([
@@ -501,7 +512,7 @@ test.each([
     formControls: [field],
   });
   expect(checks[0]?.supported).toBe(row.supported);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(row.supported ? 1 : 3);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(row.calls);
 });
 test("preflight reuses the Workday country-bound facts without a prose check", async () => {
   const answers = replay.workday.questions.map((row) => ({

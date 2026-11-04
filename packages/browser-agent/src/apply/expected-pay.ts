@@ -22,7 +22,7 @@ export function expectedPaySuggestion(
   const currency = pay.currency;
   const question = `${control.groupLabel} ${control.label} ${control.hint ?? ""}`;
   if (
-    /\b(?:current|previous|past|historical|history|earnings|net|gross|after tax|before tax)\b/iu.test(
+    /\b(?:current|previous|past|historical|history|earnings|net|after tax|take home)\b/iu.test(
       question,
     )
   )
@@ -83,4 +83,33 @@ export function expectedPaySuggestion(
     provenanceLabel: "your saved expected pay",
     groundedIn: [stored],
   };
+}
+
+/** Local handoff only: it never authorizes a browser write. */
+export function expectedPayHandoff(
+  control: ApplyFormControl,
+  sources: ApplyAnswerSources,
+): {
+  suggestion: ApplyAnswer | null;
+  reason: string;
+  check: string;
+} | null {
+  if (control.questionKind !== "salary_expectation") return null;
+  if (control.asksCurrentPay)
+    return {
+      suggestion: null,
+      reason:
+        "Your saved expected pay does not establish your current or previous earnings. Please supply that separate fact.",
+      check: "current_pay_missing",
+    };
+  const suggestion = expectedPaySuggestion(control, sources);
+  if (!suggestion) return null;
+  const target = suggestion.groundedIn[0];
+  if (control.options.length && !control.options.includes(suggestion.value))
+    return {
+      suggestion: null,
+      reason: `Your saved expected pay is ${target}, but this form has no single matching option in the same currency and period. Please choose how to answer this form.`,
+      check: "pay_option_missing",
+    };
+  return null;
 }

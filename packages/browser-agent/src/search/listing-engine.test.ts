@@ -36,6 +36,107 @@ const card = (title: string, id = title): ListingCard => ({
   sourceLabel: source.label,
 });
 
+test.each([{ "0": 1, "1": 0 }, { "keep{": { "0": 1, "1": 0 } }])(
+  "B2 retains unambiguous indexed decisions despite a wrong wrapper: %j",
+  async (answer) => {
+    const cards = [card("Data Quality Assistant"), card("Dental Nurse")];
+    const result = await screenCards({
+      cards,
+      goals: {
+        targetRoles: ["Data Analyst"],
+        relatedRoles: [],
+        strategy: "target_roles",
+      },
+      client: {
+        chatWithTools: vi.fn(() =>
+          Promise.resolve({ content: JSON.stringify(answer) }),
+        ),
+      },
+    });
+    expect(result.related).toEqual([cards[0]]);
+    expect(result.seen.map((row) => row.url)).toEqual([cards[1].url]);
+    expect(result.failed).toEqual([]);
+  },
+);
+
+test("B2 repairs only missing or invalid screen judgments, including small batches", async () => {
+  const requests: unknown[][] = [];
+  const result = await screenCards({
+    cards: [card("Research Assistant"), card("Dental Nurse")],
+    goals: {
+      targetRoles: ["Data Analyst"],
+      relatedRoles: [],
+      strategy: "target_roles",
+    },
+    client: {
+      chatWithTools: vi.fn(
+        (messages: Parameters<LLMClient["chatWithTools"]>[0]) => {
+          const titles = (
+            JSON.parse(messages[1].content) as { titles: unknown[][] }
+          ).titles;
+          requests.push(titles);
+          return Promise.resolve({
+            content: JSON.stringify({
+              keep:
+                requests.length === 1 ? { "0": 1, "1": "invalid" } : { "0": 0 },
+            }),
+          });
+        },
+      ),
+    },
+  });
+  expect(requests.map((rows) => rows.length)).toEqual([2, 1]);
+  expect(JSON.stringify(requests[1])).toContain("dental nurse");
+  expect(result.related.map((row) => row.title)).toEqual([
+    "Research Assistant",
+  ]);
+  expect(result.seen).toHaveLength(1);
+  expect(result.failed).toEqual([]);
+});
+
+test("B2 title cache distinguishes actual duties and preserves evidence beyond a short byline", async () => {
+  const decisions = new Map<string, boolean>();
+  const client = {
+    chatWithTools: vi.fn(
+      (messages: Parameters<LLMClient["chatWithTools"]>[0]) =>
+        Promise.resolve({
+          content: JSON.stringify({
+            keep: {
+              "0": messages[1].content.includes("SQL validation") ? 1 : 0,
+            },
+          }),
+        }),
+    ),
+  };
+  const goals = {
+    targetRoles: ["Data Analyst"],
+    relatedRoles: [],
+    strategy: "target_roles" as const,
+  };
+  await screenCards({
+    client,
+    goals,
+    decisions,
+    cards: [
+      { ...card("Research Assistant", "lab"), text: "Laboratory animal care" },
+    ],
+  });
+  const analytical = {
+    ...card("Research Assistant", "data"),
+    text:
+      "Berlin office. ".repeat(24) +
+      "SQL validation and recurring reporting duties.",
+  };
+  const result = await screenCards({
+    client,
+    goals,
+    decisions,
+    cards: [analytical],
+  });
+  expect(result.related).toEqual([analytical]);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
 test.each(["No open positions", "No current vacancies", "0 open jobs"])(
   "an explicit empty HTML inventory is complete: %s",
   async (message) => {

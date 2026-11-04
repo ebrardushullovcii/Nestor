@@ -1,3 +1,6 @@
+import { questionPrompt } from "./question-text";
+export { questionPrompt } from "./question-text";
+import type { ApplyAnswerEvidencePolicy } from "./types";
 import { intendedAccountEmail } from "@nestor/contracts";
 import {
   browserInteractionKind,
@@ -36,8 +39,8 @@ import {
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import {
   resumeFormFileNames,
-  cleanFormQuestionPrompt,
   normalizeFormQuestionPrompt,
+  parseMultiChoiceAnswer,
   type ApplicationAttemptQuestion,
   type ApplyPickerAttempt,
   type StoredApplyPickerAttempt,
@@ -219,7 +222,7 @@ export interface ApplyExecutorDeps {
   checkWrittenAnswer?: (
     question: string,
     answer: string,
-    evidencePolicy?: "factual_summary" | "factual_inference" | "saved_answer",
+    evidencePolicy?: ApplyAnswerEvidencePolicy,
   ) => Promise<{
     supported: boolean;
     reason: string;
@@ -664,50 +667,6 @@ export function fileFieldHoldsOtherFile(
   return shown !== "" && !shown.includes(fileName) && !fileName.includes(shown);
 }
 
-export function questionPrompt(control: ApplyFormControl): string {
-  if (control.repeatedQuestion) return control.repeatedQuestion.prompt;
-  const label = control.label.trim();
-  const group =
-    control.attestationKind === null &&
-    (control.kind === "radio" || control.answerControlType === "multi_choice")
-      ? (
-          control.sectionPath?.at(-1) ??
-          control.groupLabel.split(" — ").at(-1) ??
-          ""
-        ).trim()
-      : control.groupLabel.trim();
-  // File tasks name the input, without its fieldset legend or required marker.
-  if (control.kind === "file") {
-    return label.replace(/[\s*:]+$/u, "").replace(/\s+upload$/iu, "") || "file";
-  }
-  const normalizedLabel = normalizeSignal(label);
-  const normalizedGroup = normalizeSignal(group);
-  if (
-    (control.kind === "radio" ||
-      (control.kind === "checkbox" &&
-        control.answerControlType === "multi_choice")) &&
-    group.length > 0
-  )
-    return control.attestationKind !== null
-      ? cleanFormQuestionPrompt(group) || group
-      : group;
-  const groupAddsSomething =
-    normalizedGroup.length > 0 &&
-    normalizedLabel.length > 0 &&
-    !normalizedLabel.includes(normalizedGroup) &&
-    !normalizedGroup.includes(normalizedLabel);
-  const prompt = groupAddsSomething ? `${group} — ${label}` : label || group;
-  const described =
-    prompt ||
-    control.placeholder.trim() ||
-    "A question on the application form";
-  // A declaration's section can change what "I agree" means. Keep that
-  // context for both its saved answer and the model's permission check.
-  return control.attestationKind !== null
-    ? cleanFormQuestionPrompt(described) || described
-    : described;
-}
-
 export function buildPendingQuestion(input: {
   control: ApplyFormControl;
   jobId: string;
@@ -730,7 +689,7 @@ export function buildPendingQuestion(input: {
       : [];
   const answerOptions =
     radioSiblings.length > 0
-      ? radioSiblings.map((candidate) => candidate.value || candidate.label)
+      ? radioSiblings.map((candidate) => candidate.label || candidate.value)
       : control.options;
   return {
     id: questionIdFor(control, input.jobId, input.siblings ?? []),
@@ -3142,6 +3101,31 @@ export async function executeApplyProposal(
       // stands when the person's facts support it (ADR 0041). A declaration
       // is settled by the person's approvals below instead.
       let radioAnswer: ApplyAnswer | null = null;
+      const savedSet =
+        control.answerControlType === "multi_choice"
+          ? savedAnswerForQuestion(
+              control,
+              config.sources.reusableAnswers,
+              observation.controls,
+            )
+          : null;
+      const selectedSet = savedSet
+        ? parseMultiChoiceAnswer(savedSet.answer, control.options)
+        : null;
+      const clearingSavedOption =
+        control.kind === "checkbox" &&
+        !proposal.checked &&
+        selectedSet !== null &&
+        !selectedSet.includes(control.label || control.value);
+      if (clearingSavedOption && savedSet)
+        radioAnswer = {
+          value: savedSet.answer,
+          kind: control.questionKind,
+          sourceKind: "answer_library",
+          sourceId: `answerLibrary.${savedSet.id}`,
+          provenanceLabel: "your answer to this question",
+          groundedIn: [`answerLibrary.${savedSet.id}`],
+        };
       const eligibilityAnswer =
         control.questionKind === "work_authorization" ||
         control.questionKind === "visa_sponsorship";
@@ -3158,13 +3142,15 @@ export async function executeApplyProposal(
             config.sources.posting.location,
           ));
       if (
-        deps.classifyQuestions ||
-        ownToggle ||
-        ((control.kind === "radio" ||
-          control.answerControlType === "multi_choice") &&
-          proposal.checked &&
-          control.attestationKind === null) ||
-        (eligibilityAnswer && (control.kind === "checkbox" || proposal.checked))
+        !clearingSavedOption &&
+        (deps.classifyQuestions ||
+          ownToggle ||
+          ((control.kind === "radio" ||
+            control.answerControlType === "multi_choice") &&
+            proposal.checked &&
+            control.attestationKind === null) ||
+          (eligibilityAnswer &&
+            (control.kind === "checkbox" || proposal.checked)))
       ) {
         // Eligibility is a factual answer even when worded as a declaration.
         // A box in a checkbox group is one option of the group's question,
@@ -3229,8 +3215,7 @@ export async function executeApplyProposal(
           control = selected;
           checked = true;
         } else if (control.answerControlType === "multi_choice") {
-          // decideAnswer accepted only an option the person included.
-          checked = true;
+          checked = clearingSavedOption ? false : true;
         } else if (control.answerControlType === "boolean") {
           const value = normalizeSignal(radioAnswer.value);
           if (value !== "yes" && value !== "no")

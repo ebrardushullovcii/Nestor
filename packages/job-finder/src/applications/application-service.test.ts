@@ -4221,6 +4221,7 @@ it("Send binds the seven earlier-step answers of a numbered form through its sto
     field(2, ECHO(label), value, "site_unchanged", {
       readOnly: true,
       repeatedQuestion: { prompt: ECHO(label), step: "step 2" },
+      ...(label === "Referral code" ? { required: false } : {}),
     });
   const receipt = (stepIndex: number, fields: ReturnType<typeof field>[]) => ({
     kind: "advance" as const,
@@ -4240,7 +4241,9 @@ it("Send binds the seven earlier-step answers of a numbered form through its sto
       field(1, "First name", "Jamie", "executor_write"),
       field(1, "Last name", "Example", "executor_write"),
       field(1, "Email", "jamie@clientnest.example", "executor_write"),
-      field(1, "Referral code", "LOCAL-REFERRAL-27", "site_unchanged"),
+      field(1, "Referral code", "LOCAL-REFERRAL-27", "site_unchanged", {
+        required: false,
+      }),
     ]),
     receipt(2, [
       echo("First name", "Jamie"),
@@ -4505,3 +4508,60 @@ it.each([false, true])(
     }
   },
 );
+
+it("bounds an unavailable equivalent-question read until its source snapshot changes", async () => {
+  const f = await setup(1);
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  const row = f.applications.claimNext()!;
+  const requested = f.applications.needsYou.request(
+    {
+      applicationId: row.id,
+      attempt: row.attempt,
+      fieldKey: "availability",
+      key: "waiting-question",
+      kind: "question",
+      scope: {},
+      prompt: "Days available for this scheduled call",
+      input: "multi_choice",
+      options: ["Tuesday", "Thursday"],
+      reusePrompt: true,
+    },
+    { reuseAnswers: false },
+  );
+  if (requested.status !== "needs_you")
+    throw new Error("Expected a waiting task");
+  const saved = f.applications.needsYou.remember({
+    key: "saved-question",
+    prompt: "Availability for the scheduled call",
+    scope: {},
+    input: "multi_choice",
+    options: ["Thursday", "Tuesday"],
+    answer: JSON.stringify(["Tuesday"]),
+  });
+  const compare = vi
+    .spyOn(browserAgent, "equivalentApplicationQuestions")
+    .mockRejectedValueOnce(new Error("Comparison unavailable"))
+    .mockResolvedValue(new Set([`${requested.task.id}:${saved.id}`]));
+  f.deps.aiClient = {
+    ...f.deps.aiClient,
+    chatWithTools: vi.fn(() => Promise.resolve({ toolCalls: [] })),
+  };
+  await f.service.start();
+  await vi.waitFor(() => expect(compare).toHaveBeenCalledOnce());
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  f.service.wake();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(compare).toHaveBeenCalledOnce();
+  expect(f.applications.getApplication(row.id)?.state).toBe("needs_you");
+  f.applications.needsYou.saveAnswer({
+    id: saved.id,
+    answer: JSON.stringify(["Thursday"]),
+  });
+  f.service.wake();
+  await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  expect(
+    f.applications.needsYou.list().rows.map((task) => task.id),
+  ).not.toContain(requested.task.id);
+  f.releases.shift()!();
+});

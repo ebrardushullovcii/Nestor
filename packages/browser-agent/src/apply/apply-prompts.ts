@@ -378,6 +378,11 @@ export function applyStepShape(
     tabs: observation.openedTabs,
     controls: observation.controls.map((control) => ({
       ...control,
+      // Local verification and inferred group requirements do not replace
+      // the site's field handles or native structure after a successful write.
+      required: control.requiredOnPage ?? control.required,
+      requiredOnPage: undefined,
+      answerUnverified: undefined,
       value: "",
       checked: false,
       answered: false,

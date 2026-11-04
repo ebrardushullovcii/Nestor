@@ -739,7 +739,7 @@ export function createJobSearchRunner(
         id !== undefined
           ? [String(id)]
           : search
-            ? resultRows.partialIds(search.id)
+            ? resultRows.unfinishedIds(search.id)
             : [];
       const targets = ids.flatMap((sourceId) => {
         const site = siteRows.get(Number(sourceId));

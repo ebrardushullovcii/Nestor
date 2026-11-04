@@ -93,11 +93,11 @@ export function createSearchSourcesStore(store: JobStore) {
         total,
       };
     },
-    /** The sites a search left with more listings to read. */
-    partialIds(searchId: string): string[] {
+    /** Only unfinished sites; completed and person-blocked sites require no automatic retry. */
+    unfinishedIds(searchId: string): string[] {
       return (
         sql(
-          "SELECT source_id FROM search_sources WHERE search_id = ? AND state = 'partial' ORDER BY id",
+          "SELECT source_id FROM search_sources WHERE search_id = ? AND state IN ('partial', 'failed', 'stopped') ORDER BY id",
         ).all(searchId) as { source_id: string }[]
       ).map((row) => row.source_id);
     },

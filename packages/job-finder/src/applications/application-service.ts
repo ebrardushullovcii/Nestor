@@ -15,6 +15,7 @@ import {
   browserStepReadyForAgent,
   canContinueApplicationAfterAccess,
   checkClassifiedApplicationAnswers,
+  equivalentApplicationQuestions,
   duplicatedHistoryRows,
   inferQuestionKind,
   fileUploadProblems,
@@ -2399,6 +2400,83 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
   }
 
+  let lastQuestionReuseSnapshot = "";
+  let unavailableQuestionReuseSnapshot = "";
+  const reconcileEquivalentQuestions = async (): Promise<void> => {
+    const client = toApplyLlmClient(deps.aiClient);
+    if (!client) return;
+    const candidates = applications.needsYou.questionReuseCandidates();
+    const snapshot = JSON.stringify(candidates);
+    if (
+      !candidates.length ||
+      snapshot === lastQuestionReuseSnapshot ||
+      snapshot === unavailableQuestionReuseSnapshot
+    )
+      return;
+    const pairs = candidates.flatMap(({ task, answers }) =>
+      answers.map((saved) => ({
+        id: `${task.id}:${saved.id}`,
+        saved: {
+          question: saved.prompt,
+          answer: saved.answer,
+          options: saved.options,
+        },
+        waiting: { question: task.prompt, options: task.options },
+      })),
+    );
+    const equivalent = new Set<string>();
+    let comparisonUnavailable = false;
+    for (let offset = 0; offset < pairs.length && !stopped; offset += 20) {
+      const checked = await equivalentApplicationQuestions({
+        client,
+        pairs: pairs.slice(offset, offset + 20),
+      }).catch(() => {
+        comparisonUnavailable = true;
+        return new Set<string>();
+      });
+      for (const id of checked) equivalent.add(id);
+    }
+    if (stopped) return;
+    // The reader already made its bounded retry. An unavailable report is
+    // not a negative decision and must not become a timer-driven retry loop.
+    // Changed questions or sources supply a fresh snapshot to check.
+    if (comparisonUnavailable) {
+      unavailableQuestionReuseSnapshot = snapshot;
+      return;
+    }
+    unavailableQuestionReuseSnapshot = "";
+    lastQuestionReuseSnapshot = snapshot;
+    const matches = candidates.flatMap((candidate) => {
+      const answers = candidate.answers.filter((answer) =>
+        equivalent.has(`${candidate.task.id}:${answer.id}`),
+      );
+      // Conflicting sources and two meanings within one application stay open.
+      if (
+        !answers.length ||
+        new Set(answers.map((answer) => answer.answer)).size !== 1
+      )
+        return [];
+      if (
+        candidate.applications.some((id) =>
+          candidates.some(
+            (other) =>
+              other.task.id !== candidate.task.id &&
+              other.applications.includes(id) &&
+              other.answers.some(
+                (answer) =>
+                  answers.some((saved) => saved.id === answer.id) &&
+                  equivalent.has(`${other.task.id}:${answer.id}`),
+              ),
+          ),
+        )
+      )
+        return [];
+      return [{ taskId: candidate.task.id, answerId: answers[0]!.id }];
+    });
+    if (matches.length)
+      applications.needsYou.resolveQuestionReuse({ snapshot, matches });
+  };
+
   function wake(): void {
     if (stopped) return;
     if (pumping) {
@@ -2406,6 +2484,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return;
     }
     pumping = (async () => {
+      await reconcileEquivalentQuestions();
       while (!stopped && active.size < capacity() && !(await deps.isPaused())) {
         const row = applications.claimNext();
         if (!row) break;

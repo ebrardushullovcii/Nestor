@@ -382,6 +382,9 @@ export function SearchStatus(props: {
   const [fitError, setFitError] = useState<string | null>(null);
   const partial = props.status.progress?.partial ?? 0;
   const running = props.status.search?.state === "running";
+  const stoppedWithSites =
+    props.status.search?.state === "stopped" &&
+    props.status.search.sourcesDone < props.status.search.sourcesTotal;
   const remaining = props.status.fitChecking ?? 0;
   const fitting = props.status.fitRunning === true;
   const progress = running ? runningLine(props.status) : null;
@@ -489,7 +492,7 @@ export function SearchStatus(props: {
           Stop fit
         </Button>
       ) : null}
-      {!running && partial > 0 ? (
+      {!running && (partial > 0 || failed || stoppedWithSites) ? (
         <Button
           className="shrink-0"
           pending={more.pending}
@@ -499,7 +502,11 @@ export function SearchStatus(props: {
           onClick={() => more.keepReading()}
           title={more.error ?? undefined}
         >
-          {partial === 1 ? "Keep reading it" : "Keep reading them"}
+          {failed || stoppedWithSites
+            ? "Continue unfinished sites"
+            : partial === 1
+              ? "Keep reading it"
+              : "Keep reading them"}
         </Button>
       ) : null}
       {props.status.search !== null ? (

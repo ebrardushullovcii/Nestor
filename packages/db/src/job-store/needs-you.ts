@@ -925,6 +925,88 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         ];
       });
     },
+    /** Full, current reusable question/answer pairs for semantic comparison.
+     * Selection, scope, drafts and option identity remain repository-owned. */
+    questionReuseCandidates(): {
+      task: NeedsYouTask;
+      answers: SavedFormAnswer[];
+      applications: number[];
+    }[] {
+      const tasks = sql(`SELECT DISTINCT t.* FROM needs_you t
+        JOIN application_needs_you n ON n.task_id=t.id
+        JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
+        WHERE t.kind='question' AND t.reuse_prompt=1 AND t.resolved_at IS NULL
+          AND a.state='needs_you' AND NOT EXISTS
+          (SELECT 1 FROM needs_you_drafts d WHERE d.task_id=t.id)
+        ORDER BY t.id`).all() as Task[];
+      return tasks.flatMap((row) => {
+        const task = toTask(row);
+        const answers = (
+          sql(`SELECT id FROM form_answers WHERE needs_confirmation=0
+          AND country=? AND site_origin=? ORDER BY id`).all(
+            row.country,
+            row.site_origin,
+          ) as { id: number }[]
+        )
+          .map(({ id }) => savedAnswer(id))
+          .filter((answer): answer is SavedFormAnswer => answer !== null);
+        // An exact answer refused by this attempt is not silently overridden.
+        if (answers.some((answer) => answer.key === task.key)) return [];
+        const options = [...task.options].sort();
+        const compatible = answers.filter(
+          (answer) =>
+            answer.input === task.input &&
+            JSON.stringify([...answer.options].sort()) ===
+              JSON.stringify(options),
+        );
+        const applications =
+          sql(`SELECT DISTINCT n.application_id AS id FROM application_needs_you n
+          JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
+          WHERE n.task_id=? AND a.state='needs_you'
+          ORDER BY n.application_id`).all(row.id) as {
+            id: number;
+          }[];
+        return compatible.length
+          ? [
+              {
+                task,
+                answers: compatible,
+                applications: applications.map(({ id }) => id),
+              },
+            ]
+          : [];
+      });
+    },
+    /** Resolve only a still-identical snapshot checked outside the transaction. */
+    resolveQuestionReuse(input: {
+      snapshot: string;
+      matches: { taskId: number; answerId: number }[];
+    }): number {
+      return store.transaction(() => {
+        const current = this.questionReuseCandidates();
+        if (JSON.stringify(current) !== input.snapshot) return 0;
+        let queued = 0;
+        for (const match of input.matches) {
+          const candidate = current.find(
+            (entry) => entry.task.id === match.taskId,
+          );
+          const saved = candidate?.answers.find(
+            (entry) => entry.id === match.answerId,
+          );
+          const task = get(match.taskId);
+          if (!candidate || !saved || !task || task.resolved_at !== null)
+            continue;
+          let answer: string;
+          try {
+            answer = validateAnswer(task, saved.answer);
+          } catch {
+            continue;
+          }
+          queued += resolve(task, answer);
+        }
+        return queued;
+      });
+    },
     /** Reuse human answers for older reworded handovers, without overriding an exact refusal. */
     reconcileSavedQuestions(): number {
       return store.transaction(() => {

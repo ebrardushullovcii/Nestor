@@ -1,3 +1,4 @@
+import { questionLabel, questionPrompt } from "./question-text";
 import {
   normalizeFormQuestionPrompt,
   preserveTechnologyTokens,
@@ -501,22 +502,7 @@ export function savedAnswerForQuestion(
   controls?: readonly ApplyFormControl[],
 ): CandidateReusableAnswer | null {
   if (control.credentialRole) return null;
-  const prompt = (candidate: ApplyFormControl) =>
-    candidate.repeatedQuestion?.prompt ??
-    ((candidate.kind === "radio" ||
-      candidate.answerControlType === "multi_choice") &&
-    candidate.choiceGroupKey &&
-    candidate.groupLabel
-      ? candidate.attestationKind === null
-        ? (candidate.sectionPath?.at(-1) ??
-          candidate.groupLabel.split(" — ").at(-1) ??
-          candidate.groupLabel)
-        : candidate.groupLabel
-      : key(candidate.groupLabel) === key(candidate.label)
-        ? candidate.label
-        : [candidate.groupLabel, candidate.label]
-            .filter((part) => part.trim())
-            .join(" — "));
+  const prompt = questionPrompt;
   const key = (value: string) =>
     normalizeFormQuestionPrompt(preserveTechnologyTokens(value));
   const rawPrompt = prompt(control);
@@ -558,6 +544,10 @@ export function savedAnswerForQuestion(
       savedQuestionMatches(saved.question, rawPrompt, saved.answer, context),
   );
   if (exact.length || control.repeatedQuestion) return unique(exact);
+  // Extra instructions and outer subjects are part of the saved question.
+  // A shorter legacy label can still be proposed through the independent
+  // whole-question checker; it cannot grant literal reuse here.
+  if (key(rawPrompt) !== key(questionLabel(control))) return null;
   const semantic = usable.filter((saved) => {
     if (!savedQuestionMatches(saved.question, rawPrompt, saved.answer, context))
       return false;

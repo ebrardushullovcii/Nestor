@@ -59,6 +59,12 @@ export type ApplyControlKind =
 /** What a button on the form does. */
 export type ApplyActionKind = "advance" | "back" | "final" | "other";
 
+export type ApplyAnswerEvidencePolicy =
+  | "factual_summary"
+  | "factual_inference"
+  | "saved_answer"
+  | "eligibility";
+
 export interface ApplyFormControl {
   frame?: ApplyFrameOwner;
   /** Stable handle for this control within one observation. */
@@ -123,6 +129,8 @@ export interface ApplyFormControl {
   answerControlType: ApplicationQuestionControlType;
   /** Set when the control asks the person to declare something themselves. */
   attestationKind: ApplicationAttestationKind | null;
+  /** A displayed value whose applicant evidence has not been established. */
+  answerUnverified?: boolean;
   /** True when the control already carries an answer. */
   answered: boolean;
 }

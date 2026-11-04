@@ -294,6 +294,7 @@ export function buildApplyFormObservation(
         : {}),
       placeholder: rawControl.placeholder.trim(),
       required: rawControl.required,
+      requiredOnPage: rawControl.required,
       disabled: rawControl.disabled,
       readOnly: rawControl.readOnly,
       visible: rawControl.visible,

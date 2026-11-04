@@ -1,3 +1,4 @@
+import { questionPrompt } from "./question-text";
 import {
   inferAttestationKind,
   inferQuestionKind,
@@ -237,6 +238,15 @@ export function answerSourceCatalog(
         country: code,
       });
   }
+  for (const [index, permit] of (
+    eligibility.limitedWorkPermissions ?? []
+  ).entries())
+    rows.push({
+      id: `profile.workEligibility.limitedWorkPermissions.${index}`,
+      value: JSON.stringify(permit),
+      purpose: "work_auth",
+      country: country(permit.country),
+    });
   for (const saved of sources.reusableAnswers.filter(
     (answer) => !answer.needsConfirmation,
   ))
@@ -769,7 +779,7 @@ export type ClassifiedAnswerDecision =
   | {
       kind: "inference";
       source: null;
-      evidencePolicy: "factual_inference";
+      evidencePolicy: "factual_inference" | "eligibility";
     }
   | {
       kind: "writing";
@@ -910,9 +920,7 @@ export function classifyAnswerPermission(input: {
     );
   }
   const identity = (control: ApplyFormControl) =>
-    normalizeFormQuestionPrompt(
-      [control.groupLabel, control.label].filter(Boolean).join(" — "),
-    );
+    normalizeFormQuestionPrompt(questionPrompt(control));
   const phonePicker = phoneCountryPicker(input.control, input.controls);
   const same = input.controls.filter(
     (control) =>
@@ -1046,12 +1054,42 @@ export function classifyAnswerPermission(input: {
     );
     if (human) return { kind: "literal", source: human };
   }
-  const target = legalQuestionCountry(
-    input.control.groupLabel + " " + input.control.label,
-    catalog,
-  );
+  const legalPrompt = [
+    ...(input.control.sectionPath ?? []),
+    input.control.groupLabel,
+    input.control.label,
+    input.control.hint ?? "",
+  ].join(" ");
+  const namedCountries = countriesIn(legalPrompt);
+  const resolvedTarget = legalQuestionCountry(legalPrompt, catalog);
+  // A question may explicitly contrast jurisdictions. The independent check
+  // must confirm the reader's selection against the whole question.
+  const target =
+    resolvedTarget ??
+    (legal && tags.country && namedCountries.has(tags.country)
+      ? tags.country
+      : null);
+  const conditionalEligibility = (): ClassifiedAnswerDecision | null => {
+    const permitted =
+      legal &&
+      typeof tags.hasAdditionalConditions === "boolean" &&
+      tags.country &&
+      !fieldNamesAnotherPerson(input.control) &&
+      (namedCountries.size === 0 || namedCountries.has(tags.country)) &&
+      input.sources.profile.workEligibility.limitedWorkPermissions?.some(
+        (permit) =>
+          country(permit.country) === tags.country ||
+          countriesIn(permit.conditions).has(tags.country!),
+      );
+    return permitted
+      ? { kind: "inference", source: null, evidencePolicy: "eligibility" }
+      : null;
+  };
   if (legal && !target)
-    return deny("The work-permission country is unknown or ambiguous.");
+    return (
+      conditionalEligibility() ??
+      deny("The work-permission country is unknown or ambiguous.")
+    );
   const knownLegalQuestion = legal && !fieldNamesAnotherPerson(input.control);
   if (knownLegalQuestion && !source)
     source = catalog.find(
@@ -1213,9 +1251,8 @@ export function classifyAnswerPermission(input: {
     tags.kind === "other" &&
     input.control.attestationKind &&
     declarationApproved &&
-    ((tags.declarationPurpose !== "personal_fact" &&
-      (tags.declarationPurpose === "consent" ||
-        tags.declarationPurpose === "acknowledgement")) ||
+    (tags.declarationPurpose === "consent" ||
+      tags.declarationPurpose === "acknowledgement" ||
       (tags.hasAdditionalConditions !== true &&
         inferAttestationKind(input.control) === input.control.attestationKind &&
         routineDeclarations[input.control.attestationKind]?.some(
@@ -1301,6 +1338,7 @@ export function classifyAnswerPermission(input: {
     );
   if (!source && input.siteUnchanged && siteUnchangedAnswerAllowed(input))
     return { kind: "site_unchanged" };
+  if (!source && conditionalEligibility()) return conditionalEligibility()!;
   if (!source)
     return factualInferenceAllowed(input)
       ? { kind: "inference", source: null, evidencePolicy: "factual_inference" }
@@ -1484,13 +1522,19 @@ export function classifyAnswerPermission(input: {
             ].join(" "),
           )))
     )
-      return deny(
-        "Authorization alone does not establish the question's additional restrictions or sponsorship conditions.",
-        "permit_conditions",
+      return (
+        conditionalEligibility() ??
+        deny(
+          "Authorization alone does not establish the question's additional restrictions or sponsorship conditions.",
+          "permit_conditions",
+        )
       );
     if (!target || tags.country !== target || source.country !== target)
-      return deny(
-        "The work-permission country is unknown or does not match the source. Please answer for this job's country.",
+      return (
+        conditionalEligibility() ??
+        deny(
+          "The work-permission country is unknown or does not match the source. Please answer for this job's country.",
+        )
       );
     if (
       (!(
@@ -1514,8 +1558,11 @@ export function classifyAnswerPermission(input: {
             permission.requiresFutureSponsorship === true,
         ))
     )
-      return deny(
-        "The current permit conditions have not been shown to fit this job. Please confirm this answer.",
+      return (
+        conditionalEligibility() ??
+        deny(
+          "The current permit conditions have not been shown to fit this job. Please confirm this answer.",
+        )
       );
     if (
       exactSaved ||
@@ -1524,8 +1571,11 @@ export function classifyAnswerPermission(input: {
         source.value.trim() === input.answer.trim())
     )
       return { kind: "literal", source };
-    return deny(
-      "No matching country-specific work-permission source answers this question.",
+    return (
+      conditionalEligibility() ??
+      deny(
+        "No matching country-specific work-permission source answers this question.",
+      )
     );
   }
   if (
@@ -1774,7 +1824,7 @@ export function siteUnchangedAnswerAllowed(input: {
 }): boolean {
   const { control, tags } = input;
   if (!tags || tags.kind !== "other" || control.kind !== "text") return false;
-  if (control.questionKind !== "other") return false;
+  if (control.questionKind !== "other" || control.required) return false;
   // A repeated question passes only as the read-only echo of its original.
   if (
     control.repeatedQuestion &&

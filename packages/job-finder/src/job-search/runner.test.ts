@@ -844,6 +844,129 @@ test("Quick has no listing cap: a board that keeps paying off is read whole", as
   });
 });
 
+test("B2 failed source continuation survives runner restart and reuses saved details", async () => {
+  const { runner, engine, context, store } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://complete.example/jobs" });
+  sites.add({ text: "https://interrupted.example/jobs" });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  const last = context.sources[1]!.id;
+  engine.readListings.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      jobs: cards.map((row) => ({
+        ...found(row),
+        company: `Employer ${row.sourceId}`,
+        sourceJobId: row.url.split("/").at(-1)!,
+      })),
+      failures: [],
+    }),
+  );
+  let recover = false;
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [
+        card(target.id),
+        ...(recover && target.id === last
+          ? [
+              {
+                ...card(target.id),
+                url: `https://${target.id}.example/jobs/two`,
+                sourceJobId: "two",
+                title: "Backend Engineer II",
+              },
+            ]
+          : []),
+      ],
+      complete: recover || target.id !== last,
+      pagesRead: 1,
+      notes:
+        target.id === last && !recover
+          ? ["The next results page could not be read."]
+          : [],
+    }),
+  );
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await finished(runner);
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(2);
+  const rows = createSearchSourcesStore(store).list({}).rows;
+  expect(rows.find((row) => row.sourceId === last)?.state).toBe("failed");
+  const completedReads = engine.readListings.mock.calls.length;
+  recover = true;
+  const restarted = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+  });
+  runners.push(restarted);
+  await restarted.keepReading();
+  await finished(restarted);
+  expect(
+    engine.collectSource.mock.calls.slice(2).map(([input]) => input.target.id),
+  ).toEqual([last]);
+  expect(
+    engine.readListings.mock.calls
+      .slice(completedReads)
+      .flatMap(([input]) => input.cards)
+      .map((row) => row.url),
+  ).toEqual([`https://${last}.example/jobs/two`]);
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(3);
+});
+
+test("B2 stop preserves early results and continuation only restarts the unfinished site", async () => {
+  const { runner, engine, context, store } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://complete.example/jobs" });
+  sites.add({ text: "https://pending.example/jobs" });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  const last = context.sources[1]!.id;
+  engine.readListings.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      jobs: cards.map((row) => ({
+        ...found(row),
+        company: `Employer ${row.sourceId}`,
+      })),
+      failures: [],
+    }),
+  );
+  const pending =
+    deferred<Awaited<ReturnType<JobSearchEngine["collectSource"]>>>();
+  engine.collectSource.mockImplementation(({ target }) =>
+    target.id === last
+      ? pending.promise
+      : Promise.resolve({
+          cards: [card(target.id)],
+          complete: true,
+          pagesRead: 1,
+          notes: [],
+        }),
+  );
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await vi.waitFor(() =>
+    expect(
+      createSearchSourcesStore(store)
+        .list({})
+        .rows.some((row) => row.state === "done"),
+    ).toBe(true),
+  );
+  runner.stop();
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(1);
+  pending.resolve({ cards: [], complete: false, pagesRead: 0, notes: [] });
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [card(target.id)],
+      complete: true,
+      pagesRead: 1,
+      notes: [],
+    }),
+  );
+  await runner.keepReading();
+  await finished(runner);
+  expect(
+    engine.collectSource.mock.calls.slice(2).map(([input]) => input.target.id),
+  ).toEqual([last]);
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(2);
+});
+
 test("Keep reading gives a site Quick stopped a full read and keeps the next search's choices", async () => {
   const { runner, engine, context, store } = setup();
   const sites = createJobSitesStore(store);

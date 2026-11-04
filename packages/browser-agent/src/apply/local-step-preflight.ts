@@ -6,7 +6,8 @@ function stepHasOpenField(page: ApplyFormObservation): boolean {
     (control) =>
       (control.visible || control.kind === "file") &&
       !control.disabled &&
-      (control.invalid ||
+      (control.answerUnverified ||
+        control.invalid ||
         (control.required && !control.answered) ||
         control.credentialRole === "password"),
   );

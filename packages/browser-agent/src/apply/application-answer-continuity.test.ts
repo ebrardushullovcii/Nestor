@@ -1,12 +1,13 @@
+import { questionPrompt } from "./question-text";
 import { expect, test, vi } from "vitest";
 import {
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
 } from "@nestor/contracts";
 import type { LLMClient } from "../agent/contracts";
-import { applicationFacts } from "./application-facts";
+import { applicationFacts, savedAnswerForQuestion } from "./application-facts";
 import { classifyAnswerPermission } from "./answer-source-catalog";
-import { expectedPaySuggestion } from "./expected-pay";
+import { expectedPayHandoff, expectedPaySuggestion } from "./expected-pay";
 import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 const sources = (): ApplyAnswerSources => ({
@@ -362,4 +363,243 @@ test("an explicit compensation currency replaces an unconfirmed legacy currency 
   expect(
     applicationFacts(src, { payDisclosed: true }).preferences?.salaryCurrency,
   ).toBe("EUR");
+});
+
+test("approved acknowledgements retain semantic category and reject an added personal claim", () => {
+  const src = sources();
+  const field = {
+    ...control("These entries faithfully represent the supplied background"),
+    kind: "checkbox" as const,
+    answerControlType: "boolean" as const,
+    attestationKind: "truthfulness_certification" as const,
+  };
+  const input = {
+    control: field,
+    controls: [field],
+    sources: src,
+    answer: "Yes",
+    pageInstructions: "",
+    tags: {
+      kind: "other" as const,
+      country: null,
+      sourceId: null,
+      declarationPurpose: "acknowledgement" as const,
+    },
+  };
+  expect(
+    classifyAnswerPermission({
+      ...input,
+      approvedAttestations: ["truthfulness_certification"],
+    }).kind,
+  ).toBe("literal");
+  expect(
+    classifyAnswerPermission({ ...input, approvedAttestations: [] }).kind,
+  ).toBe("needs_you");
+  expect(
+    classifyAnswerPermission({
+      ...input,
+      approvedAttestations: ["truthfulness_certification"],
+      tags: { ...input.tags, declarationPurpose: "personal_fact" },
+    }).kind,
+  ).toBe("needs_you");
+});
+
+test("conditional Profile permission reaches a checked comparison, never a literal Yes", async () => {
+  const src = sources();
+  src.profile.workEligibility.limitedWorkPermissions = [
+    {
+      country: "Germany",
+      conditions: "No more than 20 hours weekly until August 2027",
+      requiresFutureSponsorship: true,
+    },
+  ];
+  const field = {
+    ...control(
+      "Does your current German permission cover 16 hours weekly through April 2027?",
+    ),
+    questionKind: "work_authorization" as const,
+  };
+  expect(
+    classifyAnswerPermission({
+      control: field,
+      controls: [field],
+      sources: src,
+      answer: "Yes",
+      pageInstructions: "",
+      tags: {
+        kind: "work_auth",
+        country: "DE",
+        sourceId: "profile.workEligibility.limitedWorkPermissions.0",
+        hasAdditionalConditions: true,
+      },
+    }),
+  ).toEqual({ kind: "inference", source: null, evidencePolicy: "eligibility" });
+  const check = await checkWrittenApplicationAnswers({
+    client: report([
+      {
+        claim: "Yes",
+        kind: "applicant_fact",
+        source: "applicant",
+        path: "/workEligibility/Limited work permissions/0/Country",
+        quote: "Germany",
+      },
+    ]),
+    sources: src,
+    payDisclosed: false,
+    answers: [
+      { question: field.label, answer: "Yes", evidencePolicy: "eligibility" },
+    ],
+  });
+  expect(check[0]?.supported).toBe(false); // A country alone cannot prove the hours/expiry conditions.
+});
+
+test("gross expected pay offers the exact compatible band while a missing band and current pay remain distinct", () => {
+  const src = sources();
+  src.preferences = JobSearchPreferencesSchema.parse({
+    minimumSalaryUsd: null,
+    approvalMode: "review_before_submit",
+    tailoringMode: "balanced",
+    compensation: {
+      maximum: 68400,
+      currency: "EUR",
+      currencyStatus: "explicit",
+      interval: "year",
+      basis: "base",
+    },
+  });
+  const field = {
+    ...control("Desired gross base pay per year in EUR"),
+    kind: "select" as const,
+    questionKind: "salary_expectation" as const,
+    options: ["EUR 65,000–69,999", "EUR 70,000–74,999"],
+  };
+  expect(expectedPaySuggestion(field, src)?.value).toBe(field.options[0]);
+  expect(
+    expectedPayHandoff({ ...field, options: [field.options[1]] }, src),
+  ).toMatchObject({ suggestion: null, check: "pay_option_missing" });
+  expect(
+    expectedPayHandoff({ ...field, asksCurrentPay: true }, src),
+  ).toMatchObject({ suggestion: null, check: "current_pay_missing" });
+  expect(
+    expectedPaySuggestion(
+      { ...field, label: "Desired net pay after tax in EUR per year" },
+      src,
+    ),
+  ).toBeNull();
+  expect(
+    expectedPaySuggestion(
+      { ...field, label: "Desired base pay in CAD per month" },
+      src,
+    ),
+  ).toBeNull();
+});
+
+test("a resume quote binds the one plaintext document while an invented quote still fails", async () => {
+  const src = sources();
+  src.resumeText = "Paid work with TypeScript. No paid Rust experience.";
+  const evidence = [
+    {
+      claim: "TypeScript",
+      source: "resume",
+      path: "/experiences/0/summary",
+      quote: "Paid work with TypeScript.",
+      kind: "applicant_fact",
+    },
+  ];
+  const check = () =>
+    checkWrittenApplicationAnswers({
+      client: report(evidence),
+      sources: src,
+      payDisclosed: false,
+      answers: [
+        {
+          question: "Which technology have you used professionally?",
+          answer: "TypeScript",
+          evidencePolicy: "factual_inference",
+        },
+      ],
+    });
+  expect((await check())[0]?.supported).toBe(true);
+  evidence[0].quote = "Paid work with Ruby.";
+  expect((await check())[0]?.supported).toBe(false);
+});
+
+test("question identity preserves an outer subject and a condition supplied only as a hint", () => {
+  const field = {
+    ...control("Monday"),
+    kind: "checkbox" as const,
+    answerControlType: "multi_choice" as const,
+    groupLabel: "Weekdays",
+    sectionPath: ["Remote interviews", "Weekdays"],
+    hint: "From 17:00 to 19:00 Europe/Berlin",
+  };
+  const first = questionPrompt(field);
+  expect(first).toContain("Remote interviews");
+  expect(first).toContain("17:00 to 19:00 Europe/Berlin");
+  expect(
+    questionPrompt({ ...field, hint: "From 09:00 to 11:00 Europe/Berlin" }),
+  ).not.toBe(first);
+  expect(
+    questionPrompt({
+      ...field,
+      sectionPath: ["Regular office work", "Weekdays"],
+    }),
+  ).not.toBe(first);
+  const short = {
+    id: "known",
+    kind: "other" as const,
+    label: "Availability",
+    question: "Availability",
+    answer: "Tuesday",
+    roleFamilies: [],
+    proofEntryIds: [],
+  };
+  const availability = {
+    ...control("Availability"),
+    hint: "For regular office work, 09:00–17:00 Europe/Berlin",
+  };
+  expect(
+    savedAnswerForQuestion(availability, [short], [availability]),
+  ).toBeNull();
+  expect(
+    savedAnswerForQuestion(
+      availability,
+      [{ ...short, question: questionPrompt(availability) }],
+      [availability],
+    )?.answer,
+  ).toBe("Tuesday");
+});
+
+test("a longer outer subject is retained when it contains the leaf question", () => {
+  const field = {
+    ...control("Monday"),
+    kind: "checkbox" as const,
+    answerControlType: "multi_choice" as const,
+    groupLabel: "Availability",
+    sectionPath: ["Remote interview availability", "Availability"],
+  };
+  const interview = questionPrompt(field);
+  expect(interview).toBe("Remote interview availability — Availability");
+  const work = questionPrompt({
+    ...field,
+    sectionPath: ["Regular work availability", "Availability"],
+  });
+  expect(work).toBe("Regular work availability — Availability");
+  expect(
+    savedAnswerForQuestion(
+      { ...field, sectionPath: ["Regular work availability", "Availability"] },
+      [
+        {
+          id: "interview",
+          kind: "other",
+          label: interview,
+          question: interview,
+          answer: "Monday",
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+      ],
+      [field],
+    ),
+  ).toBeNull();
 });

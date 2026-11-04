@@ -171,7 +171,7 @@ function attempt(
     field(2, "Email", options.emailPrefilled ? email : "", {
       inputType: "email",
     }),
-    field(3, "Referral code", referral),
+    field(3, "Referral code", referral, { required: false }),
   ]);
   tracker.observe(first);
   for (const ref of options.emailPrefilled ? ["c0", "c1"] : ["c0", "c1", "c2"])
@@ -180,13 +180,13 @@ function attempt(
     field(0, "First name", "Jamie"),
     field(1, "Last name", "Example"),
     field(2, "Email", email, { inputType: "email" }),
-    field(3, "Referral code", referral),
+    field(3, "Referral code", referral, { required: false }),
   ]);
   tracker.observe(one);
   if (!options.skipStepOneReceipt) tracker.advance(one, AT);
   const secondControls = (reportingValue: string) => [
     field(0, "First name", "Jamie", { readOnly: true }),
-    field(1, "Referral code", referral, { readOnly: true }),
+    field(1, "Referral code", referral, { readOnly: true, required: false }),
     field(2, "Describe your reporting routine", reportingValue, {
       tagName: "textarea",
     }),
@@ -660,4 +660,12 @@ test("a single-page form without receipts keeps today's live-control rule", asyn
   expect(checks.every((check) => !check.supported)).toBe(true);
   expect(checks.some((check) => check.priorStep)).toBe(false);
   expect(checks[0]?.reason).toBe("The question is no longer present.");
+});
+
+test("a required site preset is not authorized by an unchanged receipt", async () => {
+  const run = attempt();
+  for (const receipt of run.receipts)
+    for (const field of receipt.fields)
+      if (field.label.startsWith("Referral code")) field.required = true;
+  expect((await send(run))[3]?.supported).toBe(false);
 });

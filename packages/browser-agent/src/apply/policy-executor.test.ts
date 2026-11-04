@@ -2,6 +2,7 @@ import githubReplay from "../../../../apps/desktop/test-fixtures/job-finder/appl
 import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
 import typedReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/typed-answer-permissions.json";
 import { answerSourceCatalog } from "./answer-source-catalog";
+import { questionPrompt } from "./question-text";
 import type { ApplyAnswerTags } from "@nestor/contracts";
 import { createApplyUserPrompt } from "./apply-prompts";
 import { replaceApprovedApplicationLetter } from "./approved-letter";
@@ -4006,7 +4007,7 @@ describe("one-use answers and compatible originals", () => {
           id: "application_once",
           kind: "other",
           label,
-          question: `${groupLabel} — ${label}`,
+          question: questionPrompt(observationOf(source).controls[0]),
           answer,
           roleFamilies: [],
           proofEntryIds: [],

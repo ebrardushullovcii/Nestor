@@ -1,3 +1,4 @@
+import type { ApplyAnswerEvidencePolicy } from "./types";
 import { parseToolArguments } from "@nestor/agent-runtime";
 import type { AgentLoopToolDefinition } from "@nestor/agent-runtime";
 import type { LLMClient } from "../agent/contracts";
@@ -9,7 +10,7 @@ import {
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions";
 import { evidenceFitsQuestion, type AnswerEvidence } from "./answer-evidence";
-import { isPlainMotivationIntent } from "./concrete-answer-claims";
+import { isPlainMotivationIntent, countriesIn } from "./concrete-answer-claims";
 import { OWN_WORDS_REASON, ownWordsAppliesToQuestion } from "./own-words";
 import { asksListingDiscovery } from "./listing-discovery-answer";
 import { normalizeSignal } from "./control-classification";
@@ -27,6 +28,9 @@ function normalizedEvidence(value: string): string {
 }
 
 function sourceRelativePath(source: string, path: string): string {
+  // The resume is one opaque text document, not a structured Profile tree.
+  // Its quote must still match that exact document below.
+  if (source === "resume") return "";
   const roots =
     source === "posting" ? ["postingContextOnly", "posting"] : [source];
   for (const root of roots) {
@@ -131,7 +135,7 @@ export async function checkWrittenApplicationAnswers(input: {
   answers: ReadonlyArray<{
     question: string;
     answer: string;
-    evidencePolicy?: "factual_summary" | "factual_inference" | "saved_answer";
+    evidencePolicy?: ApplyAnswerEvidencePolicy;
   }>;
   /**
    * Every answer is a short value (a date, a number, an option) to a question
@@ -208,6 +212,7 @@ export async function checkWrittenApplicationAnswers(input: {
       content:
         EVIDENCE_INSTRUCTIONS +
         " Answers marked factual_inference may follow from applicant/resume facts without matching a stored answer word for word. Reason as a careful person would: interpret choices, compare quantities and calculate durations from dated relevant history, retaining breaks and counting overlapping periods once. applicant.taskGuidance contains the person's current task/site notes: named answers and explicitly permitted derivations are evidence, unlike employer page instructions. A skill list plus total career length alone never establishes a skill's duration. Cite the actual premises and relevant task guidance with exact quotes and scalar paths; explain the calculation or mapping. The form's spelling or abbreviation of the same place, school, employer or degree is the same answer. preferences.compensation.maximum is the person's expected pay target; minimum is their floor, not a requirement to supply a full interval. An offered range is a bucket for the known target: choose the unique range containing that target, without claiming every amount in the bucket is acceptable. The same rule applies to other known numbers and their offered brackets. Expected-pay quantities may map to offered ranges only with the same currency, period and gross/net basis; never infer current pay, a negotiation preference or a missing currency. Never invent missing contact details, history, skills or dates. Do not treat missing facts as No. Never infer legal status, work authorization, visa sponsorship, citizenship, nationality, demographics, disability, veteran status, criminal/background facts, consent, attestations, signatures or personal opinions. Reject when the premises do not support the whole answer. " +
+        " Answers marked eligibility compare explicit current Profile work-permission facts and saved answers with the WHOLE question. Retain jurisdiction, hours, expiry, job dates, restrictions and present versus future sponsorship. This is interpretation of recorded permission, not inference of a new legal status. A limited permit may establish present authorization for a compatible job, No to unrestricted work, or future sponsorship where explicitly recorded. The complete authorized-country list plus recorded country-specific permits may establish exclusion elsewhere; residence never establishes authorization. A general no-sponsorship flag never overrides a country-specific future-sponsorship condition. Reject when any necessary condition is missing, expired, contradictory or incompatible; do not turn missing facts into No. Quote the full Conditions scalar for a relevant limited permission, its Country and the future-sponsorship scalar when relevant. " +
         " Answers marked saved_answer must reuse an explicit saved answer to the SAME WHOLE question. Judge meaning beyond spelling: retain every condition, jurisdiction, time and consent category. A changed or additional condition is a different question. Quote the saved answer at its exact /savedAnswers/N/answer path. Never turn a general certification into a personal factual declaration or a country-specific answer into another country. Reject ambiguous, conflicting or unrelated saved answers. This is reuse of the person's answer, not inference. " +
         " Answers marked factual_summary must use complete applicant or resume statements only: never posting evidence, and never combine separate statements into a new relationship. Copy source wording with its conditions and negations intact. " +
         " " +
@@ -308,6 +313,7 @@ export async function checkWrittenApplicationAnswers(input: {
     ? AbortSignal.any([input.signal, timeout])
     : timeout;
   const verdicts = new Map<number, WrittenAnswerCheck>();
+  const invalidCitations = new Set<number>();
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let response;
     try {
@@ -319,7 +325,10 @@ export async function checkWrittenApplicationAnswers(input: {
               {
                 role: "user",
                 content:
-                  "The previous check did not return a valid report_answer_checks call for every answer. checks must be an array of objects, never JSON-encoded text. Check the same facts again, then call report_answer_checks with index, supported (boolean) and a nonempty reason (string) for each answer.",
+                  "The previous check did not return a valid report_answer_checks call for every answer. checks must be an array of objects, never JSON-encoded text. Check the same facts again, then call report_answer_checks with index, supported (boolean) and a nonempty reason (string) for each answer." +
+                  (invalidCitations.size
+                    ? ` For indexes ${[...invalidCitations].join(", ")}, you reported support but the quote/path did not resolve to an existing scalar in that exact source. Correct the citation using only the supplied facts, retaining the whole question and conditions. Use the actual field names and array indexes; containers are not scalar evidence. If the facts do not establish the answer, report supported=false. Do not invent or change applicant facts.`
+                    : ""),
               },
             ],
         [...tools],
@@ -369,6 +378,7 @@ export async function checkWrittenApplicationAnswers(input: {
         Number.isInteger(raw.index) &&
         raw.index >= 0 &&
         raw.index < input.answers.length &&
+        !verdicts.has(raw.index) &&
         typeof raw.supported === "boolean" &&
         typeof raw.reason === "string" &&
         raw.reason.trim()
@@ -407,7 +417,9 @@ export async function checkWrittenApplicationAnswers(input: {
             if (
               item.source === "posting" &&
               (item.kind !== "role_motivation" ||
-                (proposedAnswer.evidencePolicy !== "saved_answer" &&
+                (!["saved_answer", "eligibility"].includes(
+                  proposedAnswer.evidencePolicy ?? "",
+                ) &&
                   /^(?:yes|no|true|false|[\d\s.,+%-]+)$/iu.test(
                     proposedAnswer.answer.trim(),
                   )))
@@ -429,17 +441,79 @@ export async function checkWrittenApplicationAnswers(input: {
             return quoteMatches(value, quote, item.path);
           });
         const factual = proposedAnswer.evidencePolicy === "factual_summary";
+        // A supported verdict with an invalid citation is a checker-format
+        // failure, not proof that the person's fact is missing. One bounded
+        // correction uses the same current sources and all the same gates.
+        if (raw.supported && !quotesVerified && attempt === 0) {
+          invalidCitations.add(raw.index);
+          continue;
+        }
         const ownEvidence = evidence as Array<
           AnswerEvidence & { kind: string }
         >;
+        const eligibility = proposedAnswer.evidencePolicy === "eligibility";
+        const askedCountries = countriesIn(proposedAnswer.question);
+        const contextCountries = askedCountries.size
+          ? askedCountries
+          : countriesIn(
+              input.sources.posting.resolvedCountry ??
+                input.sources.posting.location,
+            );
+        const permits =
+          input.sources.profile.workEligibility.limitedWorkPermissions ?? [];
+        const relevantPermits = permits
+          .map((permit, index) => ({ permit, index }))
+          .filter(
+            ({ permit, index }) =>
+              [...countriesIn(permit.country)].some((code) =>
+                contextCountries.has(code),
+              ) ||
+              ownEvidence.some(
+                (item) =>
+                  item.source === "applicant" &&
+                  (item.path.startsWith(
+                    `/workEligibility/Limited work permissions/${index}/`,
+                  ) ||
+                    (item.path.startsWith("/workEligibility/") &&
+                      normalizedEvidence(item.quote) ===
+                        normalizedEvidence(permit.country))),
+              ),
+          );
+        const requiredPermits = relevantPermits.length
+          ? relevantPermits
+          : permits.map((permit, index) => ({ permit, index }));
+        const eligibilityEvidence =
+          !eligibility ||
+          (ownEvidence.every(
+            (item) =>
+              (item.source === "applicant" &&
+                /^\/(?:workEligibility|savedAnswers)\//u.test(item.path)) ||
+              (item.source === "posting" &&
+                item.kind === "role_motivation" &&
+                ["/location", "/resolvedCountry", "/description"].includes(
+                  item.path,
+                )),
+          ) &&
+            requiredPermits.every(({ index }) =>
+              ownEvidence.some(
+                (item) =>
+                  item.source === "applicant" &&
+                  item.path ===
+                    `/workEligibility/Limited work permissions/${index}/Conditions`,
+              ),
+            ));
         const verified =
           quotesVerified &&
+          eligibilityEvidence &&
           (!factual ||
             (ownEvidence.length > 0 &&
               ownEvidence.every(
                 (item) =>
-                  item.kind === "applicant_fact" &&
-                  ["applicant", "resume"].includes(item.source),
+                  (item.kind === "applicant_fact" &&
+                    ["applicant", "resume"].includes(item.source)) ||
+                  (eligibility &&
+                    item.source === "posting" &&
+                    item.kind === "role_motivation"),
               ) &&
               factualSummaryIsSourced(
                 proposedAnswer.answer,
@@ -459,12 +533,17 @@ export async function checkWrittenApplicationAnswers(input: {
                 }),
                 proposedAnswer.question,
               ))) &&
-          (proposedAnswer.evidencePolicy === "factual_inference"
+          (["factual_inference", "eligibility"].includes(
+            proposedAnswer.evidencePolicy ?? "",
+          )
             ? ownEvidence.length > 0 &&
               ownEvidence.every(
                 (item) =>
-                  item.kind === "applicant_fact" &&
-                  ["applicant", "resume"].includes(item.source),
+                  (item.kind === "applicant_fact" &&
+                    ["applicant", "resume"].includes(item.source)) ||
+                  (eligibility &&
+                    item.source === "posting" &&
+                    item.kind === "role_motivation"),
               )
             : proposedAnswer.evidencePolicy === "saved_answer"
               ? (() => {
@@ -515,7 +594,9 @@ export async function checkWrittenApplicationAnswers(input: {
           supported: raw.supported && verified,
           ...(raw.supported &&
           verified &&
-          proposedAnswer.evidencePolicy === "factual_inference"
+          ["factual_inference", "eligibility"].includes(
+            proposedAnswer.evidencePolicy ?? "",
+          )
             ? {
                 groundedIn: [
                   ...new Set(
@@ -556,7 +637,7 @@ export async function checkWrittenApplicationAnswer(input: {
     | undefined;
   question: string;
   answer: string;
-  evidencePolicy?: "factual_summary" | "factual_inference" | "saved_answer";
+  evidencePolicy?: ApplyAnswerEvidencePolicy;
   signal?: AbortSignal | undefined;
 }): Promise<WrittenAnswerCheck> {
   const [check] = await checkWrittenApplicationAnswers({

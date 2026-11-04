@@ -6934,25 +6934,18 @@ test.each([
       (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
     );
     expect(questions.map((question) => question.prompt)).toEqual(
-      handover === "invalid email" || handover === "changed question"
-        ? ["Email *"]
-        : handover === "stale email plus MFA"
-          ? ["Enter the MFA code the site sent to your phone."]
-          : handover === "still needs person"
-            ? ["Review this application before sending."]
-            : handover === "implicit finish" || handover === "text reply"
-              ? [
-                  "Job Finder still needs you to review this application before it can finish.",
-                ]
-              : [],
+      handover === "changed question"
+        ? ["Email * — Your professional reference's email address."]
+        : handover === "invalid email"
+          ? ["Email *"]
+          : handover === "stale email plus MFA"
+            ? ["Enter the MFA code the site sent to your phone."]
+            : [],
     );
     expect(result.outcome).toBe(
-      handover === "invalid email" ||
-        handover === "changed question" ||
-        handover === "stale email plus MFA" ||
-        handover === "still needs person" ||
-        handover === "implicit finish" ||
-        handover === "text reply"
+      ["invalid email", "changed question", "stale email plus MFA"].includes(
+        handover,
+      )
         ? "paused"
         : mode === "autonomous_submit"
           ? "ready_to_send"
@@ -6960,49 +6953,8 @@ test.each([
     );
     expect(finalClick).not.toHaveBeenCalled();
     expect(calls).toHaveBeenCalledTimes(
-      handover === "none"
-        ? 2
-        : handover === "changed question" ||
-            [
-              "stale email",
-              "still needs person",
-              "implicit finish",
-              "text reply",
-            ].includes(handover)
-          ? 4
-          : 3,
+      handover === "none" ? 2 : handover === "changed question" ? 5 : 3,
     );
-    if (
-      [
-        "stale email",
-        "still needs person",
-        "implicit finish",
-        "text reply",
-      ].includes(handover)
-    ) {
-      const nudges = calls.mock.calls
-        .flatMap(([messages]) => messages)
-        .filter(
-          (message) =>
-            message.role === "tool" &&
-            String(message.content).includes(
-              "These fields already have checked, still-valid answers",
-            ),
-        );
-      expect(nudges).toHaveLength(1);
-      expect(nudges[0]?.content).toContain(
-        '"question":"Email *","value":"robin@example.test"',
-      );
-      expect(nudges[0]?.content).toContain("finish with needsPerson: false");
-    }
-    if (
-      ["still needs person", "implicit finish", "text reply"].includes(handover)
-    ) {
-      expect(result.readyToSend).toBeNull();
-      expect(questions.some((question) => question.prompt === "Email *")).toBe(
-        false,
-      );
-    }
   },
 );
 
@@ -11591,3 +11543,387 @@ test.each([true, false])(
     );
   },
 );
+
+test("a required preset with no applicant evidence cannot pass a direct finish", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        inputType: "checkbox",
+        id: "days-mon",
+        name: "days",
+        label: "Monday",
+        groupLabel: "Weekdays available for office attendance",
+        value: "Monday",
+        checked: true,
+      },
+      {
+        ...nameControl(),
+        index: 1,
+        inputType: "checkbox",
+        id: "days-tue",
+        name: "days",
+        label: "Tuesday",
+        groupLabel: "Weekdays available for office attendance",
+        value: "Tuesday",
+        checked: false,
+      },
+    ],
+  });
+  const report = (name: string, args: Record<string, unknown>) =>
+    Promise.resolve({
+      toolCalls: [
+        {
+          id: name,
+          type: "function" as const,
+          function: { name, arguments: JSON.stringify(args) },
+        },
+      ],
+    });
+  const result = await runApplyAgent(
+    config(source, { modelQuestionClassification: true }),
+    {
+      chatWithTools: (_messages, definitions) => {
+        const tool = definitions[0]?.function.name;
+        if (tool === "report_question_kinds")
+          return report(tool, {
+            plainIndexes: [0],
+            flagged: [],
+            tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
+          });
+        if (tool === "report_answer_checks")
+          return report(tool, {
+            checks: [
+              {
+                index: 0,
+                supported: false,
+                reason: "Office attendance is not recorded.",
+                evidence: [],
+              },
+            ],
+          });
+        if (tool === "match_application_answer")
+          return report(tool, { sourceId: null, answer: null });
+        return report("finish", {
+          reason: "The form is complete",
+          needsPerson: false,
+        });
+      },
+    },
+  );
+  expect(result.outcome).toBe("paused");
+  expect(
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .some((question) => /office attendance/iu.test(question.prompt)),
+  ).toBe(true);
+  expect(source.controls.map((control) => control.checked)).toEqual([
+    true,
+    false,
+  ]);
+});
+
+test("a known saved multi-select replaces every preset option", async () => {
+  const question = "Available weekdays for this placement";
+  const labels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+  const source = page({
+    controls: labels.map((label, index) => ({
+      ...nameControl(),
+      index,
+      id: `day-${index}`,
+      name: "days",
+      inputType: "checkbox",
+      required: false,
+      label,
+      groupLabel: question,
+      value: label,
+      checked: index === 0,
+    })),
+  });
+  const input = config(source, { modelQuestionClassification: true });
+  input.sources.reusableAnswers = [
+    {
+      id: "known-days",
+      kind: "other",
+      label: question,
+      question,
+      answer: JSON.stringify(["Tuesday", "Thursday"]),
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  input.hands.setToggle = (ref, checked) => {
+    source.controls[Number(ref.slice(1))].checked = checked;
+    return Promise.resolve({ ok: true, observedValue: String(checked) });
+  };
+  const result = await runApplyAgent(input, {
+    chatWithTools: (_messages, tools) =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: "step",
+            type: "function",
+            function: {
+              name:
+                tools[0]?.function.name === "report_question_kinds"
+                  ? "report_question_kinds"
+                  : "finish",
+              arguments:
+                tools[0]?.function.name === "report_question_kinds"
+                  ? JSON.stringify({
+                      plainIndexes: [],
+                      flagged: [
+                        {
+                          index: 0,
+                          asksAboutPay: false,
+                          asksCurrentPay: false,
+                          asksHiringCountry: false,
+                          required: true,
+                          declarationKind: null,
+                        },
+                      ],
+                      tags: [
+                        {
+                          index: 0,
+                          kind: "preference",
+                          country: null,
+                          sourceId: "answerLibrary.known-days",
+                        },
+                      ],
+                    })
+                  : JSON.stringify({
+                      reason: "The form is complete",
+                      needsPerson: false,
+                    }),
+            },
+          },
+        ],
+      }),
+  });
+  expect(result.outcome).toBe("prepared");
+  expect(result.pauses).toEqual([]);
+  expect(
+    source.controls
+      .filter((control) => control.checked)
+      .map((control) => control.label),
+  ).toEqual(["Tuesday", "Thursday"]);
+});
+
+test.each([false, true])(
+  "a rejected checkbox does not hold different supported options in its group (stale handoff=%s)",
+  async (staleHandoff) => {
+    const labels = ["Rust", "TypeScript", "PostgreSQL", "Playwright"];
+    const source = page({
+      controls: labels.map((label, index) => ({
+        ...nameControl(),
+        index,
+        id: `tool-${index}`,
+        name: "tools",
+        inputType: "checkbox",
+        required: false,
+        label,
+        groupLabel: "Technologies used in professional work",
+        value: label,
+        checked: false,
+      })),
+    });
+    const input = config(source, { modelQuestionClassification: true });
+    input.sources.profile.skills = labels.slice(1);
+    input.sources.profile.baseResume.textContent =
+      "Paid work with TypeScript, PostgreSQL and Playwright. No paid Rust experience.";
+    input.hands.setToggle = (ref, checked) => {
+      source.controls[Number(ref.slice(1))].checked = checked;
+      return Promise.resolve({ ok: true, observedValue: String(checked) });
+    };
+    let turns = 0;
+    const report = (name: string, args: unknown) =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: name,
+            type: "function" as const,
+            function: { name, arguments: JSON.stringify(args) },
+          },
+        ],
+      });
+    const result = await runApplyAgent(input, {
+      chatWithTools: (messages, tools) => {
+        if (tools[0]?.function.name === "report_question_kinds")
+          return report("report_question_kinds", {
+            plainIndexes: [],
+            flagged: [
+              {
+                index: 0,
+                eligibilityKind: null,
+                asksAboutPay: false,
+                required: true,
+                declarationKind: null,
+              },
+            ],
+            tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
+          });
+        if (tools[0]?.function.name === "report_answer_checks") {
+          const request = JSON.parse(messages.at(-1)!.content) as {
+            answers: { proposedAnswer: string }[];
+          };
+          return report("report_answer_checks", {
+            checks: request.answers.map((answer, index) => ({
+              index,
+              supported: answer.proposedAnswer !== "Rust",
+              reason:
+                answer.proposedAnswer === "Rust"
+                  ? "No paid Rust experience is recorded."
+                  : "Recorded paid experience.",
+              evidence:
+                answer.proposedAnswer === "Rust"
+                  ? []
+                  : [
+                      {
+                        claim: answer.proposedAnswer,
+                        kind: "applicant_fact",
+                        source: "resume",
+                        path: "/experience/0",
+                        quote:
+                          "Paid work with TypeScript, PostgreSQL and Playwright.",
+                      },
+                    ],
+            })),
+          });
+        }
+        if (tools[0]?.function.name === "match_application_answer")
+          return report("match_application_answer", { sourceId: null });
+        turns++;
+        return turns === 1
+          ? report("fill_fields", {
+              fields: [{ tool: "set_checkbox", ref: "c0", checked: true }],
+              finishWhenReady: false,
+            })
+          : turns === 2
+            ? report("fill_fields", {
+                fields: labels.slice(1).map((_label, index) => ({
+                  tool: "set_checkbox",
+                  ref: `c${index + 1}`,
+                  checked: true,
+                })),
+                finishWhenReady: !staleHandoff,
+              })
+            : report("finish", {
+                reason: "The supported options are selected",
+                needsPerson: staleHandoff && turns === 3,
+                ...(staleHandoff && turns === 3
+                  ? { forPerson: ["Technologies used in professional work"] }
+                  : {}),
+              });
+      },
+    });
+    expect(
+      result.outcome,
+      JSON.stringify({ turns, notes: result.notes, pauses: result.pauses }),
+    ).toBe("prepared");
+    expect(result.pauses).toEqual([]);
+    expect(source.controls.map((control) => control.checked)).toEqual([
+      false,
+      true,
+      true,
+      true,
+    ]);
+  },
+);
+
+test("a direct handoff uses classified pay meaning for missing options and unknown current earnings", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        tagName: "select",
+        inputType: "",
+        label:
+          "Choose the band containing your desired gross annual base pay, EUR. Both boundaries are inclusive.",
+        options: ["EUR 60,000–64,999", "EUR 70,000–74,999"],
+        value: "",
+      },
+      {
+        ...nameControl(),
+        index: 1,
+        label: "Your current monthly base earnings before tax in CAD.",
+        value: "",
+      },
+    ],
+  });
+  const input = config(source, { modelQuestionClassification: true });
+  input.authority.salaryDisclosure = "answer_from_profile";
+  input.sources.preferences = JobSearchPreferencesSchema.parse({
+    minimumSalaryUsd: null,
+    approvalMode: "review_before_submit",
+    tailoringMode: "balanced",
+    compensation: {
+      minimum: 68400,
+      maximum: 68400,
+      currency: "EUR",
+      currencyStatus: "explicit",
+      interval: "year",
+      basis: "base",
+    },
+  });
+  const finish = repeatingModel("finish", {
+    reason: "Pay needs your answer.",
+    needsPerson: true,
+    forPerson: ["c0", "c1"],
+  });
+  const result = await runApplyAgent(input, {
+    chatWithTools: (messages, tools, options) => {
+      const name = tools[0]?.function.name;
+      if (name === "report_question_kinds")
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "kinds",
+              type: "function",
+              function: {
+                name,
+                arguments: JSON.stringify({
+                  plainIndexes: [],
+                  flagged: [0, 1].map((index) => ({
+                    index,
+                    eligibilityKind: null,
+                    asksAboutPay: true,
+                    asksCurrentPay: index === 1,
+                    required: true,
+                    declarationKind: null,
+                  })),
+                  tags: [0, 1].map((index) => ({
+                    index,
+                    kind: "salary",
+                    country: null,
+                    sourceId:
+                      index === 0 ? "preferences.compensation.maximum" : null,
+                  })),
+                }),
+              },
+            },
+          ],
+        });
+      if (name === "match_application_answer")
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "match",
+              type: "function",
+              function: {
+                name,
+                arguments: JSON.stringify({ sourceId: null, answer: null }),
+              },
+            },
+          ],
+        });
+      return finish.chatWithTools(messages, tools, options);
+    },
+  });
+  const questions = result.pauses.flatMap(
+    (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+  );
+  expect(questions.map((question) => question.askReason?.check).sort()).toEqual(
+    ["current_pay_missing", "pay_option_missing"],
+  );
+  expect(source.controls.map((control) => control.value)).toEqual(["", ""]);
+});
