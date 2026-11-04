@@ -2,13 +2,14 @@
 
 ## Automated checks by change
 
-| Change                       | Run                                                                                                        |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| package-local code           | `pnpm validate:package <alias>` (`desktop`, `job-finder`, `browser-agent`, `browser-runtime`, `contracts`) |
-| contracts or IPC             | `pnpm validate:contracts` plus typecheck of affected packages                                              |
-| discovery or source-debug    | `pnpm source-generic:check` plus focused package tests                                                     |
-| desktop UI                   | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                  |
-| broad cross-package behavior | `pnpm verify:affected`                                                                                     |
+| Change                                   | Run                                                                                                                                                                                                                                     |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| package-local code                       | `pnpm validate:package <alias>` (`desktop`, `job-finder`, `browser-agent`, `browser-runtime`, `contracts`)                                                                                                                              |
+| contracts or IPC                         | `pnpm validate:contracts` plus typecheck of affected packages                                                                                                                                                                           |
+| discovery or source-debug                | `pnpm source-generic:check` plus focused package tests                                                                                                                                                                                  |
+| desktop UI                               | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                                                                                                                                               |
+| broad cross-package behavior             | `pnpm verify:affected`                                                                                                                                                                                                                  |
+| verification SQLite/source-stamp helpers | `node --test --test-concurrency=1 .claude/skills/verify-nestor/bin/lib/{sqlite,common}.test.mjs` (from PowerShell, list both paths explicitly), plus `node --check` for changed helpers; disposable data only, no product build/app run |
 
 Other entry points: `pnpm test:correctness`, `pnpm test:coverage`, `pnpm format`, `pnpm knip`, `pnpm structure:check`.
 
@@ -18,7 +19,7 @@ Builds and full suites are the slowest part of most changes. CI runs lint, typec
 
 - Run the row above that matches the change, not `pnpm test` or a full suite by habit. When shared contracts, IPC or several packages change, run their checks or `pnpm verify:affected`.
 - Batch related fixes, then check once per batch. Don't rerun a passing check after an edit that cannot affect it.
-- Build the desktop app once per batch, and only when you will run the built app. After that build, use the `:built` harness variants instead of the ones that rebuild. `verify-nestor up` refuses a build whose stamp doesn't match the source; `qa` and the `:built` harnesses don't check freshness, so rebuild after changing build inputs before using them. The stamp covers tracked changes and the names of untracked files, not their contents. Restarting an instance reuses its copied build, so start a fresh instance after a rebuild.
+- Build the desktop app once per batch, and only when you will run the built app. After that build, use the `:built` harness variants instead of the ones that rebuild. `verify-nestor up` refuses a build whose stamp doesn't match the source; `qa` and the `:built` harnesses don't check freshness, so rebuild after changing build inputs before using them. The stamp covers tracked changes under `apps/desktop` and `packages`, plus paths and raw content hashes of non-ignored untracked files under `apps/desktop/src` and `packages`; helper/private state remains outside that scope. Restarting an instance reuses its copied build, so start a fresh instance after a rebuild.
 - In the app, prove a change through the feature it affects: that feature's recipe in `.claude/skills/verify-nestor/features/` or one journey stage. Run the combined `full-check` journey (about 25 minutes plus a 12-minute batch, with live model calls) only when asked or when a change touches most of the app.
 - Use `--ai deterministic` to prove screens and flow. Use `--ai live` only when the result depends on the model (search, fit, resume, apply).
 
