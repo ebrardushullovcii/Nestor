@@ -149,6 +149,32 @@ function hasAccountCreationAction(
   });
 }
 
+/** A login form can offer registration without becoming a registration form. */
+export function hasExistingAccountLoginForm(input: {
+  controls: readonly ApplyFormControl[];
+  actions: readonly ApplyFormAction[];
+}): boolean {
+  const passwords = input.controls.filter(
+    (control) =>
+      control.visible &&
+      !control.disabled &&
+      (control.credentialRole === "password" || hasPasswordControl([control])),
+  );
+  return (
+    passwords.length === 1 &&
+    input.actions.some(
+      (action) =>
+        !action.disabled &&
+        (action.inForm || action.submitsForm) &&
+        hasSignInAction([action]),
+    ) &&
+    !input.actions.some(
+      (action) =>
+        action.submitsForm === true && hasAccountCreationAction([action]),
+    )
+  );
+}
+
 function isExactLink(link: ApplyPageLink, pattern: RegExp): boolean {
   return link.visible && pattern.test(normalizeSignal(link.label));
 }
@@ -369,6 +395,12 @@ export function detectApplyBlocker(input: {
         "Only you have that code, so Job Finder stopped here without entering anything.",
       nextActionLabel: "Open the page and enter your code",
     };
+  }
+
+  if (hasExistingAccountLoginForm(input)) {
+    return siteLoginRequiredBlocker(
+      !hasAnsweredPasswordControl(input.controls),
+    );
   }
 
   if (

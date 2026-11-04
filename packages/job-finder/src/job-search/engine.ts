@@ -170,6 +170,12 @@ export function createListingSearchEngine(deps: {
                       ...(context.browserPermissions
                         ? { browserPermissions: context.browserPermissions }
                         : {}),
+                      ...(context.readIntendedAccountEmail
+                        ? {
+                            readIntendedAccountEmail:
+                              context.readIntendedAccountEmail,
+                          }
+                        : {}),
                       ...(context.readBrowserPermissions
                         ? {
                             readBrowserPermissions:

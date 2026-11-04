@@ -353,3 +353,149 @@ describe("a raw storage PUT", () => {
     expect(await outcome("resume")).toBe("rejected");
   });
 });
+
+// Candidate 5 workday replica: after the resume was attached, "Add" inserted a
+// work-history row above it. Refs are positions, so the file Nestor gave was
+// no longer found by ref and the form's own file became "upload not confirmed".
+test("the file Nestor gave stays known after the form inserts a row above it, and a replaced file does not", async () => {
+  const site = await startServer(`<!doctype html>
+<form method="post" action="/apply" enctype="multipart/form-data">
+  <div id="rows"><label>Job title<input name="experience1Title"></label></div>
+  <label for="resume">Resume / CV</label><input id="resume" name="resume" type="file">
+</form>`);
+  const page = await browser.newPage();
+  pages.push(page);
+  const session = createPlaywrightApplyPageSession({ page });
+  await session.installPrepareOnlyGuard({
+    intermediateMutationsAuthorized: false,
+    attachmentUploadsAuthorized: true,
+    allowedOrigins: [],
+  });
+  await page.goto(`${site.url}/form`);
+  const before = (await session.readPage()).controls.find(
+    (entry) => entry.id === "resume",
+  )!;
+  const file = resumeFile();
+  await session.uploadFile(before.ref ?? `c${before.index}`, file);
+  // The form adds a row above the field, as Add does.
+  await page.evaluate(() => {
+    const rows = document.getElementById("rows")!;
+    for (const name of ["experience2Title", "experience2Company"])
+      rows.insertAdjacentHTML(
+        "beforeend",
+        `<label>${name}<input name="${name}"></label>`,
+      );
+  });
+  const after = (await session.readPage()).controls.find(
+    (entry) => entry.id === "resume",
+  )!;
+  expect(after.index).not.toBe(before.index);
+  expect(after.upload).toMatchObject({
+    fileName: file.name,
+    fileSize: file.bytes.length,
+    selectedFileName: file.name,
+    selectedFileSize: file.bytes.length,
+    formSubmits: true,
+  });
+  // The page swaps in another file: it is not the one Nestor gave.
+  await page.locator("#resume").setInputFiles({
+    name: "Other.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.alloc(10, 1),
+  });
+  const replaced = (await session.readPage()).controls.find(
+    (entry) => entry.id === "resume",
+  )!;
+  expect(replaced.upload?.selectedFileName).toBeUndefined();
+  expect(replaced.upload?.fileName).toBe("Other.pdf");
+});
+
+// Name and size alone never choose between possible attachments.
+test("two distinct attachments retain their own identity when a new input shifts onto an old ref", async () => {
+  const site = await startServer(
+    `<!doctype html><form method="post" enctype="multipart/form-data"><div id="rows"></div><label for="resume">Resume</label><input id="resume" type="file"><label for="letter">Letter</label><input id="letter" type="file"></form>`,
+  );
+  const page = await browser.newPage();
+  pages.push(page);
+  const session = createPlaywrightApplyPageSession({ page });
+  await session.installPrepareOnlyGuard({
+    intermediateMutationsAuthorized: false,
+    attachmentUploadsAuthorized: true,
+    allowedOrigins: [],
+  });
+  await page.goto(`${site.url}/form`);
+  const before = await session.readPage();
+  const resume = resumeFile();
+  const letter = {
+    ...resume,
+    name: "Letter.pdf",
+    bytes: new Uint8Array([1, 2, 3, 4, 5]),
+  };
+  for (const [id, file] of [
+    ["resume", resume],
+    ["letter", letter],
+  ] as const) {
+    const control = before.controls.find((entry) => entry.id === id)!;
+    await session.uploadFile(control.ref ?? `c${control.index}`, file);
+  }
+  await page.locator("#rows").evaluate((node) => {
+    node.innerHTML = '<label>New row<input name="newRow"></label>';
+  });
+  const after = await session.readPage();
+  expect(
+    after.controls.find((entry) => entry.id === "resume")?.upload,
+  ).toMatchObject({
+    fileName: resume.name,
+    selectedFileName: resume.name,
+    selectedFileSize: resume.bytes.length,
+  });
+  expect(
+    after.controls.find((entry) => entry.id === "letter")?.upload,
+  ).toMatchObject({
+    fileName: letter.name,
+    selectedFileName: letter.name,
+    selectedFileSize: letter.bytes.length,
+  });
+});
+
+test("an identical file held by two inputs after the rows move is not claimed for either", async () => {
+  const site = await startServer(`<!doctype html>
+<form method="post" action="/apply" enctype="multipart/form-data">
+  <div id="rows"></div>
+  <label for="resume">Resume</label><input id="resume" name="resume" type="file">
+  <label for="copy">Other document</label><input id="copy" name="copy" type="file">
+</form>`);
+  const page = await browser.newPage();
+  pages.push(page);
+  const session = createPlaywrightApplyPageSession({ page });
+  await session.installPrepareOnlyGuard({
+    intermediateMutationsAuthorized: false,
+    attachmentUploadsAuthorized: true,
+    allowedOrigins: [],
+  });
+  await page.goto(`${site.url}/form`);
+  const before = (await session.readPage()).controls.find(
+    (entry) => entry.id === "resume",
+  )!;
+  const file = resumeFile();
+  await session.uploadFile(before.ref ?? `c${before.index}`, file);
+  // The page puts the same bytes in a second input, then a row moves both.
+  await page.locator("#copy").setInputFiles({
+    name: file.name,
+    mimeType: file.mimeType,
+    buffer: Buffer.from(file.bytes),
+  });
+  await page.evaluate(() => {
+    document
+      .getElementById("rows")!
+      .insertAdjacentHTML(
+        "beforeend",
+        '<label>Job title<input name="title"></label>',
+      );
+  });
+  const read = await session.readPage();
+  for (const id of ["resume", "copy"])
+    expect(
+      read.controls.find((entry) => entry.id === id)?.upload?.selectedFileName,
+    ).toBeUndefined();
+});

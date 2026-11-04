@@ -156,6 +156,36 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
+  test("a file input reports that its form's own submission sends it only in a named POST multipart form", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`
+        <form method="post" enctype="multipart/form-data"><label>Resume<input id="a" name="resume" type="file"></label></form>
+        <form method="get" enctype="multipart/form-data"><label>Resume<input id="b" name="resume" type="file"></label></form>
+        <form method="post"><label>Resume<input id="c" name="resume" type="file"></label></form>
+        <form method="post" enctype="multipart/form-data"><label>Resume<input id="d" type="file"></label></form>
+        <label>Resume<input id="e" name="resume" type="file"></label>`);
+      for (const id of ["a", "b", "c", "d", "e"])
+        await page.locator(`#${id}`).setInputFiles({
+          name: "synthetic.pdf",
+          mimeType: "application/pdf",
+          buffer: Buffer.from("synthetic"),
+        });
+      const raw = await readRawApplyPage(page);
+      const sends = Object.fromEntries(
+        raw.controls
+          .filter((control) => control.inputType === "file")
+          .map((control) => [control.id, control.upload?.formSubmits === true]),
+      );
+      expect(sends).toEqual({ a: true, b: false, c: false, d: false, e: false });
+      expect(
+        raw.controls.find((control) => control.id === "a")?.upload,
+      ).toMatchObject({ fileName: "synthetic.pdf", fileSize: 9 });
+    } finally {
+      await page.close();
+    }
+  });
+
   test("Send keeps a div calling-code picker with the native phone in its form", async () => {
     const page = await browser.newPage();
     try {

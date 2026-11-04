@@ -21,6 +21,22 @@ const log = (file, entry) =>
 
 // --- 1. Focus -------------------------------------------------------------
 const { app, BrowserWindow, dialog, shell, session, Menu } = electron;
+const {
+  loadProviderFixture,
+  installProviderTransport,
+} = require("./provider-fixture.cjs");
+const providerFixture = loadProviderFixture(
+  process.env.NESTOR_VERIFY_PROVIDER_FIXTURE,
+  {
+    label: path.basename(stateDir),
+    userDataDir: process.env.NESTOR_USER_DATA_DIR ?? "",
+    testApi: process.env.NESTOR_ENABLE_TEST_API === "1",
+    net: netMode,
+  },
+);
+const providerSessions = new WeakSet();
+let providerArmed = false;
+installProviderTransport(providerFixture, () => providerArmed);
 // Unseen windows: macOS draws an accessory app's windows on the active Space,
 // even over a full-screen app, so every window is fully transparent and
 // click-through. Screenshots read the page with capturePage and Playwright
@@ -223,10 +239,19 @@ function guard(ses) {
     } catch {
       return callback({});
     }
+    const provider =
+      providerFixture && url.origin === "https://" + providerFixture.host;
+    const probe =
+      provider &&
+      details.method === "GET" &&
+      url.pathname === "/__nestor_probe/" + providerFixture.nonce;
+    const synthetic = provider && (probe || providerSessions.has(ses));
     const remote =
       /^(https?|wss?):$/.test(url.protocol) && !LOOPBACK.has(url.hostname);
     const blocked =
-      remote && (netMode === "replica" || !READS.has(details.method));
+      remote &&
+      !synthetic &&
+      (netMode === "replica" || !READS.has(details.method));
     if (blocked)
       log("blocked-requests.jsonl", {
         method: details.method,
@@ -246,4 +271,34 @@ app.on("ready", () => {
 globalThis.__nestorVerify = {
   netMode,
   guardInstalled: (ses) => guarded.has(ses),
+  armProviderFixture: async (id, nonce) => {
+    if (!providerFixture || nonce !== providerFixture.nonce)
+      throw new Error("Synthetic provider arm refused.");
+    const contents = electron.webContents.fromId(id);
+    if (
+      !contents ||
+      contents.isDestroyed() ||
+      contents.session !== session.fromPartition("persist:nestor-browser") ||
+      contents.getURL() !==
+        "https://" + providerFixture.host + "/__nestor_probe/" + nonce
+    )
+      throw new Error(
+        "Synthetic provider probe is not in this run browser session.",
+      );
+    const actual = await contents.executeJavaScript(
+      "document.body.textContent.trim()",
+    );
+    if (actual !== nonce)
+      throw new Error("Synthetic provider mapping nonce did not match.");
+    providerSessions.add(contents.session);
+    providerArmed = true;
+    log("provider-mapping.jsonl", {
+      host: providerFixture.host,
+      port: providerFixture.port,
+      spki: providerFixture.spki,
+      webContentsId: id,
+      nonceVerified: true,
+    });
+    return { host: providerFixture.host, nonceVerified: true };
+  },
 };

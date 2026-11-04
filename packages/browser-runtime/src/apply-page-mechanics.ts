@@ -1,5 +1,11 @@
+import {
+  trackAccountFlowEntry,
+  readAccountFlowEntry,
+} from "./account-flow-entry";
+import { clickPreparedLoginAction } from "./application-login-action";
 import { attachFile } from "./file-attachment";
 import { createHash } from "node:crypto";
+import { withAccountWindowSession } from "./account-window-session";
 import { choosePageOption } from "./choose-page-option";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
 import { pickCalendarDate } from "./date-picker";
@@ -53,6 +59,8 @@ import {
   drainPrepareOnlyIntermediateWrites,
   type ApplicationRunServiceWorkerSentinel,
   waitForPrepareOnlyAuthorizedFormAction,
+  hasPrepareOnlyPreparedValues,
+  isClaimedAccountWindow,
 } from "./playwright-application-flow";
 
 /**
@@ -244,11 +252,31 @@ async function includeChildFrameContent(
       ...root.validationErrors,
       ...readable.flatMap((item) => item.validationErrors),
     ].slice(0, 24),
+    ...(root.summaryRows?.length ||
+    readable.some((item) => item.summaryRows.length)
+      ? {
+          summaryRows: [
+            ...(root.summaryRows ?? []),
+            ...readable.flatMap((item) => item.summaryRows),
+          ].slice(0, 200),
+        }
+      : {}),
   };
 }
 
 async function readApplyFrame(frame: Frame, frameIndex: number) {
   try {
+    const owner = () => {
+      try {
+        const url = new URL(frame.url());
+        return url.origin === "null" || url.username || url.password
+          ? { origin: "null", pathname: "" }
+          : { origin: url.origin, pathname: url.pathname };
+      } catch {
+        return { origin: "null", pathname: "" };
+      }
+    };
+    const frameOwner = owner();
     const [
       controls,
       unplacedActions,
@@ -259,6 +287,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
       validationErrors,
       actionPlacements,
       clickablePlacements,
+      summaryRows,
     ] = await Promise.all([
       frame
         .locator(APPLY_CONTROL_SELECTOR)
@@ -451,6 +480,12 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                     fileName: input.files[0].name,
                     fileSize: input.files[0].size,
                   }
+                : {}),
+              // HTML form submission sends a named file input's file.
+              ...(input.name &&
+              input.form?.method === "post" &&
+              input.form.enctype === "multipart/form-data"
+                ? { formSubmits: true }
                 : {}),
             };
           };
@@ -780,6 +815,9 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 label,
                 role: element.getAttribute("role")?.toLowerCase() ?? "",
                 tagName: element.tagName.toLowerCase(),
+                disabled:
+                  (element instanceof HTMLButtonElement && element.disabled) ||
+                  element.getAttribute("aria-disabled") === "true",
                 visible:
                   style.display !== "none" &&
                   style.visibility !== "hidden" &&
@@ -831,23 +869,36 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
         .locator(APPLY_CLICKABLE_SELECTOR)
         .evaluateAll(readApplyPlacements)
         .catch(() => [] as RawApplyPlacement[]),
+      frame
+        .locator("dl")
+        .evaluateAll(readApplySummaryRows)
+        .catch(() => [] as { label: string; value: string }[]),
     ]);
+    const currentOwner = owner();
+    if (
+      currentOwner.origin !== frameOwner.origin ||
+      currentOwner.pathname !== frameOwner.pathname
+    )
+      return null;
     const actions = unplacedActions.map((action) => ({
       ...action,
+      frame: frameOwner,
       ...actionPlacements[action.index],
     }));
     const clickables = unplacedClickables.map((clickable) => ({
       ...clickable,
+      frame: frameOwner,
       ...clickablePlacements[clickable.index],
     }));
     return {
-      controls,
+      controls: controls.map((control) => ({ ...control, frame: frameOwner })),
       actions,
-      links,
+      links: links.map((link) => ({ ...link, frame: frameOwner })),
       clickables,
       headings,
       bodyText: bodyText.slice(0, 8_000),
       validationErrors,
+      summaryRows: summaryRows.map((row) => ({ ...row, frame: frameOwner })),
     };
   } catch {
     return null;
@@ -889,6 +940,54 @@ export async function readApplyStepLabel(
         : null;
     })
     .catch(() => null);
+}
+
+/**
+ * Visible description-list rows: each `dt` with exactly one following `dd`
+ * (also inside the `div` groups HTML allows). Generic page mechanics only;
+ * nothing here interprets a row. Self-contained: Playwright serializes it.
+ */
+export function readApplySummaryRows(
+  elements: Element[],
+): { label: string; value: string }[] {
+  const shown = (element: Element) => {
+    const style = getComputedStyle(element);
+    return (
+      element.getClientRects().length > 0 &&
+      style.visibility !== "hidden" &&
+      style.display !== "none"
+    );
+  };
+  const text = (element: Element) =>
+    ((element as HTMLElement).innerText ?? element.textContent ?? "")
+      .replace(/\s+/gu, " ")
+      .trim();
+  const rows: { label: string; value: string }[] = [];
+  for (const list of elements) {
+    if (!shown(list)) continue;
+    const children = Array.from(list.children).flatMap((child) =>
+      child.tagName === "DIV" ? Array.from(child.children) : [child],
+    );
+    for (let index = 0; index < children.length; index++) {
+      const term = children[index]!;
+      if (term.tagName !== "DT") continue;
+      const values: Element[] = [];
+      for (
+        let next = index + 1;
+        next < children.length && children[next]!.tagName !== "DT";
+        next++
+      )
+        if (children[next]!.tagName === "DD") values.push(children[next]!);
+      const [value] = values;
+      if (values.length !== 1 || !value || !shown(term) || !shown(value))
+        continue;
+      const label = text(term).slice(0, 500);
+      if (!label) continue;
+      rows.push({ label, value: text(value).slice(0, 12_000) });
+      if (rows.length >= 200) return rows;
+    }
+  }
+  return rows;
 }
 
 export const APPLY_PAGE_SELECTORS = {
@@ -1453,6 +1552,12 @@ export function collectApplyDocumentSnapshot(
         ...(input.files?.[0]
           ? { fileName: input.files[0].name, fileSize: input.files[0].size }
           : {}),
+        // HTML form submission sends a named file input's file.
+        ...(input.name &&
+        input.form?.method === "post" &&
+        input.form.enctype === "multipart/form-data"
+          ? { formSubmits: true }
+          : {}),
       };
     };
     // A question's title can say it is required when its control doesn't
@@ -1754,6 +1859,9 @@ export function collectApplyDocumentSnapshot(
               ...placement(element),
               role: element.getAttribute("role")?.toLowerCase() ?? "",
               tagName: element.tagName.toLowerCase(),
+              disabled:
+                (element instanceof HTMLButtonElement && element.disabled) ||
+                element.getAttribute("aria-disabled") === "true",
               visible:
                 style.display !== "none" &&
                 style.visibility !== "hidden" &&
@@ -1789,12 +1897,16 @@ export function collectApplyDocumentSnapshot(
 
 async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
   // One DOM snapshot, preserving selector order and shadow-root access.
-  const [snapshot, stepLabel, openedTabs] = await Promise.all([
+  const [snapshot, stepLabel, openedTabs, summaryRows] = await Promise.all([
     page
       .locator(Object.values(APPLY_PAGE_SELECTORS).join(", "))
       .evaluateAll(collectApplyDocumentSnapshot, APPLY_PAGE_SELECTORS),
     readApplyStepLabel(page),
     readOpenedTabs(page),
+    page
+      .locator("dl")
+      .evaluateAll(readApplySummaryRows)
+      .catch(() => [] as { label: string; value: string }[]),
   ]);
   const { controls } = snapshot;
 
@@ -1847,6 +1959,7 @@ async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
     controls: controlsWithChoices,
     openedTabs,
     stepLabel,
+    ...(summaryRows.length ? { summaryRows } : {}),
   };
 }
 
@@ -2365,7 +2478,12 @@ export function createPlaywrightApplyPageMechanics(
         await closePrepareOnlyAuthorizedFormActionWindow(page);
       }
     },
-    readPage: () => readRawApplyPage(page),
+    readPage: () => {
+      trackAccountFlowEntry(page);
+      return readRawApplyPage(page);
+    },
+    readAccountFlowEntry: (origins) =>
+      Promise.resolve(readAccountFlowEntry(page, origins)),
     readLinkedText: () => readPageLinkedText(page),
     checkAction: async (ref): Promise<ApplyWriteResult> => {
       const locator = actionLocator(page, ref);
@@ -2788,11 +2906,23 @@ export function createPlaywrightApplyPageMechanics(
       }
     },
     adoptOpenedTab: async (index): Promise<ApplyNavigationResult> => {
+      if (hasPrepareOnlyPreparedValues(page))
+        return {
+          ok: false,
+          error:
+            "This tab holds prepared application values; its form stays in this tab.",
+        };
       const others = await listTaskOwnedPopups(page);
       const opened = others[index];
       if (!opened) {
         return { ok: false, error: "That tab is no longer open." };
       }
+      if (isClaimedAccountWindow(opened))
+        return {
+          ok: false,
+          error:
+            "An account window belongs to its original application and cannot be adopted.",
+        };
       await opened
         .waitForLoadState("domcontentloaded", { timeout: 5_000 })
         .catch(() => undefined);
@@ -2842,7 +2972,8 @@ export function createPlaywrightApplyPageMechanics(
 export function createPlaywrightApplyPageSession(input: {
   page: Page;
   sentinel?: ApplicationRunServiceWorkerSentinel;
-}): ApplyPageSession {
+  signal?: AbortSignal;
+}): ApplyPageSession & { closeAccountWindow(): Promise<void> } {
   const { page } = input;
   const mechanics = createPlaywrightApplyPageMechanics(page);
   // Attempts already handed to the workflow layer. Each read hands out one
@@ -2858,9 +2989,21 @@ export function createPlaywrightApplyPageSession(input: {
           ? 1
           : 0;
 
-  return {
+  const session: ApplyPageSession = {
     ...mechanics,
     clickAuthorizedFormAction: mechanics.clickAuthorizedFormAction!,
+    clickAuthorizedLoginAction: async (grant) => {
+      const locator = actionLocator(page, grant.ref);
+      if (!locator)
+        return { ok: false, error: "The sign-in control is unavailable." };
+      return clickPreparedLoginAction(
+        page,
+        locator,
+        grant,
+        () => clickAndSettle(page, locator),
+        input.signal,
+      );
+    },
     clickWithoutWrites: async (expected) => {
       const fresh = await mechanics.readPage();
       const action = fresh.actions.find(
@@ -2915,6 +3058,53 @@ export function createPlaywrightApplyPageSession(input: {
           error: "This page needs the person before it can advance.",
         };
       await fencePrepareOnlyLocalPress(page);
+      return mechanics.clickElement(expected.ref);
+    },
+    clickBoundAction: async (expected) => {
+      const changed = {
+        ok: false as const,
+        error: "The exact step control changed. Check the page again.",
+        reason: "binding_changed" as const,
+      };
+      const fresh = await mechanics.readPage();
+      const action = fresh.actions.find(
+        (item) => (item.ref ?? `a${item.index}`) === expected.ref,
+      );
+      if (
+        fresh.url !== expected.url ||
+        fresh.stepLabel !== expected.stepLabel ||
+        !action ||
+        action.label !== expected.label ||
+        !action.visible ||
+        action.disabled
+      )
+        return changed;
+      const locator = actionLocator(page, expected.ref);
+      if (!locator) return changed;
+      // The document that owns the control now, read from the control itself.
+      const owner = await locator
+        .evaluate(() =>
+          window === window.top
+            ? null
+            : { origin: location.origin, pathname: location.pathname },
+        )
+        .catch(() => undefined);
+      if (
+        owner === undefined ||
+        (owner === null
+          ? expected.frame !== null
+          : !expected.frame ||
+            owner.origin !== expected.frame.origin ||
+            owner.pathname !== expected.frame.pathname) ||
+        !(await locator.isVisible().catch(() => false)) ||
+        !(await locator.isEnabled().catch(() => false))
+      )
+        return changed;
+      if (await input.sentinel?.check("bound_control_press"))
+        return {
+          ...changed,
+          error: "This page needs the person before it can advance.",
+        };
       return mechanics.clickElement(expected.ref);
     },
     setToggle: async (ref, checked) => {
@@ -3039,4 +3229,15 @@ export function createPlaywrightApplyPageSession(input: {
       };
     },
   };
+  return withAccountWindowSession({
+    ...input,
+    session,
+    locate: (ref) =>
+      controlLocator(page, ref) ??
+      actionLocator(page, ref) ??
+      linkLocator(page, ref) ??
+      clickableLocator(page, ref),
+    click: (locator) => clickAndSettle(page, locator),
+    mechanics: createPlaywrightApplyPageMechanics,
+  });
 }

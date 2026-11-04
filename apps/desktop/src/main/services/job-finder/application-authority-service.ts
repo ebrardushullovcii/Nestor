@@ -42,10 +42,7 @@ import {
   type CandidateProfile,
 } from "@nestor/contracts";
 import { readSavedApplicationAnswers } from "@nestor/db/applications";
-import {
-  readProfileWithRevision,
-  type SendGuards,
-} from "@nestor/db/job-store";
+import { readProfileWithRevision, type SendGuards } from "@nestor/db/job-store";
 import { getJobStore } from "../job-store";
 import { getSendGuards } from "../send-guards";
 import { getApplicationStore } from "./application-store";
@@ -330,9 +327,7 @@ function assertRevocationClockIsValid(
 }
 
 function parseMutationResult(
-  result: Awaited<
-    ReturnType<SendGuards["commitApplicationAuthorityEnvelope"]>
-  >,
+  result: Awaited<ReturnType<SendGuards["commitApplicationAuthorityEnvelope"]>>,
 ): ApplicationAuthorityEnvelopeMutationResult {
   return ApplicationAuthorityEnvelopeMutationResultSchema.parse(result);
 }
@@ -544,6 +539,10 @@ export function createJobFinderApplicationAuthorityService(
       return withMutationLock(async () => {
         const parsedInput =
           CreateApplicationAuthorityEnvelopeInputSchema.parse(input);
+        // Send for me includes ordinary bounded preparation writes. This does
+        // not open final-send authority outside its separate preflight.
+        if (parsedInput.mode === "autonomous_submit")
+          parsedInput.intermediateMutationsAuthorized = true;
         const createdAt = parseClockValue(now());
         assertExpiryIsFuture(parsedInput.expiresAt, createdAt);
 

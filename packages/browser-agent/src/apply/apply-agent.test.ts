@@ -433,75 +433,245 @@ function scriptedModel(
   };
 }
 
-test("an early credential handoff inspects a separate Sign In and then the offered Google route", async () => {
-  const source = page({
-    title: "Sign In",
-    bodyText: "Create Account/Sign In. Don't have an account? Create Account",
-    controls: [
-      { ...nameControl(), label: "Password", inputType: "password", value: "" },
-    ],
-    actions: [
+test.each([true, false])(
+  "an early credential handoff inspects a separate Sign In and then the offered Google route (password sign-in=%s)",
+  async (signIn) => {
+    const source = page({
+      title: "Sign In",
+      bodyText: "Create Account/Sign In. Don't have an account? Create Account",
+      controls: [
+        {
+          ...nameControl(),
+          label: "Password",
+          inputType: "password",
+          value: "",
+        },
+      ],
+      actions: [
+        {
+          index: 0,
+          label: "Sign In",
+          visible: true,
+          disabled: false,
+          inForm: true,
+          submitsForm: true,
+          formMethod: "POST",
+          formAction: "https://apply.example.test/session",
+        },
+        { index: 1, label: "Sign In", visible: true, disabled: false },
+        { index: 2, label: "Create Account", visible: true, disabled: false },
+      ],
+    });
+    const input = config(source, {
+      browserPermissions: {
+        signIn,
+        googleSignIn: true,
+        createAccounts: false,
+        solveCaptchas: false,
+      },
+    });
+    const click = vi.fn((ref: string) => {
+      if (ref === "a1") {
+        source.actions.push({
+          index: 3,
+          label: "Sign in with Google",
+          visible: true,
+          disabled: false,
+        });
+      } else if (ref === "a3") {
+        source.url = "https://accounts.google.com/v3/signin/identifier";
+        source.bodyText = "Sign in to Google";
+        source.actions = [];
+      }
+      return Promise.resolve({ ok: true as const, observedValue: "clicked" });
+    });
+    input.hands.clickElement = click;
+    const fill = vi.spyOn(input.hands, "fillText");
+    const model = scriptedModel([
       {
-        index: 0,
+        name: "finish",
+        args: { reason: "Password is missing", needsPerson: true },
+      },
+      { name: "click", args: { ref: "a1" } },
+      {
+        name: "finish",
+        args: { reason: "An account is required", needsPerson: true },
+      },
+      { name: "click", args: { ref: "a3" } },
+      {
+        name: "finish",
+        args: { reason: "Google needs you to sign in", needsPerson: true },
+      },
+    ]);
+    const result = await runApplyAgent(input, model);
+    expect(click.mock.calls.map(([ref]) => ref)).toEqual(["a1", "a3"]);
+    expect(fill).not.toHaveBeenCalled();
+    expect(result.outcome).toBe("paused");
+    expect(result.pauses[0]?.blocker?.detail).toContain("Google");
+    expect(result.pauses[0]?.questions ?? []).toEqual([]);
+  },
+);
+
+test.each(["layout-group", "link"] as const)(
+  "an early credential handoff inspects the existing-account %s with only password sign-in enabled",
+  async (kind) => {
+    const source = page({
+      title: "Create Account/Sign In",
+      bodyText: "Create Account. Already have an account? Sign In",
+      controls: [
+        {
+          ...nameControl(),
+          label: "Password",
+          inputType: "password",
+          value: "",
+        },
+      ],
+      actions: [
+        {
+          index: 0,
+          label: "Create Account",
+          visible: true,
+          disabled: false,
+          submitsForm: true,
+          formMethod: "POST",
+          formAction: "https://apply.example.test/register",
+        },
+      ],
+    });
+    if (kind === "layout-group")
+      source.actions.push({
+        index: 1,
         label: "Sign In",
         visible: true,
         disabled: false,
         inForm: true,
-        submitsForm: true,
-        formMethod: "POST",
-        formAction: "https://apply.example.test/session",
+        section: "Already have an account?",
+      });
+    else
+      source.links.push({
+        index: 0,
+        label: "Sign In",
+        href: "https://apply.example.test/login",
+        target: "",
+        visible: true,
+        topOffset: 0,
+      });
+    const input = config(source, {
+      browserPermissions: {
+        signIn: true,
+        googleSignIn: false,
+        createAccounts: false,
+        solveCaptchas: false,
       },
-      { index: 1, label: "Sign In", visible: true, disabled: false },
-      { index: 2, label: "Create Account", visible: true, disabled: false },
+    });
+    const ref = kind === "layout-group" ? "a1" : "l0";
+    const click = vi.fn(() => {
+      source.actions = [];
+      source.links = [];
+      source.title = "Sign In";
+      source.bodyText = "Sign in to continue";
+      return Promise.resolve({
+        ok: true as const,
+        observedValue: "opened login",
+      });
+    });
+    input.hands.clickElement = click;
+    const fill = vi.spyOn(input.hands, "fillText");
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        {
+          name: "finish",
+          args: { reason: "Password missing", needsPerson: true },
+        },
+        { name: "click", args: { ref } },
+        {
+          name: "finish",
+          args: {
+            reason: "The login still needs credentials",
+            needsPerson: true,
+          },
+        },
+      ]),
+    );
+    expect(click).toHaveBeenCalledExactlyOnceWith(ref);
+    expect(fill).not.toHaveBeenCalled();
+    expect(result.outcome).toBe("paused");
+    expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
+  },
+);
+
+test("a Google chooser selection records one normalized local checkpoint and recovery does not click it again", async () => {
+  const source = page({
+    url: "https://accounts.google.com/v3/signin/accountchooser?state=synthetic#private",
+    title: "Choose an account",
+    bodyText: "Choose an account",
+    controls: [],
+    actions: [
+      {
+        index: 0,
+        label: "Robin ROBIN.Choice@Example.test",
+        visible: true,
+        disabled: false,
+        submitsForm: false,
+      },
     ],
   });
   const input = config(source, {
     browserPermissions: {
-      signIn: true,
       googleSignIn: true,
+      signIn: false,
       createAccounts: false,
       solveCaptchas: false,
     },
   });
-  const click = vi.fn((ref: string) => {
-    if (ref === "a1") {
-      source.actions.push({
-        index: 3,
-        label: "Sign in with Google",
-        visible: true,
-        disabled: false,
-      });
-    } else if (ref === "a3") {
-      source.url = "https://accounts.google.com/v3/signin/identifier";
-      source.bodyText = "Sign in to Google";
-      source.actions = [];
-    }
-    return Promise.resolve({ ok: true as const, observedValue: "clicked" });
+  input.sources.profile.applicationIdentity.preferredEmail =
+    "robin.choice@example.test";
+  source.actions.unshift({
+    ...source.actions[0],
+    index: 1,
+    label: "other@example.test",
   });
-  input.hands.clickElement = click;
-  const fill = vi.spyOn(input.hands, "fillText");
-  const model = scriptedModel([
+  const click = vi.spyOn(input.hands, "clickElement");
+  const model = () =>
+    scriptedModel([
+      { name: "click", args: { ref: "a0" } },
+      { name: "click", args: { ref: "a0" } },
+      {
+        name: "finish",
+        args: { reason: "The chooser did not finish", needsPerson: true },
+      },
+    ]);
+  const first = await runApplyAgent(input, model());
+  const selection = first.timeline.filter(
+    (entry) => entry.label === "Google account selected",
+  );
+  expect(selection).toEqual([
     {
-      name: "finish",
-      args: { reason: "Password is missing", needsPerson: true },
-    },
-    { name: "click", args: { ref: "a1" } },
-    {
-      name: "finish",
-      args: { reason: "An account is required", needsPerson: true },
-    },
-    { name: "click", args: { ref: "a3" } },
-    {
-      name: "finish",
-      args: { reason: "Google needs you to sign in", needsPerson: true },
+      at: "2026-09-14T10:00:00.000Z",
+      label: "Google account selected",
+      text: "Selected Google account robin.choice@example.test. Sign-in completion has not been verified.",
     },
   ]);
-  const result = await runApplyAgent(input, model);
-  expect(click.mock.calls.map(([ref]) => ref)).toEqual(["a1", "a3"]);
-  expect(fill).not.toHaveBeenCalled();
-  expect(result.outcome).toBe("paused");
-  expect(result.pauses[0]?.blocker?.detail).toContain("Google");
-  expect(result.pauses[0]?.questions ?? []).toEqual([]);
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(first.outcome).toBe("paused");
+  expect(selection[0]?.text).not.toContain("state=");
+  input.earlierActivity = selection.map((entry) => ({
+    id: "google-selection",
+    at: entry.at,
+    label: entry.label!,
+    detail: entry.text,
+    state: "in_progress",
+    visualEvidence: [],
+  }));
+  const recovered = await runApplyAgent(input, model());
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(
+    recovered.timeline.filter(
+      (entry) => entry.label === "Google account selected",
+    ),
+  ).toEqual(selection);
+  expect(recovered.outcome).toBe("paused");
 });
 
 test.each([false, true])(
@@ -583,51 +753,133 @@ test("ignoring an enabled Google route gets only one handoff correction", async 
   expect(click).not.toHaveBeenCalled();
 });
 
-test.each(["Sign in", "Create account", "Continue"])("an enabled %s handoff never asks for credentials as saved-answer questions", async (label) => {
-  const source = page({
-    title: label, bodyText: label,
-    controls: [{ ...nameControl(), label: "Password", inputType: "password", value: "" }],
-    actions: [{ index: 0, label, visible: true, disabled: false }],
-  });
-  const result = await runApplyAgent(config(source, { browserPermissions: { signIn: true, googleSignIn: true, createAccounts: true, solveCaptchas: true } }), scriptedModel([
-    { name: "finish", args: { reason: "Enter the password on the site", needsPerson: true, forPerson: ["Password"] } },
-  ]));
-  expect(result.pauses).toHaveLength(1);
-  expect(result.pauses[0]).toMatchObject({ code: "page_blocked", question: null });
-  if (label !== "Continue") expect(result.pauses[0]?.blocker).toMatchObject({ code: label === "Sign in" ? "site_login_required" : "account_creation_required", requiresPerson: true });
-  expect(result.pauses[0]?.questions ?? []).toEqual([]);
-});
+test.each(["Sign in", "Create account", "Continue"])(
+  "an enabled %s handoff never asks for credentials as saved-answer questions",
+  async (label) => {
+    const source = page({
+      title: label,
+      bodyText: label,
+      controls: [
+        {
+          ...nameControl(),
+          label: "Password",
+          inputType: "password",
+          value: "",
+        },
+      ],
+      actions: [{ index: 0, label, visible: true, disabled: false }],
+    });
+    const result = await runApplyAgent(
+      config(source, {
+        browserPermissions: {
+          signIn: true,
+          googleSignIn: true,
+          createAccounts: true,
+          solveCaptchas: true,
+        },
+      }),
+      scriptedModel([
+        {
+          name: "finish",
+          args: {
+            reason: "Enter the password on the site",
+            needsPerson: true,
+            forPerson: ["Password"],
+          },
+        },
+      ]),
+    );
+    expect(result.pauses).toHaveLength(1);
+    expect(result.pauses[0]).toMatchObject({
+      code: "page_blocked",
+      question: null,
+    });
+    if (label !== "Continue")
+      expect(result.pauses[0]?.blocker).toMatchObject({
+        code:
+          label === "Sign in"
+            ? "site_login_required"
+            : "account_creation_required",
+        requiresPerson: true,
+      });
+    expect(result.pauses[0]?.questions ?? []).toEqual([]);
+  },
+);
 
-test.each([false,true])("Fill completes four proven local steps after a finish, including an earlier premature Next: %s", async premature => {
-  const source=page({stepLabel:"Step 1 of 4",actions:[{index:0,label:"Next",visible:true,disabled:false,inForm:true,submitsForm:false}]});
-  let step=1,turns=0;
-  const input=config(source,{pressesFormButtons:false,intermediateWritesAuthorized:false});
-  const press=vi.fn(() => {
-    step++;
-    source.stepLabel=`Step ${step} of 4`;
-    source.controls[0].visible=step!==2;
-    if(step===4) source.actions=[{index:0,label:"Send application",visible:true,disabled:false,inForm:true,submitsForm:true}];
-    return Promise.resolve({ok:true as const,observedValue:"clicked"});
-  });
-  input.hands.clickWithoutWrites=press;
-  const normalClick=vi.spyOn(input.hands,"clickElement");
-  const result=await runApplyAgent(input,{
-    chatWithTools:(messages,definitions) => {
-      const check=supportedChecks(messages,definitions);
-      if(check) return check;
-      expect(source.stepLabel).not.toBe("Step 2 of 4");
-      turns++;
-      source.loading=premature && turns===1;
-      return Promise.resolve({toolCalls:[{id:`step_${turns}`,type:"function" as const,function:{name:source.loading?"click":"finish",arguments:JSON.stringify(source.loading?{ref:"a0"}:{reason:"This step is filled."})}}]});
-    },
-  });
-  expect(result.outcome).toBe("prepared");
-  expect(result.pauses).toEqual([]);
-  expect(press).toHaveBeenCalledTimes(3);
-  expect(normalClick).not.toHaveBeenCalled();
-  expect(step).toBe(4);
-  expect(result.formPath).toHaveLength(3);
-});
+test.each([false, true])(
+  "Fill completes four proven local steps after a finish, including an earlier premature Next: %s",
+  async (premature) => {
+    const source = page({
+      stepLabel: "Step 1 of 4",
+      actions: [
+        {
+          index: 0,
+          label: "Next",
+          visible: true,
+          disabled: false,
+          inForm: true,
+          submitsForm: false,
+        },
+      ],
+    });
+    let step = 1,
+      turns = 0;
+    const input = config(source, {
+      pressesFormButtons: false,
+      intermediateWritesAuthorized: false,
+    });
+    const press = vi.fn(() => {
+      step++;
+      source.stepLabel = `Step ${step} of 4`;
+      source.controls[0].visible = step !== 2;
+      if (step === 4)
+        source.actions = [
+          {
+            index: 0,
+            label: "Send application",
+            visible: true,
+            disabled: false,
+            inForm: true,
+            submitsForm: true,
+          },
+        ];
+      return Promise.resolve({ ok: true as const, observedValue: "clicked" });
+    });
+    input.hands.clickWithoutWrites = press;
+    const normalClick = vi.spyOn(input.hands, "clickElement");
+    const result = await runApplyAgent(input, {
+      chatWithTools: (messages, definitions) => {
+        const check = supportedChecks(messages, definitions);
+        if (check) return check;
+        expect(source.stepLabel).not.toBe("Step 2 of 4");
+        turns++;
+        source.loading = premature && turns === 1;
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: `step_${turns}`,
+              type: "function" as const,
+              function: {
+                name: source.loading ? "click" : "finish",
+                arguments: JSON.stringify(
+                  source.loading
+                    ? { ref: "a0" }
+                    : { reason: "This step is filled." },
+                ),
+              },
+            },
+          ],
+        });
+      },
+    });
+    expect(result.outcome).toBe("prepared");
+    expect(result.pauses).toEqual([]);
+    expect(press).toHaveBeenCalledTimes(3);
+    expect(normalClick).not.toHaveBeenCalled();
+    expect(step).toBe(4);
+    expect(result.formPath).toHaveLength(3);
+  },
+);
 
 test("a completed form returns an obstructed final button to the model in fill-only mode", async () => {
   const source = page();
@@ -2381,7 +2633,8 @@ describe("apply agent run endings", () => {
       label: "Your CV",
       fileName: "synthetic-resume.md",
       mimeType: "text/markdown",
-      loadBytes: () => Promise.resolve(new TextEncoder().encode("Synthetic CV")),
+      loadBytes: () =>
+        Promise.resolve(new TextEncoder().encode("Synthetic CV")),
     };
     const input = config(source, {
       sources: { ...config(source).sources, documents: [document] },
@@ -4396,7 +4649,7 @@ test("the current form review names every selected skill in a checkbox group", a
   expect(
     result.reviewFilled?.find((entry) => entry.label === "Select your skills")
       ?.answer.value,
-  ).toBe("Analysis, Coordination");
+  ).toBe('["Analysis","Coordination"]');
 });
 
 test("a required letter pause collects the other visible questions and explains Never", async () => {
@@ -5370,6 +5623,7 @@ describe("fill_fields visible steps", () => {
         {
           index: 0,
           label: "Reject cookies",
+          disabled: false,
           tagName: "button",
           role: "button",
           visible: true,
@@ -9161,6 +9415,98 @@ test("a file field the widget removed once storage took the file is attached, no
   expect(result.outcome).toBe("prepared");
 });
 
+// Captured on the workday replica (2026-11-03): the step's autosave posted
+// the whole form with the file and got 200 {"saved":true} (no storage
+// receipt). The next step left the file field in the page, disabled and
+// hidden, still holding the file inside the POST multipart form.
+test.each([
+  { formSubmits: true, asked: [] as string[] },
+  { formSubmits: false, asked: ["Resume — upload not confirmed"] },
+])(
+  "an untied autosave of a step's file is no question only when the form itself sends it (formSubmits $formSubmits)",
+  async ({ formSubmits, asked }) => {
+    const fileField = {
+      ...nameControl(),
+      index: 1,
+      id: "resume",
+      name: "resume",
+      inputType: "file",
+      label: "Resume",
+      required: true,
+      value: "",
+      upload: { described: "", nearby: "Resume Upload resume", shown: false },
+    };
+    const source = page({ controls: [nameControl(), fileField] });
+    const suppliedResume = {
+      id: "resume_document",
+      fileName: "resume.txt",
+      mimeType: "text/plain",
+      label: "Your CV",
+      kind: "resume" as const,
+      loadBytes: () => Promise.resolve(new TextEncoder().encode("Resume")),
+    };
+    const input = config(source, {
+      intermediateWritesAuthorized: false,
+      uploadWaitMs: 0,
+      sources: { ...config(source).sources, documents: [suppliedResume] },
+    });
+    let reads = 0;
+    const held = (network?: "unconfirmed") => ({
+      described: "",
+      nearby: "Resume Upload resume resume.txt",
+      shown: false,
+      fileName: "resume.txt",
+      fileSize: 6,
+      selectedFileName: "resume.txt",
+      selectedFileSize: 6,
+      ...(formSubmits ? { formSubmits: true } : {}),
+      ...(network ? { network } : {}),
+    });
+    input.hands.uploadFile = () => {
+      reads = 1;
+      source.controls[1] = {
+        ...fileField,
+        value: "fakepath/resume.txt",
+        upload: held(),
+      };
+      return Promise.resolve({
+        ok: true as const,
+        observedValue: "resume.txt",
+      });
+    };
+    const observe = input.hands.observe;
+    input.hands.observe = () => {
+      // The next step: the field stays in the page, disabled and hidden, and
+      // the autosave that carried the file got no storage receipt.
+      if (reads > 0 && reads++ > 1) {
+        source.controls[1] = {
+          ...fileField,
+          value: "fakepath/resume.txt",
+          disabled: true,
+          visible: false,
+          upload: held("unconfirmed"),
+        };
+        source.uploads = [{ fileName: "resume.txt", network: "unconfirmed" }];
+      }
+      return observe();
+    };
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "upload", args: { ref: "c1", documentId: suppliedResume.id } },
+        { name: "finish", args: { reason: "The form is ready" } },
+        { name: "finish", args: { reason: "The form is ready" } },
+      ]),
+    );
+    expect(
+      result.pauses
+        .flatMap((pause) => pause.questions ?? [])
+        .filter((question) => question.answerControlType === "file")
+        .map((question) => question.prompt),
+    ).toEqual(asked);
+  },
+);
+
 describe("a finish that says needsPerson always ends paused", () => {
   const sendForMe = {
     authority: {
@@ -9969,6 +10315,300 @@ describe("a closed form comes back without the model", () => {
     },
   );
 
+  // Batch-1 review P1: the group answer a run records must keep the source its
+  // box writes shared, so a later recovery consults the current answer
+  // instead of restoring an observed old selection.
+  test("a recorded multi-select keeps its saved source, and a recovery uses the person's changed answer", async () => {
+    const question = "Select your skills";
+    const skills = () =>
+      page({
+        controls: ["TypeScript", "SQL"].map((label, index) =>
+          field(index, label, {
+            inputType: "checkbox",
+            name: "skills",
+            groupLabel: question,
+            required: false,
+          }),
+        ),
+      });
+    const saved = (answer: string) => () =>
+      Promise.resolve([
+        {
+          id: "application_31",
+          kind: "other" as const,
+          label: question,
+          question,
+          answer,
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+      ]);
+    const first = skills();
+    const recording = config(first, { intermediateWritesAuthorized: false });
+    recording.replay = { answers: [], attachments: [], path: [] };
+    recording.readReusableAnswers = saved('["TypeScript","SQL"]');
+    liveHands(first, recording);
+    const recorded = await runApplyAgent(recording, countingModel().client);
+    const group = (recorded.reviewFilled ?? []).find(
+      (entry) => entry.label === question,
+    );
+    expect(group?.answer).toMatchObject({
+      value: '["TypeScript","SQL"]',
+      sourceId: "answerLibrary.application_31",
+    });
+    // Recovery on an empty page from exactly what the run recorded, after
+    // the person changed the saved answer to SQL only.
+    const second = skills();
+    const recovery = config(second, { intermediateWritesAuthorized: false });
+    recovery.readReusableAnswers = saved('["SQL"]');
+    recovery.replay = {
+      answers: (recorded.reviewFilled ?? []).map((entry) => ({
+        ...(entry.fieldKey ? { fieldKey: entry.fieldKey } : {}),
+        question: entry.label,
+        answer: entry.answer.value,
+        source: entry.answer.provenanceLabel,
+        sourceId: entry.answer.sourceId,
+        written: false,
+        groundedIn: [...entry.answer.groundedIn],
+      })),
+      attachments: [],
+      path: [],
+    };
+    const writes = liveHands(second, recovery);
+    await runApplyAgent(recovery, countingModel().client);
+    expect(writes).toEqual(["c1=true"]);
+    expect(second.controls.map((control) => control.checked)).toEqual([
+      false,
+      true,
+    ]);
+  });
+
+  // Batch-1 review P2: a replay write the page did not take must not pass as
+  test("a page handler clearing an initially correct group member cannot pass final replay readback", async () => {
+    const question = "Select your skills";
+    const source = page({
+      controls: ["TypeScript", "SQL", "Rust"].map((label, index) =>
+        field(index, label, {
+          inputType: "checkbox",
+          name: "skills",
+          groupLabel: question,
+          checked: true,
+          required: false,
+        }),
+      ),
+    });
+    const input = config(source, { intermediateWritesAuthorized: false });
+    liveHands(source, input);
+    const toggle = input.hands.setToggle;
+    input.hands.setToggle = async (ref, checked) => {
+      const result = await toggle(ref, checked);
+      if (ref === "c2" && !checked) source.controls[1].checked = false;
+      return result;
+    };
+    input.sources.reusableAnswers = [
+      {
+        id: "application_7",
+        kind: "other",
+        label: question,
+        question,
+        answer: '["TypeScript","SQL"]',
+        roleFamilies: [],
+        proofEntryIds: [],
+      },
+    ];
+    input.replay = {
+      answers: [
+        {
+          question,
+          answer: '["TypeScript","SQL"]',
+          source: "saved answer",
+          sourceId: "answerLibrary.application_7",
+          written: false,
+          groundedIn: [],
+        },
+      ],
+      attachments: [],
+      path: [],
+    };
+    const result = await runApplyAgent(input, countingModel().client);
+    expect(result.outcome).toBe("paused");
+    expect(
+      result.notes.some((note) => note.includes("could not put back")),
+    ).toBe(true);
+    expect(result.reviewFilled?.some((entry) => entry.label === question)).toBe(
+      false,
+    );
+  });
+
+  test("one checked Profile skill records aggregate provenance through actual recording and recovery", async () => {
+    const question = "Select your skills";
+    const skillPage = () =>
+      page({
+        controls: ["TypeScript", "SQL"].map((label, index) =>
+          field(index, label, {
+            inputType: "checkbox",
+            name: "skills",
+            groupLabel: question,
+            required: false,
+          }),
+        ),
+      });
+    const first = skillPage();
+    const recording = config(first, { intermediateWritesAuthorized: false });
+    recording.sources.profile.skills = ["TypeScript", "SQL"];
+    liveHands(first, recording);
+    const recorded = await runApplyAgent(
+      recording,
+      scriptedModel([
+        {
+          name: "fill_fields",
+          args: {
+            fields: [
+              {
+                tool: "set_checkbox",
+                ref: "c1",
+                checked: true,
+                storedFactId: "profile.skills.1",
+              },
+            ],
+            finishWhenReady: true,
+          },
+        },
+      ]),
+    );
+    const group = recorded.reviewFilled?.find(
+      (entry) => entry.label === question,
+    );
+    expect(
+      group?.answer,
+      JSON.stringify({
+        outcome: recorded.outcome,
+        reason: recorded.reason,
+        filled: recorded.filled,
+        notes: recorded.notes,
+      }),
+    ).toMatchObject({ value: '["SQL"]', sourceId: "profile.skills" });
+    for (const retained of [true, false]) {
+      const second = skillPage();
+      const recovery = config(second, { intermediateWritesAuthorized: false });
+      recovery.sources.profile.skills = retained
+        ? ["TypeScript", "SQL"]
+        : ["TypeScript"];
+      recovery.replay = {
+        answers: [
+          {
+            question,
+            answer: group!.answer.value,
+            source: group!.answer.provenanceLabel,
+            sourceId: group!.answer.sourceId,
+            written: false,
+            groundedIn: group!.answer.groundedIn,
+          },
+        ],
+        attachments: [],
+        path: [],
+      };
+      const writes = liveHands(second, recovery);
+      await runApplyAgent(recovery, countingModel().client);
+      expect(writes.includes("c1=true")).toBe(retained);
+    }
+  });
+
+  // a restored, Ready form.
+  test.each([
+    { name: "a refused untick", kind: "checkbox" as const },
+    { name: "a radio the page flips back", kind: "radio" as const },
+  ])(
+    "$name leaves the recovered form with the person, not Ready",
+    async ({ kind }) => {
+      const question =
+        kind === "radio"
+          ? "Are you willing to relocate?"
+          : "Select your skills";
+      const source = page({
+        controls:
+          kind === "radio"
+            ? ["Yes", "No"].map((label, index) =>
+                field(index, label, {
+                  inputType: "radio",
+                  name: "relocate",
+                  groupLabel: question,
+                  value: label,
+                  checked: label === "Yes",
+                }),
+              )
+            : ["TypeScript", "SQL"].map((label, index) =>
+                field(index, label, {
+                  inputType: "checkbox",
+                  name: "skills",
+                  groupLabel: question,
+                  value: label,
+                  checked: true,
+                  required: false,
+                }),
+              ),
+      });
+      const input = config(source, { intermediateWritesAuthorized: false });
+      liveHands(source, input);
+      const toggle = input.hands.setToggle;
+      input.hands.setToggle = async (ref, checked) =>
+        kind === "checkbox" && !checked
+          ? // The widget refuses to untick: both boxes stay ticked.
+            { ok: false as const, error: "The box did not change." }
+          : kind === "radio"
+            ? // The page takes the click, then puts the old member back.
+              toggle(ref, checked).then((result) => {
+                const [yes, no] = source.controls;
+                if (yes) yes.checked = true;
+                if (no) no.checked = false;
+                return result;
+              })
+            : toggle(ref, checked);
+      input.replay = {
+        answers: [
+          {
+            question,
+            answer: kind === "radio" ? "No" : '["SQL"]',
+            source: "your matching saved answer or profile fact",
+            sourceId: "answerLibrary.application_7",
+            written: false,
+            groundedIn: [],
+          },
+        ],
+        attachments: [],
+        path: [],
+      };
+      input.sources.reusableAnswers = [
+        {
+          id: "application_7",
+          kind: "other",
+          label: question,
+          question,
+          answer: kind === "radio" ? "No" : '["SQL"]',
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+      ];
+      const result = await runApplyAgent(input, countingModel().client);
+      expect(result.outcome).not.toBe("prepared");
+      expect(result.readyToSend).toBeNull();
+      expect(
+        result.notes?.some((note) => note.includes("could not put back")),
+      ).toBe(true);
+      // One item for the person on that question, through the existing route.
+      expect(
+        result.pauses
+          .flatMap((pause) => pause.questions ?? [])
+          .map((asked) => [asked.prompt, asked.askReason?.kind]),
+      ).toEqual([[question, "page_refused"]]);
+      if (kind === "checkbox")
+        expect(source.controls.map((control) => control.checked)).toEqual([
+          true,
+          true,
+        ]);
+    },
+  );
+
   test.each(["Worldwide", ""])(
     "Needs-you eligibility answers are written and advance with location %j",
     async (location) => {
@@ -10644,5 +11284,156 @@ test("upload diagnostics name native validation, field text and the refused endp
     kind: "page_refused",
     check: "upload_acceptance",
   });
-  expect(result.pauses.flatMap((pause) => pause.questions ?? []).find((question) => question.id === "upload_repair")?.askReason?.detail).toContain("HTTP 413");
+  expect(
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .find((question) => question.id === "upload_repair")?.askReason?.detail,
+  ).toContain("HTTP 413");
+});
+
+test("basic Google confirmation records an unverified attempt and survives recovery without a second click", async () => {
+  const source = page({
+    url: "https://accounts.google.com/signin/oauth/consent?state=synthetic-private",
+    bodyText: "robin.ashford@example.test",
+    controls: [],
+    actions: [
+      {
+        index: 0,
+        label: "Continue",
+        visible: true,
+        disabled: false,
+        submitsForm: false,
+      },
+    ],
+  });
+  const input = config(source, {
+    browserPermissions: {
+      googleSignIn: true,
+      signIn: false,
+      createAccounts: false,
+      solveCaptchas: false,
+    },
+  });
+  input.sources.profile.applicationIdentity.preferredEmail =
+    "robin.ashford@example.test";
+  input.hands.readAccountFlowEntry = () =>
+    Promise.resolve([
+      "https://accounts.google.com/o/oauth2/v2/auth?scope=openid+email+profile",
+    ]);
+  const click = vi.spyOn(input.hands, "clickElement");
+  const model = () =>
+    scriptedModel([
+      { name: "click", args: { ref: "a0" } },
+      { name: "click", args: { ref: "a0" } },
+      { name: "finish", args: { reason: "Check result", needsPerson: true } },
+    ]);
+  const first = await runApplyAgent(input, model());
+  const receipt = first.timeline.filter(
+    (entry) => entry.label === "Google sign-in confirmed",
+  );
+  expect(receipt).toHaveLength(1);
+  expect(receipt[0]?.text).toContain(
+    "Sign-in completion has not been verified.",
+  );
+  expect(receipt[0]?.text).not.toContain("state=");
+  expect(click).toHaveBeenCalledTimes(1);
+  input.earlierActivity = receipt.map((entry) => ({
+    id: "confirmation-attempt",
+    at: entry.at,
+    label: entry.label!,
+    detail: entry.text,
+    state: "in_progress",
+    visualEvidence: [],
+  }));
+  const recovered = await runApplyAgent(input, model());
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(
+    recovered.timeline.filter(
+      (entry) => entry.label === "Google sign-in confirmed",
+    ),
+  ).toEqual(receipt);
+});
+
+test("the main apply turn receives the full resume including a fact after character 8000", async () => {
+  const source = page();
+  const input = config(source);
+  const fact = "Built accessible interfaces.";
+  input.sources.resumeText = "Synthetic resume background. ".repeat(400) + fact;
+  let received = false;
+  const client: LLMClient = {
+    chatWithTools: (messages) => {
+      const resume = messages.find((message) =>
+        message.content.startsWith("The resume going out"),
+      );
+      expect(resume?.content).toContain(fact);
+      received = true;
+      return Promise.resolve({
+        toolCalls: [
+          {
+            id: "done",
+            type: "function",
+            function: {
+              name: "finish",
+              arguments: JSON.stringify({ reason: "Done" }),
+            },
+          },
+        ],
+      });
+    },
+  };
+  await runApplyAgent(input, client);
+  expect(received).toBe(true);
+});
+
+test("long choices advertise and return their complete scoped list through read_text", async () => {
+  const options = Array.from(
+    { length: 40 },
+    (_, index) => `Synthetic option ${index}`,
+  );
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        tagName: "select",
+        label: "Preferred platform",
+        required: false,
+        value: "",
+        options,
+      },
+    ],
+  });
+  const input = config(source);
+  let turn = 0;
+  const client: LLMClient = {
+    chatWithTools: (messages) => {
+      if (turn++ === 0) {
+        expect(messages.at(-1)?.content).toContain("read_text");
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "read",
+              type: "function",
+              function: { name: "read_text", arguments: '{"ref":"c0"}' },
+            },
+          ],
+        });
+      }
+      expect(
+        messages.find(
+          (message) => message.role === "tool" && message.toolCallId === "read",
+        )?.content,
+      ).toContain(options.at(-1));
+      return Promise.resolve({
+        toolCalls: [
+          {
+            id: "done",
+            type: "function",
+            function: { name: "finish", arguments: '{"reason":"Done"}' },
+          },
+        ],
+      });
+    },
+  };
+  await runApplyAgent(input, client);
+  expect(turn).toBe(2);
 });

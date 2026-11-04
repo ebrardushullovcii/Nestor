@@ -5,9 +5,19 @@ const mocks = vi.hoisted(() => ({
   stopApplication: vi.fn(),
   openApplication: vi.fn(),
   browserCommand: vi.fn(),
+  getApplication: vi.fn(),
+  getWork: vi.fn(),
+  getResumeArtifact: vi.fn(),
+  getSubmissionReceipt: vi.fn(),
 }));
 vi.mock("../services/job-finder/application-store", () => ({
-  getApplicationStore: () => ({ listApplications: mocks.listApplications }),
+  getApplicationStore: () => ({
+    listApplications: mocks.listApplications,
+    getApplication: mocks.getApplication,
+    getWork: mocks.getWork,
+    getResumeArtifact: mocks.getResumeArtifact,
+    getSubmissionReceipt: mocks.getSubmissionReceipt,
+  }),
 }));
 vi.mock("../services/job-store", () => ({ getJobStore: vi.fn() }));
 vi.mock("../services/job-finder/test-api", () => ({
@@ -38,6 +48,46 @@ beforeEach(() => vi.clearAllMocks());
 
 // The preload passes these calls through, so main is where they are checked.
 describe("application commands in main", () => {
+  it.each(["site_login_required", "security_challenge"])(
+    "exposes the recorded access reason only for a sign-in handoff: %s",
+    async (code) => {
+      const at = "2026-11-03T21:00:00.000Z";
+      const accessDetail =
+        "Nestor cannot prove this request is limited to basic identity. Review the listed access yourself. ".repeat(
+          24,
+        );
+      mocks.getApplication.mockReturnValue({
+        id: 3,
+        jobId: 3,
+        mode: "confirm_before_submit",
+        title: "Synthetic role",
+        company: "Synthetic employer",
+        location: "Berlin, Germany",
+        state: "needs_you",
+        attempt: 1,
+        queuedAt: at,
+        updatedAt: at,
+        submittedAt: null,
+        error: null,
+      });
+      mocks.getWork.mockReturnValue({
+        execution: {
+          summary: "Google needs you to finish this step.",
+          detail: "Google needs you to finish this step.",
+          blocker: { code, detail: accessDetail },
+        },
+        reviewCard: null,
+      });
+      mocks.getResumeArtifact.mockReturnValue(null);
+      mocks.getSubmissionReceipt.mockReturnValue(null);
+      await expect(
+        executeApplicationStoreCommand("get-application-details", { id: 3 }),
+      ).resolves.toMatchObject({
+        accessDetail: code === "site_login_required" ? accessDetail : null,
+      });
+    },
+  );
+
   it.each([true, false])(
     "Open delegates the exact page or refill to the service and never opens an unrelated active tab: %s",
     async (opened) => {

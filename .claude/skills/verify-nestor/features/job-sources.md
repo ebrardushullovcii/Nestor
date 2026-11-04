@@ -29,7 +29,6 @@ Find jobs > What each site found reports listings observed, new jobs and jobs sa
 - A restarted verify instance may get a different replica port. Update stored site URLs before another search.
 - The sidebar uses the same list_sites/get_site/add_sites/update_site/remove_site/set_sites_enabled commands as the screens. Changes have separate persisted Undo receipts; later site edits are preserved. Ask to show Profile > Job sites after the change, then compare the screen with job_sites.
 
-
 ## Browser permissions and saved passwords
 
 Settings > AI behavior > In-app browser has independent switches: Solve
@@ -42,8 +41,7 @@ still go to the person.
 
 Check the Google switch on its own with the other account switches off. A local
 replica's Continue with Google button beside an empty password form should be
-usable only when the Google switch is on. One signed-in Google account can be
-selected; multiple accounts and Google credentials/consent remain handoffs.
+usable only when the Google switch is on. Select the unique account matching the Profile application email (otherwise the primary email), including when it is second among several. A sole wrong account is never selected. A known identifier can be typed and basic identity confirmation pressed only with transient authorization proof. Passwords, MFA, Google account creation and additional or unproven access remain handoffs.
 Restart and verify the saved switch, then turn it off and verify a running
 browser task cannot use the provider button again.
 

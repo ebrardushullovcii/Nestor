@@ -2825,6 +2825,7 @@ describe("a site that saves as you go", () => {
         {
           index: 0,
           label: "Portugal",
+          disabled: false,
           role: "option",
           tagName: "li",
           visible: true,
@@ -3484,72 +3485,85 @@ describe("a question keeps its name across runs", () => {
 });
 
 describe("a button that opens a new tab", () => {
-  test("the run goes where the tab was going, in this tab, and says so", async () => {
-    const listing = rawPage({
-      url: "https://remoteok.test/remote-jobs/staff-engineer",
-      actions: [{ index: 0, label: "Apply", visible: true, disabled: false }],
-    });
-    const employerForm = rawPage({
-      url: "https://jobs.employer.test/apply/123",
-      controls: [rawControl({ index: 0, label: "First Name" })],
-    });
-    let popupHandedOut = false;
-    let onEmployerSite = false;
-    const navigated: string[] = [];
-    const { config } = configFor(listing, {
-      hands: {
-        observe: () =>
-          Promise.resolve(
-            observationOf(onEmployerSite ? employerForm : listing),
-          ),
-        navigate: (url) => {
-          navigated.push(url);
-          onEmployerSite = true;
-          return Promise.resolve({ ok: true, url });
+  test.each([false, true])(
+    "popup adoption protects existing prepared values (%s)",
+    async (hadWritten) => {
+      const listing = rawPage({
+        url: "https://remoteok.test/remote-jobs/staff-engineer",
+        actions: [{ index: 0, label: "Apply", visible: true, disabled: false }],
+      });
+      const employerForm = rawPage({
+        url: "https://jobs.employer.test/apply/123",
+        controls: [rawControl({ index: 0, label: "First Name" })],
+      });
+      let popupHandedOut = false;
+      let onEmployerSite = false;
+      const navigated: string[] = [];
+      const { config } = configFor(listing, {
+        hands: {
+          observe: () =>
+            Promise.resolve(
+              observationOf(onEmployerSite ? employerForm : listing),
+            ),
+          navigate: (url) => {
+            navigated.push(url);
+            onEmployerSite = true;
+            return Promise.resolve({ ok: true, url });
+          },
         },
-      },
-    });
-    const withSafety: ApplyAgentConfig = {
-      ...config,
-      safety: {
-        readBlockedAttempt: () => {
-          if (popupHandedOut) return Promise.resolve(null);
-          popupHandedOut = true;
-          return Promise.resolve({
-            kind: "popup_open" as const,
-            method: "GET",
-            url: "https://jobs.employer.test/apply/123",
-            at: "2026-09-14T10:00:01.000Z",
-          });
+      });
+      const withSafety: ApplyAgentConfig = {
+        ...config,
+        safety: {
+          readBlockedAttempt: () => {
+            if (popupHandedOut) return Promise.resolve(null);
+            popupHandedOut = true;
+            return Promise.resolve({
+              kind: "popup_open" as const,
+              method: "GET",
+              url: "https://jobs.employer.test/apply/123",
+              at: "2026-09-14T10:00:01.000Z",
+            });
+          },
+          registerPreparedValue: () => Promise.resolve(),
+          openIntermediateWriteWindow: () => Promise.resolve(),
+          closeIntermediateWriteWindow: () => Promise.resolve(),
+          checkServiceWorker: () => Promise.resolve(null),
         },
-        registerPreparedValue: () => Promise.resolve(),
-        openIntermediateWriteWindow: () => Promise.resolve(),
-        closeIntermediateWriteWindow: () => Promise.resolve(),
-        checkServiceWorker: () => Promise.resolve(null),
-      },
-    };
+      };
 
-    const outcome = await executeApplyProposal(
-      { tool: "click", ref: "a0" },
-      observationOf(listing).signature,
-      {
-        config: withSafety,
-        now: () => new Date("2026-09-14T10:00:00.000Z"),
-        guardState: createApplyGuardState(),
-      },
-    );
-
-    expect(navigated).toEqual(["https://jobs.employer.test/apply/123"]);
-    expect(outcome.kind).toBe("moved");
-    if (outcome.kind === "moved") {
-      expect(outcome.note).toContain('"Apply"');
-      expect(outcome.note).toContain("new tab");
-      expect(outcome.note).toContain("https://jobs.employer.test/apply/123");
-      expect(outcome.observation.url).toBe(
-        "https://jobs.employer.test/apply/123",
+      const outcome = await executeApplyProposal(
+        { tool: "click", ref: "a0" },
+        observationOf(listing).signature,
+        {
+          config: withSafety,
+          now: () => new Date("2026-09-14T10:00:00.000Z"),
+          guardState: { ...createApplyGuardState(), hasWritten: hadWritten },
+        },
       );
-    }
-  });
+
+      if (hadWritten) {
+        expect(navigated).toEqual([]);
+        expect(outcome).toMatchObject({
+          kind: "refused",
+          reason:
+            "The page tried to open jobs.employer.test in a new tab; the form stays in this tab.",
+          observation: { url: listing.url },
+        });
+        return;
+      }
+      expect(navigated).toEqual(["https://jobs.employer.test/apply/123"]);
+      expect(outcome.kind).toBe("moved");
+      if (outcome.kind === "moved") {
+        expect(outcome.note).toContain('"Apply"');
+        expect(outcome.note).toContain("new tab");
+        expect(outcome.note).toContain("https://jobs.employer.test/apply/123");
+        expect(outcome.observation.url).toBe(
+          "https://jobs.employer.test/apply/123",
+        );
+      }
+    },
+  );
 });
 
 describe("Round 2 application recovery", () => {
@@ -5724,3 +5738,76 @@ test("Needs you keeps every offered choice in the form's order", () => {
     }).answerOptions,
   ).toEqual(options);
 });
+
+test.each(["Target@Example.test", "wrong@example.test"])(
+  "Google identifier grounding writes canonical Profile application email only: %s",
+  async (text) => {
+    const seen = rawPage({
+      url: "https://accounts.google.com/v3/signin/identifier",
+      title: "Sign in",
+      controls: [rawControl({ index: 0, label: "Email", inputType: "email" })],
+      actions: [{ index: 0, label: "Next", visible: true, disabled: false }],
+    });
+    const { config, hands } = configFor(seen);
+    config.sources.profile.applicationIdentity.preferredEmail =
+      "Target@Example.test";
+    config.readIntendedAccountEmail = () => "Target@Example.test";
+    config.browserPermissions = {
+      googleSignIn: true,
+      signIn: false,
+      createAccounts: false,
+      solveCaptchas: false,
+    };
+    const write = vi.spyOn(hands, "fillText");
+    const result = await executeApplyProposal(
+      { tool: "type", ref: "c0", text },
+      observationOf(seen).signature,
+      { config, guardState: createApplyGuardState(), now },
+    );
+    if (text === "wrong@example.test") {
+      expect(result.kind).toBe("refused");
+      expect(write).not.toHaveBeenCalled();
+    } else {
+      expect(result.kind).toBe("moved");
+      expect(write).toHaveBeenCalledExactlyOnceWith(
+        "c0",
+        "Target@Example.test",
+      );
+    }
+  },
+);
+
+test.each(["Next", "Review", "Show details"])(
+  "only a visible non-final advance opens a write window: %s",
+  async (label) => {
+    const page = rawPage({
+      actions: [
+        {
+          index: 0,
+          label,
+          visible: true,
+          disabled: false,
+          inForm: true,
+          submitsForm: false,
+        },
+      ],
+    });
+    const { config } = configFor(page);
+    const opened = vi.fn(() => Promise.resolve()),
+      closed = vi.fn(() => Promise.resolve());
+    config.safety = {
+      readBlockedAttempt: () => Promise.resolve(null),
+      registerPreparedValue: () => Promise.resolve(),
+      openIntermediateWriteWindow: opened,
+      closeIntermediateWriteWindow: closed,
+      checkServiceWorker: () => Promise.resolve(null),
+    };
+    await executeApplyProposal(
+      { tool: "click", ref: "a0" },
+      observationOf(page).signature,
+      { config, now, guardState: createApplyGuardState() },
+    );
+    expect(opened).toHaveBeenCalledTimes(label === "Next" ? 1 : 0);
+    if (label !== "Next") expect(closed).toHaveBeenCalledOnce();
+  },
+);

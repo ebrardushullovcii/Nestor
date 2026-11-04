@@ -1,3 +1,4 @@
+import { intendedAccountEmail } from "@nestor/contracts";
 import {
   ListingRejectionCategorySchema,
   toJobSearchGoals,
@@ -384,7 +385,12 @@ export async function runJobSearchAgent(
   input: JobSearchAgentInput,
 ): Promise<AgentResult> {
   const { config } = input;
-  const hands = withBrowserPermissions(input.hands, config);
+  const hands = withBrowserPermissions(input.hands, {
+    ...config,
+    readIntendedAccountEmail:
+      config.readIntendedAccountEmail ??
+      (() => intendedAccountEmail(config.userProfile)),
+  });
   const now = input.now ?? (() => new Date());
   const isSourceCheck = Boolean(config.promptContext.taskPacket);
   const siteLabel = config.promptContext.siteLabel;

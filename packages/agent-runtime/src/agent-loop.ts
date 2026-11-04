@@ -74,6 +74,7 @@ export interface AgentLoopModel {
   ) => Promise<{
     content?: string;
     toolCalls?: AgentLoopToolCall[];
+    continuation?: AgentLoopContinuation;
   }>;
 }
 
@@ -188,7 +189,10 @@ export interface AgentLoopOptions {
   /** Host supplies a fresh observation after a response batch, if needed. */
   afterToolBatch?: () => Promise<string | null>;
   /** Finish from the host's verified state before spending another model call. */
-  beforeModelTurn?: () => AgentLoopFinish | null | Promise<AgentLoopFinish | null>;
+  beforeModelTurn?: () =>
+    | AgentLoopFinish
+    | null
+    | Promise<AgentLoopFinish | null>;
   /**
    * A reply with words and no tool call. The host may take it as a step of
    * its own (most often the model reporting that it is done) instead of the
@@ -284,7 +288,11 @@ function endSentence(text: string): string {
 }
 
 function messageChars(message: AgentLoopMessage): number {
-  const base = message.content.length;
+  const base =
+    message.content.length +
+    (message.role === "assistant"
+      ? (message.continuation?.text.length ?? 0)
+      : 0);
   return message.role === "assistant" && message.toolCalls
     ? base + JSON.stringify(message.toolCalls).length
     : base;
@@ -466,7 +474,16 @@ export async function runAgentLoop(
     steps,
     progressSteps,
     turnNotes,
-    messages,
+    // The live model history is private. Hosts receive only the public transcript.
+    messages: messages.map((message) =>
+      message.role === "assistant"
+        ? {
+            role: message.role,
+            content: message.content,
+            ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
+          }
+        : message,
+    ),
     timing: { totalMs: elapsed(), modelMs, toolMs, modelTurns },
   });
   const markProgress = (): void => {
@@ -609,7 +626,13 @@ export async function runAgentLoop(
 
     const toolCalls = response.toolCalls ?? [];
     if (toolCalls.length === 0) {
-      messages.push({ role: "assistant", content: response.content ?? "" });
+      messages.push({
+        role: "assistant",
+        content: response.content ?? "",
+        ...(response.continuation
+          ? { continuation: response.continuation }
+          : {}),
+      });
       const hosted = (response.content ?? "").trim()
         ? await options.onReplyWithoutTool?.(response.content ?? "")
         : null;
@@ -649,6 +672,7 @@ export async function runAgentLoop(
       role: "assistant",
       content: response.content ?? "",
       toolCalls,
+      ...(response.continuation ? { continuation: response.continuation } : {}),
     });
 
     let ended: AgentLoopResult | null = null;

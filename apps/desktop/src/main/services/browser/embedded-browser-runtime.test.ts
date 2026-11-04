@@ -3,7 +3,10 @@ import {
   type AgentDiscoveryOptions,
   type BrowserSessionRuntime,
 } from "@nestor/browser-runtime";
-import { DiscoveryRunResultSchema } from "@nestor/contracts";
+import {
+  ApplyExecutionResultSchema,
+  DiscoveryRunResultSchema,
+} from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 import type { Page } from "playwright";
 
@@ -15,6 +18,97 @@ import {
 import { describeApplicationPreparationProgress } from "@nestor/job-finder";
 
 describe("withEmbeddedBrowserActivity", () => {
+  test.each([
+    { state: "failed", retain: true, live: true, kept: true },
+    { state: "failed", retain: true, live: false, kept: false },
+    { state: "failed", retain: false, live: true, kept: false },
+    { state: "submitted", retain: true, live: true, kept: false },
+  ] as const)(
+    "native terminal cleanup respects only a live confirmed failed-page retention: $state / $retain / $live",
+    async ({ state, retain, live, kept }) => {
+      const base = createStubBrowserSessionRuntime({
+        sessions: [],
+        catalog: [],
+      });
+      const result = ApplyExecutionResultSchema.parse({
+        state,
+        summary: "Nestor could not read this form",
+        detail: "Try again.",
+        submittedAt: null,
+        outcome: null,
+        questions: [],
+        blocker: null,
+        consentDecisions: [],
+        replay: {
+          sourceInstructionArtifactId: null,
+          sourceDebugEvidenceRefIds: [],
+          lastUrl: "https://site.test/apply",
+          checkpointUrls: [],
+        },
+        checkpoints: [],
+        visualEvidence: [],
+        visualObservationSets: [],
+        visualCheckpoints: [],
+        nextActionLabel: "Try again",
+      });
+      const executeApplicationFlow = vi.fn<
+        BrowserSessionRuntime["executeApplicationFlow"]
+      >((_source, input) => {
+        if (state === "failed")
+          input.shouldRetainFailedApplicationPage?.(result);
+        return Promise.resolve(result);
+      });
+      const markFinishedTabs = vi.fn();
+      const markPreparedForm = vi.fn(() => true);
+      const browser: Pick<
+        EmbeddedBrowser,
+        | "runAutomation"
+        | "setApplicationTabLabel"
+        | "markFinishedTabs"
+        | "markPreparedForm"
+      > = {
+        runAutomation: (_label, _signal, work) =>
+          work(new AbortController().signal, vi.fn(), vi.fn(), () =>
+            Promise.resolve(["native-tab"]),
+          ),
+        setApplicationTabLabel: vi.fn(),
+        markFinishedTabs,
+        markPreparedForm,
+      };
+      const wrapped = withEmbeddedBrowserActivity(
+        {
+          ...base,
+          executeApplicationFlow,
+          hasApplicationPageBinding: () => Promise.resolve(live),
+        },
+        browser as EmbeddedBrowser,
+      );
+      const input = {
+        applicationPageBindingKey: "failed-attempt",
+        job: {
+          title: "Synthetic role",
+          company: "Synthetic company",
+          location: "Berlin",
+        },
+        shouldRetainFailedApplicationPage: () => retain,
+      } as unknown as Parameters<
+        BrowserSessionRuntime["executeApplicationFlow"]
+      >[1];
+      await wrapped.executeApplicationFlow("target_site", input);
+      if (kept) {
+        expect(markFinishedTabs).not.toHaveBeenCalled();
+        expect(markPreparedForm).toHaveBeenCalledExactlyOnceWith(
+          "failed-attempt",
+        );
+      } else {
+        expect(markFinishedTabs).toHaveBeenCalledExactlyOnceWith([
+          "native-tab",
+        ]);
+        expect(markPreparedForm).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   test("Open shows only the exact binding adopted during restoration", async () => {
     const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
     let restored = false;
@@ -157,11 +251,16 @@ describe("withEmbeddedBrowserActivity", () => {
   test("a replacement attempt reclaims and transfers the host's exact tab owner", async () => {
     const base = createStubBrowserSessionRuntime({ sessions: [], catalog: [] });
     const transferApplicationPageBinding = vi.fn(() => Promise.resolve(true));
-    const reclaimOwnedTabs = vi.fn(() => Promise.resolve());
+    const reclaimOwnedTabs = vi.fn(() => Promise.resolve(vi.fn()));
     const transferOwnedTabs = vi.fn();
     const wrapped = withEmbeddedBrowserActivity(
       { ...base, transferApplicationPageBinding },
-      { reclaimOwnedTabs, transferOwnedTabs } as unknown as EmbeddedBrowser,
+      {
+        reclaimOwnedTabs,
+        transferOwnedTabs,
+        completeOwnedTabReclaim: vi.fn(),
+        ownerHasSendEvidence: () => false,
+      } as unknown as EmbeddedBrowser,
     );
     await expect(
       wrapped.transferApplicationPageBinding!("target_site", "old", "retry"),
@@ -172,6 +271,137 @@ describe("withEmbeddedBrowserActivity", () => {
       transferApplicationPageBinding.mock.invocationCallOrder[0]!,
     );
   });
+
+  test.each(["missing", "detached"])(
+    "an unsuccessful %s page transfer restores the old tab's person handoff",
+    async (outcome) => {
+      const base = createStubBrowserSessionRuntime({
+        sessions: [],
+        catalog: [],
+      });
+      const restore = vi.fn();
+      const reclaimOwnedTabs = vi.fn(() => Promise.resolve(restore));
+      const transferOwnedTabs = vi.fn();
+      const transferApplicationPageBinding = vi.fn(() =>
+        outcome === "missing"
+          ? Promise.resolve(false)
+          : Promise.reject(new Error("Page detached")),
+      );
+      const wrapped = withEmbeddedBrowserActivity(
+        { ...base, transferApplicationPageBinding },
+        {
+          reclaimOwnedTabs,
+          transferOwnedTabs,
+          ownerHasSendEvidence: () => false,
+        } as unknown as EmbeddedBrowser,
+      );
+      const result = wrapped.transferApplicationPageBinding!(
+        "target_site",
+        "old",
+        "next",
+      );
+      if (outcome === "missing") await expect(result).resolves.toBe(false);
+      else await expect(result).rejects.toThrow("Page detached");
+      expect(restore).toHaveBeenCalledOnce();
+      expect(transferOwnedTabs).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each(["before reclaim", "during reclaim", "during runtime rename"])(
+    "send evidence %s prevents ownership transfer without erasing the press",
+    async (phase) => {
+      const base = createStubBrowserSessionRuntime({
+        sessions: [],
+        catalog: [],
+      });
+      let pressed = phase === "before reclaim";
+      const restore = vi.fn();
+      const reclaimOwnedTabs = vi.fn(() => {
+        if (phase === "during reclaim") pressed = true;
+        return Promise.resolve(restore);
+      });
+      const transferApplicationPageBinding = vi.fn(() => {
+        pressed = true;
+        return Promise.resolve(true);
+      });
+      const renameApplicationPageBinding = vi.fn(async () => {});
+      const transferOwnedTabs = vi.fn();
+      const wrapped = withEmbeddedBrowserActivity(
+        {
+          ...base,
+          transferApplicationPageBinding,
+          renameApplicationPageBinding,
+        },
+        {
+          ownerHasSendEvidence: () => pressed,
+          reclaimOwnedTabs,
+          transferOwnedTabs,
+        } as unknown as EmbeddedBrowser,
+      );
+      await expect(
+        wrapped.transferApplicationPageBinding!("target_site", "old", "next"),
+      ).resolves.toBe(false);
+      expect(pressed).toBe(true);
+      expect(transferOwnedTabs).not.toHaveBeenCalled();
+      if (phase === "before reclaim")
+        expect(reclaimOwnedTabs).not.toHaveBeenCalled();
+      else expect(restore).toHaveBeenCalledOnce();
+      if (phase === "during runtime rename")
+        expect(renameApplicationPageBinding).toHaveBeenCalledExactlyOnceWith(
+          "target_site",
+          "next",
+          "old",
+        );
+    },
+  );
+
+  test.each([false, true])(
+    "native-only adoption preserves handoff and rechecks a press during rename (race=%s)",
+    async (race) => {
+      const base = createStubBrowserSessionRuntime({
+        sessions: [],
+        catalog: [],
+      });
+      let owner = "old";
+      let pressed = false;
+      const personPage = { url: "https://replica.test/kept", controls: [] };
+      const renameApplicationPageBinding = vi.fn(() => {
+        if (race) pressed = true;
+        return Promise.resolve();
+      });
+      const reclaimOwnedTabs = vi.fn();
+      const wrapped = withEmbeddedBrowserActivity(
+        { ...base, renameApplicationPageBinding },
+        {
+          getApplicationTabIds: (key: string) =>
+            owner === key ? ["kept"] : [],
+          ownerHasSendEvidence: () => pressed,
+          transferOwnedTabs: (old: string, next: string) => {
+            expect(old).toBe(owner);
+            owner = next;
+          },
+          readApplicationPageWithPerson: (key: string) =>
+            Promise.resolve(owner === key ? personPage : null),
+          reclaimOwnedTabs,
+        } as unknown as EmbeddedBrowser,
+      );
+      await expect(
+        wrapped.adoptApplicationPageOwnership!("target_site", "old", "next"),
+      ).resolves.toBe(!race);
+      expect(reclaimOwnedTabs).not.toHaveBeenCalled();
+      expect(owner).toBe(race ? "old" : "next");
+      if (!race)
+        await expect(
+          wrapped.readApplicationPageWithPerson!("target_site", "next"),
+        ).resolves.toBe(personPage);
+      else
+        expect(renameApplicationPageBinding).toHaveBeenLastCalledWith(
+          "target_site",
+          "next",
+          "old",
+        );
+    },
+  );
 
   test("keeps form values out of the visible progress label", () => {
     expect(

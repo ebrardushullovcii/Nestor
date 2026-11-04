@@ -1,6 +1,7 @@
 import { Disclosure } from "@renderer/components/ui/disclosure";
 import { useEffect, useId, useRef, useState } from "react";
 import type {
+  ApplicationDetails,
   CandidateAssetKind,
   NeedsYouDetails,
   NeedsYouDraft,
@@ -15,6 +16,14 @@ import {
 import { Button } from "@renderer/components/ui/button";
 import { Checkbox } from "@renderer/components/ui/checkbox";
 import { useToast } from "@renderer/components/ui/toast";
+import {
+  actionSite,
+  doneSoFar,
+  sentStatus,
+  taskAction,
+  type ActionNeeded,
+} from "@renderer/features/applications/action-needed";
+import { ActionNeededLine } from "@renderer/features/applications/action-needed-line";
 import { openPreparedApplication } from "@renderer/features/applications/open-application";
 import { AnswerField } from "./answer-field";
 import { SourceNeedPane } from "./source-need-pane";
@@ -59,6 +68,63 @@ function siteHost(url: string): string {
 
 export const describeError = (error: unknown) =>
   error instanceof Error ? error.message : "Could not save this answer.";
+
+/**
+ * The one application an item waits on, as Apply recorded it: what went on
+ * the form and whether it was sent. Undefined while it loads, null when it
+ * cannot be read (the line then says so rather than guessing).
+ */
+function useWaitingApplication(
+  application: { id: number; state: string } | null,
+) {
+  const [record, setRecord] = useState<ApplicationDetails | null | undefined>(
+    undefined,
+  );
+  const id = application?.id ?? null;
+  const state = application?.state ?? null;
+  useEffect(() => {
+    setRecord(undefined);
+    if (id === null) return;
+    let live = true;
+    void Promise.resolve()
+      .then(() => window.nestor.jobFinder.getApplicationDetails({ id }))
+      .then((value) => {
+        if (live) setRecord(value);
+      })
+      .catch(() => {
+        if (live) setRecord(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [id, state]);
+  return record;
+}
+
+/** The item's lead line; several applications keep their own records. */
+function taskActionLine(
+  details: NeedsYouDetails,
+  record: ApplicationDetails | null | undefined,
+): ActionNeeded {
+  const line = {
+    site: actionSite(details.task, details.applications),
+    action: taskAction(details.task, {
+      accessDetail: record?.accessDetail ?? null,
+    }),
+  };
+  if (details.applications.length > 1) {
+    const each = `shown on each of the ${details.applications.length} applications in Applications.`;
+    return { ...line, done: each, sent: each };
+  }
+  if (record === undefined) return { ...line, done: null, sent: null };
+  if (record === null)
+    return {
+      ...line,
+      done: "not available right now.",
+      sent: "not available right now; check the application in Applications.",
+    };
+  return { ...line, done: doneSoFar(record), sent: sentStatus(record) };
+}
 
 /** Each mounted editor belongs to one task. Async reads and saves cannot retarget it. */
 export function TaskPane(props: {
@@ -226,6 +292,11 @@ export function TaskPane(props: {
   }
   const task = details?.task;
   const { checks } = useWorkThrough();
+  const single =
+    details && !task?.source && details.applications.length === 1
+      ? details.applications[0]!
+      : null;
+  const record = useWaitingApplication(single);
   return (
     <section
       id="list-detail"
@@ -251,6 +322,7 @@ export function TaskPane(props: {
         />
       ) : (
         <div className="grid gap-5 [&>button]:justify-self-start">
+          <ActionNeededLine line={taskActionLine(details, record)} />
           {task.kind === "question" ? (
             // The question is the pane's title; the job it is for and why
             // it was asked sit under it, quieter.
@@ -269,7 +341,11 @@ export function TaskPane(props: {
                     </span>
                     {task.askReason.check === "question_classification"
                       ? "Nestor could not read this question, so it could not check your profile or saved answers."
-                      : ASK_REASON_LEAD[task.askReason.kind]}
+                      : task.askReason.check === "step_not_confirmed"
+                        ? "Nestor pressed this step's button once, but the form did not show the next step."
+                        : task.askReason.check === "step_handover"
+                          ? "Nestor could not prove this button only moves the form to its next step, so pressing it is yours."
+                          : ASK_REASON_LEAD[task.askReason.kind]}
                   </p>
                   {task.askReason.detail ? (
                     <Disclosure summary="What Nestor saw">
@@ -295,9 +371,10 @@ export function TaskPane(props: {
             <div className="grid gap-3 [&>button]:justify-self-start">
               <p className="max-w-prose text-sm text-foreground-soft">
                 Job Finder filled what it could on this page. In Fill in for me
-                it never presses the form's own buttons, because one of them
-                could send your application. Open the application, press it
-                yourself, then come back here.
+                it presses a step's own button only on a numbered step whose
+                next step it can confirm, and never a button that could send
+                your application. Open the application, press it yourself, then
+                come back here.
               </p>
               {details.applications.map((application) => (
                 <Button

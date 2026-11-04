@@ -15,6 +15,7 @@ import type { JobSearchEngine } from "./engine";
 
 export interface JobSearchContext {
   browserPermissions?: BrowserAgentPermissions;
+  readIntendedAccountEmail?: () => string | null | Promise<string | null>;
   readBrowserPermissions?: () =>
     | BrowserAgentPermissions
     | Promise<BrowserAgentPermissions>;

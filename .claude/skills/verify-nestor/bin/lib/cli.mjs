@@ -47,6 +47,7 @@ import {
   writeState,
 } from "./common.mjs";
 import { rows, saveRows, tables } from "./sqlite.mjs";
+import { prepareNativeBridge, validateLaunchMode } from "./native-app.mjs";
 
 if (Number(process.versions.node.split(".")[0]) < 22)
   fail(`Node 22 or newer is needed (found ${process.version}).`);
@@ -170,6 +171,7 @@ async function up() {
     options: {
       ai: { type: "string", default: "deterministic" },
       net: { type: "string", default: "replica" },
+      launch: { type: "string", default: "playwright" },
       video: { type: "boolean", default: false },
       "no-test-api": { type: "boolean", default: false },
       "allow-stale": { type: "boolean", default: false },
@@ -179,6 +181,11 @@ async function up() {
   if (!["deterministic", "live"].includes(values.ai))
     fail("--ai is deterministic or live");
   if (!["replica", "web"].includes(values.net)) fail("--net is replica or web");
+  try {
+    validateLaunchMode(values.launch, values);
+  } catch (error) {
+    fail(error.message);
+  }
   const previous = readState();
   if (driverUp(previous)) {
     console.log(
@@ -262,6 +269,10 @@ async function up() {
     net: values.net,
     video: values.video,
     testApi: !values["no-test-api"],
+    launch: values.launch,
+    ...(values.launch === "native"
+      ? await prepareNativeBridge({ checkout, stateDir, requireDesktop })
+      : {}),
   };
   writeFileSync(
     path.join(stateDir, "launch.json"),
@@ -278,7 +289,7 @@ async function up() {
     aiKeys,
   });
   step(
-    `=== up label=${label} checkout=${checkout} build=${fingerprintText(stamp)} source=${fingerprintText(now)} ai=${values.ai} net=${values.net}`,
+    `=== up label=${label} checkout=${checkout} build=${fingerprintText(stamp)} source=${fingerprintText(now)} ai=${values.ai} net=${values.net} launch=${values.launch}`,
   );
 
   const log = openSync(path.join(stateDir, "driver.log"), "a");
@@ -308,7 +319,7 @@ async function up() {
       console.log(
         [
           `ready: label ${label}`,
-          `  ai ${values.ai}${aiKeys.length ? ` (${aiKeys.join(", ")})` : ""}, net ${values.net}, build ${fingerprintText(stamp)}`,
+          `  ai ${values.ai}${aiKeys.length ? ` (${aiKeys.join(", ")})` : ""}, net ${values.net}, launch ${values.launch}, build ${fingerprintText(stamp)}`,
           `  replica sites ${state.sitesUrl}`,
           `  user data ${userDataDir}`,
           `  evidence ${evidenceDir}`,
@@ -538,6 +549,10 @@ function db() {
 // --- down -----------------------------------------------------------------
 async function down() {
   const keepData = rest.includes("--keep-data");
+  // A run on the owner's imported real state: archive no databases or app log.
+  const privateData = rest.includes("--private-data");
+  if (keepData && privateData)
+    fail("--private-data deletes the data folder; it cannot be kept.");
   const state = readState();
   if (!state) return console.log(`Nothing recorded for label ${label}.`);
   if (driverUp(state) && state.driverPort) {
@@ -567,7 +582,7 @@ async function down() {
   // Keep the proof: final databases, diagnostics and logs go to the evidence folder.
   const finalData = path.join(evidenceDir, "final-data");
   mkdirSync(finalData, { recursive: true });
-  if (state.userDataDir && existsSync(state.userDataDir))
+  if (!privateData && state.userDataDir && existsSync(state.userDataDir))
     for (const name of readdirSync(state.userDataDir))
       if (
         /\.sqlite(-wal|-shm)?$|\.json$|startup-diagnostics\.log$/.test(name) &&
@@ -576,7 +591,7 @@ async function down() {
         cpSync(path.join(state.userDataDir, name), path.join(finalData, name));
   const logs = path.join(evidenceDir, "logs");
   mkdirSync(logs, { recursive: true });
-  for (const name of ["driver.log", "app.log"])
+  for (const name of privateData ? ["driver.log"] : ["driver.log", "app.log"])
     if (existsSync(path.join(stateDir, name)))
       cpSync(path.join(stateDir, name), path.join(logs, name));
 
@@ -594,7 +609,7 @@ async function down() {
     } else rmSync(stateDir, { recursive: true, force: true });
   }
   step(
-    `=== down${keepData ? " --keep-data" : ""}${survivors.length ? ` SURVIVORS ${survivors.join(", ")}` : ""}`,
+    `=== down${keepData ? " --keep-data" : ""}${privateData ? " --private-data" : ""}${survivors.length ? ` SURVIVORS ${survivors.join(", ")}` : ""}`,
   );
   const files = existsSync(evidenceDir)
     ? readdirSync(evidenceDir, { recursive: true }).length

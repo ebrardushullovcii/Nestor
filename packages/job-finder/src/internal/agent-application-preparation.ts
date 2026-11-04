@@ -1,10 +1,12 @@
 import { browserAgentPermissionsOf } from "@nestor/contracts";
+import { resolveListingCountry } from "../applications/questions";
 import {
   checkWrittenApplicationAnswer,
   applicationFacts,
   createApplyPageHands,
   createMoveReviewer,
   runApplyAgent,
+  UNCONFIRMED_STEP_LABEL,
   type ApplyAgentResult,
   type ApplyAuthority,
   type ApplyDocument,
@@ -109,6 +111,7 @@ export interface AgentApplicationPreparationInput {
   earlierAttachments?: Parameters<
     typeof runApplyAgent
   >[0]["earlierAttachments"];
+  earlierActivity?: Parameters<typeof runApplyAgent>[0]["earlierActivity"];
   /** What an earlier run left on this form, to bring a closed page back. */
   replay?: Parameters<typeof runApplyAgent>[0]["replay"];
   /**
@@ -343,18 +346,33 @@ function toCheckpoints(
 ): ApplicationAttemptCheckpoint[] {
   // Each line is stamped with the moment it was written, not with the run's
   // start: a trail where every step happened "at 19:41" is no trail.
-  const lines =
+  const lines: ApplyAgentResult["timeline"] =
     result.timeline.length > 0
       ? result.timeline
       : result.notes.map((text) => ({ at: startedAt, text }));
-  return lines.slice(0, 40).map((line, index) => ({
-    id: `checkpoint_${jobId}_agent_${index + 1}`,
-    at: line.at,
-    label: "Working through the form",
-    detail: line.text,
-    state: "in_progress" as const,
-    visualEvidence: [],
-  }));
+  // Receipts a continued run reads to avoid repeating an uncertain action.
+  const selections = lines.filter(
+    (line) =>
+      line.label === "Google account selected" ||
+      line.label === "Google sign-in confirmed" ||
+      line.label === UNCONFIRMED_STEP_LABEL,
+  );
+  const retained = new Set([
+    ...selections,
+    ...lines
+      .filter((line) => !selections.includes(line))
+      .slice(0, Math.max(0, 40 - selections.length)),
+  ]);
+  return lines
+    .filter((line) => retained.has(line))
+    .map((line, index) => ({
+      id: `checkpoint_${jobId}_agent_${index + 1}`,
+      at: line.at,
+      label: line.label ?? "Working through the form",
+      detail: line.text,
+      state: "in_progress" as const,
+      visualEvidence: [],
+    }));
 }
 
 /** What the run wrote on the site, for the receipt: each field, each file. */
@@ -599,7 +617,9 @@ export async function runAgentApplicationPreparation(
   };
   const moveReviewer = createMoveReviewer({
     browserPermissions: browserAgentPermissionsOf(executionInput.settings),
-    ...(executionInput.prepareBrowserCredentials ? { prepareBrowserCredentials: executionInput.prepareBrowserCredentials } : {}),
+    ...(executionInput.prepareBrowserCredentials
+      ? { prepareBrowserCredentials: executionInput.prepareBrowserCredentials }
+      : {}),
     llmClient: input.llmClient,
     goal: isContinuation
       ? `Continue the ${executionInput.job.title} application at ${executionInput.job.company} on the currently open retained page at ${targetUrl}. Confirm that the open page is still this employer's application. Keep working on that current form; do not return to the listing or reload it. Nothing is sent.`
@@ -641,6 +661,9 @@ export async function runAgentApplicationPreparation(
     ...(input.earlierAttachments?.length
       ? { earlierAttachments: input.earlierAttachments }
       : {}),
+    ...(input.earlierActivity?.length
+      ? { earlierActivity: input.earlierActivity }
+      : {}),
     ...(input.replay ? { replay: input.replay } : {}),
     ...(input.initialUnansweredPickerQuestions
       ? {
@@ -654,9 +677,15 @@ export async function runAgentApplicationPreparation(
     // them to the person even where the site saves fields as they are filled.
     pressesFormButtons: executionInput.submitAuthorized === true,
     browserPermissions: browserAgentPermissionsOf(executionInput.settings),
-    ...(executionInput.readBrowserPermissions ? { readBrowserPermissions: executionInput.readBrowserPermissions } : {}),
-    accountCreationAuthorized:
-      browserAgentPermissionsOf(executionInput.settings).createAccounts,
+    ...(executionInput.readIntendedAccountEmail
+      ? { readIntendedAccountEmail: executionInput.readIntendedAccountEmail }
+      : {}),
+    ...(executionInput.readBrowserPermissions
+      ? { readBrowserPermissions: executionInput.readBrowserPermissions }
+      : {}),
+    accountCreationAuthorized: browserAgentPermissionsOf(
+      executionInput.settings,
+    ).createAccounts,
     authority: activeAuthority,
     sources: {
       profile: executionInput.profile,
@@ -669,6 +698,7 @@ export async function runAgentApplicationPreparation(
         title: executionInput.job.title,
         company: executionInput.job.company,
         location: executionInput.job.location,
+        resolvedCountry: resolveListingCountry(executionInput.job.location),
         description: executionInput.job.description,
       },
       ...(approvedLetterText != null ? { approvedLetterText } : {}),
@@ -849,6 +879,10 @@ export async function runAgentApplicationPreparation(
     questionContexts: result.questionContexts,
     pickerAttempts: result.pickerAttempts,
     ...(result.formPath?.length ? { formPath: result.formPath } : {}),
+    // Send evidence for this attempt only (council D1).
+    ...(result.stepReceipts?.length
+      ? { stepReceipts: result.stepReceipts.slice(-40) }
+      : {}),
     ...(result.skipReason ? { skipReason: result.skipReason } : {}),
   };
 }
@@ -944,6 +978,7 @@ export function createApplyFormPreparer(input: {
   initialPickerAttempts?: AgentApplicationPreparationInput["initialPickerAttempts"];
   uploadsConfirmedByPerson?: readonly string[];
   earlierAttachments?: AgentApplicationPreparationInput["earlierAttachments"];
+  earlierActivity?: AgentApplicationPreparationInput["earlierActivity"];
   replay?: AgentApplicationPreparationInput["replay"];
   initialUnansweredPickerQuestions?: AgentApplicationPreparationInput["initialUnansweredPickerQuestions"];
   now?: () => Date;
@@ -1017,6 +1052,9 @@ export function createApplyFormPreparer(input: {
         ? { earlierAttachments: input.earlierAttachments }
         : {}),
       ...(input.replay ? { replay: input.replay } : {}),
+      ...(input.earlierActivity?.length
+        ? { earlierActivity: input.earlierActivity }
+        : {}),
       ...(input.initialUnansweredPickerQuestions
         ? {
             initialUnansweredPickerQuestions:

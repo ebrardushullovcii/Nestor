@@ -64,11 +64,7 @@ const initiativeOptions: readonly ChoiceCardOption<ProfileAssistantInitiative>[]
 function GroupHeading(props: { title: string; description: string }) {
   return (
     <div className="grid min-w-0 gap-1">
-      <h4
-        className="font-semibold text-(--text-headline)"
-      >
-        {props.title}
-      </h4>
+      <h4 className="font-semibold text-(--text-headline)">{props.title}</h4>
       <p className="max-w-[70ch] text-(length:--text-description) leading-5 text-foreground-soft">
         {props.description}
       </p>
@@ -110,7 +106,7 @@ const browserPermissionChoices: readonly {
     label: "Use Google to sign in or sign up",
     description:
       "Uses an existing Google sign-in to log in or create accounts on job sites.",
-    hint: "Sign in to Google in the browser first. Multiple Google accounts, passwords, verification and new access requests still come to you.",
+    hint: "Uses the Google account that matches your Profile email. Sign in to Google in this browser first. Passwords, verification and requests for more than your name, email and profile picture still come to you.",
   },
   {
     key: "createAccounts",
@@ -188,9 +184,7 @@ export function SettingsAiBehaviorSection({
     >
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="grid min-w-0 max-w-[72ch] flex-1 gap-1">
-          <h3
-            className="min-w-0 font-semibold text-(--text-headline)"
-          >
+          <h3 className="min-w-0 font-semibold text-(--text-headline)">
             {SETTINGS_AI_BEHAVIOR_LABEL}
           </h3>
           <p className="text-(length:--text-description) leading-5 text-foreground-soft">

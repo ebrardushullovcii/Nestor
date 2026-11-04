@@ -19,6 +19,7 @@ import {
 import { readPageMessages } from "./page-messages";
 import { mutationResponseSaysError } from "./mutation-response";
 import {
+  hasActiveAccountWindow,
   closePrepareOnlyFinalActionWindow,
   isPrepareOnlyFinalActionWindowOpen,
   openPrepareOnlyFinalActionWindow,
@@ -379,6 +380,7 @@ export interface ApplicationFormObservation {
 export type ApplicationFinalActionBlockReason =
   | "aborted"
   | "action_error"
+  | "account_window_open"
   | "ambiguous_final_controls"
   | "no_final_control"
   | "origin_drift"
@@ -1234,6 +1236,13 @@ export async function executeExactlyOneFinalAction(
         facts: initialFacts,
       });
     }
+    if (hasActiveAccountWindow(page)) {
+      return blockedResult({
+        reason: "account_window_open",
+        observation: null,
+        facts: initialFacts,
+      });
+    }
     if (typeof input.veto !== "function") {
       return blockedResult({
         reason: "vetoed",
@@ -1751,7 +1760,21 @@ export async function executeExactlyOneFinalAction(
     }
     // The prepare-only guard stays on the page from preparation; this is the
     // one press it is opened for.
-    await openPrepareOnlyFinalActionWindow(page);
+    try {
+      await openPrepareOnlyFinalActionWindow(page);
+    } catch {
+      networkFence.close();
+      stopWatchingNetwork();
+      forgetIssuedAction(page, key);
+      return blockedResult({
+        reason: hasActiveAccountWindow(page)
+          ? "account_window_open"
+          : "action_error",
+        observation: finalObservation,
+        control: finalControl,
+        facts: emptyFacts(initialPage),
+      });
+    }
     networkFence.open();
     const closeActionWindow = async (): Promise<void> => {
       networkFence.close();

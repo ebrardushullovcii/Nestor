@@ -167,6 +167,7 @@ describe("R3 assistant safety findings", () => {
       {
         index: 0,
         label: "Expand details",
+        disabled: false,
         role: "button",
         tagName: "div",
         visible: true,

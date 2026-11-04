@@ -660,3 +660,32 @@ describe("Job Finder application authority service", () => {
     expect(releaseApplicationPage).not.toHaveBeenCalled();
   });
 });
+
+it("new Send for me envelopes include bounded preparation writes even when the old input defaults false", async () => {
+  const service = makeService({
+    repository: records(),
+    now: () => NOW,
+    idFactory: () => "send-with-saves",
+  });
+  service.saveAnswers({
+    visa_sponsorship: "No sponsorship required",
+    work_authorization: "Authorized to work in the EU",
+  });
+  const readiness = await service.getReadiness();
+  await service.approveCurrentAnswers({
+    confirmedCurrentAnswers: true,
+    expectedProfileRevision: readiness.currentAnswers.sourceProfileRevision,
+  });
+  const envelope = expectApplied(
+    await service.create(
+      createPolicy({
+        mode: "autonomous_submit",
+        expiresAt: LATER,
+        scope: { campaignId: null, jobIds: ["job_1"] },
+        intermediateMutationsAuthorized: false,
+      }),
+    ),
+  );
+  expect(envelope.intermediateMutationsAuthorized).toBe(true);
+  expect(envelope.decisionPolicy).not.toBeNull();
+});

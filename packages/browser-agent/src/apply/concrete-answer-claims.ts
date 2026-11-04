@@ -1,3 +1,4 @@
+import { factualSummaryIsSourced } from "./factual-summary";
 import { preserveTechnologyTokens } from "@nestor/contracts";
 import type { AnswerEvidence } from "./answer-evidence";
 
@@ -237,7 +238,13 @@ export function concreteClaimsSupported(
     const literalClaim =
       applicantClaim &&
       (personalHistory || personalVoice || numbers(clause).length > 0);
-    if (literalClaim && !quotes.some((quote) => contains(quote, clause)))
+    if (
+      literalClaim &&
+      !quotes.some(
+        (quote) =>
+          contains(quote, clause) || factualSummaryIsSourced(clause, [quote]),
+      )
+    )
       return false;
     const counts = numbers(clause);
     if (

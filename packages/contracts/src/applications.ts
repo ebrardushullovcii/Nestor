@@ -95,6 +95,12 @@ export const ApplicationDetailsSchema = z.object({
   resumeFileName: z.string().nullable(),
   reviewCard: ApplicationReviewCardSchema.nullable(),
   receipt: SubmissionOutcomeRecordSchema.nullable(),
+  /**
+   * The run's recorded reason for a sign-in step it handed to the person
+   * (such as access a sign-in provider asks for beyond basic profile), as
+   * the policy worded it. Null for any other stop.
+   */
+  accessDetail: z.string().nullable().optional(),
 });
 export type ApplicationDetails = z.infer<typeof ApplicationDetailsSchema>;
 export const ApplicationPreparationUpdateSchema = z

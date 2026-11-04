@@ -18,7 +18,11 @@ import {
   questionPrompt,
 } from "./policy-executor";
 import { buildApplyFormObservation } from "./page-hands";
-import { createQuestionClassifier } from "./question-classification";
+import {
+  createQuestionClassifier,
+  applicationQuestionClassificationContext,
+} from "./question-classification";
+import { questionReadContext, formWritingInstructions } from "./own-words";
 import type {
   ApplyFormControl,
   ApplyAnswerSources,
@@ -1542,26 +1546,43 @@ test("batch W: preflight refuses mixed employment records", async () => {
   expect(checks.every((c) => !c.supported)).toBe(true);
 });
 
+// Council D6 replaced the blanket refusal for one unambiguous state: the
+// named country covered without a limited permit and sponsorship recorded
+// as not needed. Any other condition, or any doubt, still asks.
 test.each([
   {
     label:
       "Are you authorized to work in the UK without ever requiring sponsorship?",
     group: "",
+    sponsorship: false,
+    expected: "needs_you",
   },
   {
     label:
       "Without requiring sponsorship — Are you authorized to work in the UK?",
     group: "",
+    sponsorship: false,
+    expected: "literal",
+  },
+  {
+    label:
+      "Without requiring sponsorship — Are you authorized to work in the UK?",
+    group: "",
+    sponsorship: true,
+    expected: "needs_you",
   },
   {
     label: "Are you authorized to work in the UK?",
     group: "Without restrictions or sponsorship",
+    sponsorship: false,
+    expected: "needs_you",
   },
 ])(
-  "compound instructions do not become a country-only answer: $label",
-  ({ label, group }) => {
-    const src = sources(),
-      s = setup(field(label, { groupLabel: group }), src),
+  "compound instructions follow the recorded sponsorship fact: $label (sponsorship $sponsorship)",
+  ({ label, group, sponsorship, expected }) => {
+    const src = sources();
+    src.profile.workEligibility.requiresVisaSponsorship = sponsorship;
+    const s = setup(field(label, { groupLabel: group }), src),
       control = s.observation().controls[0];
     expect(
       classifyAnswerPermission({
@@ -1571,12 +1592,13 @@ test.each([
           kind: "work_auth",
           country: "GB",
           sourceId: "profile.workEligibility.authorizedWorkCountries.0",
+          hasAdditionalConditions: true,
         },
         sources: src,
         answer: "Yes",
         pageInstructions: "",
       }).kind,
-    ).toBe("needs_you");
+    ).toBe(expected);
   },
 );
 
@@ -1644,7 +1666,7 @@ test("a motivation misreading cannot waive a language-of-choice preference", asy
 });
 
 test.each(["truncated", "unparseable"])(
-  "a %s question reading retries twice then creates a visible handover",
+  "a %s question reading retries twice then reports a technical outage without personal questions",
   async (failure) => {
     const { runApplyAgent } = await import("./apply-agent");
     const s = setup(field("Full name"));
@@ -1671,16 +1693,20 @@ test.each(["truncated", "unparseable"])(
     const result = await runApplyAgent(s.config, client);
     expect(client.chatWithTools).toHaveBeenCalledTimes(3);
     expect(s.fillText).not.toHaveBeenCalled();
-    expect(result.outcome).toBe("paused");
-    const question = result.pauses
-      .flatMap((pause) => pause.questions ?? [])
-      .find((question) => question.prompt === "Full name");
-    expect(question?.note).toContain("three tries");
-    // Not read is not the same as no saved fact.
-    expect(question?.askReason).toMatchObject({
-      kind: "source_rejected",
-      check: "question_classification",
+    expect(result.outcome).toBe("stuck");
+    expect(result.reason).toContain("Nestor could not read this page");
+    expect(result.reason).toContain("Retry");
+    expect(result.technicalFailure).toEqual({
+      code: "question_classification_unavailable",
+      retryable: true,
+      pageDisposition: "retain",
     });
+    expect(result.finalUrl).toBe(s.page.url);
+    expect(
+      result.pauses.flatMap(
+        (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+      ),
+    ).toEqual([]);
   },
 );
 
@@ -2063,4 +2089,99 @@ test("URL formatting never guesses an account or accepts credentials as an addre
   expect(fullProfileUrl("synthetic-robin")).toBeNull();
   expect(fullProfileUrl("user:secret@github.com/synthetic-robin")).toBeNull();
   expect(fullProfileUrl("javascript:alert(1)")).toBeNull();
+});
+
+test("the answer matcher reads a source longer than 4000 characters without discarding its final fact", async () => {
+  const { matchApplicationAnswer } = await import("./answer-match");
+  const fact = "Built accessible interfaces.";
+  const value = "Synthetic background. ".repeat(450) + fact;
+  const client: LLMClient = {
+    chatWithTools: (messages) => {
+      expect(messages[1]?.content).toContain(fact);
+      return Promise.resolve(
+        call("match_application_answer", {
+          sourceId: "resume.text",
+          answer: fact,
+        }),
+      );
+    },
+  };
+  const result = await matchApplicationAnswer({
+    client,
+    question: "Describe your interface experience",
+    sources: [{ id: "resume.text", purpose: "writing", value, country: null }],
+    rejection: null,
+  });
+  expect(result).toEqual({ sourceId: "resume.text", value: fact });
+});
+
+test("unchanged preparation and actual Send checker share one classification with current recipient construction", async () => {
+  const s = setup(field("Full name"));
+  const browserPermissions = {
+    signIn: false,
+    googleSignIn: false,
+    createAccounts: false,
+    solveCaptchas: false,
+  };
+  const client: LLMClient = {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>(() =>
+      Promise.resolve(
+        call("report_question_kinds", {
+          plainIndexes: [0],
+          flagged: [],
+          tags: [
+            {
+              index: 0,
+              kind: "other",
+              country: null,
+              sourceId: "profile.fullName",
+            },
+          ],
+        }),
+      ),
+    ),
+  };
+  const questionReadCacheScope = {};
+  const input = {
+    client,
+    sources: s.config.sources,
+    application: { ...s.config.application, startingUrl: s.observation().url! },
+    payDisclosed: false,
+    approvedAttestations: [],
+    browserPermissions,
+    questionReadCacheScope,
+  };
+  const classify = createQuestionClassifier({
+    client,
+    cacheScope: questionReadCacheScope,
+    readContext: () => applicationQuestionClassificationContext(input),
+    sources: () => answerSourceCatalog(input.sources),
+  });
+  await classify(
+    s.observation().controls,
+    questionReadContext(s.observation()),
+  );
+  s.raw.value = s.config.sources.profile.fullName ?? "";
+  const [check] = await checkClassifiedApplicationAnswers({
+    ...input,
+    answers: [{ question: "Full name", answer: s.raw.value }],
+    formControls: s.observation().controls,
+    formContext: {
+      pageText: formWritingInstructions(s.observation()),
+      fields: [],
+    },
+  });
+  expect(check?.supported).toBe(true);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  browserPermissions.googleSignIn = true;
+  await checkClassifiedApplicationAnswers({
+    ...input,
+    answers: [{ question: "Full name", answer: s.raw.value }],
+    formControls: s.observation().controls,
+    formContext: {
+      pageText: formWritingInstructions(s.observation()),
+      fields: [],
+    },
+  });
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });

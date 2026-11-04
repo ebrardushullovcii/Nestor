@@ -789,6 +789,7 @@
       "role": "",
       "tagName": "label",
       "visible": true,
+      "disabled": false,
       "topOffset": 469
     },
     {
@@ -797,6 +798,7 @@
       "role": "",
       "tagName": "label",
       "visible": true,
+      "disabled": false,
       "topOffset": 568
     },
     {
@@ -805,6 +807,7 @@
       "role": "",
       "tagName": "label",
       "visible": true,
+      "disabled": false,
       "topOffset": 668
     },
     {
@@ -853,6 +856,7 @@
       "role": "",
       "tagName": "label",
       "visible": true,
+      "disabled": false,
       "topOffset": 767
     },
     {
@@ -861,6 +865,7 @@
       "role": "",
       "tagName": "label",
       "visible": true,
+      "disabled": false,
       "topOffset": 861
     },
     {
@@ -869,6 +874,7 @@
       "role": "",
       "tagName": "label",
       "visible": true,
+      "disabled": false,
       "topOffset": 1018
     },
     {
@@ -877,6 +883,7 @@
       "role": "",
       "tagName": "label",
       "visible": true,
+      "disabled": false,
       "topOffset": 2423
     },
     {
@@ -885,6 +892,7 @@
       "role": "",
       "tagName": "label",
       "visible": true,
+      "disabled": false,
       "topOffset": 2523
     }
   ],

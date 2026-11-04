@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { normalizeModelUsage } from "./model-token-usage";
 import {
   AgentTaskExecutionReceiptSchema,
@@ -841,6 +842,15 @@ export function createOpenAiCompatibleJobFinderAiClient(
       try {
         const apiMode = validatedOptions.apiMode ?? "chat_completions";
         const streamingEnabled = resilience.streaming !== false;
+        const continuationRoute = createHash("sha256")
+          .update(
+            JSON.stringify([
+              buildModelUrl(validatedOptions.baseUrl, apiMode),
+              validatedOptions.model,
+              apiMode,
+            ]),
+          )
+          .digest("hex");
         const payload = await performModelRequest({
           purpose: [
             options?.reasoningTask ?? "chat",
@@ -875,20 +885,25 @@ export function createOpenAiCompatibleJobFinderAiClient(
                 options?.onStreamEvent !== undefined),
             messages: messages.map((msg) => {
               const base = { role: msg.role, content: msg.content };
-              if (msg.role === "assistant" && msg.toolCalls) {
+              if (msg.role === "assistant") {
                 return {
                   ...base,
                   // Private continuation goes back only to the route that
                   // produced it.
                   ...(msg.continuation?.kind === "reasoning_content" &&
-                  msg.continuation.route === validatedOptions.model
+                  msg.continuation.route === continuationRoute &&
+                  apiMode === "chat_completions"
                     ? { reasoning_content: msg.continuation.text }
                     : {}),
-                  tool_calls: msg.toolCalls.map((tc) => ({
-                    id: tc.id,
-                    type: tc.type,
-                    function: tc.function,
-                  })),
+                  ...(msg.toolCalls
+                    ? {
+                        tool_calls: msg.toolCalls.map((tc) => ({
+                          id: tc.id,
+                          type: tc.type,
+                          function: tc.function,
+                        })),
+                      }
+                    : {}),
                 };
               }
               if (msg.role === "tool") {
@@ -932,7 +947,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         if (message?.reasoning_content) {
           result.continuation = {
             kind: "reasoning_content",
-            route: validatedOptions.model,
+            route: continuationRoute,
             text: message.reasoning_content,
           };
         }

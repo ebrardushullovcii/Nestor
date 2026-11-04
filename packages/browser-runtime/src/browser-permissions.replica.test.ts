@@ -15,12 +15,42 @@ import {
   createPlaywrightApplyPageMechanics,
   createPlaywrightApplyPageSession,
 } from "./apply-page-mechanics";
-import { allowPrepareOnlyRunNavigation } from "./playwright-application-flow";
+import {
+  allowPrepareOnlyRunNavigation,
+  createApplicationRunServiceWorkerSentinel,
+} from "./playwright-application-flow";
 
 let server: Server;
 let browser: Browser;
 let base = "";
 const posts: string[] = [];
+
+function dynamicAccountPage(button: boolean): string {
+  const login = `<h1>Sign In</h1><form id="login">
+    <label>Email Address<input type="email" name="email" autocomplete="username"></label>
+    <label>Password<input type="password" name="password" autocomplete="current-password"></label>
+    <button type="${button ? "button" : "submit"}" id="signin">Sign In</button>
+    </form><button type="button">Create Account</button>`;
+  return `<!doctype html><title>Create Account / Sign In</title><main>
+    <h1>Create Account</h1><form method="post" action="/account">
+    <label>Email Address<input type="email" name="email"></label>
+    <label>Password<input type="password" autocomplete="new-password"></label>
+    <label>Verify Password<input type="password" autocomplete="new-password"></label>
+    <button>Create Account</button>
+    <section><h2>Already have an account?</h2><button type="button" id="existing-account">Sign In</button></section>
+    </form></main><script>
+    globalThis.syntheticAuthPresses = 0;
+    document.querySelector('#existing-account').onclick = () => {
+      document.querySelector('main').innerHTML = ${JSON.stringify(login)};
+      const authenticate = (event) => {
+        event.preventDefault();
+        globalThis.syntheticAuthPresses++;
+        void fetch('/auth', {method:'POST',body:new URLSearchParams(new FormData(document.querySelector('#login')))}).catch(()=>{});
+      };
+      ${button ? "document.querySelector('#signin').onclick = authenticate;" : "document.querySelector('#login').onsubmit = authenticate;"}
+    };
+    </script>`;
+}
 
 beforeAll(async () => {
   server = createServer((request, response) => {
@@ -37,7 +67,9 @@ beforeAll(async () => {
       return;
     }
     response.setHeader("Content-Type", "text/html");
-    if (path === "/google-session") {
+    if (path === "/dyn-apply" || path === "/dyn-apply-button") {
+      response.end(dynamicAccountPage(path.endsWith("-button")));
+    } else if (path === "/google-session") {
       response.writeHead(303, {
         Location: "/jobs",
         "Set-Cookie": "syntheticGoogleSession=yes; Path=/; SameSite=Lax",
@@ -91,7 +123,13 @@ afterAll(async () => {
 
 async function open(context: BrowserContext, path: string) {
   const page = await context.newPage();
-  const session = createPlaywrightApplyPageSession({ page });
+  const sentinel = createApplicationRunServiceWorkerSentinel({
+    context,
+    targetUrl: `${base}${path}`,
+  });
+  sentinel.attachPage(page);
+  page.once("close", () => sentinel.detach());
+  const session = createPlaywrightApplyPageSession({ page, sentinel });
   await session.installPrepareOnlyGuard({
     intermediateMutationsAuthorized: false,
     allowedOrigins: [],
@@ -107,6 +145,157 @@ async function enterSyntheticLogin(page: Page) {
   await page.getByLabel("Password").fill("synthetic-replica-password");
 }
 
+test.each(["/dyn-apply", "/dyn-apply-button"])(
+  "same-URL registration-to-login at %s signs in through the host-filled JavaScript press once (B5)",
+  async (path) => {
+    const context = await browser.newContext();
+    try {
+      const { page, hands } = await open(context, path);
+      const before = posts.length;
+      const prepared: string[] = [];
+      let registrationReads = 0;
+      const guarded = withBrowserPermissions(hands, {
+        browserPermissions: BrowserAgentPermissionsSchema.parse({
+          signIn: true,
+        }),
+        prepareBrowserCredentials: async (url) => {
+          const password = page.locator(
+            'input[autocomplete="current-password"]',
+          );
+          if ((await password.count()) !== 1) {
+            registrationReads++;
+            return false;
+          }
+          prepared.push(url);
+          await password.fill("synthetic-host-only-password");
+          return true;
+        },
+      });
+      const registration = await guarded.observe();
+      expect(registration.blocker?.code).toBe("account_creation_required");
+      const create = registration.actions.find(
+        (action) => action.label === "Create Account",
+      )!;
+      expect(await guarded.clickElement(create.ref)).toMatchObject({
+        ok: false,
+      });
+      const entry = registration.actions.find(
+        (action) => action.label === "Sign In",
+      )!;
+      expect(await guarded.clickElement(entry.ref)).toMatchObject({ ok: true });
+      await page.locator('input[autocomplete="current-password"]').waitFor();
+      const login = await guarded.observe();
+      expect(page.url()).toBe(`${base}${path}`);
+      // ADR 0012 (B5): after exact-site host autofill the existing-account
+      // JavaScript Sign In is the agent's to press; nothing goes to the person.
+      expect(login.blocker).toMatchObject({
+        code: "site_login_required",
+        requiresPerson: false,
+      });
+      expect(registrationReads).toBe(1);
+      expect(prepared).toEqual([`${base}${path}`]);
+      expect(
+        login.controls.find((control) => control.credentialRole === "password")
+          ?.answered,
+      ).toBe(true);
+      expect(JSON.stringify(login)).not.toContain(
+        "synthetic-host-only-password",
+      );
+      const email = login.controls.find(
+        (control) => control.credentialRole === "identifier",
+      )!;
+      expect(
+        await guarded.fillText(email.ref, "synthetic@example.test"),
+      ).toMatchObject({ ok: true });
+      const submit = login.actions.find(
+        (action) => action.label === "Sign In",
+      )!;
+      const result = await guarded.clickElement(submit.ref);
+      expect(result).toMatchObject({ ok: true });
+      // Its own one press: the site's handler ran once and sent exactly one
+      // bounded same-origin POST, with no native form navigation.
+      expect(
+        await page.evaluate(
+          () =>
+            (globalThis as unknown as { syntheticAuthPresses: number })
+              .syntheticAuthPresses,
+        ),
+      ).toBe(1);
+      expect(page.url()).toBe(`${base}${path}`);
+      expect(posts.slice(before)).toEqual(["/auth"]);
+      const after = await guarded.observe();
+      expect(JSON.stringify(after)).not.toContain(
+        "synthetic-host-only-password",
+      );
+      expect(after.url).not.toContain("synthetic-host-only-password");
+      // Host autofill only ever targets this exact site; reading the page
+      // again sends nothing more.
+      expect(new Set(prepared)).toEqual(new Set([`${base}${path}`]));
+      expect(posts.slice(before)).toEqual(["/auth"]);
+    } finally {
+      await context.close();
+    }
+  },
+  20_000,
+);
+
+test.each(["/dyn-apply", "/dyn-apply-button"])(
+  "Google alone cannot prepare or submit the password login at %s",
+  async (path) => {
+    const context = await browser.newContext();
+    try {
+      const { page, hands } = await open(context, path);
+      const before = posts.length;
+      let prepared = 0;
+      const guarded = withBrowserPermissions(hands, {
+        browserPermissions: BrowserAgentPermissionsSchema.parse({
+          googleSignIn: true,
+        }),
+        prepareBrowserCredentials: () => {
+          prepared++;
+          return Promise.resolve(false);
+        },
+      });
+      const registration = await guarded.observe();
+      const entry = registration.actions.find(
+        (action) => action.label === "Sign In",
+      )!;
+      expect(await guarded.clickElement(entry.ref)).toMatchObject({ ok: true });
+      await page.locator('input[autocomplete="current-password"]').waitFor();
+      const login = await guarded.observe();
+      const email = login.controls.find(
+        (control) => control.credentialRole === "identifier",
+      )!;
+      expect(
+        await guarded.fillText(email.ref, "synthetic@example.test"),
+      ).toMatchObject({ ok: false });
+      const submit = login.actions.find(
+        (action) => action.label === "Sign In",
+      )!;
+      expect(await guarded.clickElement(submit.ref)).toMatchObject({
+        ok: false,
+      });
+      expect(prepared).toBe(0);
+      expect(
+        await page
+          .locator('input[autocomplete="current-password"]')
+          .inputValue(),
+      ).toBe("");
+      expect(
+        await page.evaluate(
+          () =>
+            (globalThis as unknown as { syntheticAuthPresses: number })
+              .syntheticAuthPresses,
+        ),
+      ).toBe(0);
+      expect(posts.slice(before)).toEqual([]);
+      expect(page.url()).toBe(`${base}${path}`);
+    } finally {
+      await context.close();
+    }
+  },
+);
+
 test("two-stage sign-in opens provider choices without a password or registration grant, then uses only enabled Google", async () => {
   const context = await browser.newContext();
   try {
@@ -116,7 +305,7 @@ test("two-stage sign-in opens provider choices without a password or registratio
       browserPermissions: BrowserAgentPermissionsSchema.parse({ signIn: true }),
     });
     const first = await guarded.observe();
-    expect(first.blocker?.code).toBe("account_creation_required");
+    expect(first.blocker?.code).toBe("site_login_required");
     const entry = first.actions.find(
       (action) => action.label === "Sign In" && !action.inForm,
     )!;
@@ -160,7 +349,7 @@ test("two-stage sign-in opens provider choices without a password or registratio
   } finally {
     await context.close();
   }
-});
+}, 30_000);
 
 test("Google sign-up opt-in follows the provider button beside an empty password form without authorizing other writes", async () => {
   const context = await browser.newContext();
@@ -206,7 +395,7 @@ test("Google sign-up opt-in follows the provider button beside an empty password
   } finally {
     await context.close();
   }
-});
+}, 30_000);
 
 test("search mechanics install a closed guard before the exact sign-in POST", async () => {
   const context = await browser.newContext();

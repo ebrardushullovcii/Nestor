@@ -634,6 +634,18 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       });
     },
     savedAnswer,
+    /** Original application locations linked to an old answer; no Profile history is inferred. */
+    answerApplications(
+      answerId: number,
+    ): Array<{ jobId: number; location: string }> {
+      return sql(`SELECT DISTINCT j.id AS jobId,j.location FROM form_answers f
+        JOIN needs_you t ON t.answer_key=f.answer_key AND t.prompt=f.prompt AND t.answer IS NOT NULL
+        JOIN application_needs_you n ON n.task_id=t.id
+        JOIN applications a ON a.id=n.application_id JOIN jobs j ON j.id=a.job_id
+        WHERE f.id=? AND t.country=f.country AND t.site_origin=f.site_origin`).all(
+        answerId,
+      ) as Array<{ jobId: number; location: string }>;
+    },
     getAnswerByKey(input: SavedFormAnswerKey): SavedFormAnswer | null {
       const { key, scope } = SavedFormAnswerKeySchema.parse(input);
       const row = sql(
@@ -1169,8 +1181,26 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         }
         link(value, task.id);
         if (value.askReason) {
+          const earlier = toTask(task).askReason?.eligibilityContext;
+          const current = value.askReason.eligibilityContext;
+          const askReason =
+            earlier?.legacyAnswerId &&
+            current &&
+            !current.legacyAnswerId &&
+            earlier.fingerprint === current.fingerprint &&
+            earlier.country === current.country &&
+            earlier.jobId === current.jobId &&
+            earlier.kind === current.kind
+              ? {
+                  ...value.askReason,
+                  eligibilityContext: {
+                    ...current,
+                    legacyAnswerId: earlier.legacyAnswerId,
+                  },
+                }
+              : value.askReason;
           sql("UPDATE needs_you SET ask_reason_json=? WHERE id=?").run(
-            JSON.stringify(value.askReason),
+            JSON.stringify(askReason),
             task.id,
           );
           task = get(task.id)!;
@@ -1247,6 +1277,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         if (task.kind !== "question")
           throw new Error("Finish this step in the browser.");
         const answer = validateAnswer(task, value.answer);
+        const eligibility = toTask(task).askReason?.eligibilityContext;
         if (value.remember)
           writeAnswer({
             key: task.answer_key,
@@ -1255,6 +1286,17 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             input: inputOf(task) as NeedsYouTask["input"],
             options: JSON.parse(task.options_json) as string[],
             answer,
+            ...(eligibility
+              ? {
+                  kind: eligibility.kind,
+                  proofEntryIds: [
+                    `eligibility:${eligibility.fingerprint}`,
+                    ...(eligibility.legacyAnswerId
+                      ? [`legacy_form_answer:${eligibility.legacyAnswerId}`]
+                      : []),
+                  ],
+                }
+              : {}),
           });
         let queued = resolve(task, answer);
         if (value.remember && task.reuse_prompt === 1)

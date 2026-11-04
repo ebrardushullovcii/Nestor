@@ -30,6 +30,7 @@ import {
   writeState,
 } from "./common.mjs";
 import { rows, saveRows, tables } from "./sqlite.mjs";
+import { readNativeIdentity, startNativeApp } from "./native-app.mjs";
 
 const { _electron } = requireDesktop("playwright");
 
@@ -44,10 +45,24 @@ if (process.platform === "win32") {
       : realSpawn(command, { ...args, windowsHide: true });
 }
 const patchPath = path.join(import.meta.dirname, "instance-patch.cjs");
+const { loadProviderFixture, providerArgs } = requireDesktop(
+  path.join(import.meta.dirname, "provider-fixture.cjs"),
+);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const launch = JSON.parse(
   readFileSync(path.join(stateDir, "launch.json"), "utf8"),
 );
+const providerFixturePath = process.env.NESTOR_VERIFY_PROVIDER_FIXTURE;
+const providerFixture = loadProviderFixture(providerFixturePath, {
+  label: path.basename(stateDir),
+  userDataDir: launch.userDataDir,
+  testApi: launch.testApi !== false,
+  net: launch.net,
+});
+if (providerFixture && launch.launch === "native")
+  throw new Error(
+    "The synthetic provider fixture currently requires the isolated Playwright backend.",
+  );
 const shotsDir = path.join(evidenceDir, "shots");
 mkdirSync(shotsDir, { recursive: true });
 
@@ -95,6 +110,9 @@ function buildEnv() {
       NESTOR_VERIFY_STATE: stateDir,
       NESTOR_VERIFY_EVIDENCE: evidenceDir,
       NESTOR_VERIFY_NET: launch.net,
+      ...(providerFixture
+        ? { NESTOR_VERIFY_PROVIDER_FIXTURE: providerFixturePath }
+        : {}),
     },
     aiSources,
   };
@@ -164,34 +182,64 @@ function killOrphans() {
 async function startApp() {
   generation += 1;
   let lastError;
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
+  const native = launch.launch === "native";
+  for (let attempt = 1; attempt <= (native ? 1 : 4); attempt += 1) {
     if (killOrphans().length) await sleep(1500);
     try {
-      app = await _electron.launch({
-        executablePath: launch.electronPath,
-        args: ["-r", patchPath, launch.appDir],
-        cwd: desktopDir,
-        env,
-        timeout: 60000,
-        ...(launch.video
-          ? { recordVideo: { dir: path.join(evidenceDir, "videos") } }
-          : {}),
-      });
+      app = native
+        ? await startNativeApp(launch, env, patchPath, {
+            requireDesktop,
+            cwd: desktopDir,
+            onSpawn: (child, started) =>
+              update({
+                electronPid: child.pid,
+                electronStart: started,
+                generation,
+              }),
+            log: (chunk) =>
+              appendFileSync(
+                path.join(stateDir, "app.log"),
+                redact(chunk, env),
+              ),
+          })
+        : await _electron.launch({
+            executablePath: launch.electronPath,
+            args: [
+              ...providerArgs(providerFixture),
+              "-r",
+              patchPath,
+              launch.appDir,
+            ],
+            cwd: desktopDir,
+            env,
+            timeout: 60000,
+            ...(launch.video
+              ? { recordVideo: { dir: path.join(evidenceDir, "videos") } }
+              : {}),
+          });
       const child = app.process();
-      child.stdout?.on("data", (c) =>
-        appendFileSync(path.join(stateDir, "app.log"), redact(c, env)),
-      );
-      child.stderr?.on("data", (c) =>
-        appendFileSync(path.join(stateDir, "app.log"), redact(c, env)),
-      );
+      if (!native)
+        child.stdout?.on("data", (c) =>
+          appendFileSync(path.join(stateDir, "app.log"), redact(c, env)),
+        );
+      if (!native)
+        child.stderr?.on("data", (c) =>
+          appendFileSync(path.join(stateDir, "app.log"), redact(c, env)),
+        );
       const page = await mainPage(60);
       // Windows: park the window off-screen so it never covers the owner's
       // screen; it keeps rendering for screenshots and Playwright input.
       if (process.platform === "win32")
-        await app
-          .browserWindow(page)
-          .then((win) => win.evaluate((w) => w.setPosition(-6000, 0)))
-          .catch(() => {});
+        if (native)
+          await app.evaluate(({ BrowserWindow }) => {
+            for (const win of BrowserWindow.getAllWindows())
+              win.setPosition(-6000, 0);
+          });
+        else
+          await app
+            .browserWindow(page)
+            .then((win) => win.evaluate((w) => w.setPosition(-6000, 0)))
+            .catch(() => {});
       await page.waitForFunction(
         () => Boolean(window.nestor?.jobFinder),
         null,
@@ -209,15 +257,61 @@ async function startApp() {
         electronStart: startTime(child.pid),
         generation,
       });
+      await verifyGuard();
+      if (native) {
+        const prior = await page.evaluate(() =>
+          window.nestor.browser.getState(),
+        );
+        let probeTab;
+        try {
+          if (!prior.tabs.length) {
+            const opened = await page.evaluate(
+              (url) => window.nestor.browser.command({ type: "open", url }),
+              sites.url,
+            );
+            probeTab = opened.activeTabId;
+          }
+          // Product navigation is asynchronous; inspect only its own partition.
+          let samples;
+          for (let n = 0; n < 40; n++) {
+            try {
+              samples = await readNativeIdentity(app);
+              break;
+            } catch (error) {
+              if (!String(error.message).includes("no embedded page"))
+                throw error;
+              await sleep(100);
+            }
+          }
+          if (!samples)
+            throw new Error("Refusing: native identity probe did not load.");
+          update({
+            nativeIdentity: samples,
+            nativeIdentityAt: new Date().toISOString(),
+          });
+        } finally {
+          if (probeTab)
+            await page.evaluate(
+              (tabId) =>
+                window.nestor.browser.command({ type: "close_tab", tabId }),
+              probeTab,
+            );
+        }
+      }
       return;
     } catch (error) {
       lastError = error;
+      if (error.survivors?.length) update({ survivors: error.survivors });
       step(
         `launch attempt ${attempt} failed: ${String(error.message).split("\n")[0]}`,
       );
-      if (String(error.message).startsWith("Refusing")) break;
-      if (app) await app.close().catch(() => {});
+      // Keep the launch error; record cleanup survivors instead of throwing.
+      if (app)
+        await stopApp().catch((cleanup) =>
+          update({ survivors: cleanup.survivors ?? [] }),
+        );
       app = null;
+      if (native || String(error.message).startsWith("Refusing")) break;
     }
   }
   throw lastError;
@@ -225,6 +319,11 @@ async function startApp() {
 
 async function stopApp() {
   if (!app) return [];
+  if (launch.launch === "native") {
+    const stopped = await app.close();
+    app = null;
+    return stopped;
+  }
   const pid = app.process().pid;
   const owned = descendants(pid);
   await Promise.race([app.close().catch(() => {}), sleep(20000)]);
@@ -260,6 +359,10 @@ async function mainPage(seconds = 30) {
 /** `--page browser` targets the newest in-app browser page (or the one whose URL contains `--url`). */
 async function pageFor({ page: which, url } = {}) {
   if (which !== "browser") return mainPage();
+  if (launch.launch === "native")
+    throw new Error(
+      "Native launch does not expose embedded page input. Use the app's scoped browser workflow; capturePage shots remain available.",
+    );
   for (let i = 0; i < 20; i += 1) {
     const pages = app
       .context()
@@ -582,6 +685,7 @@ const commands = {
       userDataDir: launch.userDataDir,
       ai: launch.ai,
       net: launch.net,
+      launch: launch.launch ?? "playwright",
       sites: sites?.url ?? null,
       heading: app ? await heading() : null,
       windows: app
@@ -609,6 +713,11 @@ const commands = {
     return `the next file picker returns ${files.join(", ")}`;
   },
   browser: () => context().browserPages(),
+  identity: () => {
+    if (launch.launch !== "native")
+      throw new Error("identity requires --launch native");
+    return readNativeIdentity(app);
+  },
   async eval(source) {
     const ctx = context();
     const page = await ctx.page;
@@ -653,7 +762,12 @@ let stopping = false;
 async function shutdown(code = 0) {
   if (stopping) return;
   stopping = true;
-  const survivors = await stopApp().catch(() => []);
+  const survivors = await stopApp().catch((error) => {
+    update({
+      cleanupError: "Owned app cleanup failed; state retained for down.",
+    });
+    return error.survivors ?? readState()?.survivors ?? [];
+  });
   if (sites) {
     sites.child.kill("SIGTERM");
     await sleep(300);
@@ -720,6 +834,37 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify(out, null, 1));
 });
 
+async function verifyGuard() {
+  const probePath = `/apply/${randomBytes(8).toString("hex")}`;
+  const guardProbe = await app.evaluate(async ({ session }, probePath) => {
+    try {
+      await session
+        .fromPartition("persist:nestor-browser")
+        .fetch(`https://guard-selftest.invalid${probePath}`, {
+          method: "POST",
+          body: "x",
+        });
+      return "sent";
+    } catch {
+      return "blocked";
+    }
+  }, probePath);
+  const events = readJsonl(path.join(evidenceDir, "blocked-requests.jsonl"));
+  if (
+    guardProbe !== "blocked" ||
+    !events.some(
+      (event) =>
+        event.origin === "https://guard-selftest.invalid" &&
+        event.path === probePath &&
+        event.method === "POST",
+    )
+  )
+    throw new Error(
+      "Send guard self-test failed; refusing to drive this instance.",
+    );
+  update({ guard: "verified" });
+}
+
 try {
   ({ env } = buildEnv());
   sites = await startSites();
@@ -729,28 +874,6 @@ try {
     sitesStart: startTime(sites.pid),
   });
   await startApp();
-  // Prove the guard is live before anyone drives: a POST to a non-loopback host must be refused.
-  const guardProbe = await app.evaluate(async ({ session }) => {
-    try {
-      await session
-        .fromPartition("persist:nestor-browser")
-        .fetch("https://guard-selftest.invalid/apply", {
-          method: "POST",
-          body: "x",
-        });
-      return "sent";
-    } catch (error) {
-      return String(error.message);
-    }
-  });
-  const blockedLog = path.join(evidenceDir, "blocked-requests.jsonl");
-  const guardOk =
-    existsSync(blockedLog) &&
-    readFileSync(blockedLog, "utf8").includes("guard-selftest.invalid");
-  if (!guardOk)
-    throw new Error(
-      `Send guard self-test failed (${guardProbe}); refusing to drive this instance.`,
-    );
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   update({
     driverPort: server.address().port,

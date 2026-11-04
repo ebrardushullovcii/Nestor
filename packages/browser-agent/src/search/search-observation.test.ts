@@ -50,8 +50,8 @@ function boardPage() {
       text: `Engineer ${job}\nNorthwind\nRemote, Worldwide`,
     })),
     clickables: [
-      { index: 0, label: "Engineer 0\nNorthwind\nRemote", role: "", tagName: "div", visible: true, topOffset: 0 },
-      { index: 1, label: "Engineer 0\nNorthwind", role: "", tagName: "div", visible: true, topOffset: 0 },
+      { index: 0, label: "Engineer 0\nNorthwind\nRemote", role: "", tagName: "div", disabled: false, visible: true, topOffset: 0 },
+      { index: 1, label: "Engineer 0\nNorthwind", role: "", tagName: "div", disabled: false, visible: true, topOffset: 0 },
     ],
   });
 }

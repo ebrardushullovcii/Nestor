@@ -242,6 +242,7 @@ export function buildApplyFormObservation(
       "questionKind" | "answerControlType" | "attestationKind" | "answered"
     > = {
       ref: rawControl.ref ?? `c${rawControl.index}`,
+      ...(rawControl.frame ? { frame: { ...rawControl.frame } } : {}),
       kind,
       ...(rawControl.scopeKey ? { scopeKey: rawControl.scopeKey } : {}),
       ...(rawControl.rowScopeKey
@@ -353,6 +354,7 @@ export function buildApplyFormObservation(
 
   const actions: ApplyFormAction[] = raw.actions.map((rawAction) => ({
     ref: rawAction.ref ?? `a${rawAction.index}`,
+    ...(rawAction.frame ? { frame: { ...rawAction.frame } } : {}),
     label: rawAction.label.trim(),
     kind: inferActionKind(rawAction.label),
     visible: rawAction.visible,
@@ -374,6 +376,7 @@ export function buildApplyFormObservation(
     }
     return {
       ref: rawLink.ref ?? `l${rawLink.index}`,
+      ...(rawLink.frame ? { frame: { ...rawLink.frame } } : {}),
       label: rawLink.label.trim(),
       href: resolved ? resolved.toString() : rawLink.href,
       origin:
@@ -400,6 +403,7 @@ export function buildApplyFormObservation(
     signature: hashSignature([
       raw.url ?? "",
       raw.stepLabel ?? "",
+      JSON.stringify(raw.accountWindow ?? null),
       ...controls.map(
         (control) =>
           `${control.ref}|${control.kind}|${normalizeSignal(control.label)}|${control.required}|${control.answered}`,
@@ -411,6 +415,16 @@ export function buildApplyFormObservation(
       ...links.map((link) => `${link.ref}|${normalizeSignal(link.label)}`),
     ]),
     url: raw.url,
+    ...(raw.accountWindow ? { accountWindow: raw.accountWindow } : {}),
+    ...(raw.summaryRows?.length
+      ? {
+          summaryRows: raw.summaryRows.map((row) => ({
+            label: row.label,
+            value: row.value,
+            ...(row.frame ? { frame: row.frame } : {}),
+          })),
+        }
+      : {}),
     origin,
     title: raw.title,
     step: readStepPosition(raw.stepLabel, raw.bodyText),
@@ -429,6 +443,8 @@ export function buildApplyFormObservation(
       role: clickable.role,
       tagName: clickable.tagName,
       visible: clickable.visible,
+      disabled: clickable.disabled,
+      ...(clickable.frame ? { frame: { ...clickable.frame } } : {}),
       ...placementOf(clickable),
     })),
     openedTabs: raw.openedTabs.map((tab) => ({
@@ -469,11 +485,17 @@ export function createApplyPageHands(
       : {}),
     navigate: (url) => mechanics.navigate(url),
     clickElement: (ref) => mechanics.clickElement(ref),
+    ...(mechanics.clickAuthorizedLoginAction
+      ? { clickAuthorizedLoginAction: mechanics.clickAuthorizedLoginAction }
+      : {}),
     ...(mechanics.clickAuthorizedFormAction
       ? { clickAuthorizedFormAction: mechanics.clickAuthorizedFormAction }
       : {}),
     ...(mechanics.clickWithoutWrites
       ? { clickWithoutWrites: mechanics.clickWithoutWrites }
+      : {}),
+    ...(mechanics.clickBoundAction
+      ? { clickBoundAction: mechanics.clickBoundAction }
       : {}),
     pressKey: (ref, key) => mechanics.pressKey(ref, key),
     scroll: (direction) => mechanics.scroll(direction),
@@ -493,6 +515,24 @@ export function createApplyPageHands(
     followLink: (ref) => mechanics.followLink(ref),
     ...(mechanics.adoptOpenedTab
       ? { adoptOpenedTab: (index) => mechanics.adoptOpenedTab!(index) }
+      : {}),
+    ...(mechanics.readAccountFlowEntry
+      ? {
+          readAccountFlowEntry: (origins: readonly string[]) =>
+            mechanics.readAccountFlowEntry!(origins),
+        }
+      : {}),
+    ...(mechanics.clickOpeningAccountWindow
+      ? {
+          clickOpeningAccountWindow: (grant) =>
+            mechanics.clickOpeningAccountWindow!(grant),
+        }
+      : {}),
+    ...(mechanics.renewAccountWindow
+      ? {
+          renewAccountWindow: (expected) =>
+            mechanics.renewAccountWindow!(expected),
+        }
       : {}),
   };
 }

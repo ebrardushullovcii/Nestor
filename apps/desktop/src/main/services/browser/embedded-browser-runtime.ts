@@ -341,18 +341,76 @@ export function withEmbeddedBrowserActivity(
             previousKey: string,
             nextKey: string,
           ) {
-            await browser.reclaimOwnedTabs(previousKey);
-            const transferred = await runtime.transferApplicationPageBinding!(
+            if (browser.ownerHasSendEvidence(previousKey)) return false;
+            const restore = await browser.reclaimOwnedTabs(previousKey);
+            try {
+              if (browser.ownerHasSendEvidence(previousKey)) {
+                restore();
+                return false;
+              }
+              const transferred = await runtime.transferApplicationPageBinding!(
+                source,
+                previousKey,
+                nextKey,
+              );
+              if (!transferred) {
+                restore();
+                return false;
+              }
+              if (browser.ownerHasSendEvidence(previousKey)) {
+                await runtime.renameApplicationPageBinding?.(
+                  source,
+                  nextKey,
+                  previousKey,
+                );
+                restore();
+                return false;
+              }
+              browser.transferOwnedTabs(previousKey, nextKey);
+              browser.completeOwnedTabReclaim(nextKey);
+              applicationSources.delete(previousKey);
+              applicationSources.set(nextKey, source);
+              return true;
+            } catch (error) {
+              restore();
+              throw error;
+            }
+          },
+        }
+      : {}),
+    ...(runtime.renameApplicationPageBinding
+      ? {
+          async adoptApplicationPageOwnership(
+            source: JobSource,
+            previousKey: string,
+            nextKey: string,
+          ) {
+            if (
+              !browser.getApplicationTabIds(previousKey).length ||
+              browser.ownerHasSendEvidence(previousKey)
+            )
+              return false;
+            await runtime.renameApplicationPageBinding!(
               source,
               previousKey,
               nextKey,
             );
-            if (transferred) browser.transferOwnedTabs(previousKey, nextKey);
-            if (transferred) {
-              applicationSources.delete(previousKey);
-              applicationSources.set(nextKey, source);
+            // No await between this recheck and the native ownership move.
+            if (
+              browser.ownerHasSendEvidence(previousKey) ||
+              !browser.getApplicationTabIds(previousKey).length
+            ) {
+              await runtime.renameApplicationPageBinding!(
+                source,
+                nextKey,
+                previousKey,
+              );
+              return false;
             }
-            return transferred;
+            browser.transferOwnedTabs(previousKey, nextKey);
+            applicationSources.delete(previousKey);
+            applicationSources.set(nextKey, source);
+            return true;
           },
         }
       : {}),
@@ -415,12 +473,18 @@ export function withEmbeddedBrowserActivity(
       browser.runAutomation(
         "Preparing application",
         options?.signal,
-        (signal, updateActivity, claimPage, claimedTabs) =>
-          runtime
+        (signal, updateActivity, claimPage, claimedTabs) => {
+          let retainedFailure = false;
+          return runtime
             .executeApplicationFlow(
               source,
               {
                 ...input,
+                shouldRetainFailedApplicationPage: (result) => {
+                  retainedFailure =
+                    input.shouldRetainFailedApplicationPage?.(result) === true;
+                  return retainedFailure;
+                },
                 prepareApplicationForm: (formInput) =>
                   input.prepareApplicationForm({
                     ...formInput,
@@ -446,6 +510,15 @@ export function withEmbeddedBrowserActivity(
             )
             .then(async (result) => {
               const tabs = await claimedTabs();
+              const key = input.applicationPageBindingKey;
+              const keptFailure =
+                result.state === "failed" &&
+                !signal.aborted &&
+                retainedFailure &&
+                !!key &&
+                (await runtime
+                  .hasApplicationPageBinding?.(source, key)
+                  .catch(() => false)) === true;
               for (const tabId of tabs)
                 browser.setApplicationTabLabel(
                   tabId,
@@ -454,19 +527,23 @@ export function withEmbeddedBrowserActivity(
                   input.job.location,
                   input.applicationPageBindingKey?.slice(-6),
                 );
-              if (result.state === "failed" || result.state === "submitted")
+              if (
+                (result.state === "failed" && !keptFailure) ||
+                result.state === "submitted"
+              )
                 browser.markFinishedTabs(tabs);
               // Every page left waiting on the person counts toward the
               // live limit: Ready forms and pages stopped at Needs you.
               if (
                 input.applicationPageBindingKey &&
-                !WAITING_PAGE_ENDS.has(result.state) &&
+                (!WAITING_PAGE_ENDS.has(result.state) || keptFailure) &&
                 browser.markPreparedForm(input.applicationPageBindingKey)
               ) {
                 applicationSources.set(input.applicationPageBindingKey, source);
               }
               return flagResult(result, tabs.at(-1) ?? null, input.job.company);
-            }),
+            });
+        },
         { owner: input.applicationPageBindingKey ?? null },
       ),
     ...(runtime.runAgentDiscovery

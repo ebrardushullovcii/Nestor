@@ -1,11 +1,22 @@
+import { intendedAccountEmail } from "@nestor/contracts";
 import { createHash } from "node:crypto";
 import {
   answerSourceCatalog,
+  applicantLiteralSource,
   classifyAnswerPermission,
 } from "./answer-source-catalog";
 import { createApplyTiming } from "./apply-timing";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
-import { localStepAdvanced, localStepPreflight } from "./local-step-preflight";
+import {
+  localStepAdvanced,
+  numberedStepAdvanced,
+  UNCONFIRMED_STEP_LABEL,
+} from "./local-step-preflight";
+import {
+  createStepReceiptTracker,
+  observedControlValue,
+} from "./step-receipts";
+import { labelledStatementFor } from "./factual-summary";
 import { manualEntryPressFor } from "./fill-presses";
 import { asksListingDiscovery } from "./listing-discovery-answer";
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
@@ -30,11 +41,15 @@ import { withReasoningTask, type LLMClient } from "../agent/contracts";
 import { createPageTools } from "../page-tools";
 import {
   browserInteractionKind,
-  isSignInEntryAction,
+  googleIdentityContext,
+  signInEntryActions,
   currentBrowserPermissions,
   withBrowserPermissions,
 } from "../browser-permission-policy";
-import { googleSignInInteraction, isGoogleAccountPage } from "../google-sign-in";
+import {
+  googleSignInInteraction,
+  isGoogleAccountPage,
+} from "../google-sign-in";
 import {
   createApplySystemPrompt,
   createApplyUserPrompt,
@@ -61,6 +76,7 @@ import {
   formSendPause,
   unrecognizedSubmit,
   pressesFormButtons,
+  fillStepPress,
   questionPrompt,
   pickerExhausted,
   pickerQuestionKey,
@@ -72,7 +88,11 @@ import {
   isCoverLetterControl,
 } from "./cover-letter";
 import {
+  asksPayCurrency,
   createQuestionClassifier,
+  applicationQuestionClassificationContext,
+  QuestionReadUnavailableError,
+  modelQuestionKind,
   questionClassificationKey,
   type ApplyQuestionClassification,
 } from "./question-classification";
@@ -88,6 +108,7 @@ import {
   fileUploadProblems,
   hasRemainingApplicationStep,
   holdsAnswer,
+  retainedForFormSubmission,
   runSubmitPreflight,
   unresolvedRequiredControls,
   STEP_HANDOVER_QUESTION_ID,
@@ -100,7 +121,9 @@ import {
   planReplay,
   replayedAnswer,
   reviewFieldKey,
+  replayStillCurrent,
   screenKey,
+  type ReplayWrite,
 } from "./form-replay";
 import { matchOption } from "./option-match";
 import { answerProposals } from "./answer-proposals";
@@ -149,8 +172,6 @@ import type {
   ApplyPause,
   ApplyProposal,
 } from "./types";
-
-class QuestionReadUnavailableError extends Error {}
 
 /** Bind before the fresh finish read can change the page's control refs. */
 function nativeFinishQuestion(
@@ -231,6 +252,19 @@ const DEFAULT_TIME_BUDGET_MS = 30 * 60_000;
 const DEFAULT_NO_PROGRESS_STEP_LIMIT = 12;
 // Writing and then checking a high-effort letter can exceed a page tool's 90s.
 const DOCUMENT_TOOL_TIMEOUT_MS = 5 * 60_000;
+
+/** What a partial classifier outage still allows: reads and field writes. */
+const PARTIAL_OUTAGE_TOOLS = new Set([
+  "observe",
+  "read_text",
+  "scroll",
+  "wait",
+  "fill_fields",
+  "type",
+  "select",
+  "set_checkbox",
+  "upload",
+]);
 
 const PAGE_TOOL_NAMES = new Set([
   "observe",
@@ -418,15 +452,75 @@ export async function runApplyAgent(
   llmClient: LLMClient,
 ): Promise<ApplyAgentResult> {
   const timing = createApplyTiming(config.now ?? (() => new Date()));
+  const activity: ApplyAgentResult["timeline"] = (config.earlierActivity ?? [])
+    .filter((checkpoint) =>
+      [
+        "Google account selected",
+        "Google sign-in confirmed",
+        UNCONFIRMED_STEP_LABEL,
+      ].includes(checkpoint.label),
+    )
+    .map((checkpoint) => ({
+      at: checkpoint.at,
+      text: checkpoint.detail,
+      label: checkpoint.label,
+    }));
+  const confirmationText = (account: string) =>
+    `Pressed Google’s sign-in confirmation for ${account}. Sign-in completion has not been verified.`;
+  const confirmations = new Set(
+    activity
+      .filter((entry) => entry.label === "Google sign-in confirmed")
+      .map((entry) => entry.text),
+  );
+  const selections = new Set(activity.map((entry) => entry.text));
+  const selectionText = (account: string) =>
+    `Selected Google account ${account}. Sign-in completion has not been verified.`;
+  config = {
+    ...config,
+    readIntendedAccountEmail:
+      config.readIntendedAccountEmail ??
+      (() => intendedAccountEmail(config.sources.profile)),
+  };
   try {
     return await runMeasuredApplyAgent(
       {
         ...config,
-        hands: timing.hands(withBrowserPermissions(config.hands, config)),
+        hands: timing.hands(
+          withBrowserPermissions(config.hands, {
+            ...config,
+            googleSignInAlreadyConfirmed: (account) =>
+              confirmations.has(confirmationText(account)),
+            onGoogleSignInConfirmed: async (account) => {
+              const text = confirmationText(account);
+              if (confirmations.has(text)) return;
+              confirmations.add(text);
+              activity.push({
+                at: (config.now ?? (() => new Date()))().toISOString(),
+                label: "Google sign-in confirmed",
+                text,
+              });
+              await config.onGoogleSignInConfirmed?.(account);
+            },
+            googleAccountAlreadySelected: (account) =>
+              selections.has(selectionText(account)),
+            onGoogleAccountSelected: async (account) => {
+              const text = selectionText(account);
+              if (selections.has(text)) return;
+              selections.add(text);
+              activity.push({
+                at: (config.now ?? (() => new Date()))().toISOString(),
+                label: "Google account selected",
+                text,
+              });
+              await config.onGoogleAccountSelected?.(account);
+            },
+          }),
+        ),
       },
       // Form turns are short; answer checks name their own task.
       timing.model(withReasoningTask(llmClient, "apply")),
       timing,
+      activity,
     );
   } finally {
     config.onTiming?.(timing.snapshot());
@@ -437,6 +531,7 @@ async function runMeasuredApplyAgent(
   input: ApplyAgentConfig,
   llmClient: LLMClient,
   timingRecord: ReturnType<typeof createApplyTiming>,
+  activity: ApplyAgentResult["timeline"],
 ): Promise<ApplyAgentResult> {
   const runAbort = new AbortController();
   const runSignal = input.signal
@@ -485,7 +580,7 @@ async function runMeasuredApplyAgent(
   // Letter fields whose drafted letter waits for the person's review.
   const lettersAwaitingReview = new Set<string>();
   const notes: string[] = [];
-  const timeline: { at: string; text: string }[] = [];
+  const timeline = activity;
   const reviewObservedFieldKeys = new Set<string>();
   const pendingQuestions = new Map<string, ApplicationAttemptQuestion>();
   const attemptedWrites = new Set<string>();
@@ -493,12 +588,25 @@ async function runMeasuredApplyAgent(
   const attemptedSignInEntries = new Set<string>();
   const suggestedAccessRoutes = new Set<string>();
   let attemptedGoogleSignIn = false;
-  const recordAccessAttempt = (observation: ApplyFormObservation, ref: string) => {
-    if (browserInteractionKind(observation, ref) === "googleSignIn")
+  const recordAccessAttempt = async (
+    observation: ApplyFormObservation,
+    ref: string,
+  ) => {
+    if (
+      browserInteractionKind(
+        observation,
+        ref,
+        await googleIdentityContext(config, config.hands),
+      ) === "googleSignIn"
+    )
       attemptedGoogleSignIn = true;
-    const action = observation.actions.find((entry) => entry.ref === ref);
-    if (action && isSignInEntryAction(action))
-      attemptedSignInEntries.add(`${observation.url}|${action.label.toLowerCase()}`);
+    const action = signInEntryActions(observation).find(
+      (entry) => entry.ref === ref,
+    );
+    if (action)
+      attemptedSignInEntries.add(
+        `${observation.url}|${action.label.toLowerCase()}`,
+      );
   };
   const heldAnswerKeys = new Set<string>();
   const rejectedCandidates = new Map<
@@ -517,6 +625,15 @@ async function runMeasuredApplyAgent(
   // only the part the agent could not do.
   let stuckFinishNudged = false;
   const guardState = createApplyGuardState(config.initialPickerAttempts);
+  // A step press an earlier run could not confirm is never pressed again.
+  for (const entry of activity)
+    if (entry.label === UNCONFIRMED_STEP_LABEL)
+      guardState.uncertainAdvances.set(entry.text, entry.at);
+  // This attempt's send evidence (council D1): never write or replay authority.
+  const stepReceipts = createStepReceiptTracker(
+    config.application.resultId ?? config.application.applicationId,
+  );
+  const earlierUncertain = new Set(guardState.uncertainAdvances.keys());
   // Pickers an earlier run left unanswered: a search the site restored into
   // the box is not a choice, until this run chooses one.
   const unconfirmedPickers = new Map(
@@ -576,6 +693,7 @@ async function runMeasuredApplyAgent(
             ...(guardState.pickerAttempts.get(key)?.offeredOptions ?? []),
           ];
       }
+      stepReceipts.observe(observation);
       return observation;
     },
   };
@@ -583,6 +701,8 @@ async function runMeasuredApplyAgent(
     const control = pageTools.state.observation?.controls.find(
       (entry) => entry.ref === ref,
     );
+    // Recorded before the write runs: a write the site refuses still counts.
+    stepReceipts.wrote(pageTools.state.observation ?? null, ref);
     if (control)
       attemptedWrites.add(normalizeFormQuestionPrompt(questionPrompt(control)));
   };
@@ -591,6 +711,21 @@ async function runMeasuredApplyAgent(
         client: llmClient,
         signal: config.signal,
         cacheScope: config.questionReadCacheScope,
+        readContext: async () =>
+          applicationQuestionClassificationContext({
+            sources: runConfig.sources,
+            application: {
+              ...runConfig.application,
+              startingUrl:
+                pageTools.state.observation?.url ??
+                runConfig.application.startingUrl,
+            },
+            payDisclosed:
+              runConfig.authority.salaryDisclosure === "answer_from_profile",
+            approvedAttestations:
+              runConfig.authority.preApprovedAttestationKinds,
+            browserPermissions: await currentBrowserPermissions(config),
+          }),
         sources: () =>
           answerSourceCatalog({
             ...runConfig.sources,
@@ -700,9 +835,9 @@ async function runMeasuredApplyAgent(
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const resumeText =
-    (config.sources.resumeText ?? config.sources.profile.baseResume.textContent)
-      ?.trim()
-      .slice(0, 8_000) || null;
+    (
+      config.sources.resumeText ?? config.sources.profile.baseResume.textContent
+    )?.trim() || null;
   const currentFormContext = () => {
     const observation = pageTools.state.observation;
     return observation
@@ -895,9 +1030,11 @@ async function runMeasuredApplyAgent(
         control: {
           ...control,
           attestationKind: reading?.declarationKind ?? control.attestationKind,
-          questionKind: reading?.asksAboutPay
-            ? "salary_expectation"
-            : (reading?.eligibilityKind ?? control.questionKind),
+          questionKind: modelQuestionKind(
+            control,
+            reading,
+            asksPayCurrency(control, observation.controls, readings),
+          ),
           asksCurrentPay:
             reading?.asksCurrentPay ?? control.asksCurrentPay ?? false,
           asksHiringCountry:
@@ -1018,6 +1155,42 @@ async function runMeasuredApplyAgent(
       }).kind !== "needs_you"
     );
   };
+  // Held factual-summary questions whose one labelled source statement was
+  // proposed and still refused, by pending key (council D4).
+  const refusedProseCandidates = new Map<string, string>();
+  const proseCandidate = (
+    control: ApplyFormControl,
+    tags: ApplyAnswerTags | null | undefined,
+  ): string | null => {
+    if (
+      control.kind !== "long_text" ||
+      tags?.kind !== "factual_summary" ||
+      !pendingQuestions.has(pendingQuestionKey(control))
+    )
+      return null;
+    const candidate = labelledStatementFor(
+      control.label,
+      answerSourceCatalog(runConfig.sources)
+        .filter((row) => row.purpose === "profile" || row.id === "resume.text")
+        .map((row) => row.value),
+    );
+    if (candidate === null) return null;
+    const permission = classifyAnswerPermission({
+      control,
+      controls: pageTools.state.observation?.controls ?? [control],
+      tags: { ...tags, sourceId: "resume.text" },
+      sources: runConfig.sources,
+      answer: candidate,
+      pageInstructions: pageTools.state.observation
+        ? formWritingInstructions(pageTools.state.observation)
+        : "",
+      approvedAttestations: config.authority.preApprovedAttestationKinds,
+    });
+    return permission.kind === "writing" &&
+      permission.evidencePolicy === "factual_summary"
+      ? candidate
+      : null;
+  };
   // This only decides whether another proposal is worth trying. Every actual
   // write still goes through the executor and its current permission gate.
   const independentLiteral = (
@@ -1038,7 +1211,21 @@ async function runMeasuredApplyAgent(
     const reading =
       readings?.get(questionClassificationKey(control, observation.controls)) ??
       readings?.get(questionPrompt(control));
-    if (classifyQuestions && !reading?.answerTags) return null;
+    if (classifyQuestions && !reading?.answerTags) {
+      // An unread question during a partial outage takes only the exact
+      // applicant-identity fallback (council D6); pay and declarations never.
+      if (!reading?.readFailed) return null;
+      const literal = applicantLiteralSource(
+        control,
+        observation.controls,
+        runConfig.sources,
+        formWritingInstructions(observation),
+      );
+      if (!literal?.value.trim() || (proposed && proposed !== literal.value))
+        return null;
+      literalSourceIds.set(control.ref, literal.id);
+      return literal.value;
+    }
     for (const source of answerSourceCatalog(runConfig.sources)) {
       const value = formatProfileUrlAnswer(
         control,
@@ -1074,6 +1261,14 @@ async function runMeasuredApplyAgent(
         continue;
       literalSourceIds.set(control.ref, permission.source.id);
       return value;
+    }
+    // A held summary question gets one exact source statement whose label
+    // only restates the question (council D4). The executor's permission and
+    // the independent written check still decide every write.
+    const candidate = proseCandidate(control, reading?.answerTags);
+    if (candidate !== null && (!proposed || proposed === candidate)) {
+      literalSourceIds.set(control.ref, "resume.text");
+      return candidate;
     }
     return null;
   };
@@ -1293,9 +1488,14 @@ async function runMeasuredApplyAgent(
     );
     // Classify the page's questions now, while the model reads the page, so
     // the first answer does not wait for it. Writes await the same result.
-    void classifyQuestions?.(next.controls, questionReadContext(next)).catch(
-      () => undefined,
-    );
+    // Refresh shared answers before prefetching; otherwise each newly reached
+    // step first reads stale evidence and must classify it again a turn later.
+    void refreshReusableAnswers()
+      .then(() => {
+        if (pageTools.state.observation !== next) return;
+        return classifyQuestions?.(next.controls, questionReadContext(next));
+      })
+      .catch(() => undefined);
     // A person or a later page write may have answered a previously pending
     // question. Keep the live controls authoritative when continuing.
     // Refs are page-local. Retain only questions that still describe an
@@ -1412,27 +1612,63 @@ async function runMeasuredApplyAgent(
           control.checked) &&
         !isSecurityChallengeControl(control)
       ) {
-        const value =
-          control.kind === "checkbox"
-            ? control.answerControlType === "multi_choice"
+        const value = observedControlValue(control, next.controls);
+        if (value.trim()) {
+          // A multi-select is written one box at a time. Its group answer
+          // keeps the source those writes shared, so a replay can tell
+          // whether that source still holds (review P1); a mix of sources
+          // stays observed and is checked against the current saved answer.
+          const memberSources =
+            control.answerControlType === "multi_choice"
               ? next.controls
                   .filter(
                     (candidate) =>
                       candidate.choiceGroupKey === control.choiceGroupKey &&
                       candidate.checked,
                   )
-                  .map((candidate) => candidate.label || candidate.value)
-                  .join(", ")
-              : "Yes"
-            : control.kind === "radio"
-              ? control.label || control.value
-              : control.selectedOptionLabel || control.value;
-        if (value.trim()) {
-          const recorded = [...filled]
-            .reverse()
-            .find(
-              (entry) => entry.label === label && entry.answer.value === value,
-            );
+                  .map(
+                    (member) =>
+                      [...filled]
+                        .reverse()
+                        .find((entry) => entry.ref === member.ref)?.answer,
+                  )
+              : [];
+          const [firstSource] = memberSources;
+          const skillIds = memberSources.map((answer) => {
+            const id = answer?.sourceId;
+            return id && /^profile\.skills\.\d+$/u.test(id) ? id : null;
+          });
+          const groupSource =
+            firstSource && skillIds.every(Boolean)
+              ? {
+                  ...firstSource,
+                  sourceId: "profile.skills",
+                  groundedIn: skillIds.filter(
+                    (id): id is string => id !== null,
+                  ),
+                }
+              : firstSource &&
+                  memberSources.every(
+                    (answer) =>
+                      answer?.sourceId === firstSource.sourceId &&
+                      !answer.sourceId?.startsWith("observed."),
+                  )
+                ? firstSource
+                : null;
+          const recorded = groupSource
+            ? {
+                ref: control.ref,
+                label,
+                questionKind: control.questionKind,
+                answer: { ...groupSource, value },
+                at: next.observedAt,
+              }
+            : [...filled]
+                .reverse()
+                .find(
+                  (entry) =>
+                    entry.label === label && entry.answer.value === value,
+                );
           observedAnswers.set(fieldKey, {
             ...(recorded ?? {
               ref: control.ref,
@@ -1470,7 +1706,24 @@ async function runMeasuredApplyAgent(
           upload.fileName.toLowerCase() === entry.fileName.toLowerCase(),
       )?.network;
       if (!word) continue;
-      const state = word === "pending" ? "uploading" : word;
+      // A wizard keeps an earlier step's field in the page, disabled and
+      // hidden. When that input still holds the exact file inside a POST
+      // multipart form, the form's submission sends it: an untied word from
+      // a later step's autosave does not unattach it.
+      const field = next.controls.find(
+        (control) =>
+          control.kind === "file" && uploadFieldKey(control, next) === key,
+      );
+      const state =
+        word === "pending"
+          ? "uploading"
+          : word === "unconfirmed" &&
+              field &&
+              field.upload?.fileName?.toLowerCase() ===
+                entry.fileName.toLowerCase() &&
+              retainedForFormSubmission(field)
+            ? "accepted"
+            : word;
       if (state !== entry.state)
         uploadLedger.set(key, { ...entry, state, since: now().getTime() });
       if (state !== "accepted") continue;
@@ -1794,6 +2047,8 @@ async function runMeasuredApplyAgent(
             : outcome.reason,
         };
       case "paused":
+        // A step press Nestor already made once is not deferred and retried.
+        if (outcome.pause.unconfirmedStep) return handOverPress(outcome.pause);
         // Fill in for me: a form button waits until the rest is filled.
         if (
           outcome.pause.question?.id === STEP_HANDOVER_QUESTION_ID &&
@@ -1907,11 +2162,15 @@ async function runMeasuredApplyAgent(
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();
         const permissions = await currentBrowserPermissions(config);
+        const identityContext = await googleIdentityContext(
+          config,
+          config.hands,
+        );
         // A password screen can hide provider choices behind a separate Sign In.
         // Give the model one correction per route, without repeating an account
         // action or forcing a provider attempt whose outcome is uncertain.
         if (
-          permissions.googleSignIn &&
+          (permissions.signIn || permissions.googleSignIn) &&
           !attemptedGoogleSignIn &&
           !isGoogleAccountPage(observation) &&
           !observation.loading &&
@@ -1924,26 +2183,32 @@ async function runMeasuredApplyAgent(
               control.visible && control.credentialRole === "one_time_code",
           )
         ) {
-          const google = [
-            ...observation.actions,
-            ...observation.links,
-            ...observation.clickables,
-          ].find(
-            (entry) =>
-              entry.visible &&
-              googleSignInInteraction(observation, entry.ref) === "googleSignIn",
-          );
+          const google = permissions.googleSignIn
+            ? [
+                ...observation.actions,
+                ...observation.links,
+                ...observation.clickables,
+              ].find(
+                (entry) =>
+                  entry.visible &&
+                  googleSignInInteraction(
+                    observation,
+                    entry.ref,
+                    identityContext,
+                  ) === "googleSignIn",
+              )
+            : undefined;
           const entry =
-            permissions.signIn &&
+            observation.blocker?.code === "account_creation_required" ||
+            observation.blocker?.code === "site_login_required" ||
             observation.controls.some(
               (control) =>
                 control.visible &&
                 control.credentialRole === "password" &&
                 !control.answered,
             )
-              ? observation.actions.find(
+              ? signInEntryActions(observation).find(
                   (action) =>
-                    isSignInEntryAction(action) &&
                     !attemptedSignInEntries.has(
                       `${observation.url}|${action.label.toLowerCase()}`,
                     ),
@@ -1957,7 +2222,7 @@ async function runMeasuredApplyAgent(
             forPerson = [];
             return {
               kind: "ok",
-              content: `${renderObservation(observation)}\nBefore handing off missing credentials, inspect the enabled ${JSON.stringify(route.label)} (${route.ref}) route. ${google ? "Google sign-in is enabled; prefer this observed provider over email/password." : "This button is outside the password form and may reveal provider choices."} Use its observed handle; never type a password or repeat an uncertain account action.`,
+              content: `${renderObservation(observation)}\nBefore handing off missing credentials, inspect the enabled ${JSON.stringify(route.label)} (${route.ref}) route. ${google ? "Google sign-in is enabled; prefer this observed provider over email/password." : "This non-submitting existing-account route may reveal sign-in choices."} Use its observed handle; never type a password or repeat an uncertain account action.`,
             };
           }
         }
@@ -2056,13 +2321,11 @@ async function runMeasuredApplyAgent(
         // Finishing a filled local step is not finishing the wizard. A
         // premature Next handoff may now be safe after the remaining fills.
         const localAdvance =
-          !pressesFormButtons(runConfig) &&
-          config.hands.clickWithoutWrites &&
           !deferredPress?.formSend &&
           pendingQuestions.size === 0 &&
           !outcome.stuck
             ? observation.actions.find((action) =>
-                localStepPreflight(observation, action.ref),
+                fillStepPress(runConfig, observation, action.ref),
               )
             : undefined;
         if (
@@ -2574,7 +2837,7 @@ async function runMeasuredApplyAgent(
     await refreshReusableAnswers();
     const current = pageTools.state.observation;
     if (current && proposal.tool === "click")
-      recordAccessAttempt(current, proposal.ref);
+      await recordAccessAttempt(current, proposal.ref);
     if (
       current &&
       proposal.tool === "click" &&
@@ -2697,6 +2960,10 @@ async function runMeasuredApplyAgent(
         },
       },
     );
+    if (outcome.kind === "moved" && outcome.confirmedStepPage)
+      stepReceipts.advance(outcome.confirmedStepPage, now().toISOString());
+    if (outcome.kind === "paused" && outcome.pause.unconfirmedStep && before)
+      stepReceipts.unconfirmed(before, now().toISOString());
     if (control && outcome.kind === "suggestion") {
       note(outcome.note);
       const value =
@@ -2731,7 +2998,8 @@ async function runMeasuredApplyAgent(
     if (
       outcome.kind === "moved" &&
       before &&
-      localStepAdvanced(before, outcome.observation) &&
+      (localStepAdvanced(before, outcome.observation) ||
+        numberedStepAdvanced(before, outcome.observation)) &&
       !deferredPress?.formSend
     )
       deferredPress = null;
@@ -3785,57 +4053,30 @@ async function runMeasuredApplyAgent(
       await refreshReusableAnswers();
       const observation = pageTools.state.observation;
       if (classifyQuestions && observation) {
-        const readings = await classifyQuestions(
-          observation.controls,
-          questionReadContext(observation),
-        );
-        // A question whose reading failed goes to the person, said as that:
-        // it was not read, which is not the same as no saved fact for it.
-        // The questions that were read are still filled; the executor
-        // refuses any write to an unread one. Only when nothing on the page
-        // could be read does the run stop here.
-        const reason =
-          "Job Finder could not read this question after three tries, so it did not check your saved answers for it. Answer it here or on the form.";
-        const unread = (control: ApplyFormControl) =>
-          (
-            readings.get(
-              questionClassificationKey(control, observation.controls),
-            ) ?? readings.get(questionPrompt(control))
-          )?.readFailed === true;
-        if ([...readings.values()].some((reading) => reading.readFailed)) {
-          for (const control of observation.controls) {
-            if (
-              !control.visible ||
-              control.disabled ||
-              control.readOnly ||
-              control.kind === "file" ||
-              !questionPrompt(control) ||
-              holdsAnswer(control) ||
-              !unread(control) ||
-              pendingQuestions.has(pendingQuestionKey(control))
+        const readings = [
+          ...(
+            await classifyQuestions(
+              observation.controls,
+              questionReadContext(observation),
             )
-              continue;
-            pendingQuestions.set(
-              pendingQuestionKey(control),
-              buildPendingQuestion({
-                control,
-                jobId: config.application.jobId,
-                detectedAt: now().toISOString(),
-                suggestion: null,
-                siblings: observation.controls,
-                reason,
-                askReason: {
-                  kind: "source_rejected",
-                  check: "question_classification",
-                  detail: reason,
-                },
-              }),
-            );
-          }
-          if ([...readings.values()].every((reading) => reading.readFailed))
+          ).values(),
+        ];
+        if (readings.some((reading) => reading.readFailed)) {
+          // Council D6: a full outage stops before any turn. A partial one
+          // gets one turn with field-writing tools only, so readable fields
+          // and exact identity fill; no press, finish or send can happen.
+          // Then the run ends as a retained technical failure.
+          if (
+            partialOutageTurns > 0 ||
+            readings.every((reading) => reading.readFailed)
+          )
             throw new QuestionReadUnavailableError(
-              "Job Finder could not read the form's questions after three tries. Complete them here or on the form.",
+              "Nestor could not read this page after three attempts. Your page and answers are kept. Retry this application when Nestor is available.",
             );
+          partialOutageTurns += 1;
+          tools = tools.filter((tool) =>
+            PARTIAL_OUTAGE_TOOLS.has(tool.function.name),
+          );
         }
       }
       const current = pageTools.state.observation;
@@ -3937,6 +4178,12 @@ async function runMeasuredApplyAgent(
           break;
         }
       }
+      if (
+        !answered &&
+        candidates.some((candidate) => candidate.sourceId === "resume.text") &&
+        literal !== null
+      )
+        refusedProseCandidates.set(pendingQuestionKey(control), literal);
       if (!answered) {
         const candidate = await matchApplicationAnswer({
           client: llmClient,
@@ -4082,20 +4329,17 @@ async function runMeasuredApplyAgent(
             }
           : null;
     const safety = runConfig.safety;
-    const writeOne = async (
-      control: ApplyFormControl,
-      kind: "text" | "choose" | "toggle",
-      value: string,
-    ): Promise<boolean> => {
-      if (kind !== "toggle") await safety?.registerPreparedValue(value);
+    const writeOne = async (write: ReplayWrite): Promise<boolean> => {
+      if (write.kind !== "toggle")
+        await safety?.registerPreparedValue(write.value);
       if (runConfig.intermediateWritesAuthorized === true)
         await safety?.openIntermediateWriteWindow().catch(() => undefined);
       const result =
-        kind === "text"
-          ? await runConfig.hands.fillText(control.ref, value)
-          : kind === "choose"
-            ? await runConfig.hands.chooseOption(control.ref, value)
-            : await runConfig.hands.setToggle(control.ref, true);
+        write.kind === "text"
+          ? await runConfig.hands.fillText(write.control.ref, write.value)
+          : write.kind === "choose"
+            ? await runConfig.hands.chooseOption(write.control.ref, write.value)
+            : await runConfig.hands.setToggle(write.control.ref, write.checked);
       return result.ok;
     };
     for (let hop = 0; hop <= replay.path.length; hop += 1) {
@@ -4104,7 +4348,17 @@ async function runMeasuredApplyAgent(
       if (!page || page.blocker) return null;
       const screen = screenKey(page);
       if (replayedScreens.has(screen)) break;
-      const plan = planReplay(page, replay);
+      // This screen's saved answers, so a changed one is seen before replay.
+      if (hop > 0) await refreshReusableAnswers();
+      const plan = planReplay(
+        page,
+        replay,
+        replayStillCurrent({
+          controls: page.controls,
+          sources: runConfig.sources,
+          approvedAttestations: config.authority.preApprovedAttestationKinds,
+        }),
+      );
       const files = replay.attachments.flatMap((attachment) => {
         const control = page.controls.find(
           (entry) =>
@@ -4148,7 +4402,13 @@ async function runMeasuredApplyAgent(
           ? [{ control, answer }]
           : [];
       });
-      if (!plan.writes.length && !plan.kept && !files.length && !saved.length) {
+      if (
+        !plan.writes.length &&
+        !plan.kept &&
+        !plan.withdrawn.length &&
+        !files.length &&
+        !saved.length
+      ) {
         // Nothing of this screen is stored: take the recorded way on.
         const next = nextPathStep(page, replay, takenPath);
         if (!next) break;
@@ -4184,8 +4444,15 @@ async function runMeasuredApplyAgent(
         if (finish) return finish;
       }
       let restoredCount = 0;
+      const failedWrites: ReplayWrite[] = [];
       for (const { write, answer } of plan.writes) {
-        if (!(await writeOne(write.control, write.kind, write.value))) continue;
+        if (!(await writeOne(write))) {
+          failedWrites.push(write);
+          continue;
+        }
+        // Unchecking a stale member restores nothing by itself; the
+        // member that holds the answer records it.
+        if (write.kind === "toggle" && !write.checked) continue;
         restoredCount += 1;
         filled.push({
           fieldKey: reviewFieldKey(page, write.control),
@@ -4216,6 +4483,67 @@ async function runMeasuredApplyAgent(
       note(
         `Brought back ${restoredCount} answer${restoredCount === 1 ? "" : "s"} on this screen without the model${plan.kept ? `; ${plan.kept} were already there` : ""}${plan.missing.length ? `; ${plan.missing.length} no longer match a field` : ""}.`,
       );
+      // A choice is restored only when the page now shows exactly the planned
+      // state: every box ticked or unticked as planned, the planned option
+      // chosen. A refused write or a page that changed it back leaves the
+      // form with the person instead of letting it pass as Ready (review P2).
+      const unrestored = plan.writes.flatMap(({ write }) => {
+        const now = after.controls.find(
+          (control) => control.ref === write.control.ref,
+        );
+        const held =
+          !!now &&
+          !failedWrites.includes(write) &&
+          (write.kind === "toggle"
+            ? now.checked === write.checked
+            : write.kind === "choose"
+              ? [now.selectedOptionLabel, now.value].some(
+                  (shown) =>
+                    shown.trim().toLowerCase() ===
+                    write.value.trim().toLowerCase(),
+                )
+              : true);
+        return held ? [] : [questionPrompt(write.control)];
+      });
+      for (const group of plan.groups) {
+        const actual = after.controls.filter(
+          (control) =>
+            (control.kind === "checkbox" || control.kind === "radio") &&
+            (group.key
+              ? control.choiceGroupKey === group.key
+              : group.members.some((member) => member.ref === control.ref)),
+        );
+        if (
+          actual.length !== group.members.length ||
+          group.members.some(
+            (member) =>
+              actual.find((control) => control.ref === member.ref)?.checked !==
+              member.checked,
+          )
+        )
+          unrestored.push(group.label);
+      }
+      if (unrestored.length) {
+        const labels = [...new Set(unrestored)];
+        for (const control of after.controls)
+          if (labels.includes(questionPrompt(control)))
+            observedAnswers.delete(reviewFieldKey(after, control));
+        const reason = `Nestor could not put back ${labels.map((label) => `"${label}"`).join(", ")} exactly as answered; the form shows something else there. The form is left for you to check, and nothing was sent.`;
+        note(reason);
+        const kept = new Set(
+          plan.writes
+            .filter(({ write }) =>
+              labels.includes(questionPrompt(write.control)),
+            )
+            .map(({ write }) => write.control.ref),
+        );
+        for (let index = filled.length - 1; index >= 0; index -= 1) {
+          const entry = filled[index];
+          if (entry && (kept.has(entry.ref) || labels.includes(entry.label)))
+            filled.splice(index, 1);
+        }
+        return { reason, needsPerson: true, stuck: false, data: {} };
+      }
       const stopped = await guardStop(
         { config: runConfig, now, guardState },
         after.url,
@@ -4303,6 +4631,9 @@ async function runMeasuredApplyAgent(
       }),
     );
   };
+  let technicalFailure: ApplyAgentResult["technicalFailure"];
+  let partialOutageTurns = 0;
+  let groundingFailureReason: string | null = null;
   const loop = await runAgentLoop({
     // What stays the same for every application this person makes leads:
     // the instructions, then their facts. The job, its resume and its page
@@ -4329,6 +4660,26 @@ async function runMeasuredApplyAgent(
             // Fill in for me opens only the form and the page it is on; any
             // other link or address (a "Continue", a step) is the person's.
             const name = tool.definition.function.name;
+            if (name === "read_text") {
+              const args = parseToolArguments(rawArguments);
+              if (typeof args.ref === "string") {
+                const fresh = await config.hands.observe();
+                syncObservation(fresh);
+                const control = fresh.controls.find(
+                  (control) => control.ref === args.ref && control.visible,
+                );
+                if (control && control.options.length > 12)
+                  return {
+                    kind: "ok",
+                    content: JSON.stringify({
+                      ref: control.ref,
+                      question: questionPrompt(control),
+                      choices: control.options,
+                      total: control.options.length,
+                    }),
+                  };
+              }
+            }
             if (
               (name === "follow_link" || name === "navigate") &&
               !pressesFormButtons(config)
@@ -4355,7 +4706,11 @@ async function runMeasuredApplyAgent(
                   : (link?.href ?? "");
               const accessKind =
                 seen && name === "follow_link" && typeof args.ref === "string"
-                  ? browserInteractionKind(seen, args.ref)
+                  ? browserInteractionKind(
+                      seen,
+                      args.ref,
+                      await googleIdentityContext(config, config.hands),
+                    )
                   : null;
               const browserPermissions =
                 await currentBrowserPermissions(config);
@@ -4378,14 +4733,17 @@ async function runMeasuredApplyAgent(
             }
             if (name === "follow_link" || name === "navigate") {
               try {
-                const args = JSON.parse(rawArguments) as Record<string, unknown>;
+                const args = JSON.parse(rawArguments) as Record<
+                  string,
+                  unknown
+                >;
                 const seen = pageTools.state.observation;
                 const ref =
                   name === "follow_link"
                     ? args.ref
                     : seen?.links.find((link) => link.href === args.url)?.ref;
                 if (seen && typeof ref === "string")
-                  recordAccessAttempt(seen, ref);
+                  await recordAccessAttempt(seen, ref);
               } catch {
                 // The page tool reports malformed arguments without an action.
               }
@@ -4466,8 +4824,6 @@ async function runMeasuredApplyAgent(
       // Re-observe each local advance through the ordinary executor fence.
       while (
         current &&
-        !pressesFormButtons(runConfig) &&
-        config.hands.clickWithoutWrites &&
         pendingQuestions.size === 0 &&
         !deferredPress?.formSend &&
         current.controls.every(
@@ -4476,7 +4832,7 @@ async function runMeasuredApplyAgent(
       ) {
         const emptyStep = current;
         const advance = emptyStep.actions.find((action) =>
-          localStepPreflight(emptyStep, action.ref),
+          fillStepPress(runConfig, emptyStep, action.ref),
         );
         if (!advance) break;
         const outcome = await runProposal(
@@ -4638,6 +4994,11 @@ async function runMeasuredApplyAgent(
   })
     .catch((error: unknown): AgentLoopResult => {
       if (!(error instanceof QuestionReadUnavailableError)) throw error;
+      technicalFailure = {
+        code: "question_classification_unavailable",
+        retryable: true,
+        pageDisposition: "retain",
+      };
       note(error.message);
       return {
         ending: "stopped",
@@ -4729,16 +5090,78 @@ async function runMeasuredApplyAgent(
         status: "detected",
       });
     };
+    // Questions already held by a pause or the deferred press count too.
+    const heldQuestions = [
+      ...pauses.flatMap(
+        (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+      ),
+      ...(deferredPress?.question ? [deferredPress.question] : []),
+    ];
+    const handover = heldQuestions.find(
+      (question) => question.id === STEP_HANDOVER_QUESTION_ID,
+    );
+    const advances = (page?.actions ?? []).filter(
+      (action) =>
+        action.kind === "advance" && action.visible && !action.disabled,
+    );
+    const escape = (text: string) =>
+      text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    // Council D5: only the one press instruction for the step already handed
+    // over maps onto it. Anything more, or any open field, is still asked.
+    const restatesHandover = (item: string): boolean => {
+      const labels = new Set(advances.map((action) => words(action.label)));
+      if (!handover || item.includes("?") || labels.size !== 1) return false;
+      const parenthetical = /\s*\(([^()]*)\)\s*[.!]?\s*$/u.exec(item);
+      const body = parenthetical ? item.slice(0, parenthetical.index) : item;
+      const clauses = body
+        .split(/[.!;]+|\b(?:then|also|after that)\b/iu)
+        .map((clause) => clause.trim())
+        .filter((clause) => /[\p{L}\p{N}]/u.test(clause));
+      const [only] = clauses;
+      if (clauses.length !== 1 || only === undefined) return false;
+      const clause = words(only.replace(/["“”'‘’]/gu, ""));
+      const named = [
+        ...new Set(
+          advances
+            .map((action) => words(action.label))
+            .filter(
+              (label) =>
+                !!label &&
+                new RegExp(
+                  `\\b(?:press|click|tap)\\s+(?:on\\s+)?(?:the\\s+)?${escape(label)}\\b`,
+                  "u",
+                ).test(clause),
+            ),
+        ),
+      ];
+      const [label] = named;
+      if (
+        named.length !== 1 ||
+        label === undefined ||
+        !words(handover.prompt).includes(label)
+      )
+        return false;
+      const said = words(item);
+      return !open.some((control) => {
+        const prompt = words(questionPrompt(control));
+        return prompt.length > 2 && said.includes(prompt);
+      });
+    };
     for (const item of items) {
+      if (handover && restatesHandover(item)) {
+        finishItemIds.add(handover.id);
+        continue;
+      }
       // Restating an already-open question does not create another task or
       // replace its options, explanation or draft. Extra clauses stay separate.
-      const existing = [...pendingQuestions.values()].filter((question) =>
-        matchesFinishQuestion(
-          question.prompt,
-          question.answerControlType === "boolean" ||
-            offersYesNo(question.answerOptions),
-          item,
-        ),
+      const existing = [...pendingQuestions.values(), ...heldQuestions].filter(
+        (question) =>
+          matchesFinishQuestion(
+            question.prompt,
+            question.answerControlType === "boolean" ||
+              offersYesNo(question.answerOptions),
+            item,
+          ),
       );
       if (existing.length) {
         existing.forEach((question) => finishItemIds.add(question.id));
@@ -4790,7 +5213,86 @@ async function runMeasuredApplyAgent(
   };
   // A finish that says needsPerson always ends paused, never ready to send:
   // what it names joins whatever the page left, in the same handover.
+  // Council D6: a run that met a partial classifier outage filled only what
+  // it could read (and exact identity), then ends as a retained technical
+  // failure, however the loop itself ended.
+  if (!technicalFailure && !skipReason && partialOutageTurns > 0) {
+    technicalFailure = {
+      code: "question_classification_unavailable",
+      retryable: true,
+      pageDisposition: "retain",
+    };
+    groundingFailureReason =
+      "Nestor could not read this page after three attempts. Your page and answers are kept. Retry this application when Nestor is available.";
+    note(groundingFailureReason);
+  }
+  // Council D4: the one labelled statement was proposed and still refused,
+  // and that question is the run's only blocker: Nestor's grounding failed,
+  // not a fact the person must supply. The page and answers are kept.
+  const refusedProse = [...refusedProseCandidates.keys()].filter((key) =>
+    pendingQuestions.has(key),
+  );
+  const heldQuestionIds = new Set([
+    ...[...pendingQuestions.values()].map((question) => question.id),
+    ...pauses.flatMap((pause) =>
+      (pause.questions ?? (pause.question ? [pause.question] : [])).map(
+        (question) => question.id,
+      ),
+    ),
+  ]);
+  const soleProse = refusedProse[0]
+    ? pendingQuestions.get(refusedProse[0])
+    : undefined;
+  if (
+    !technicalFailure &&
+    !skipReason &&
+    refusedProse.length === 1 &&
+    soleProse &&
+    heldQuestionIds.size === 1 &&
+    heldQuestionIds.has(soleProse.id) &&
+    pauses.every((pause) => pause.question || pause.questions?.length) &&
+    !deferredPress &&
+    !(pageTools.state.observation?.blocker?.requiresPerson === true)
+  ) {
+    const question = soleProse;
+    technicalFailure = {
+      code: "answer_grounding_unavailable",
+      retryable: true,
+      pageDisposition: "retain",
+    };
+    pendingQuestions.clear();
+    forPerson = [];
+    needsPersonFinishPending = false;
+    groundingFailureReason = `Nestor could not confirm its answer to "${question.prompt}" against your resume. Your page and answers are kept. Try again.`;
+    note(groundingFailureReason);
+  } else
+    for (const key of refusedProse) {
+      // Other real questions are pending: this one stays, with the exact
+      // source statement offered as its suggestion.
+      const question = pendingQuestions.get(key);
+      const candidate = refusedProseCandidates.get(key);
+      if (question && candidate && !question.suggestedAnswers.length)
+        question.suggestedAnswers = [
+          {
+            id: `${question.id}_resume`,
+            text: candidate,
+            sourceKind: "resume",
+            sourceId: "resume.text",
+            confidenceLabel: null,
+            provenance: [],
+          },
+        ];
+    }
+  // A technical failure asks the person nothing (councils B10, D6).
+  if (technicalFailure) {
+    pendingQuestions.clear();
+    pauses.length = 0;
+    forPerson = [];
+    needsPersonFinishPending = false;
+    readyToSend = null;
+  }
   const finishNeedsPerson =
+    !technicalFailure &&
     !skipReason &&
     (needsPersonFinishPending || loop.finish?.needsPerson === true);
   const finishReason =
@@ -4815,6 +5317,9 @@ async function runMeasuredApplyAgent(
     outcome = "paused";
     reason = skipReason;
     readyToSend = null;
+  } else if (technicalFailure) {
+    outcome = "stuck";
+    reason = groundingFailureReason ?? loop.reason;
   } else if (pauses.length > 0) {
     outcome = "paused";
     reason = pauses[0]?.summary ?? loop.reason;
@@ -4932,8 +5437,26 @@ async function runMeasuredApplyAgent(
       }
     }
   }
+  // A press this attempt could not confirm means no earlier step binds at Send.
+  if (
+    [...guardState.uncertainAdvances.keys()].some(
+      (key) => !earlierUncertain.has(key),
+    ) &&
+    pageTools.state.observation
+  )
+    stepReceipts.unconfirmed(pageTools.state.observation, now().toISOString());
+  // Each unconfirmed step press becomes a receipt a continued run reads.
+  for (const [text, at] of guardState.uncertainAdvances)
+    if (
+      !timeline.some(
+        (entry) =>
+          entry.label === UNCONFIRMED_STEP_LABEL && entry.text === text,
+      )
+    )
+      timeline.push({ at, label: UNCONFIRMED_STEP_LABEL, text });
   return {
     outcome,
+    ...(technicalFailure ? { technicalFailure } : {}),
     ...(skipReason ? { skipReason } : {}),
     reason: skipReason ?? reason,
     steps: loop.steps,
@@ -4952,5 +5475,9 @@ async function runMeasuredApplyAgent(
     questionContexts: questionOccurrences.snapshot(),
     pickerAttempts: [...guardState.pickerAttempts.values()],
     formPath,
+    stepReceipts: stepReceipts.finish(
+      pageTools.state.observation ?? null,
+      now().toISOString(),
+    ),
   };
 }

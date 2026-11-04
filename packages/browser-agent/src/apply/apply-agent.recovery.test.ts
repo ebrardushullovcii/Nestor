@@ -214,6 +214,7 @@ test.each([false, true])(
       {
         index: 0,
         label: "Cannot find your city? Click here to fill in manually",
+        disabled: false,
         visible: true,
         tagName: "button",
         role: "button",

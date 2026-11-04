@@ -2837,6 +2837,8 @@ describe("managed context service worker blocking", () => {
       let pageUrl = "about:blank";
       const fakePage = {
         on: vi.fn(),
+        once: vi.fn(),
+        off: vi.fn(),
         bringToFront: vi.fn().mockResolvedValue(undefined),
         goto: vi.fn((url: string) => {
           pageUrl = url;
@@ -3326,6 +3328,8 @@ describe("managed context active service worker gate", () => {
     let pageUrl = "about:blank";
     const fakePage = {
       on: vi.fn(),
+      once: vi.fn(),
+      off: vi.fn(),
       bringToFront: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn((url: string) => {
@@ -3339,6 +3343,8 @@ describe("managed context active service worker gate", () => {
     let secondaryPageUrl = "about:blank";
     const secondaryPage = {
       on: vi.fn(),
+      once: vi.fn(),
+      off: vi.fn(),
       bringToFront: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
       goto: vi.fn((url: string) => {
@@ -3854,6 +3860,8 @@ describe("managed context active service worker gate", () => {
       let thirdAdded = false;
       const thirdPage = {
         on: vi.fn(),
+        once: vi.fn(),
+        off: vi.fn(),
         bringToFront: vi.fn().mockResolvedValue(undefined),
         close: vi.fn().mockResolvedValue(undefined),
         goto: vi.fn((url: string) => {
@@ -4368,6 +4376,213 @@ describe("managed context active service worker gate", () => {
       }
     },
   );
+
+  test.each([
+    {
+      state: "failed",
+      retain: true,
+      bound: true,
+      submitted: false,
+      kept: true,
+    },
+    {
+      state: "failed",
+      retain: false,
+      bound: true,
+      submitted: false,
+      kept: false,
+    },
+    {
+      state: "submitted",
+      retain: true,
+      bound: true,
+      submitted: false,
+      kept: false,
+    },
+    {
+      state: "unsupported",
+      retain: true,
+      bound: true,
+      submitted: false,
+      kept: false,
+    },
+    {
+      state: "failed",
+      retain: true,
+      bound: false,
+      submitted: false,
+      kept: false,
+    },
+    {
+      state: "failed",
+      retain: true,
+      bound: true,
+      submitted: true,
+      kept: false,
+    },
+  ] as const)(
+    "terminal page retention is exact and explicit: $state / requested=$retain / bound=$bound / submitted=$submitted",
+    async ({ state, retain, bound, submitted, kept }) => {
+      const userDataDir = await mkdtemp(
+        join(tmpdir(), "nestor-failed-page-retention-"),
+      );
+      try {
+        const harness = createGateHarness({ activeServiceWorkers: () => [] });
+        const runtime = await createGatedRuntime({
+          userDataDir,
+          debugPort: await reserveFreePort(),
+          browser: harness.fakeBrowser,
+        });
+        const { approvedResumePath, prepareInput } = createPrepareInput({
+          userDataDir,
+        });
+        await writeFile(approvedResumePath, "synthetic resume");
+        const shouldRetainFailedApplicationPage = vi.fn(() => retain);
+        const result = await runtime.executeApplicationFlow("target_site", {
+          ...prepareInput,
+          ...(bound ? { applicationPageBindingKey: "retryable_result" } : {}),
+          shouldRetainFailedApplicationPage,
+          prepareApplicationForm: async (args) => ({
+            ...(await prepareInput.prepareApplicationForm(args)),
+            state,
+            submittedAt: submitted ? new Date().toISOString() : null,
+          }),
+        });
+        expect(result.state).toBe(state);
+        expect(harness.fakePage.close).toHaveBeenCalledTimes(kept ? 0 : 1);
+        expect(harness.secondaryPage.close).not.toHaveBeenCalled();
+        await expect(
+          runtime.hasApplicationPageBinding!("target_site", "retryable_result"),
+        ).resolves.toBe(kept);
+        if (kept) {
+          expect(shouldRetainFailedApplicationPage).toHaveBeenCalledOnce();
+          expect(harness.fakePage.goto).toHaveBeenCalledOnce();
+          Object.assign(harness.fakePage, {
+            evaluate: vi.fn(() => Promise.resolve(undefined)),
+          });
+          await expect(
+            runtime.transferApplicationPageBinding!(
+              "target_site",
+              "retryable_result",
+              "retried_result",
+            ),
+          ).resolves.toBe(true);
+          await expect(
+            runtime.hasApplicationPageBinding!("target_site", "retried_result"),
+          ).resolves.toBe(true);
+          expect(harness.fakePage.close).not.toHaveBeenCalled();
+          expect(harness.fakePage.goto).toHaveBeenCalledOnce();
+        } else {
+          expect(shouldRetainFailedApplicationPage).toHaveBeenCalledTimes(
+            state === "failed" && bound && !submitted ? 1 : 0,
+          );
+        }
+      } finally {
+        await rm(userDataDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test("native ownership rebinds a lost-mark Page and re-stamps it without scanning or navigation", async () => {
+    const userDataDir = await mkdtemp(join(tmpdir(), "nestor-native-owner-"));
+    try {
+      const harness = createGateHarness({ activeServiceWorkers: () => [] });
+      const evaluate = vi.fn().mockResolvedValue(null);
+      Object.assign(harness.fakePage, {
+        evaluate,
+        route: vi.fn(async () => {}),
+        addInitScript: vi.fn(async () => {}),
+        frames: () => [],
+      });
+      const ownedApplicationPage = vi.fn(() =>
+        Promise.resolve({
+          page: harness.fakePage as unknown as Page,
+        }),
+      );
+      const { createBrowserAgentRuntime } =
+        await import("./playwright-browser-runtime");
+      const runtime = createBrowserAgentRuntime({
+        userDataDir,
+        browserHost: {
+          connect: () => Promise.resolve(harness.fakeBrowser as never),
+          getOpenBrowser: vi.fn(() =>
+            Promise.resolve(harness.fakeBrowser as never),
+          ),
+          close: async () => {},
+          assertAutomationSafe: () => {},
+          ownedApplicationPage,
+        },
+      });
+      await expect(
+        runtime.transferApplicationPageBinding!(
+          "target_site",
+          "old-owner",
+          "current-owner",
+        ),
+      ).resolves.toBe(true);
+      expect(ownedApplicationPage).toHaveBeenCalledWith("old-owner");
+      expect(
+        evaluate.mock.calls.some(
+          (call) =>
+            (call[1] as { value?: string } | undefined)?.value === "old-owner",
+        ),
+      ).toBe(true);
+      expect(
+        evaluate.mock.calls.some(
+          (call) =>
+            (call[1] as { value?: string } | undefined)?.value ===
+            "current-owner",
+        ),
+      ).toBe(true);
+      expect(harness.fakeContext.newPage).not.toHaveBeenCalled();
+      expect(harness.fakePage.goto).not.toHaveBeenCalled();
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true });
+    }
+  });
+
+  test("live native ownership without an attachable Page suppresses saved-form refill and mark scanning", async () => {
+    const userDataDir = await mkdtemp(
+      join(tmpdir(), "nestor-native-unattached-"),
+    );
+    try {
+      const harness = createGateHarness({ activeServiceWorkers: () => [] });
+      const get = vi
+        .fn()
+        .mockRejectedValue(
+          new Error("A live native form must not load a snapshot"),
+        );
+      const getOpenBrowser = vi.fn(() =>
+        Promise.resolve(harness.fakeBrowser as never),
+      );
+      const { createBrowserAgentRuntime } =
+        await import("./playwright-browser-runtime");
+      const runtime = createBrowserAgentRuntime({
+        userDataDir,
+        preparedFormStore: {
+          get,
+          save: vi.fn(),
+          delete: vi.fn(),
+          loadAttachment: vi.fn(),
+        },
+        browserHost: {
+          connect: () => Promise.resolve(harness.fakeBrowser as never),
+          getOpenBrowser,
+          close: async () => {},
+          assertAutomationSafe: () => {},
+          ownedApplicationPage: () => Promise.resolve({ page: null }),
+        },
+      });
+      await expect(
+        runtime.transferApplicationPageBinding!("target_site", "held", "next"),
+      ).resolves.toBe(false);
+      expect(get).not.toHaveBeenCalled();
+      expect(getOpenBrowser).not.toHaveBeenCalled();
+      expect(harness.fakeContext.newPage).not.toHaveBeenCalled();
+    } finally {
+      await rm(userDataDir, { recursive: true, force: true });
+    }
+  });
 
   test("a retry transfers and reuses its filled wizard page without another navigation", async () => {
     const userDataDir = await mkdtemp(join(tmpdir(), "nestor-retry-page-"));

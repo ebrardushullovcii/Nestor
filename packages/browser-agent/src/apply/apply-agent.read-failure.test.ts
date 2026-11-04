@@ -231,33 +231,37 @@ test("stalled reads of other questions do not hand stored name and email to the 
     "",
     "",
   ]);
-  const asked = askedFor(result);
-  expect([...asked.keys()].sort()).toEqual([CODING, SALARY].sort());
-  for (const prompt of [SALARY, CODING])
-    expect(asked.get(prompt)?.askReason).toMatchObject({
-      kind: "source_rejected",
-      check: "question_classification",
-    });
-  expect(result.outcome).toBe("paused");
+  // Council D6: a partial outage fills what it can read, then ends as
+  // Nestor's retained technical failure; it never asks per-field questions.
+  expect(askedFor(result).size).toBe(0);
+  expect(result.outcome).toBe("stuck");
+  expect(result.readyToSend).toBeNull();
+  expect(result.technicalFailure).toEqual({
+    code: "question_classification_unavailable",
+    retryable: true,
+    pageDisposition: "retain",
+  });
 });
 
-test("an unread contact question is still never written from a stored fact", async () => {
+// Council D3 (2026-11-03): a reading outage is Nestor's problem, not a
+// question for a fact Profile holds. An exact applicant-identity binding
+// fills without a reading; an unread pay question still does not.
+test("an unread first-name question fills from its exact Profile fact; unread pay is not written", async () => {
   const { raw, input } = setup();
   const { model } = client([FIRST, SALARY]);
   const result = await runApplyAgent(input, model);
   expect(raw.controls.slice(0, 4).map((control) => control.value)).toEqual([
-    "",
+    "Jamie",
     "Rivers",
     "jamie@example.test",
     "",
   ]);
-  const asked = askedFor(result);
-  expect(asked.has(FIRST)).toBe(true);
-  expect(asked.has(SALARY)).toBe(true);
-  expect(asked.has(LAST)).toBe(false);
-  expect(asked.has(EMAIL)).toBe(false);
-  expect(asked.get(FIRST)?.askReason?.kind).not.toBe("no_source");
-  expect(asked.get(FIRST)?.askReason?.check).toBe("question_classification");
+  // Unread pay is not written and not asked: the run ends technical.
+  expect(askedFor(result).size).toBe(0);
+  expect(result.outcome).toBe("stuck");
+  expect(result.technicalFailure?.code).toBe(
+    "question_classification_unavailable",
+  );
 });
 
 test("a page with no readable question stops before any model turn and says why", async () => {
@@ -269,11 +273,14 @@ test("a page with no readable question stops before any model turn and says why"
   expect(reads).toHaveLength(9);
   expect(fill).toHaveBeenCalledTimes(9);
   expect(raw.controls.every((control) => control.value === "")).toBe(true);
-  const asked = askedFor(result);
-  expect(asked.size).toBe(5);
-  for (const question of asked.values())
-    expect(question.askReason).toMatchObject({
-      kind: "source_rejected",
-      check: "question_classification",
-    });
+  // Council B10/D6: a full outage is Nestor's technical failure, with no
+  // personal question; the page is kept for one ordinary Retry.
+  expect(askedFor(result).size).toBe(0);
+  expect(result.filled).toEqual([]);
+  expect(result.outcome).toBe("stuck");
+  expect(result.technicalFailure).toEqual({
+    code: "question_classification_unavailable",
+    retryable: true,
+    pageDisposition: "retain",
+  });
 });

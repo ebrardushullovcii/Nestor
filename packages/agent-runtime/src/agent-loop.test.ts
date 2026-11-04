@@ -82,6 +82,56 @@ const opening: AgentLoopMessage[] = [
 ];
 
 describe("runAgentLoop", () => {
+  test("private continuation survives two tool turns without entering the returned transcript or activity", async () => {
+    const notes: string[] = [];
+    let turn = 0;
+    const result = await runAgentLoop({
+      messages: opening,
+      model: {
+        chatWithTools: (messages) => {
+          const assistants = messages.filter(
+            (message) => message.role === "assistant",
+          );
+          expect(
+            assistants.map((message) => message.continuation?.text),
+          ).toEqual(
+            Array.from(
+              { length: turn },
+              (_, index) => `synthetic private ${index + 1}`,
+            ),
+          );
+          turn += 1;
+          return Promise.resolve({
+            continuation: {
+              kind: "reasoning_content" as const,
+              route: "bound-route",
+              text: `synthetic private ${turn}`,
+            },
+            toolCalls: [call(turn <= 2 ? "look" : "finish")],
+          });
+        },
+      },
+      tools: [
+        tool("look", () =>
+          Promise.resolve({ kind: "ok", content: "page", progress: true }),
+        ),
+        finishTool,
+      ],
+      subjectLabel: "synthetic page",
+      onStep: ({ note }) => {
+        notes.push(note);
+      },
+    });
+    expect(turn).toBe(3);
+    expect(result.ending).toBe("finished");
+    expect(JSON.stringify({ result, notes })).not.toContain(
+      "synthetic private",
+    );
+    expect(result.messages.some((message) => "continuation" in message)).toBe(
+      false,
+    );
+  });
+
   test("the model's finish reason is the run's reason, word for word", async () => {
     const result = await runAgentLoop({
       messages: opening,

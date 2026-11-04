@@ -10,7 +10,7 @@ import {
 } from "@testing-library/react";
 import { Link, MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { FoundJob } from "@nestor/contracts";
+import type { ApplicationDetails, FoundJob } from "@nestor/contracts";
 import {
   createApplicationStore,
   type ApplicationStore,
@@ -542,6 +542,175 @@ it("hands Fill's Next to the person: open the form, press it, and continue", asy
   ).toBe("Pressed on the site");
   // The item is done; the run picks the form up where the person left it.
   expect(applications.needsYou.details(task.id)).toBeNull();
+});
+
+it("says Nestor pressed an unconfirmed step once, and never says Fill presses no buttons", async () => {
+  const row = claimed[0]!;
+  const detail =
+    'Nestor pressed "Save and Continue" once on step 1 of 3, but the form did not show step 2 of 3 afterwards. It will not press it again. Check the form; if that step is not done, press "Save and Continue" yourself.';
+  applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "step_handover",
+    key: "step_handover_unconfirmed",
+    scope: {},
+    prompt: 'Press "Save and Continue" on the site, then continue',
+    kind: "question",
+    input: "text",
+    options: [],
+    askReason: { kind: "page_refused", check: "step_not_confirmed", detail },
+  });
+  show();
+  expect(
+    await screen.findByText(
+      "Nestor pressed this step's button once, but the form did not show the next step.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.queryByText(
+      "Nestor filled it in, but the site still marks it unanswered.",
+    ),
+  ).toBeNull();
+  expect(
+    screen.queryByText(/never presses the form's own buttons/u),
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "I pressed it, continue" }),
+  ).toBeTruthy();
+});
+
+it("says why a step handover is the person's, never that the site marks it unanswered", async () => {
+  const row = claimed[0]!;
+  applications.needsYou.request({
+    applicationId: row.id,
+    attempt: row.attempt,
+    fieldKey: "step_handover",
+    key: "step_handover",
+    scope: {},
+    prompt: 'Press "Save and Continue" on the site, then continue',
+    kind: "question",
+    input: "text",
+    options: [],
+    askReason: {
+      kind: "page_refused",
+      check: "step_handover",
+      detail:
+        "This step has no step counter, so Nestor leaves the press to you.",
+    },
+  });
+  show();
+  expect(
+    await screen.findByText(
+      "Nestor could not prove this button only moves the form to its next step, so pressing it is yours.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.queryByText(
+      "Nestor filled it in, but the site still marks it unanswered.",
+    ),
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "I pressed it, continue" }),
+  ).toBeTruthy();
+});
+
+/** Apply's record of one application, as the bridge returns it. */
+function recordOf(
+  id: number,
+  reviewCard: ApplicationDetails["reviewCard"],
+): Promise<ApplicationDetails> {
+  return Promise.resolve({
+    application: applications.getApplication(id)!,
+    summary: null,
+    detail: null,
+    resumeFileName: null,
+    reviewCard,
+    receipt: null,
+  });
+}
+/** The pane's lead line, once the application's record has loaded. */
+function leadLine() {
+  return waitFor(() => {
+    const line = document.querySelector("[data-action-needed]");
+    if (!line?.textContent?.includes("Sent:")) throw new Error("No line");
+    return line.textContent;
+  });
+}
+
+it("leads a question with its exact instruction, what was filled and an honest sent status", async () => {
+  ask(0);
+  const getApplicationDetails = vi.fn(({ id }: { id: number }) =>
+    recordOf(id, {
+      siteLabel: "Employer 0",
+      pageUrl: null,
+      answers: [
+        {
+          question: "Full name",
+          answer: "Jamie Rivers",
+          source: "Profile",
+          written: false,
+          groundedIn: [],
+        },
+      ],
+      attachments: [],
+      intermediateSaved: false,
+      letter: null,
+      waitingOnYou: [],
+      preparedAt: new Date().toISOString(),
+    }),
+  );
+  Object.assign(window.nestor, { jobFinder: { getApplicationDetails } });
+  show();
+  expect(await leadLine()).toMatch(
+    /^ACTION NEEDED — Employer 0: Give your answer to “What is your notice period\?”\. Done so far: filled 1 field \(.+\)\. Sent: no application send recorded\. Whether the site saved answers on its own is not verified\.$/u,
+  );
+  expect(getApplicationDetails).toHaveBeenCalledWith({ id: claimed[0]!.id });
+  // The question stays the pane's title, and its answer controls are kept.
+  expect(
+    screen.getByRole("heading", { name: "What is your notice period?" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Save and continue" }),
+  ).toBeTruthy();
+});
+
+it("leads a site sign-in with the site and recorded step, and says when the record cannot be read", async () => {
+  applications.needsYou.request({
+    applicationId: claimed[0]!.id,
+    attempt: claimed[0]!.attempt,
+    fieldKey: "site_access",
+    key: "access",
+    kind: "sign_in",
+    scope: { siteOrigin: "https://jobs.example.test" },
+    prompt: "Sign in first",
+    input: "text",
+    options: [],
+  });
+  Object.assign(window.nestor, {
+    jobFinder: {
+      getApplicationDetails: ({ id }: { id: number }) => recordOf(id, null),
+    },
+  });
+  show();
+  expect(await leadLine()).toBe(
+    "ACTION NEEDED — jobs.example.test: Sign in first. Then press “Check again”. Done so far: nothing is recorded on the form yet. Sent: no application send recorded.",
+  );
+  expect(
+    screen.getByRole("heading", { name: "Sign in to continue" }),
+  ).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Open in browser" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+  cleanup();
+  // No bridge to the record: the line says so instead of claiming a state.
+  Object.assign(window.nestor, {
+    jobFinder: {
+      getApplicationDetails: () => Promise.reject(new Error("offline")),
+    },
+  });
+  show();
+  expect(await leadLine()).toMatch(
+    /Done so far: not available right now\. Sent: not available right now; check the application in Applications\.$/u,
+  );
 });
 
 it("lets the person say a failed upload is attached on the site, which continues the form", async () => {

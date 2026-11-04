@@ -155,6 +155,164 @@ function reader(tags: unknown[]): LLMClient {
     ),
   };
 }
+
+test("send binds a retained multi-select as one exact JSON set, including comma labels", async () => {
+  const controls = buildApplyFormObservation(
+    {
+      url: "https://replica.test/apply",
+      title: "Review",
+      bodyText: "Review",
+      controls: ["Writing, editing", "Mentoring", "Planning"].map(
+        (label, index) => ({
+          index,
+          tagName: "input",
+          inputType: "checkbox",
+          role: "",
+          id: `skill${index}`,
+          name: "skills",
+          scopeKey: "form0",
+          label,
+          groupLabel: "Select your skills",
+          placeholder: "",
+          autocomplete: "",
+          required: false,
+          invalid: false,
+          validationMessage: "",
+          disabled: false,
+          readOnly: false,
+          visible: false,
+          value: label,
+          checked: index < 2,
+          multiple: false,
+          options: [],
+          selectedOptionLabel: "",
+        }),
+      ),
+      actions: [],
+      links: [],
+      clickables: [],
+      headings: [],
+      openedTabs: [],
+      validationErrors: [],
+      loading: false,
+      stepLabel: "Step 2 of 2: Review",
+    },
+    "2026-11-03T00:00:00Z",
+  ).controls;
+  const answer = '["Writing, editing","Mentoring"]';
+  const input = {
+    client: reader([
+      {
+        index: 0,
+        kind: "other",
+        country: null,
+        sourceId: "answerLibrary.skills",
+      },
+    ]),
+    sources: {
+      ...sources,
+      reusableAnswers: [
+        {
+          id: "skills",
+          kind: "other" as const,
+          label: "Select your skills",
+          question: "Select your skills",
+          answer,
+          roleFamilies: [],
+          proofEntryIds: [],
+        },
+      ],
+    },
+    payDisclosed: false,
+    answers: [{ question: "Select your skills", answer }],
+    formControls: controls,
+    formContext: { pageText: "Review", fields: [] },
+  };
+  expect((await checkClassifiedApplicationAnswers(input))[0]?.supported).toBe(
+    true,
+  );
+  // The review card shows the same set comma-joined.
+  const shown = {
+    ...input,
+    answers: [
+      { question: "Select your skills", answer: "Writing, editing, Mentoring" },
+    ],
+  };
+  expect((await checkClassifiedApplicationAnswers(shown))[0]?.supported).toBe(
+    true,
+  );
+  controls[2].checked = true;
+  expect((await checkClassifiedApplicationAnswers(input))[0]?.supported).toBe(
+    false,
+  );
+  expect((await checkClassifiedApplicationAnswers(shown))[0]?.supported).toBe(
+    false,
+  );
+});
+
+test("exact approved routine certification does not become an unknown personal fact at send", async () => {
+  const field: ApplyFormControl = {
+    ref: "c0",
+    kind: "checkbox",
+    label: "I certify that the information is true *",
+    groupLabel: "Review and send",
+    placeholder: "",
+    required: true,
+    disabled: false,
+    readOnly: false,
+    visible: true,
+    value: "yes",
+    checked: true,
+    options: [],
+    selectedOptionLabel: "",
+    invalid: false,
+    validationMessage: "",
+    questionKind: "other",
+    answerControlType: "boolean",
+    attestationKind: "truthfulness_certification",
+    answered: true,
+  };
+  const input = {
+    client: reader([
+      {
+        index: 0,
+        kind: "other",
+        country: null,
+        sourceId: null,
+        declarationPurpose: "personal_fact",
+        hasAdditionalConditions: false,
+      },
+    ]),
+    sources,
+    payDisclosed: false,
+    approvedAttestations: ["truthfulness_certification" as const],
+    answers: [
+      {
+        question: "Review and send — I certify that the information is true *",
+        answer: "Yes",
+      },
+    ],
+    formControls: [field],
+    formContext: { pageText: "Review", fields: [] },
+  };
+  expect((await checkClassifiedApplicationAnswers(input))[0]?.supported).toBe(
+    true,
+  );
+  expect(
+    (
+      await checkClassifiedApplicationAnswers({
+        ...input,
+        approvedAttestations: [],
+      })
+    )[0]?.supported,
+  ).toBe(false);
+  field.label = "I certify that I have a medical licence";
+  input.answers[0].question =
+    "Review and send — I certify that I have a medical licence";
+  expect((await checkClassifiedApplicationAnswers(input))[0]?.supported).toBe(
+    false,
+  );
+});
 test.each([
   {
     kind: "work_auth",
@@ -771,4 +929,58 @@ test.each([
   expect(client.chatWithTools).toHaveBeenCalledTimes(
     entry.name === "an uncertain Profile timezone" ? 6 : 2,
   );
+});
+
+// Candidate 4 workday replica: the card kept "… (repeated question on step 4)"
+// and Send, reading the page afresh, found "The question is no longer present".
+test("Send binds a card answer recorded with a repeated-question note to its question", async () => {
+  const field: ApplyFormControl = {
+    ref: "c0",
+    kind: "checkbox",
+    label: "I have read and agree to the terms",
+    groupLabel: "Review",
+    placeholder: "",
+    required: true,
+    disabled: false,
+    readOnly: false,
+    visible: true,
+    value: "yes",
+    checked: true,
+    options: [],
+    selectedOptionLabel: "",
+    invalid: false,
+    validationMessage: "",
+    questionKind: "other",
+    answerControlType: "boolean",
+    attestationKind: "terms_acceptance",
+    answered: true,
+  };
+  const check = (question: string) =>
+    checkClassifiedApplicationAnswers({
+      client: reader([
+        {
+          index: 0,
+          kind: "other",
+          country: null,
+          sourceId: null,
+          declarationPurpose: "acknowledgement",
+          hasAdditionalConditions: false,
+        },
+      ]),
+      sources,
+      payDisclosed: false,
+      approvedAttestations: ["terms_acceptance"],
+      answers: [{ question, answer: "Yes" }],
+      formControls: [field],
+      formContext: { pageText: "Review", fields: [] },
+    });
+  const noted = await check(
+    "Review — I have read and agree to the terms (repeated question on step 4)",
+  );
+  expect(noted[0]).toMatchObject({ supported: true });
+  // A question that is really gone still is not bound.
+  expect(
+    (await check("Review — I confirm my references may be contacted"))[0]
+      ?.supported,
+  ).toBe(false);
 });

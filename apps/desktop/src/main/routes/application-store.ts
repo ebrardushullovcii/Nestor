@@ -83,6 +83,10 @@ export async function executeApplicationStoreCommand(
         resumeFileName: store.getResumeArtifact(id)?.fileName ?? null,
         reviewCard: work?.reviewCard ?? null,
         receipt: store.getSubmissionReceipt(id),
+        accessDetail:
+          work?.execution.blocker?.code === "site_login_required"
+            ? work.execution.blocker.detail
+            : null,
       });
     }
     case "stop-application":
@@ -119,7 +123,9 @@ export async function executeApplicationStoreCommand(
       }
       await startJobFinderRuntime();
       return ApplicationCommandResultSchema.parse(
-        await (await getApplicationService()).resolveUncertainByPerson(id, sent),
+        await (
+          await getApplicationService()
+        ).resolveUncertainByPerson(id, sent),
       );
     }
     case "open-application": {

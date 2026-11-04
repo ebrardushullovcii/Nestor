@@ -1,11 +1,14 @@
 import { expect, test } from "vitest";
 import {
+  CandidateWorkEligibilitySchema,
   cleanFormQuestionPrompt,
   normalizeFormQuestionPrompt,
 } from "@nestor/contracts";
 import {
   describeFormQuestion,
   describeSavedFormAnswer,
+  describeLegacyFormQuestion,
+  resolveListingCountry,
   type FormQuestion,
 } from "./questions";
 
@@ -145,7 +148,7 @@ test("Workday legal prompt seeds are not country-scoped answers: the typed profi
   }
 });
 
-test("an exact authorization question naming one country reuses its own saved answer across posting locations", () => {
+test("an explicit authorization country has a fingerprinted key across posting locations", () => {
   const prompt = "Are you authorized to work in the UK?";
   const question = {
     prompt,
@@ -154,9 +157,16 @@ test("an exact authorization question naming one country reuses its own saved an
     answerOptions: ["Yes", "No"],
   };
   const saved = describeSavedFormAnswer(prompt, "No");
-  const target = describeFormQuestion(question, { id: 1, location: "Germany" });
-  expect(target.reusePrompt).toBe(true);
-  expect(target.key).toBe(saved.key);
+  const profile = { workEligibility: CandidateWorkEligibilitySchema.parse({}) };
+  const target = describeFormQuestion(question, { id: 1, location: "Germany" }, profile);
+  expect(target.reusePrompt).toBe(false);
+  expect(target.key).not.toBe(saved.key);
+  expect(
+    describeLegacyFormQuestion(question, { id: 1, location: "Germany" }).key,
+  ).toBe(saved.key);
+  expect(
+    describeFormQuestion(question, { id: 2, location: "Remote" }, profile).key,
+  ).toBe(target.key);
   for (const prompt of [
     "Are you authorized to work in this country?",
     "Are you authorized to work in the UK and Germany?",
@@ -167,4 +177,86 @@ test("an exact authorization question naming one country reuses its own saved an
         { id: 1, location: "Germany" },
       ).reusePrompt,
     ).toBe(false);
+});
+
+test("eligibility memory shares a resolved country only while recorded facts match", () => {
+  const question: FormQuestion = {
+    prompt: "Are you authorized to work here?",
+    kind: "work_authorization",
+    answerControlType: "boolean",
+    answerOptions: ["Yes", "No"],
+  };
+  const profile = {
+    workEligibility: {
+      authorizedWorkCountries: ["Germany"],
+      requiresVisaSponsorship: false,
+    },
+  };
+  const facts = {
+    workEligibility: CandidateWorkEligibilitySchema.parse(
+      profile.workEligibility,
+    ),
+  };
+  const one = describeFormQuestion(
+    question,
+    { id: 1, location: "Berlin, Germany" },
+    facts,
+  );
+  expect(
+    describeFormQuestion(
+      question,
+      { id: 2, location: "Munich, Germany" },
+      facts,
+    ).key,
+  ).toBe(one.key);
+  expect(
+    describeFormQuestion(
+      question,
+      { id: 2, location: "Munich, Germany" },
+      {
+        workEligibility: {
+          ...facts.workEligibility,
+          requiresVisaSponsorship: true,
+        },
+      },
+    ).key,
+  ).not.toBe(one.key);
+  expect(
+    describeFormQuestion(question, { id: 1, location: "Remote, Europe" }, facts)
+      .key,
+  ).not.toBe(
+    describeFormQuestion(question, { id: 2, location: "Remote, Europe" }, facts)
+      .key,
+  );
+  const limited = {
+    workEligibility: CandidateWorkEligibilitySchema.parse({
+      ...facts.workEligibility,
+      limitedWorkPermissions: [
+        {
+          country: "Germany",
+          permissionType: "Student",
+          conditions: "20 hours",
+          requiresFutureSponsorship: false,
+        },
+      ],
+    }),
+  };
+  expect(
+    describeFormQuestion(question, { id: 1, location: "Germany" }, limited).key,
+  ).not.toBe(
+    describeFormQuestion(question, { id: 2, location: "Germany" }, limited).key,
+  );
+});
+
+test.each([
+  ["Austin, TX", "US"],
+  ["Toronto, ON", "CA"],
+  ["Vancouver, British Columbia", "CA"],
+  ["Berlin, Germany", "DE"],
+  ["Paris", null],
+  ["Remote", null],
+  ["Remote, Europe", null],
+  ["Canada / Germany", null],
+])("listing country %s resolves conservatively", (location, expected) => {
+  expect(resolveListingCountry(location)).toBe(expected);
 });

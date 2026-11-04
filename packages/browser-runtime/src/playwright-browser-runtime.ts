@@ -1,3 +1,7 @@
+import {
+  trackAccountFlowEntry,
+  readAccountFlowEntry,
+} from "./account-flow-entry";
 import { createHash } from "node:crypto";
 import { readRenderedPageHtml } from "./rendered-page-reader";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -73,6 +77,8 @@ import {
 import { guardApplicationPreparationSession } from "./application-preparation-session";
 import { createApplicationSitePacing } from "./application-site-pacing";
 import {
+  ACCOUNT_WINDOW_OPEN_MESSAGE,
+  hasActiveAccountWindow,
   buildPreparationResult,
   createApplicationRunServiceWorkerSentinel,
   ensurePrepareOnlyMutationGuard,
@@ -647,6 +653,8 @@ export interface BrowserAgentRuntimeOptions {
   browserHost?: {
     connect(): Promise<Browser>;
     getOpenBrowser(): Promise<Browser | null>;
+    /** Native ownership is authoritative even when CDP has no Page yet. */
+    ownedApplicationPage?(key: string): Promise<{ page: Page | null } | null>;
     close(): Promise<void>;
     assertAutomationSafe(): void | Promise<void>;
     /**
@@ -1088,6 +1096,7 @@ export async function resolveAutomationPageForContext(
         blankPage ??
         reusableLivePage ??
         (await context.newPage()));
+  trackAccountFlowEntry(page);
   await options.onPageResolved?.(page);
 
   if (options.closeOtherPages && options.reuseExistingPage !== false) {
@@ -1628,6 +1637,16 @@ export function createBrowserAgentRuntime(
       await markPreparedPage(key, current);
       return;
     }
+    const owned = await options.browserHost?.ownedApplicationPage?.(key);
+    if (owned) {
+      // A live native tab excludes both a duplicate refill and a mark scan.
+      if (owned.page && !owned.page.isClosed()) {
+        bindPreparedApplicationPage(key, owned.page);
+        await markPreparedPage(key, owned.page);
+        await ensurePrepareOnlyMutationGuard(owned.page, false);
+      }
+      return;
+    }
     await loadSavedForm(key);
     const recovery = formRecovery.get(key);
     if (recovery?.snapshot) {
@@ -1698,6 +1717,37 @@ export function createBrowserAgentRuntime(
         );
         return;
       }
+    }
+  }
+
+  /** Move only key-scoped recovery state; native ownership needs no CDP Page. */
+  async function renameApplicationPageBinding(
+    previousKey: string,
+    nextKey: string,
+  ): Promise<void> {
+    if (previousKey === nextKey) return;
+    const saved = await preparedFormStore?.get(previousKey);
+    if (saved) {
+      await preparedFormStore!.save({ ...saved, id: nextKey });
+      await preparedFormStore!.delete(previousKey);
+    }
+    const recovery = formRecovery.get(previousKey);
+    formRecovery.delete(previousKey);
+    if (recovery) {
+      if (recovery.saved) recovery.saved = { ...recovery.saved, id: nextKey };
+      formRecovery.set(nextKey, recovery);
+    }
+    if (recoveryUnavailable.delete(previousKey))
+      recoveryUnavailable.add(nextKey);
+    if (markedPreparedApplicationKeys.delete(previousKey))
+      markedPreparedApplicationKeys.add(nextKey);
+    if (preparedPagesWithPerson.delete(previousKey))
+      preparedPagesWithPerson.add(nextKey);
+    const page = preparedApplicationPages.get(previousKey);
+    preparedApplicationPages.delete(previousKey);
+    if (page && !page.isClosed()) {
+      bindPreparedApplicationPage(nextKey, page);
+      await markPreparedPage(nextKey, page);
     }
   }
 
@@ -2402,10 +2452,18 @@ export function createBrowserAgentRuntime(
   function applyPageMechanicsForSource(source: JobSource): ApplyRawPageHands {
     const onReadyPage = async <TResult>(
       operation: (page: Page) => Promise<TResult>,
-    ): Promise<TResult> => operation(await getReadyPage(source));
+    ): Promise<TResult> => {
+      const page = await getReadyPage(source);
+      trackAccountFlowEntry(page);
+      return operation(page);
+    };
 
     return {
       readPage: () => onReadyPage((page) => readRawApplyPage(page)),
+      readAccountFlowEntry: (origins) =>
+        onReadyPage((page) =>
+          Promise.resolve(readAccountFlowEntry(page, origins)),
+        ),
       fillText: (ref, value) =>
         onReadyPage((page) =>
           createPlaywrightApplyPageMechanics(page).fillText(ref, value),
@@ -2902,6 +2960,8 @@ export function createBrowserAgentRuntime(
         preparedApplicationPages,
         pageBindingKey,
       );
+      if (hasActiveAccountWindow(page))
+        return { ok: false, error: ACCOUNT_WINDOW_OPEN_MESSAGE };
       await saveReviewedPreparedForm(pageBindingKey, page);
       await openPrepareOnlyFinalActionWindow(page, PERSON_HANDOFF_WINDOW_MS);
       preparedPagesWithPerson.add(pageBindingKey);
@@ -2914,6 +2974,8 @@ export function createBrowserAgentRuntime(
     },
     releaseApplicationPageBinding: (_source, key) =>
       releaseApplicationPage(key),
+    renameApplicationPageBinding: (_source, previousKey, nextKey) =>
+      renameApplicationPageBinding(previousKey, nextKey),
     async transferApplicationPageBinding(_source, previousKey, nextKey) {
       await rebindPreparedApplicationPage(previousKey);
       const page = preparedApplicationPages.get(previousKey);
@@ -2921,23 +2983,9 @@ export function createBrowserAgentRuntime(
       if (previousKey === nextKey) return true;
       await closePrepareOnlyAuthorizedFormActionWindow(page);
       await closePrepareOnlyFinalActionWindow(page);
-      preparedApplicationPages.delete(previousKey);
-      const saved = await preparedFormStore?.get(previousKey);
-      if (saved) {
-        await preparedFormStore!.save({ ...saved, id: nextKey });
-        await preparedFormStore!.delete(previousKey);
-      }
-      const recovery = formRecovery.get(previousKey);
-      formRecovery.delete(previousKey);
-      if (recovery) {
-        if (recovery.saved) recovery.saved = { ...recovery.saved, id: nextKey };
-        formRecovery.set(nextKey, recovery);
-      }
-      recoveryUnavailable.delete(previousKey);
-      markedPreparedApplicationKeys.delete(previousKey);
+      await renameApplicationPageBinding(previousKey, nextKey);
       preparedPagesWithPerson.delete(previousKey);
-      bindPreparedApplicationPage(nextKey, page);
-      await markPreparedPage(nextKey, page);
+      preparedPagesWithPerson.delete(nextKey);
       return true;
     },
     applyPageMechanics: applyPageMechanicsForSource,
@@ -3160,11 +3208,15 @@ export function createBrowserAgentRuntime(
             const browserPreparationStartedAtMs = Date.now();
             let formPreparationStartedAtMs: number | null = null;
             let workingPage: Page | null = null;
+            let accountSession: ReturnType<
+              typeof createPlaywrightApplyPageSession
+            > | null = null;
             let workingPageOwnedByRun = false;
             let releaseReservedTab: (() => void) | null = null;
             let releaseWorkingPageUse: (() => void) | null = null;
             const closeWorkingPageOnAbort = () => {
               if (workingPage && workingPageOwnedByRun) {
+                void accountSession?.closeAccountWindow();
                 void workingPage.close().catch(() => undefined);
               }
             };
@@ -3350,10 +3402,13 @@ export function createBrowserAgentRuntime(
                     formPreparationStartedAtMs = Date.now();
                     const applicationSession =
                       guardApplicationPreparationSession(
-                        createPlaywrightApplyPageSession({
+                        (accountSession = createPlaywrightApplyPageSession({
                           page: prepared.page,
                           sentinel: runSentinel,
-                        }),
+                          ...(options?.signal
+                            ? { signal: options.signal }
+                            : {}),
+                        })),
                         preparationLease,
                         () =>
                           applicationSitePacing.waitForReady(
@@ -3644,9 +3699,27 @@ export function createBrowserAgentRuntime(
               });
           }
 
+          let retainFailedPage = false;
+          if (
+            executionResult.state === "failed" &&
+            executionResult.submittedAt === null &&
+            executionResult.outcome === null &&
+            !options?.signal?.aborted &&
+            applicationPageOpened &&
+            input.applicationPageBindingKey &&
+            preparedApplicationPages.has(input.applicationPageBindingKey)
+          ) {
+            try {
+              retainFailedPage =
+                input.shouldRetainFailedApplicationPage?.(executionResult) ===
+                true;
+            } catch {
+              // An unavailable retention check keeps terminal cleanup intact.
+            }
+          }
           if (
             executionResult.state === "submitted" ||
-            executionResult.state === "failed" ||
+            (executionResult.state === "failed" && !retainFailedPage) ||
             executionResult.state === "unsupported"
           ) {
             if (input.applicationPageBindingKey)
@@ -3733,6 +3806,9 @@ export function createBrowserAgentRuntime(
           ? {
               prepareBrowserCredentials: agentOptions.prepareBrowserCredentials,
             }
+          : {}),
+        ...(agentOptions.readIntendedAccountEmail
+          ? { readIntendedAccountEmail: agentOptions.readIntendedAccountEmail }
           : {}),
         ...(agentOptions.readBrowserPermissions
           ? { readBrowserPermissions: agentOptions.readBrowserPermissions }

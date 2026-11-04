@@ -2,8 +2,14 @@ import {
   CandidateProfileSchema,
   type ApplyAnswerTags,
 } from "@nestor/contracts";
-import { expect, test } from "vitest";
-import { classifyAnswerPermission } from "./answer-source-catalog";
+import { describe, expect, test } from "vitest";
+import {
+  applicantLiteralSource,
+  classifyAnswerPermission,
+  duplicatedHistoryRows,
+  answerSourceCatalog,
+  legalQuestionCountry,
+} from "./answer-source-catalog";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 import { ownWordsAppliesToQuestion } from "./own-words";
 
@@ -61,6 +67,39 @@ function control(
     answered: false,
   };
 }
+
+test("a resolved listing country supports generic legal questions but cannot override an explicit question country", () => {
+  const sources = source();
+  sources.posting = {
+    ...sources.posting,
+    location: "Austin, TX",
+    resolvedCountry: "US",
+  };
+  const catalog = answerSourceCatalog(sources);
+  expect(
+    legalQuestionCountry("Are you authorized to work here?", catalog),
+  ).toBe("US");
+  expect(
+    legalQuestionCountry("Are you authorized to work in Canada?", catalog),
+  ).toBe("CA");
+  sources.posting = {
+    ...sources.posting,
+    location: "Remote",
+    resolvedCountry: null,
+  };
+  expect(
+    legalQuestionCountry(
+      "Are you authorized to work here?",
+      answerSourceCatalog(sources),
+    ),
+  ).toBeNull();
+  expect(
+    legalQuestionCountry(
+      "Are you authorized to work in Germany?",
+      answerSourceCatalog(sources),
+    ),
+  ).toBe("DE");
+});
 function decide(
   sources: ApplyAnswerSources,
   field: ApplyFormControl,
@@ -77,6 +116,91 @@ function decide(
     pageInstructions: "",
   });
 }
+
+test.each([
+  "Full name",
+  "First name",
+  "Legal first name",
+  "Last name",
+  "Legal last name",
+  "Email",
+])(
+  "an unread or repeated applicant literal still binds exactly: %s",
+  (label) => {
+    const sources = source();
+    sources.profile.firstName = "Alex";
+    sources.profile.lastName = "Vanguard";
+    sources.profile.email = "alex@example.test";
+    const field = {
+      ...control(label),
+      groupLabel: "Contact details",
+      repeatedQuestion: {
+        prompt: `${label} (repeated question on step 2)`,
+        step: "2",
+      },
+    };
+    const value = /first/i.test(label)
+      ? "Alex"
+      : /last/i.test(label)
+        ? "Vanguard"
+        : label === "Email"
+          ? "alex@example.test"
+          : "Alex Vanguard";
+    expect(decide(sources, field, null, value).kind).toBe("literal");
+    field.groupLabel = "Employment history — Work history 2";
+    expect(decide(sources, field, null, value).kind).toBe("needs_you");
+  },
+);
+
+test.each([
+  "Preferred name",
+  "Supervisor name",
+  "Reference full name",
+  "Name as on passport",
+])("unread %s does not borrow the applicant name", (label) => {
+  expect(decide(source(), control(label), null, "Alex Vanguard").kind).toBe(
+    "needs_you",
+  );
+});
+
+// Batch-1 review P1: the unread-identity fallback must honour instructions
+// that live only in the page text.
+test.each([
+  ["Enter your reference's full name.", "needs_you"],
+  ["Enter your supervisor’s full name.", "needs_you"],
+  ["Enter the full name of the person who referred you.", "needs_you"],
+  ["Enter your referrer's full name.", "needs_you"],
+  [
+    "Your supervisor will review the application. Enter your full name.",
+    "literal",
+  ],
+  ["Full name exactly as it appears on your passport.", "needs_you"],
+  ["Please fill in your contact details.", "literal"],
+] as const)(
+  "an unread plain Full name follows the page's instruction: %s",
+  (pageInstructions, expected) => {
+    const sources = source();
+    const field = { ...control("Full name"), groupLabel: "Contact details" };
+    const decision = classifyAnswerPermission({
+      sources,
+      control: field,
+      controls: [field],
+      tags: null,
+      answer: "Alex Vanguard",
+      pageInstructions,
+    });
+    expect(decision.kind).toBe(expected);
+    // The repeated-step guard is lifted only by the same binding.
+    expect(
+      applicantLiteralSource(
+        { ...field, repeatedQuestion: { prompt: "Full name", step: "2" } },
+        [field],
+        sources,
+        pageInstructions,
+      ) !== null,
+    ).toBe(expected === "literal");
+  },
+);
 
 test("a nested scalar history fact remains literal when classified as a factual account", () => {
   const sources = source();
@@ -212,6 +336,189 @@ test("a host semantic match preserves reference, own-words, country and history 
   ).toBe("needs_you");
 });
 
+// Captured ledgerleaf receipt (candidate 2, 2026-11-03): work1 and work2 were
+// both "Staff Frontend Engineer / Signal Systems / 2021-03", one Profile record
+// in two rows. Rows bind by what they hold, never by order (council D2).
+describe("history rows and Profile records", () => {
+  const twoJobs = () => {
+    const sources = source();
+    sources.profile = CandidateProfileSchema.parse({
+      ...sources.profile,
+      experiences: [
+        {
+          id: "signal",
+          companyName: "Signal Systems",
+          title: "Staff Frontend Engineer",
+          startDate: "2021-03",
+          isCurrent: true,
+        },
+        {
+          id: "copper",
+          companyName: "Copper Finch Software",
+          title: "Software Engineer",
+          startDate: "2016-01",
+          endDate: "2021-02",
+        },
+      ],
+    });
+    return sources;
+  };
+  const rowControls = (row: 1 | 2, values: [string, string, string]) =>
+    (["Job title", "Company", "From"] as const).map((label, index) => ({
+      ...control(label),
+      ref: `w${row}${index}`,
+      groupLabel: `Work history (optional) — Work history ${row}`,
+      sectionPath: ["Work history (optional)", `Work history ${row}`],
+      rowScopeKey: `row${row}`,
+      scopeKey: "form0",
+      ...(label === "From"
+        ? { kind: "date" as const, dateInputType: "month" as const }
+        : {}),
+      value: values[index] ?? "",
+    }));
+  const fill = (
+    sources: ReturnType<typeof source>,
+    field: ApplyFormControl,
+    controls: ApplyFormControl[],
+    record: string,
+    answer: string,
+  ) =>
+    classifyAnswerPermission({
+      sources,
+      control: field,
+      controls,
+      tags: {
+        kind: "other",
+        country: null,
+        sourceId: `profile.experiences.${record}.companyName`,
+      },
+      answer,
+      pageInstructions: "",
+    }).kind;
+
+  test("a record another row holds never fills a second row; the other record does", () => {
+    const sources = twoJobs();
+    const first = rowControls(1, [
+      "Staff Frontend Engineer",
+      "Signal Systems",
+      "2021-03",
+    ]);
+    const second = rowControls(2, ["", "", ""]);
+    const [, company] = second;
+    if (!company) throw new Error("row 2 has a Company field");
+    expect(
+      classifyAnswerPermission({
+        sources,
+        control: company,
+        controls: [...first, ...second],
+        tags: {
+          kind: "other",
+          country: null,
+          sourceId: "profile.experiences.signal.companyName",
+        },
+        answer: "Signal Systems",
+        pageInstructions: "",
+      }),
+    ).toMatchObject({ kind: "needs_you", check: "history_record_in_use" });
+    expect(
+      fill(
+        sources,
+        company,
+        [...first, ...second],
+        "copper",
+        "Copper Finch Software",
+      ),
+    ).toBe("literal");
+    // With no other row holding it, the first record fills normally.
+    expect(fill(sources, company, second, "signal", "Signal Systems")).toBe(
+      "literal",
+    );
+  });
+
+  test("the Send check names rows holding the same single record, and only those", () => {
+    const sources = twoJobs();
+    const duplicate = [
+      ...rowControls(1, [
+        "Staff Frontend Engineer",
+        "Signal Systems",
+        "2021-03",
+      ]),
+      ...rowControls(2, [
+        "Staff Frontend Engineer",
+        "Signal Systems",
+        "2021-03",
+      ]),
+    ];
+    expect(duplicatedHistoryRows(duplicate, sources)).toEqual([
+      "Work history 1",
+      "Work history 2",
+    ]);
+    const distinct = [
+      ...rowControls(1, [
+        "Staff Frontend Engineer",
+        "Signal Systems",
+        "2021-03",
+      ]),
+      ...rowControls(2, [
+        "Software Engineer",
+        "Copper Finch Software",
+        "2016-01",
+      ]),
+    ];
+    expect(duplicatedHistoryRows(distinct, sources)).toEqual([]);
+    // An empty optional row, or one the person typed that no record is,
+    // is not a duplicate.
+    expect(
+      duplicatedHistoryRows(
+        [
+          ...rowControls(1, [
+            "Staff Frontend Engineer",
+            "Signal Systems",
+            "2021-03",
+          ]),
+          ...rowControls(2, ["", "", ""]),
+        ],
+        sources,
+      ),
+    ).toEqual([]);
+    expect(
+      duplicatedHistoryRows(
+        [
+          ...rowControls(1, [
+            "Staff Frontend Engineer",
+            "Signal Systems",
+            "2021-03",
+          ]),
+          ...rowControls(2, ["Volunteer", "Local Library", "2014-05"]),
+        ],
+        sources,
+      ),
+    ).toEqual([]);
+  });
+
+  test("applicant identity never fills a field inside a history or reference row", () => {
+    const sources = twoJobs();
+    for (const section of ["Work history 1", "Professional reference"]) {
+      const field = {
+        ...control("Full name"),
+        groupLabel: section,
+        sectionPath: [section],
+        rowScopeKey: "row1",
+      };
+      expect(
+        classifyAnswerPermission({
+          sources,
+          control: field,
+          controls: [field],
+          tags: null,
+          answer: "Alex Vanguard",
+          pageInstructions: "",
+        }).kind,
+      ).toBe("needs_you");
+    }
+  });
+});
+
 test("plain applicant identity binds to its own exact Profile value when the model omits a source", () => {
   const sources = source();
   sources.profile.firstName = "Alex";
@@ -232,7 +539,11 @@ test("plain applicant identity binds to its own exact Profile value when the mod
     expect(decide(sources, field, tags, "Different value").kind).not.toBe(
       "literal",
     );
-    expect(decide(sources, field, null, value).kind).toBe("needs_you");
+    // A classifier outage is not a question for a fact Profile holds.
+    expect(decide(sources, field, null, value).kind).toBe("literal");
+    expect(decide(sources, field, null, "Different value").kind).toBe(
+      "needs_you",
+    );
     expect(
       classifyAnswerPermission({
         sources,
@@ -770,6 +1081,97 @@ test.each([
   },
 );
 
+// Captured on the harbor-health replica (2026-11-03): "Availability —
+// Preferred start date *" (a date input) was gated as an opinion and asked,
+// although Profile records availableStartDate.
+test.each(["other", "preference"] as const)(
+  "a preferred start date is the recorded availability, not an opinion (read as %s)",
+  (kind) => {
+    const sources = source();
+    sources.profile.workEligibility.availableStartDate = "2026-12-01";
+    const field: ApplyFormControl = {
+      ...control("Preferred start date *"),
+      kind: "date",
+      answerControlType: "date",
+      groupLabel: "Availability",
+    };
+    const tags = {
+      kind,
+      country: null,
+      sourceId: "profile.workEligibility.availableStartDate",
+    };
+    expect(decide(sources, field, tags, "2026-12-01").kind).toBe("literal");
+    expect(decide(sources, field, tags, "2026-11-15").kind).toBe("needs_you");
+  },
+);
+
+test.each([
+  ["What is your preferred work location?", "text", "Berlin"],
+  ["What is your preferred language?", "text", "English"],
+  ["Preferred interview date", "date", "2026-12-01"],
+] as const)(
+  "other preferred questions stay the person's: %s",
+  (label, kind, answer) => {
+    const sources = source();
+    sources.profile.workEligibility.availableStartDate = "2026-12-01";
+    const field: ApplyFormControl = {
+      ...control(label),
+      kind,
+      answerControlType: kind,
+    };
+    expect(
+      decide(
+        sources,
+        field,
+        {
+          kind: "preference",
+          country: null,
+          sourceId: "profile.workEligibility.availableStartDate",
+        },
+        answer,
+      ).kind,
+    ).toBe("needs_you");
+  },
+);
+
+// Captured on the workday replica (2026-11-03): "Which technical skills would
+// you bring? *" was asked although every listed skill is in Profile.
+test("a skills question is answered from the recorded skills list, verbatim only", () => {
+  const sources = source();
+  sources.profile = CandidateProfileSchema.parse({
+    ...sources.profile,
+    skills: ["React", "TypeScript", "Mentoring"],
+  });
+  const tags = { kind: "other", country: null, sourceId: null } as const;
+  const bring = {
+    ...control("Which technical skills would you bring? *"),
+    groupLabel: "Application Questions",
+  };
+  expect(
+    decide(sources, bring, tags, "React, TypeScript, Mentoring"),
+  ).toMatchObject({
+    kind: "literal",
+    source: { id: "profile.skills" },
+  });
+  // An unrecorded skill is never vouched for.
+  expect(decide(sources, bring, tags, "React, Kubernetes").kind).not.toBe(
+    "literal",
+  );
+  // Opinion and own-words wording, and another person's skills, stay gated.
+  for (const label of [
+    "What is your top skill?",
+    "Which skills do you enjoy using most?",
+    "Describe, in your own words, the skills you would bring",
+    "Which skills would your reference say you have?",
+  ])
+    expect(decide(sources, control(label), tags, "React").kind).not.toBe(
+      "literal",
+    );
+  expect(
+    decide(sources, bring, { ...tags, kind: "preference" }, "React").kind,
+  ).toBe("needs_you");
+});
+
 test("only a classified, fact-free motivation can proceed without a source", () => {
   const sources = source(),
     field = control("Why do you want to join us?");
@@ -1133,6 +1535,231 @@ test("limited permission is not unconditional authorization or sponsorship", () 
   ).toBe("needs_you");
 });
 
+// Council D6: the job's country comes from the question or the listing,
+// never from Remote, a bare city or the Profile's own permits; the
+// countries where the person may work are a complete list (ADR 0029).
+describe("D6 job country and eligibility answers", () => {
+  const eligible = (
+    location: string,
+    workEligibility: Partial<
+      ApplyAnswerSources["profile"]["workEligibility"]
+    > = {},
+  ) => {
+    const sources = source();
+    sources.posting.location = location;
+    sources.profile.workEligibility = {
+      ...sources.profile.workEligibility,
+      authorizedWorkCountries: ["Germany"],
+      requiresVisaSponsorship: false,
+      limitedWorkPermissions: [],
+      ...workEligibility,
+    };
+    return sources;
+  };
+  const auth = (
+    sources: ApplyAnswerSources,
+    question: string,
+    answer: string,
+    country: string | null,
+    hasAdditionalConditions?: boolean,
+  ) =>
+    decide(
+      sources,
+      control(question),
+      {
+        kind: "work_auth",
+        country,
+        sourceId: "profile.workEligibility.authorizedWorkCountries.0",
+        ...(hasAdditionalConditions === undefined
+          ? {}
+          : { hasAdditionalConditions }),
+      },
+      answer,
+    ).kind;
+  const jobCountry = "Are you authorized to work in the job's country?";
+
+  test("one known country: every city in it is answered from Profile", () => {
+    for (const location of ["Berlin, Germany", "Munich, Germany"])
+      expect(auth(eligible(location), jobCountry, "Yes", "DE")).toBe("literal");
+    // A question naming the country settles it even on a Remote listing.
+    expect(
+      auth(
+        eligible("Remote"),
+        "Are you authorized to work in Germany?",
+        "Yes",
+        "DE",
+      ),
+    ).toBe("literal");
+  });
+
+  test("Remote, a bare city or several permits never pick a country", () => {
+    expect(auth(eligible("Remote"), jobCountry, "Yes", "DE")).toBe("needs_you");
+    expect(
+      auth(
+        eligible("Remote", { authorizedWorkCountries: ["Germany", "Kosovo"] }),
+        jobCountry,
+        "Yes",
+        "DE",
+      ),
+    ).toBe("needs_you");
+    expect(auth(eligible("Berlin"), jobCountry, "Yes", "DE")).toBe("needs_you");
+  });
+
+  test("a resolved country the complete list does not cover is a No; doubt still asks", () => {
+    expect(auth(eligible("Paris, France"), jobCountry, "No", "FR")).toBe(
+      "literal",
+    );
+    // Never a Yes for it, and never a No when the list names a region, a
+    // limited permit covers it, or the question adds conditions.
+    expect(auth(eligible("Paris, France"), jobCountry, "Yes", "FR")).toBe(
+      "needs_you",
+    );
+    expect(
+      auth(
+        eligible("Paris, France", {
+          authorizedWorkCountries: ["European Union"],
+        }),
+        jobCountry,
+        "No",
+        "FR",
+      ),
+    ).not.toBe("literal");
+    expect(
+      auth(
+        eligible("Paris, France", {
+          limitedWorkPermissions: [
+            {
+              country: "France",
+              conditions: "Student work only",
+              requiresFutureSponsorship: null,
+            },
+          ],
+        }),
+        jobCountry,
+        "No",
+        "FR",
+      ),
+    ).not.toBe("literal");
+    expect(
+      auth(eligible("Paris, France"), jobCountry, "No", "FR", true),
+    ).not.toBe("literal");
+    // An unresolved country never becomes a No.
+    expect(auth(eligible("Remote"), jobCountry, "No", null)).not.toBe(
+      "literal",
+    );
+  });
+
+  test("'without sponsorship' follows the recorded sponsorship fact; other conditions ask", () => {
+    const question =
+      "Are you authorized to work in Germany without sponsorship?";
+    expect(auth(eligible("Berlin, Germany"), question, "Yes", "DE", true)).toBe(
+      "literal",
+    );
+    expect(
+      auth(
+        eligible("Berlin, Germany", { requiresVisaSponsorship: true }),
+        question,
+        "Yes",
+        "DE",
+        true,
+      ),
+    ).toBe("needs_you");
+    expect(
+      auth(
+        eligible("Berlin, Germany", { requiresVisaSponsorship: null }),
+        question,
+        "Yes",
+        "DE",
+        true,
+      ),
+    ).toBe("needs_you");
+    expect(
+      auth(
+        eligible("Berlin, Germany", {
+          limitedWorkPermissions: [
+            {
+              country: "Germany",
+              conditions: "Up to 20 hours per week",
+              requiresFutureSponsorship: false,
+            },
+          ],
+        }),
+        question,
+        "Yes",
+        "DE",
+        true,
+      ),
+    ).toBe("needs_you");
+    for (const wording of [
+      "Are you authorized to work in Germany without restrictions?",
+      "Are you permanently authorized to work in Germany without sponsorship?",
+    ])
+      expect(
+        auth(eligible("Berlin, Germany"), wording, "Yes", "DE", true),
+      ).toBe("needs_you");
+    // On an unresolved Remote listing it still asks.
+    expect(
+      auth(
+        eligible("Remote"),
+        "Are you authorized to work in this country without sponsorship?",
+        "Yes",
+        "DE",
+        true,
+      ),
+    ).toBe("needs_you");
+  });
+
+  test("a person's answer under a limited permit stays with that application", () => {
+    const sources = eligible("Berlin, Germany", {
+      authorizedWorkCountries: [],
+      limitedWorkPermissions: [
+        {
+          country: "Germany",
+          conditions: "Up to 20 hours per week",
+          requiresFutureSponsorship: false,
+        },
+      ],
+    });
+    sources.posting.description = "This role requires 40 hours per week.";
+    const field = control(jobCountry);
+    const saved = (applicationRecordId: string | null) => ({
+      id: applicationRecordId ? "application_7" : "remembered_7",
+      kind: "work_authorization" as const,
+      label: field.label,
+      question: field.label,
+      answer: "Yes",
+      roleFamilies: [],
+      proofEntryIds: [],
+      applicationScope: {
+        resultId: null,
+        applicationRecordId,
+        location: "Berlin, Germany",
+      },
+    });
+    const tags = { kind: "work_auth", country: "DE", sourceId: null } as const;
+    sources.reusableAnswers = [saved(null)];
+    expect(decide(sources, field, tags, "Yes").kind).toBe("needs_you");
+    sources.reusableAnswers = [saved("application_1")];
+    expect(
+      classifyAnswerPermission({
+        sources,
+        control: field,
+        controls: [field],
+        tags,
+        answer: "Yes",
+        pageInstructions: "",
+        application: {
+          jobId: "1",
+          applicationId: "application_1_attempt_2",
+          resultId: "application_1_attempt_2",
+          applicationRecordId: "application_1",
+          startingUrl: "https://replica.test",
+        },
+      }).kind,
+    ).toBe("literal");
+  });
+});
+
 test("a limited permit must fit the job hours and future sponsorship remains affirmative", () => {
   const sources = source();
   sources.posting.location = "Germany";
@@ -1342,4 +1969,125 @@ test("explicit residence country can be read from a saved full location, never f
   expect(decide(sources, field, tags).kind).toBe("literal");
   sources.profile.currentLocation = "Lisbon";
   expect(decide(sources, field, tags).kind).toBe("needs_you");
+});
+
+// Candidate 2: after "My answers are true" was turned off, the certify box was
+// asked with "There is no matching verbatim source". It is the person's
+// declaration to confirm, and the reason says why.
+test("an unapproved declaration says it is the person's to confirm, and is never ticked", () => {
+  const field: ApplyFormControl = {
+    ...control("I certify that the information is true *"),
+    kind: "checkbox",
+    answerControlType: "boolean",
+    groupLabel: "Review and send",
+    attestationKind: "truthfulness_certification",
+  };
+  const decision = (approved: boolean) =>
+    classifyAnswerPermission({
+      sources: source(),
+      control: field,
+      controls: [field],
+      tags: { kind: "other", country: null, sourceId: null },
+      approvedAttestations: approved ? ["truthfulness_certification"] : [],
+      answer: "Yes",
+      pageInstructions: "",
+    });
+  const refused = decision(false);
+  expect(refused.kind).toBe("needs_you");
+  expect(refused.kind === "needs_you" && refused.check).toBe(
+    "declaration_permission",
+  );
+  expect(refused.kind === "needs_you" && refused.reason).toContain(
+    "not one of those you let Nestor tick",
+  );
+  expect(decision(true).kind).toBe("literal");
+});
+
+// Candidate 5 workday replica: "My Information — Address *" beside its own
+// City and Postal code fields was sent "Berlin, Germany" (profile location).
+// Earlier runs filled the street from the resume by checked inference.
+describe("a street address line beside its own city field", () => {
+  const sources = () => {
+    const s = source();
+    s.profile.currentCity = "Berlin";
+    s.profile.currentLocation = "Berlin, Germany";
+    s.profile.currentCountry = "Germany";
+    s.resumeText = "Jamie Rivers\n12 Example Street, Berlin, Germany 10115";
+    return s;
+  };
+  const form = () =>
+    ["Address *", "City *", "Postal code *", "Country *"].map(
+      (label, index) => ({
+        ...control(label),
+        ref: `c${index}`,
+        groupLabel: "My Information",
+        scopeKey: "form0",
+      }),
+    );
+  const decide = (
+    field: ApplyFormControl,
+    controls: ApplyFormControl[],
+    sourceId: string | null,
+    answer: string,
+  ) =>
+    classifyAnswerPermission({
+      sources: sources(),
+      control: field,
+      controls,
+      tags: { kind: "other", country: null, sourceId },
+      answer,
+      pageInstructions: "",
+    });
+
+  test("never takes the city or location, from any source, and the street can still be worked out", () => {
+    const controls = form();
+    const [address, city] = controls;
+    if (!address || !city) throw new Error("fixture");
+    for (const [sourceId, answer] of [
+      ["profile.currentLocation", "Berlin, Germany"],
+      ["profile.currentCity", "Berlin"],
+      ["resume.text", "Berlin, Germany"],
+      [null, "Berlin"],
+    ] as const)
+      expect(decide(address, controls, sourceId, answer)).toMatchObject({
+        kind: "needs_you",
+        check: "street_address_line",
+      });
+    // The street itself goes through the checked inference path.
+    expect(
+      decide(address, controls, "resume.text", "12 Example Street").kind,
+    ).toBe("inference");
+    // City still binds its own Profile fact.
+    expect(decide(city, controls, "profile.currentCity", "Berlin").kind).toBe(
+      "literal",
+    );
+    // An unread Address street line never borrows the city either.
+    expect(
+      classifyAnswerPermission({
+        sources: sources(),
+        control: address,
+        controls,
+        tags: null,
+        answer: "Berlin",
+        pageInstructions: "",
+      }).kind,
+    ).toBe("needs_you");
+  });
+
+  test("a lone Address or a Location field is still the person's location", () => {
+    const lone = { ...control("Address"), groupLabel: "Address" };
+    expect(
+      decide(lone, [lone], "profile.currentCity", "Berlin, Germany").kind,
+    ).toBe("literal");
+    const controls = form();
+    const location = { ...control("Location"), ref: "loc", scopeKey: "form0" };
+    expect(
+      decide(
+        location,
+        [...controls, location],
+        "profile.currentLocation",
+        "Berlin, Germany",
+      ).kind,
+    ).toBe("literal");
+  });
 });

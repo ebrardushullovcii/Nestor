@@ -2,12 +2,16 @@ import type { BrowserPermissionPolicy } from "../browser-permission-policy";
 import type { FormReplay } from "./form-replay";
 import type {
   ApplyAgentTiming,
+  ApplyFrameOwner,
   ApplyFormPathStep,
   ApplyPickerAttempt,
+  ApplyStepReceipt,
+  RawApplySummaryRow,
   StoredApplyPickerAttempt,
 } from "@nestor/contracts";
 import type {
   ApplicationAttemptQuestion,
+  ApplicationAttemptCheckpoint,
   ApplyAnswerTags,
   ApplyBlockedAttempt,
   CoverLetterPreference,
@@ -28,6 +32,7 @@ import type {
   JobSearchPreferences,
   RawApplyUpload,
   RawApplyUploadOutcome,
+  RawApplyPage,
 } from "@nestor/contracts";
 
 /**
@@ -55,6 +60,7 @@ export type ApplyControlKind =
 export type ApplyActionKind = "advance" | "back" | "final" | "other";
 
 export interface ApplyFormControl {
+  frame?: ApplyFrameOwner;
   /** Stable handle for this control within one observation. */
   ref: string;
   kind: ApplyControlKind;
@@ -123,6 +129,7 @@ export interface ApplyFormControl {
 
 /** Where an action or clickable sits on the page; see `RawApplyPlacement`. */
 export interface ApplyPlacement {
+  frame?: ApplyFrameOwner;
   /** The part of the page holding it: legend, dialog or section name, or nearby words. */
   section?: string;
   /** Inside a form, a fieldset or a group of fields. */
@@ -151,6 +158,7 @@ export type ApplyLinkDestination = "page" | "email" | "document" | "other";
  * run finds the way through; nothing here is specific to any site.
  */
 export interface ApplyPageLink {
+  frame?: ApplyFrameOwner;
   /** Stable handle for this link within one observation. */
   ref: string;
   label: string;
@@ -204,6 +212,7 @@ export interface ApplyClickable extends ApplyPlacement {
   role: string;
   tagName: string;
   visible: boolean;
+  disabled: boolean;
 }
 
 export interface ApplyHeading {
@@ -245,6 +254,10 @@ export interface ApplyFormObservation {
   clickables: ApplyClickable[];
   /** Tabs the page opened for itself. Going to one is the model's choice. */
   openedTabs: ApplyOpenedTab[];
+  /** A ref-bound account child currently owned by this application session. */
+  accountWindow?: RawApplyPage["accountWindow"];
+  /** Visible `dt`/`dd` rows, read as the page shows them. */
+  summaryRows?: readonly RawApplySummaryRow[];
   validationErrors: string[];
   /** True while the page is still loading. The model may wait and look again. */
   loading: boolean;
@@ -285,6 +298,7 @@ export interface ApplyPageHands {
   navigate: (url: string) => Promise<ApplyNavigationResult>;
   clickElement: (ref: string) => Promise<ApplyWriteResult>;
   clickWithoutWrites?: ApplyRawPageHands["clickWithoutWrites"];
+  clickBoundAction?: ApplyRawPageHands["clickBoundAction"];
   /** Presses a keyboard key on one element, or on the active page. */
   pressKey?: (
     ref: string | undefined,
@@ -308,6 +322,9 @@ export interface ApplyPageHands {
   followLink: (ref: string) => Promise<ApplyNavigationResult>;
   /** Moves the run into a tab the page opened, closing that tab. */
   adoptOpenedTab?: (index: number) => Promise<ApplyNavigationResult>;
+  readAccountFlowEntry?: ApplyRawPageHands["readAccountFlowEntry"];
+  clickOpeningAccountWindow?: ApplyRawPageHands["clickOpeningAccountWindow"];
+  renewAccountWindow?: ApplyRawPageHands["renewAccountWindow"];
 }
 
 /** Where an answer came from. Every written answer carries one. */
@@ -340,6 +357,8 @@ export interface ApplyAnswerSources {
     title: string;
     company: string;
     location: string;
+    /** Listing country resolved by the product's shared location resolver. */
+    resolvedCountry?: string | null;
     description: string;
   };
   /** Latest letter approved in this application's document library. */
@@ -442,6 +461,8 @@ export interface ApplyPause {
   blocker: ApplyBlocker | null;
   /** A button that may send the form, handed to the person in either mode. */
   formSend?: true;
+  /** A step press Nestor made once whose result the page did not confirm. */
+  unconfirmedStep?: true;
 }
 
 export interface ApplyFilledControl {
@@ -480,6 +501,16 @@ export type ApplyAgentOutcome =
   | "stuck";
 
 export interface ApplyAgentResult {
+  /** Nestor failed to read; keep this attempt's usable page for an explicit retry. */
+  technicalFailure?: {
+    code:
+      | "question_classification_unavailable"
+      | "answer_grounding_unavailable";
+    retryable: true;
+    pageDisposition: "retain";
+  };
+  /** Confirmed-step and final-observation receipts of this attempt (send evidence). */
+  stepReceipts?: ApplyStepReceipt[];
   skipReason?: string;
   questionContexts?: Array<{ prompt: string; step: string }>;
   /** Choices pickers on this application refused, for the next run. */
@@ -501,7 +532,7 @@ export interface ApplyAgentResult {
   /** Plain-sentence trail of what happened, oldest first. */
   notes: string[];
   /** The same trail with the moment each line was written. */
-  timeline: { at: string; text: string }[];
+  timeline: { at: string; text: string; label?: string }[];
   /** How many times the model was asked. Zero means no model was used. */
   modelTurns: number;
   /**
@@ -558,6 +589,8 @@ export type ApplyProposal =
     };
 
 export interface ApplyAgentConfig extends BrowserPermissionPolicy {
+  /** Existing local checkpoints retained when this application is continued. */
+  earlierActivity?: readonly ApplicationAttemptCheckpoint[];
   /** Host-only semantic matches that passed the independent grounding check. */
   matchedAnswers?: ReadonlyMap<string, string>;
   initialQuestionContexts?: ReadonlyArray<{ prompt: string; step: string }>;

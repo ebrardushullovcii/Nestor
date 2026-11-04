@@ -441,6 +441,7 @@ export async function checkWrittenApplicationAnswers(input: {
               factualSummaryIsSourced(
                 proposedAnswer.answer,
                 ownEvidence.map((item) => item.quote),
+                proposedAnswer.question,
               ) &&
               factualSummaryIsSourced(
                 proposedAnswer.answer,
@@ -453,6 +454,7 @@ export async function checkWrittenApplicationAnswers(input: {
                   );
                   return typeof value === "string" ? value : "";
                 }),
+                proposedAnswer.question,
               ))) &&
           (proposedAnswer.evidencePolicy === "factual_inference"
             ? ownEvidence.length > 0 &&

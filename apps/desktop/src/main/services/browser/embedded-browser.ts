@@ -24,7 +24,7 @@ import {
   type Session,
   type BrowserWindowConstructorOptions,
 } from "electron";
-import type { Browser } from "playwright";
+import type { Browser, Page } from "playwright";
 import {
   DesktopBrowserStateSchema,
   readApplicationSubmissionConfirmationEvidence,
@@ -69,6 +69,9 @@ import {
 export const EMBEDDED_BROWSER_PARTITION = "persist:nestor-browser";
 const MAX_TABS = EMBEDDED_BROWSER_MAX_WORKING_TABS;
 const MAX_TOTAL_TABS = EMBEDDED_BROWSER_MAX_TOTAL_TABS;
+// Electron's own user agent, read once per process before getSession() changes
+// the process fallback, so a later instance never captures the changed value.
+let electronUserAgent: string | null = null;
 interface BrowserPage extends BrowserCdpPage {
   view: WebContentsView;
   createdAt: number;
@@ -611,19 +614,84 @@ export class EmbeddedBrowser {
     );
   }
 
-  async reclaimOwnedTabs(owner: string): Promise<void> {
+  /** Restore the person's handoff if the subsequent exact-page transfer fails. */
+  async reclaimOwnedTabs(owner: string): Promise<() => void> {
     const tabs = this.ownedTabs.get(owner);
-    if (!tabs) return;
+    if (!tabs) return () => {};
+    const previous = [...tabs].map((id) => ({
+      id,
+      held: this.heldTabs.get(id),
+      parked: this.parkedTabs.has(id),
+      attention: this.parkedTabs.get(id),
+      person: this.personTabs.has(id),
+      input: this.personInputTabs.has(id),
+      inputAt: this.personInputAt.get(id),
+    }));
+    let restored = false;
+    const restore = () => {
+      if (restored) return;
+      restored = true;
+      for (const before of previous) {
+        const page = this.pageMap.get(before.id);
+        if (
+          !this.ownedTabs.get(owner)?.has(before.id) ||
+          !page ||
+          page.contents.isDestroyed()
+        )
+          continue;
+        if (before.held && !this.heldTabs.has(before.id))
+          this.heldTabs.set(before.id, before.held);
+        if (before.parked && !this.parkedTabs.has(before.id))
+          this.parkedTabs.set(before.id, before.attention ?? null);
+        if (before.person) this.personTabs.add(before.id);
+        if (before.input) this.personInputTabs.add(before.id);
+        if (before.inputAt !== undefined && !this.personInputAt.has(before.id))
+          this.personInputAt.set(before.id, before.inputAt);
+        if (before.held || before.parked || before.person || before.input) {
+          this.bridge?.releasePage(before.id);
+          this.openTabForPerson(before.id);
+        }
+      }
+    };
     for (const id of tabs) {
       this.heldTabs.delete(id);
       this.parkedTabs.delete(id);
       this.personTabs.delete(id);
     }
-    await this.getOpenBrowser();
-    for (const id of tabs) {
-      const page = this.pageMap.get(id);
-      await this.closeTabForAutomation(id);
-      if (page && this.bridge) await this.bridge.reclaimPage(page);
+    try {
+      await this.getOpenBrowser();
+      if (this.ownerHasSendEvidence(owner)) {
+        restore();
+        return restore;
+      }
+      for (const id of tabs) {
+        const page = this.pageMap.get(id);
+        await this.closeTabForAutomation(id, true);
+        if (this.ownerHasSendEvidence(owner)) {
+          restore();
+          return restore;
+        }
+        if (page && this.bridge) await this.bridge.reclaimPage(page);
+      }
+    } catch (error) {
+      restore();
+      throw error;
+    }
+    return restore;
+  }
+
+  ownerHasSendEvidence(owner: string): boolean {
+    return [...(this.ownedTabs.get(owner) ?? [])].some(
+      (id) => this.personSendPressedAt.has(id) || this.sentTabs.has(id),
+    );
+  }
+
+  /** Called synchronously after the last send-evidence check and ownership move. */
+  completeOwnedTabReclaim(owner: string): void {
+    for (const id of this.ownedTabs.get(owner) ?? []) {
+      if (this.personSendPressedAt.has(id) || this.sentTabs.has(id)) continue;
+      this.personInputTabs.delete(id);
+      this.personInputAt.delete(id);
     }
   }
 
@@ -806,12 +874,18 @@ export class EmbeddedBrowser {
 
   getSession(): Session {
     if (this.browserSession) return this.browserSession;
+    // Electron's own identity, read once before the fallback below changes it.
+    electronUserAgent ??= app.userAgentFallback;
+    const chromeUserAgent = browserUserAgent(electronUserAgent, app.getName());
+    // Popups adopt Chromium-created contents whose first navigation ignores
+    // per-contents overrides (Electron sets them without override_in_new_tabs),
+    // so the process default presents the same Chrome identity (ADR 0017).
+    app.userAgentFallback = chromeUserAgent;
     const browserSession = session.fromPartition(EMBEDDED_BROWSER_PARTITION);
-    this.originalUserAgent = browserSession.getUserAgent();
+    // Retry site verification restores this original, never the fallback.
+    this.originalUserAgent = electronUserAgent;
     this.passwords();
-    browserSession.setUserAgent(
-      browserUserAgent(this.originalUserAgent, app.getName()),
-    );
+    browserSession.setUserAgent(chromeUserAgent);
     // Present as the Chrome this Chromium is built from: brand headers here,
     // the in-page brand list and window.chrome shape through a bridge-free
     // page preload. Google's sign-in refuses the bare Chromium identity.
@@ -1993,11 +2067,10 @@ export class EmbeddedBrowser {
     }
   }
 
-  private async closeTabForAutomation(tabId: string): Promise<void> {
-    this.personInputTabs.delete(tabId);
-    this.personInputAt.delete(tabId);
-    this.personSendPressedAt.delete(tabId);
-    this.personSendContext.delete(tabId);
+  private async closeTabForAutomation(
+    tabId: string,
+    preserveSendEvidence = false,
+  ): Promise<void> {
     const page = this.pageMap.get(tabId);
     if (!page || page.contents.isDestroyed()) return;
     await Promise.all(
@@ -2015,6 +2088,13 @@ export class EmbeddedBrowser {
           .catch(() => undefined),
       ),
     );
+    // Keep native input attribution until the guard has actually closed.
+    // A press arriving during getOpenBrowser or this await must survive.
+    if (preserveSendEvidence) return;
+    this.personInputTabs.delete(tabId);
+    this.personInputAt.delete(tabId);
+    this.personSendPressedAt.delete(tabId);
+    this.personSendContext.delete(tabId);
   }
 
   private takeTab(tabId: string, operationIds: readonly string[]): void {
@@ -2122,6 +2202,89 @@ export class EmbeddedBrowser {
     const landed = bridge.waitForToken(token, 3_000);
     void page.evaluate((value) => value, token).catch(() => undefined);
     return landed;
+  }
+
+  private readonly automationPageTabIds = new WeakMap<
+    Page,
+    Promise<string | null>
+  >();
+
+  async ownedApplicationPage(
+    owner: string,
+  ): Promise<{ page: Page | null } | null> {
+    const live = [...(this.ownedTabs.get(owner) ?? [])].flatMap((id) => {
+      const page = this.pageMap.get(id);
+      return page && !page.contents.isDestroyed() ? [page] : [];
+    });
+    if (!live.length) return null;
+    const ownIds = new Set(live.map((page) => page.id));
+    const roots = live.filter(
+      (page) => !page.openerId || !ownIds.has(page.openerId),
+    );
+    const root = roots.length === 1 ? roots[0] : undefined;
+    if (
+      !root ||
+      (!this.lentTabs.has(root.id) &&
+        (this.heldTabs.has(root.id) ||
+          this.parkedTabs.has(root.id) ||
+          this.personTabs.has(root.id)))
+    )
+      return { page: null };
+    const deadline = Date.now() + 5_000;
+    const withinDeadline = async <T>(work: Promise<T>): Promise<T | null> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          work,
+          new Promise<null>((resolve) => {
+            timer = setTimeout(
+              () => resolve(null),
+              Math.max(0, deadline - Date.now()),
+            );
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    };
+    const browser = await withinDeadline(this.getOpenBrowser());
+    if (!browser) return { page: null };
+    do {
+      if (
+        !this.ownedTabs.get(owner)?.has(root.id) ||
+        root.contents.isDestroyed()
+      )
+        return { page: null };
+      if (
+        !this.lentTabs.has(root.id) &&
+        (this.heldTabs.has(root.id) ||
+          this.parkedTabs.has(root.id) ||
+          this.personTabs.has(root.id))
+      )
+        return { page: null };
+      const matches = await withinDeadline(
+        Promise.all(
+          browser
+            .contexts()
+            .flatMap((context) => context.pages())
+            .filter((page) => !page.isClosed())
+            .map(async (page) => {
+              let identity = this.automationPageTabIds.get(page);
+              if (!identity) {
+                identity = this.identifyAutomationPage(page).catch(() => null);
+                this.automationPageTabIds.set(page, identity);
+              }
+              return (await identity) === root.id ? page : null;
+            }),
+        ),
+      );
+      const page = matches?.find((candidate) => candidate !== null);
+      if (page && !page.isClosed()) return { page };
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))),
+      );
+    } while (Date.now() < deadline);
+    return { page: null };
   }
 
   async getOpenBrowser(): Promise<Browser | null> {

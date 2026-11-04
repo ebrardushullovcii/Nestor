@@ -164,6 +164,7 @@ function describeControl(
     control.required ? "required" : "optional",
     describeAnswered(control),
   ];
+  if (control.frame) parts.push(`frame: ${control.frame.origin}`);
   if (control.sectionPath?.length)
     parts.push(`sections: ${control.sectionPath.join(" > ")}`);
   if (control.acceptedTypes?.length)
@@ -177,7 +178,7 @@ function describeControl(
     const shown = control.options.slice(0, 12);
     const remaining = control.options.length - shown.length;
     parts.push(
-      `choices: ${shown.join(" | ")}${remaining > 0 ? ` | +${remaining} more` : ""}`,
+      `choices: ${shown.join(" | ")}${remaining > 0 ? ` | ${remaining} more; call read_text with ref ${control.ref} for all choices` : ""}`,
     );
   }
   if (control.attestationKind) {
@@ -252,7 +253,7 @@ export function describeObservation(
       ? `Buttons:\n${actions
           .map(
             (action) =>
-              `- ${action.ref}: ${action.label}${action.disabled ? " (disabled)" : ""}`,
+              `- ${action.ref}: ${action.label}${action.disabled ? " (disabled)" : ""}${action.frame ? ` (frame: ${action.frame.origin})` : ""}`,
           )
           .join("\n")}`
       : null,
@@ -261,14 +262,17 @@ export function describeObservation(
           .slice(0, options.linkLimit ?? 80)
           .map(
             (link) =>
-              `- ${link.ref}: ${link.label} → ${link.href}${link.opensNewWindow ? " (opens a new tab; follow_link opens it here)" : ""}`,
+              `- ${link.ref}: ${link.label} → ${link.href}${link.opensNewWindow ? " (opens a new tab; follow_link opens it here)" : ""}${link.frame ? ` (frame: ${link.frame.origin})` : ""}`,
           )
           .join("\n")}`
       : null,
     clickables.length > 0
       ? `Other clickable things:\n${clickables
           .slice(0, 40)
-          .map((entry) => `- ${entry.ref}: ${entry.label}`)
+          .map(
+            (entry) =>
+              `- ${entry.ref}: ${entry.label}${entry.disabled ? " (disabled)" : ""}${entry.frame ? ` (frame: ${entry.frame.origin})` : ""}`,
+          )
           .join("\n")}`
       : null,
     observation.bodyTextExcerpt.trim()

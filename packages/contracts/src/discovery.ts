@@ -6,7 +6,10 @@ import { ApplicationAnswerDependenciesSchema } from "./application-answer-depend
 import { z } from "zod";
 import { ApplicationQuestionAskReasonSchema } from "./application-question-reason";
 
-import { ApplicationAutomationModeSchema } from "./application-authority";
+import {
+  ApplicationAttestationKindSchema,
+  ApplicationAutomationModeSchema,
+} from "./application-authority";
 
 import {
   DiscoveryRunReportSchema,
@@ -2306,6 +2309,82 @@ export const ApplyFormPathStepSchema = z.object({
   href: z.string().max(4_096).optional(),
 });
 export type ApplyFormPathStep = z.infer<typeof ApplyFormPathStepSchema>;
+
+/**
+ * One field as Nestor saw it on a step it confirmed it advanced, from the
+ * exact observation taken just before its own press. Send evidence for this
+ * attempt only: never write, replay, reclaim or continuation authority.
+ */
+export const ApplyStepReceiptFieldSchema = z.object({
+  /** The review card's key for this field (screen, question key and prompt). */
+  fieldKey: z.string().min(1).max(2_000),
+  label: z.string().max(2_000),
+  groupLabel: z.string().max(2_000).default(""),
+  sectionPath: z.array(z.string().max(500)).max(12).default([]),
+  hint: z.string().max(2_000).default(""),
+  placeholder: z.string().max(500).default(""),
+  kind: z.enum([
+    "text",
+    "long_text",
+    "select",
+    "combobox",
+    "checkbox",
+    "radio",
+    "date",
+    "other",
+  ]),
+  answerControlType: ApplicationQuestionControlTypeSchema,
+  choiceGroupKey: z.string().max(500).nullable().default(null),
+  options: z.array(z.string().max(500)).max(200).default([]),
+  required: z.boolean(),
+  readOnly: z.boolean(),
+  questionKind: ApplicationQuestionKindSchema,
+  attestationKind: ApplicationAttestationKindSchema.nullable(),
+  repeatedQuestion: z
+    .object({ prompt: z.string().max(2_000), step: z.string().max(2_000) })
+    .nullable()
+    .default(null),
+  telInput: z.boolean().default(false),
+  urlInput: z.boolean().default(false),
+  /** The value the page showed, derived as the review card derives it. */
+  value: z.string().max(12_000),
+  /**
+   * `executor_write`: Nestor wrote this field in this attempt (even if the
+   * site later refused it). `site_unchanged`: first seen with this exact value
+   * and never written by Nestor. `observed_unverified`: anything else.
+   */
+  provenance: z.enum([
+    "executor_write",
+    "site_unchanged",
+    "observed_unverified",
+  ]),
+});
+export type ApplyStepReceiptField = z.infer<typeof ApplyStepReceiptFieldSchema>;
+
+/**
+ * A confirmed numbered or local step advance (`advance`), the final
+ * observation of the run (`final`), or a press whose result the page did not
+ * confirm (`unconfirmed`, no fields). Bound to one attempt by `resultId`.
+ */
+export const ApplyStepReceiptSchema = z.object({
+  kind: z.enum(["advance", "final", "unconfirmed"]),
+  resultId: z.string().min(1).max(500),
+  /** Address without query or fragment. */
+  url: z.string().max(4_096),
+  origin: z.string().max(500),
+  stepIndex: z.number().int().positive().nullable(),
+  stepTotal: z.number().int().positive().nullable(),
+  stepLabel: z.string().max(500).nullable(),
+  frame: z
+    .object({ origin: z.string().max(500), pathname: z.string().max(2_000) })
+    .nullable()
+    .default(null),
+  /** Bounded page-instructions excerpt the step's questions were read with. */
+  instructions: z.string().max(4_000).default(""),
+  fields: z.array(ApplyStepReceiptFieldSchema).max(200).default([]),
+  at: IsoDateTimeSchema,
+});
+export type ApplyStepReceipt = z.infer<typeof ApplyStepReceiptSchema>;
 /** As stored by a run from before `notOffered` was kept. */
 export type StoredApplyPickerAttempt = z.input<typeof ApplyPickerAttemptSchema>;
 
@@ -2315,6 +2394,10 @@ export const ApplyExecutionResultSchema = z.object({
     [],
   ),
   formPath: optionalStoredField(z.array(ApplyFormPathStepSchema).max(40), []),
+  stepReceipts: optionalStoredField(
+    z.array(ApplyStepReceiptSchema).max(40),
+    [],
+  ),
   skipReason: optionalStoredField(z.string().min(1).max(2000).nullable(), null),
   applyUsageTotals: optionalStoredField(
     ApplicationApplyUsageTotalsSchema.nullable(),

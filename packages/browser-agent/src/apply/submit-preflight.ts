@@ -173,8 +173,14 @@ function fileUploadState(
     return { state: "rejected", rule: "failure text beside the field" };
   if (stillWorking) return pending;
   // Nothing tied the server's word to this field: the page alone cannot
-  // settle it, only the person can.
-  if (upload?.network === "unconfirmed")
+  // settle it, only the person can. The exception is a file the form itself
+  // will send: the input still holds exactly the file Nestor chose, inside a
+  // POST multipart form. An ambiguous earlier request (a step autosave) does
+  // not change what the form submits, so the field is judged as if no request
+  // had been heard. The storage word stays "unconfirmed"; nothing calls it a
+  // receipt (#139).
+  const retained = retainedForFormSubmission(control);
+  if (upload?.network === "unconfirmed" && !retained)
     return {
       state: confirmedByPerson ? "accepted" : "unconfirmed",
       rule: "never confirmed",
@@ -208,7 +214,31 @@ function fileUploadState(
       state: "rejected",
       rule: "failure text on the page about this file",
     };
-  return { state: "accepted", rule: "file accepted" };
+  return {
+    state: "accepted",
+    rule:
+      upload?.network === "unconfirmed" && retained
+        ? "held in the field for the form's own submission"
+        : "file accepted",
+  };
+}
+
+/**
+ * The form's own submission will send this file: the input still holds the
+ * exact file this runtime chose (same name and size, so a replaced file does
+ * not count), and it is named inside a POST multipart/form-data form. A
+ * widget that emptied its input, or uploads outside the form, never is.
+ */
+export function retainedForFormSubmission(control: FileControl): boolean {
+  const upload = control.upload;
+  return (
+    control.kind === "file" &&
+    upload?.formSubmits === true &&
+    !!upload.fileName &&
+    upload.fileName === upload.selectedFileName &&
+    upload.fileSize !== undefined &&
+    upload.fileSize === upload.selectedFileSize
+  );
 }
 
 /** A selected local file is not evidence that the site accepted its upload. */

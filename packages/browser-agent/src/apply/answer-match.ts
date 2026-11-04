@@ -26,7 +26,7 @@ export async function matchApplicationAnswer(input: {
   signal?: AbortSignal;
 }): Promise<{ sourceId: string; value: string } | null> {
   const sources = input.sources.filter(
-    (source) => source.purpose !== "context" && source.value.length <= 4000,
+    (source) => source.purpose !== "context",
   );
   const response = await input.client.chatWithTools(
     [

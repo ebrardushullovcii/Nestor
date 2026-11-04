@@ -128,11 +128,17 @@ test.each([false, true])(
       expect(received.slice(before).map((entry) => entry.path)).toEqual([
         "/wday/calypso/cxs/common/synthetic/scanfile",
       ]);
-      expect(
-        (await session.readPage()).controls.find(
-          (control) => control.id === "resume",
-        )?.upload?.network,
-      ).toBe("unconfirmed");
+      const scanned = (await session.readPage()).controls.find(
+        (control) => control.id === "resume",
+      )?.upload;
+      expect(scanned?.network).toBe("unconfirmed");
+      // An asynchronous widget outside any form: no form submission will
+      // carry the file, so the untied word keeps it unconfirmed.
+      expect(scanned).toMatchObject({
+        selectedFileName: file.name,
+        selectedFileSize: file.bytes.length,
+      });
+      expect(scanned?.formSubmits).toBeUndefined();
       // A press must wait through the scan for the actual storage leg,
       // including a gap longer than the page's network-idle threshold.
       const closed = session.closeUploadWindow();

@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { normalizeFormQuestionPrompt } from "@nestor/contracts";
+import {
+  normalizeFormQuestionPrompt,
+  BrowserAgentPermissionsSchema,
+  type BrowserAgentPermissions,
+} from "@nestor/contracts";
 import { countriesIn } from "./concrete-answer-claims";
 import { legalQuestionCountry } from "./answer-source-catalog";
 import {
@@ -13,7 +17,11 @@ import type { AgentLoopToolDefinition } from "@nestor/agent-runtime";
 
 import type { LLMClient } from "../agent/contracts";
 import { questionPrompt } from "./policy-executor";
-import type { ApplyFormControl } from "./types";
+import type {
+  ApplyFormControl,
+  ApplyAnswerSources,
+  ApplyAgentConfig,
+} from "./types";
 import { requiresOwnWords } from "./own-words";
 
 /**
@@ -36,6 +44,47 @@ export interface ApplyQuestionClassification {
   /** The page can mark a group required in its legend rather than its inputs. */
   required?: boolean;
   declarationKind: ApplicationAttestationKind | null;
+}
+
+/**
+ * The question kind every stage uses: the model's reading decides pay and
+ * eligibility, so a "Compensation" heading does not make "Years of analysis
+ * experience" a pay question at send when preparation read it as a plain one.
+ * With no usable reading the keyword kind stays (ADR 0041 fallback).
+ */
+export function modelQuestionKind(
+  control: ApplyFormControl,
+  reading: ApplyQuestionClassification | undefined,
+  payCurrency = false,
+): ApplyFormControl["questionKind"] {
+  if (!reading || reading.readFailed) return control.questionKind;
+  return (
+    reading.eligibilityKind ??
+    (reading.asksAboutPay || payCurrency
+      ? "salary_expectation"
+      : control.questionKind === "salary_expectation"
+        ? "other"
+        : control.questionKind)
+  );
+}
+
+/** A currency field belongs to the pay question beside it. */
+export function asksPayCurrency(
+  control: ApplyFormControl,
+  controls: readonly ApplyFormControl[],
+  readings: ReadonlyMap<string, ApplyQuestionClassification> | undefined,
+): boolean {
+  return (
+    /currency/iu.test(questionPrompt(control)) &&
+    (control.questionKind === "salary_expectation" ||
+      controls.some(
+        (sibling) =>
+          (
+            readings?.get(questionClassificationKey(sibling, controls)) ??
+            readings?.get(questionPrompt(sibling))
+          )?.asksAboutPay === true,
+      ))
+  );
 }
 
 const DECLARATION_KINDS = ApplicationAttestationKindSchema.options;
@@ -571,10 +620,58 @@ function copyReading(
   };
 }
 
+export class QuestionReadUnavailableError extends Error {}
+
+/** Private cache identity only. No applicant values or authority go to the model. */
+export function applicationQuestionClassificationContext(input: {
+  sources: Pick<ApplyAnswerSources, "posting">;
+  application?: Pick<ApplyAgentConfig["application"], "startingUrl">;
+  payDisclosed: boolean;
+  approvedAttestations?: readonly ApplicationAttestationKind[];
+  browserPermissions?: BrowserAgentPermissions;
+}): string | null {
+  const permissions = BrowserAgentPermissionsSchema.safeParse(
+    input.browserPermissions,
+  );
+  if (
+    !input.browserPermissions ||
+    !permissions.success ||
+    !input.application?.startingUrl ||
+    !input.sources.posting.company.trim()
+  )
+    return null;
+  let recipient: string;
+  try {
+    const url = new URL(input.application.startingUrl);
+    recipient = url.origin + url.pathname + url.search;
+  } catch {
+    return null;
+  }
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        recipient: [
+          recipient,
+          input.sources.posting.company,
+          input.sources.posting.title,
+        ],
+        authority: {
+          payDisclosed: input.payDisclosed,
+          approvedAttestations: [
+            ...new Set(input.approvedAttestations ?? []),
+          ].sort(),
+          browserPermissions: permissions.data,
+        },
+      }),
+    )
+    .digest("hex");
+}
+
 export function createQuestionClassifier(input: {
   client: LLMClient;
   signal?: AbortSignal | undefined;
   cacheScope?: object | undefined;
+  readContext?: () => string | null | Promise<string | null>;
   sources?: () => NonNullable<QuestionReadInput["sources"]>;
 }): QuestionClassifier {
   const shared = input.cacheScope
@@ -583,19 +680,23 @@ export function createQuestionClassifier(input: {
     : undefined;
   if (shared && input.cacheScope)
     sharedQuestionReads.set(input.cacheScope, shared);
+  let currentContext: string | null = null;
   const settled = new Map<string, QuestionMeaning>();
   const pending = new Map<string, Promise<QuestionMeaning>>();
   const inFlight = new Map<string, ReturnType<QuestionClassifier>>();
   const questionsFor = (
     controls: readonly ApplyFormControl[],
     context?: string,
+    classificationContext = currentContext,
   ) => {
     // A changed applicant must get a new source selection, including at Send.
     // Keep only a digest in the key; no fact values go to the model or reading.
     const profileKey = createHash("sha256")
       .update(
         JSON.stringify(
-          (input.sources?.() ?? []).filter((row) => row.purpose === "profile"),
+          [...(input.sources?.() ?? [])].sort((left, right) =>
+            JSON.stringify(left).localeCompare(JSON.stringify(right)),
+          ),
         ),
       )
       .digest("hex");
@@ -614,10 +715,12 @@ export function createQuestionClassifier(input: {
       return {
         ...question,
         instructions,
+        reusable: classificationContext !== null,
         cacheIdentity: JSON.stringify([
           question.identity,
           instructions,
           profileKey,
+          classificationContext,
         ]),
       };
     });
@@ -675,7 +778,7 @@ export function createQuestionClassifier(input: {
     for (const question of questions) {
       const meaning =
         settled.get(question.cacheIdentity) ??
-        shared?.get(question.cacheIdentity);
+        (question.reusable ? shared?.get(question.cacheIdentity) : undefined);
       if (!meaning) return undefined;
       const reading = bind(
         meaning,
@@ -689,9 +792,10 @@ export function createQuestionClassifier(input: {
     }
     return result;
   };
-  const classify = (
+  const classify = async (
     controls: readonly ApplyFormControl[],
     context?: string,
+    refreshes = 0,
   ): ReturnType<QuestionClassifier> => {
     if (input.signal?.aborted)
       return Promise.reject(
@@ -699,6 +803,7 @@ export function createQuestionClassifier(input: {
           ? input.signal.reason
           : new Error("The question read was stopped."),
       );
+    currentContext = (await input.readContext?.()) ?? null;
     const questions = questionsFor(controls, context);
     const setKey = JSON.stringify(
       questions.map((question) => question.cacheIdentity),
@@ -709,7 +814,7 @@ export function createQuestionClassifier(input: {
     const missing = questions.filter(
       (question) =>
         !settled.has(question.cacheIdentity) &&
-        !shared?.has(question.cacheIdentity) &&
+        !(question.reusable && shared?.has(question.cacheIdentity)) &&
         !pending.has(question.cacheIdentity),
     );
     if (missing.length) {
@@ -758,7 +863,7 @@ export function createQuestionClassifier(input: {
               if (postingCountry) reading.answerTags.country = null;
             }
             settled.set(question.cacheIdentity, meaning);
-            if (shared && !reading.readFailed) {
+            if (shared && question.reusable && !reading.readFailed) {
               shared.delete(question.cacheIdentity);
               shared.set(question.cacheIdentity, meaning);
               if (shared.size > 512) shared.delete(shared.keys().next().value!);
@@ -778,11 +883,16 @@ export function createQuestionClassifier(input: {
       // Facts may have changed while the model was reading. Resolve against
       // the current key too, rather than lending that earlier source selection
       // to a different applicant before the next call can invalidate it.
-      .then(
-        () =>
-          resultFor(questionsFor(controls, context), controls) ??
-          classify(controls, context),
-      )
+      .then(async () => {
+        currentContext = (await input.readContext?.()) ?? null;
+        const fresh = resultFor(questionsFor(controls, context), controls);
+        if (fresh) return fresh;
+        if (refreshes >= 1)
+          throw new QuestionReadUnavailableError(
+            "Nestor's question context changed while reading. Your page is kept. Retry this application.",
+          );
+        return classify(controls, context, refreshes + 1);
+      })
       .finally(() => inFlight.delete(setKey));
     inFlight.set(setKey, result);
     return result;

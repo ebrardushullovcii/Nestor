@@ -1,38 +1,88 @@
 import { app } from "electron";
 import { describe, expect, test, vi } from "vitest";
+import { browserUserAgent } from "./browser-navigation";
 import { EmbeddedBrowser } from "./embedded-browser";
+import type { Browser, Page } from "playwright";
+import { createStubBrowserSessionRuntime } from "@nestor/browser-runtime";
+import { withEmbeddedBrowserActivity } from "./embedded-browser-runtime";
 
-const { openExternal } = vi.hoisted(() => ({
-  openExternal: vi.fn(() => Promise.resolve()),
-}));
+const { openExternal, ELECTRON_UA, sessions, makeSession } = vi.hoisted(() => {
+  const ELECTRON_UA =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.7977.76 Electron/44.2.0 Nestor/0.1.0 Safari/537.36";
+  interface FakeSession {
+    setUserAgent: ReturnType<typeof vi.fn<(ua: string) => void>>;
+    getUserAgent(): string;
+  }
+  const sessions: FakeSession[] = [];
+  // Like Electron's session: getUserAgent() falls back to the process
+  // fallback, so reading it after the fallback changed is the wrong original.
+  function makeSession(fallback: () => string): FakeSession {
+    let own: string | null = null;
+    const value = {
+      setUserAgent: vi.fn<(ua: string) => void>((ua) => {
+        own = ua;
+      }),
+      getUserAgent: () => own ?? fallback(),
+      registerPreloadScript: vi.fn(),
+      webRequest: { onBeforeSendHeaders: vi.fn() },
+      setPermissionCheckHandler: vi.fn(),
+      setPermissionRequestHandler: vi.fn(),
+      on: vi.fn(),
+    };
+    sessions.push(value);
+    return value;
+  }
+  return {
+    openExternal: vi.fn(() => Promise.resolve()),
+    ELECTRON_UA,
+    sessions,
+    makeSession,
+  };
+});
 
-vi.mock("electron", () => ({
-  app: {
+vi.mock("electron", () => {
+  const app = {
     getAppMetrics: vi.fn(() => [{ pid: 100, memory: { workingSetSize: 0 } }]),
-  },
-  BrowserWindow: class {},
-  dialog: {},
-  screen: {},
-  session: {},
-  shell: { openExternal },
-  WebContentsView: class {},
-}));
+    getName: () => "Nestor",
+    userAgentFallback: ELECTRON_UA,
+  };
+  return {
+    app,
+    BrowserWindow: class {},
+    dialog: {},
+    screen: {},
+    session: {
+      fromPartition: vi.fn(() => makeSession(() => app.userAgentFallback)),
+    },
+    shell: { openExternal },
+    WebContentsView: class {},
+  };
+});
 
 function makeBrowser() {
   const browser = new EmbeddedBrowser();
   const state = browser as unknown as {
     pageMap: Map<
       string,
-      { id: string; contents: ReturnType<typeof makeContents> }
+      {
+        id: string;
+        openerId?: string;
+        contents: ReturnType<typeof makeContents>;
+      }
     >;
     activeTabId: string | null;
     parkedTabs: Map<string, null>;
     heldTabs: Map<string, string[]>;
     personTabs: Set<string>;
+    personInputTabs: Set<string>;
+    personInputAt: Map<string, number>;
     personSendPressedAt: Map<string, number>;
+    sentTabs: Set<string>;
+    lentTabs: Set<string>;
     ownedTabs: Map<string, Set<string>>;
     closeReleasedOwnedTabs(): void;
     originalUserAgent: string | null;
+    passwordManager: unknown;
     operations: Map<AbortController, string>;
     operationClaims: Map<
       AbortController,
@@ -268,6 +318,60 @@ describe("embedded browser tab state", () => {
     expect(state.heldTabs.has("prepared")).toBe(true);
   });
 
+  test("a failed transfer restores the exact person's page and leaves unrelated tabs alone", async () => {
+    const { browser, state, pages } = makeBrowser();
+    state.ownedTabs.set("old", new Set(["held"]));
+    state.heldTabs.set("held", ["old"]);
+    state.parkedTabs.set("held", null);
+    state.personTabs.add("held");
+    state.personInputTabs.add("held");
+    state.personInputAt.set("held", 123);
+    state.heldTabs.set("prepared", ["unrelated"]);
+    vi.spyOn(browser, "getOpenBrowser").mockResolvedValue(null);
+    const restore = await browser.reclaimOwnedTabs("old");
+    expect(state.personInputTabs.has("held")).toBe(true);
+    restore();
+    restore();
+    expect(state.heldTabs.get("held")).toEqual(["old"]);
+    expect(state.parkedTabs.has("held")).toBe(true);
+    expect(state.personTabs.has("held")).toBe(true);
+    expect(state.personInputTabs.has("held")).toBe(true);
+    expect(state.personInputAt.get("held")).toBe(123);
+    expect(state.heldTabs.get("prepared")).toEqual(["unrelated"]);
+    expect(
+      pages.get("held")!.mainFrame.framesInSubtree[0]!.executeJavaScript,
+    ).toHaveBeenCalledTimes(2);
+    for (const page of pages.values())
+      expect(page.close).not.toHaveBeenCalled();
+  });
+
+  test("rollback cannot reclaim a tab whose ownership already moved to a new attempt", async () => {
+    const { browser, state } = makeBrowser();
+    state.ownedTabs.set("old", new Set(["held"]));
+    state.personTabs.add("held");
+    vi.spyOn(browser, "getOpenBrowser").mockResolvedValue(null);
+    const restore = await browser.reclaimOwnedTabs("old");
+    browser.transferOwnedTabs("old", "next");
+    restore();
+    expect(state.personTabs.has("held")).toBe(false);
+    expect(state.ownedTabs.get("next")).toEqual(new Set(["held"]));
+  });
+
+  test("a failed native reclaim keeps the prior person handoff", async () => {
+    const { browser, state } = makeBrowser();
+    state.ownedTabs.set("old", new Set(["held"]));
+    state.heldTabs.set("held", ["old"]);
+    state.personTabs.add("held");
+    vi.spyOn(browser, "getOpenBrowser").mockRejectedValue(
+      new Error("Bridge unavailable"),
+    );
+    await expect(browser.reclaimOwnedTabs("old")).rejects.toThrow(
+      "Bridge unavailable",
+    );
+    expect(state.heldTabs.get("held")).toEqual(["old"]);
+    expect(state.personTabs.has("held")).toBe(true);
+  });
+
   test("sign-in attention follows its tab instead of the active public listing", async () => {
     const { browser } = makeBrowser();
     browser.requestAttention(
@@ -462,6 +566,7 @@ test("handing a native-owned form back closes its person guard before automation
   ).toHaveBeenLastCalledWith(
     expect.stringContaining("finalActionAllowed = false"),
   );
+  browser.completeOwnedTabReclaim("result");
   expect(await browser.readApplicationPageWithPerson("result")).toBeNull();
 });
 
@@ -1097,4 +1202,232 @@ test("a page handed to the person never freezes in the background", async () => 
     "Page.setWebLifecycleState",
     { state: "frozen" },
   );
+});
+
+describe("process user-agent fallback for popups", () => {
+  const CHROME = browserUserAgent(ELECTRON_UA, "Nestor");
+  const ready = () => {
+    const made = makeBrowser();
+    // The password vault is not part of this check: every call is a no-op.
+    made.state.passwordManager = new Proxy(
+      {},
+      {
+        get: (target: Record<string | symbol, unknown>, key) =>
+          key === "then" ? undefined : (target[key] ??= vi.fn()),
+      },
+    );
+    return made;
+  };
+
+  test("getSession sets the process fallback and the session to the same Chrome identity, and keeps Electron's original", () => {
+    expect(CHROME).not.toMatch(/Electron\/|Nestor\//);
+    expect(CHROME).toContain("Chrome/152.0.7977.76");
+    const first = ready();
+    first.browser.getSession();
+    expect(app.userAgentFallback).toBe(CHROME);
+    expect(sessions.at(-1)!.setUserAgent).toHaveBeenCalledExactlyOnceWith(
+      CHROME,
+    );
+    expect(first.state.originalUserAgent).toBe(ELECTRON_UA);
+    // A later instance runs after the fallback changed and must still keep
+    // Electron's original, not the session value that now falls back to Chrome.
+    const second = ready();
+    second.browser.getSession();
+    expect(second.state.originalUserAgent).toBe(ELECTRON_UA);
+    expect(app.userAgentFallback).toBe(CHROME);
+    expect(sessions.at(-1)!.setUserAgent).toHaveBeenCalledExactlyOnceWith(
+      CHROME,
+    );
+  });
+
+  test("Retry gives only the selected tab Electron's original with a GET, and a popup from it gets no per-contents user agent", async () => {
+    const { browser, state, pages } = ready();
+    browser.getSession();
+    await browser.command({ type: "retry_verification" });
+    expect(pages.get("failed")!.setUserAgent).toHaveBeenCalledExactlyOnceWith(
+      ELECTRON_UA,
+    );
+    expect(pages.get("failed")!.loadURL).toHaveBeenCalledExactlyOnceWith(
+      "https://jobs.example/failed",
+    );
+    for (const [id, page] of pages)
+      if (id !== "failed") expect(page.setUserAgent).not.toHaveBeenCalled();
+    // The popup path Electron's createWindow takes sets no per-contents user
+    // agent, so a popup presents the process fallback (Chrome) even when its
+    // opener was retried. A per-contents override there would be switched off
+    // and could flip identity mid-life on a later loadURL.
+    const createPage = (
+      EmbeddedBrowser.prototype as unknown as Record<string, () => void>
+    ).createPage;
+    expect(String(createPage)).not.toContain("setUserAgent");
+    expect("applyPopupIdentity" in EmbeddedBrowser.prototype).toBe(false);
+    expect(state.originalUserAgent).toBe(ELECTRON_UA);
+  });
+});
+
+test.each(["held", "person", "parked"])(
+  "native owner resolver refuses an unannounced %s tab immediately",
+  async (kind) => {
+    const { browser, state } = makeBrowser();
+    state.ownedTabs.set("key", new Set(["prepared"]));
+    if (kind === "held") state.heldTabs.set("prepared", ["key"]);
+    if (kind === "person") state.personTabs.add("prepared");
+    if (kind === "parked") state.parkedTabs.set("prepared", null);
+    const connect = vi.spyOn(browser, "getOpenBrowser");
+    await expect(browser.ownedApplicationPage("key")).resolves.toEqual({
+      page: null,
+    });
+    expect(connect).not.toHaveBeenCalled();
+  },
+);
+
+test("native owner resolver requires a unique root and ignores its owned popup", async () => {
+  const { browser, state } = makeBrowser();
+  state.ownedTabs.set("key", new Set(["prepared", "search"]));
+  const page = { isClosed: () => false } as Page;
+  const popup = { isClosed: () => false } as Page;
+  const connect = vi.spyOn(browser, "getOpenBrowser").mockResolvedValue({
+    contexts: () => [{ pages: () => [popup, page] }],
+  } as unknown as Browser);
+  const identify = vi
+    .spyOn(browser, "identifyAutomationPage")
+    .mockImplementation((candidate) =>
+      Promise.resolve(candidate === page ? "prepared" : "search"),
+    );
+  await expect(browser.ownedApplicationPage("key")).resolves.toEqual({
+    page: null,
+  });
+  expect(connect).not.toHaveBeenCalled();
+  state.pageMap.get("search")!.openerId = "prepared";
+  await expect(browser.ownedApplicationPage("key")).resolves.toEqual({ page });
+  expect(identify).toHaveBeenCalledTimes(2);
+});
+
+test.each([100, 5_100])(
+  "native owner resolver bounds Page arrival and caches older Page identities (arrival=%d)",
+  async (delay) => {
+    vi.useFakeTimers();
+    try {
+      const { browser, state } = makeBrowser();
+      state.ownedTabs.set("key", new Set(["prepared"]));
+      const old = { isClosed: () => false } as Page;
+      const owned = { isClosed: () => false } as Page;
+      const pages = [old];
+      vi.spyOn(browser, "getOpenBrowser").mockResolvedValue({
+        contexts: () => [{ pages: () => pages }],
+      } as unknown as Browser);
+      const identify = vi
+        .spyOn(browser, "identifyAutomationPage")
+        .mockImplementation((page) =>
+          Promise.resolve(page === owned ? "prepared" : "unrelated"),
+        );
+      const timer = setTimeout(() => pages.push(owned), delay);
+      const result = browser.ownedApplicationPage("key");
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(result).resolves.toEqual({
+        page: delay < 5_000 ? owned : null,
+      });
+      expect(identify.mock.calls.filter(([page]) => page === old)).toHaveLength(
+        1,
+      );
+      clearTimeout(timer);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+test.each(["connection", "guard"])(
+  "native press arriving during %s reclaim survives and restores the handoff",
+  async (phase) => {
+    const { browser, state, pages } = makeBrowser();
+    state.ownedTabs.set("old", new Set(["prepared"]));
+    state.personTabs.add("prepared");
+    state.personInputTabs.add("prepared");
+    state.personInputAt.set("prepared", Date.now());
+    const press = () => state.personSendPressedAt.set("prepared", Date.now());
+    vi.spyOn(browser, "getOpenBrowser").mockImplementation(() => {
+      if (phase === "connection") press();
+      return Promise.resolve(null);
+    });
+    if (phase === "guard")
+      pages
+        .get("prepared")!
+        .mainFrame.framesInSubtree[0]!.executeJavaScript.mockImplementation(
+          () => {
+            press();
+            return Promise.resolve();
+          },
+        );
+    await browser.reclaimOwnedTabs("old");
+    expect(browser.ownerHasSendEvidence("old")).toBe(true);
+    expect(state.personInputTabs.has("prepared")).toBe(true);
+    expect(state.personTabs.has("prepared")).toBe(true);
+  },
+);
+
+test("native-only owner transfer preserves the exact held tab's person and input flags", async () => {
+  const { browser, state, pages } = makeBrowser();
+  pages.get("prepared")!.executeJavaScript.mockImplementation(() =>
+    Promise.resolve({
+      title: "Application",
+      bodyText: "Application received",
+      controls: [],
+    }),
+  );
+  state.ownedTabs.set("old", new Set(["prepared"]));
+  state.heldTabs.set("prepared", ["old"]);
+  state.parkedTabs.set("prepared", null);
+  state.personTabs.add("prepared");
+  state.personInputTabs.add("prepared");
+  state.personInputAt.set("prepared", Date.now());
+  const wrapped = withEmbeddedBrowserActivity(
+    {
+      ...createStubBrowserSessionRuntime({ sessions: [], catalog: [] }),
+      renameApplicationPageBinding: vi.fn(async () => {}),
+    },
+    browser,
+  );
+  await expect(
+    wrapped.adoptApplicationPageOwnership!("target_site", "old", "next"),
+  ).resolves.toBe(true);
+  expect(state.heldTabs.get("prepared")).toEqual(["old"]);
+  expect(state.personTabs.has("prepared")).toBe(true);
+  expect(state.parkedTabs.has("prepared")).toBe(true);
+  await expect(
+    wrapped.readApplicationPageWithPerson!("target_site", "next"),
+  ).resolves.toMatchObject({ bodyText: "Application received" });
+  expect(
+    pages.get("prepared")!.mainFrame.framesInSubtree[0]!.executeJavaScript,
+  ).not.toHaveBeenCalled();
+});
+
+test("a native send notification during the runtime rename keeps its original attribution and person handoff", async () => {
+  const { browser, state } = makeBrowser();
+  state.ownedTabs.set("old", new Set(["prepared"]));
+  state.personTabs.add("prepared");
+  state.personInputTabs.add("prepared");
+  state.personInputAt.set("prepared", Date.now());
+  vi.spyOn(browser, "getOpenBrowser").mockResolvedValue(null);
+  const native = browser as unknown as { noteBoundSend(id: string): void };
+  const rename = vi.fn(async () => {});
+  const wrapped = withEmbeddedBrowserActivity(
+    {
+      ...createStubBrowserSessionRuntime({ sessions: [], catalog: [] }),
+      transferApplicationPageBinding: () => {
+        native.noteBoundSend("prepared");
+        return Promise.resolve(true);
+      },
+      renameApplicationPageBinding: rename,
+    },
+    browser,
+  );
+  await expect(
+    wrapped.transferApplicationPageBinding!("target_site", "old", "next"),
+  ).resolves.toBe(false);
+  expect(state.personSendPressedAt.has("prepared")).toBe(true);
+  expect(state.personInputTabs.has("prepared")).toBe(true);
+  expect(state.personTabs.has("prepared")).toBe(true);
+  expect(state.ownedTabs.get("old")).toEqual(new Set(["prepared"]));
+  expect(rename).toHaveBeenCalledExactlyOnceWith("target_site", "next", "old");
 });
