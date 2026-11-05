@@ -193,64 +193,63 @@ export function createListingSearchEngine(deps: {
                       "This site needs browser navigation, which is unavailable.",
                     ],
                   };
-                const result = await browser.run(
-                  new URL(target.startingUrl).hostname,
-                  signal,
-                  () =>
-                    deps.browserRuntime.runAgentDiscovery!("target_site", {
-                      ...(context.browserPermissions
-                        ? { browserPermissions: context.browserPermissions }
-                        : {}),
-                      ...(context.readIntendedAccountEmail
-                        ? {
-                            readIntendedAccountEmail:
-                              context.readIntendedAccountEmail,
-                          }
-                        : {}),
-                      ...(context.readBrowserPermissions
-                        ? {
-                            readBrowserPermissions:
-                              context.readBrowserPermissions,
-                          }
-                        : {}),
-                      inventoryOnly: true,
-                      onCheckpoint: async (checkpoint) => {
-                        input.message(
-                          `Collected ${checkpoint.collectedJobs.length} listing cards; remaining batches are still being checked.`,
-                        );
-                        await input.onCards?.(
-                          toCards(checkpoint.collectedJobs),
-                        );
-                      },
-                      dedicatedPage: true,
-                      retainAllFound: true,
-                      userProfile: context.profile,
-                      searchPreferences: toJobSearchGoals(
-                        context.searchPreferences,
-                      ),
-                      lookupKnownUrls: (urls) =>
-                        Promise.resolve(input.knownUrls(urls)),
-                      startingUrls: [portalUrl ?? target.startingUrl],
-                      navigationHostnames: [
-                        new URL(target.startingUrl).hostname,
-                        ...(portalUrl ? [new URL(portalUrl).hostname] : []),
-                      ],
-                      siteLabel: target.label,
-                      siteInstructions: guidance,
-                      searchRequest: {
-                        intent: settings.note,
-                        breadth: "wide",
-                        freshness: "any",
-                        sourceIds: [target.id],
-                      },
-                      targetJobCount: Number.MAX_SAFE_INTEGER,
-                      maxSteps: settings.depth === "quick" ? 8 : 16,
-                      signal,
-                      onProgress: (progress) => {
-                        if (progress.message) input.message(progress.message);
-                      },
-                      aiClient: deps.aiClient,
-                    }),
+                // The runner bounds source navigation in its browser queue.
+                // Do not also hold the detail-reader queue: a checkpoint can
+                // wait for screening that needs a rendered detail of its own.
+                const result = await deps.browserRuntime.runAgentDiscovery(
+                  "target_site",
+                  {
+                    ...(context.browserPermissions
+                      ? { browserPermissions: context.browserPermissions }
+                      : {}),
+                    ...(context.readIntendedAccountEmail
+                      ? {
+                          readIntendedAccountEmail:
+                            context.readIntendedAccountEmail,
+                        }
+                      : {}),
+                    ...(context.readBrowserPermissions
+                      ? {
+                          readBrowserPermissions:
+                            context.readBrowserPermissions,
+                        }
+                      : {}),
+                    inventoryOnly: true,
+                    onCheckpoint: async (checkpoint) => {
+                      input.message(
+                        `Collected ${checkpoint.collectedJobs.length} listing cards; remaining batches are still being checked.`,
+                      );
+                      await input.onCards?.(toCards(checkpoint.collectedJobs));
+                    },
+                    dedicatedPage: true,
+                    retainAllFound: true,
+                    userProfile: context.profile,
+                    searchPreferences: toJobSearchGoals(
+                      context.searchPreferences,
+                    ),
+                    lookupKnownUrls: (urls) =>
+                      Promise.resolve(input.knownUrls(urls)),
+                    startingUrls: [portalUrl ?? target.startingUrl],
+                    navigationHostnames: [
+                      new URL(target.startingUrl).hostname,
+                      ...(portalUrl ? [new URL(portalUrl).hostname] : []),
+                    ],
+                    siteLabel: target.label,
+                    siteInstructions: guidance,
+                    searchRequest: {
+                      intent: settings.note,
+                      breadth: "wide",
+                      freshness: "any",
+                      sourceIds: [target.id],
+                    },
+                    targetJobCount: Number.MAX_SAFE_INTEGER,
+                    maxSteps: settings.depth === "quick" ? 8 : 16,
+                    signal,
+                    onProgress: (progress) => {
+                      if (progress.message) input.message(progress.message);
+                    },
+                    aiClient: deps.aiClient,
+                  },
                 );
                 const cards = toCards(result.jobs);
                 return {
