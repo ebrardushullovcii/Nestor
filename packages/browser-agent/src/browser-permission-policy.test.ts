@@ -12,6 +12,7 @@ import type { ApplyPageHands } from "./apply/types";
 import {
   browserInteractionKind,
   browserStepReadyForAgent,
+  googleIdentityContext,
   withBrowserPermissions,
 } from "./browser-permission-policy";
 import { createPageTools } from "./page-tools";
@@ -116,6 +117,148 @@ function setup(kind: "signIn" | "createAccounts" | "solveCaptchas") {
   };
   return { raw, hands };
 }
+
+describe("Google preference at a mixed sign-in wall", () => {
+  function mixed() {
+    const result = setup("signIn");
+    result.raw.controls[1].value = "";
+    result.raw.actions.push({
+      index: 1,
+      label: "Sign in with Google",
+      visible: true,
+      disabled: false,
+      submitsForm: false,
+    });
+    return result;
+  }
+  test("does not prepare or type site credentials while Google is enabled", async () => {
+    const { raw, hands } = mixed();
+    const prepare = vi.fn(() => Promise.resolve(false));
+    const guarded = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({
+        signIn: true,
+        googleSignIn: true,
+      }),
+      prepareBrowserCredentials: prepare,
+    });
+    await guarded.observe();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(
+      await guarded.fillText("c0", "synthetic@example.test"),
+    ).toMatchObject({ ok: false });
+    raw.controls[1].value = "synthetic-password";
+    expect(await guarded.clickElement("a0")).toMatchObject({ ok: false });
+    expect(hands.fillText).not.toHaveBeenCalled();
+    expect(hands.clickAuthorizedFormAction).not.toHaveBeenCalled();
+    expect(await guarded.clickElement("a1")).toMatchObject({ ok: true });
+  });
+  test("Google revocation allows the separately enabled saved-password route", async () => {
+    const { raw, hands } = mixed();
+    let googleSignIn = true;
+    const prepare = vi.fn(() => {
+      raw.controls[1].value = "synthetic-password";
+      return Promise.resolve(true);
+    });
+    const guarded = withBrowserPermissions(hands, {
+      readBrowserPermissions: () =>
+        BrowserAgentPermissionsSchema.parse({ signIn: true, googleSignIn }),
+      prepareBrowserCredentials: prepare,
+    });
+    await guarded.observe();
+    expect(prepare).not.toHaveBeenCalled();
+    googleSignIn = false;
+    await guarded.observe();
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(await guarded.clickElement("a1")).toMatchObject({ ok: false });
+    expect(await guarded.clickElement("a0")).toMatchObject({ ok: true });
+  });
+});
+
+describe("Google with no Profile email", () => {
+  function chooser(accounts: string[]) {
+    const { raw, hands } = setup("signIn");
+    raw.url = "https://accounts.google.com/v3/signin/accountchooser";
+    raw.controls = [];
+    raw.actions = accounts.map((email, index) => ({
+      index,
+      label: email,
+      visible: true,
+      disabled: false,
+      submitsForm: false,
+    }));
+    hands.readAccountFlowEntry = () =>
+      Promise.resolve([
+        "https://accounts.google.com/o/oauth2/v2/auth?scope=openid+email+profile",
+      ]);
+    const guarded = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({
+        googleSignIn: true,
+      }),
+      readIntendedAccountEmail: () => null,
+    });
+    return { raw, hands, guarded };
+  }
+  test("selects the sole account and confirms only that identity", async () => {
+    const { raw, hands, guarded } = chooser(["sole@example.test"]);
+    expect(await guarded.clickElement("a0")).toMatchObject({ ok: true });
+    expect(await googleIdentityContext({}, { ...guarded })).toMatchObject({
+      selectedEmail: "sole@example.test",
+    });
+    raw.url = "https://accounts.google.com/signin/oauth/consent";
+    raw.bodyText = "sole@example.test · Share your name and email";
+    raw.actions = [
+      {
+        index: 0,
+        label: "Continue",
+        visible: true,
+        disabled: false,
+        submitsForm: false,
+      },
+    ];
+    expect((await guarded.observe()).blocker?.requiresPerson).not.toBe(true);
+    expect(await guarded.clickElement("a0")).toMatchObject({ ok: true });
+    expect(hands.clickElement).toHaveBeenCalledTimes(2);
+  });
+  test("does not choose between two accounts or use another account without an email", async () => {
+    const { raw, hands, guarded } = chooser([
+      "one@example.test",
+      "two@example.test",
+      "Use another account",
+    ]);
+    for (const ref of ["a0", "a1", "a2"])
+      expect(await guarded.clickElement(ref)).toMatchObject({ ok: false });
+    raw.actions = [raw.actions[2]];
+    expect(await guarded.clickElement("a2")).toMatchObject({ ok: false });
+    expect(hands.clickElement).not.toHaveBeenCalled();
+  });
+  test("a sole account never overrides a known nonmatching Profile email", async () => {
+    const { hands } = chooser(["other@example.test"]);
+    const guarded = withBrowserPermissions(hands, {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({
+        googleSignIn: true,
+      }),
+      readIntendedAccountEmail: () => "profile@example.test",
+    });
+    expect(await guarded.clickElement("a0")).toMatchObject({ ok: false });
+    expect(hands.clickElement).not.toHaveBeenCalled();
+  });
+  test("a changed confirmation identity is handed off", async () => {
+    const { raw, hands, guarded } = chooser(["sole@example.test"]);
+    await guarded.clickElement("a0");
+    raw.url = "https://accounts.google.com/signin/oauth/consent";
+    raw.bodyText = "other@example.test";
+    raw.actions = [
+      { index: 0, label: "Continue", visible: true, disabled: false },
+    ];
+    expect(await guarded.clickElement("a0")).toMatchObject({ ok: false });
+    expect(hands.clickElement).toHaveBeenCalledTimes(1);
+  });
+  test("a sole signed-out account is not treated as an existing session", async () => {
+    const { hands, guarded } = chooser(["sole@example.test Signed out"]);
+    expect(await guarded.clickElement("a0")).toMatchObject({ ok: false });
+    expect(hands.clickElement).not.toHaveBeenCalled();
+  });
+});
 
 test.each(["GET", "button"])(
   "host-completed saved login uses the bounded JS press for %s",

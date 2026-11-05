@@ -19,6 +19,105 @@ import { describeApplicationPreparationProgress } from "@nestor/job-finder";
 
 describe("withEmbeddedBrowserActivity", () => {
   test.each([
+    {
+      url: "https://site.test/signin?stage=signin#form",
+      tabs: [{ id: "owned", url: "https://site.test/signin" }],
+      expected: true,
+    },
+    {
+      url: "https://site.test/signin?stage=signin",
+      tabs: [{ id: "owned", url: "https://site.test/signin?other=1" }],
+      expected: true,
+    },
+    {
+      url: "https://site.test/signin",
+      tabs: [{ id: "owned", url: "https://site.test:444/signin" }],
+      expected: false,
+    },
+    {
+      url: "https://site.test/signin",
+      tabs: [{ id: "owned", url: "http://site.test/signin" }],
+      expected: false,
+    },
+    {
+      url: "https://site.test/signin",
+      tabs: [{ id: "owned", url: "https://other.site.test/signin" }],
+      expected: false,
+    },
+    {
+      url: "https://site.test/signin",
+      tabs: [{ id: "unowned", url: "https://site.test/signin" }],
+      expected: false,
+    },
+    {
+      url: "https://site.test/signin",
+      tabs: [{ id: "owned", url: "https://site.test/register" }],
+      expected: false,
+    },
+    {
+      url: "https://site.test/signin",
+      tabs: [
+        { id: "owned", url: "https://site.test/signin" },
+        { id: "second", url: "https://site.test/signin" },
+      ],
+      expected: false,
+    },
+    {
+      url: "invalid",
+      tabs: [{ id: "owned", url: "invalid" }],
+      expected: false,
+    },
+  ])(
+    "saved credentials require one owned exact-origin path: $url / $tabs",
+    async ({ url, tabs, expected }) => {
+      const base = createStubBrowserSessionRuntime({
+        sessions: [],
+        catalog: [],
+      });
+      const result = DiscoveryRunResultSchema.parse({
+        source: "target_site",
+        startedAt: "2026-09-12T10:00:00.000Z",
+        completedAt: "2026-09-12T10:00:01.000Z",
+        querySummary: "Synthetic",
+        warning: null,
+        inventoryCompleteness: "complete",
+        jobs: [],
+      });
+      const prepare = vi.fn(() => Promise.resolve(true));
+      const runAutomation: EmbeddedBrowser["runAutomation"] = (
+        _label,
+        _signal,
+        work,
+      ) =>
+        work(new AbortController().signal, vi.fn(), vi.fn(), () =>
+          Promise.resolve(["owned", "second"]),
+        );
+      const wrapped = withEmbeddedBrowserActivity(
+        {
+          ...base,
+          runAgentDiscovery: async (_source, options) => {
+            expect(await options.prepareBrowserCredentials!(url)).toBe(
+              expected,
+            );
+            return result;
+          },
+        },
+        {
+          getState: () => ({ tabs }),
+          prepareAgentCredentials: prepare,
+          runAutomation,
+        } as unknown as EmbeddedBrowser,
+      );
+      await wrapped.runAgentDiscovery!("target_site", {
+        siteLabel: "Synthetic",
+        protectedPages: [],
+      } as unknown as AgentDiscoveryOptions);
+      expect(prepare).toHaveBeenCalledTimes(expected ? 1 : 0);
+      if (expected) expect(prepare).toHaveBeenCalledWith("owned");
+    },
+  );
+
+  test.each([
     { state: "failed", retain: true, live: true, kept: true },
     { state: "failed", retain: true, live: false, kept: false },
     { state: "failed", retain: false, live: true, kept: false },

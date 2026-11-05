@@ -145,6 +145,12 @@ export type BrowserInteractionKind =
   | "mfa"
   | "password";
 
+function controlIsSiteCredential(page: ApplyFormObservation, ref?: string) {
+  return page.controls.some(
+    (control) => control.ref === ref && !!control.credentialRole,
+  );
+}
+
 export function browserInteractionKind(
   page: ApplyFormObservation,
   ref: string | undefined,
@@ -288,7 +294,7 @@ export function describeBrowserPermissions(
     `Browser permissions: CAPTCHA ${permissions.solveCaptchas ? "ON" : "OFF"}; website sign-in ${permissions.signIn ? "ON" : "OFF"}; Google sign-in/sign-up ${permissions.googleSignIn ? "ON" : "OFF"}; account creation ${permissions.createAccounts ? "ON" : "OFF"}.`,
     ...(permissions.googleSignIn
       ? [
-          "Google: prefer its visible button over email/password, even beside an empty password form. If only email/password is shown, an enabled Sign In button outside that form may open provider choices: inspect it once before handing off missing credentials. This may register a site account. Choose only the Google account matching the Profile email, type that email if Google asks for it, and press Google’s basic sign-in confirmation. Use another account only to reach the identifier for that same email. Decline an optional Google offer, such as creating a passkey, with its own Not now or Skip. Hand off passwords, MFA, other accounts and any request for more access; never create Google accounts. Never repeat a Google attempt whose result is uncertain.",
+          "Google: use its visible button before email/password, even beside an empty password form. If only email/password is shown, an enabled Sign In button outside that form may open provider choices: inspect it once before handing off missing credentials. This may register a site account. Choose the Google account matching the Profile email; if Profile has no email, choose only a sole offered signed-in account. Type only the Profile email if Google asks for an identifier, and press Google’s basic sign-in confirmation. Use another account only to reach the identifier for that same Profile email. Decline an optional Google offer, such as creating a passkey, with its own Not now or Skip. Hand off passwords, MFA, ambiguous accounts and any request for more access; never create Google accounts. Never repeat a Google attempt whose result is uncertain.",
         ]
       : []),
     "Use visible controls for enabled steps; hand off others. Reuse sessions or host-filled saved logins. Never request or type passwords or MFA codes; the person enters missing credentials on-site. Sending and extra consent stay separate. Check results; never repeat an uncertain account action.",
@@ -307,6 +313,7 @@ export async function googleIdentityContext(
       intendedEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(intendedEmail)
         ? intendedEmail
         : null,
+    selectedEmail: (hands as WrappedHands)[WRAPPED]?.selectedEmail ?? null,
     entry: googleFlowEntry(
       (await hands.readAccountFlowEntry?.(GOOGLE_ACCOUNT_WINDOW_ORIGINS)) ??
         null,
@@ -315,7 +322,10 @@ export async function googleIdentityContext(
   };
 }
 const WRAPPED = Symbol("browser-permission-policy");
-type PermissionState = { policies: BrowserPermissionPolicy[] };
+type PermissionState = {
+  policies: BrowserPermissionPolicy[];
+  selectedEmail: string | null;
+};
 type WrappedHands = ApplyPageHands & { [WRAPPED]?: PermissionState };
 const redactedGoogleUrl = (url: string | null): string | null => {
   if (!url) return url;
@@ -352,8 +362,6 @@ function googleHandoff(
   ctx: GoogleIdentityContext,
   entryShape?: string,
 ): string {
-  if (!ctx.intendedEmail)
-    return "Add your email in Profile so Nestor knows which Google account to use, or finish this Google step yourself.";
   if (
     page.controls.some(
       (control) => control.visible && control.credentialRole === "password",
@@ -365,7 +373,9 @@ function googleHandoff(
     return "Nestor's allowance for this Google step ran out before it finished. Finish the Google step yourself, then continue.";
   if (ctx.entry !== "basic" && googleConsentPath(page))
     return `Nestor cannot prove this request is limited to your name, email and profile picture. Review the Google access request yourself.${entryShape ? ` Recorded entry: ${entryShape}.` : ""}`;
-  return `Google isn't offering one unambiguous action for ${ctx.intendedEmail}, the email in your Profile. Check that account on the website.`;
+  if (!ctx.intendedEmail && !ctx.selectedEmail)
+    return "Choose your Google account on the website. Profile has no email and Google is not offering one unambiguous signed-in account.";
+  return `Google isn't offering one unambiguous action for ${ctx.intendedEmail ?? ctx.selectedEmail}. Check that account on the website.`;
 }
 /** Enforcement shared by search, source checks and Apply, below all their tools. */
 export function withBrowserPermissions(
@@ -380,7 +390,7 @@ export function withBrowserPermissions(
       inherited.policies.push(requested);
     return hands;
   }
-  const state: PermissionState = { policies: [requested] };
+  const state: PermissionState = { policies: [requested], selectedEmail: null };
   const notify = async (
     name: "onGoogleAccountSelected" | "onGoogleSignInConfirmed",
     account: string,
@@ -475,7 +485,6 @@ export function withBrowserPermissions(
       return;
     const fresh = await context();
     if (
-      !ctx.intendedEmail ||
       normalizeGoogleEmail(fresh.intendedEmail) !==
         normalizeGoogleEmail(ctx.intendedEmail) ||
       ctx.entry !== "basic" ||
@@ -494,7 +503,10 @@ export function withBrowserPermissions(
   const usedAnotherAccounts = new Set<string>();
   const prepareCredentials =
     requested.prepareBrowserCredentials ?? hands.prepareBrowserCredentials;
-  const context = () => googleIdentityContext(policy, hands);
+  const context = async (): Promise<GoogleIdentityContext> => ({
+    ...(await googleIdentityContext(policy, hands)),
+    selectedEmail: state.selectedEmail,
+  });
   const refusal = async (
     ref: string | undefined,
     secretWrite = false,
@@ -504,6 +516,17 @@ export function withBrowserPermissions(
     const page = observed ?? (await hands.observe());
     ctx ??= await context();
     const kind = browserInteractionKind(page, ref, ctx);
+    const allowed = await currentBrowserPermissions(policy);
+    if (
+      allowed.googleSignIn &&
+      !isGoogleAccountPage(page) &&
+      hasGoogleSignInAction(page, ctx) &&
+      (controlIsSiteCredential(page, ref) ||
+        (kind === "signIn" &&
+          !signInEntryActions(page).some((entry) => entry.ref === ref)) ||
+        kind === "createAccounts")
+    )
+      return "Google sign-in is enabled and offered here. Use its visible button before email and password.";
     if (kind === "mfa")
       return "Enter the verification code yourself on the website, then continue.";
     if (kind === "google_handoff") return googleHandoff(page, ctx);
@@ -512,7 +535,6 @@ export function withBrowserPermissions(
         ? "Enter passwords yourself on the website. They are never given to the agent."
         : null;
     if (!kind) return null;
-    const allowed = await currentBrowserPermissions(policy);
     if (
       !secretWrite &&
       kind === "signIn" &&
@@ -543,7 +565,9 @@ export function withBrowserPermissions(
       const freshContext = await context();
       if (
         normalizeGoogleEmail(ctx.intendedEmail) !==
-        normalizeGoogleEmail(freshContext.intendedEmail)
+          normalizeGoogleEmail(freshContext.intendedEmail) ||
+        normalizeGoogleEmail(ctx.selectedEmail) !==
+          normalizeGoogleEmail(freshContext.selectedEmail)
       )
         return "Your Profile email changed. Look at the page again.";
       const all = (seen: ApplyFormObservation) => [
@@ -635,9 +659,14 @@ export function withBrowserPermissions(
     }
     return null;
   };
-  const click = async (ref: string, following = false) => {
-    const page = await hands.observe();
-    const ctx = await context();
+  const click = async (
+    ref: string,
+    following = false,
+    observed?: ApplyFormObservation,
+    identity?: GoogleIdentityContext,
+  ) => {
+    const page = observed ?? (await hands.observe());
+    const ctx = identity ?? (await context());
     const denied =
       (await refusal(ref, false, page, ctx)) ??
       (await accountActionRefusal(page, ref, ctx));
@@ -647,8 +676,10 @@ export function withBrowserPermissions(
     const selected = async <T extends { ok: boolean }>(
       result: T,
     ): Promise<T> => {
-      if (result.ok && account)
+      if (result.ok && account) {
+        state.selectedEmail = account;
         await notify("onGoogleAccountSelected", account);
+      }
       if (result.ok && confirmation)
         await notify("onGoogleSignInConfirmed", confirmation);
       return !result.ok && "error" in result && typeof result.error === "string"
@@ -929,6 +960,7 @@ export function withBrowserPermissions(
         };
       if (
         permissions.signIn &&
+        !(permissions.googleSignIn && hasGoogleSignInAction(page, ctx)) &&
         prepareCredentials &&
         page.url &&
         (page.blocker?.code === "site_login_required" ||
@@ -1056,7 +1088,7 @@ export function withBrowserPermissions(
       const page = await hands.observe();
       const ctx = await context();
       if (browserInteractionKind(page, ref, ctx) === "googleSignIn") {
-        const result = await click(ref, true);
+        const result = await click(ref, true, page, ctx);
         return result.ok
           ? {
               ok: true,

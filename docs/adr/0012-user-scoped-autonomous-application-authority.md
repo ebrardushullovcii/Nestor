@@ -92,7 +92,9 @@ It permits the site's visible Google button, choosing the one offered account
 matching the Profile application email (otherwise the primary email), typing
 that known email as Google's identifier, and pressing a basic identity confirmation
 when transient authorization evidence proves only name/profile/email access.
-It never selects another email, including a sole non-matching account. A visible
+With no Profile email, it may use the only signed-in Google account. With several
+accounts and no match, it hands off. A known Profile email still rules out a sole
+non-matching account. A visible
 Use another account action may be taken once to reach the identifier for that
 same intended email; it does not authorize a Google account's creation. An
 optional Google offer, such as creating a passkey, may be declined with its own
