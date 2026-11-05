@@ -15,6 +15,8 @@ test("profile audit flags known facts without inventing sensitive or foreign-cou
     "Can you work remotely?",
     "Your email",
     "Years of professional experience",
+    "My Experience — Work experience 1 — Job title",
+    "My Experience — Work experience 1 — Company",
   ])
     assert.ok(profileAnswer(question), question);
   assert.ok(
@@ -51,6 +53,8 @@ test("profile audit flags known facts without inventing sensitive or foreign-cou
     ["Are you willing to relocate?", ""],
     ["What is your salary expectation?", ""],
     ["What is your earliest start date?", ""],
+    ["My Experience — Work experience 1 — From", ""],
+    ["My Experience — Work experience 2 — Company", ""],
   ])
     assert.equal(profileAnswer(question, "", country), null, question);
 });

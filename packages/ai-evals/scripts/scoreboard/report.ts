@@ -79,6 +79,14 @@ export function profileAnswer(text: string, key = "", country = "") {
     return "authorizedWorkCountries=European Union, Germany";
   }
   if (/notice/.test(question)) return "noticePeriodDays=30";
+  // This synthetic resume has exactly one experience entry, so its first
+  // employer and title are unambiguous. Its dates are absent and stay unknown.
+  if (/\bwork experience 1\b/.test(question)) {
+    if (/job.title/.test(question))
+      return "synthetic resume experience: Staff Frontend Engineer";
+    if (/company|employer/.test(question))
+      return "synthetic resume experience: Signal Systems";
+  }
   if (/remote|hybrid|work.mode/.test(question))
     return "remoteEligible=true; workModes=remote, hybrid";
   if (
