@@ -279,8 +279,8 @@ test("an Ashby-sized form fills known facts and hands unknown facts over once", 
       JSON.stringify({ requests, calls: requests.length }),
     );
   expect(reads).toBe(1);
-  expect(turns).toBe(1); // The last-chance catalog fills the remaining known literals.
-  expect(requests).toHaveLength(4); // Reading, one fill, and two unknown-question matches.
+  expect(turns).toBe(2); // The actor fills known siblings in its next batch.
+  expect(requests).toHaveLength(3); // One reading and two fills; no per-field matching.
   expect(result.outcome).toBe("paused");
   expect(result.filled).toHaveLength(5);
   expect(controls[4]?.value).toBe("");

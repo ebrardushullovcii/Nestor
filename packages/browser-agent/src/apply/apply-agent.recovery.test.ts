@@ -187,7 +187,23 @@ test("a document handoff fills known name and email fields before asking only fo
   ];
   const result = await runApplyAgent(
     input,
-    client([{ name: "upload", args: { ref: "c0", documentId: "cv" } }]),
+    client([
+      { name: "upload", args: { ref: "c0", documentId: "cv" } },
+      {
+        name: "fill_fields",
+        args: {
+          fields: [
+            { tool: "type", ref: "c1", text: "Jamie" },
+            { tool: "type", ref: "c2", text: "Rivers" },
+            { tool: "type", ref: "c3", text: "jamie@example.test" },
+          ],
+        },
+      },
+      {
+        name: "finish",
+        args: { reason: "Only the file needs the person.", needsPerson: true },
+      },
+    ]),
   );
   expect(raw.controls.slice(1).map((entry) => entry.value)).toEqual([
     "Jamie",
@@ -319,6 +335,16 @@ test("reopening an earlier handoff rechecks known identity instead of asking it 
   const result = await runApplyAgent(
     input,
     client([
+      {
+        name: "fill_fields",
+        args: {
+          fields: [
+            { tool: "type", ref: "c0", text: "Jamie" },
+            { tool: "type", ref: "c1", text: "Rivers" },
+            { tool: "type", ref: "c2", text: "jamie@example.test" },
+          ],
+        },
+      },
       {
         name: "finish",
         args: { reason: "The form is complete.", needsPerson: false },

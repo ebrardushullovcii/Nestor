@@ -246,9 +246,11 @@ test("a checker refusal before a supported sibling leaves only the refused field
       .flatMap((p) => p.questions ?? (p.question ? [p.question] : []))
       .map((q) => q.prompt),
   ).toContain("Weekly rota capacity");
-  expect(JSON.stringify(calls)).toContain(
-    "could not finish checking this answer",
-  );
+  expect(
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .find((question) => question.prompt === "Weekly rota capacity")?.note,
+  ).toContain("could not finish checking");
   expect(JSON.stringify(calls)).not.toContain("Reconsider it once");
   expect(input.hands.clickAction).not.toHaveBeenCalled();
 });

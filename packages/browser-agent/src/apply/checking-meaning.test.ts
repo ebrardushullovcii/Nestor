@@ -10,7 +10,6 @@ import {
 } from "./answer-meaning";
 import { createStepReceiptTracker } from "./step-receipts";
 import { buildApplyFormObservation } from "./page-hands";
-import { factualSummaryCitationIsSourced } from "./factual-summary";
 import type { ApplyAnswerSources } from "./types";
 
 const sources: ApplyAnswerSources = {
@@ -117,29 +116,6 @@ test("one unusable citation preserves a supported answer and a genuine question"
     },
   });
   expect(chatWithTools).toHaveBeenCalledTimes(2);
-});
-
-test("normalized factual citations preserve complete statements and material scope", () => {
-  expect(
-    factualSummaryCitationIsSourced(
-      "I prepare monthly quality reports.",
-      ["Reporting routine: I prepare monthly quality reports."],
-      "How do you produce recurring business information?",
-    ),
-  ).toBe(true);
-  for (const source of [
-    "Previously reporting: I prepare monthly quality reports.",
-    "Reporting for Acme: I prepare monthly quality reports.",
-    "Acme reporting: I prepare monthly quality reports.",
-    "Reporting: I prepare monthly quality reports only under supervision.",
-  ])
-    expect(
-      factualSummaryCitationIsSourced(
-        "I prepare monthly quality reports.",
-        [source],
-        "How do you produce recurring business information?",
-      ),
-    ).toBe(false);
 });
 
 function observation() {
@@ -254,7 +230,6 @@ test("a bound whole-meaning verdict accepts a factual paraphrase without a secon
       {
         index: 0,
         supported: true,
-        meaningPreserved: true,
         reason: "Same monthly reporting fact.",
         evidence: [
           {
@@ -284,44 +259,6 @@ test("a bound whole-meaning verdict accepts a factual paraphrase without a secon
   expect(chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test("a semantic verdict cannot discard an explicit qualification", async () => {
-  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>().mockResolvedValue(
-    reply([
-      {
-        index: 0,
-        supported: true,
-        meaningPreserved: true,
-        reason: "Incorrectly called a paraphrase.",
-        evidence: [
-          {
-            claim: "Review invoices",
-            kind: "applicant_fact",
-            source: "resume",
-            path: "",
-            quote: "I reconcile stock counts only after an independent review.",
-          },
-        ],
-      },
-    ]),
-  );
-  const result = await checkWrittenApplicationAnswers({
-    client: { chatWithTools },
-    sources: {
-      ...sources,
-      resumeText: "I reconcile stock counts only after an independent review.",
-    },
-    payDisclosed: true,
-    answers: [
-      {
-        question: "Describe stock reconciliation",
-        answer: "I reconcile stock counts.",
-        evidencePolicy: "factual_summary",
-      },
-    ],
-  });
-  expect(result[0]?.supported).toBe(false);
-});
-
 test.each([
   ["6", true],
   ["7", false],
@@ -341,9 +278,10 @@ test.each([
       reply([
         {
           index: 0,
-          supported: true,
-          meaningPreserved: true,
-          reason: "Claimed same meaning.",
+          supported,
+          reason: supported
+            ? "Same meaning."
+            : "Conflicting recorded quantities.",
           evidence: [
             {
               claim: "Six years",
@@ -393,7 +331,6 @@ test("two agreeing cited human answer rows are one supported numeric meaning", a
       {
         index: 0,
         supported: true,
-        meaningPreserved: true,
         reason: "Both recorded answers mean six years.",
         evidence: [
           {

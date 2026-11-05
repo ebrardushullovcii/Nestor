@@ -143,7 +143,7 @@ test("the smaller model catalog preserves every fact, source id and record relat
 
 // 24 visible controls and a 13k-character body, matching the real form's sizes.
 // Every profile value, answer, URL and document here is synthetic.
-test("a GitLab-sized fill keeps the same facts and handovers with bounded input and matching", async () => {
+test("a GitLab-sized fill keeps the same facts and handovers with bounded input and no per-field matching", async () => {
   const input = sources();
   const entries = [
     ["Full name", "profile.fullName"],
@@ -285,22 +285,20 @@ test("a GitLab-sized fill keeps the same facts and handovers with bounded input 
         message.content.slice(message.content.indexOf("\n") + 1),
       ) as Record<string, unknown> & { storedFactCatalog: CatalogRow[] };
       // Proposals read the actual serialized catalog, including dereferencing it.
-      const fields = entries
-        .slice((turns - 1) * 2, turns * 2)
-        .map(([, id], offset) => {
-          const row = facts.storedFactCatalog.find((row) => row.id === id)!;
-          const value = dereference(facts, row);
-          expect(value).toBe(expected.get(id));
-          const index = (turns - 1) * 2 + offset;
-          return index === 9
-            ? {
-                tool: "select",
-                ref: `c${index}`,
-                option: value,
-                storedFactId: id,
-              }
-            : { tool: "type", ref: `c${index}`, text: value, storedFactId: id };
-        });
+      const fields = entries.slice(0, 12).map(([, id], offset) => {
+        const row = facts.storedFactCatalog.find((row) => row.id === id)!;
+        const value = dereference(facts, row);
+        expect(value).toBe(expected.get(id));
+        const index = offset;
+        return index === 9
+          ? {
+              tool: "select",
+              ref: `c${index}`,
+              option: value,
+              storedFactId: id,
+            }
+          : { tool: "type", ref: `c${index}`, text: value, storedFactId: id };
+      });
       if (turns === 1)
         fields.push(
           ...[12, 13, 14].map((index) => ({
@@ -385,7 +383,7 @@ test("a GitLab-sized fill keeps the same facts and handovers with bounded input 
           .map((question) => question.prompt),
       }),
     );
-  expect(turns).toBe(1); // Last-chance lookup fills the known fields before handover.
+  expect(turns).toBe(1); // One complete actor batch; no matcher fills behind it.
   expect(reads).toBe(1);
   expect(result.filled).toHaveLength(12);
   expect(controls.slice(0, 12).map((control) => control.value)).toEqual(

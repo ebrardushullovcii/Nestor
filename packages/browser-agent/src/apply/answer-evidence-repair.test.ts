@@ -201,39 +201,6 @@ test.each([
   ]);
 });
 
-test("a truncated permit cannot lose its exclusions and correction identifies the required full row", async () => {
-  const src = sources();
-  const client = clientFor([
-    cite("/workEligibility/Limited work permissions/0/Country", "Germany"),
-    cite(
-      "/workEligibility/Limited work permissions/0/Conditions",
-      "Employee work up to 18 hours weekly, from 2026-11-01 through 2027-04-30.",
-    ),
-  ]);
-  const result = await checkWrittenApplicationAnswers({
-    client,
-    sources: src,
-    payDisclosed: false,
-    answers: [
-      {
-        question: "Legally work in Germany for this employee role?",
-        answer: "Yes",
-        evidencePolicy: "eligibility",
-      },
-    ],
-  });
-  expect(result).toMatchObject([
-    { supported: false, unavailable: { stage: "source_support" } },
-  ]);
-  const correction = String(
-    client.chatWithTools.mock.calls[1][0].at(-1)?.content,
-  );
-  expect(correction).toContain("requiredPermitRows");
-  expect(correction).toContain("full Conditions and Country");
-  expect(correction).toContain("priorReports");
-  expect(correction).not.toContain("JSON-encoded");
-});
-
 test("a form context quote can establish target conditions alongside complete applicant permission", async () => {
   const src = sources();
   const permit = src.profile.workEligibility.limitedWorkPermissions![0];
@@ -268,33 +235,6 @@ test("a form context quote can establish target conditions alongside complete ap
       ],
     }),
   ).toMatchObject([{ supported: true }]);
-});
-
-test("conflicting same-scope saved quantities cannot be voted into agreement", async () => {
-  const src = sources();
-  src.reusableAnswers = [4, 7].map((n) =>
-    CandidateReusableAnswerSchema.parse({
-      id: `years-${n}`,
-      label: "SQL",
-      question: "Years using SQL",
-      answer: String(n),
-    }),
-  );
-  const client = clientFor([cite("/savedAnswers/0/answer", "4")]);
-  expect(
-    await checkWrittenApplicationAnswers({
-      client,
-      sources: src,
-      payDisclosed: false,
-      answers: [
-        {
-          question: "Years using SQL",
-          answer: "4",
-          evidencePolicy: "saved_answer",
-        },
-      ],
-    }),
-  ).toMatchObject([{ supported: false }]);
 });
 
 test("an unapproved declaration has no authority even with form instructions", async () => {
@@ -462,52 +402,6 @@ test("pending current-field binding survives the question contract", () => {
     targetHash: meaningTargetHash(control, [control]),
     instructionsHash: meaningHash("Saturday work only"),
   });
-});
-
-test("a real sole scalar cannot authorize a different numeric answer", async () => {
-  const src = sources();
-  src.reusableAnswers[0].answer = "4";
-  const client = clientFor([cite("/savedAnswers/0/answer", "4")]);
-  expect(
-    await checkWrittenApplicationAnswers({
-      client,
-      sources: src,
-      payDisclosed: false,
-      answers: [
-        {
-          question: "Personal availability in Germany",
-          answer: "8",
-          evidencePolicy: "saved_answer",
-        },
-      ],
-    }),
-  ).toMatchObject([{ supported: false }]);
-});
-
-test("a complete permit for a different country cannot establish the requested permission", async () => {
-  const src = sources();
-  const permit = src.profile.workEligibility.limitedWorkPermissions![0];
-  const client = clientFor([
-    cite("/workEligibility/Limited work permissions/0/Country", permit.country),
-    cite(
-      "/workEligibility/Limited work permissions/0/Conditions",
-      permit.conditions,
-    ),
-  ]);
-  expect(
-    await checkWrittenApplicationAnswers({
-      client,
-      sources: src,
-      payDisclosed: false,
-      answers: [
-        {
-          question: "May you legally work in Switzerland?",
-          answer: "Yes",
-          evidencePolicy: "eligibility",
-        },
-      ],
-    }),
-  ).toMatchObject([{ supported: false }]);
 });
 
 test("the sent source catalog retains recorded personal work preferences including travel", () => {

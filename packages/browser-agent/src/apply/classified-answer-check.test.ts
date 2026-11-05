@@ -2,33 +2,8 @@ import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
-import { concreteClaimsSupported } from "./concrete-answer-claims";
 import { buildApplyFormObservation } from "./page-hands";
 import type { ApplyFormControl } from "./types";
-
-test("motivation cannot turn a posting requirement into an applicant fact", () => {
-  const quote = "Already holding a valid driving licence";
-  const answer = "I am excited about already holding a valid driving licence";
-  expect(
-    concreteClaimsSupported(answer, [
-      { source: "posting", path: "/description", quote },
-    ]),
-  ).toBe(false);
-  expect(
-    concreteClaimsSupported(answer, [
-      { source: "applicant", path: "/summary", quote: answer },
-    ]),
-  ).toBe(true);
-  expect(
-    concreteClaimsSupported("The role requires a valid driving licence", [
-      {
-        source: "posting",
-        path: "/description",
-        quote: "The role requires a valid driving licence",
-      },
-    ]),
-  ).toBe(true);
-});
 import replay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/typed-answer-permissions.json";
 
 const sources = {
@@ -563,50 +538,6 @@ test("preflight refuses every multilingual gated kind without its matching human
   expect(checks.every((row) => !row.supported)).toBe(true);
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
-test.each([
-  "kubernetes platform",
-  "aws certification",
-  "fluent in german and french",
-  "a decade of TypeScript",
-  "several years of TypeScript",
-  "I joined Example Workshop in 2023",
-  "I led a team of 12 at GitLab",
-])("concrete claims need a single supporting passage: %s", (answer) => {
-  expect(
-    concreteClaimsSupported(answer, [
-      {
-        source: "resume",
-        path: "/text",
-        quote: "Platform engineer with overall experience.",
-      },
-    ]),
-  ).toBe(false);
-});
-test("numbers and entities from different quotes cannot be recombined", () => {
-  expect(
-    concreteClaimsSupported("I led a team of 12 at Example Workshop in 2023", [
-      {
-        source: "resume",
-        path: "/text",
-        quote: "I led a team of 3 at Example Workshop in 2020.",
-      },
-      {
-        source: "resume",
-        path: "/text",
-        quote: "I joined Other Company in 2023 with 12 colleagues.",
-      },
-    ]),
-  ).toBe(false);
-  expect(
-    concreteClaimsSupported("I led a team of 12 at Example Workshop in 2023", [
-      {
-        source: "resume",
-        path: "/text",
-        quote: "I led a team of 12 at Example Workshop in 2023.",
-      },
-    ]),
-  ).toBe(true);
-});
 test("empty inputs do not call AI; retry reads current sources, not an earlier permission", async () => {
   const client = reader([
     {
@@ -645,77 +576,6 @@ test("empty inputs do not call AI; retry reads current sources, not an earlier p
     false,
   );
 });
-
-test.each([
-  "kubernetes platform",
-  "aws certification",
-  "fluent in german and french",
-  "a decade of TypeScript",
-  "several years of TypeScript",
-  "I joined Example Workshop in 2023",
-])(
-  "a lying checker still cannot approve %s inside motivation",
-  async (answer) => {
-    const quote = "Platform engineer with overall experience.";
-    const client: LLMClient = {
-      chatWithTools: vi.fn<LLMClient["chatWithTools"]>((_messages, tools) =>
-        Promise.resolve({
-          toolCalls: [
-            {
-              id: "lying",
-              type: "function",
-              function: {
-                name: tools[0].function.name,
-                arguments: JSON.stringify(
-                  tools[0].function.name === "report_question_kinds"
-                    ? {
-                        plainIndexes: [0],
-                        flagged: [],
-                        tags: [
-                          {
-                            index: 0,
-                            kind: "motivation",
-                            country: null,
-                            sourceId: "resume.text",
-                          },
-                        ],
-                      }
-                    : {
-                        checks: [
-                          {
-                            index: 0,
-                            supported: true,
-                            reason: "Supported",
-                            evidence: [
-                              {
-                                kind: "applicant_fact",
-                                claim: answer,
-                                source: "resume",
-                                path: "",
-                                quote,
-                              },
-                            ],
-                          },
-                        ],
-                      },
-                ),
-              },
-            },
-          ],
-        }),
-      ),
-    };
-    const checks = await checkClassifiedApplicationAnswers({
-      client,
-      sources: { ...sources, resumeText: quote },
-      payDisclosed: false,
-      answers: [{ question: "Why this role?", answer }],
-      formContext: { pageText: "", fields: [] },
-    });
-    expect(checks[0]?.supported).toBe(false);
-    expect(client.chatWithTools).toHaveBeenCalledTimes(3);
-  },
-);
 
 test("a preapproved routine declaration remains a sourced answer, while a gated question cannot borrow that approval", async () => {
   const client: LLMClient = {

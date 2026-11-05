@@ -140,7 +140,6 @@ import {
 } from "./form-replay";
 import { matchOption } from "./option-match";
 import { answerProposals } from "./answer-proposals";
-import { matchApplicationAnswer, semanticAnswerKey } from "./answer-match";
 import { savedPickerRule } from "./option-fallback";
 import { compactApplyPageHistory } from "./page-history";
 import { applicationModelFactsMessage } from "./model-facts";
@@ -157,7 +156,6 @@ import {
   ownWordsAppliesToQuestion,
 } from "./own-words";
 import {
-  checkWrittenApplicationAnswer,
   checkWrittenApplicationAnswers,
   isShortValueAnswer,
   WrittenAnswerCheckUnavailableError,
@@ -559,7 +557,6 @@ async function runMeasuredApplyAgent(
   // Only executor-approved writes, bound to this page/step and field. Page
   // autofill and arbitrary observed values are not checked answer receipts.
   const checkedFieldValues = new Map<string, string>();
-  const matchedAnswers = new Map<string, string>();
   const attachments: ApplyAttachedDocument[] = [];
   const observedAnswers = new Map<string, ApplyFilledControl>();
   const observedAttachments = new Map<string, ApplyAttachedDocument>();
@@ -758,7 +755,6 @@ async function runMeasuredApplyAgent(
   >();
   const runConfig: ApplyAgentConfig = {
     ...config,
-    matchedAnswers,
     sources: {
       ...config.sources,
       taskInstructions:
@@ -966,7 +962,7 @@ async function runMeasuredApplyAgent(
     check: WrittenAnswerCheck,
   ): WrittenAnswerCheck => {
     const prompt = normalizeFormQuestionPrompt(question);
-    if (check.unavailable || check.repairable) {
+    if (check.unavailable) {
       unavailableQuestions.add(prompt);
       retainUnavailableCheck(
         new WrittenAnswerCheckUnavailableError(
@@ -1072,51 +1068,93 @@ async function runMeasuredApplyAgent(
       answer,
       evidencePolicy ?? null,
     ]);
+  type AnswerToCheck = {
+    question: string;
+    answer: string;
+    evidencePolicy?: ApplyAnswerEvidencePolicy;
+  };
+  const checkBatch = (
+    answers: readonly AnswerToCheck[],
+    shortValues = false,
+  ): Promise<WrittenAnswerCheck[]> => {
+    const unchecked = [
+      ...new Map(
+        answers.flatMap((answer) => {
+          const key = answerCheckKey(
+            answer.question,
+            answer.answer,
+            answer.evidencePolicy,
+          );
+          return answerChecks.has(key) ? [] : [[key, answer] as const];
+        }),
+      ).entries(),
+    ];
+    if (unchecked.length) {
+      const verdicts = checkWrittenApplicationAnswers({
+        client: llmClient,
+        sources: runConfig.sources,
+        payDisclosed,
+        approvedAttestations: runConfig.authority.preApprovedAttestationKinds,
+        formContext: currentFormContext(),
+        answers: unchecked.map(([, answer]) => answer),
+        shortValues,
+        signal: config.signal,
+      }).catch((error: unknown) => {
+        retainUnavailableCheck(error);
+        return unchecked.map((_, index) => ({
+          supported: false,
+          reason:
+            "Nestor could not check this answer. Please answer this question.",
+          unavailable: { category: "request_failed", index, stage: "request" },
+        }));
+      });
+      unchecked.forEach(([key, answer], index) =>
+        answerChecks.set(
+          key,
+          verdicts.then((results) =>
+            recordCheck(
+              answer.question,
+              answer.answer,
+              results[index] ?? {
+                supported: false,
+                reason:
+                  "Nestor could not check this answer. Please answer this question.",
+                unavailable: {
+                  category: "invalid_report",
+                  index,
+                  stage: "report",
+                },
+              },
+            ),
+          ),
+        ),
+      );
+    }
+    return Promise.all(
+      answers.map(
+        (answer) =>
+          answerChecks.get(
+            answerCheckKey(
+              answer.question,
+              answer.answer,
+              answer.evidencePolicy,
+            ),
+          )!,
+      ),
+    );
+  };
   const checkOne = (
     question: string,
     answer: string,
     evidencePolicy?: ApplyAnswerEvidencePolicy,
-  ): Promise<WrittenAnswerCheck> => {
-    const key = answerCheckKey(question, answer, evidencePolicy);
-    const cached = answerChecks.get(key);
-    if (cached) return cached;
-    const result = checkWrittenApplicationAnswer({
-      client: llmClient,
-      sources: {
-        ...runConfig.sources,
-        reusableAnswers: relevantSavedAnswers(
-          runConfig.sources.reusableAnswers,
-          [question],
-        ),
+  ): Promise<WrittenAnswerCheck> =>
+    checkBatch([
+      {
+        question,
+        answer,
+        ...(evidencePolicy ? { evidencePolicy } : {}),
       },
-      payDisclosed,
-      approvedAttestations: runConfig.authority.preApprovedAttestationKinds,
-      formContext: currentFormContext(),
-      question,
-      answer,
-      ...(evidencePolicy ? { evidencePolicy } : {}),
-      signal: config.signal,
-    })
-      .then((check) => recordCheck(question, answer, check))
-      .catch((error: unknown) => {
-        retainUnavailableCheck(error);
-        unavailableQuestions.add(normalizeFormQuestionPrompt(question));
-        return {
-          supported: false,
-          reason: "Nestor could not finish checking this answer. Try again.",
-          unavailable: {
-            category:
-              error instanceof WrittenAnswerCheckUnavailableError
-                ? error.category
-                : "request_failed",
-            index: 0,
-            stage: "request",
-          },
-        };
-      });
-    answerChecks.set(key, result);
-    return result;
-  };
+    ]).then(([check]) => check);
   // Precheck exactly the answer the executor will ask about. The executor
   // still decides whether that answer and the person's permissions allow a write.
   const fillFieldCheck = (
@@ -1180,10 +1218,19 @@ async function runMeasuredApplyAgent(
               : null;
         break;
       case "upload":
+        return null; // File contents and upload authority have their own checks.
       case "click":
-        return null; // The executor checks files and click-derived answers itself.
+        if (control.kind !== "checkbox" && control.kind !== "radio")
+          return null;
+        answer =
+          control.kind === "checkbox" &&
+          control.answerControlType !== "multi_choice"
+            ? control.checked
+              ? "No"
+              : "Yes"
+            : control.label || control.value;
+        break;
     }
-    let evidencePolicy: ApplyAnswerEvidencePolicy | undefined;
     if (answer !== null && classifyQuestions) {
       const readings = classifyQuestions.settled(
         observation.controls,
@@ -1210,6 +1257,8 @@ async function runMeasuredApplyAgent(
         controls: observation.controls,
         tags: reading?.answerTags,
         sources: runConfig.sources,
+        payDisclosed,
+        approvedAttestations: runConfig.authority.preApprovedAttestationKinds,
         application: config.application,
         answer,
         pageInstructions: formWritingInstructions(observation),
@@ -1217,14 +1266,14 @@ async function runMeasuredApplyAgent(
       });
       if (permission.kind !== "writing" && permission.kind !== "inference")
         return null;
-      evidencePolicy = permission.evidencePolicy;
-      if (permission.kind === "inference")
-        return {
-          question: questionPrompt(control),
-          answer,
-          control,
-          evidencePolicy: permission.evidencePolicy,
-        };
+      return {
+        question: questionPrompt(control),
+        answer,
+        control,
+        ...(permission.evidencePolicy
+          ? { evidencePolicy: permission.evidencePolicy }
+          : {}),
+      };
     }
     return answer !== null &&
       !requiresSavedOpinionAnswer(questionPrompt(control), answer) &&
@@ -1247,7 +1296,6 @@ async function runMeasuredApplyAgent(
           question: questionPrompt(control),
           answer,
           control,
-          ...(evidencePolicy ? { evidencePolicy } : {}),
         }
       : null;
   };
@@ -1378,14 +1426,10 @@ async function runMeasuredApplyAgent(
         pageInstructions: formWritingInstructions(observation),
         pageUrl: observation.url,
         approvedAttestations: config.authority.preApprovedAttestationKinds,
-        matchedSourceId: matchedAnswers.get(semanticAnswerKey(control, value)),
         now: now(),
       }).kind !== "needs_you"
     );
   };
-  // Held factual-summary questions whose one labelled source statement was
-  // proposed and still refused, by pending key (council D4).
-  const refusedProseCandidates = new Map<string, string>();
   const proseCandidate = (
     control: ApplyFormControl,
     tags: ApplyAnswerTags | null | undefined,
@@ -2556,7 +2600,7 @@ async function runMeasuredApplyAgent(
           ];
         }
         if (outcome.pause.code === "document_needs_you") {
-          let observation = await pageTools.observe();
+          const observation = await pageTools.observe();
           const classifications = await classifyQuestions?.(
             observation.controls,
             questionReadContext(observation),
@@ -2575,12 +2619,24 @@ async function runMeasuredApplyAgent(
               control.required = true;
             }
           }
-          // A file problem does not make the remaining Profile facts unknown.
-          // Fill those through the ordinary permission and retention checks
-          // before collecting the questions this handoff actually needs.
-          if (await tryKnownAnswers(observation)) {
-            observation = await pageTools.observe();
-            syncObservation(observation);
+          const known = unresolvedRequiredControls(observation).flatMap(
+            (control) => {
+              if (control.kind === "file" || control.credentialRole) return [];
+              const value = independentLiteral(control, observation);
+              return value === null ? [] : [{ ref: control.ref, value }];
+            },
+          );
+          if (known.length && !requiredEmptyNudged) {
+            requiredEmptyNudged = true;
+            if (outcome.pause.question)
+              pendingQuestions.set(
+                outcome.pause.question.id,
+                outcome.pause.question,
+              );
+            return {
+              kind: "ok",
+              content: `The file needs the person. First fill these recorded answers in one fill_fields batch: ${JSON.stringify(known)}. Then finish with the missing file question.`,
+            };
           }
           for (const control of unresolvedRequiredControls(observation)) {
             const key = pendingQuestionKey(control);
@@ -2795,9 +2851,78 @@ async function runMeasuredApplyAgent(
             control.required = true;
           }
         }
-        if (await tryKnownAnswers(observation)) {
-          observation = await pageTools.observe();
-          syncObservation(observation);
+        await validateExistingAnswers(observation);
+        for (const control of unresolvedRequiredControls(observation)) {
+          const reading =
+            classifications?.get(
+              questionClassificationKey(control, observation.controls),
+            ) ?? classifications?.get(questionPrompt(control));
+          const permission = classifyAnswerPermission({
+            control: {
+              ...control,
+              questionKind: modelQuestionKind(
+                control,
+                reading,
+                asksPayCurrency(control, observation.controls, classifications),
+              ),
+              attestationKind:
+                reading?.declarationKind ?? control.attestationKind,
+            },
+            controls: observation.controls,
+            tags: reading?.answerTags,
+            sources: runConfig.sources,
+            application: config.application,
+            payDisclosed,
+            approvedAttestations:
+              runConfig.authority.preApprovedAttestationKinds,
+            answer: "",
+            pageInstructions: formWritingInstructions(observation),
+            pageUrl: observation.url,
+          });
+          if (
+            permission.kind === "needs_you" &&
+            permission.check === "pay_permission"
+          )
+            pendingQuestions.set(
+              pendingQuestionKey(control),
+              buildPendingQuestion({
+                control,
+                siblings: observation.controls,
+                jobId: config.application.jobId,
+                detectedAt: now().toISOString(),
+                suggestion: null,
+                reason: permission.reason,
+                askReason: {
+                  kind: "source_rejected",
+                  check: permission.check,
+                  detail: permission.reason,
+                },
+              }),
+            );
+        }
+        // Give the actor one batch reminder for missed Profile facts. Recovery
+        // never starts another matcher or writes fields behind the actor.
+        const knownEmpty = unresolvedRequiredControls(observation).flatMap(
+          (control) => {
+            if (control.kind === "file" || control.credentialRole) return [];
+            const value = independentLiteral(control, observation);
+            return value === null
+              ? []
+              : [
+                  {
+                    ref: control.ref,
+                    question: questionPrompt(control),
+                    value,
+                  },
+                ];
+          },
+        );
+        if (classifyQuestions && knownEmpty.length && !requiredEmptyNudged) {
+          requiredEmptyNudged = true;
+          return {
+            kind: "ok",
+            content: `These unanswered fields have recorded answers: ${JSON.stringify(knownEmpty)}. Fill them in one fill_fields batch before finishing. Leave only genuine unknowns for the person.`,
+          };
         }
         // Finishing a filled local step is not finishing the wizard. A
         // premature Next handoff may now be safe after the remaining fills.
@@ -4018,88 +4143,22 @@ async function runMeasuredApplyAgent(
           }),
         ).values(),
       ];
-      const stepKey = questionReadContext(observation);
-      const checkAnswers = (shortValues: boolean) =>
-        checkWrittenApplicationAnswers({
-          client: llmClient,
-          sources: runConfig.sources,
-          payDisclosed,
-          approvedAttestations: runConfig.authority.preApprovedAttestationKinds,
-          formContext: currentFormContext(),
-          answers: toCheck,
-          shortValues,
-          signal: config.signal,
-        });
-      // Short values are checked at the form-turn effort. The check starts
-      // now, beside the page's question reading; a write waits for that
-      // reading anyway, and when it says one of these questions is about
-      // eligibility, pay or a declaration after all, the answers get the
-      // full fact check before anything is entered.
-      const allowsShort = (
-        readings: ReadonlyMap<string, ApplyQuestionClassification>,
-      ) =>
-        toCheck.every((entry) =>
-          readingAllowsShortCheck(
-            entry.control,
-            readings,
-            observation.controls,
-          ),
-        );
-      const settledReadings = classifyQuestions?.settled(
+      const readings = classifyQuestions?.settled(
         observation.controls,
-        stepKey,
+        questionReadContext(observation),
       );
-      const shortShape =
-        toCheck.length > 0 &&
+      const shortValues =
+        !!readings &&
         toCheck.every(
           (entry) =>
-            !["factual_inference", "eligibility"].includes(
-              entry.evidencePolicy ?? "",
-            ) && isShortValueAnswer(entry.control, entry.answer),
-        );
-      const verdicts = (
-        !shortShape || !classifyQuestions
-          ? checkAnswers(false)
-          : settledReadings
-            ? checkAnswers(allowsShort(settledReadings))
-            : (() => {
-                const quick = checkAnswers(true);
-                // A quick verdict the reading overrules is never used.
-                quick.catch(() => undefined);
-                return classifyQuestions(observation.controls, stepKey).then(
-                  (readings) =>
-                    allowsShort(readings) ? quick : checkAnswers(false),
-                  () => checkAnswers(false),
-                );
-              })()
-      ).catch((error: unknown) => {
-        retainUnavailableCheck(error);
-        return toCheck.map(() => ({
-          supported: false,
-          reason: "Nestor could not finish checking this answer.",
-        }));
-      });
-      toCheck.forEach((entry, index) => {
-        answerChecks.set(
-          answerCheckKey(entry.question, entry.answer, entry.evidencePolicy),
-          verdicts.then((results) =>
-            recordCheck(
-              entry.question,
-              entry.answer,
-              results[index] ?? {
-                supported: false,
-                reason:
-                  "Job Finder could not check this answer right now. Please review it yourself or try again.",
-              },
+            isShortValueAnswer(entry.control, entry.answer) &&
+            readingAllowsShortCheck(
+              entry.control,
+              readings,
+              observation.controls,
             ),
-          ),
         );
-      });
-      // Classification remains mandatory before a write, including direct
-      // stored facts, to enforce permissions.
-      void classifyQuestions?.(observation.controls, stepKey).catch(
-        () => undefined,
-      );
+      void checkBatch(toCheck, shortValues);
       const checkFromBatch = (
         question: string,
         answer: string,
@@ -4783,6 +4842,63 @@ async function runMeasuredApplyAgent(
         control.required = true;
       }
     }
+    const toCheck = page.controls.flatMap((control) => {
+      if (
+        !control.required ||
+        control.disabled ||
+        !control.visible ||
+        control.kind === "file" ||
+        control.credentialRole ||
+        !holdsAnswer(control) ||
+        (["checkbox", "radio"].includes(control.kind) && !control.checked)
+      )
+        return [];
+      const value = currentFieldAnswer(control);
+      if (
+        acceptedMeaningFor(control, value, page) ||
+        (isCoverLetterControl(control) &&
+          value === approvedApplicationLetter(runConfig, control))
+      )
+        return [];
+      const reading =
+        readings.get(questionClassificationKey(control, page.controls)) ??
+        readings.get(questionPrompt(control));
+      const permission = classifyAnswerPermission({
+        control: {
+          ...control,
+          questionKind: modelQuestionKind(
+            control,
+            reading,
+            asksPayCurrency(control, page.controls, readings),
+          ),
+          attestationKind: reading?.declarationKind ?? control.attestationKind,
+          asksCurrentPay:
+            reading?.asksCurrentPay ?? control.asksCurrentPay ?? false,
+        },
+        controls: page.controls,
+        tags: reading?.answerTags,
+        sources: runConfig.sources,
+        approvedAttestations: config.authority.preApprovedAttestationKinds,
+        application: config.application,
+        payDisclosed,
+        answer: value,
+        pageInstructions: formWritingInstructions(page),
+        pageUrl: page.url,
+        now: now(),
+      });
+      return permission.kind === "inference" || permission.kind === "writing"
+        ? [
+            {
+              question: questionPrompt(control),
+              answer: value,
+              ...(permission.evidencePolicy
+                ? { evidencePolicy: permission.evidencePolicy }
+                : {}),
+            },
+          ]
+        : [];
+    });
+    await checkBatch(toCheck);
     const groups = new Set<string>();
     for (const field of page.controls) {
       const groupKey = pendingQuestionKey(field);
@@ -4856,9 +4972,6 @@ async function runMeasuredApplyAgent(
           tags: reading?.answerTags,
           sources: runConfig.sources,
           approvedAttestations: config.authority.preApprovedAttestationKinds,
-          matchedSourceId: matchedAnswers.get(
-            semanticAnswerKey(control, value),
-          ),
           application: config.application,
           payDisclosed,
           answer: value,
@@ -4910,283 +5023,6 @@ async function runMeasuredApplyAgent(
     }
   };
   const replayedScreens = new Set<string>();
-  const lastChanceLookups = new Set<string>();
-  const tryKnownAnswers = async (
-    page: ApplyFormObservation,
-  ): Promise<boolean> => {
-    // Offline executor tests have no semantic reader. Production always
-    // classifies the whole question before matching another source.
-    if (!classifyQuestions) return false;
-    await refreshReusableAnswers();
-    await validateExistingAnswers(page);
-    let changed = false;
-    for (const control of unresolvedRequiredControls(page)) {
-      if (
-        attemptedWrites.has(
-          normalizeFormQuestionPrompt(questionPrompt(control)),
-        ) ||
-        control.kind === "file" ||
-        control.kind === "other" ||
-        control.credentialRole ||
-        isSecurityChallengeControl(control)
-      )
-        continue;
-      const identity = `${screenKey(page)}|${pendingQuestionKey(control)}|${questionPrompt(control)}`;
-      if (lastChanceLookups.has(identity)) continue;
-      lastChanceLookups.add(identity);
-      const pending = pendingQuestions.get(pendingQuestionKey(control));
-      // Exact/normalized saved wording is tried before the Profile catalog.
-      const saved = savedAnswerForQuestion(
-        control,
-        runConfig.sources.reusableAnswers,
-        page.controls,
-      );
-      const reading = classifyQuestions
-        .settled(page.controls, questionReadContext(page))
-        ?.get(questionClassificationKey(control, page.controls));
-      if (reading?.readFailed) continue;
-      const permissionControl = {
-        ...control,
-        questionKind: modelQuestionKind(
-          control,
-          reading,
-          asksPayCurrency(
-            control,
-            page.controls,
-            classifyQuestions.settled(page.controls, questionReadContext(page)),
-          ),
-        ),
-        attestationKind: reading?.declarationKind ?? control.attestationKind,
-      };
-      const permissionFor = (answer: string, candidateSourceId?: string) =>
-        classifyAnswerPermission({
-          control: permissionControl,
-          controls: page.controls,
-          tags: reading?.answerTags,
-          sources: runConfig.sources,
-          application: config.application,
-          approvedAttestations: config.authority.preApprovedAttestationKinds,
-          payDisclosed,
-          answer,
-          candidateSourceId,
-          pageInstructions: formWritingInstructions(page),
-          pageUrl: page.url,
-        });
-      const hold = (reason: string, check: string) =>
-        pendingQuestions.set(
-          pendingQuestionKey(control),
-          buildPendingQuestion({
-            control,
-            siblings: page.controls,
-            jobId: config.application.jobId,
-            detectedAt: now().toISOString(),
-            suggestion: null,
-            reason,
-            askReason: { kind: "source_rejected", check, detail: reason },
-          }),
-        );
-      const initialPermission = permissionFor(saved?.answer ?? "");
-      if (
-        initialPermission.kind === "needs_you" &&
-        initialPermission.check === "pay_permission"
-      ) {
-        hold(initialPermission.reason, initialPermission.check);
-        continue;
-      }
-      const candidates = saved
-        ? [{ sourceId: `answerLibrary.${saved.id}`, value: saved.answer }]
-        : [];
-      if (
-        candidates.length === 0 &&
-        alternativeSelectionGroups(page).has(pendingQuestionKey(control))
-      ) {
-        // Recover factual selections from all offered options, rather than
-        // letting one unsupported proposal hide the other recorded facts.
-        // These are independent checks of positive claims, never inferred No.
-        const reading = classifyQuestions
-          .settled(page.controls, questionReadContext(page))
-          ?.get(questionClassificationKey(control, page.controls));
-        const options = page.controls.flatMap((option) => {
-          if (option.choiceGroupKey !== control.choiceGroupKey) return [];
-          const answer = option.label || option.value;
-          const permission = classifyAnswerPermission({
-            control: option,
-            controls: page.controls,
-            tags: reading?.answerTags,
-            sources: runConfig.sources,
-            application: config.application,
-            approvedAttestations: config.authority.preApprovedAttestationKinds,
-            payDisclosed,
-            answer,
-            pageInstructions: formWritingInstructions(page),
-            pageUrl: page.url,
-          });
-          return permission.kind === "inference" ||
-            permission.kind === "writing"
-            ? [{ option, answer, evidencePolicy: permission.evidencePolicy }]
-            : [];
-        });
-        const checks = await checkWrittenApplicationAnswers({
-          client: llmClient,
-          sources: runConfig.sources,
-          payDisclosed,
-          formContext: currentFormContext(),
-          answers: options.map((entry) => ({
-            question: questionPrompt(entry.option),
-            answer: entry.answer,
-            ...(entry.evidencePolicy
-              ? { evidencePolicy: entry.evidencePolicy }
-              : {}),
-          })),
-          signal: config.signal,
-        }).catch((error: unknown) => {
-          retainUnavailableCheck(error);
-          return [];
-        });
-        let recovered = false;
-        for (const [index, entry] of options.entries()) {
-          const check = checks[index];
-          if (!check) continue;
-          answerChecks.set(
-            answerCheckKey(
-              questionPrompt(entry.option),
-              entry.answer,
-              entry.evidencePolicy,
-            ),
-            Promise.resolve(check),
-          );
-          if (!check.supported || entry.option.checked) continue;
-          const current = pageTools.state.observation;
-          const target = current?.controls.find(
-            (item) => item.ref === entry.option.ref,
-          );
-          if (
-            !target ||
-            target.choiceGroupKey !== entry.option.choiceGroupKey ||
-            questionPrompt(target) !== questionPrompt(entry.option) ||
-            (target.label || target.value) !== entry.answer
-          )
-            break;
-          const outcome = await runProposal(
-            { tool: "set_checkbox", ref: target.ref, checked: true },
-            checkOne,
-          );
-          await outcomeToLoop(outcome, { withPage: false });
-          if (outcome.kind === "filled") recovered = changed = true;
-        }
-        if (recovered) continue;
-      }
-      const literal = independentLiteral(control, page);
-      if (literal !== null) {
-        const sourceId = literalSourceIds.get(control.ref);
-        if (sourceId) candidates.push({ sourceId, value: literal });
-      }
-      const attempt = async (candidate: {
-        sourceId: string;
-        value: string;
-      }) => {
-        heldAnswerKeys.delete(pendingQuestionKey(control));
-        for (const proposal of answerProposals(
-          control,
-          candidate.value,
-          page.controls,
-          candidate.sourceId,
-        )) {
-          const outcome = await runProposal(proposal, checkOne);
-          await outcomeToLoop(outcome, { withPage: false });
-          if (outcome.kind === "filled") changed = true;
-        }
-        const current = pageTools.state.observation?.controls.find(
-          (entry) => entry.ref === control.ref,
-        );
-        return current && holdsAnswer(current) && !current.invalid;
-      };
-      let answered = false;
-      for (const candidate of candidates) {
-        if (await attempt(candidate)) {
-          answered = true;
-          break;
-        }
-      }
-      if (
-        !answered &&
-        candidates.some((candidate) => candidate.sourceId === "resume.text") &&
-        literal !== null
-      )
-        refusedProseCandidates.set(pendingQuestionKey(control), literal);
-      if (!answered) {
-        const candidate = await matchApplicationAnswer({
-          client: llmClient,
-          question: questionPrompt(control),
-          options: control.options,
-          sources: answerSourceCatalog(
-            {
-              ...runConfig.sources,
-              reusableAnswers: relevantSavedAnswers(
-                runConfig.sources.reusableAnswers,
-                page.controls.map(questionPrompt),
-              ),
-            },
-            runConfig.authority.preApprovedAttestationKinds,
-          ),
-          rejection: pending?.note ?? pending?.askReason?.detail ?? null,
-          ...(config.signal ? { signal: config.signal } : {}),
-        }).catch((error: unknown) => {
-          if (config.signal?.aborted) throw error;
-          hold(
-            "Nestor could not match a saved answer for this question. You can answer it here or try again.",
-            "answer_match_unavailable",
-          );
-          return null;
-        });
-        if (candidate) {
-          const permission = permissionFor(candidate.value, candidate.sourceId);
-          if (permission.kind === "needs_you") {
-            hold(permission.reason, permission.check ?? "answer_permission");
-            continue;
-          }
-          const grounding =
-            permission.kind === "literal"
-              ? {
-                  supported: true,
-                  reason: "The exact current answer is bound to its source.",
-                }
-              : await checkOne(
-                  questionPrompt(control),
-                  candidate.value,
-                  permission.kind === "inference" ||
-                    permission.kind === "writing"
-                    ? permission.evidencePolicy
-                    : undefined,
-                );
-          if (grounding.supported) {
-            matchedAnswers.set(
-              semanticAnswerKey(control, candidate.value),
-              candidate.sourceId,
-            );
-            await attempt(candidate);
-          } else {
-            const question = buildPendingQuestion({
-              control,
-              jobId: config.application.jobId,
-              detectedAt: now().toISOString(),
-              suggestion: null,
-              siblings: page.controls,
-              reason: grounding.reason,
-            });
-            if (!question.askReason?.check)
-              question.askReason = {
-                kind: "source_rejected",
-                check: "answer_grounding",
-                detail: grounding.reason.slice(0, 4000),
-              };
-            pendingQuestions.set(pendingQuestionKey(control), question);
-          }
-        }
-      }
-    }
-    return changed;
-  };
   const takenPath = new Set<number>();
   // The questions the attempt before left with the person, unanswered.
   const stillWithPerson = new Set(
@@ -5272,6 +5108,7 @@ async function runMeasuredApplyAgent(
   const restoreFromReplay = async (): Promise<AgentLoopFinish | null> => {
     const replay = runConfig.replay;
     if (!replay) return null;
+    await refreshReusableAnswers();
     const toFinish = (
       reported: AgentLoopToolOutcome,
     ): AgentLoopFinish | null =>
@@ -5536,11 +5373,15 @@ async function runMeasuredApplyAgent(
       }
       break;
     }
-    let current = pageTools.state.observation;
+    const current = pageTools.state.observation;
     if (!current || current.blocker) return null;
-    // An old handoff is not evidence that a Profile fact is missing now.
-    if (await tryKnownAnswers(current)) current = pageTools.state.observation!;
+    await classifyQuestions?.(
+      current.controls,
+      questionReadContext(current),
+    ).catch(() => undefined);
     const open = unresolvedRequiredControls(current);
+    if (open.some((control) => independentLiteral(control, current) !== null))
+      return null;
     // A question the person was already asked, and has not answered yet, is
     // theirs again as the attempt before left it. Any other open field means
     // the page differs from what was recorded: the model reads it.
@@ -5872,8 +5713,6 @@ async function runMeasuredApplyAgent(
           };
       }
       current = pageTools.state.observation;
-      if (current && pendingQuestions.size && (await tryKnownAnswers(current)))
-        current = pageTools.state.observation;
       const answerHeld = [...heldAnswerKeys].some((key) =>
         pendingQuestions.has(key),
       );
@@ -6251,20 +6090,6 @@ async function runMeasuredApplyAgent(
     groundingFailureReason =
       "Nestor could not read this page after three attempts. Your page and answers are kept. Retry this application when Nestor is available.";
     note(groundingFailureReason);
-  }
-  for (const [key, candidate] of refusedProseCandidates) {
-    const question = pendingQuestions.get(key);
-    if (question && !question.suggestedAnswers.length)
-      question.suggestedAnswers = [
-        {
-          id: `${question.id}_resume`,
-          text: candidate,
-          sourceKind: "resume",
-          sourceId: "resume.text",
-          confidenceLabel: null,
-          provenance: [],
-        },
-      ];
   }
   if (technicalFailure?.code === "question_classification_unavailable") {
     const page = pageTools.state.observation;

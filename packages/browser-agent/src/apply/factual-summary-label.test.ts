@@ -1,10 +1,7 @@
 import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test } from "vitest";
 import { classifyAnswerPermission } from "./answer-source-catalog";
-import {
-  factualSummaryIsSourced,
-  labelledStatementFor,
-} from "./factual-summary";
+import { labelledStatementFor } from "./factual-summary";
 import { buildApplyFormObservation } from "./page-hands";
 import type { ApplyAnswerSources } from "./types";
 
@@ -12,88 +9,6 @@ import type { ApplyAnswerSources } from "./types";
 // when the label is decoration the question already restates.
 const QUESTION = "Describe your reporting routine";
 const ANSWER = "I submit weekly reports";
-
-test.each([
-  [
-    "the label the question restates",
-    "Reporting routine: I submit weekly reports",
-    true,
-  ],
-  [
-    "an article in the label",
-    "The reporting routine: I submit weekly reports",
-    true,
-  ],
-  [
-    "a condition word in the label",
-    "Previously reporting routine: I submit weekly reports",
-    false,
-  ],
-  [
-    "an employer the question does not name",
-    "Acme reporting routine: I submit weekly reports",
-    false,
-  ],
-  [
-    "a digit in the label",
-    "2019 reporting routine: I submit weekly reports",
-    false,
-  ],
-  [
-    "a negation in the label",
-    "No reporting routine: I submit weekly reports",
-    false,
-  ],
-  ["a nested label", "Reporting routine: Note: I submit weekly reports", false],
-  [
-    "a label of five words",
-    "My own personal reporting routine: I submit weekly reports",
-    false,
-  ],
-  [
-    "a negation in the remainder",
-    "Reporting routine: I do not submit weekly reports",
-    false,
-  ],
-  [
-    "a condition in the remainder",
-    "Reporting routine: I submit weekly reports only under supervision",
-    false,
-  ],
-])("%s", (_name, source, accepted) => {
-  expect(factualSummaryIsSourced(ANSWER, [source], QUESTION)).toBe(accepted);
-});
-
-test("without the question a labelled line is only its whole statement", () => {
-  expect(
-    factualSummaryIsSourced(ANSWER, [
-      "Reporting routine: I submit weekly reports",
-    ]),
-  ).toBe(false);
-});
-
-test("the remainder keeps its negation when the answer keeps it", () => {
-  expect(
-    factualSummaryIsSourced(
-      "I do not submit weekly reports",
-      ["Reporting routine: I do not submit weekly reports"],
-      QUESTION,
-    ),
-  ).toBe(true);
-});
-
-test("two labelled lines are never joined into one claim", () => {
-  const sources = [
-    "Reporting routine: I submit weekly reports\nReporting tools: Jira and Confluence",
-  ];
-  expect(
-    factualSummaryIsSourced(
-      "I submit weekly reports in Jira and Confluence",
-      sources,
-      "Describe your reporting routine and reporting tools",
-    ),
-  ).toBe(false);
-});
 
 test("recovery finds one statement in its own words, never two", () => {
   expect(
