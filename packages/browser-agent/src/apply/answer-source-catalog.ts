@@ -110,6 +110,7 @@ export function legalQuestionCountry(
 }
 export function answerSourceCatalog(
   sources: ApplyAnswerSources,
+  approvedAttestations: readonly ApplicationAttestationKind[] = [],
 ): ClassifiedAnswerSource[] {
   const rows: ClassifiedAnswerSource[] = storedFacts(sources, {
     payDisclosed: true,
@@ -283,6 +284,13 @@ export function answerSourceCatalog(
       id: "posting.description",
       value: sources.posting.description,
       purpose: "writing",
+      country: null,
+    });
+  for (const kind of approvedAttestations)
+    rows.push({
+      id: `authority.attestation.${kind}`,
+      value: `The person permits Nestor to accept ${kind} declarations.`,
+      purpose: "authority",
       country: null,
     });
   return rows;
@@ -784,7 +792,7 @@ export type ClassifiedAnswerDecision =
   | {
       kind: "writing";
       source: ClassifiedAnswerSource | null;
-      evidencePolicy?: "factual_summary" | "saved_answer";
+      evidencePolicy?: "factual_summary" | "saved_answer" | "declaration";
     }
   | { kind: "needs_you"; reason: string; check?: string }
   /**
@@ -1142,12 +1150,45 @@ export function classifyAnswerPermission(input: {
   // verify that the saved question has the same complete meaning and value.
   // Current-application answers can settle their own conditional eligibility;
   // reuse elsewhere still has to fit this jurisdiction and permit conditions.
+  let savedSetOffered = false;
+  if (matchingSaved && input.control.answerControlType === "multi_choice") {
+    try {
+      const selected: unknown = JSON.parse(matchingSaved.answer);
+      const offered = input.control.options.length
+        ? input.control.options
+        : input.controls
+            .filter(
+              (control) =>
+                control.choiceGroupKey === input.control.choiceGroupKey,
+            )
+            .map((control) => control.label || control.value);
+      savedSetOffered =
+        Array.isArray(selected) &&
+        selected.every(
+          (value) => typeof value === "string" && offered.includes(value),
+        );
+    } catch {
+      /* Non-set answers cannot grant an individual selection. */
+    }
+  }
   if (
-    !matchingSaved &&
+    (!matchingSaved ||
+      (source?.value.trim() !== input.answer.trim() && !savedSetOffered)) &&
     source?.purpose === "saved" &&
-    source.value.trim() === input.answer.trim() &&
+    (source.value.trim() === input.answer.trim() ||
+      input.control.options.length > 0 ||
+      ["checkbox", "radio"].includes(input.control.kind)) &&
     !input.control.repeatedQuestion &&
-    !fieldNamesAnotherPerson(input.control)
+    !fieldNamesAnotherPerson(input.control) &&
+    (!(
+      tags.kind === "own_words" ||
+      requiresOwnWords(input.control.label) ||
+      ownWordsAppliesToQuestion(
+        `${input.control.groupLabel}\n${input.pageInstructions}`,
+        input.control.label,
+      )
+    ) ||
+      source.value.trim() === input.answer.trim())
   ) {
     const record = input.sources.reusableAnswers.find(
       (entry) => source?.id === `answerLibrary.${entry.id}`,
@@ -1157,7 +1198,7 @@ export function classifyAnswerPermission(input: {
         entry.purpose === "saved" &&
         normalizeFormQuestionPrompt(entry.question ?? "") ===
           normalizeFormQuestionPrompt(source?.question ?? "") &&
-        entry.value.trim() !== input.answer.trim(),
+        entry.value.trim() !== source?.value.trim(),
     );
     if (conflicting)
       return deny(
@@ -1268,6 +1309,24 @@ export function classifyAnswerPermission(input: {
       purpose: "authority",
       country: null,
     };
+  if (
+    tags.kind === "other" &&
+    input.control.attestationKind &&
+    declarationApproved &&
+    (tags.declarationPurpose === "consent" ||
+      tags.declarationPurpose === "acknowledgement") &&
+    input.answer !== "Yes"
+  )
+    return {
+      kind: "writing",
+      source: {
+        id: `authority.attestation.${input.control.attestationKind}`,
+        value: input.control.attestationKind,
+        purpose: "authority",
+        country: null,
+      },
+      evidencePolicy: "declaration",
+    };
   // A listing source has its own deterministic evidence, after all gated kinds.
   if (priorCompany?.answer)
     source = {
@@ -1343,7 +1402,7 @@ export function classifyAnswerPermission(input: {
     return factualInferenceAllowed(input)
       ? { kind: "inference", source: null, evidencePolicy: "factual_inference" }
       : deny(
-          "There is no matching verbatim source for this question. Please supply your answer.",
+          "Nestor could not establish an answer to this whole question from your saved facts or permissions. Please supply the missing answer.",
           "source_lookup",
         );
   const saved =

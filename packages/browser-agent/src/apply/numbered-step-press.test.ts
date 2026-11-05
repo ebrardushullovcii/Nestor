@@ -94,6 +94,45 @@ test("a fresh numbered non-final step with every field answered may be pressed",
   ).not.toBeNull();
 });
 
+test("a native non-final save binds its exact same-origin POST", () => {
+  const native = step({
+    actions: [
+      {
+        index: 0,
+        label: "Save and Continue",
+        visible: true,
+        disabled: false,
+        inForm: true,
+        submitsForm: true,
+        formAction: "https://apply.example.test/wizard",
+        formMethod: "POST",
+      },
+    ],
+  });
+  expect(numberedStepPreflight(read(native), "a0")?.nativeForm).toEqual({
+    action: "https://apply.example.test/wizard",
+    method: "POST",
+  });
+  for (const changed of [
+    { formAction: "https://another.example.test/save" },
+    { formMethod: "GET" },
+    { formAction: undefined },
+  ]) {
+    expect(
+      numberedStepPreflight(
+        read({ ...native, actions: [{ ...native.actions[0], ...changed }] }),
+        "a0",
+      ),
+    ).toBeNull();
+  }
+  expect(
+    numberedStepPreflight(
+      read({ ...native, bodyText: "Step 3 of 3", stepLabel: "Step 3 of 3" }),
+      "a0",
+    ),
+  ).toBeNull();
+});
+
 test.each([
   [
     "no step numbers",

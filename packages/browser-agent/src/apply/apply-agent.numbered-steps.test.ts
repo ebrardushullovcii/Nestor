@@ -1,6 +1,7 @@
 import { CandidateProfileSchema } from "@nestor/contracts";
 import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
+import { createHash } from "node:crypto";
 
 import type { LLMClient } from "../agent/contracts";
 import { runApplyAgent } from "./apply-agent";
@@ -278,6 +279,197 @@ function model(turn: () => { name: string; args: Record<string, unknown> }) {
 }
 const finishing = () =>
   model(() => ({ name: "finish", args: { reason: "This step is filled." } }));
+
+test.each(["saved", "other_form", "rejected"] as const)(
+  "a native step carries only its verified file forward: %s",
+  async (variant) => {
+    const w = wizard("saves");
+    const bytes = new TextEncoder().encode("Resume");
+    w.config.sources.documents = [
+      {
+        id: "resume_document",
+        fileName: "resume.txt",
+        mimeType: "text/plain",
+        label: "Your CV",
+        kind: "resume",
+        loadBytes: () => Promise.resolve(bytes),
+      },
+    ];
+    let held = false;
+    const observe = w.hands.observe;
+    w.hands.observe = () => {
+      if (w.state.step === 1) {
+        w.source.actions[0] = {
+          ...w.source.actions[0],
+          submitsForm: true,
+          formAction: w.source.url!,
+          formMethod: "POST",
+        };
+        w.source.controls = [
+          field(),
+          {
+            ...field(),
+            index: 1,
+            id: "resume",
+            name: "resume",
+            inputType: "file",
+            label: "Resume",
+            value: held ? "fakepath/resume.txt" : "",
+            upload: {
+              described: "",
+              nearby: "",
+              shown: true,
+              formSubmits: true,
+              formAction:
+                w.source.url! + (variant === "other_form" ? "/other" : ""),
+              ...(held
+                ? {
+                    fileName: "resume.txt",
+                    fileSize: bytes.length,
+                    selectedFileName: "resume.txt",
+                    selectedFileSize: bytes.length,
+                  }
+                : {}),
+            },
+          },
+        ];
+      } else
+        w.source.uploads = [
+          {
+            fileName: "resume.txt",
+            network: variant === "rejected" ? "rejected" : "unconfirmed",
+          },
+        ];
+      return observe();
+    };
+    w.hands.uploadFile = () => {
+      held = true;
+      return Promise.resolve({ ok: true, observedValue: "resume.txt" });
+    };
+    const result = await runApplyAgent(
+      { ...w.config, uploadWaitMs: 0 },
+      model(() =>
+        !held
+          ? {
+              name: "upload",
+              args: { ref: "c1", documentId: "resume_document" },
+            }
+          : { name: "finish", args: { reason: "Filled" } },
+      ),
+    );
+    expect(
+      result.pauses
+        .flatMap((p) => p.questions ?? [])
+        .some((q) => q.prompt.includes("upload")),
+    ).toBe(variant !== "saved");
+    if (variant === "saved")
+      expect(
+        result.reviewAttachments?.find((a) => a.fileName === "resume.txt")
+          ?.savedSha256,
+      ).toBe(createHash("sha256").update(bytes).digest("hex"));
+    else
+      expect(result.reviewAttachments?.some((a) => a.savedSha256)).toBe(false);
+  },
+);
+
+test.each([true, false])(
+  "a restored native file receipt requires the same source bytes (%s)",
+  async (same) => {
+    const w = wizard("saves", { startStep: 2 });
+    const bytes = new TextEncoder().encode("Resume");
+    w.config.sources.documents = [
+      {
+        id: "resume_document",
+        fileName: "resume.txt",
+        mimeType: "text/plain",
+        label: "Your CV",
+        kind: "resume",
+        loadBytes: () =>
+          Promise.resolve(same ? bytes : new TextEncoder().encode("Changed")),
+      },
+    ];
+    w.config.replay = {
+      answers: [],
+      path: [],
+      attachments: [
+        {
+          fieldKey: w.source.url + "|field:file:0|Resume",
+          label: "Your CV",
+          field: "Resume",
+          fileName: "resume.txt",
+          savedSha256: createHash("sha256").update(bytes).digest("hex"),
+        },
+      ],
+    };
+    const result = await runApplyAgent(w.config, finishing());
+    expect(result.reviewAttachments?.some((a) => a.savedSha256)).toBe(same);
+  },
+);
+
+test("a fresh structured review retains known earlier contact values without editable controls", async () => {
+  const w = wizard("saves", { startStep: 3 });
+  w.source.controls = [];
+  w.source.summaryRows = [
+    { label: "Full name", value: "Robin Ashford" },
+    { label: "Unknown private value", value: "not a supplied fact" },
+  ];
+  const result = await runApplyAgent(w.config, finishing());
+  expect(
+    result.reviewFilled?.map((a) => [
+      a.label,
+      a.answer.value,
+      a.answer.sourceId,
+    ]),
+  ).toEqual([["Full name", "Robin Ashford", "observed.summary_0"]]);
+});
+
+test("a structured summary does not duplicate a control retained with its section context", async () => {
+  const w = wizard("saves", { startStep: 3 });
+  w.source.controls = [
+    { ...field(), groupLabel: "Step 1 of 3: Contact details" },
+  ];
+  w.source.summaryRows = [{ label: "Full name", value: "Robin Ashford" }];
+  const result = await runApplyAgent(w.config, finishing());
+  expect(result.reviewFilled).toHaveLength(1);
+  expect(result.reviewFilled?.[0]?.label).toContain("Contact details");
+  expect(result.reviewFilled?.[0]?.answer.value).toBe("Robin Ashford");
+});
+
+test("an empty optional advance restores the newly exposed recorded answer before the model", async () => {
+  const w = wizard("saves", { emptyStep: true });
+  let restored = false;
+  const observe = w.hands.observe;
+  w.hands.observe = () => {
+    const control = w.source.controls[0];
+    if (w.state.step === 2 && control && !restored) control.value = "";
+    return observe();
+  };
+  w.hands.fillText = vi.fn((_ref: string, value: string) => {
+    restored = true;
+    const control = w.source.controls[0];
+    if (control) control.value = value;
+    return Promise.resolve({ ok: true, observedValue: value });
+  });
+  w.config.replay = {
+    answers: [
+      {
+        question: "Full name",
+        answer: "Robin Ashford",
+        source: "your saved name",
+        written: false,
+        groundedIn: [],
+        sourceId: "profile.fullName",
+      },
+    ],
+    attachments: [],
+    path: [],
+  };
+  const result = await runApplyAgent(w.config, finishing());
+  expect(w.hands.fillText).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(w.hands.fillText).mock.calls[0]?.[1]).toBe("Robin Ashford");
+  expect(result.outcome).toBe("prepared");
+  expect(w.state.finalPresses).toBe(0);
+});
 
 test("Fill advances numbered server-backed steps 1 and 2 with their saves and stops at review with no final press", async () => {
   const { state, hands, config } = wizard("saves");

@@ -866,6 +866,20 @@ async function runMeasuredApplyAgent(
       : undefined;
   };
   const answerChecks = new Map<string, Promise<WrittenAnswerCheck>>();
+  const retainUnavailableCheck = (error: unknown): void => {
+    if (
+      !(error instanceof WrittenAnswerCheckUnavailableError) ||
+      config.signal?.aborted
+    )
+      return;
+    technicalFailure = {
+      code: "answer_grounding_unavailable",
+      retryable: true,
+      pageDisposition: "retain",
+    };
+    groundingFailureReason =
+      "Nestor could not finish checking this application. Nothing was sent. Your page and answers are kept. Try again to continue.";
+  };
   const initialReusableAnswers = JSON.stringify(
     runConfig.sources.reusableAnswers,
   );
@@ -952,11 +966,15 @@ async function runMeasuredApplyAgent(
         ),
       },
       payDisclosed,
+      approvedAttestations: runConfig.authority.preApprovedAttestationKinds,
       formContext: currentFormContext(),
       question,
       answer,
       ...(evidencePolicy ? { evidencePolicy } : {}),
       signal: config.signal,
+    }).catch((error: unknown) => {
+      retainUnavailableCheck(error);
+      throw error;
     });
     answerChecks.set(key, result);
     return result;
@@ -976,6 +994,9 @@ async function runMeasuredApplyAgent(
       (candidate) => candidate.ref === proposal.ref,
     );
     if (!control) return null;
+    // The letter executor supplies approved or checked letter text itself;
+    // it never types this generic proposal's text.
+    if (proposal.tool === "type" && isCoverLetterControl(control)) return null;
     if (savedPickerRule(control, questionPrompt(control), runConfig))
       return null;
     if (
@@ -1421,6 +1442,32 @@ async function runMeasuredApplyAgent(
     string,
     { documentId: string; fileName: string }
   >();
+  const nativeSavedFiles = new Map<string, ApplyAttachedDocument>();
+  for (const earlier of [
+    ...(runConfig.earlierAttachments ?? []),
+    ...(runConfig.replay?.attachments ?? []),
+  ]) {
+    if (!earlier.savedSha256 || !earlier.fieldKey) continue;
+    const document = documentCatalog.find(
+      (entry) => entry.fileName === earlier.fileName,
+    );
+    if (!document) continue;
+    const bytes = await document.loadBytes().catch(() => null);
+    if (!bytes) continue;
+    if (
+      createHash("sha256").update(bytes).digest("hex") !== earlier.savedSha256
+    )
+      continue;
+    nativeSavedFiles.set(earlier.fieldKey, {
+      fieldKey: earlier.fieldKey,
+      documentId: document.id,
+      fileName: earlier.fileName,
+      label: earlier.label,
+      controlLabel: earlier.field,
+      savedSha256: earlier.savedSha256,
+      at: now().toISOString(),
+    });
+  }
   const uploadDiagnostics = new Map<string, string>();
   const recordUpload = (
     fieldKey: string,
@@ -1648,6 +1695,10 @@ async function runMeasuredApplyAgent(
     for (const control of next.controls) {
       if (control.disabled || (!control.visible && control.kind !== "file"))
         continue;
+      if (control.kind === "file")
+        for (const [key, saved] of nativeSavedFiles)
+          if (saved.controlLabel === questionPrompt(control))
+            nativeSavedFiles.delete(key);
       const label = questionPrompt(control);
       const nationality = nationalityQuestionIdentity(label);
       const nationalitySaved = nationality
@@ -1681,11 +1732,10 @@ async function runMeasuredApplyAgent(
         control.choiceGroupKey && !control.choiceGroupKey.startsWith("ref:")
           ? control.choiceGroupKey
           : `field:${control.kind}:${questionOrdinal}`;
-      const fieldKey =
-        `${next.url?.split(/[?#]/u)[0] ?? ""}|${next.step.label ?? ""}|${questionKey}|${label}`.slice(
-          0,
-          2_000,
-        );
+      const fieldKey = `${screenKey(next)}|${questionKey}|${label}`.slice(
+        0,
+        2_000,
+      );
       reviewObservedFieldKeys.add(fieldKey);
       if (control.kind === "file") {
         // Without the step label: a field that stays in the page while later
@@ -1825,6 +1875,65 @@ async function runMeasuredApplyAgent(
       if (holdsAnswer(control) && !control.invalid)
         pendingQuestions.delete(pendingQuestionKey(control));
     }
+    // A server-backed wizard may replace earlier controls with a structured
+    // review. Keep those current values as observations, never as new facts.
+    const catalog = answerSourceCatalog(runConfig.sources);
+    for (const [index, row] of (next.summaryRows ?? []).entries()) {
+      const label = row.label.trim(),
+        value = row.value.trim();
+      if (
+        !label ||
+        !value ||
+        [...observedAttachments.values()].some((a) => a.fileName === value)
+      )
+        continue;
+      const same = (question: string) =>
+        normalizeSignal(question) === normalizeSignal(label);
+      // questionPrompt adds section context to a control's own label. A
+      // summary commonly shows that label alone. Only suppress its extra
+      // display row here; source checks still use the whole question.
+      const represented = (question: string) =>
+        same(question) ||
+        normalizeSignal(question.split(" — ").at(-1) ?? question) ===
+          normalizeSignal(label);
+      if (
+        [...observedAnswers.values()].some(
+          (a) => represented(a.label) && a.answer.value.trim() === value,
+        )
+      )
+        continue;
+      const prior = runConfig.replay?.answers.find(
+        (a) => same(a.question) && a.answer.trim() === value,
+      );
+      if (
+        !prior &&
+        !catalog.some(
+          (source) =>
+            source.purpose !== "authority" && source.value.trim() === value,
+        )
+      )
+        continue;
+      const fieldKey = `${screenKey(next)}|summary:${index}|${label}`.slice(
+        0,
+        2_000,
+      );
+      observedAnswers.set(fieldKey, {
+        fieldKey,
+        ref: `summary:${index}`,
+        label,
+        questionKind: "other",
+        at: next.observedAt,
+        answer: {
+          value,
+          kind: "other",
+          sourceKind: "profile",
+          sourceId: `observed.summary_${index}`,
+          provenanceLabel: "the site's current review",
+          groundedIn: [],
+        },
+      });
+      reviewObservedFieldKeys.add(fieldKey);
+    }
     // Some widgets replace the file field with the file's name once the
     // upload lands (Greenhouse). The field is gone; the server's word on that
     // same file, which the page still reports, settles it.
@@ -1844,15 +1953,24 @@ async function runMeasuredApplyAgent(
           control.kind === "file" && uploadFieldKey(control, next) === key,
       );
       const state =
-        word === "pending"
-          ? "uploading"
-          : word === "unconfirmed" &&
-              field &&
-              field.upload?.fileName?.toLowerCase() ===
-                entry.fileName.toLowerCase() &&
-              retainedForFormSubmission(field)
-            ? "accepted"
-            : word;
+        word !== "rejected" &&
+        nativeSavedFiles.get(key)?.fileName === entry.fileName
+          ? "accepted"
+          : word === "pending"
+            ? "uploading"
+            : word === "unconfirmed" &&
+                field &&
+                field.upload?.fileName?.toLowerCase() ===
+                  entry.fileName.toLowerCase() &&
+                retainedForFormSubmission(field)
+              ? "accepted"
+              : word;
+      const nativeSaved = nativeSavedFiles.get(key);
+      if (word === "rejected") {
+        nativeSavedFiles.delete(key);
+        if (nativeSaved?.fieldKey)
+          observedAttachments.delete(nativeSaved.fieldKey);
+      }
       if (state !== entry.state)
         uploadLedger.set(key, { ...entry, state, since: now().getTime() });
       if (state !== "accepted") continue;
@@ -1863,7 +1981,8 @@ async function runMeasuredApplyAgent(
             attached.controlLabel === entry.label &&
             attached.fileName === entry.fileName,
         );
-      observedAttachments.set(key, {
+      const observedKey = nativeSaved?.fieldKey ?? key;
+      observedAttachments.set(observedKey, {
         ...(recorded ?? {
           documentId: `observed.${entry.label}`,
           fileName: entry.fileName,
@@ -1871,8 +1990,33 @@ async function runMeasuredApplyAgent(
           controlLabel: entry.label,
           at: next.observedAt,
         }),
-        fieldKey: key,
+        fieldKey: observedKey,
+        ...(nativeSavedFiles.get(key)?.savedSha256
+          ? { savedSha256: nativeSavedFiles.get(key)!.savedSha256 }
+          : {}),
       });
+    }
+    for (const [key, saved] of nativeSavedFiles) {
+      if (
+        !key.startsWith(`${next.url?.split(/[?#]/u)[0] ?? ""}|`) ||
+        next.controls.some(
+          (field) =>
+            field.kind === "file" &&
+            questionPrompt(field) === saved.controlLabel,
+        )
+      )
+        continue;
+      if (
+        next.uploads?.some(
+          (upload) =>
+            upload.fileName === saved.fileName && upload.network === "rejected",
+        )
+      ) {
+        nativeSavedFiles.delete(key);
+        observedAttachments.delete(saved.fieldKey ?? key);
+        continue;
+      }
+      observedAttachments.set(saved.fieldKey ?? key, saved);
     }
     // A continue keeps the page an earlier attempt attached a file on. Where
     // the widget replaced that field with the file's name, this run never
@@ -3239,6 +3383,57 @@ async function runMeasuredApplyAgent(
     );
     if (outcome.kind === "moved" && outcome.confirmedStepPage)
       stepReceipts.advance(outcome.confirmedStepPage, now().toISOString());
+    if (
+      outcome.kind === "moved" &&
+      outcome.confirmedNativeForm &&
+      outcome.confirmedStepPage
+    ) {
+      const savedPage = outcome.confirmedStepPage;
+      for (const field of savedPage.controls) {
+        if (
+          field.kind !== "file" ||
+          !field.visible ||
+          field.disabled ||
+          field.upload?.formAction !== outcome.confirmedNativeForm.action ||
+          !retainedForFormSubmission(field)
+        )
+          continue;
+        const key = uploadFieldKey(field, savedPage);
+        const fileName = field.upload.fileName!;
+        if (
+          outcome.observation.uploads?.some(
+            (upload) =>
+              upload.fileName === fileName && upload.network === "rejected",
+          )
+        )
+          continue;
+        const document = documentCatalog.find(
+          (entry) => entry.fileName === fileName,
+        );
+        if (!document) continue;
+        const bytes = await document.loadBytes().catch(() => null);
+        if (!bytes) continue;
+        if (bytes.byteLength !== field.upload.fileSize) continue;
+        const saved: ApplyAttachedDocument = {
+          fieldKey: reviewFieldKey(savedPage, field),
+          documentId: document.id,
+          fileName,
+          label: document.label,
+          controlLabel: questionPrompt(field),
+          at: now().toISOString(),
+          savedSha256: createHash("sha256").update(bytes).digest("hex"),
+        };
+        nativeSavedFiles.set(key, saved);
+        const existing = uploadLedger.get(key);
+        if (existing)
+          uploadLedger.set(key, {
+            ...existing,
+            state: "accepted",
+            since: now().getTime(),
+          });
+        observedAttachments.set(saved.fieldKey!, saved);
+      }
+    }
     if (outcome.kind === "paused" && outcome.pause.unconfirmedStep && before)
       stepReceipts.unconfirmed(before, now().toISOString());
     if (control && outcome.kind === "suggestion") {
@@ -3654,6 +3849,7 @@ async function runMeasuredApplyAgent(
           client: llmClient,
           sources: runConfig.sources,
           payDisclosed,
+          approvedAttestations: runConfig.authority.preApprovedAttestationKinds,
           formContext: currentFormContext(),
           answers: toCheck,
           shortValues,
@@ -3701,13 +3897,13 @@ async function runMeasuredApplyAgent(
                   () => checkAnswers(false),
                 );
               })()
-      ).catch(() =>
-        toCheck.map(() => ({
+      ).catch((error: unknown) => {
+        retainUnavailableCheck(error);
+        return toCheck.map(() => ({
           supported: false,
-          reason:
-            "Job Finder could not check this answer right now. Please review it yourself or try again.",
-        })),
-      );
+          reason: "Nestor could not finish checking this answer.",
+        }));
+      });
       toCheck.forEach((entry, index) => {
         answerChecks.set(
           answerCheckKey(entry.question, entry.answer, entry.evidencePolicy),
@@ -4453,6 +4649,14 @@ async function runMeasuredApplyAgent(
           readings.get(questionClassificationKey(control, page.controls)) ??
           readings.get(questionPrompt(control));
         const value = currentFieldAnswer(control);
+        // The person's approved application letter is already an exact,
+        // task-scoped source. Checking it again as newly written prose loses
+        // that source and can reject the unchanged text.
+        if (
+          isCoverLetterControl(control) &&
+          value === approvedApplicationLetter(runConfig, control)
+        )
+          continue;
         const permission = classifyAnswerPermission({
           control: {
             ...control,
@@ -4599,7 +4803,10 @@ async function runMeasuredApplyAgent(
               : {}),
           })),
           signal: config.signal,
-        }).catch(() => []);
+        }).catch((error: unknown) => {
+          retainUnavailableCheck(error);
+          return [];
+        });
         let recovered = false;
         for (const [index, entry] of options.entries()) {
           const check = checks[index];
@@ -4675,13 +4882,17 @@ async function runMeasuredApplyAgent(
         const candidate = await matchApplicationAnswer({
           client: llmClient,
           question: questionPrompt(control),
-          sources: answerSourceCatalog({
-            ...runConfig.sources,
-            reusableAnswers: relevantSavedAnswers(
-              runConfig.sources.reusableAnswers,
-              page.controls.map(questionPrompt),
-            ),
-          }),
+          options: control.options,
+          sources: answerSourceCatalog(
+            {
+              ...runConfig.sources,
+              reusableAnswers: relevantSavedAnswers(
+                runConfig.sources.reusableAnswers,
+                page.controls.map(questionPrompt),
+              ),
+            },
+            runConfig.authority.preApprovedAttestationKinds,
+          ),
           rejection: pending?.note ?? pending?.askReason?.detail ?? null,
           ...(config.signal ? { signal: config.signal } : {}),
         }).catch(() => null);
@@ -5067,6 +5278,25 @@ async function runMeasuredApplyAgent(
           data: {},
         };
       }
+      const next = nextPathStep(after, replay, takenPath);
+      if (next && checkFormReadiness(after, uploadOptions).ok) {
+        const proposal: ApplyProposal | null =
+          next.step.tool === "navigate"
+            ? { tool: "navigate", url: next.step.href ?? next.step.label }
+            : next.ref
+              ? { tool: next.step.tool, ref: next.ref }
+              : null;
+        if (proposal) {
+          takenPath.add(next.index);
+          const finish = toFinish(
+            await outcomeToLoop(await runProposal(proposal, checkOne), {
+              withPage: false,
+            }),
+          );
+          if (finish) return finish;
+          continue;
+        }
+      }
       break;
     }
     let current = pageTools.state.observation;
@@ -5315,6 +5545,15 @@ async function runMeasuredApplyAgent(
     // Once every remaining field is held for the person, another model turn
     // cannot fill anything. This includes answer refusals, not just pickers.
     beforeModelTurn: async () => {
+      if (technicalFailure)
+        return {
+          reason:
+            groundingFailureReason ??
+            "Nestor could not finish checking this application.",
+          needsPerson: false,
+          stuck: true,
+          data: {},
+        };
       await refreshReusableAnswers();
       // A form brought back from what an earlier run left: no model call
       // for a screen that matches it.
@@ -5359,6 +5598,11 @@ async function runMeasuredApplyAgent(
             data: {},
           };
         if (outcome.kind !== "moved") break;
+        current = pageTools.state.observation;
+        // The empty screen may have exposed a recorded, answered screen.
+        // Restore it before the model can make a new choice for that field.
+        const restoredAfterAdvance = await restoreFromReplay();
+        if (restoredAfterAdvance) return restoredAfterAdvance;
         current = pageTools.state.observation;
       }
       // A saved picker rule is applied as soon as its question is on the
@@ -5511,9 +5755,17 @@ async function runMeasuredApplyAgent(
     now,
   })
     .catch((error: unknown): AgentLoopResult => {
-      if (!(error instanceof QuestionReadUnavailableError)) throw error;
+      if (
+        !(error instanceof QuestionReadUnavailableError) &&
+        !(error instanceof WrittenAnswerCheckUnavailableError)
+      )
+        throw error;
+      retainUnavailableCheck(error);
       technicalFailure = {
-        code: "question_classification_unavailable",
+        code:
+          error instanceof WrittenAnswerCheckUnavailableError
+            ? "answer_grounding_unavailable"
+            : "question_classification_unavailable",
         retryable: true,
         pageDisposition: "retain",
       };

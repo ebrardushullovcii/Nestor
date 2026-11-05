@@ -390,7 +390,10 @@ export async function checkClassifiedApplicationAnswers(input: {
       )
     )
       contextControls.push(control);
-  const catalog = answerSourceCatalog(input.sources);
+  const catalog = answerSourceCatalog(
+    input.sources,
+    input.approvedAttestations,
+  );
   const classify = createQuestionClassifier({
     client: input.client,
     signal: input.signal,
@@ -519,13 +522,9 @@ export async function checkClassifiedApplicationAnswers(input: {
         if (
           decision.kind !== "needs_you" ||
           control.credentialRole ||
-          !["source_lookup", "declaration_permission"].includes(
-            decision.check ?? "",
-          ) ||
           !catalog.some(
             (source) =>
-              source.purpose === "saved" &&
-              source.value.trim() === answer.answer.trim(),
+              source.purpose === "saved" || source.purpose === "authority",
           )
         )
           return decision;
@@ -535,6 +534,7 @@ export async function checkClassifiedApplicationAnswers(input: {
         const candidate = await matchApplicationAnswer({
           client: input.client,
           question: questionPrompt(control),
+          options: control.options,
           sources: catalog,
           rejection: decision.reason,
           ...(input.signal ? { signal: input.signal } : {}),

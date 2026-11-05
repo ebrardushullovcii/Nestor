@@ -258,6 +258,7 @@ test.each([
         | "factual_summary"
         | "factual_inference"
         | "saved_answer"
+        | "declaration"
         | "eligibility",
     ) =>
       checkWrittenApplicationAnswer({

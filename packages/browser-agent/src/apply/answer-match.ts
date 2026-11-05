@@ -21,6 +21,7 @@ export const semanticAnswerKey = (
 export async function matchApplicationAnswer(input: {
   client: LLMClient;
   question: string;
+  options?: readonly string[];
   sources: readonly ClassifiedAnswerSource[];
   rejection: string | null;
   signal?: AbortSignal;
@@ -33,12 +34,13 @@ export async function matchApplicationAnswer(input: {
       {
         role: "system",
         content:
-          "Find an existing answer to the whole application question. Select one supplied source only. Preserve its meaning, country, conditions and negations. A layout/wording rejection is a candidate to reconsider, never permission to invent facts. Unknown age, relocation, preferences, credentials and personal declarations stay unknown. Report null when no source answers the whole question. Your proposal still goes through grounding, permission and page verification.",
+          "Find an existing answer to the whole application question. Select one supplied source only. Map its meaning to the actual target options, even when labels or control types differ. Return actual option labels, or a JSON array string for a complete multiple selection. Preserve its meaning, country, conditions and negations. For free text keep the person's words unchanged. A wording rejection is a candidate to reconsider, never permission to invent facts. Approved declaration authority permits only its named consent or acknowledgement, never a new personal fact. Unknown age, relocation, preferences, credentials and personal facts stay unknown. Report null when no source answers the whole question. Your proposal still goes through grounding, permission and page verification.",
       },
       {
         role: "user",
         content: JSON.stringify({
           question: input.question,
+          options: input.options ?? [],
           priorRejection: input.rejection,
           sources,
         }),

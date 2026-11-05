@@ -1562,6 +1562,26 @@ it("opens a restored Ready form without preparing or authorizing a send again", 
   expect(f.authorizeSending).not.toHaveBeenCalled();
 });
 
+it("a failed snapshot reopen queues a linked Fill-only restoration instead of leaving a dead Ready row", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  f.browser.focusApplicationPageBinding.mockRejectedValueOnce(
+    new Error("Saved multistep form could not reopen"),
+  );
+  expect(await f.service.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(f.applications.getApplication(row.id)?.attempt).toBe(row.attempt + 1);
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+  f.releases.shift()!();
+});
+
 it("a database-backed refill carries the actual Google selection checkpoint into the next caller", async () => {
   const f = await setup(1, undefined, { onDisk: true });
   preparation.activities.length = 0;
@@ -4541,7 +4561,11 @@ it("bounds an unavailable equivalent-question read until its source snapshot cha
   const compare = vi
     .spyOn(browserAgent, "equivalentApplicationQuestions")
     .mockRejectedValueOnce(new Error("Comparison unavailable"))
-    .mockResolvedValue(new Set([`${requested.task.id}:${saved.id}`]));
+    .mockResolvedValue(
+      new Map([
+        [`${requested.task.id}:${saved.id}`, JSON.stringify(["Thursday"])],
+      ]),
+    );
   f.deps.aiClient = {
     ...f.deps.aiClient,
     chatWithTools: vi.fn(() => Promise.resolve({ toolCalls: [] })),

@@ -2157,7 +2157,7 @@ it("a select-all-that-apply question takes, saves and reuses a list of options",
   );
 });
 
-it("semantic answer reuse preserves option identity, drafts and a changed snapshot", () => {
+it("semantic answer reuse offers different options while preserving drafts and a changed snapshot", () => {
   const { jobs, applications } = open();
   applications.applyJobs({ selection: { ids: add(jobs, 2) } });
   const [first, second] = [
@@ -2199,7 +2199,7 @@ it("semantic answer reuse preserves option identity, drafts and a changed snapsh
     scope: {},
   });
   const candidates = memory.questionReuseCandidates();
-  expect(candidates.map((row) => row.task.id)).toEqual([asked.task.id]);
+  expect(candidates.map((row) => row.task.id)).toContain(asked.task.id);
   const snapshot = JSON.stringify(candidates);
   memory.saveDraft({
     id: asked.task.id,
@@ -2210,8 +2210,58 @@ it("semantic answer reuse preserves option identity, drafts and a changed snapsh
   expect(
     memory.resolveQuestionReuse({
       snapshot,
-      matches: [{ taskId: asked.task.id, answerId: saved.id }],
+      matches: [
+        { taskId: asked.task.id, answerId: saved.id, answer: saved.answer },
+      ],
     }),
   ).toBe(0);
   expect(applications.getApplication(first.id)?.state).toBe("needs_you");
+});
+
+it("resolves a current waiting task with the checked target value across input types", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!;
+  const memory = applications.needsYou;
+  const asked = memory.request(
+    question(row.id, row.attempt, {
+      key: "travel-target",
+      prompt: "Maximum business travel",
+      input: "choice",
+      options: ["None", "Up to 25%", "Up to 50%"],
+      reusePrompt: true,
+      scope: {},
+    }),
+    { reuseAnswers: false },
+  );
+  if (asked.status !== "needs_you") throw new Error("Waiting question missing");
+  const saved = memory.remember({
+    key: "travel-saved",
+    prompt: "Business travel limit",
+    input: "text",
+    options: [],
+    answer: "At most 25%",
+    scope: {},
+  });
+  let snapshot = JSON.stringify(memory.questionReuseCandidates());
+  expect(
+    memory.resolveQuestionReuse({
+      snapshot,
+      matches: [
+        { taskId: asked.task.id, answerId: saved.id, answer: "At most 25%" },
+      ],
+    }),
+  ).toBe(0);
+  snapshot = JSON.stringify(memory.questionReuseCandidates());
+  expect(
+    memory.resolveQuestionReuse({
+      snapshot,
+      matches: [
+        { taskId: asked.task.id, answerId: saved.id, answer: "Up to 25%" },
+      ],
+    }),
+  ).toBe(1);
+  expect(applications.getApplication(row.id)?.state).toBe("queued");
+  expect(memory.list().total).toBe(0);
+  expect(memory.savedAnswer(saved.id)?.answer).toBe("At most 25%");
 });

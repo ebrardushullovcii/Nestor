@@ -43,6 +43,7 @@ export interface FormReplayAnswer {
 
 export interface FormReplayAttachment {
   fieldKey?: string | undefined;
+  savedSha256?: string | undefined;
   field: string;
   fileName: string;
   label: string;
@@ -50,7 +51,12 @@ export interface FormReplayAttachment {
 
 /** One screen of a form: its address without query, and its step label. */
 export function screenKey(observation: ApplyFormObservation): string {
-  return `${observation.url?.split(/[?#]/u)[0] ?? ""}|${observation.step.label ?? ""}`;
+  const step =
+    observation.step.label ??
+    (observation.step.index !== null && observation.step.total !== null
+      ? `Step ${observation.step.index} of ${observation.step.total}`
+      : "");
+  return `${observation.url?.split(/[?#]/u)[0] ?? ""}|${step}`;
 }
 
 /** The review card's identity for one field, as the run records it. */

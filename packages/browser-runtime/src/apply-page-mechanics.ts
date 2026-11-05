@@ -483,9 +483,15 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 : {}),
               // HTML form submission sends a named file input's file.
               ...(input.name &&
-              input.form?.method === "post" &&
+              input.form?.getAttribute("method")?.toLowerCase() === "post" &&
               input.form.enctype === "multipart/form-data"
-                ? { formSubmits: true }
+                ? {
+                    formSubmits: true,
+                    formAction: new URL(
+                      input.form.getAttribute("action") || window.location.href,
+                      document.baseURI,
+                    ).href,
+                  }
                 : {}),
             };
           };
@@ -739,13 +745,13 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                     formAction: new URL(
                       (actionElement?.hasAttribute("formaction")
                         ? actionElement.formAction
-                        : form.action) || window.location.href,
-                      window.location.href,
+                        : form.getAttribute("action")) || window.location.href,
+                      document.baseURI,
                     ).toString(),
                     formMethod: (
                       (actionElement?.hasAttribute("formmethod")
                         ? actionElement.formMethod
-                        : form.method) || "GET"
+                        : form.getAttribute("method")) || "GET"
                     ).toUpperCase(),
                     submitsForm:
                       button?.type === "submit" ||
@@ -1554,9 +1560,15 @@ export function collectApplyDocumentSnapshot(
           : {}),
         // HTML form submission sends a named file input's file.
         ...(input.name &&
-        input.form?.method === "post" &&
+        input.form?.getAttribute("method")?.toLowerCase() === "post" &&
         input.form.enctype === "multipart/form-data"
-          ? { formSubmits: true }
+          ? {
+              formSubmits: true,
+              formAction: new URL(
+                input.form.getAttribute("action") || window.location.href,
+                document.baseURI,
+              ).href,
+            }
           : {}),
       };
     };
@@ -1750,13 +1762,13 @@ export function collectApplyDocumentSnapshot(
               formAction: new URL(
                 (actionElement?.hasAttribute("formaction")
                   ? actionElement.formAction
-                  : form.action) || window.location.href,
-                window.location.href,
+                  : form.getAttribute("action")) || window.location.href,
+                document.baseURI,
               ).toString(),
               formMethod: (
                 (actionElement?.hasAttribute("formmethod")
                   ? actionElement.formMethod
-                  : form.method) || "GET"
+                  : form.getAttribute("method")) || "GET"
               ).toUpperCase(),
               submitsForm:
                 button?.type === "submit" ||
@@ -3076,7 +3088,11 @@ export function createPlaywrightApplyPageSession(input: {
         !action ||
         action.label !== expected.label ||
         !action.visible ||
-        action.disabled
+        action.disabled ||
+        (expected.nativeForm &&
+          (action.submitsForm !== true ||
+            action.formAction !== expected.nativeForm.action ||
+            action.formMethod?.toUpperCase() !== expected.nativeForm.method))
       )
         return changed;
       const locator = actionLocator(page, expected.ref);
@@ -3105,7 +3121,22 @@ export function createPlaywrightApplyPageSession(input: {
           ...changed,
           error: "This page needs the person before it can advance.",
         };
-      return mechanics.clickElement(expected.ref);
+      if (!expected.nativeForm) return mechanics.clickElement(expected.ref);
+      // The workflow proved a numbered non-final step. Bind its one native
+      // POST to the same freshly observed submitter and destination.
+      try {
+        await openPrepareOnlyAuthorizedFormActionWindow(
+          page,
+          locator,
+          20_000,
+          expected.nativeForm,
+        );
+        const result = await mechanics.clickElement(expected.ref);
+        await waitForPrepareOnlyAuthorizedFormAction(page);
+        return result;
+      } finally {
+        await closePrepareOnlyAuthorizedFormActionWindow(page);
+      }
     },
     setToggle: async (ref, checked) => {
       // A radio or checkbox sends its value ("PT") and its page shows a label

@@ -713,7 +713,7 @@ test.each([
       formContext: { pageText: "", fields: [] },
     });
     expect(checks[0]?.supported).toBe(false);
-    expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+    expect(client.chatWithTools).toHaveBeenCalledTimes(3);
   },
 );
 

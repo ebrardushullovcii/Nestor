@@ -917,6 +917,11 @@ export const ApplicationReviewAttachmentSchema = z
     label: NonEmptyStringSchema.max(240),
     fileName: NonEmptyStringSchema.max(240),
     field: NonEmptyStringSchema.max(2_000),
+    /** Exact document carried by a verified non-final native step save. */
+    savedSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
   })
   .strict();
 export type ApplicationReviewAttachment = z.infer<

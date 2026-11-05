@@ -103,7 +103,19 @@ export function expectedPayHandoff(
       check: "current_pay_missing",
     };
   const suggestion = expectedPaySuggestion(control, sources);
-  if (!suggestion) return null;
+  if (!suggestion) {
+    const pay = sources.preferences?.compensation;
+    return pay?.maximum !== null &&
+      pay?.maximum !== undefined &&
+      pay.currencyStatus === "explicit" &&
+      pay.currency
+      ? {
+          suggestion: null,
+          reason: `Your saved expected pay is ${pay.maximum} ${pay.currency} per ${pay.interval}. That does not establish an answer in the currency, period and pay basis this form requests. Please choose what to disclose; Nestor has not converted it.`,
+          check: "pay_context_mismatch",
+        }
+      : null;
+  }
   const target = suggestion.groundedIn[0];
   if (control.options.length && !control.options.includes(suggestion.value))
     return {

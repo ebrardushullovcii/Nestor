@@ -952,13 +952,6 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           .filter((answer): answer is SavedFormAnswer => answer !== null);
         // An exact answer refused by this attempt is not silently overridden.
         if (answers.some((answer) => answer.key === task.key)) return [];
-        const options = [...task.options].sort();
-        const compatible = answers.filter(
-          (answer) =>
-            answer.input === task.input &&
-            JSON.stringify([...answer.options].sort()) ===
-              JSON.stringify(options),
-        );
         const applications =
           sql(`SELECT DISTINCT n.application_id AS id FROM application_needs_you n
           JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
@@ -966,11 +959,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           ORDER BY n.application_id`).all(row.id) as {
             id: number;
           }[];
-        return compatible.length
+        return answers.length
           ? [
               {
                 task,
-                answers: compatible,
+                answers,
                 applications: applications.map(({ id }) => id),
               },
             ]
@@ -980,7 +973,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     /** Resolve only a still-identical snapshot checked outside the transaction. */
     resolveQuestionReuse(input: {
       snapshot: string;
-      matches: { taskId: number; answerId: number }[];
+      matches: { taskId: number; answerId: number; answer: string }[];
     }): number {
       return store.transaction(() => {
         const current = this.questionReuseCandidates();
@@ -998,7 +991,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             continue;
           let answer: string;
           try {
-            answer = validateAnswer(task, saved.answer);
+            answer = validateAnswer(task, match.answer);
           } catch {
             continue;
           }

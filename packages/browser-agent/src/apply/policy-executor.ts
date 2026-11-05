@@ -164,6 +164,7 @@ export type ApplyExecutionOutcome =
        * exact fresh page it pressed on, for that step's send receipt.
        */
       confirmedStepPage?: ApplyFormObservation;
+      confirmedNativeForm?: { action: string; method: "POST" };
     }
   /** What the person's own facts say about one field, for the model to use. */
   | {
@@ -2566,6 +2567,9 @@ export async function executeApplyProposal(
           url: numberedStep.url,
           stepLabel: numberedStep.stepLabel,
           frame: numberedStep.frame,
+          ...(numberedStep.nativeForm
+            ? { nativeForm: numberedStep.nativeForm }
+            : {}),
         });
         if (!pressed.ok && pressed.reason === "binding_changed") {
           await config.safety!.closeIntermediateWriteWindow();
@@ -2618,6 +2622,9 @@ export async function executeApplyProposal(
           observation: after,
           progress: true,
           confirmedStepPage: livePage,
+          ...(numberedStep.nativeForm
+            ? { confirmedNativeForm: numberedStep.nativeForm }
+            : {}),
         };
       }
       const personOwnedBlocker = livePage.blocker?.requiresPerson

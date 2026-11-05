@@ -1364,6 +1364,9 @@ export function buildApplyReviewCard(input: {
         label: clamp(attachment.label, 240),
         fileName: clamp(attachment.fileName, 240),
         field: clamp(attachment.controlLabel, 2_000),
+        ...(attachment.savedSha256
+          ? { savedSha256: attachment.savedSha256 }
+          : {}),
       })),
     letter: reviewDraft
       ? {

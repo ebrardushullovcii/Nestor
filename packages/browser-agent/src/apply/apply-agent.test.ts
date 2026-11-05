@@ -1801,12 +1801,14 @@ describe("written answer fact check recovery", () => {
         ],
       }),
     };
-    await checkWrittenApplicationAnswer({
-      ...request,
-      client,
-      question: "Do you need visa sponsorship in Germany?",
-      answer: "Yes",
-    });
+    await expect(
+      checkWrittenApplicationAnswer({
+        ...request,
+        client,
+        question: "Do you need visa sponsorship in Germany?",
+        answer: "Yes",
+      }),
+    ).rejects.toMatchObject({ category: "unverified_evidence" });
     const content = vi
       .mocked(client.chatWithTools)
       .mock.calls[0]?.[0].find((message) => message.role === "user")?.content;

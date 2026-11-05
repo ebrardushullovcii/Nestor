@@ -656,6 +656,7 @@ export async function openPrepareOnlyAuthorizedFormActionWindow(
   page: Page,
   locator: Locator,
   durationMs: number | null = 20_000,
+  expected?: { action: string; method: "POST" },
 ): Promise<void> {
   assertNoAccountWindow(page);
   // Search pages do not necessarily arrive through an application session.
@@ -678,15 +679,21 @@ export async function openPrepareOnlyAuthorizedFormActionWindow(
       const actionUrl = new URL(
         (actionElement.hasAttribute("formaction")
           ? actionElement.formAction
-          : form.action) || window.location.href,
-        window.location.href,
+          : form.getAttribute("action")) || window.location.href,
+        document.baseURI,
       ).toString();
       const method = (
         (actionElement.hasAttribute("formmethod")
           ? actionElement.formMethod
-          : form.method) || "GET"
+          : form.getAttribute("method")) || "GET"
       ).toUpperCase();
       if (method !== "POST") return null;
+      if (
+        input.expected &&
+        (actionUrl !== input.expected.action ||
+          method !== input.expected.method)
+      )
+        return null;
       actionElement.dataset.nestorAuthorizedFormAction = input.token;
       const state = (window as unknown as Record<string, unknown>)[
         "__nestorPrepareOnlyMutationGuardV1"
@@ -705,7 +712,7 @@ export async function openPrepareOnlyAuthorizedFormActionWindow(
       }
       return { method, url: actionUrl };
     },
-    { token, expiresAtMs },
+    { token, expiresAtMs, expected },
   );
   if (!action) {
     throw new Error("The authorized control is not attached to a form.");
@@ -1293,7 +1300,10 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     try {
       if (state.providerWriteWindow?.scriptLoginToken) return false;
       return providerRequestAllowed(
-        form.action,
+        new URL(
+          form.getAttribute("action") || window.location.href,
+          document.baseURI,
+        ).href,
         new URLSearchParams(
           [...new FormData(form)].filter(
             (entry): entry is [string, string] => typeof entry[1] === "string",
@@ -1524,12 +1534,12 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       normalizeMethod(
         submitter.hasAttribute("formmethod")
           ? (submitter as HTMLButtonElement | HTMLInputElement).formMethod
-          : form.method,
+          : form.getAttribute("method"),
       ) === authorized.method &&
       normalizeUrl(
         (submitter.hasAttribute("formaction")
           ? (submitter as HTMLButtonElement | HTMLInputElement).formAction
-          : form.action) || window.location.href,
+          : form.getAttribute("action")) || window.location.href,
       ) === authorized.url,
     );
   };
@@ -1569,8 +1579,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         if (formCarriesPreparedValue(form) === true) {
           recordBlockedAttempt(
             "dom_submit",
-            form?.method ?? "FORM",
-            normalizeUrl(form?.action ?? window.location.href),
+            form?.getAttribute("method") ?? "FORM",
+            normalizeUrl(form?.getAttribute("action") ?? window.location.href),
             true,
           );
         }
@@ -1611,7 +1621,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         recordBlockedAttempt(
           "dom_submit",
           "POST",
-          normalizeUrl(form?.action || window.location.href),
+          normalizeUrl(form?.getAttribute("action") || window.location.href),
         );
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -1636,8 +1646,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         if (formCarriesPreparedValue(this) === true) {
           recordBlockedAttempt(
             "form_submit",
-            this.method || "FORM",
-            normalizeUrl(this.action || window.location.href),
+            this.getAttribute("method") || "FORM",
+            normalizeUrl(this.getAttribute("action") || window.location.href),
             true,
           );
         }
@@ -1673,8 +1683,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         if (formCarriesPreparedValue(this) === true) {
           recordBlockedAttempt(
             "form_request_submit",
-            this.method || "FORM",
-            normalizeUrl(this.action || window.location.href),
+            this.getAttribute("method") || "FORM",
+            normalizeUrl(this.getAttribute("action") || window.location.href),
             true,
           );
         }

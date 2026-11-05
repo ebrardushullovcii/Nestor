@@ -74,6 +74,7 @@ import type { JobFinderAiClient } from "@nestor/ai-providers";
 
 import {
   createApplyFormPreparer,
+  mergeApplyReviewCards,
   buildApplyLetterDependencies,
   toApplyLlmClient,
 } from "../internal/agent-application-preparation";
@@ -111,17 +112,22 @@ import {
 } from "../internal/workspace-helpers";
 import { uniqueStrings } from "../internal/shared";
 
-/** Eligibility library rows enter only through the current question/context lookup. */
+/** A country-free legacy legal answer has no jurisdiction to apply elsewhere. */
 function generalSavedAnswer(answer: CandidateReusableAnswer): boolean {
-  const kind = inferQuestionKind({
-    kind: "text",
-    label: answer.question,
-    groupLabel: "",
-    placeholder: "",
-  });
+  const legal =
+    ["work_authorization", "visa_sponsorship"].includes(answer.kind) ||
+    ["work_authorization", "visa_sponsorship"].includes(
+      inferQuestionKind({
+        kind: "text",
+        label: answer.question,
+        groupLabel: "",
+        placeholder: "",
+      }),
+    );
   return (
-    !["work_authorization", "visa_sponsorship"].includes(answer.kind) &&
-    !["work_authorization", "visa_sponsorship"].includes(kind)
+    !legal ||
+    !!resolveListingCountry(answer.question) ||
+    !!resolveListingCountry(answer.applicationScope?.location ?? "")
   );
 }
 
@@ -903,6 +909,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     };
     let agent: ApplyAgentResult | null = null;
     let review: ApplicationReviewCard | null = null;
+    let currentReview: ApplicationReviewCard | null = null;
     const shouldRetainFailedApplicationPage = (
       execution: ApplyExecutionResult,
     ): boolean => {
@@ -1019,44 +1026,53 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               ]),
             );
             return Promise.resolve([
-              ...answerDependencies.includeContext(
-                readSavedApplicationAnswers(jobs, undefined, origin).filter(
-                  generalSavedAnswer,
-                ),
-              ),
-              ...answerDependencies
-                .read(
-                  questions.map((question) => ({
-                    ...describeForRun(question),
-                    prompt: question.prompt,
-                    kind: [
-                      "work_authorization",
-                      "visa_sponsorship",
-                      "relocation",
-                      "travel",
-                      "notice_period",
-                      "availability",
-                      "salary_expectation",
-                      "self_intro",
-                      "career_transition",
-                    ].includes(question.kind)
-                      ? (question.kind as CandidateAnswerKind)
-                      : "other",
-                  })),
-                )
-                .map((answer) =>
-                  toKnownFormAnswer(
-                    answer,
-                    byKey.get(answer.key)!,
-                    job.location,
-                    row.id,
+              ...new Map(
+                [
+                  ...answerDependencies.includeContext(
+                    readSavedApplicationAnswers(jobs, undefined, origin).filter(
+                      generalSavedAnswer,
+                    ),
                   ),
-                ),
+                  ...answerDependencies
+                    .read(
+                      questions.map((question) => ({
+                        ...describeForRun(question),
+                        prompt: question.prompt,
+                        kind: [
+                          "work_authorization",
+                          "visa_sponsorship",
+                          "relocation",
+                          "travel",
+                          "notice_period",
+                          "availability",
+                          "salary_expectation",
+                          "self_intro",
+                          "career_transition",
+                        ].includes(question.kind)
+                          ? (question.kind as CandidateAnswerKind)
+                          : "other",
+                      })),
+                    )
+                    .map((answer) =>
+                      toKnownFormAnswer(
+                        answer,
+                        byKey.get(answer.key)!,
+                        job.location,
+                        row.id,
+                      ),
+                    ),
+                ].map((answer) => [answer.id, answer]),
+              ).values(),
             ]);
           },
           onPrepared: (outcome) => {
             agent = outcome.result;
-            review = outcome.reviewCard;
+            currentReview = outcome.reviewCard;
+            review = mergeApplyReviewCards(
+              previous?.reviewCard ?? null,
+              outcome.reviewCard,
+              { freshPreparation: !keptPage },
+            );
           },
         }),
       },
@@ -1123,7 +1139,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (
       (result.state === "ready" ||
         result.questions.some((question) => question.status === "detected")) &&
-      uploadRepaired(row, result, review as ApplicationReviewCard | null)
+      uploadRepaired(row, result, currentReview as ApplicationReviewCard | null)
     )
       applications.needsYou.dropQuestion(
         row.id,
@@ -1577,12 +1593,16 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       profile,
                       resumeText: profile.baseResume.textContent,
                       reusableAnswers: [
-                        ...readSavedApplicationAnswers(
-                          jobs,
-                          undefined,
-                          origin,
-                        ).filter(generalSavedAnswer),
-                        ...saved,
+                        ...new Map(
+                          [
+                            ...readSavedApplicationAnswers(
+                              jobs,
+                              undefined,
+                              origin,
+                            ).filter(generalSavedAnswer),
+                            ...saved,
+                          ].map((answer) => [answer.id, answer]),
+                        ).values(),
                       ],
                       documents: [],
                       posting: {
@@ -2424,7 +2444,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         waiting: { question: task.prompt, options: task.options },
       })),
     );
-    const equivalent = new Set<string>();
+    const equivalent = new Map<string, string>();
     let comparisonUnavailable = false;
     for (let offset = 0; offset < pairs.length && !stopped; offset += 20) {
       const checked = await equivalentApplicationQuestions({
@@ -2432,9 +2452,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         pairs: pairs.slice(offset, offset + 20),
       }).catch(() => {
         comparisonUnavailable = true;
-        return new Set<string>();
+        return new Map<string, string>();
       });
-      for (const id of checked) equivalent.add(id);
+      for (const [id, answer] of checked) equivalent.set(id, answer);
     }
     if (stopped) return;
     // The reader already made its bounded retry. An unavailable report is
@@ -2453,7 +2473,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       // Conflicting sources and two meanings within one application stay open.
       if (
         !answers.length ||
-        new Set(answers.map((answer) => answer.answer)).size !== 1
+        new Set(
+          answers.map((answer) =>
+            equivalent.get(`${candidate.task.id}:${answer.id}`),
+          ),
+        ).size !== 1
       )
         return [];
       if (
@@ -2471,7 +2495,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         )
       )
         return [];
-      return [{ taskId: candidate.task.id, answerId: answers[0]!.id }];
+      return [
+        {
+          taskId: candidate.task.id,
+          answerId: answers[0]!.id,
+          answer: equivalent.get(`${candidate.task.id}:${answers[0]!.id}`)!,
+        },
+      ];
     });
     if (matches.length)
       applications.needsYou.resolveQuestionReuse({ snapshot, matches });
@@ -2696,10 +2726,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (!row || !work || !["ready", "needs_you"].includes(row.state))
       return false;
     const key = applicationIdentity(id, work.attempt).resultId;
-    let focused = await browser.focusApplicationPageBinding?.(
-      "target_site",
-      key,
-    );
+    let focused = await browser
+      .focusApplicationPageBinding?.("target_site", key)
+      .catch((error: unknown) => {
+        onError(error);
+        return false;
+      });
     if (
       !focused &&
       row.state === "needs_you" &&

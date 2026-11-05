@@ -42,6 +42,91 @@ function source(): ApplyAnswerSources {
     documents: [],
   };
 }
+test("a saved preference may map to offered wording through the independent whole-question check", () => {
+  const sources = source();
+  sources.reusableAnswers = [
+    {
+      id: "travel",
+      kind: "travel",
+      label: "Business travel",
+      question: "Maximum business travel",
+      answer: "At most 25%",
+      roleFamilies: [],
+      proofEntryIds: [],
+    },
+  ];
+  const field = {
+    ...control("Maximum work-related travel"),
+    kind: "select" as const,
+    options: ["None", "Up to 25%", "Up to 50%"],
+  };
+  expect(
+    classifyAnswerPermission({
+      control: field,
+      controls: [field],
+      tags: {
+        kind: "preference",
+        country: null,
+        sourceId: "answerLibrary.travel",
+      },
+      sources,
+      answer: "Up to 25%",
+      payDisclosed: false,
+      pageInstructions: "",
+    }),
+  ).toMatchObject({ kind: "writing", evidencePolicy: "saved_answer" });
+  expect(
+    classifyAnswerPermission({
+      control: {
+        ...field,
+        label: "Use your own words: maximum work-related travel",
+      },
+      controls: [
+        { ...field, label: "Use your own words: maximum work-related travel" },
+      ],
+      tags: {
+        kind: "own_words",
+        country: null,
+        sourceId: "answerLibrary.travel",
+      },
+      sources,
+      answer: "Up to 25%",
+      payDisclosed: false,
+      pageInstructions: "",
+    }).kind,
+  ).toBe("needs_you");
+});
+test("approved sentence acceptance is checked as a declaration; an unapproved category stays personal", () => {
+  const field = {
+    ...control("Application portal terms"),
+    kind: "select" as const,
+    attestationKind: "terms_acceptance" as const,
+    options: ["I agree to the portal terms", "I decline"],
+  };
+  const input = {
+    control: field,
+    controls: [field],
+    tags: {
+      kind: "other" as const,
+      country: null,
+      sourceId: null,
+      declarationPurpose: "acknowledgement" as const,
+    },
+    sources: source(),
+    answer: field.options[0],
+    payDisclosed: false,
+    pageInstructions: "",
+  };
+  expect(
+    classifyAnswerPermission({
+      ...input,
+      approvedAttestations: ["terms_acceptance"],
+    }),
+  ).toMatchObject({ kind: "writing", evidencePolicy: "declaration" });
+  expect(
+    classifyAnswerPermission({ ...input, approvedAttestations: [] }),
+  ).toMatchObject({ kind: "needs_you", check: "declaration_permission" });
+});
 function control(
   label = "Are you legally authorized to work in this country?",
 ): ApplyFormControl {

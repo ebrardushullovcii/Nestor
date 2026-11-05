@@ -63,6 +63,7 @@ export type ApplyAnswerEvidencePolicy =
   | "factual_summary"
   | "factual_inference"
   | "saved_answer"
+  | "declaration"
   | "eligibility";
 
 export interface ApplyFormControl {
@@ -486,6 +487,7 @@ export interface ApplyFilledControl {
 
 export interface EarlierAttachment {
   fieldKey?: string | undefined;
+  savedSha256?: string | undefined;
   label: string;
   fileName: string;
   /** The field's question, as the review card names it. */
@@ -494,6 +496,7 @@ export interface EarlierAttachment {
 
 export interface ApplyAttachedDocument {
   fieldKey?: string;
+  savedSha256?: string;
   documentId: string;
   fileName: string;
   label: string;

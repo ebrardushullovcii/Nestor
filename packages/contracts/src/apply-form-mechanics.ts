@@ -82,6 +82,8 @@ export interface RawApplyUpload {
    * form submission). Not a storage receipt for any earlier request.
    */
   formSubmits?: boolean;
+  /** Resolved action of that native multipart form. */
+  formAction?: string;
   /** Distinguishes an ARIA refusal from native file validation. */
   ariaInvalid?: boolean;
   /**
@@ -371,8 +373,8 @@ export interface ApplyRawPageHands {
   }) => Promise<ApplyWriteResult>;
   /**
    * One press of the exact control a fresh read showed: same page, step
-   * label, label, owning frame, visible and enabled. It opens no write window
-   * of its own; whatever the workflow already opened still applies. A changed
+   * label, label, owning frame, visible and enabled. An explicit nativeForm
+   * binds one native POST; otherwise only existing write authority applies. A changed
    * binding is refused with `binding_changed` before anything is pressed.
    */
   clickBoundAction?: (input: {
@@ -381,6 +383,8 @@ export interface ApplyRawPageHands {
     url: string;
     stepLabel: string | null;
     frame: ApplyFrameOwner | null;
+    /** Workflow-approved non-final native save, bound to this exact POST. */
+    nativeForm?: { action: string; method: "POST" };
   }) => Promise<ApplyWriteResult>;
   /** Presses a keyboard key on one element, or on the active page. */
   pressKey: (ref: string | undefined, key: string) => Promise<ApplyWriteResult>;

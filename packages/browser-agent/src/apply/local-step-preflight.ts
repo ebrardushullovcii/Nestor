@@ -83,6 +83,14 @@ function originOf(url: string | null): string | null {
 export function numberedStepPreflight(page: ApplyFormObservation, ref: string) {
   const action = page.actions.find((item) => item.ref === ref);
   const { index, total } = page.step;
+  const nativeForm =
+    action?.submitsForm === true &&
+    action.inForm === true &&
+    action.formMethod?.toUpperCase() === "POST" &&
+    action.formAction &&
+    originOf(action.formAction) === originOf(page.url)
+      ? { action: action.formAction, method: "POST" as const }
+      : null;
   if (
     !page.url ||
     !originOf(page.url) ||
@@ -92,8 +100,7 @@ export function numberedStepPreflight(page: ApplyFormObservation, ref: string) {
     action.kind !== "advance" ||
     !action.visible ||
     action.disabled ||
-    // A native submit is refused by the guard; it cannot save this step.
-    action.submitsForm === true ||
+    (action.submitsForm === true && !nativeForm) ||
     FINAL_WORDING.test(action.label) ||
     index === null ||
     total === null ||
@@ -117,6 +124,7 @@ export function numberedStepPreflight(page: ApplyFormObservation, ref: string) {
     frame: action.frame ?? null,
     index,
     total,
+    ...(nativeForm ? { nativeForm } : {}),
   };
 }
 

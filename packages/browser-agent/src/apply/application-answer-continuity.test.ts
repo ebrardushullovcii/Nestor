@@ -129,8 +129,8 @@ test("task notes reach the independent checker with verifiable quote paths", asy
     }),
   ).toMatchObject([{ supported: true }]);
   src.taskInstructions = [];
-  expect(
-    await checkWrittenApplicationAnswers({
+  await expect(
+    checkWrittenApplicationAnswers({
       client,
       sources: src,
       payDisclosed: false,
@@ -142,7 +142,7 @@ test("task notes reach the independent checker with verifiable quote paths", asy
         },
       ],
     }),
-  ).toMatchObject([{ supported: false }]);
+  ).rejects.toMatchObject({ category: "unverified_evidence" });
 });
 
 test("saved answer wording changes require an independent whole-question check", async () => {
@@ -200,7 +200,7 @@ test("saved answer wording changes require an independent whole-question check",
     ],
     [{ ...good, path: "/yearsExperience", quote: "23" }],
   ]) {
-    const result = await checkWrittenApplicationAnswers({
+    const pending = checkWrittenApplicationAnswers({
       client: report(evidence),
       sources: src,
       payDisclosed: false,
@@ -212,7 +212,11 @@ test("saved answer wording changes require an independent whole-question check",
         },
       ],
     });
-    expect(result[0]?.supported).toBe(evidence[0] === good);
+    if (evidence[0] === good) expect((await pending)[0]?.supported).toBe(true);
+    else
+      await expect(pending).rejects.toMatchObject({
+        category: "unverified_evidence",
+      });
   }
 });
 
@@ -434,7 +438,7 @@ test("conditional Profile permission reaches a checked comparison, never a liter
       },
     }),
   ).toEqual({ kind: "inference", source: null, evidencePolicy: "eligibility" });
-  const check = await checkWrittenApplicationAnswers({
+  const pending = checkWrittenApplicationAnswers({
     client: report([
       {
         claim: "Yes",
@@ -450,7 +454,9 @@ test("conditional Profile permission reaches a checked comparison, never a liter
       { question: field.label, answer: "Yes", evidencePolicy: "eligibility" },
     ],
   });
-  expect(check[0]?.supported).toBe(false); // A country alone cannot prove the hours/expiry conditions.
+  await expect(pending).rejects.toMatchObject({
+    category: "unverified_evidence",
+  }); // A country alone cannot prove hours/expiry.
 });
 
 test("gross expected pay offers the exact compatible band while a missing band and current pay remain distinct", () => {
@@ -521,7 +527,9 @@ test("a resume quote binds the one plaintext document while an invented quote st
     });
   expect((await check())[0]?.supported).toBe(true);
   evidence[0].quote = "Paid work with Ruby.";
-  expect((await check())[0]?.supported).toBe(false);
+  await expect(check()).rejects.toMatchObject({
+    category: "unverified_evidence",
+  });
 });
 
 test("question identity preserves an outer subject and a condition supplied only as a hint", () => {
