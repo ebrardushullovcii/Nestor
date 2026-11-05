@@ -2548,6 +2548,108 @@ it("recovers interrupted preparation, settles an interrupted send from its saved
   expect(f.authorizeSending).not.toHaveBeenCalled();
 });
 
+it.each([
+  ["security_challenge", "captcha"],
+  ["site_login_required", "sign_in"],
+  ["account_creation_required", "sign_in"],
+  ["multi_factor_required", "mfa"],
+] as const)(
+  "shows the exact retained %s page once, then resumes without Continue",
+  async (code, kind) => {
+    const f = await setup(1);
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    preparation.blocker = {
+      code,
+      requiresPerson: true,
+      summary: "This site needs you.",
+      detail: "Complete this step in the browser.",
+      nextActionLabel: "Open browser",
+    };
+    f.browser.focusRetainedApplicationPage.mockResolvedValue(true);
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+    f.releases.shift()!();
+    const row = f.applications.listApplications().rows[0]!;
+    const key = `application_${row.id}_attempt_${row.attempt}`;
+    await vi.waitFor(() =>
+      expect(f.browser.handApplicationPageToPerson).toHaveBeenCalledWith(
+        "target_site",
+        key,
+      ),
+    );
+    expect(
+      f.browser.focusRetainedApplicationPage,
+    ).toHaveBeenCalledExactlyOnceWith("target_site", key);
+    expect(f.browser.focusApplicationPageBinding).not.toHaveBeenCalled();
+    expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalled();
+    expect(f.applications.needsYou.list().rows).toMatchObject([{ kind }]);
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(f.execute).toHaveBeenCalledTimes(1);
+    expect(f.browser.focusRetainedApplicationPage).toHaveBeenCalledOnce();
+
+    preparation.blocker = null;
+    f.browser.readApplicationPageWithPerson.mockResolvedValue({
+      ...f.personPage,
+      title: "Application",
+      bodyText: "Application",
+      links: [
+        {
+          index: 0,
+          label: "Continue application",
+          href: "https://replica.test/application",
+          visible: true,
+          target: "",
+          topOffset: 0,
+        },
+      ],
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+    expect(f.applications.needsYou.list().total).toBe(0);
+    expect(f.browser.focusRetainedApplicationPage).toHaveBeenCalledOnce();
+    expect(f.authorizeSending).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["missing", "failed"] as const)(
+  "keeps a CAPTCHA item usable when showing its page %s",
+  async (outcome) => {
+    const f = await setup(1);
+    preparation.blocker = {
+      code: "security_challenge",
+      requiresPerson: true,
+      summary: "The site is running a security check.",
+      detail: "Complete the CAPTCHA.",
+      nextActionLabel: "Open browser",
+    };
+    if (outcome === "failed")
+      f.browser.focusRetainedApplicationPage.mockRejectedValueOnce(
+        new Error("The page is unavailable."),
+      );
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.browser.focusRetainedApplicationPage).toHaveBeenCalledOnce(),
+    );
+    expect(f.applications.listApplications().rows[0]?.state).toBe("needs_you");
+    expect(f.applications.needsYou.list().rows).toMatchObject([
+      { kind: "captcha" },
+    ]);
+    expect(f.browser.handApplicationPageToPerson).not.toHaveBeenCalled();
+    expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalled();
+    f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+    const row = f.applications.listApplications().rows[0]!;
+    expect(await f.service.open(row.id)).toBe(true);
+    expect(f.browser.handApplicationPageToPerson).toHaveBeenCalledWith(
+      "target_site",
+      `application_${row.id}_attempt_${row.attempt}`,
+    );
+  },
+);
+
 it.each(["signIn", "createAccounts", "solveCaptchas"] as const)(
   "resumes %s after new permission/input, without repeating an unchanged unsuccessful step",
   async (permission) => {
