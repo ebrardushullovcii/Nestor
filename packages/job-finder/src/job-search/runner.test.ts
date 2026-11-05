@@ -253,9 +253,14 @@ test("a background search merges all sightings before fitting; repeat reads and 
   );
   expect(store.getJob(judged.id)?.fitScore).toBe(82);
   expect(runner.status().search?.alreadySaved).toBe(0);
+  const completedReads = engine.readListings.mock.calls.length;
   await runner.start({ postedWithin: "any" });
   await finished(runner);
-  expect(engine.readListings.mock.calls[1]![0].cards).toEqual([]);
+  expect(
+    engine.readListings.mock.calls
+      .slice(completedReads)
+      .flatMap(([input]) => input.cards),
+  ).toEqual([]);
   expect(engine.fitJobs).toHaveBeenCalledTimes(1);
   expect(
     createSearchSourcesStore(store)
@@ -1385,3 +1390,45 @@ test("complete fit batches persist before later work is cancelled", async () => 
   expect(store.listJobs({ stage: "found" }).rows[0]?.fitScore).toBe(77);
   expect(runner.status()).toMatchObject({ fitRunning: false, fitChecking: 0 });
 });
+
+test("healthy-source jobs persist and score while another source detail is held", async () => {
+  const { runner, engine, store } = setup();
+  const held = deferred<Awaited<ReturnType<JobSearchEngine["readListings"]>>>();
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [card(target.id)],
+      pagesRead: 1,
+      complete: true,
+      notes: [],
+    }),
+  );
+  engine.readListings.mockImplementation(({ cards }) =>
+    cards[0]?.sourceId === "one"
+      ? held.promise
+      : Promise.resolve({
+          jobs: cards.map((row) => ({
+            ...found(row),
+            company: `Employer ${row.sourceId}`,
+          })),
+          failures: [],
+        }),
+  );
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await vi.waitFor(
+    () => {
+      const rows = store.listJobs({ stage: "found" }).rows;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.fitScore).toBe(82);
+    },
+    { timeout: 8000 },
+  );
+  expect(runner.status().search?.state).toBe("running");
+  expect(
+    engine.readListings.mock.calls.some(
+      ([input]) => input.cards[0]?.sourceId === "one",
+    ),
+  ).toBe(true);
+  held.resolve({ jobs: [found(card("one"))], failures: [] });
+  await finished(runner);
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(2);
+}, 10000);

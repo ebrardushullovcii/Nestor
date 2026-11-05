@@ -188,3 +188,95 @@ export function asksForSpecificStory(question: string): boolean {
     question,
   );
 }
+
+/** Model-accepted source binding may cross synonymous question labels.
+ * A complete statement after a short heading keeps all its own conditions.
+ * Labels carrying jurisdiction, dates, negation or qualifications stay material.
+ */
+export function factualSummaryCitationIsSourced(
+  answer: string,
+  sources: readonly string[],
+  question: string,
+): boolean {
+  if (factualSummaryIsSourced(answer, sources, question)) return true;
+  const safe = sources.map((source) =>
+    source
+      .split(STATEMENT_BREAK)
+      .map((segment) => {
+        const match = LABELLED.exec(segment);
+        if (!match) return segment;
+        const [, prefix = "", remainder = ""] = match;
+        const words = normalized(prefix).split(" ").filter(Boolean);
+        if (
+          words.length > 4 ||
+          /\p{N}/u.test(prefix) ||
+          words.some((word) => LABEL_VETO.has(word)) ||
+          LABELLED.test(remainder)
+        )
+          return segment;
+        // A heading cannot discard a named employer/place or an explicit scope.
+        const names = prefix
+          .trim()
+          .split(/\s+/u)
+          .slice(1)
+          .some((word) => /^\p{Lu}/u.test(word));
+        if (names || /\b(?:for|at|in|during|from|to|by|as|on)\b/iu.test(prefix))
+          return segment;
+        const stem = (word: string) => word.replace(/(?:ing|s)$/u, "");
+        const subject = words.find((word) => !LABEL_STOPWORDS.has(word));
+        const context = new Set(
+          normalized(`${question} ${answer}`).split(" ").map(stem),
+        );
+        if (!subject || !context.has(stem(subject))) return segment;
+        return remainder;
+      })
+      .join("\n"),
+  );
+  return factualSummaryIsSourced(answer, safe, question);
+}
+
+/** Clear changes to polarity, explicit bounds and time direction never become paraphrases. */
+export function factualSummaryQualificationsMatch(
+  answer: string,
+  evidence: readonly { quote: string; scalar: unknown }[],
+): boolean {
+  const text = normalized(answer);
+  const categories = [
+    /\b(?:no|not|never|without|nicht|kein|keine|jamais|nunca|nao)\b/u,
+    /\b(?:only|solely|exclusively|nur|seulement|apenas)\b/u,
+    /\b(?:after|nach|apres|depois)\b/u,
+    /\b(?:before|vor|avant|antes)\b/u,
+    /\b(?:until|bis|jusqu|ate)\b/u,
+    /\b(?:unless|except|außer|sauf|salvo|exceto)\b/u,
+    /\b(?:if|when|while|wenn|falls|lorsque|cuando|enquanto)\b/u,
+  ];
+  const values = evidence.flatMap(({ quote, scalar }) => {
+    if (typeof scalar !== "string") return [];
+    const cited = normalized(quote);
+    return scalar.split(STATEMENT_BREAK).filter((segment) => {
+      const value = normalized(segment);
+      return value && (value.includes(cited) || cited.includes(value));
+    });
+  });
+  const relevant = values.length
+    ? values.map(normalized)
+    : evidence.map((item) => normalized(item.quote));
+  if (
+    categories.some(
+      (category) =>
+        relevant.some((value) => category.test(value)) !== category.test(text),
+    )
+  )
+    return false;
+  // Exact numeric premises remain exact; this lane does not calculate new facts.
+  const digits = (value: string) =>
+    [...value.matchAll(/\b\d+(?:[.,]\d+)*\b/gu)].map((match) => match[0]);
+  const offered = new Set(evidence.flatMap((item) => digits(item.quote)));
+  if (digits(answer).some((value) => !offered.has(value))) return false;
+  const technologies = (value: string) =>
+    [...value.matchAll(/\b(?:csharp|cplusplus|fsharp|dotnet)\b/gu)].map(
+      (match) => match[0],
+    );
+  const known = new Set(relevant.flatMap(technologies));
+  return technologies(text).every((value) => known.has(value));
+}

@@ -256,9 +256,10 @@ test("an unread first-name question fills from its exact Profile fact; unread pa
     "jamie@example.test",
     "",
   ]);
-  // Unread pay is not written and not asked: the run ends technical.
-  expect(askedFor(result).size).toBe(0);
-  expect(result.outcome).toBe("stuck");
+  // Unread pay remains technical. The separately readable, genuinely missing
+  // personal preference survives instead of being discarded with that fault.
+  expect([...askedFor(result).keys()]).toEqual([CODING]);
+  expect(result.outcome).toBe("paused");
   expect(result.technicalFailure?.code).toBe(
     "question_classification_unavailable",
   );

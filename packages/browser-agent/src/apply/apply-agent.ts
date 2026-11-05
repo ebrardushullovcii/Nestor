@@ -1,3 +1,9 @@
+import {
+  meaningHash,
+  meaningSourcesHash,
+  meaningTargetHash,
+  type AcceptedAnswerMeaning,
+} from "./answer-meaning";
 import { phoneCallingCode, phoneCountryPicker } from "./phone-answer";
 import { questionLabel } from "./question-text";
 import type { ApplyAnswerEvidencePolicy } from "./types";
@@ -127,6 +133,7 @@ import {
   replayedAnswer,
   reviewFieldKey,
   replayStillCurrent,
+  replayValueFitsControl,
   screenKey,
   type ReplayWrite,
 } from "./form-replay";
@@ -637,6 +644,8 @@ async function runMeasuredApplyAgent(
   // This attempt's send evidence (council D1): never write or replay authority.
   const stepReceipts = createStepReceiptTracker(
     config.application.resultId ?? config.application.applicationId,
+    (control, value, observation) =>
+      acceptedMeaningFor(control, value, observation),
   );
   const earlierUncertain = new Set(guardState.uncertainAdvances.keys());
   // Pickers an earlier run left unanswered: a search the site restored into
@@ -831,7 +840,19 @@ async function runMeasuredApplyAgent(
                 // A draft may still be running when a page changes or Stop lands.
                 void pending.catch(() => undefined);
               }
-              return pending;
+              const result = await pending;
+              if (!result.ok && result.checkingUnavailable) {
+                retainUnavailableCheck(
+                  new WrittenAnswerCheckUnavailableError(
+                    "letter_check_unavailable",
+                  ),
+                );
+                if (control)
+                  unavailableQuestions.add(
+                    normalizeFormQuestionPrompt(questionPrompt(control)),
+                  );
+              }
+              return result;
             },
           },
         }
@@ -866,6 +887,109 @@ async function runMeasuredApplyAgent(
       : undefined;
   };
   const answerChecks = new Map<string, Promise<WrittenAnswerCheck>>();
+  const unavailableQuestions = new Set<string>();
+  const acceptedMeanings = new Map<string, AcceptedAnswerMeaning>();
+  const meaningKey = (control: ApplyFormControl, answer: string) =>
+    `${meaningTargetHash(control, pageTools.state.observation?.controls)}:${meaningHash(answer)}`;
+  const acceptedMeaningFor = (
+    control: ApplyFormControl,
+    answer: string,
+    observation: ApplyFormObservation,
+  ) => {
+    const sourcesHash = meaningSourcesHash(
+      runConfig.sources,
+      payDisclosed,
+      runConfig.authority.preApprovedAttestationKinds,
+    );
+    const instructionsHash = meaningHash(formWritingInstructions(observation));
+    const proof = acceptedMeanings.get(meaningKey(control, answer));
+    if (
+      proof?.sourcesHash === sourcesHash &&
+      proof.instructionsHash === instructionsHash
+    )
+      return proof;
+    // Exact facts already accepted by the executor use the same binding as
+    // checked prose. This is no new semantic sample or authority to write.
+    if (
+      checkedFieldValues.get(checkedFieldKey(observation, control))?.trim() !==
+      answer.trim()
+    )
+      return undefined;
+    const readings = classifyQuestions?.settled(
+      observation.controls,
+      questionReadContext(observation),
+    );
+    const reading =
+      readings?.get(questionClassificationKey(control, observation.controls)) ??
+      readings?.get(questionPrompt(control));
+    const permission = classifyAnswerPermission({
+      control: {
+        ...control,
+        attestationKind: reading?.declarationKind ?? control.attestationKind,
+        questionKind: modelQuestionKind(
+          control,
+          reading,
+          asksPayCurrency(control, observation.controls, readings),
+        ),
+        asksCurrentPay:
+          reading?.asksCurrentPay ?? control.asksCurrentPay ?? false,
+        asksHiringCountry:
+          reading?.asksHiringCountry ?? control.asksHiringCountry ?? false,
+      },
+      controls: observation.controls,
+      tags: reading?.answerTags,
+      sources: runConfig.sources,
+      answer,
+      pageInstructions: formWritingInstructions(observation),
+      approvedAttestations: runConfig.authority.preApprovedAttestationKinds,
+      application: config.application,
+      payDisclosed,
+      now: now(),
+    });
+    return permission.kind === "literal"
+      ? {
+          sourcesHash,
+          targetHash: meaningTargetHash(control, observation.controls),
+          instructionsHash,
+          valueHash: meaningHash(answer),
+          reason: "The executor confirmed this exact sourced answer.",
+        }
+      : undefined;
+  };
+  const recordCheck = (
+    question: string,
+    answer: string,
+    check: WrittenAnswerCheck,
+  ): WrittenAnswerCheck => {
+    const prompt = normalizeFormQuestionPrompt(question);
+    if (check.unavailable || check.repairable) {
+      unavailableQuestions.add(prompt);
+      retainUnavailableCheck(
+        new WrittenAnswerCheckUnavailableError(
+          check.unavailable?.category ?? "answer_repair_incomplete",
+        ),
+      );
+    } else if (check.supported) {
+      unavailableQuestions.delete(prompt);
+      const observation = pageTools.state.observation;
+      for (const control of observation?.controls ?? []) {
+        if (normalizeFormQuestionPrompt(questionPrompt(control)) !== prompt)
+          continue;
+        acceptedMeanings.set(meaningKey(control, answer), {
+          sourcesHash: meaningSourcesHash(
+            runConfig.sources,
+            payDisclosed,
+            runConfig.authority.preApprovedAttestationKinds,
+          ),
+          targetHash: meaningTargetHash(control, observation?.controls),
+          instructionsHash: meaningHash(formWritingInstructions(observation)),
+          valueHash: meaningHash(answer),
+          reason: check.reason.slice(0, 600),
+        });
+      }
+    }
+    return check;
+  };
   const retainUnavailableCheck = (error: unknown): void => {
     if (
       !(error instanceof WrittenAnswerCheckUnavailableError) ||
@@ -972,10 +1096,24 @@ async function runMeasuredApplyAgent(
       answer,
       ...(evidencePolicy ? { evidencePolicy } : {}),
       signal: config.signal,
-    }).catch((error: unknown) => {
-      retainUnavailableCheck(error);
-      throw error;
-    });
+    })
+      .then((check) => recordCheck(question, answer, check))
+      .catch((error: unknown) => {
+        retainUnavailableCheck(error);
+        unavailableQuestions.add(normalizeFormQuestionPrompt(question));
+        return {
+          supported: false,
+          reason: "Nestor could not finish checking this answer. Try again.",
+          unavailable: {
+            category:
+              error instanceof WrittenAnswerCheckUnavailableError
+                ? error.category
+                : "request_failed",
+            index: 0,
+            stage: "request",
+          },
+        };
+      });
     answerChecks.set(key, result);
     return result;
   };
@@ -3907,13 +4045,16 @@ async function runMeasuredApplyAgent(
       toCheck.forEach((entry, index) => {
         answerChecks.set(
           answerCheckKey(entry.question, entry.answer, entry.evidencePolicy),
-          verdicts.then(
-            (results) =>
+          verdicts.then((results) =>
+            recordCheck(
+              entry.question,
+              entry.answer,
               results[index] ?? {
                 supported: false,
                 reason:
                   "Job Finder could not check this answer right now. Please review it yourself or try again.",
               },
+            ),
           ),
         );
       });
@@ -4419,6 +4560,8 @@ async function runMeasuredApplyAgent(
         fileType,
         ...(approvedText ? { approvedText } : {}),
       });
+      if (!created.ok && created.checkingUnavailable)
+        return { kind: "ok", status: "refused", content: created.reason };
       if (!created.ok || !created.document) {
         if (!created.ok && control && created.draftText) {
           // A drafted letter that needs the person's review joins the other
@@ -4649,6 +4792,7 @@ async function runMeasuredApplyAgent(
           readings.get(questionClassificationKey(control, page.controls)) ??
           readings.get(questionPrompt(control));
         const value = currentFieldAnswer(control);
+        if (acceptedMeaningFor(control, value, page)) continue;
         // The person's approved application letter is already an exact,
         // task-scoped source. Checking it again as newly written prose loses
         // that source and can reject the unchanged text.
@@ -4929,7 +5073,7 @@ async function runMeasuredApplyAgent(
               candidate.sourceId,
             );
             await attempt(candidate);
-          } else {
+          } else if (!grounding.unavailable) {
             const question = buildPendingQuestion({
               control,
               jobId: config.application.jobId,
@@ -5119,7 +5263,8 @@ async function runMeasuredApplyAgent(
           page.controls,
         );
         savedGroups.add(group);
-        return answer?.id.startsWith("application_")
+        return answer?.id.startsWith("application_") &&
+          replayValueFitsControl(control, answer.answer)
           ? [{ control, answer }]
           : [];
       });
@@ -5374,6 +5519,7 @@ async function runMeasuredApplyAgent(
   let technicalFailure: ApplyAgentResult["technicalFailure"];
   let partialOutageTurns = 0;
   let groundingFailureReason: string | null = null;
+  const technicalFeedback = new Set<string>();
   const loop = await runAgentLoop({
     // What stays the same for every application this person makes leads:
     // the instructions, then their facts. The job, its resume and its page
@@ -5545,6 +5691,21 @@ async function runMeasuredApplyAgent(
     // Once every remaining field is held for the person, another model turn
     // cannot fill anything. This includes answer refusals, not just pickers.
     beforeModelTurn: async () => {
+      if (
+        technicalFailure?.code === "answer_grounding_unavailable" &&
+        unavailableQuestions.size === 0 &&
+        ![...refusedProseCandidates.keys()].some((key) =>
+          pendingQuestions.has(key),
+        )
+      )
+        technicalFailure = undefined;
+      if (technicalFailure?.code === "answer_grounding_unavailable") {
+        const feedback = JSON.stringify([...unavailableQuestions].sort());
+        if (!technicalFeedback.has(feedback)) {
+          technicalFeedback.add(feedback);
+          return null; // One actor turn can repair its proposal and keep genuine questions.
+        }
+      }
       if (technicalFailure)
         return {
           reason:
@@ -6049,6 +6210,7 @@ async function runMeasuredApplyAgent(
       retryable: true,
       pageDisposition: "retain",
     };
+    unavailableQuestions.add(normalizeFormQuestionPrompt(question.prompt));
     pendingQuestions.clear();
     forPerson = [];
     needsPersonFinishPending = false;
@@ -6072,29 +6234,137 @@ async function runMeasuredApplyAgent(
           },
         ];
     }
-  // A technical failure asks the person nothing (councils B10, D6).
-  if (technicalFailure) {
-    pendingQuestions.clear();
-    pauses.length = 0;
-    forPerson = [];
-    needsPersonFinishPending = false;
-    readyToSend = null;
+  if (
+    technicalFailure?.code === "answer_grounding_unavailable" &&
+    unavailableQuestions.size === 0 &&
+    ![...refusedProseCandidates.keys()].some((key) => pendingQuestions.has(key))
+  )
+    technicalFailure = undefined;
+  if (technicalFailure?.code === "question_classification_unavailable") {
+    const page = pageTools.state.observation;
+    const controls = page?.controls ?? [];
+    const readings = page
+      ? classifyQuestions?.settled(controls, questionReadContext(page))
+      : undefined;
+    for (const control of controls) {
+      const reading =
+        readings?.get(questionClassificationKey(control, controls)) ??
+        readings?.get(questionPrompt(control));
+      if (reading?.readFailed)
+        unavailableQuestions.add(
+          normalizeFormQuestionPrompt(questionPrompt(control)),
+        );
+    }
   }
   const finishNeedsPerson =
-    !technicalFailure &&
     !skipReason &&
     (needsPersonFinishPending || loop.finish?.needsPerson === true);
   const finishReason =
     needsPersonFinishPending && loop.finish?.needsPerson !== true
       ? "Job Finder still needs you to review this application before it can finish."
       : (loop.finish?.reason ?? loop.reason);
-  if (finishNeedsPerson)
+  if (finishNeedsPerson && (!technicalFailure || forPerson.length > 0))
     addFinishItems(
       finishHasOnlyCheckedFields
         ? "Review this application before sending."
         : finishReason,
       forPerson,
     );
+  // An unchecked answer is a technical stop; other genuine questions survive.
+  if (technicalFailure) {
+    const page = pageTools.state.observation;
+    const controls = page?.controls ?? [];
+    const readings = page
+      ? (classifyQuestions?.settled(controls, questionReadContext(page)) ??
+        (await classifyQuestions?.(controls, questionReadContext(page)).catch(
+          () => undefined,
+        )))
+      : undefined;
+    for (const control of controls) {
+      const reading =
+        readings?.get(questionClassificationKey(control, controls)) ??
+        readings?.get(questionPrompt(control));
+      const tags = reading?.answerTags;
+      if (
+        !control.visible ||
+        control.disabled ||
+        control.readOnly ||
+        !control.required ||
+        holdsAnswer(control) ||
+        control.kind === "file" ||
+        control.credentialRole ||
+        reading?.readFailed ||
+        !tags ||
+        tags.sourceId !== null ||
+        tags.kind === "motivation" ||
+        tags.kind === "factual_summary" ||
+        unavailableQuestions.has(
+          normalizeFormQuestionPrompt(questionPrompt(control)),
+        ) ||
+        savedAnswerForQuestion(
+          control,
+          runConfig.sources.reusableAnswers,
+          controls,
+        )
+      )
+        continue;
+      const permission = classifyAnswerPermission({
+        control: {
+          ...control,
+          attestationKind: reading?.declarationKind ?? control.attestationKind,
+        },
+        controls,
+        tags,
+        sources: runConfig.sources,
+        answer: "",
+        pageInstructions: page ? formWritingInstructions(page) : "",
+        approvedAttestations: config.authority.preApprovedAttestationKinds,
+        application: config.application,
+        payDisclosed,
+        now: now(),
+      });
+      if (permission.kind !== "needs_you") continue;
+      const key = pendingQuestionKey(control);
+      if (!pendingQuestions.has(key))
+        pendingQuestions.set(
+          key,
+          buildPendingQuestion({
+            control,
+            siblings: controls,
+            jobId: config.application.jobId,
+            detectedAt: now().toISOString(),
+            suggestion: null,
+            reason: permission.reason,
+          }),
+        );
+    }
+    for (const [key, question] of pendingQuestions)
+      if (
+        unavailableQuestions.has(normalizeFormQuestionPrompt(question.prompt))
+      )
+        pendingQuestions.delete(key);
+    for (let index = pauses.length - 1; index >= 0; index--) {
+      const pause = pauses[index];
+      if (!pause) continue;
+      if (!pause.question && !pause.questions?.length) continue;
+      const genuine = (
+        pause.questions ?? (pause.question ? [pause.question] : [])
+      ).filter(
+        (question) =>
+          !unavailableQuestions.has(
+            normalizeFormQuestionPrompt(question.prompt),
+          ),
+      );
+      if (!genuine.length) pauses.splice(index, 1);
+      else {
+        pause.question = genuine[0]!;
+        pause.questions = genuine;
+      }
+    }
+    forPerson = [];
+    needsPersonFinishPending = false;
+    readyToSend = null;
+  }
   const pending = collectedQuestionsPause();
   const personOwnedBlocker =
     pageTools.state.observation?.blocker?.requiresPerson === true
@@ -6106,7 +6376,11 @@ async function runMeasuredApplyAgent(
     outcome = "paused";
     reason = skipReason;
     readyToSend = null;
-  } else if (technicalFailure) {
+  } else if (
+    technicalFailure &&
+    pendingQuestions.size === 0 &&
+    pauses.length === 0
+  ) {
     outcome = "stuck";
     reason = groundingFailureReason ?? loop.reason;
   } else if (pauses.length > 0) {

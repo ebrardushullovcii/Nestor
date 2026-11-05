@@ -1,3 +1,8 @@
+import {
+  meaningHash,
+  meaningSourcesHash,
+  meaningTargetHash,
+} from "./answer-meaning";
 import type {
   ApplicationAttestationKind,
   ApplyStepReceipt,
@@ -65,6 +70,23 @@ function receiptControl(
   const label = field.label.replace(REPEATED_NOTE, "");
   return {
     ref: `receipt${index}`,
+    ...(field.frame ? { frame: field.frame } : {}),
+    ...(field.inputConstraints
+      ? {
+          inputConstraints: {
+            type: field.inputConstraints.type,
+            ...(field.inputConstraints.min !== undefined
+              ? { min: field.inputConstraints.min }
+              : {}),
+            ...(field.inputConstraints.max !== undefined
+              ? { max: field.inputConstraints.max }
+              : {}),
+            ...(field.inputConstraints.step !== undefined
+              ? { step: field.inputConstraints.step }
+              : {}),
+          },
+        }
+      : {}),
     kind: field.kind,
     label,
     ...(field.hint ? { hint: field.hint } : {}),
@@ -81,7 +103,7 @@ function receiptControl(
     disabled: false,
     readOnly: field.readOnly,
     visible: true,
-    value: field.value,
+    value: field.nativeValue ?? field.value,
     checked: field.kind === "radio" || field.kind === "checkbox",
     options: [...field.options],
     selectedOptionLabel: "",
@@ -275,12 +297,14 @@ export async function checkClassifiedApplicationAnswers(input: {
       const [match] = matches;
       if (matches.length !== 1 || !match || unconfirmed) return "unverified";
       const { receipt, field } = match;
-      // A choice group's snapshot lacks its live members: it stays with the
-      // person rather than being checked from a reconstruction.
+      // Earlier choices need the accepted decision and complete offered set.
+      // The exact native value also binds the site's review of a checkbox.
       if (
-        field.kind === "radio" ||
-        field.kind === "checkbox" ||
-        field.answerControlType === "multi_choice"
+        (field.kind === "radio" ||
+          field.kind === "checkbox" ||
+          field.answerControlType === "multi_choice") &&
+        (!field.acceptedMeaning ||
+          (field.answerControlType !== "boolean" && field.options.length === 0))
       )
         return "unverified";
       if (
@@ -306,7 +330,9 @@ export async function checkClassifiedApplicationAnswers(input: {
       if (
         labelled.length !== 1 ||
         !only ||
-        collapse(only.row.value) !== collapse(field.value)
+        (collapse(only.row.value) !== collapse(field.value) &&
+          (!field.nativeValue ||
+            collapse(only.row.value) !== collapse(field.nativeValue)))
       )
         return "unverified";
       return { field, receipt, row: only.rowIndex, echo: false };
@@ -390,6 +416,65 @@ export async function checkClassifiedApplicationAnswers(input: {
       )
     )
       contextControls.push(control);
+  const sourcesHash = meaningSourcesHash(
+    input.sources,
+    input.payDisclosed,
+    input.approvedAttestations,
+  );
+  const accepted = input.answers.map((answer, index) => {
+    const control = controls[index];
+    const binding = prior[index];
+    if (!control || typeof binding === "string") return false;
+    const receipt =
+      binding && typeof binding === "object" ? binding.receipt : finalReceipt;
+    const field =
+      binding && typeof binding === "object"
+        ? binding.field
+        : receipt?.fields.find((field) => field.fieldKey === answer.fieldKey);
+    const proof = field?.acceptedMeaning;
+    if (!receipt || !field || !proof || !sameAnswer(field, answer.answer))
+      return false;
+    if (liveBound[index]) {
+      const actual =
+        control.answerControlType === "multi_choice"
+          ? JSON.stringify(
+              (formControls ?? [])
+                .filter(
+                  (entry) =>
+                    entry.choiceGroupKey === control.choiceGroupKey &&
+                    entry.checked,
+                )
+                .map((entry) => entry.label || entry.value),
+            )
+          : control.kind === "checkbox"
+            ? control.checked
+              ? "Yes"
+              : "No"
+            : control.selectedOptionLabel || control.value;
+      if (!sameAnswer(field, actual)) return false;
+    }
+    return (
+      proof.sourcesHash === sourcesHash &&
+      proof.targetHash ===
+        meaningTargetHash(
+          control,
+          liveBound[index] ? formControls : undefined,
+        ) &&
+      proof.valueHash === meaningHash(answer.answer) &&
+      proof.instructionsHash ===
+        meaningHash(
+          binding && typeof binding === "object"
+            ? receipt.instructions
+            : input.formContext.pageText,
+        )
+    );
+  });
+  if (accepted.every(Boolean))
+    return accepted.map(() => ({
+      supported: true,
+      reason:
+        "The accepted answer and all current meaning bindings are unchanged.",
+    }));
   const catalog = answerSourceCatalog(
     input.sources,
     input.approvedAttestations,
@@ -412,6 +497,16 @@ export async function checkClassifiedApplicationAnswers(input: {
       async (answer, index): Promise<ClassifiedAnswerDecision> => {
         const control = controls[index];
         const binding = prior[index];
+        if (accepted[index])
+          return {
+            kind: "literal",
+            source: {
+              id: "accepted_meaning",
+              value: answer.answer,
+              purpose: "profile",
+              country: null,
+            },
+          };
         if (binding === "no_receipt" || binding === "unverified")
           return {
             kind: "needs_you",
@@ -570,9 +665,10 @@ export async function checkClassifiedApplicationAnswers(input: {
         ...input,
         answers: writing,
       }).catch(() =>
-        writing.map(() => ({
+        writing.map((_answer, index) => ({
           supported: false,
-          reason: "This answer could not be checked against your sources.",
+          reason: "Nestor could not finish checking this answer. Try again.",
+          unavailable: { category: "request_failed", index, stage: "request" },
         })),
       )
     : [];

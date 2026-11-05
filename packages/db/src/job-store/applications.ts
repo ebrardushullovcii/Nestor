@@ -559,6 +559,23 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
+    /** A failed check before any send retains the work and offers explicit retry. */
+    failBeforeSubmission(id: number, attempt: number, reason: string): boolean {
+      return store.transaction(() => {
+        const row =
+          sql(`UPDATE applications SET state = 'failed', error = ?, updated_at = ?
+          WHERE id = ? AND attempt = ? AND state IN ('running', 'ready')
+          AND submitted_at IS NULL AND submission_outcome_json IS NULL RETURNING job_id`).get(
+            reason.slice(0, 2000),
+            Date.now(),
+            id,
+            attempt,
+          ) as { job_id: number } | undefined;
+        if (row) changed([row.job_id]);
+        return !!row;
+      });
+    },
+
     /** A refusal before a send was issued can return the filled form for review. */
     submissionRefused(id: number, attempt: number, reason: string): void {
       store.transaction(() => {

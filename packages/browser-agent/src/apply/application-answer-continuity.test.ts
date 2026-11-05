@@ -142,7 +142,9 @@ test("task notes reach the independent checker with verifiable quote paths", asy
         },
       ],
     }),
-  ).rejects.toMatchObject({ category: "unverified_evidence" });
+  ).resolves.toMatchObject([
+    { supported: false, unavailable: { category: "unverified_evidence" } },
+  ]);
 });
 
 test("saved answer wording changes require an independent whole-question check", async () => {
@@ -214,9 +216,14 @@ test("saved answer wording changes require an independent whole-question check",
     });
     if (evidence[0] === good) expect((await pending)[0]?.supported).toBe(true);
     else
-      await expect(pending).rejects.toMatchObject({
-        category: "unverified_evidence",
-      });
+      await expect(pending).resolves.toMatchObject([
+        {
+          supported: false,
+          unavailable: {
+            category: "unverified_evidence",
+          },
+        },
+      ]);
   }
 });
 
@@ -454,9 +461,14 @@ test("conditional Profile permission reaches a checked comparison, never a liter
       { question: field.label, answer: "Yes", evidencePolicy: "eligibility" },
     ],
   });
-  await expect(pending).rejects.toMatchObject({
-    category: "unverified_evidence",
-  }); // A country alone cannot prove hours/expiry.
+  await expect(pending).resolves.toMatchObject([
+    {
+      supported: false,
+      unavailable: {
+        category: "unverified_evidence",
+      },
+    },
+  ]); // A country alone cannot prove hours/expiry.
 });
 
 test("gross expected pay offers the exact compatible band while a missing band and current pay remain distinct", () => {
@@ -527,9 +539,14 @@ test("a resume quote binds the one plaintext document while an invented quote st
     });
   expect((await check())[0]?.supported).toBe(true);
   evidence[0].quote = "Paid work with Ruby.";
-  await expect(check()).rejects.toMatchObject({
-    category: "unverified_evidence",
-  });
+  await expect(check()).resolves.toMatchObject([
+    {
+      supported: false,
+      unavailable: {
+        category: "unverified_evidence",
+      },
+    },
+  ]);
 });
 
 test("question identity preserves an outer subject and a condition supplied only as a hint", () => {

@@ -96,7 +96,14 @@ test.each(["conflict", "met", "unknown"] as const)(
                   c: ["strong", "Experience"],
                   e: ["compatible", "Worldwide", "broader_remote", ""],
                   h: [hard, "Pay compared with the explicit hourly minimum"],
-                  pay: { minimum: 19, maximum: 19, currency: "EUR", interval: "hour", basis: "base", quote: "EUR19 hourly" },
+                  pay: {
+                    minimum: 19,
+                    maximum: 19,
+                    currency: "EUR",
+                    interval: "hour",
+                    basis: "base",
+                    quote: "EUR19 hourly",
+                  },
                 },
               ],
             }),
@@ -111,7 +118,7 @@ test.each(["conflict", "met", "unknown"] as const)(
 test.each([
   ["20 hours per week", "compatible", 92],
   ["40 hours per week", "blocked", 39],
-  ["Hours to be agreed", "review", 64],
+  ["Hours to be agreed", "review", 92],
 ] as const)(
   "conditional permission follows the model's reading of %s",
   async (hours, status, expected) => {
@@ -180,7 +187,7 @@ test.each([
 
 test.each([
   ["US-only residence contradicts your country", "blocked", 99, 39],
-  ["Required work authorization is not known", "review", 99, 64],
+  ["Required work authorization is not known", "review", 99, 99],
   ["Worldwide remote includes your country", "compatible", 99, 99],
   ["Europe hiring includes your country", "compatible", 90, 90],
   ["EU-only hiring excludes your country", "blocked", 90, 39],
@@ -295,10 +302,12 @@ test("fit gets explicit residence and saved country-list rules, without changing
   ]);
   expect(data.countryOptionFallbacks).toEqual([rule]);
   expect(messages[0].content).toContain("Neither choice offered is a conflict");
-  expect(messages[0].content).toContain("never Strong");
+  expect(messages[0].content).toContain(
+    "fit label never grants work permission",
+  );
 });
 
-test("a response with no eligibility verdict cannot silently become Strong", async () => {
+test("a response with no eligibility verdict retains its score with visible uncertainty", async () => {
   const [fit] = await fitJobs({
     profile,
     jobs: [job],
@@ -321,7 +330,8 @@ test("a response with no eligibility verdict cannot silently become Strong", asy
         }),
     },
   });
-  expect(fit?.score).toBe(JOB_FIT_BANDS.good - 1);
+  expect(fit?.score).toBe(99);
+  expect(fit?.summary).toContain("unconfirmed");
   expect(fit?.preferences?.assessment).toBe("unknown");
 });
 
@@ -372,7 +382,7 @@ test.each([
     description: "Build production software.",
     quote: "United States",
     kind: "unknown",
-    score: 64,
+    score: 99,
     assessment: "unknown",
   },
   {
@@ -381,7 +391,7 @@ test.each([
       "A hybrid work model of 3 days in the office. Relocation assistance is available.",
     quote: "hybrid work model of 3 days in the office",
     kind: "hybrid",
-    score: 64,
+    score: 99,
     assessment: "unknown",
   },
 ])(
@@ -623,4 +633,52 @@ test("keeps the model's short reason beside its own reason, whole and capped", a
   ).toBeUndefined();
   // An older answer without it still reads.
   expect((await fit(answer("", "compatible")))?.short).toBeUndefined();
+});
+
+test("unknown terms preserve relative model scores and explanations; a confirmed conflict stays capped", async () => {
+  const result = await fitJobs({
+    profile,
+    goals: { targetRoles: ["Software Engineer"], locations: [] },
+    jobs: [1, 2, 3].map((id) => ({
+      ...job,
+      id,
+      location: "Remote worldwide",
+      description: "Worldwide remote. Contract dates to be agreed.",
+    })),
+    client: {
+      chatWithTools: () =>
+        Promise.resolve({
+          content: JSON.stringify({
+            fits: [
+              [1, 93, "unknown"],
+              [2, 72, "unknown"],
+              [3, 93, "conflict"],
+            ].map(([id, s, hard]) => ({
+              id,
+              s,
+              why: `Core work comparison ${id}`,
+              w: "Core match",
+              r: ["strong", "Requested work"],
+              p: ["aligned", "Remote work"],
+              c: ["strong", "Direct evidence"],
+              e: ["compatible", "Worldwide remote", "broader_remote", ""],
+              h: [
+                hard,
+                hard === "unknown"
+                  ? "Contract term not stated"
+                  : "Explicit term exceeds recorded permission",
+              ],
+            })),
+          }),
+        }),
+    },
+  });
+  expect(result.map((row) => row.score)).toEqual([93, 72, 64]);
+  expect(result[0]?.summary).toContain("Core work comparison 1");
+  expect(result[0]?.summary).toContain(
+    "Requirement not confirmed: Contract term not stated",
+  );
+  expect(result[0]?.short).toBeUndefined();
+  expect(result[2]?.summary).toBe("Explicit term exceeds recorded permission");
+  expect(result[2]?.preferences?.assessment).toBe("conflict");
 });

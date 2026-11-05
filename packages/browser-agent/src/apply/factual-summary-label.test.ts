@@ -209,13 +209,15 @@ test("the resume's labelled line is a written answer to check, not a question", 
   expect(decision.kind).toBe("writing");
 });
 
-test("the same labelled line only in the posting grants nothing", () => {
+test("an unsupported proposed summary still requires independent applicant evidence", () => {
   const decision = decide(
     sources(
       "Jamie Example\nBuilt accessible forms.\n",
       "Reporting routine: I submit weekly reports",
     ),
   );
-  expect(decision.kind).not.toBe("writing");
-  expect(decision.kind).not.toBe("literal");
+  expect(decision).toMatchObject({
+    kind: "writing",
+    evidencePolicy: "factual_summary",
+  });
 });

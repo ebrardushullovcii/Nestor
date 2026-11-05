@@ -68,7 +68,14 @@ const cut = (value: string | undefined, max: number) =>
  * confirmed it advanced. Nothing here authorizes a write, a replay, a reclaim
  * or a continuation; a new attempt starts with an empty tracker.
  */
-export function createStepReceiptTracker(resultId: string) {
+export function createStepReceiptTracker(
+  resultId: string,
+  acceptedMeaning?: (
+    control: ApplyFormControl,
+    value: string,
+    observation: ApplyFormObservation,
+  ) => ApplyStepReceiptField["acceptedMeaning"],
+) {
   const firstSeen = new Map<string, string>();
   const written = new Set<string>();
   const receipts: ApplyStepReceipt[] = [];
@@ -100,7 +107,20 @@ export function createStepReceiptTracker(resultId: string) {
         ? []
         : receiptControls(observation).map(
             ({ control, fieldKey, value }): ApplyStepReceiptField => ({
+              ...(acceptedMeaning?.(control, value, observation)
+                ? {
+                    acceptedMeaning: acceptedMeaning(
+                      control,
+                      value,
+                      observation,
+                    ),
+                  }
+                : {}),
               fieldKey,
+              ...(control.frame ? { frame: control.frame } : {}),
+              ...(control.inputConstraints
+                ? { inputConstraints: control.inputConstraints }
+                : {}),
               label: cut(questionPrompt(control), 2_000),
               groupLabel: cut(control.groupLabel, 2_000),
               sectionPath: (control.sectionPath ?? [])
@@ -113,7 +133,18 @@ export function createStepReceiptTracker(resultId: string) {
               choiceGroupKey: control.choiceGroupKey
                 ? cut(control.choiceGroupKey, 500)
                 : null,
-              options: control.options.slice(0, 200).map((o) => cut(o, 500)),
+              options: (control.choiceGroupKey &&
+              ["radio", "checkbox"].includes(control.kind)
+                ? observation.controls
+                    .filter(
+                      (entry) =>
+                        entry.choiceGroupKey === control.choiceGroupKey,
+                    )
+                    .map((entry) => entry.label || entry.value)
+                : control.options
+              )
+                .slice(0, 200)
+                .map((o) => cut(o, 500)),
               required: control.required,
               readOnly: control.readOnly,
               questionKind: control.questionKind,
@@ -126,6 +157,7 @@ export function createStepReceiptTracker(resultId: string) {
                 : null,
               telInput: control.telInput === true,
               urlInput: control.urlInput === true,
+              nativeValue: cut(control.value, 12_000),
               value: cut(value, 12_000),
               provenance: provenance(fieldKey, value),
             }),

@@ -1219,6 +1219,12 @@ export function buildApplyLetterDependencies(input: {
           text,
         );
       }
+      if (check.unavailable)
+        throw new ApplicationLetterGroundingError(
+          "Nestor could not finish checking this letter. Nothing was attached. Try again to continue.",
+          text,
+          true,
+        );
       // The check usually asks for the review itself; ask only once.
       if (!check.supported)
         throw new ApplicationLetterGroundingError(

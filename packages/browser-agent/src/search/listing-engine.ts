@@ -331,8 +331,10 @@ export async function collectSource(
         ? { emptyConfirmed: true }
         : {}),
       notes: [
-        ...(needsAccess && fallback.complete
-          ? ["Browser access was verified after the initial access check."]
+        ...(fallback.complete
+          ? needsAccess
+            ? ["Browser access was verified after the initial access check."]
+            : []
           : notes),
         ...fallback.notes,
         ...(!fallback.complete
@@ -541,7 +543,10 @@ export async function screenCards(
           .map((card) => roleDutyEvidence(card, input.goals))
           .find(Boolean);
         if (!body) return null;
-        evidence.set(key, `Role-duty evidence from the full provider listing: ${body}`);
+        evidence.set(
+          key,
+          `Role-duty evidence from the full provider listing: ${body}`,
+        );
         return key;
       }
       try {
@@ -551,9 +556,11 @@ export async function screenCards(
             bodies.push(card.listingText);
             continue;
           }
-          const page = card.listingPage ?? await input.readPage(card.url, {
-            signal: input.signal,
-          });
+          const page =
+            card.listingPage ??
+            (await input.readPage(card.url, {
+              signal: input.signal,
+            }));
           const body = readListingHtml(page.html, card.title);
           if (
             blockedByCheck(page.html) ||
@@ -562,15 +569,27 @@ export async function screenCards(
             !body.detailHeading ||
             !body.text
           )
-            throw new Error("The full listing is not readable enough to verify its profession.");
-          enriched.set(card.url, { ...card, listingPage: page, listingText: body.text });
+            throw new Error(
+              "The full listing is not readable enough to verify its profession.",
+            );
+          enriched.set(card.url, {
+            ...card,
+            listingPage: page,
+            listingText: body.text,
+          });
           bodies.push(body.text);
         }
-        evidence.set(key, `Full listing duty evidence. Keep this shared card identity if any listing contains requested or ambiguous work:\n${bodies.join("\n\n---\n\n")}`);
+        evidence.set(
+          key,
+          `Full listing duty evidence. Keep this shared card identity if any listing contains requested or ambiguous work:\n${bodies.join("\n\n---\n\n")}`,
+        );
         return key;
       } catch (error) {
         input.signal?.throwIfAborted();
-        failedTitles.set(key, `Profession not verified: ${error instanceof Error ? error.message : String(error)} Try this site again to continue.`);
+        failedTitles.set(
+          key,
+          `Profession not verified: ${error instanceof Error ? error.message : String(error)} Try this site again to continue.`,
+        );
         return null;
       }
     })
@@ -593,10 +612,12 @@ export async function screenCards(
       verdict: "unrelated" as const,
     }));
   return {
-    related: fresh.filter(
-      (card) =>
-        !unrelated.has(titleKey(card)) && !failedTitles.has(titleKey(card)),
-    ).map((card) => enriched.get(card.url) ?? card),
+    related: fresh
+      .filter(
+        (card) =>
+          !unrelated.has(titleKey(card)) && !failedTitles.has(titleKey(card)),
+      )
+      .map((card) => enriched.get(card.url) ?? card),
     failed: fresh
       .filter((card) => failedTitles.has(titleKey(card)))
       .map((card) => ({
@@ -1013,7 +1034,7 @@ const FIT_WORK_ELIGIBILITY = [
   "A foreign city/country alone gives review at best: never invent remote flexibility from the person's goals. Missing work permission means review, not blocked. Compare limitedWorkPermissions conditions with the actual job: hours, employment type, permitted work, dates and future sponsorship. A conditional permit is compatible when this job meets its stated conditions, blocked only when the job clearly contradicts them, and review when material conditions cannot be checked. Do not invent student or country rules. Current permission and future sponsorship are separate. Relocation assistance pays for a move; it does not grant work authorization. A broader_remote verdict needs a verbatim quote explicitly permitting a broader work region, not a company market, customer location, generic benefit or the word remote alone. For offered_list, quote the offered choices and report their country codes. Keep e's quote verbatim and under 12 words; use an empty quote if no supporting passage exists.",
   "Compare the listing's hiring location, residence restrictions and work-authorization requirements with currentCountry, currentCity, currentRegion, location and workEligibility. Remote does not mean worldwide. Remote-US, US residents only, or another exclusive hiring region excludes someone working from outside it, even when the skills are an exact match. An employer's office address alone is not a hiring restriction; explicit worldwide hiring includes the person.",
   "A saved countryOptionFallbacks rule applies only to an explicit offered country list: prefer primary when offered; otherwise accept fallback only when offered. Neither choice offered is a conflict. Never hard-code a country substitution, treat Europe as EU/EEA, or infer citizenship or work authorization from residence or a fallback choice.",
-  "Set blocked only for a listing restriction contradicted by saved facts, naming that restriction. A missing authorization country is unknown, not proof of no permission. Unresolved required authorization, sponsorship, permit conditions or hiring region means review, never Strong. Set compatible only when no material place or eligibility restriction remains unresolved. Worldwide remote without a specific authorization requirement needs no invented permit check. A schedule-overlap request alone does not impose residence. Relocation willingness and permission to work are separate.",
+  "Set blocked only for a listing restriction contradicted by saved facts, naming that restriction. A missing authorization country is unknown, not proof of no permission. Unresolved required authorization, sponsorship, permit conditions or hiring region means review, not a confirmed conflict. A useful role may still be Good or Strong with an explicit uncertainty note; a fit label never grants work permission. Set compatible only when no material place or eligibility restriction remains unresolved. Worldwide remote without a specific authorization requirement needs no invented permit check. A schedule-overlap request alone does not impose residence. Relocation willingness and permission to work are separate.",
 ].join(" ");
 const fitSchema = z.object({
   id: z.number().int().positive(),
@@ -1237,7 +1258,7 @@ export async function fitJobs(
         }));
         const answer = await ask(
           input,
-          `${FIT_WORK_ELIGIBILITY} ${payInstruction}Judge each job from the complete listing and candidate evidence. Each listing's description is its complete unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : ""} Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known conflict or unresolved mandatory requirement worth applying or a strong match. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":["compatible|review|blocked","verbatim scope quote","location kind","ISO country codes"],"s":score,"why":"short overall reason","w":"the why in 5 words or fewer: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":["strong|related|stretch|unrelated|unknown","role reason"],"p":["aligned|mixed|conflict|unknown","preferences reason"],"c":["strong|partial|unknown","candidate evidence"],"h":["met|conflict|unknown|not_requested","mandatory requirements reason"],"pay":{"minimum":null,"maximum":null,"currency":null,"interval":null,"basis":null,"quote":""}}]}. The pay object is required: replace its null example values with published own-listing facts when present. If the input includes repair issues, correct only those contract failures using the same listing evidence; never invent a missing fact. Include every id exactly once, including low scores. Keep each explanation under 12 words without repeating sentences.`,
+          `${FIT_WORK_ELIGIBILITY} ${payInstruction}Judge each job from the complete listing and candidate evidence. Each listing's description is its complete unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : ""} Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known hard conflict worth applying or a strong match. Unknown permission, missing or incomparable pay and uncertain terms must remain explicit uncertainties, not automatic below-Good limits; judge their significance alongside the actual work and evidence. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":["compatible|review|blocked","verbatim scope quote","location kind","ISO country codes"],"s":score,"why":"short overall reason","w":"the why in 5 words or fewer: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":["strong|related|stretch|unrelated|unknown","role reason"],"p":["aligned|mixed|conflict|unknown","preferences reason"],"c":["strong|partial|unknown","candidate evidence"],"h":["met|conflict|unknown|not_requested","mandatory requirements reason"],"pay":{"minimum":null,"maximum":null,"currency":null,"interval":null,"basis":null,"quote":""}}]}. The pay object is required: replace its null example values with published own-listing facts when present. If the input includes repair issues, correct only those contract failures using the same listing evidence; never invent a missing fact. Include every id exactly once, including low scores. Keep each explanation under 12 words without repeating sentences.`,
           {
             ...context,
             listings,
@@ -1281,7 +1302,8 @@ export async function fitJobs(
               (pay.minimum === null ||
                 pay.maximum === null ||
                 pay.minimum <= pay.maximum));
-          const valid = parsed.success &&
+          const valid =
+            parsed.success &&
             (!(input.goals.compensation?.minimum != null) ||
               (parsed.data.h !== undefined &&
                 pay !== undefined &&
@@ -1294,7 +1316,9 @@ export async function fitJobs(
                 ? ["missing_hard_requirements"]
                 : []),
               ...(pay === undefined ? ["missing_pay"] : []),
-              ...(!payEvidence ? ["pay_quote_not_verbatim_or_bounds_reversed"] : []),
+              ...(!payEvidence
+                ? ["pay_quote_not_verbatim_or_bounds_reversed"]
+                : []),
             ]);
           return valid && parsed.success ? [parsed.data] : [];
         });
@@ -1337,21 +1361,33 @@ export async function fitJobs(
               : unknownPay
                 ? "Published pay cannot yet be compared with your saved minimum; its currency, interval, basis or amount is unresolved."
                 : null;
-            const hardLimited =
-              belowFloor ||
-              unknownPay ||
-              fit.h?.[0] === "conflict" ||
-              fit.h?.[0] === "unknown";
+            const hardLimited = belowFloor || fit.h?.[0] === "conflict";
             const cap =
               eligibility === "blocked"
                 ? JOB_FIT_BANDS.stretch - 1
-                : eligibility === "review"
+                : hardLimited
                   ? JOB_FIT_BANDS.good - 1
-                  : hardLimited
-                    ? JOB_FIT_BANDS.good - 1
-                    : fit.p[0] === "conflict"
-                      ? JOB_FIT_BANDS.strong - 1
-                      : 100;
+                  : fit.p[0] === "conflict"
+                    ? JOB_FIT_BANDS.strong - 1
+                    : 100;
+            const uncertainty = [
+              ...(eligibility === "review"
+                ? [
+                    `Work permission or hiring scope is unconfirmed: ${eligibilityReason}`,
+                  ]
+                : []),
+              ...(unknownPay && payReason ? [payReason] : []),
+              ...(fit.h?.[0] === "unknown"
+                ? [`Requirement not confirmed: ${fit.h[1]}`]
+                : []),
+              ...(fit.p[0] === "unknown" ? [fit.p[1]] : []),
+            ];
+            const conflictReason =
+              eligibility === "blocked"
+                ? eligibilityReason
+                : hardLimited
+                  ? (payReason ?? fit.h![1])
+                  : fit.p[1];
             return {
               id: fit.id,
               ...(eligibility !== "compatible" ||
@@ -1377,18 +1413,14 @@ export async function fitJobs(
                 : {}),
               score: Math.min(fit.s, cap),
               summary:
-                eligibility === "compatible" && payReason
-                  ? payReason
-                  : fit.s > cap
-                    ? eligibility === "compatible"
-                      ? hardLimited
-                        ? (payReason ?? fit.h![1])
-                        : fit.p[1]
-                      : eligibilityReason
-                    : fit.why,
-              // Only beside its own reason (a capped score reads another
-              // one), whole and within the row's cap, never cut.
-              ...(fit.s <= cap && !payReason && shortFitReason(fit.w, fit.why)
+                fit.s > cap
+                  ? conflictReason
+                  : [fit.why, ...uncertainty].join(" "),
+              // A short comparison cannot hide an unresolved condition or
+              // describe a different reason after a confirmed-conflict cap.
+              ...(fit.s <= cap &&
+              !uncertainty.length &&
+              shortFitReason(fit.w, fit.why)
                 ? { short: shortFitReason(fit.w, fit.why)! }
                 : {}),
               reasons: [],
@@ -1396,21 +1428,17 @@ export async function fitJobs(
               role: { assessment: fit.r[0], explanation: fit.r[1] },
               preferences: {
                 assessment:
-                  eligibility === "blocked"
+                  eligibility === "blocked" || hardLimited
                     ? "conflict"
-                    : eligibility === "review" && fit.p[0] !== "conflict"
-                      ? "unknown"
-                      : hardLimited
-                        ? belowFloor || fit.h?.[0] === "conflict"
-                          ? "conflict"
-                          : "unknown"
+                    : fit.p[0] === "conflict"
+                      ? "conflict"
+                      : uncertainty.length
+                        ? "unknown"
                         : fit.p[0],
                 explanation:
-                  eligibility === "compatible"
-                    ? hardLimited
-                      ? (payReason ?? fit.h![1])
-                      : fit.p[1]
-                    : eligibilityReason,
+                  eligibility === "blocked" || hardLimited
+                    ? conflictReason
+                    : [fit.p[1], ...uncertainty].join(" "),
               },
               coverage: { assessment: fit.c[0], explanation: fit.c[1] },
               scoredAt: new Date().toISOString(),

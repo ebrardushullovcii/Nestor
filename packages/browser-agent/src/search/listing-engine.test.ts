@@ -38,40 +38,77 @@ const card = (title: string, id = title): ListingCard => ({
 
 test("a negative unusual title is checked against full duties and its page is reused", async () => {
   const cards = [card("Trend Steward"), card("Metrics Caretaker")];
-  const pages = new Map(cards.map((row) => [row.url, {
-    html: `<article><h1>${row.title}</h1><p>Analyse revenue with SQL joins, R extracts and Tableau dashboards. Check data quality and report findings to stakeholders. Remote in Germany, part time.</p></article>`,
-    finalUrl: row.url,
-  }]));
-  const readPage = vi.fn(async (url: string) => pages.get(url)!);
+  const pages = new Map(
+    cards.map((row) => [
+      row.url,
+      {
+        html: `<article><h1>${row.title}</h1><p>Analyse revenue with SQL joins, R extracts and Tableau dashboards. Check data quality and report findings to stakeholders. Remote in Germany, part time.</p></article>`,
+        finalUrl: row.url,
+      },
+    ]),
+  );
+  const readPage = vi.fn((url: string) => Promise.resolve(pages.get(url)!));
   let calls = 0;
   const client: LLMClient = {
-    chatWithTools: async (messages) => {
-      const data = JSON.parse(String(messages[1].content));
+    chatWithTools: (messages) => {
+      const data = JSON.parse(String(messages[1].content)) as {
+        titles?: unknown[][];
+        listings: { id: number; title: string }[];
+      };
       if (data.titles) {
         calls++;
         if (calls > 1)
           for (const row of data.titles)
             expect(row[2]).toContain("Analyse revenue with SQL joins");
-        return { content: JSON.stringify({ keep: { 0: calls === 1 ? 0 : 1, 1: calls === 1 ? 0 : 1 } }) };
+        return Promise.resolve({
+          content: JSON.stringify({
+            keep: { 0: calls === 1 ? 0 : 1, 1: calls === 1 ? 0 : 1 },
+          }),
+        });
       }
-      return { content: JSON.stringify({ jobs: data.listings.map((row: { id: number; title: string }) => ({
-        id: row.id, title: row.title, company: "Real Employer", location: "Germany",
-        workModes: ["remote"], sourceJobId: null, employmentType: "part_time",
-        seniority: null, salaryText: null, closed: false,
-      })) }) };
+      return Promise.resolve({
+        content: JSON.stringify({
+          jobs: data.listings.map((row: { id: number; title: string }) => ({
+            id: row.id,
+            title: row.title,
+            company: "Real Employer",
+            location: "Germany",
+            workModes: ["remote"],
+            sourceJobId: null,
+            employmentType: "part_time",
+            seniority: null,
+            salaryText: null,
+            closed: false,
+          })),
+        }),
+      });
     },
   };
   const result = await screenCards({
-    cards, client, readPage,
-    goals: { targetRoles: ["Data Analyst"], relatedRoles: [], strategy: "wide_net" },
+    cards,
+    client,
+    readPage,
+    goals: {
+      targetRoles: ["Data Analyst"],
+      relatedRoles: [],
+      strategy: "wide_net",
+    },
   });
-  expect(result.related.map((row) => row.url)).toEqual(cards.map((row) => row.url));
+  expect(result.related.map((row) => row.url)).toEqual(
+    cards.map((row) => row.url),
+  );
   expect(result.seen).toEqual([]);
   expect(result.failed).toEqual([]);
   expect(readPage).toHaveBeenCalledTimes(2);
   expect(result.related[0].listingPage).toEqual(pages.get(cards[0].url));
-  const downstream = vi.fn(async () => { throw new Error("The verified page should be reused"); });
-  const read = await readListings({ cards: result.related, client, readPage: downstream });
+  const downstream = vi.fn(() =>
+    Promise.reject(new Error("The verified page should be reused")),
+  );
+  const read = await readListings({
+    cards: result.related,
+    client,
+    readPage: downstream,
+  });
   expect(downstream).not.toHaveBeenCalled();
   expect(read.jobs).toHaveLength(2);
 });
@@ -79,14 +116,26 @@ test("a negative unusual title is checked against full duties and its page is re
 test("failure to verify a negative profession is technical work, never remembered unrelated", async () => {
   const decisions = new Map<string, boolean>();
   const result = await screenCards({
-    cards: [card("Trend Steward")], decisions,
-    goals: { targetRoles: ["Data Analyst"], relatedRoles: [], strategy: "wide_net" },
-    client: { chatWithTools: async () => ({ content: '{"keep":{"0":0}}' }) },
-    readPage: async () => { throw new Error("Temporary source failure"); },
+    cards: [card("Trend Steward")],
+    decisions,
+    goals: {
+      targetRoles: ["Data Analyst"],
+      relatedRoles: [],
+      strategy: "wide_net",
+    },
+    client: {
+      chatWithTools: () => Promise.resolve({ content: '{"keep":{"0":0}}' }),
+    },
+    readPage: () => Promise.reject(new Error("Temporary source failure")),
   });
   expect(result.related).toEqual([]);
   expect(result.seen).toEqual([]);
-  expect(result.failed).toEqual([{ url: card("Trend Steward").url, reason: expect.stringContaining("Profession not verified: Temporary source failure") }]);
+  expect(result.failed.map((row) => row.url)).toEqual([
+    card("Trend Steward").url,
+  ]);
+  expect(result.failed[0]?.reason).toContain(
+    "Profession not verified: Temporary source failure",
+  );
   expect(decisions.size).toBe(0);
 });
 
@@ -676,7 +725,8 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     e: ["compatible", "Berlin", "unknown", "DE"],
   };
   const requests: number[][] = [];
-  const secondDescription = "An unusual title\n\nBuild SQL extracts and explain weekly trends.\n\nEUR 26 per hour.";
+  const secondDescription =
+    "An unusual title\n\nBuild SQL extracts and explain weekly trends.\n\nEUR 26 per hour.";
   const retryClient = {
     chatWithTools: vi.fn(
       (messages: Parameters<LLMClient["chatWithTools"]>[0]) => {
@@ -1420,4 +1470,35 @@ test("a successful access step rechecks rendered inventory before claiming cover
   expect(readPage).toHaveBeenCalledTimes(2);
   expect(result.complete).toBe(true);
   expect(result.notes.join(" ")).not.toContain("HTTP 401");
+});
+
+test("completed browser coverage replaces the initial load-more warning", async () => {
+  const result = await collectSource({
+    source,
+    readPage: () =>
+      Promise.resolve({
+        finalUrl: source.url,
+        html: '<main>Loading</main><script src="app.js"></script>',
+      }),
+    navigateFallback: () =>
+      Promise.resolve({
+        cards: [
+          {
+            sourceId: source.id,
+            sourceLabel: source.label,
+            url: `${source.url}/job`,
+            title: "Analyst",
+            text: "Analyst",
+            cardFingerprint: "one",
+          },
+        ],
+        pagesRead: 2,
+        complete: true,
+        notes: ["Every observed forward control was exhausted."],
+      }),
+  });
+  expect(result.complete).toBe(true);
+  expect(result.notes).toEqual([
+    "Every observed forward control was exhausted.",
+  ]);
 });

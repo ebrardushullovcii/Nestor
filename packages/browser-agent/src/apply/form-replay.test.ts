@@ -445,3 +445,32 @@ test("a recorded add-row press is not replayed; the recorded way on is, every ti
     ).toBeNull();
   }
 });
+
+test("a changed saved sentence is not replayed literally into a numeric field", () => {
+  const shown = page([
+    {
+      type: "text",
+      name: "analysis",
+      label: "Years of analysis experience",
+      value: "6",
+    },
+  ]);
+  shown.controls[0].inputConstraints = { type: "number" };
+  const answer = stored(
+    shown,
+    "Years of analysis experience",
+    "6",
+    "answerLibrary.analysis",
+  );
+  const current = replayStillCurrent({
+    controls: shown.controls,
+    sources: sources([
+      saved("analysis", "Years of analysis experience", "6 years"),
+    ]),
+    approvedAttestations: [],
+  });
+  expect(planReplay(shown, replay([answer]), current)).toMatchObject({
+    writes: [],
+    withdrawn: [answer],
+  });
+});

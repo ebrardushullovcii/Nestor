@@ -253,7 +253,7 @@ test("two different labelled statements are no recovery: the question stays the 
   const { raw, config } = setup(
     `Reporting routine: ${STATEMENT}\nReporting routine: I submit monthly reports\n`,
   );
-  const { client, checked } = model(() => true);
+  const { client, checked } = model(() => false);
   const result = await runApplyAgent(config, client);
   expect(checked).not.toContain(STATEMENT);
   expect(raw.controls[0]?.value).not.toBe(STATEMENT);
@@ -277,4 +277,79 @@ test("beside another real question a refused statement stays asked, offered as i
     questions.find((question) => question.prompt === QUESTION)
       ?.suggestedAnswers,
   ).toMatchObject([{ text: STATEMENT, sourceKind: "resume" }]);
+});
+
+test("a checking outage keeps a genuine question named by the actor", async () => {
+  const { config } = setup(`Jamie Example\nReporting routine: ${STATEMENT}\n`, {
+    notice: true,
+  });
+  const ordinary = model(() => true).client;
+  const client: LLMClient = {
+    chatWithTools: async (messages, tools, options) => {
+      if (tools[0]?.function.name === "report_answer_checks")
+        throw new Error("Synthetic check unavailable");
+      const reply = await ordinary.chatWithTools(messages, tools, options);
+      return reply.toolCalls?.some((tool) => tool.function.name === "finish")
+        ? call("finish", {
+            reason: "Your notice period is unknown.",
+            needsPerson: true,
+            forPerson: [NOTICE],
+          })
+        : reply;
+    },
+  };
+  const result = await runApplyAgent(config, client);
+  expect(asked(result).map((question) => question.prompt)).toEqual([NOTICE]);
+  expect(result.readyToSend).toBeNull();
+});
+
+test("a checking outage preserves a separately readable missing fact even when the actor omits it", async () => {
+  const { config } = setup(`Jamie Example\nReporting routine: ${STATEMENT}\n`, {
+    notice: true,
+  });
+  const ordinary = model(() => true).client;
+  const client: LLMClient = {
+    chatWithTools: async (messages, tools, options) => {
+      if (tools[0]?.function.name === "report_answer_checks")
+        throw new Error("Synthetic check unavailable");
+      return ordinary.chatWithTools(messages, tools, options);
+    },
+  };
+  const result = await runApplyAgent(config, client);
+  expect(asked(result).map((question) => question.prompt)).toEqual([NOTICE]);
+  expect(result.technicalFailure?.code).toBe("answer_grounding_unavailable");
+  expect(result.readyToSend).toBeNull();
+});
+
+test("technical cleanup waits for the current reading after page instructions change", async () => {
+  const { config } = setup(`Jamie Example\nReporting routine: ${STATEMENT}\n`, {
+    notice: true,
+  });
+  const ordinary = model(() => true).client;
+  let failures = 0;
+  const observe = config.hands.observe;
+  config.hands.observe = async () => {
+    const page = await observe();
+    if (failures >= 2)
+      page.bodyTextExcerpt += "\nAnswer format: use complete sentences.";
+    return page;
+  };
+  const client: LLMClient = {
+    chatWithTools: async (messages, tools, options) => {
+      if (tools[0]?.function.name === "report_answer_checks") {
+        failures++;
+        throw new Error("Synthetic check unavailable");
+      }
+      if (
+        tools[0]?.function.name === "report_question_kinds" &&
+        JSON.stringify(messages).includes("complete sentences")
+      )
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      return ordinary.chatWithTools(messages, tools, options);
+    },
+  };
+  const result = await runApplyAgent(config, client);
+  expect(failures).toBeGreaterThanOrEqual(2);
+  expect(asked(result).map((question) => question.prompt)).toEqual([NOTICE]);
+  expect(result.technicalFailure?.code).toBe("answer_grounding_unavailable");
 });

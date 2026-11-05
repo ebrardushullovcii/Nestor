@@ -130,6 +130,18 @@ export type ReplayCurrent = (
   control: ApplyFormControl,
 ) => { value: string; changed: boolean } | null;
 
+/** Native numeric inputs cannot hold a sentence, even when its meaning is known.
+ * Leave representation changes to the ordinary checked actor. */
+export function replayValueFitsControl(
+  control: ApplyFormControl,
+  value: string,
+): boolean {
+  return (
+    control.inputConstraints?.type !== "number" ||
+    /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/iu.test(value.trim())
+  );
+}
+
 /**
  * A stored answer restores only while its source still grants it: an
  * approved declaration, a saved answer the person has not since changed or
@@ -246,7 +258,7 @@ export function planReplay(
     used.add(answer);
     const now = current(answer, control);
     // No longer granted: not restored; the ordinary decision reads it again.
-    if (!now) {
+    if (!now || !replayValueFitsControl(control, now.value)) {
       plan.withdrawn.push(answer);
       continue;
     }

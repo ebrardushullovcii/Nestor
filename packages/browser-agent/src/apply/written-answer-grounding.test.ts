@@ -333,7 +333,9 @@ test.each([
           },
         ],
       }),
-    ).rejects.toMatchObject({ category: "unverified_evidence" });
+    ).resolves.toMatchObject([
+      { supported: false, unavailable: { category: "unverified_evidence" } },
+    ]);
     expect(chatWithTools).toHaveBeenCalledTimes(2);
   },
 );
@@ -432,7 +434,12 @@ test("a repeated incomplete check reports plain copy without provider errors", a
       payDisclosed: false,
       answers: [{ question: "Authorization?", answer: "Yes" }],
     }),
-  ).rejects.toThrow("could not finish checking");
+  ).resolves.toMatchObject([
+    {
+      supported: false,
+      unavailable: { category: "request_failed", stage: "request" },
+    },
+  ]);
   expect(chatWithTools).toHaveBeenCalledTimes(2);
 });
 

@@ -442,7 +442,12 @@ export interface ApplyLetterProvider {
     signal?: AbortSignal;
   }) => Promise<
     | { ok: true; text: string; document: ApplyDocument | null }
-    | { ok: false; reason: string; draftText?: string }
+    | {
+        ok: false;
+        reason: string;
+        draftText?: string;
+        checkingUnavailable?: boolean;
+      }
   >;
 }
 

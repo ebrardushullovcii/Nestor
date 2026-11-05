@@ -2265,3 +2265,39 @@ it("resolves a current waiting task with the checked target value across input t
   expect(memory.list().total).toBe(0);
   expect(memory.savedAnswer(saved.id)?.answer).toBe("At most 25%");
 });
+
+it("an unavailable pre-send check retains Ready work for explicit retry and cannot reopen an armed send", () => {
+  const { jobs, applications } = open();
+  const ids = add(jobs, 1);
+  applications.applyJobs({ selection: { ids } });
+  const first = applications.claimNext()!;
+  applications.finishPreparation({
+    id: first.id,
+    attempt: first.attempt,
+    state: "ready",
+  });
+  expect(
+    applications.failBeforeSubmission(first.id, first.attempt + 1, "stale"),
+  ).toBe(false);
+  expect(
+    applications.failBeforeSubmission(
+      first.id,
+      first.attempt,
+      "Nestor could not finish checking. Try again.",
+    ),
+  ).toBe(true);
+  expect(applications.getApplication(first.id)?.state).toBe("failed");
+  expect(applications.getSubmissionReceipt(first.id)).toBeNull();
+  applications.applyJobs({ selection: { ids } });
+  const retry = applications.claimNext()!;
+  applications.finishPreparation({
+    id: retry.id,
+    attempt: retry.attempt,
+    state: "ready",
+  });
+  expect(applications.beginSubmission(retry.id, retry.attempt)).toBe(true);
+  expect(
+    applications.failBeforeSubmission(retry.id, retry.attempt, "cannot re-arm"),
+  ).toBe(false);
+  expect(applications.getApplication(retry.id)?.state).toBe("submitting");
+});

@@ -11,6 +11,7 @@ import {
 } from "../browser-permission-policy";
 import {
   applicantLiteralSource,
+  answerSourceCatalog,
   classifyAnswerPermission,
 } from "./answer-source-catalog";
 import { semanticAnswerKey } from "./answer-match";
@@ -229,10 +230,13 @@ export interface ApplyExecutorDeps {
     reason: string;
     reviewWording?: string;
     groundedIn?: string[];
+    repairable?: boolean;
+    unavailable?: { category: string; index: number; stage: string };
   }>;
 }
 
 export interface ApplyGuardState extends FillPressState {
+  answerFeedback: Set<string>;
   addedHistoryCounts: Map<string, number>;
   ownedHistoryRows: Set<string>;
   /**
@@ -270,6 +274,7 @@ export function createApplyGuardState(
   pickerAttempts: readonly StoredApplyPickerAttempt[] = [],
 ): ApplyGuardState {
   return {
+    answerFeedback: new Set<string>(),
     addedHistoryCounts: new Map(),
     ownedHistoryRows: new Set(),
     pickerAttempts: new Map(
@@ -820,6 +825,7 @@ type AnswerDecision =
   | {
       kind: "leave";
       reason: string;
+      actorFeedback?: boolean;
       suggestion: ApplyAnswer | null;
       permission: boolean;
       askReason?: ApplicationAttemptQuestion["askReason"];
@@ -1134,6 +1140,7 @@ async function decideAnswer(input: {
     if (!check?.supported)
       return {
         kind: "leave",
+        actorFeedback: !!(check?.repairable || check?.unavailable),
         reason:
           check?.reason ??
           "This answer could not be checked against your sources.",
@@ -1351,6 +1358,7 @@ async function decideAnswer(input: {
     return {
       kind: "leave",
       reason: check.reason,
+      actorFeedback: !!(check.repairable || check.unavailable),
       suggestion: check.reviewWording
         ? {
             value: check.reviewWording,
@@ -1489,6 +1497,18 @@ function notEntered(input: {
       ? { askReason: input.decision.askReason }
       : {}),
   };
+  if (input.decision.actorFeedback) {
+    const key = questionPrompt(input.control);
+    const first = !input.deps.guardState.answerFeedback.has(key);
+    input.deps.guardState.answerFeedback.add(key);
+    return {
+      kind: "refused",
+      reason: first
+        ? `Nestor could not accept this proposed answer: ${input.decision.reason} Reconsider it once using these actual sources and the complete target constraints. Do not ask the person to repair a known answer or a checking format failure. Target: ${JSON.stringify({ question: key, options: input.control.options, constraints: input.control.inputConstraints })}. Sources: ${JSON.stringify(answerSourceCatalog(input.deps.config.sources, input.deps.config.authority.preApprovedAttestationKinds))}. Leave it unwritten if checking remains unavailable and finish with the retained technical stop.`
+        : "This answer is still unchecked after the bounded feedback. Leave it unwritten, finish the other fields and stop for technical recovery.",
+      observation: input.observation,
+    };
+  }
   return input.decision.permission || !input.deps.checkWrittenAnswer
     ? leaveUnansweredForPerson(args)
     : unsupportedAnswer(args);
@@ -3876,6 +3896,15 @@ async function provideApplicationLetter(
     },
   });
 
+  if (!produced.ok && produced.checkingUnavailable)
+    return {
+      kind: "stop",
+      outcome: {
+        kind: "refused",
+        reason: produced.reason,
+        observation: await config.hands.observe(),
+      },
+    };
   if (!produced.ok) {
     return pauseWith(
       `Job Finder could not write the letter this form asks for. ${produced.reason}`,

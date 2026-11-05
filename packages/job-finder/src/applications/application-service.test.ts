@@ -3212,7 +3212,9 @@ it.each([
       expect(
         application.state === "needs_you" ||
           (application.state === "ready" &&
-            /^Not sent:/u.test(application.error ?? "")),
+            /^Not sent:/u.test(application.error ?? "")) ||
+          (application.state === "failed" &&
+            /could not finish checking/u.test(application.error ?? "")),
       ).toBe(true);
     }
     expect(f.onError).not.toHaveBeenCalled();

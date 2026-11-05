@@ -10,7 +10,11 @@ const profile = CandidateProfileSchema.parse({
   workEligibility: { authorizedWorkCountries: ["Germany"] },
   skills: ["SQL"],
   yearsExperience: 2,
-  baseResume: { id: "synthetic", fileName: "synthetic.txt", uploadedAt: "2026-11-05T00:00:00Z" },
+  baseResume: {
+    id: "synthetic",
+    fileName: "synthetic.txt",
+    uploadedAt: "2026-11-05T00:00:00Z",
+  },
 });
 const job = (id: number, description: string) =>
   JobDetailSchema.parse({
@@ -143,8 +147,10 @@ test.each([
         }),
       },
     });
-    expect(fits[0].score).toBe(64);
+    expect(fits[0].score).toBe(94);
+    expect(fits[0].summary).toContain("Excellent match worth applying");
     expect(fits[0].summary).toContain("cannot yet be compared");
+    expect(fits[0].short).toBeUndefined();
     expect(fits[0].preferences?.assessment).toBe("unknown");
   },
 );
@@ -189,7 +195,9 @@ test("Chat receives the required pay contract and repairs only the omitted sibli
     jobs: [1, 2].map((id) =>
       job(id, "Remote within Germany. EUR 27 per hour. SQL reporting."),
     ),
-    onBatch: (updates) => { batches.push(updates.map((row) => row.id)); },
+    onBatch: (updates) => {
+      batches.push(updates.map((row) => row.id));
+    },
     client: {
       chatWithTools: async (messages, _tools, options) => {
         const instruction = String(messages[0].content);
@@ -198,11 +206,17 @@ test("Chat receives the required pay contract and repairs only the omitted sibli
           instruction.split("Required response JSON Schema: ")[1],
         );
         expect(schema.properties.fits.items.required).toContain("pay");
-        expect(instruction).toContain('"h":["met|conflict|unknown|not_requested","mandatory requirements reason"],"pay":');
+        expect(instruction).toContain(
+          '"h":["met|conflict|unknown|not_requested","mandatory requirements reason"],"pay":',
+        );
         const input = JSON.parse(String(messages[1].content));
         requests.push(input.listings.map((row: { id: number }) => row.id));
         if (requests.length === 1)
-          return { content: JSON.stringify({ fits: [verdict(1, pay), verdict(2, undefined)] }) };
+          return {
+            content: JSON.stringify({
+              fits: [verdict(1, pay), verdict(2, undefined)],
+            }),
+          };
         expect(input.repair).toEqual([{ id: 2, issues: ["missing_pay"] }]);
         return { content: JSON.stringify({ fits: [verdict(2, pay)] }) };
       },
@@ -223,10 +237,20 @@ test("pay repair identifies an ungrounded quote and keeps the grounding gate", a
       chatWithTools: async (messages) => {
         const input = JSON.parse(String(messages[1].content));
         if (input.repair) issues.push(input.repair[0].issues);
-        return { content: JSON.stringify({ fits: [verdict(1, {
-          minimum: 27, maximum: 27, currency: "EUR", interval: "hour",
-          basis: "base", quote: "EUR 27/hour",
-        })] }) };
+        return {
+          content: JSON.stringify({
+            fits: [
+              verdict(1, {
+                minimum: 27,
+                maximum: 27,
+                currency: "EUR",
+                interval: "hour",
+                basis: "base",
+                quote: "EUR 27/hour",
+              }),
+            ],
+          }),
+        };
       },
     },
   });

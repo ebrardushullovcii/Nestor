@@ -1555,14 +1555,18 @@ test("only the exact, unique question receives unchanged saved text", () => {
     decide(sources, field, tags, "Playwright", [field, { ...field, ref: "c1" }])
       .kind,
   ).toBe("needs_you");
-  expect(decide(sources, field, tags, "I prefer Playwright").kind).toBe(
-    "needs_you",
-  );
+  expect(decide(sources, field, tags, "I prefer Playwright")).toMatchObject({
+    kind: "writing",
+    evidencePolicy: "saved_answer",
+  });
   sources.reusableAnswers = [
     ...sources.reusableAnswers,
     { ...sources.reusableAnswers[0], id: "conflict", answer: "Other" },
   ];
-  expect(decide(sources, field, tags, "Playwright").kind).toBe("needs_you");
+  expect(decide(sources, field, tags, "Playwright")).toMatchObject({
+    kind: "writing",
+    evidencePolicy: "saved_answer",
+  });
 });
 test("saved legal answers require their own country, not a generic Yes", () => {
   const sources = source(),

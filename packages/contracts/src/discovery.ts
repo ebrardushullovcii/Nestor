@@ -2316,6 +2316,27 @@ export type ApplyFormPathStep = z.infer<typeof ApplyFormPathStepSchema>;
  * attempt only: never write, replay, reclaim or continuation authority.
  */
 export const ApplyStepReceiptFieldSchema = z.object({
+  frame: z
+    .object({ origin: z.string().max(500), pathname: z.string().max(2000) })
+    .optional(),
+  inputConstraints: z
+    .object({
+      type: z.enum(["number", "date", "month"]),
+      min: z.string().optional(),
+      max: z.string().optional(),
+      step: z.string().optional(),
+    })
+    .optional(),
+  /** Accepted meaning only; live value/file/recipient/authority checks still apply. */
+  acceptedMeaning: z
+    .object({
+      sourcesHash: z.string().regex(/^[a-f0-9]{64}$/u),
+      targetHash: z.string().regex(/^[a-f0-9]{64}$/u),
+      instructionsHash: z.string().regex(/^[a-f0-9]{64}$/u),
+      valueHash: z.string().regex(/^[a-f0-9]{64}$/u),
+      reason: z.string().max(600),
+    })
+    .optional(),
   /** The review card's key for this field (screen, question key and prompt). */
   fieldKey: z.string().min(1).max(2_000),
   label: z.string().max(2_000),
@@ -2346,6 +2367,8 @@ export const ApplyStepReceiptFieldSchema = z.object({
     .default(null),
   telInput: z.boolean().default(false),
   urlInput: z.boolean().default(false),
+  /** Native submitted value, retained separately from the card's display label. */
+  nativeValue: z.string().max(12_000).optional(),
   /** The value the page showed, derived as the review card derives it. */
   value: z.string().max(12_000),
   /**

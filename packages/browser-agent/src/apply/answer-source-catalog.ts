@@ -53,10 +53,7 @@ import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import { isShortValueAnswer } from "./written-answer-grounding";
 import { expectedPaySuggestion } from "./expected-pay";
 import { asksGithubUsername, fieldNamesAnotherPerson } from "./github-username";
-import {
-  asksForSpecificStory,
-  factualSummaryIsSourced,
-} from "./factual-summary";
+import { asksForSpecificStory } from "./factual-summary";
 import type {
   ApplyAgentConfig,
   ApplyAnswerSources,
@@ -138,7 +135,19 @@ export function answerSourceCatalog(
       !rows.some((row) => row.id === id)
     )
       rows.push({ id, value, purpose: "profile", country: null });
-    else if (value && typeof value === "object")
+    else if (
+      (typeof value === "number" && Number.isFinite(value)) ||
+      typeof value === "boolean"
+    ) {
+      if (!rows.some((row) => row.id === id))
+        rows.push({
+          id,
+          value:
+            typeof value === "boolean" ? (value ? "Yes" : "No") : String(value),
+          purpose: "profile",
+          country: null,
+        });
+    } else if (value && typeof value === "object")
       for (const [key, child] of Object.entries(value))
         if (key !== "id") addWritingFact(child, `${id}.${key}`);
   };
@@ -148,6 +157,7 @@ export function answerSourceCatalog(
     "profile.professionalSummary",
   );
   addWritingFact(sources.profile.narrative, "profile.narrative");
+  addWritingFact(sources.preferences, "profile.preferences");
   addWritingFact(sources.profile.proofBank, "profile.proofBank");
   rows.push({
     id: "posting.location",
@@ -1173,11 +1183,26 @@ export function classifyAnswerPermission(input: {
   }
   if (
     (!matchingSaved ||
-      (source?.value.trim() !== input.answer.trim() && !savedSetOffered)) &&
+      (source &&
+        !literalValueMatches(
+          source,
+          input.control,
+          input.answer,
+          input.controls,
+          input.sources,
+        ) &&
+        !savedSetOffered &&
+        !(
+          addressLabels.includes(
+            normalizeFormQuestionPrompt(input.control.label),
+          ) &&
+          addressAnswerMatches(
+            source.value,
+            input.answer,
+            input.sources.profile,
+          )
+        ))) &&
     source?.purpose === "saved" &&
-    (source.value.trim() === input.answer.trim() ||
-      input.control.options.length > 0 ||
-      ["checkbox", "radio"].includes(input.control.kind)) &&
     !input.control.repeatedQuestion &&
     !fieldNamesAnotherPerson(input.control) &&
     (!(
@@ -1200,11 +1225,10 @@ export function classifyAnswerPermission(input: {
           normalizeFormQuestionPrompt(source?.question ?? "") &&
         entry.value.trim() !== source?.value.trim(),
     );
-    if (conflicting)
-      return deny(
-        "Your saved answers conflict for this question. Please confirm which answer to use.",
-        "conflicting_sources",
-      );
+    // Differing text can be one accepted numeric/option meaning. The whole-source
+    // checker resolves that once; it still refuses genuinely conflicting facts.
+    if (conflicting && !legal)
+      return { kind: "writing", source, evidencePolicy: "saved_answer" };
     const scope = record?.applicationScope;
     const local =
       !!input.application &&
@@ -1486,6 +1510,19 @@ export function classifyAnswerPermission(input: {
       : deny(
           "This date must be calculated from your recorded availability or notice period.",
         );
+  if (
+    tags.kind === "preference" &&
+    source.purpose === "profile" &&
+    (/^profile\.preferences\./u.test(source.id) ||
+      (source.id === "profile.workEligibility.willingToRelocate" &&
+        /relocat/iu.test(questionPrompt(input.control)))) &&
+    !requiresOwnWords(input.control.label)
+  )
+    return {
+      kind: "inference",
+      source: null,
+      evidencePolicy: "factual_inference",
+    };
   const gated =
     [
       "citizenship",
@@ -1761,17 +1798,7 @@ export function classifyAnswerPermission(input: {
           source.id,
         )))
   )
-    return factualSummaryIsSourced(
-      input.answer,
-      catalog
-        .filter((row) => row.purpose === "profile" || row.id === "resume.text")
-        .map((row) => row.value),
-      input.control.label,
-    )
-      ? { kind: "writing", source, evidencePolicy: "factual_summary" }
-      : deny(
-          "This summary must preserve complete claims from your resume or Profile, including their conditions and negation, without joining separate facts into a new claim.",
-        );
+    return { kind: "writing", source, evidencePolicy: "factual_summary" };
   return factualInferenceAllowed(input)
     ? { kind: "inference", source: null, evidencePolicy: "factual_inference" }
     : deny(

@@ -1643,9 +1643,21 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     signal,
                   }).catch(() => null)
                 : null;
+            const unchecked =
+              !checks || checks.some((check) => check.unavailable);
             const rejected = questions.flatMap((question, index) =>
-              checks?.[index]?.supported ? [] : [{ question, index }],
+              checks?.[index]?.supported || checks?.[index]?.unavailable
+                ? []
+                : [{ question, index }],
             );
+            if (unchecked && rejected.length === 0) {
+              applications.failBeforeSubmission(
+                row.id,
+                row.attempt,
+                "Nestor could not finish checking this application before sending. Nothing was sent. Your page and answers are kept. Try again to continue.",
+              );
+              return;
+            }
             // An earlier step Nestor could not check on this review page holds
             // the whole send: nothing is discarded and nothing new is asked.
             const unbound = checks?.filter((check) => check.priorStep) ?? [];

@@ -448,7 +448,7 @@ test("an empty optional advance restores the newly exposed recorded answer befor
     restored = true;
     const control = w.source.controls[0];
     if (control) control.value = value;
-    return Promise.resolve({ ok: true, observedValue: value });
+    return Promise.resolve({ ok: true as const, observedValue: value });
   });
   w.config.replay = {
     answers: [
