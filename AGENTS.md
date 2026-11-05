@@ -24,10 +24,6 @@ Package ownership and data flow: `docs/ARCHITECTURE.md`.
 - Persistence stays behind repository interfaces in `packages/db`; no SQL or storage details reach the renderer.
 - Native code lives behind `packages/os-integration`, and only when Electron APIs are insufficient.
 
-## Checking the app
-
-Use the `verify-nestor` skill to drive the built app like a user: its own isolated instance with temporary data and synthetic profiles, never the user's `pnpm desktop:dev`. Details: `docs/TESTING.md`.
-
 ## Website
 
 `apps/website/` is the live landing page; Netlify deploys it when a merge to `main` changes that folder. Never deploy it from local files. Videos and other designs live in `../nestor-marketing` (see its `AGENTS.md`).

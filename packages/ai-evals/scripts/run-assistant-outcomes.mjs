@@ -29,7 +29,7 @@ Usage:
 --build         Build and stamp the desktop before running; otherwise require a matching build.
 --merge FILE    Combine short runs of the identical build without starting an app. Repeatable.
 
-The run launches its own verify-nestor instance, passes doctor, submits requests through
+The run launches its own isolated-app instance, passes doctor, submits requests through
 the visible Assistant composer and reads resulting data, files and visible controls.
 It always closes only its own instance. Coordinate the build and built-app slot using
 the workspace's rules; the CLI does not manage a machine-specific lock.
@@ -38,7 +38,7 @@ Each action is completed, correctly_blocked, unsupported or failed. A tool call 
 alone cannot pass. Blocked cases require the actual guard and unchanged protected state.
 Unexercised actions remain failed (not_exercised) in the full denominator, even on a subset run.
 Chat-management exclusions remain listed with reasons. Scripted-model reachability is not
-an outcome result. Sends are restricted by verify-nestor to this run's loopback replicas.
+an outcome result. Sends are restricted by isolated-app to this run's loopback replicas.
 Merged results retain every attempt, including failures, and reject different build SHAs.
 
 Artifacts: assistant-outcomes.json, assistant-observations.json, conversations, screenshots,
@@ -125,7 +125,7 @@ try {
         };
         const verify = path.join(
           root,
-          ".claude/skills/verify-nestor/bin/lib/cli.mjs",
+          "packages/ai-evals/scripts/isolated-app/cli.mjs",
         );
         const command = (...args) => runNode([verify, ...args], env);
         let launched = false;

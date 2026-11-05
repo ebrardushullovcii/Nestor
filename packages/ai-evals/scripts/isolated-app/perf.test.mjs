@@ -1,4 +1,4 @@
-// Run: node --test .claude/skills/verify-nestor/bin/lib/perf.test.mjs
+// Run: node --test packages/ai-evals/scripts/isolated-app/perf.test.mjs
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";

@@ -21,4 +21,4 @@ The first shared model put a 40 px checkbox column on every row of every list. R
 
 ## Consequences
 
-Rows get their full width back, every working list offers the same Select, Select all N, Clear and Done, and the filter that defines a selection stays visible and usable while selecting. Bulk work starts with one press (Select, a modified click, X or Cmd/Ctrl+A) instead of a permanent column. The verify-nestor journeys enter select mode before ticking rows.
+Rows get their full width back, every working list offers the same Select, Select all N, Clear and Done, and the filter that defines a selection stays visible and usable while selecting. Bulk work starts with one press (Select, a modified click, X or Cmd/Ctrl+A) instead of a permanent column.

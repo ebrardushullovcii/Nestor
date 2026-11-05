@@ -33,7 +33,7 @@ Build first (pnpm --filter @nestor/desktop build); perf runs apps/desktop/out
 as is. Each size gets its own private data folder, seeded before launch with a
 finished setup, that many jobs across every stage (40% hidden, 2% shortlisted,
 1% with an approved resume, 1% applied) and job sites: 30 sites for up to
-1,000 jobs, 900 above. Nothing leaves the machine: the verify-nestor send guard
+1,000 jobs, 900 above. Nothing leaves the machine: the isolated-app send guard
 refuses every non-loopback request, and the sites are on example.test.
 
 Per size it reports:
@@ -67,7 +67,7 @@ Load (--load, scripted model, replica sites only):
             or --urls) in Nestor's own browser and then in plain Chromium
             (Playwright's build), and reads Task Manager's private working
             set across all processes of each, per page. Windows only.
-  observe   --observe <label> samples a running verify-nestor instance (start
+  observe   --observe <label> samples a running isolated-app instance (start
             it with bin/up, attach before starting the search) like a load
             run, until its search and Apply work stop, or --for seconds pass.
             It makes no clicks and no model calls of its own; the timeline is
@@ -99,7 +99,7 @@ Options:
   --urls      a file of real job-site URLs (one per line) for --chromium to
             open instead of replica pages: read only, nothing is filled in
             or sent; for the per-page weight of real boards
-  --observe   label of a running verify-nestor instance to sample
+  --observe   label of a running isolated-app instance to sample
   --for       seconds --observe watches at most (default 900)
   --cpu-profile  record renderer CPU profiles of one more warm and one more
             cold launch and of each first visit (.cpuprofile files, open in

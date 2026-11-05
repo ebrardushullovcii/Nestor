@@ -3,7 +3,7 @@
 // process, and how smooth the open screen is. It never clicks anything.
 // `perf --observe <label>` runs it and prints the summary.
 //
-// Run: bin/drive run .claude/skills/verify-nestor/journeys/observe.mjs [seconds] [heap]
+// Run: node packages/ai-evals/scripts/isolated-app/cli.mjs drive run packages/ai-evals/scripts/isolated-app/observe.mjs [seconds] [heap]
 // With "heap" it also saves V8 heap snapshots of main and the app's window
 // before, two minutes into the work and after, summarized by constructor.
 // Each pauses the app for a few seconds.
@@ -22,7 +22,7 @@ import {
   sampleApp,
   summarizeSamples,
   workState,
-} from "../bin/lib/perf-sample.mjs";
+} from "./perf-sample.mjs";
 
 const RELEASE_MS = 60_000;
 

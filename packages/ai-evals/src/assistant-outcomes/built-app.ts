@@ -187,7 +187,7 @@ export async function chatInBuiltApp(
   throw new Error("The built-app chat turn timed out.");
 }
 
-/** Called by a verify-nestor journey after its isolated app passes doctor. */
+/** Called by a isolated-app journey after its isolated app passes doctor. */
 export async function runBuiltAppOutcomes(options: {
   page: Page;
   evidenceDir: string;

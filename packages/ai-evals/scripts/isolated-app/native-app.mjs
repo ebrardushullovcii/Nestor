@@ -1,4 +1,4 @@
-// A deliberately small backend for verify-nestor, not ElectronApplication.
+// A deliberately small backend for the isolated-app driver, not ElectronApplication.
 // Main-process inspection and the UI bridge never attach to embedded pages.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";

@@ -1,4 +1,4 @@
-// Run: node --test .claude/skills/verify-nestor/bin/lib/perf-apply-policy.test.mjs
+// Run: node --test packages/ai-evals/scripts/isolated-app/perf-apply-policy.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
 

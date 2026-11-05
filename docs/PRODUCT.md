@@ -8,6 +8,12 @@ This is the owner's scope, in their terms (2026-10-25). Where an older doc or AD
 
 Someone imports a resume, finds lots of relevant jobs, gets a good resume for each and applies — faster and easier than doing the whole hunt themselves, finding included. Otherwise there's no point. Dead simple: no PhD and flight license needed. It is a paid product, so it also works for someone who wants a few very relevant jobs or light resume changes, not just high volume.
 
+## AI and automation
+
+- AI access is included in the product. People do not enter API keys, configure providers or choose models. Provider configuration is for development and operations; unavailable AI is a service outage, not a setup task for the person.
+- The AI should do the work through capable tools within the person's saved permissions. Use its judgment where rigid rules fail, avoid asking for facts already known, and ask for help only when the person really needs to act.
+- Development checks use isolated instances, synthetic data and local replica sites for application submissions. The detailed rules belong in [Testing](TESTING.md#safety-rules).
+
 ## Job Finder screens
 
 - **Home:** a real dashboard with charts that make sense.
