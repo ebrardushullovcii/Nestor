@@ -1577,6 +1577,8 @@ async function runMeasuredApplyAgent(
         control: {
           ...control,
           attestationKind: reading?.declarationKind ?? control.attestationKind,
+          asksHiringCountry:
+            reading?.asksHiringCountry ?? control.asksHiringCountry ?? false,
         },
         controls: observation.controls,
         tags: reading?.answerTags
@@ -5478,8 +5480,8 @@ async function runMeasuredApplyAgent(
         .map<AgentLoopTool>((tool) => ({
           ...tool,
           execute: async (rawArguments, context) => {
-            // Fill in for me opens only the form and the page it is on; any
-            // other link or address (a "Continue", a step) is the person's.
+            // Fill opens ordinary application entry links as well as this
+            // application's known pages; later ambiguous navigation is held.
             const name = tool.definition.function.name;
             if (name === "read_text") {
               const args = parseToolArguments(rawArguments);
@@ -5518,7 +5520,7 @@ async function runMeasuredApplyAgent(
               const link =
                 name === "follow_link"
                   ? seen?.links.find((entry) => entry.ref === args.ref)
-                  : undefined;
+                  : seen?.links.find((entry) => entry.href === args.url);
               const href =
                 name === "navigate"
                   ? typeof args.url === "string"
@@ -5542,10 +5544,17 @@ async function runMeasuredApplyAgent(
                 browserPermissions[accessKind];
               if (
                 !enabledAccessLink &&
-                !fillMayOpen(config, seen?.url ?? null, href)
+                !fillMayOpen(
+                  config,
+                  seen?.url ?? null,
+                  href,
+                  seen ? { observation: seen, state: guardState } : undefined,
+                )
               ) {
                 const pause = pressOnSitePause(
-                  link?.label ? `"${link.label}"` : href || "that link",
+                  link?.label && !/^https?:/iu.test(link.label.trim())
+                    ? `"${link.label}"`
+                    : "the link to the next page",
                   now(),
                 );
                 if (deferredPress) return handOverPress(pause);

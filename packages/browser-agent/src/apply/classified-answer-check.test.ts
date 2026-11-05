@@ -362,6 +362,14 @@ test.each([
         sources: {
           ...sources,
           posting: { ...sources.posting, location: "Worldwide" },
+          // This case isolates a local human decision from Profile answers.
+          profile: {
+            ...sources.profile,
+            workEligibility: {
+              ...sources.profile.workEligibility,
+              requiresVisaSponsorship: null,
+            },
+          },
           reusableAnswers: [
             {
               id: variant === "remembered" ? "remembered_31" : "application_31",
@@ -413,6 +421,55 @@ test.each([
     }
   },
 );
+
+test("Send keeps a plain sponsorship answer supported by Profile even with an unresolved job country", async () => {
+  const question = "Will you require sponsorship?";
+  const field: ApplyFormControl = {
+    ref: "c0",
+    kind: "select",
+    label: question,
+    groupLabel: "",
+    placeholder: "",
+    required: true,
+    disabled: false,
+    readOnly: false,
+    visible: true,
+    value: "No",
+    checked: false,
+    options: ["Yes", "No"],
+    selectedOptionLabel: "No",
+    invalid: false,
+    validationMessage: "",
+    questionKind: "visa_sponsorship",
+    answerControlType: "single_choice",
+    attestationKind: null,
+    answered: true,
+  };
+  const input = {
+    client: reader([
+      { index: 0, kind: "sponsorship", country: null, sourceId: null },
+    ]),
+    sources: {
+      ...sources,
+      posting: { ...sources.posting, location: "Remote, Europe" },
+    },
+    payDisclosed: false,
+    answers: [{ question, answer: "No" }],
+    formControls: [field],
+    formContext: { pageText: "Review", fields: [] },
+  };
+  expect((await checkClassifiedApplicationAnswers(input))[0]?.supported).toBe(
+    true,
+  );
+  expect(
+    (
+      await checkClassifiedApplicationAnswers({
+        ...input,
+        answers: [{ question, answer: "Yes" }],
+      })
+    )[0]?.supported,
+  ).toBe(false);
+});
 test.each([
   {
     label: "GitHub",

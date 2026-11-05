@@ -12098,3 +12098,70 @@ test.each(["select", "radio"] as const)(
     expect(result.reason).not.toContain("could not finish checking");
   },
 );
+
+test.each(["follow_link", "navigate"])(
+  "Fill opens an observed ordinary Apply link through %s without handing its URL to the person",
+  async (tool) => {
+    const source = page({
+      url: "https://jobs.example.test/listing/42",
+      controls: [],
+      actions: [],
+      links: [
+        {
+          index: 0,
+          label: "Apply",
+          href: "https://employer.example.test/applications/42",
+          target: "_blank",
+          visible: true,
+          topOffset: 0,
+        },
+      ],
+    });
+    const input = config(source, {
+      intermediateWritesAuthorized: false,
+      application: { ...config(source).application, startingUrl: source.url! },
+    });
+    const open = vi.fn(() => {
+      Object.assign(
+        source,
+        page({ url: "https://employer.example.test/applications/42" }),
+      );
+      return Promise.resolve({ ok: true as const, url: source.url! });
+    });
+    input.hands.followLink = open;
+    input.hands.navigate = open;
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        {
+          name: tool,
+          args:
+            tool === "follow_link"
+              ? { ref: "l0" }
+              : { url: "https://employer.example.test/applications/42" },
+        },
+        { name: "finish", args: { reason: "Filled." } },
+      ]),
+    );
+    expect(open).toHaveBeenCalledOnce();
+    expect(
+      result.pauses.flatMap(
+        (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+      ),
+    ).toEqual([]);
+  },
+);
+
+test("an unobserved navigation handoff never exposes a raw URL as a question", async () => {
+  const source = page();
+  const result = await runApplyAgent(
+    config(source, { intermediateWritesAuthorized: false }),
+    scriptedModel([
+      { name: "navigate", args: { url: "https://example.test/next-page" } },
+      { name: "finish", args: { reason: "Filled." } },
+    ]),
+  );
+  expect(JSON.stringify(result.pauses)).not.toContain(
+    "https://example.test/next-page",
+  );
+});

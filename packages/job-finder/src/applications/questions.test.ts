@@ -229,7 +229,7 @@ test("eligibility memory shares a resolved country only while recorded facts mat
   expect(
     describeFormQuestion(question, { id: 1, location: "Remote, Europe" }, facts)
       .key,
-  ).not.toBe(
+  ).toBe(
     describeFormQuestion(question, { id: 2, location: "Remote, Europe" }, facts)
       .key,
   );
@@ -292,4 +292,75 @@ test("only an application-local answer carries the original exact field binding"
     toKnownFormAnswer({ ...answer, local: false }, question, "Germany", 42)
       .applicationScope?.currentFieldBinding,
   ).toBeUndefined();
+});
+
+test("unknown-country legal questions share only the same nonempty location text", () => {
+  const question: FormQuestion = {
+    prompt: "Are you legally authorized to work in this country?",
+    kind: "work_authorization",
+    answerControlType: "boolean",
+    answerOptions: ["Yes", "No"],
+  };
+  const profile = {
+    workEligibility: CandidateWorkEligibilitySchema.parse({
+      authorizedWorkCountries: ["European Union"],
+      requiresVisaSponsorship: false,
+    }),
+  };
+  const key = (
+    id: number,
+    location: string,
+    changes: Partial<FormQuestion> = {},
+  ) =>
+    describeFormQuestion({ ...question, ...changes }, { id, location }, profile)
+      .key;
+  expect(key(1, "Remote, Europe")).toBe(key(2, "Remote, Europe"));
+  expect(key(1, "Remote, Europe")).not.toBe(key(2, "Remote, Worldwide"));
+  expect(key(1, "")).not.toBe(key(2, ""));
+  expect(key(1, "Berlin, Germany")).toBe(key(2, "Munich, Germany"));
+  expect(key(1, "Berlin, Germany")).not.toBe(key(2, "Paris, France"));
+  expect(key(1, "Austin, TX")).toBe(key(2, "Seattle, WA"));
+  expect(key(1, "Austin, TX")).not.toBe(key(2, "Toronto, ON"));
+  const conditional = {
+    ...question,
+    prompt: "Are you authorized under your limited permit until 2027-06-30?",
+  };
+  expect(
+    describeFormQuestion(conditional, { id: 1, location: "Germany" }, profile)
+      .key,
+  ).not.toBe(
+    describeFormQuestion(conditional, { id: 2, location: "Germany" }, profile)
+      .key,
+  );
+  expect(key(1, "Remote, Europe", { repeatedAtDifferentStep: true })).not.toBe(
+    key(2, "Remote, Europe", { repeatedAtDifferentStep: true }),
+  );
+});
+
+test("a fixed-date permit retains an application-specific legal answer", () => {
+  const question: FormQuestion = {
+    prompt: "Are you authorized to work here?",
+    kind: "work_authorization",
+    answerControlType: "boolean",
+    answerOptions: ["Yes", "No"],
+  };
+  const profile = {
+    workEligibility: CandidateWorkEligibilitySchema.parse({
+      authorizedWorkCountries: ["Germany"],
+      requiresVisaSponsorship: false,
+      limitedWorkPermissions: [
+        {
+          country: "Germany",
+          conditions: "Authorized until 2027-06-30",
+          requiresFutureSponsorship: true,
+        },
+      ],
+    }),
+  };
+  for (const location of ["Berlin, Germany", "Remote, Europe"])
+    expect(
+      describeFormQuestion(question, { id: 1, location }, profile).key,
+    ).not.toBe(
+      describeFormQuestion(question, { id: 2, location }, profile).key,
+    );
 });

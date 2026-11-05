@@ -2180,3 +2180,183 @@ describe("a street address line beside its own city field", () => {
     ).toBe("literal");
   });
 });
+
+test("explicit EU authorization covers a member country, never an unrelated country or extra legal condition", () => {
+  const sources = source();
+  sources.profile.workEligibility.authorizedWorkCountries = ["European Union"];
+  const field = control();
+  const tags = { kind: "work_auth", country: "FR", sourceId: null } as const;
+  sources.posting.location = "Paris, France";
+  expect(decide(sources, field, tags).kind).toBe("literal");
+  expect(
+    decide(sources, field, { ...tags, hasAdditionalConditions: true }).kind,
+  ).toBe("needs_you");
+  sources.posting.location = "United Kingdom";
+  expect(decide(sources, field, { ...tags, country: "GB" }).kind).toBe(
+    "needs_you",
+  );
+});
+
+test.each([true, false])(
+  "a plain sponsorship question retains the explicit %s fact when the posting country is unknown",
+  (requiresVisaSponsorship) => {
+    const sources = source();
+    sources.posting.location = "Remote, Europe";
+    sources.profile.workEligibility.requiresVisaSponsorship =
+      requiresVisaSponsorship;
+    const field = control("Will you require sponsorship?");
+    const tags = {
+      kind: "sponsorship",
+      country: null,
+      sourceId: null,
+    } as const;
+    const value = requiresVisaSponsorship ? "Yes" : "No";
+    expect(decide(sources, field, tags, value).kind).toBe("literal");
+    expect(
+      decide(sources, field, { ...tags, hasAdditionalConditions: true }, value)
+        .kind,
+    ).toBe("needs_you");
+    expect(
+      decide(sources, control(), {
+        kind: "work_auth",
+        country: null,
+        sourceId: null,
+      }).kind,
+    ).toBe("needs_you");
+    expect(
+      decide(
+        sources,
+        control("Will you require sponsorship in Canada?"),
+        { ...tags, country: "CA" },
+        value,
+      ).kind,
+    ).toBe("needs_you");
+    sources.profile.workEligibility.limitedWorkPermissions = [
+      {
+        country: "Germany",
+        conditions: "20 hours per week",
+        requiresFutureSponsorship: true,
+      },
+    ];
+    expect(decide(sources, field, tags, value).kind).toBe("needs_you");
+  },
+);
+
+test("the person's legal answer is reusable within the same unresolved location only", () => {
+  const sources = source();
+  sources.posting.location = "Remote, Europe";
+  const field = { ...control(), questionKind: "work_authorization" as const };
+  sources.reusableAnswers = [
+    {
+      id: "remembered_42",
+      kind: "work_authorization",
+      label: field.label,
+      question: field.label,
+      answer: "Yes",
+      roleFamilies: [],
+      proofEntryIds: [],
+      applicationScope: {
+        resultId: null,
+        applicationRecordId: null,
+        location: "Remote, Europe",
+      },
+    },
+  ];
+  const tags = {
+    kind: "work_auth",
+    country: null,
+    sourceId: "answerLibrary.remembered_42",
+  } as const;
+  expect(decide(sources, field, tags).kind).toBe("literal");
+  expect(
+    decide(sources, field, { ...tags, hasAdditionalConditions: true }).kind,
+  ).toBe("needs_you");
+  sources.posting.location = "Remote, Worldwide";
+  expect(decide(sources, field, tags).kind).toBe("needs_you");
+  sources.posting.location = "Canada";
+  expect(decide(sources, field, { ...tags, country: "CA" }).kind).toBe(
+    "needs_you",
+  );
+});
+
+test("a known sponsorship flag does not bypass an own-words instruction", () => {
+  const sources = source();
+  sources.posting.location = "Remote, Europe";
+  const field = control(
+    "Explain in your own words whether you require sponsorship",
+  );
+  expect(
+    decide(
+      sources,
+      field,
+      { kind: "sponsorship", country: null, sourceId: null },
+      "No",
+    ).kind,
+  ).toBe("needs_you");
+});
+
+test("a missing resume date does not discard the recorded employer and title in that row", () => {
+  const sources = source();
+  sources.profile.experiences = CandidateProfileSchema.parse({
+    ...sources.profile,
+    experiences: [
+      {
+        id: "signal",
+        title: "Staff Frontend Engineer",
+        companyName: "Signal Systems",
+        isCurrent: true,
+      },
+    ],
+  }).experiences;
+  const row = {
+    groupLabel: "My Experience — Work experience 1",
+    rowScopeKey: "experience:1",
+  };
+  const date = {
+    ...control("From"),
+    ...row,
+    ref: "c2",
+    value: "2018-01",
+    answered: true,
+  };
+  for (const [label, leaf, value] of [
+    ["Job title", "title", "Staff Frontend Engineer"],
+    ["Company", "companyName", "Signal Systems"],
+  ]) {
+    const field = { ...control(label), ...row };
+    const tags = {
+      kind: "other",
+      country: null,
+      sourceId: `profile.experiences.signal.${leaf}`,
+    } as const;
+    expect(decide(sources, field, tags, value, [field, date]).kind).toBe(
+      "literal",
+    );
+    sources.profile.experiences[0].startDate = "2019-01";
+    expect(decide(sources, field, tags, value, [field, date]).kind).toBe(
+      "needs_you",
+    );
+    sources.profile.experiences[0].startDate = null;
+  }
+});
+
+test("application location uses the matching offered listing location, not residence or an unrelated option", () => {
+  const sources = source();
+  sources.posting.location = "Remote, Europe";
+  const field = {
+    ...control("Which location are you applying for?"),
+    kind: "select" as const,
+    asksHiringCountry: true,
+    options: ["Remote, Europe", "Remote, Worldwide"],
+  };
+  const tags = { kind: "other", country: null, sourceId: null } as const;
+  expect(decide(sources, field, tags, "Remote, Europe")).toMatchObject({
+    kind: "literal",
+    source: { id: "posting.location" },
+  });
+  expect(decide(sources, field, tags, "Remote, Worldwide").kind).toBe(
+    "needs_you",
+  );
+  sources.posting.location = "Remote, Americas";
+  expect(decide(sources, field, tags, "Remote, Europe").kind).toBe("needs_you");
+});

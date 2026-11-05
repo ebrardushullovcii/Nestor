@@ -81,6 +81,18 @@ const country = (text: string) => {
   return codes.size === 1 ? (codes.values().next().value ?? null) : null;
 };
 
+// Geographic coverage of an explicitly recorded EU work authorization. This
+// does not derive work permission from citizenship or residence.
+const EU_COUNTRIES = new Set(
+  "AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE".split(
+    " ",
+  ),
+);
+const coversCountry = (source: string | null, target: string | null) =>
+  !!source &&
+  !!target &&
+  (source === target || (source === "EU" && EU_COUNTRIES.has(target)));
+
 /** An explicit residence-relative legal question names a different jurisdiction
  * from a remote/regional posting. Residence selects the country, never the answer. */
 export function legalQuestionCountry(
@@ -217,6 +229,16 @@ export function answerSourceCatalog(
     });
   // Explicit authorization, never residence, supplies the jurisdiction.
   const eligibility = sources.profile.workEligibility;
+  if (
+    eligibility.requiresVisaSponsorship !== null &&
+    !eligibility.limitedWorkPermissions?.length
+  )
+    rows.push({
+      id: "profile.workEligibility.requiresVisaSponsorship",
+      value: eligibility.requiresVisaSponsorship ? "Yes" : "No",
+      purpose: "sponsorship",
+      country: null,
+    });
   for (const [index, name] of eligibility.authorizedWorkCountries.entries()) {
     const code = country(name);
     if (
@@ -477,8 +499,10 @@ function historyRecordMatches(
         );
         if (!leaf) return true;
         const expected = catalog.find((row) => row.id === `${prefix}.${leaf}`);
+        // A missing resume field cannot contradict another recorded field.
+        // The entered value keeps its own answer/permission checks.
         return (
-          !!expected && literalValueMatches(expected, control, control.value)
+          !expected || literalValueMatches(expected, control, control.value)
         );
       }) && !historyRecordInAnotherRow(prefix, input, catalog)
   );
@@ -513,16 +537,25 @@ function historyRowRecords(
         knownLiteralField({ id: `${prefix}.${leaf}` }, control),
       );
     // A row is a record only once its employer or school says so.
-    if (!filled.some((control) => leafOf(control) === identity)) return false;
+    const recordedIdentity = catalog.find(
+      (source) => source.id === `${prefix}.${identity}`,
+    );
+    if (
+      !recordedIdentity ||
+      !filled.some(
+        (control) =>
+          leafOf(control) === identity &&
+          literalValueMatches(recordedIdentity, control, control.value),
+      )
+    )
+      return false;
     return filled.every((control) => {
       const leaf = leafOf(control);
       if (!leaf) return true;
       const expected = catalog.find(
         (source) => source.id === `${prefix}.${leaf}`,
       );
-      return (
-        !!expected && literalValueMatches(expected, control, control.value)
-      );
+      return !expected || literalValueMatches(expected, control, control.value);
     });
   });
 }
@@ -1124,16 +1157,73 @@ export function classifyAnswerPermission(input: {
       ? { kind: "inference", source: null, evidencePolicy: "eligibility" }
       : null;
   };
-  if (legal && !target)
+  if (legal && !target) {
+    // The person supplied this answer for the same unresolved location. The
+    // host shares it only within that location and unchanged eligibility facts.
+    const savedLocation = matchingSaved?.applicationScope?.location;
+    if (
+      matchingSaved &&
+      savedLocation?.trim() &&
+      normalizeFormQuestionPrompt(savedLocation) ===
+        normalizeFormQuestionPrompt(input.sources.posting.location) &&
+      matchingSaved.kind ===
+        (tags.kind === "work_auth"
+          ? "work_authorization"
+          : "visa_sponsorship") &&
+      !matchingSaved.applicationScope?.applicationRecordId &&
+      !matchingSaved.applicationScope?.resultId &&
+      !input.control.repeatedQuestion &&
+      !input.sources.profile.workEligibility.limitedWorkPermissions?.length &&
+      tags.hasAdditionalConditions !== true &&
+      matchingSaved.answer.trim() === input.answer.trim()
+    ) {
+      const human = catalog.find(
+        (row) => row.id === `answerLibrary.${matchingSaved.id}`,
+      );
+      if (human) return { kind: "literal", source: human };
+    }
+    // A plain sponsorship question is separately answered by the person's
+    // explicit flag. An unresolved hiring country does not erase that fact.
+    const sponsorship = catalog.find(
+      (row) => row.id === "profile.workEligibility.requiresVisaSponsorship",
+    );
+    if (
+      requiresOwnWords(legalPrompt) ||
+      ownWordsAppliesToQuestion(
+        input.pageInstructions,
+        questionPrompt(input.control),
+        input.controls.map(questionPrompt),
+      )
+    )
+      return deny("This question needs your own unchanged answer.");
+    if (
+      tags.kind === "sponsorship" &&
+      namedCountries.size === 0 &&
+      tags.country === null &&
+      !fieldNamesAnotherPerson(input.control) &&
+      tags.hasAdditionalConditions !== true &&
+      sponsorship?.value === input.answer.trim()
+    )
+      return { kind: "literal", source: sponsorship };
     return (
       conditionalEligibility() ??
       deny("The work-permission country is unknown or ambiguous.")
     );
+  }
   const knownLegalQuestion = legal && !fieldNamesAnotherPerson(input.control);
-  if (knownLegalQuestion && !source)
+  if (
+    knownLegalQuestion &&
+    (!source || source.id === "profile.workEligibility.requiresVisaSponsorship")
+  )
     source = catalog.find(
-      (row) => row.purpose === tags.kind && row.country === target,
+      (row) => row.purpose === tags.kind && coversCountry(row.country, target),
     );
+  if (
+    legal &&
+    source?.purpose === tags.kind &&
+    coversCountry(source.country, target)
+  )
+    source = { ...source, country: target };
   // The countries where the person may work are a complete list (ADR 0029):
   // a resolved job country it plainly does not cover is a No. A region in
   // the list, a limited permit there, or extra conditions leave it asked.
@@ -1418,6 +1508,16 @@ export function classifyAnswerPermission(input: {
       country: null,
     };
   if (
+    tags.kind === "other" &&
+    input.control.asksHiringCountry &&
+    input.control.options.filter(
+      (option) =>
+        normalizeFormQuestionPrompt(option) ===
+        normalizeFormQuestionPrompt(input.sources.posting.location),
+    ).length === 1
+  )
+    source = catalog.find((row) => row.id === "posting.location");
+  if (
     !source &&
     tags.kind === "motivation" &&
     isPlainMotivationIntent(input.answer) &&
@@ -1605,6 +1705,15 @@ export function classifyAnswerPermission(input: {
     return exactSaved
       ? { kind: "literal", source }
       : deny("This question needs your own unchanged answer.");
+  if (
+    tags.kind === "other" &&
+    input.control.asksHiringCountry &&
+    source.id === "posting.location" &&
+    input.control.options.includes(input.answer) &&
+    normalizeFormQuestionPrompt(input.answer) ===
+      normalizeFormQuestionPrompt(source.value)
+  )
+    return { kind: "literal", source: { ...source, value: input.answer } };
   const timezone =
     tags.kind === "other"
       ? currentTimezoneAnswer(input.control, input.sources)
