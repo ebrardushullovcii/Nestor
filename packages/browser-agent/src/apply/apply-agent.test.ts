@@ -599,6 +599,112 @@ test.each(["layout-group", "link"] as const)(
   },
 );
 
+test.each([true, false])(
+  "Google reaches the application after refusing site credential entry (Profile email=%s)",
+  async (knownEmail) => {
+    const source = page({
+      url: "https://apply.example.test/login",
+      title: "Sign in to apply",
+      bodyText: "Sign in to apply",
+      controls: [
+        { ...nameControl(), label: "Email", inputType: "email", value: "" },
+        {
+          ...nameControl(),
+          index: 1,
+          label: "Password",
+          inputType: "password",
+          value: "",
+        },
+      ],
+      actions: [
+        {
+          index: 0,
+          label: "Sign in",
+          visible: true,
+          disabled: false,
+          submitsForm: true,
+          formMethod: "POST",
+          formAction: "https://apply.example.test/session",
+        },
+        {
+          index: 1,
+          label: "Sign in with Google",
+          visible: true,
+          disabled: false,
+          submitsForm: false,
+        },
+      ],
+    });
+    const input = config(source, {
+      browserPermissions: {
+        googleSignIn: true,
+        signIn: true,
+        createAccounts: false,
+        solveCaptchas: false,
+      },
+    });
+    const email = "robin.choice@example.test";
+    input.sources.profile.email = knownEmail ? email : null;
+    input.hands.readAccountFlowEntry = () =>
+      Promise.resolve([
+        "https://accounts.google.com/o/oauth2/v2/auth?scope=openid+email+profile",
+      ]);
+    const prepare = vi.fn(() => Promise.resolve(false));
+    input.prepareBrowserCredentials = prepare;
+    const type = vi.spyOn(input.hands, "fillText");
+    let stage = 0;
+    input.hands.clickElement = vi.fn(() => {
+      if (stage++ === 0) {
+        source.url = "https://accounts.google.com/v3/signin/accountchooser";
+        source.title = "Choose an account";
+        source.bodyText = "Choose an account";
+        source.controls = [];
+        source.actions = [
+          { index: 0, label: email, visible: true, disabled: false },
+        ];
+        if (knownEmail)
+          source.actions.push({
+            index: 1,
+            label: "other@example.test",
+            visible: true,
+            disabled: false,
+          });
+      } else if (stage === 2) {
+        source.url = "https://accounts.google.com/signin/oauth/consent";
+        source.title = "Sign in to Example";
+        source.bodyText = `${email}: share your name and email`;
+        source.actions = [
+          { index: 0, label: "Continue", visible: true, disabled: false },
+        ];
+      } else {
+        Object.assign(source, page());
+      }
+      return Promise.resolve({ ok: true as const, observedValue: "clicked" });
+    });
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([
+        { name: "type", args: { ref: "c0", text: email } },
+        { name: "click", args: { ref: "a1" } },
+        { name: "click", args: { ref: "a0" } },
+        { name: "click", args: { ref: "a0" } },
+        { name: "finish", args: { reason: "The application is filled." } },
+      ]),
+    );
+    expect(type).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(input.hands.clickElement).toHaveBeenCalledTimes(3);
+    expect(result.pauses).toEqual([]);
+    expect(
+      result.timeline.filter((entry) =>
+        /Google (?:account selected|sign-in confirmed)/u.test(
+          entry.label ?? "",
+        ),
+      ),
+    ).toHaveLength(2);
+  },
+);
+
 test("a Google chooser selection records one normalized local checkpoint and recovery does not click it again", async () => {
   const source = page({
     url: "https://accounts.google.com/v3/signin/accountchooser?state=synthetic#private",

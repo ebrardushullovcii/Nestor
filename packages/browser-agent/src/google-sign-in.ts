@@ -6,6 +6,8 @@ export const GOOGLE_ACCOUNT_WINDOW_ORIGINS = [
 ] as const;
 export type GoogleIdentityContext = {
   intendedEmail: string | null;
+  /** The sole offered account selected in this flow when Profile has no email. */
+  selectedEmail?: string | null;
   entry: "basic" | "unproven";
   fenced: boolean;
 };
@@ -94,7 +96,7 @@ function ready(
 ): ctx is GoogleIdentityContext {
   const url = pageUrl(page);
   return (
-    !!ctx?.intendedEmail &&
+    !!ctx &&
     url?.origin === GOOGLE_ACCOUNT_WINDOW_ORIGINS[0] &&
     !url.username &&
     !url.password &&
@@ -126,7 +128,20 @@ export function googleChooserAccount(
 ): string | null {
   if (!chooser(page, ctx)) return null;
   const target = normalizeGoogleEmail(ctx!.intendedEmail);
-  const matches = items(page).filter(
+  const accounts = items(page).filter(
+    (item) => !item.frame && available(item) && emails(item.label).length > 0,
+  );
+  if (!target) {
+    const account = accounts[0];
+    return accounts.length === 1 &&
+      !!account &&
+      account.ref === ref &&
+      !/\bsigned\s*out\b/iu.test(account.label) &&
+      emails(account.label).length === 1
+      ? (emails(account.label).at(0) ?? null)
+      : null;
+  }
+  const matches = accounts.filter(
     (item) =>
       !item.frame && available(item) && emails(item.label).includes(target),
   );
@@ -144,12 +159,12 @@ export function googleUseAnotherAccount(
   ref: string | undefined,
   ctx?: GoogleIdentityContext,
 ): boolean {
-  if (!chooser(page, ctx)) return false;
+  if (!ctx?.intendedEmail || !chooser(page, ctx)) return false;
   if (
     items(page).some(
       (item) =>
         available(item) &&
-        emails(item.label).includes(normalizeGoogleEmail(ctx!.intendedEmail)),
+        emails(item.label).includes(normalizeGoogleEmail(ctx.intendedEmail)),
     )
   )
     return false;
@@ -168,6 +183,7 @@ export function googleIdentifierStep(
 ): boolean {
   if (
     !ready(page, ctx) ||
+    !ctx.intendedEmail ||
     !/^\/(?:v\d+\/)?signin\/(?:v\d+\/)?identifier\/?$/u.test(
       pageUrl(page)!.pathname,
     )
@@ -239,7 +255,7 @@ export function googleBasicConfirmation(
       available(item) &&
       /^(?:continue|confirm|allow)$/iu.test(item.label.trim()),
   );
-  const target = normalizeGoogleEmail(ctx.intendedEmail);
+  const target = normalizeGoogleEmail(ctx.intendedEmail ?? ctx.selectedEmail);
   return shown.size === 1 &&
     shown.has(target) &&
     confirm.length === 1 &&
@@ -266,7 +282,8 @@ export function googleOptionalOfferDecline(
   if (!ready(page, ctx) || chooser(page, ctx)) return false;
   if (CREDENTIAL_OR_CONSENT_PATH.test(pageUrl(page)!.pathname)) return false;
   if (page.controls.some((control) => control.visible)) return false;
-  const target = normalizeGoogleEmail(ctx.intendedEmail);
+  const target = normalizeGoogleEmail(ctx.intendedEmail ?? ctx.selectedEmail);
+  if (!target) return false;
   const shown = emails(
     [...items(page).map((item) => item.label), page.bodyTextExcerpt].join(" "),
   );

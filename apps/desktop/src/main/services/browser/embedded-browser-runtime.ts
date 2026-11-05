@@ -67,9 +67,15 @@ export function withEmbeddedBrowserActivity(
     url: string,
   ): Promise<boolean> => {
     const owned = new Set(await claimedTabs());
+    // UI tabs omit queries/fragments; compare the observed URL the same way.
+    // The vault still checks the live document, form and saved exact origin.
+    const displayUrl = browserDisplayUrl(url);
+    if (!displayUrl || displayUrl === "about:blank") return false;
     const matches = browser
       .getState()
-      .tabs.filter((tab) => owned.has(tab.id) && tab.url === url);
+      .tabs.filter(
+        (tab) => owned.has(tab.id) && browserDisplayUrl(tab.url) === displayUrl,
+      );
     if (matches.length !== 1) return false;
     return (
       browser.prepareAgentCredentials?.(matches[0]!.id).catch(() => false) ??
