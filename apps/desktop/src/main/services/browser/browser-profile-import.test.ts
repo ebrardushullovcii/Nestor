@@ -1,5 +1,5 @@
 import { createCipheriv, createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -11,11 +11,14 @@ import {
   deriveChromiumKey,
   firefoxCookieToDetails,
   importSignInsByName,
+  importSignInsFromBrowser,
   listBrowserImportSources,
   listSignInSourcesByName,
   readChromiumCookies,
+  readChromiumCookieStore,
   readFirefoxCookies,
   readBrowserPasswords,
+  snapshotDatabase,
   type ImportEnvironment,
 } from "./browser-profile-import";
 
@@ -30,13 +33,17 @@ afterEach(async () => {
     await rm(directory, { recursive: true, force: true });
 });
 
-function encryptWindows(plain: string, key: Buffer, prefix = "v10"): Buffer {
+function encryptWindows(
+  plain: string | Buffer,
+  key: Buffer,
+  prefix = "v10",
+): Buffer {
   const nonce = Buffer.alloc(12, 7);
   const cipher = createCipheriv("aes-256-gcm", key, nonce);
   return Buffer.concat([
     Buffer.from(prefix),
     nonce,
-    cipher.update(plain, "utf8"),
+    cipher.update(Buffer.from(plain)),
     cipher.final(),
     cipher.getAuthTag(),
   ]);
@@ -95,6 +102,62 @@ async function windowsProfiles(
 }
 
 describe("Windows profile passwords", () => {
+  test("discovers account-only passwords and reads both password stores", async () => {
+    const key = Buffer.alloc(32, 4);
+    const { env, root } = await windowsProfiles({
+      Default: [encryptWindows("synthetic", key)],
+    });
+    const directory = path.join(root, "Default");
+    await copyFile(
+      path.join(directory, "Login Data"),
+      path.join(directory, "Login Data For Account"),
+    );
+    await rm(path.join(directory, "Login Data"));
+    await rm(path.join(directory, "Cookies"));
+    let source = (await listBrowserImportSources(env)).sources[0]!;
+    expect(source.passwordImport.supported).toBe(true);
+    dpapi.mockImplementation(() => Promise.resolve(Buffer.from(key)));
+    expect((await readBrowserPasswords(source.id, env)).values).toHaveLength(1);
+    await copyFile(
+      path.join(directory, "Login Data For Account"),
+      path.join(directory, "Login Data"),
+    );
+    source = (await listBrowserImportSources(env)).sources[0]!;
+    const result = await readBrowserPasswords(source.id, env);
+    expect(result.values).toHaveLength(2);
+    expect(result.diagnostics?.found).toBe(2);
+  });
+
+  test("reports protected and empty rows across both stores without requesting a key", async () => {
+    const { env, root } = await windowsProfiles({
+      Default: [
+        encryptWindows("synthetic", Buffer.alloc(32, 4), "v20"),
+        Buffer.alloc(0),
+      ],
+    });
+    await copyFile(
+      path.join(root, "Default/Login Data"),
+      path.join(root, "Default/Login Data For Account"),
+    );
+    const source = (await listBrowserImportSources(env)).sources[0]!;
+    expect(source.passwordImport).toMatchObject({ supported: false });
+    expect(source.passwordImport.note).toMatch(/Found 4.*2.*app-bound.*CSV/);
+    const result = await readBrowserPasswords(source.id, env);
+    expect(result).toMatchObject({
+      values: [],
+      skipped: 4,
+      unsupported: true,
+      diagnostics: {
+        found: 4,
+        appBound: 2,
+        filtered: 2,
+        decryptFailed: 0,
+        unsupportedEncryption: 0,
+      },
+    });
+    expect(dpapi).not.toHaveBeenCalled();
+  });
+
   test("discovers capability per profile, independently of cookies, without unwrapping a key", async () => {
     const key = Buffer.alloc(32, 4);
     const { env, root } = await windowsProfiles({
@@ -164,6 +227,13 @@ describe("Windows profile passwords", () => {
       ],
       skipped: 4,
       unsupported: false,
+      diagnostics: {
+        found: 5,
+        appBound: 1,
+        decryptFailed: 2,
+        filtered: 0,
+        unsupportedEncryption: 1,
+      },
     });
     expect(dpapi).toHaveBeenCalledOnce();
     expect(unwrapped.every((byte) => byte === 0)).toBe(true);
@@ -211,6 +281,248 @@ function encrypt(plain: Buffer, key: Buffer): Buffer {
     cipher.final(),
   ]);
 }
+
+async function windowsCookieProfile() {
+  const key = Buffer.alloc(32, 4);
+  const { env, root } = await windowsProfiles({ Default: [] });
+  const file = path.join(root, "Default/Cookies");
+  await rm(file);
+  const db = new DatabaseSync(file);
+  db.exec(
+    "CREATE TABLE meta (key TEXT, value TEXT); INSERT INTO meta VALUES ('version', '24')",
+  );
+  db.exec(
+    "CREATE TABLE cookies (host_key TEXT, name TEXT, value TEXT, encrypted_value BLOB, path TEXT, expires_utc INTEGER, is_secure INTEGER, is_httponly INTEGER, samesite INTEGER, has_expires INTEGER, top_frame_site_key TEXT)",
+  );
+  const digest = createHash("sha256").update(".example.test").digest();
+  const encrypted = encryptWindows(
+    Buffer.concat([digest, Buffer.from("synthetic-cookie")]),
+    key,
+  );
+  const corrupt = Buffer.from(encrypted);
+  corrupt[corrupt.length - 1]! ^= 1;
+  const insert = db.prepare(
+    "INSERT INTO cookies VALUES (?, ?, ?, ?, '/', ?, 1, 1, 0, ?, ?)",
+  );
+  insert.run(".example.test", "legacy", "", encrypted, 0, 0, "");
+  insert.run(
+    "plain.test",
+    "plain",
+    "synthetic-plain",
+    Buffer.alloc(0),
+    0,
+    0,
+    "",
+  );
+  insert.run(
+    ".example.test",
+    "protected",
+    "",
+    encryptWindows("synthetic", key, "v20"),
+    0,
+    0,
+    "",
+  );
+  insert.run(".example.test", "corrupt", "", corrupt, 0, 0, "");
+  insert.run(
+    ".example.test",
+    "unknown",
+    "",
+    Buffer.from("v99synthetic"),
+    0,
+    0,
+    "",
+  );
+  insert.run(".example.test", "expired", "", encrypted, 1, 1, "");
+  insert.run(
+    ".example.test",
+    "partitioned",
+    "",
+    encrypted,
+    0,
+    0,
+    "https://other.test",
+  );
+  insert.run("bad host", "invalid", "", encrypted, 0, 0, "");
+  db.close();
+  return { env, root, file, key };
+}
+
+describe("Windows cookie import accounting", () => {
+  test("authenticates GCM, validates the host digest and counts every skip without leaking cookie material", async () => {
+    const { file, key } = await windowsCookieProfile();
+    const { cookies, diagnostics } = readChromiumCookieStore(
+      file,
+      key,
+      "win32",
+    );
+    expect(cookies).toHaveLength(2);
+    expect(cookies[0]?.value).toBe("synthetic-cookie");
+    expect(diagnostics).toEqual({
+      found: 8,
+      appBound: 1,
+      unsupportedEncryption: 1,
+      decryptFailed: 1,
+      filtered: 3,
+    });
+    expect(JSON.stringify(diagnostics)).not.toMatch(/synthetic|example|legacy/);
+    const encrypted = encryptWindows(
+      Buffer.concat([
+        createHash("sha256").update("other.test").digest(),
+        Buffer.from("synthetic"),
+      ]),
+      key,
+    );
+    expect(
+      decryptChromiumCookieValue(encrypted, key, ".example.test", 24, "win32"),
+    ).toBeNull();
+    expect(
+      readChromiumCookieStore(file, Buffer.alloc(32, 9), "win32").diagnostics
+        .decryptFailed,
+    ).toBe(2);
+  });
+
+  test("imports readable Windows cookies, reports partial coverage and browser rejections, and clears the key", async () => {
+    const { env, key } = await windowsCookieProfile();
+    const unwrapped = Buffer.from(key);
+    dpapi.mockResolvedValueOnce(unwrapped);
+    const set = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("synthetic-private-value"));
+    const host = {
+      takeControl: vi.fn(),
+      getSession: () => ({ cookies: { set, flushStore: vi.fn() } }),
+    } as unknown as EmbeddedBrowser;
+    const source = (await listBrowserImportSources(env)).sources[0]!;
+    expect(source.supported).toBe(true);
+    expect(dpapi).not.toHaveBeenCalled();
+    const result = await importSignInsFromBrowser(
+      host,
+      { sourceId: source.id },
+      env,
+    );
+    expect(result).toMatchObject({
+      status: "imported",
+      cookieCount: 1,
+      siteCount: 1,
+    });
+    expect(result.message).toMatch(
+      /Found 8.*1 blocked.*1 use unsupported.*1 could not be decrypted.*3 expired.*Imported 1.*1 rejected/,
+    );
+    expect(result.message).toContain("do not guarantee a working sign-in");
+    expect(JSON.stringify(result)).not.toMatch(/synthetic|example|legacy/);
+    expect(unwrapped.every((byte) => byte === 0)).toBe(true);
+  });
+
+  test("does not attempt app-bound decryption and explains a protected-only profile", async () => {
+    const { env, file } = await windowsCookieProfile();
+    const db = new DatabaseSync(file);
+    db.exec("DELETE FROM cookies WHERE name <> 'protected'");
+    db.close();
+    const source = (await listBrowserImportSources(env)).sources[0]!;
+    expect(source.supported).toBe(false);
+    expect(source.note).toMatch(/Found 1.*1.*app-bound.*Sign in here directly/);
+    const takeControl = vi.fn();
+    const host = { takeControl } as unknown as EmbeddedBrowser;
+    expect(
+      await importSignInsFromBrowser(host, { sourceId: source.id }, env),
+    ).toMatchObject({ status: "unsupported", cookieCount: 0, siteCount: 0 });
+    expect(dpapi).not.toHaveBeenCalled();
+    expect(takeControl).not.toHaveBeenCalled();
+  });
+
+  test("imports plaintext without an encryption key and reports failed legacy decryption", async () => {
+    const { env, root } = await windowsCookieProfile();
+    await rm(path.join(root, "Local State"));
+    const set = vi.fn();
+    const host = {
+      takeControl: vi.fn(),
+      getSession: () => ({ cookies: { set, flushStore: vi.fn() } }),
+    } as unknown as EmbeddedBrowser;
+    const source = (await listBrowserImportSources(env)).sources[0]!;
+    const result = await importSignInsFromBrowser(
+      host,
+      { sourceId: source.id },
+      env,
+    );
+    expect(result).toMatchObject({ status: "imported", cookieCount: 1 });
+    expect(result.message).toContain("2 could not be decrypted");
+    expect(set).toHaveBeenCalledOnce();
+    expect(dpapi).not.toHaveBeenCalled();
+  });
+
+  test("does not claim a successful import when saving the cookie store fails", async () => {
+    const { env, file } = await windowsCookieProfile();
+    const db = new DatabaseSync(file);
+    db.exec("DELETE FROM cookies WHERE name <> 'plain'");
+    db.close();
+    const host = {
+      takeControl: vi.fn(),
+      getSession: () => ({
+        cookies: {
+          set: vi.fn(),
+          flushStore: vi
+            .fn()
+            .mockRejectedValue(new Error("synthetic-private-value")),
+        },
+      }),
+    } as unknown as EmbeddedBrowser;
+    const source = (await listBrowserImportSources(env)).sources[0]!;
+    const result = await importSignInsFromBrowser(
+      host,
+      { sourceId: source.id },
+      env,
+    );
+    expect(result).toMatchObject({
+      status: "failed",
+      cookieCount: 1,
+      siteCount: 1,
+    });
+    expect(result.message).toContain("could not be saved");
+    expect(result.message).not.toContain("synthetic");
+    expect(dpapi).not.toHaveBeenCalled();
+  });
+});
+
+test("snapshots include uncheckpointed WAL rows and leave the live store unchanged", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "nestor-wal-test-"));
+  temporary.push(directory);
+  const file = path.join(directory, "source");
+  const db = new DatabaseSync(file);
+  db.exec(
+    "PRAGMA journal_mode=WAL; CREATE TABLE records (value INTEGER); PRAGMA wal_checkpoint(TRUNCATE); INSERT INTO records VALUES (1)",
+  );
+  try {
+    const snapshot = await snapshotDatabase(file);
+    try {
+      const copy = new DatabaseSync(snapshot.path, { readOnly: true });
+      try {
+        expect(
+          copy.prepare("SELECT COUNT(*) AS total FROM records").get()?.total,
+        ).toBe(1);
+      } finally {
+        copy.close();
+      }
+      expect(
+        db.prepare("SELECT COUNT(*) AS total FROM records").get()?.total,
+      ).toBe(1);
+    } finally {
+      await snapshot.dispose();
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test("an unreadable WAL fails the snapshot instead of silently importing an incomplete database", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "nestor-wal-test-"));
+  temporary.push(directory);
+  const file = path.join(directory, "source");
+  await writeFile(file, "synthetic");
+  await mkdir(`${file}-wal`);
+  await expect(snapshotDatabase(file)).rejects.toThrow();
+});
 
 test("imports only explicitly chosen synthetic Chromium passwords and reports Windows CSV fallback", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "nestor-password-import-"));
@@ -268,10 +580,10 @@ describe("browser profile import", () => {
       key,
     );
     expect(
-      decryptChromiumCookieValue(encrypted, key, ".example.test", 24),
+      decryptChromiumCookieValue(encrypted, key, ".example.test", 24, "darwin"),
     ).toBe("session-token");
     expect(
-      decryptChromiumCookieValue(encrypted, key, ".other.test", 24),
+      decryptChromiumCookieValue(encrypted, key, ".other.test", 24, "darwin"),
     ).toBeNull();
     expect(
       decryptChromiumCookieValue(
@@ -279,6 +591,7 @@ describe("browser profile import", () => {
         key,
         ".example.test",
         20,
+        "darwin",
       ),
     ).toBe("legacy");
     expect(
@@ -325,6 +638,13 @@ describe("browser profile import", () => {
     ).toBeNull();
     expect(
       chromiumCookieToDetails({ ...row, host_key: "bad host" }, "abc", now),
+    ).toBeNull();
+    expect(
+      chromiumCookieToDetails(
+        { ...row, host_key: "9999999999999" },
+        "abc",
+        now,
+      ),
     ).toBeNull();
     const hostOnly = chromiumCookieToDetails(
       { ...row, host_key: "app.example.test", has_expires: 0 },
@@ -470,16 +790,16 @@ describe("browser profile import", () => {
       "INSERT INTO cookies VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ).run("plain.test", "theme", "dark", null, "/", 0, 0, 0, -1, 0, "");
     db.close();
-    const cookies = readChromiumCookies(file, key);
+    const cookies = readChromiumCookies(file, key, "darwin");
     expect(
       cookies.map((cookie) => [cookie.name, cookie.value, cookie.sameSite]),
     ).toEqual([
       ["sid", "secret-token", "no_restriction"],
       ["theme", "dark", "unspecified"],
     ]);
-    expect(readChromiumCookies(file, deriveChromiumKey("wrong", 1003))).toEqual(
-      [expect.objectContaining({ name: "theme" })],
-    );
+    expect(
+      readChromiumCookies(file, deriveChromiumKey("wrong", 1003), "darwin"),
+    ).toEqual([expect.objectContaining({ name: "theme" })]);
   });
 
   test("reads a Firefox cookie store", async () => {

@@ -148,20 +148,56 @@ function familyRoots(family: BrowserFamily, env: ImportEnvironment): string[] {
   );
 }
 
-function chromiumSupport(env: ImportEnvironment): {
+async function chromiumSupport(
+  cookiesPath: string | null,
+  env: ImportEnvironment,
+): Promise<{
   supported: boolean;
   note: string | null;
-} {
+}> {
   if (env.platform === "darwin")
     return {
       supported: true,
       note: "macOS asks once for Keychain access to read the saved sign-ins.",
     };
   if (env.platform === "linux") return { supported: true, note: null };
-  return {
-    supported: false,
-    note: "This browser protects its sign-ins on Windows so other apps cannot read them. Sign in here directly instead.",
-  };
+  if (env.platform !== "win32" || !cookiesPath)
+    return {
+      supported: false,
+      note: "This browser protects its sign-ins on Windows so other apps cannot read them. Sign in here directly instead.",
+    };
+  let snapshot: Awaited<ReturnType<typeof snapshotDatabase>> | null = null;
+  try {
+    snapshot = await snapshotDatabase(cookiesPath);
+    const db = new DatabaseSync(snapshot.path, { readOnly: true });
+    try {
+      const counts = db
+        .prepare(
+          `SELECT COUNT(*) AS total,
+        COALESCE(SUM(CASE WHEN length(encrypted_value) = 0 OR encrypted_value IS NULL
+          OR (substr(encrypted_value, 1, 3) = X'763130' AND length(encrypted_value) >= 32)
+          THEN 1 ELSE 0 END), 0) AS readable,
+        COALESCE(SUM(CASE WHEN substr(encrypted_value, 1, 3) = X'763230' THEN 1 ELSE 0 END), 0) AS protected
+        FROM cookies`,
+        )
+        .get();
+      const total = Number(counts?.total ?? 0),
+        protectedCount = Number(counts?.protected ?? 0);
+      return {
+        supported: Number(counts?.readable ?? 0) > 0,
+        note: `Found ${total} cookies. ${protectedCount} are protected by this browser's app-bound encryption and cannot be imported. Sign in here directly in Nestor once instead. Saved passwords are imported separately from Saved passwords.`,
+      };
+    } finally {
+      db.close();
+    }
+  } catch {
+    return {
+      supported: false,
+      note: "Saved sign-ins could not be read while the browser is open or its database is unavailable. Try again later. Sign in here directly in Nestor instead.",
+    };
+  } finally {
+    await snapshot?.dispose();
+  }
 }
 
 async function chromiumCookiesPath(
@@ -209,7 +245,7 @@ async function chromiumProfiles(root: string): Promise<Profile[]> {
     const directory = path.join(root, entry);
     if (
       !(await chromiumCookiesPath(directory)) &&
-      !(await exists(path.join(directory, "Login Data")))
+      !(await passwordFiles(directory)).length
     )
       continue;
     profiles.push({ directory, label: names.get(entry) ?? entry });
@@ -271,6 +307,15 @@ const encodeId = (value: string) =>
 const PASSWORDS_LOCKED =
   "This browser keeps its passwords locked to itself. Export a CSV instead.";
 
+async function passwordFiles(profileDirectory: string): Promise<string[]> {
+  const files: string[] = [];
+  for (const name of ["Login Data", "Login Data For Account"]) {
+    const file = path.join(profileDirectory, name);
+    if (await exists(file)) files.push(file);
+  }
+  return files;
+}
+
 async function windowsEncryptedKey(profileDirectory: string): Promise<Buffer> {
   const state = JSON.parse(
     await readFile(path.join(profileDirectory, "..", "Local State"), "utf8"),
@@ -293,8 +338,8 @@ async function passwordSupport(
   profileDirectory: string,
   env: ImportEnvironment,
 ): Promise<DesktopBrowserImportSource["passwordImport"] & { count: number }> {
-  const file = path.join(profileDirectory, "Login Data");
-  if (!(await exists(file)))
+  const files = await passwordFiles(profileDirectory);
+  if (!files.length)
     return {
       supported: false,
       note: "No saved passwords in this profile.",
@@ -302,27 +347,34 @@ async function passwordSupport(
     };
   let snapshot: Awaited<ReturnType<typeof snapshotDatabase>> | null = null;
   let count = 0;
+  let protectedCount = 0;
   try {
-    snapshot = await snapshotDatabase(file);
-    const db = new DatabaseSync(snapshot.path, { readOnly: true });
     let readable = false;
-    try {
-      const row = db
-        .prepare(
-          `SELECT COUNT(*) AS total,
+    for (const file of files) {
+      snapshot = await snapshotDatabase(file);
+      const db = new DatabaseSync(snapshot.path, { readOnly: true });
+      try {
+        const row = db
+          .prepare(
+            `SELECT COUNT(*) AS total,
         COALESCE(SUM(CASE WHEN (substr(password_value, 1, 3) = X'763130'
           OR (? = 1 AND substr(password_value, 1, 3) = X'763131'))
-          AND length(password_value) >= ? THEN 1 ELSE 0 END), 0) AS readable
+          AND length(password_value) >= ? THEN 1 ELSE 0 END), 0) AS readable,
+        COALESCE(SUM(CASE WHEN substr(password_value, 1, 3) = X'763230' THEN 1 ELSE 0 END), 0) AS protected
         FROM logins WHERE blacklisted_by_user = 0`,
-        )
-        .get(
-          env.platform === "darwin" ? 1 : 0,
-          env.platform === "win32" ? 32 : 19,
-        );
-      count = Number(row?.total ?? 0);
-      readable = Number(row?.readable ?? 0) > 0;
-    } finally {
-      db.close();
+          )
+          .get(
+            env.platform === "darwin" ? 1 : 0,
+            env.platform === "win32" ? 32 : 19,
+          );
+        count += Number(row?.total ?? 0);
+        protectedCount += Number(row?.protected ?? 0);
+        readable ||= Number(row?.readable ?? 0) > 0;
+      } finally {
+        db.close();
+      }
+      await snapshot.dispose();
+      snapshot = null;
     }
     if (!count)
       return {
@@ -331,7 +383,13 @@ async function passwordSupport(
         count,
       };
     if (!readable || !["win32", "darwin", "linux"].includes(env.platform))
-      return { supported: false, note: PASSWORDS_LOCKED, count };
+      return {
+        supported: false,
+        note: protectedCount
+          ? `Found ${count} saved password records; ${protectedCount} are locked to this browser by app-bound encryption. Export passwords from the browser's password manager, then choose Import password CSV in Nestor.`
+          : PASSWORDS_LOCKED,
+        count,
+      };
     if (env.platform === "win32") {
       const encrypted = await windowsEncryptedKey(profileDirectory);
       encrypted.fill(0);
@@ -360,10 +418,10 @@ async function resolveSources(
 ): Promise<ResolvedSource[]> {
   const sources: ResolvedSource[] = [];
   for (const family of CHROMIUM_FAMILIES) {
-    const support = chromiumSupport(env);
     for (const root of familyRoots(family, env)) {
       for (const profile of await chromiumProfiles(root)) {
         const cookiesPath = await chromiumCookiesPath(profile.directory);
+        const support = await chromiumSupport(cookiesPath, env);
         const { count: passwordCount, ...passwordImport } =
           await passwordSupport(profile.directory, env);
         sources.push({
@@ -463,19 +521,33 @@ export function decryptChromiumCookieValue(
   key: Buffer,
   hostKey: string,
   schemaVersion: number,
+  platform: NodeJS.Platform = process.platform,
 ): string | null {
   const buffer = Buffer.from(encrypted);
   if (buffer.length === 0) return "";
   const prefix = buffer.subarray(0, 3).toString("latin1");
   if (prefix !== "v10" && prefix !== "v11") return null;
-  if (prefix === "v11" && process.platform === "linux") return null;
+  if (prefix === "v11" && platform !== "darwin") return null;
   let plain: Buffer | undefined;
   let partial: Buffer | undefined;
   let tail: Buffer | undefined;
   try {
-    const decipher = createDecipheriv("aes-128-cbc", key, CHROMIUM_IV);
-    partial = decipher.update(buffer.subarray(3));
-    tail = decipher.final();
+    if (platform === "win32" && (prefix !== "v10" || buffer.length < 32))
+      return null;
+    if (platform === "win32") {
+      const decipher = createDecipheriv(
+        "aes-256-gcm",
+        key,
+        buffer.subarray(3, 15),
+      );
+      decipher.setAuthTag(buffer.subarray(-16));
+      partial = decipher.update(buffer.subarray(15, -16));
+      tail = decipher.final();
+    } else {
+      const decipher = createDecipheriv("aes-128-cbc", key, CHROMIUM_IV);
+      partial = decipher.update(buffer.subarray(3));
+      tail = decipher.final();
+    }
     plain = Buffer.concat([partial, tail]);
     if (schemaVersion >= 24) {
       if (plain.length < 32) return null;
@@ -491,43 +563,6 @@ export function decryptChromiumCookieValue(
     tail?.fill(0);
     plain?.fill(0);
     buffer.fill(0);
-  }
-}
-
-/** Windows v10 is AES-256-GCM. App-bound v20 never reaches a decryptor. */
-function decryptWindowsPassword(
-  encrypted: Uint8Array,
-  key: Buffer,
-): string | null {
-  if (
-    encrypted.length < 32 ||
-    encrypted[0] !== 0x76 ||
-    encrypted[1] !== 0x31 ||
-    encrypted[2] !== 0x30
-  )
-    return null;
-  const bytes = Buffer.from(
-    encrypted.buffer,
-    encrypted.byteOffset,
-    encrypted.byteLength,
-  );
-  let partial: Buffer | undefined;
-  let plain: Buffer | undefined;
-  try {
-    const decipher = createDecipheriv(
-      "aes-256-gcm",
-      key,
-      bytes.subarray(3, 15),
-    );
-    decipher.setAuthTag(bytes.subarray(-16));
-    partial = decipher.update(bytes.subarray(15, -16));
-    plain = Buffer.concat([partial, decipher.final()]);
-    return plain.toString("utf8");
-  } catch {
-    return null;
-  } finally {
-    partial?.fill(0);
-    plain?.fill(0);
   }
 }
 
@@ -548,72 +583,123 @@ async function windowsPasswordKey(profileDirectory: string): Promise<Buffer> {
 export async function readBrowserPasswords(
   sourceId: string,
   env: ImportEnvironment = defaultImportEnvironment(),
-): Promise<{ values: PasswordValue[]; skipped: number; unsupported: boolean }> {
+): Promise<{
+  values: PasswordValue[];
+  skipped: number;
+  unsupported: boolean;
+  diagnostics?: ImportDiagnostics;
+}> {
   const source = (await resolveSources(env)).find(
     (item) => item.id === sourceId,
   );
-  if (
-    !source ||
-    source.browser === "firefox" ||
-    !source.passwordImport.supported
-  )
+  if (!source || source.browser === "firefox")
     return {
       values: [],
       skipped: source?.passwordCount ?? 0,
       unsupported: true,
     };
-  const key =
-    env.platform === "win32"
+  const key = !source.passwordImport.supported
+    ? null
+    : env.platform === "win32"
       ? await windowsPasswordKey(source.profileDirectory)
       : await chromiumKey(source.family, env);
   let snapshot: Awaited<ReturnType<typeof snapshotDatabase>> | null = null;
+  const values: PasswordValue[] = [];
+  const diagnostics = emptyDiagnostics();
   try {
-    snapshot = await snapshotDatabase(
-      path.join(source.profileDirectory, "Login Data"),
-    );
-    const db = new DatabaseSync(snapshot.path, { readOnly: true });
-    try {
-      const rows = db
-        .prepare(
-          "SELECT origin_url, action_url, username_value, password_value FROM logins WHERE blacklisted_by_user = 0",
-        )
-        .all();
-      const values: PasswordValue[] = [];
-      let skipped = 0;
-      for (const row of rows) {
-        const origin =
-          typeof row.origin_url === "string"
-            ? passwordOrigin(row.origin_url)
+    for (const file of await passwordFiles(source.profileDirectory)) {
+      snapshot = await snapshotDatabase(file);
+      const db = new DatabaseSync(snapshot.path, { readOnly: true });
+      try {
+        const rows = db
+          .prepare(
+            "SELECT origin_url, action_url, username_value, password_value FROM logins WHERE blacklisted_by_user = 0",
+          )
+          .all();
+        for (const row of rows) {
+          diagnostics.found++;
+          const encrypted = row.password_value;
+          if (!(encrypted instanceof Uint8Array) || !encrypted.length) {
+            diagnostics.filtered++;
+            continue;
+          }
+          const prefix = Buffer.from(encrypted.subarray(0, 3)).toString(
+            "latin1",
+          );
+          if (prefix === "v20") {
+            diagnostics.appBound++;
+            continue;
+          }
+          if (
+            prefix !== "v10" &&
+            !(prefix === "v11" && env.platform === "darwin")
+          ) {
+            diagnostics.unsupportedEncryption++;
+            continue;
+          }
+          const origin =
+            typeof row.origin_url === "string"
+              ? passwordOrigin(row.origin_url)
+              : null;
+          const action =
+            typeof row.action_url === "string" && row.action_url
+              ? passwordOrigin(row.action_url)
+              : origin;
+          const password = key
+            ? decryptChromiumCookieValue(encrypted, key, "", 0, env.platform)
             : null;
-        const action =
-          typeof row.action_url === "string" && row.action_url
-            ? passwordOrigin(row.action_url)
-            : origin;
-        const password =
-          row.password_value instanceof Uint8Array
-            ? env.platform === "win32"
-              ? decryptWindowsPassword(row.password_value, key)
-              : decryptChromiumCookieValue(row.password_value, key, "", 0)
-            : null;
-        if (
-          !origin ||
-          action !== origin ||
-          !password ||
-          typeof row.username_value !== "string"
-        ) {
-          skipped++;
-          continue;
+          if (password === null) {
+            diagnostics.decryptFailed++;
+            continue;
+          }
+          if (
+            !origin ||
+            action !== origin ||
+            !password ||
+            typeof row.username_value !== "string" ||
+            row.username_value.length > 1000 ||
+            password.length > 10000
+          ) {
+            diagnostics.filtered++;
+            continue;
+          }
+          values.push({ origin, username: row.username_value, password });
         }
-        values.push({ origin, username: row.username_value, password });
+      } finally {
+        db.close();
       }
-      return { values, skipped, unsupported: false };
-    } finally {
-      db.close();
+      await snapshot.dispose();
+      snapshot = null;
     }
+    return {
+      values,
+      skipped: diagnostics.found - values.length,
+      unsupported: !source.passwordImport.supported,
+      diagnostics,
+    };
   } finally {
-    key.fill(0);
+    key?.fill(0);
     await snapshot?.dispose().catch(() => undefined);
   }
+}
+
+/** Counts only; never include origins, account identifiers or secret material. */
+interface ImportDiagnostics {
+  found: number;
+  appBound: number;
+  unsupportedEncryption: number;
+  decryptFailed: number;
+  filtered: number;
+}
+
+function emptyDiagnostics(): ImportDiagnostics {
+  return {
+    found: 0,
+    appBound: 0,
+    unsupportedEncryption: 0,
+    decryptFailed: 0,
+    filtered: 0,
+  };
 }
 
 interface ChromiumCookieRow {
@@ -649,13 +735,18 @@ function cookieUrl(hostKey: string, cookiePath: string, secure: boolean) {
   if (
     !/^[a-zA-Z0-9.-]+$/.test(hostname) ||
     hostname.includes("..") ||
-    hostname.endsWith(".")
+    hostname.endsWith(".") ||
+    !cookiePath.startsWith("/")
   )
     return null;
-  const url = new URL(
-    `${secure ? "https" : "http"}://${hostname}${cookiePath}`,
-  );
-  return url.hostname === hostname.toLowerCase() ? url.href : null;
+  try {
+    const url = new URL(
+      `${secure ? "https" : "http"}://${hostname}${cookiePath}`,
+    );
+    return url.hostname === hostname.toLowerCase() ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 export function chromiumCookieToDetails(
@@ -720,7 +811,7 @@ export function firefoxCookieToDetails(
   };
 }
 
-async function snapshotDatabase(source: string): Promise<{
+export async function snapshotDatabase(source: string): Promise<{
   path: string;
   dispose: () => Promise<void>;
 }> {
@@ -732,8 +823,17 @@ async function snapshotDatabase(source: string): Promise<{
     for (const suffix of ["-wal", "-journal"]) {
       try {
         await copyFile(`${source}${suffix}`, `${target}${suffix}`);
-      } catch {
-        /* No write-ahead log to carry over. */
+      } catch (error) {
+        // A locked WAL is not an absent WAL: using just the base file could
+        // silently omit recent sign-ins/passwords or read an inconsistent copy.
+        if (
+          !(
+            error instanceof Error &&
+            "code" in error &&
+            error.code === "ENOENT"
+          )
+        )
+          throw error;
       }
     }
     return {
@@ -757,7 +857,16 @@ function numericRow(row: Record<string, unknown>): Record<string, unknown> {
 export function readChromiumCookies(
   file: string,
   key: Buffer,
+  platform: NodeJS.Platform = process.platform,
 ): CookiesSetDetails[] {
+  return readChromiumCookieStore(file, key, platform).cookies;
+}
+
+export function readChromiumCookieStore(
+  file: string,
+  key: Buffer | null,
+  platform: NodeJS.Platform = process.platform,
+): { cookies: CookiesSetDetails[]; diagnostics: ImportDiagnostics } {
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     const meta = db
@@ -781,21 +890,49 @@ export function readChromiumCookies(
       .all()
       .map(numericRow) as unknown as ChromiumCookieRow[];
     const cookies: CookiesSetDetails[] = [];
+    const diagnostics = emptyDiagnostics();
     for (const row of rows) {
+      diagnostics.found++;
+      if (!chromiumCookieToDetails(row, "")) {
+        diagnostics.filtered++;
+        continue;
+      }
+      const encrypted = row.encrypted_value;
+      const prefix = encrypted?.length
+        ? Buffer.from(encrypted.subarray(0, 3)).toString("latin1")
+        : null;
+      if (prefix === "v20") {
+        diagnostics.appBound++;
+        continue;
+      }
+      if (
+        prefix !== null &&
+        prefix !== "v10" &&
+        !(prefix === "v11" && platform === "darwin")
+      ) {
+        diagnostics.unsupportedEncryption++;
+        continue;
+      }
       const value =
-        row.encrypted_value && row.encrypted_value.length > 0
-          ? decryptChromiumCookieValue(
-              row.encrypted_value,
-              key,
-              row.host_key,
-              schemaVersion,
-            )
+        encrypted && encrypted.length > 0
+          ? key
+            ? decryptChromiumCookieValue(
+                encrypted,
+                key,
+                row.host_key,
+                schemaVersion,
+                platform,
+              )
+            : null
           : row.value;
-      if (value === null) continue;
+      if (value === null) {
+        diagnostics.decryptFailed++;
+        continue;
+      }
       const details = chromiumCookieToDetails(row, value);
       if (details) cookies.push(details);
     }
-    return cookies;
+    return { cookies, diagnostics };
   } finally {
     db.close();
   }
@@ -852,7 +989,8 @@ export async function importSignInsFromBrowser(
         "Sign-ins from this browser cannot be read on this device.",
     );
   await host.takeControl();
-  let cookies: CookiesSetDetails[];
+  let cookies: CookiesSetDetails[] = [];
+  let diagnostics: ImportDiagnostics | null = null;
   const snapshot = await snapshotDatabase(source.cookiesPath).catch(() => null);
   if (!snapshot)
     return result(
@@ -863,19 +1001,38 @@ export async function importSignInsFromBrowser(
     if (source.family.browser === "firefox")
       cookies = readFirefoxCookies(snapshot.path);
     else {
-      let key: Buffer;
+      let key: Buffer | null = null;
       try {
-        key = await chromiumKey(source.family, env);
+        if (env.platform === "win32") {
+          ({ cookies, diagnostics } = readChromiumCookieStore(
+            snapshot.path,
+            null,
+            env.platform,
+          ));
+          // Plaintext cookies need no key. If Windows cannot unlock legacy
+          // cookies, retain their failure count and any readable plaintext.
+          if (diagnostics.decryptFailed)
+            key = await windowsPasswordKey(source.profileDirectory).catch(
+              () => null,
+            );
+        } else key = await chromiumKey(source.family, env);
       } catch {
         return result(
-          "cancelled",
-          `Keychain access was not granted, so nothing was imported from ${source.browserLabel}.`,
+          env.platform === "darwin" ? "cancelled" : "failed",
+          env.platform === "darwin"
+            ? `Keychain access was not granted, so nothing was imported from ${source.browserLabel}.`
+            : `The saved sign-ins in ${source.browserLabel} could not be unlocked. Sign in here directly in Nestor instead.`,
         );
       }
       try {
-        cookies = readChromiumCookies(snapshot.path, key);
+        if (key)
+          ({ cookies, diagnostics } = readChromiumCookieStore(
+            snapshot.path,
+            key,
+            env.platform,
+          ));
       } finally {
-        key.fill(0);
+        key?.fill(0);
       }
     }
   } catch {
@@ -886,10 +1043,13 @@ export async function importSignInsFromBrowser(
   } finally {
     await snapshot.dispose().catch(() => undefined);
   }
+  const skippedMessage = diagnostics
+    ? `Found ${diagnostics.found} cookies. ${diagnostics.appBound} blocked by app-bound encryption; ${diagnostics.unsupportedEncryption} use unsupported encryption; ${diagnostics.decryptFailed} could not be decrypted; ${diagnostics.filtered} expired, partitioned or invalid.`
+    : "";
   if (!cookies.length)
     return result(
       "unsupported",
-      `${source.browserLabel} has no current sign-ins to bring over.`,
+      `${skippedMessage} No cookies were imported from ${source.browserLabel}. Sign in here directly in Nestor instead. Saved passwords are imported separately from Saved passwords.`,
     );
   let imported = 0;
   const sites = new Set<string>();
@@ -903,12 +1063,21 @@ export async function importSignInsFromBrowser(
       /* Do not log cookie material, including values embedded in exceptions. */
     }
   }
-  await cookieStore.flushStore();
+  try {
+    await cookieStore.flushStore();
+  } catch {
+    return result(
+      "failed",
+      "The imported cookies could not be saved. Sign in here directly in Nestor instead.",
+      imported,
+      sites.size,
+    );
+  }
   return result(
     imported ? "imported" : "failed",
     imported
-      ? `Brought over sign-ins for ${sites.size} ${sites.size === 1 ? "site" : "sites"} from ${source.browserLabel}. Some sites may still ask you to sign in again.`
-      : `Nothing could be imported from ${source.browserLabel}.`,
+      ? `${skippedMessage} Imported ${imported} cookies for ${sites.size} ${sites.size === 1 ? "site" : "sites"} from ${source.browserLabel}; ${cookies.length - imported} rejected by Nestor's browser. Cookies do not guarantee a working sign-in. For any site still signed out, sign in here directly in Nestor once. Saved passwords are imported separately from Saved passwords.`
+      : `${skippedMessage} No cookies could be imported from ${source.browserLabel}; ${cookies.length} rejected by Nestor's browser. Sign in here directly in Nestor instead.`,
     imported,
     sites.size,
   );

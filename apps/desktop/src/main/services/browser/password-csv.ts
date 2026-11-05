@@ -50,17 +50,25 @@ export function importPasswordValues(
   skipped = 0,
 ): BrowserPasswordImportResult {
   const counts = { added: 0, updated: 0, skipped };
+  let failed = skipped;
   for (const value of values) {
     try {
       counts[vault.save(value)]++;
     } catch {
       counts.skipped++;
+      failed++;
     }
   }
   return {
-    status: "imported",
+    status:
+      !counts.added &&
+      !counts.updated &&
+      counts.skipped === failed &&
+      (failed > 0 || values.length === 0)
+        ? "failed"
+        : "imported",
     ...counts,
-    message: `Added ${counts.added}, updated ${counts.updated}, skipped ${counts.skipped} logins.`,
+    message: `Added ${counts.added}, updated ${counts.updated}, skipped ${counts.skipped} logins.${counts.skipped > 0 ? " Skipped records may be duplicates, invalid or protected. To bring over protected passwords, export them from your browser's password manager, then choose Import password CSV in Nestor. Imported passwords do not bring over signed-in sessions; sign in to the site in Nestor when needed." : " Passwords do not bring over signed-in sessions; sign in to the site in Nestor when needed."}`,
   };
 }
 

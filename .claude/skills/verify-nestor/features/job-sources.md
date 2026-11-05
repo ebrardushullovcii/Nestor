@@ -29,7 +29,6 @@ Find jobs > What each site found reports listings observed, new jobs and jobs sa
 - A restarted verify instance may get a different replica port. Update stored site URLs before another search.
 - The sidebar uses the same list_sites/get_site/add_sites/update_site/remove_site/set_sites_enabled commands as the screens. Changes have separate persisted Undo receipts; later site edits are preserved. Ask to show Profile > Job sites after the change, then compare the screen with job_sites.
 
-
 ## Browser permissions and saved passwords
 
 Settings > AI behavior > In-app browser has independent switches: Solve
@@ -69,6 +68,11 @@ changing an existing password offers Update. Verify the actual filled fields,
 restart persistence, no password in app browser state or agent observations,
 and no plaintext password in browser-passwords.sqlite. Test an unrelated host,
 cross-origin frame/action and HTTP downgrade as refusals. Windows direct profile
-password import reports its limitation and directs the person to CSV; do not
-read real browser stores during verification. Browser/workspace reset removes
+import supports legacy v10 encryption with the current user's DPAPI key.
+Use synthetic local and account password stores and a mixed cookie store to
+check both import paths. Protected app-bound v20 records must never be
+decrypted: cookie import reports counts and asks for a one-time sign-in in
+Nestor; password import directs the person to CSV. Check skipped, invalid,
+duplicate and rejected records, and a failed or empty import. Do not read
+real browser stores during routine verification. Browser/workspace reset removes
 the saved accounts too; ordinary tab closing keeps them.
