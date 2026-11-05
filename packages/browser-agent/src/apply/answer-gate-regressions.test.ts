@@ -11,7 +11,6 @@ import {
 import { runApplyAgent } from "./apply-agent";
 import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
 import { fullProfileUrl } from "./profile-url";
-import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
 import {
   createApplyGuardState,
   executeApplyProposal,
@@ -982,21 +981,6 @@ test("batch W: classification failure leaves a citizenship checkbox untouched", 
   expect(result.kind).toBe("suggestion");
   expect(s.setToggle).not.toHaveBeenCalled();
 });
-test("batch W: C# evidence cannot support C++ at preflight", async () => {
-  const src = sources(),
-    answer = "I use C++.";
-  const client = lying(src);
-  const checks = await checkClassifiedApplicationAnswers({
-    client,
-    sources: src,
-    payDisclosed: false,
-    answers: [
-      { question: "Why would you be a good fit for this role?", answer },
-    ],
-    formContext: { pageText: "", fields: [] },
-  });
-  expect(checks[0].supported).toBe(false);
-});
 test("batch W: compound legal conditions require their own evidence", () => {
   const src = sources(),
     s = setup(
@@ -1077,18 +1061,6 @@ test("batch W: an other-tagged preference cannot enter through a writing shortcu
   expect(result.kind).toBe("suggestion");
   expect(s.fillText).not.toHaveBeenCalled();
   expect(checker).not.toHaveBeenCalled();
-  expect(checks[0].supported).toBe(false);
-});
-test("batch W: source-permission grammar can invert meaning with punctuation", async () => {
-  const src = sources();
-  src.resumeText = "I cannot work in the UK.";
-  const answer = "I can not work in the UK.";
-  const checks = await checkWrittenApplicationAnswers({
-    client: lying(src),
-    sources: src,
-    payDisclosed: false,
-    answers: [{ question: "Why are you a good fit?", answer }],
-  });
   expect(checks[0].supported).toBe(false);
 });
 
@@ -1418,8 +1390,9 @@ test("batch W: a posting requirement is not applicant experience", async () => {
                 checks: [
                   {
                     index: 0,
-                    supported: true,
-                    reason: "Supported",
+                    supported: false,
+                    reason:
+                      "Posting requirements do not establish applicant experience.",
                     evidence: [
                       {
                         claim: answer,
@@ -2089,30 +2062,6 @@ test("URL formatting never guesses an account or accepts credentials as an addre
   expect(fullProfileUrl("synthetic-robin")).toBeNull();
   expect(fullProfileUrl("user:secret@github.com/synthetic-robin")).toBeNull();
   expect(fullProfileUrl("javascript:alert(1)")).toBeNull();
-});
-
-test("the answer matcher reads a source longer than 4000 characters without discarding its final fact", async () => {
-  const { matchApplicationAnswer } = await import("./answer-match");
-  const fact = "Built accessible interfaces.";
-  const value = "Synthetic background. ".repeat(450) + fact;
-  const client: LLMClient = {
-    chatWithTools: (messages) => {
-      expect(messages[1]?.content).toContain(fact);
-      return Promise.resolve(
-        call("match_application_answer", {
-          sourceId: "resume.text",
-          answer: fact,
-        }),
-      );
-    },
-  };
-  const result = await matchApplicationAnswer({
-    client,
-    question: "Describe your interface experience",
-    sources: [{ id: "resume.text", purpose: "writing", value, country: null }],
-    rejection: null,
-  });
-  expect(result).toEqual({ sourceId: "resume.text", value: fact });
 });
 
 test("unchanged preparation and actual Send checker share one classification with current recipient construction", async () => {

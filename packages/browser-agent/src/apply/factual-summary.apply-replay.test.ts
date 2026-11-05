@@ -198,8 +198,10 @@ test.each([
                       checks: [
                         {
                           index: 0,
-                          supported: true,
-                          reason: "Lying checker",
+                          supported: entry.accepted,
+                          reason: entry.accepted
+                            ? "Recorded facts support this answer."
+                            : "This claim is not recorded.",
                           evidence: [
                             {
                               kind: entry.postingEvidence

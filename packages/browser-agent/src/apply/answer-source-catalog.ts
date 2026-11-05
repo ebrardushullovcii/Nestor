@@ -905,8 +905,6 @@ export function classifyAnswerPermission(input: {
   payDisclosed?: boolean;
   now?: Date;
   pageUrl?: string | null | undefined;
-  /** Supplied only by the host after the independent answer check. */
-  matchedSourceId?: string | undefined;
   /** A proposed catalog reference; it grants no semantic-match permission. */
   candidateSourceId?: string | undefined;
   /**
@@ -1044,9 +1042,7 @@ export function classifyAnswerPermission(input: {
       ? priorCompanyHistory(input.control, input.sources)
       : null;
   let source = catalog.find(
-    (row) =>
-      row.id ===
-      (input.matchedSourceId ?? input.candidateSourceId ?? tags.sourceId),
+    (row) => row.id === (input.candidateSourceId ?? tags.sourceId),
   );
   // Plain applicant identity has an exact field-to-Profile binding. A model
   // omitting its source must not turn a known name or email into a handover.
@@ -1824,24 +1820,6 @@ export function classifyAnswerPermission(input: {
       input.sources,
     ) &&
     knownLiteralField(source, input.control)
-  )
-    return { kind: "literal", source };
-  // A semantic match may overcome an unfamiliar label after independent
-  // grounding. Gated kinds, permit conditions, references and same-row
-  // history checks above still apply; the value stays verbatim.
-  if (
-    tags.kind === "other" &&
-    input.matchedSourceId === source.id &&
-    ["profile", "saved"].includes(source.purpose) &&
-    !input.control.repeatedQuestion &&
-    !fieldNamesAnotherPerson(input.control) &&
-    literalValueMatches(
-      source,
-      input.control,
-      input.answer,
-      input.controls,
-      input.sources,
-    )
   )
     return { kind: "literal", source };
   // Only an affirmative writing classification reaches the claim checker.

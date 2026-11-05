@@ -474,7 +474,7 @@ test.each([
     expect(s.field.value).toBe(outcome === "prepared" ? "Yes" : "");
     expect(result.pauses).toHaveLength(outcome === "prepared" ? 0 : 1);
     expect(client.chatWithTools).toHaveBeenCalledTimes(
-      outcome === "paused" ? 4 : 2,
+      outcome === "paused" ? 3 : 2,
     );
     expect(s.clickAction).not.toHaveBeenCalled();
   },

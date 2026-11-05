@@ -333,81 +333,6 @@ function repeatingModel(
   };
 }
 
-test.each([true, false])(
-  "last-chance semantic matches still require independent grounding (supported: %s)",
-  async (supported) => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          label: "Contact e-mail",
-          inputType: "email",
-          value: "",
-        },
-      ],
-    });
-    const input = config(source, { modelQuestionClassification: true });
-    const value = "robin@example.test";
-    input.sources.profile.email = value;
-    const fill = vi.fn((ref: string, text: string) => {
-      source.controls[0].value = text;
-      return Promise.resolve({ ok: true as const, observedValue: text });
-    });
-    input.hands.fillText = fill;
-    let matches = 0;
-    const finish = repeatingModel("finish", {
-      reason: "I filled what I could.",
-    });
-    const report = (name: string, args: Record<string, unknown>) =>
-      Promise.resolve({
-        toolCalls: [
-          {
-            id: name,
-            type: "function" as const,
-            function: { name, arguments: JSON.stringify(args) },
-          },
-        ],
-      });
-    const result = await runApplyAgent(input, {
-      chatWithTools: (messages, definitions, options) => {
-        const tool = definitions[0]?.function.name;
-        if (tool === "report_question_kinds")
-          return report(tool, {
-            plainIndexes: [0],
-            flagged: [],
-            tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
-          });
-        if (tool === "match_application_answer") {
-          matches += 1;
-          return report(tool, { sourceId: "profile.email", answer: value });
-        }
-        if (tool === "report_answer_checks" && !supported)
-          return report(tool, {
-            checks: [
-              {
-                index: 0,
-                supported: false,
-                reason:
-                  "This question is not established by the applicant facts.",
-                evidence: [],
-              },
-            ],
-          });
-        return finish.chatWithTools(messages, definitions, options);
-      },
-    });
-    expect(matches).toBe(1);
-    if (supported) {
-      expect(fill).toHaveBeenCalledExactlyOnceWith("c0", value);
-      expect(result.outcome).toBe("prepared");
-      expect(result.pauses).toEqual([]);
-    } else {
-      expect(fill).not.toHaveBeenCalled();
-      expect(result.outcome).toBe("paused");
-    }
-  },
-);
-
 function scriptedModel(
   turns: Array<{ name: string; args: Record<string, unknown> }>,
 ): LLMClient {
@@ -4603,8 +4528,8 @@ describe("apply readiness regressions", () => {
       },
     );
     expect(result.outcome).toBe("paused");
-    // One question reading plus the one last-chance answer match.
-    expect(result.timing?.auxiliaryModelCalls).toBe(2);
+    // Only the question reading; unknowns do not launch per-field matches.
+    expect(result.timing?.auxiliaryModelCalls).toBe(1);
     expect(result.pauses[0]?.questions).toHaveLength(1);
     expect(result.pauses[0]?.question).toMatchObject({
       prompt: "Select your skills *",
@@ -7064,7 +6989,11 @@ test.each([
     );
     expect(finalClick).not.toHaveBeenCalled();
     expect(calls).toHaveBeenCalledTimes(
-      handover === "none" ? 2 : handover === "changed question" ? 5 : 3,
+      handover === "none"
+        ? 2
+        : ["changed question", "invalid email"].includes(handover)
+          ? 4
+          : 3,
     );
   },
 );
@@ -11556,7 +11485,7 @@ test("a direct finish on private pay keeps the field blank and offers the stored
 });
 
 test.each([true, false])(
-  "a held expected-pay range uses the recorded target only with disclosure permission (%s)",
+  "an expected-pay range uses the recorded target only with disclosure permission (%s)",
   async (allowed) => {
     const source = page({
       controls: [
@@ -11591,9 +11520,13 @@ test.each([true, false])(
       return Promise.resolve({ ok: true as const, observedValue: value });
     });
     input.hands.chooseOption = choose;
-    const finish = repeatingModel("finish", {
-      reason: "I filled what I could.",
-    });
+    const finish = scriptedModel([
+      {
+        name: "select",
+        args: { ref: "c0", option: "80 000 EUR – 90 000 EUR" },
+      },
+      { name: "finish", args: { reason: "I filled what I could." } },
+    ]);
     const result = await runApplyAgent(input, {
       chatWithTools: (messages, definitions, options) => {
         const name = definitions[0]?.function.name;
@@ -11767,6 +11700,7 @@ test("a known saved multi-select replaces every preset option", async () => {
     source.controls[Number(ref.slice(1))].checked = checked;
     return Promise.resolve({ ok: true, observedValue: String(checked) });
   };
+  let actorTurns = 0;
   const result = await runApplyAgent(input, {
     chatWithTools: (_messages, tools) =>
       Promise.resolve({
@@ -11778,7 +11712,9 @@ test("a known saved multi-select replaces every preset option", async () => {
               name:
                 tools[0]?.function.name === "report_question_kinds"
                   ? "report_question_kinds"
-                  : "finish",
+                  : actorTurns === 0
+                    ? "fill_fields"
+                    : "finish",
               arguments:
                 tools[0]?.function.name === "report_question_kinds"
                   ? JSON.stringify({
@@ -11802,10 +11738,18 @@ test("a known saved multi-select replaces every preset option", async () => {
                         },
                       ],
                     })
-                  : JSON.stringify({
-                      reason: "The form is complete",
-                      needsPerson: false,
-                    }),
+                  : actorTurns++ === 0
+                    ? JSON.stringify({
+                        fields: [
+                          { tool: "set_checkbox", ref: "c0", checked: false },
+                          { tool: "set_checkbox", ref: "c1", checked: true },
+                          { tool: "set_checkbox", ref: "c3", checked: true },
+                        ],
+                      })
+                    : JSON.stringify({
+                        reason: "The form is complete",
+                        needsPerson: false,
+                      }),
             },
           },
         ],

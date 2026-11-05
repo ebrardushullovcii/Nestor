@@ -609,8 +609,6 @@ export type ApplyProposal =
 export interface ApplyAgentConfig extends BrowserPermissionPolicy {
   /** Existing local checkpoints retained when this application is continued. */
   earlierActivity?: readonly ApplicationAttemptCheckpoint[];
-  /** Host-only semantic matches that passed the independent grounding check. */
-  matchedAnswers?: ReadonlyMap<string, string>;
   initialQuestionContexts?: ReadonlyArray<{ prompt: string; step: string }>;
   /** What earlier runs of this application learned about its pickers. */
   initialPickerAttempts?: readonly StoredApplyPickerAttempt[];

@@ -19,7 +19,6 @@ import {
   answerSourceCatalog,
   classifyAnswerPermission,
 } from "./answer-source-catalog";
-import { semanticAnswerKey } from "./answer-match";
 import {
   addedHistoryKind,
   completeHistoryCount,
@@ -1075,9 +1074,6 @@ async function decideAnswer(input: {
       controls: input.controls,
       tags: control.answerTags,
       candidateSourceId: input.storedFactId,
-      matchedSourceId: config.matchedAnswers?.get(
-        semanticAnswerKey(control, value),
-      ),
       sources: config.sources,
       answer: value,
       pageInstructions: input.pageText,
@@ -1554,12 +1550,11 @@ function notEntered(input: {
     const key = questionPrompt(input.control);
     const first = !input.deps.guardState.answerFeedback.has(key);
     input.deps.guardState.answerFeedback.add(key);
+    if (!first) return leaveUnansweredForPerson(args);
     return {
       kind: "refused",
       fieldRef: input.control.ref,
-      reason: first
-        ? `Nestor could not accept this proposed answer: ${input.decision.reason} Correct the answer content/completeness once using these actual sources and the complete target constraints. Do not ask the person to repair a known answer or a checking format failure. Target: ${JSON.stringify({ question: key, options: input.control.options, constraints: input.control.inputConstraints })}. Sources: ${JSON.stringify(answerSourceCatalog(input.deps.config.sources, input.deps.config.authority.preApprovedAttestationKinds))}. Leave it unwritten if checking remains unavailable and finish with the retained technical stop.`
-        : "This answer is still unchecked after the bounded feedback. Leave it unwritten, finish the other fields and stop for technical recovery.",
+      reason: `Nestor could not accept this proposed answer: ${input.decision.reason} Correct the answer content/completeness once using these actual sources and the complete target constraints. Do not ask the person to repair a known answer or a checking format failure. Target: ${JSON.stringify({ question: key, options: input.control.options, constraints: input.control.inputConstraints })}. Sources: ${JSON.stringify(answerSourceCatalog(input.deps.config.sources, input.deps.config.authority.preApprovedAttestationKinds))}. Leave this field blank if it still cannot be supported; finish the other fields and keep only this question for the person.`,
       observation: input.observation,
     };
   }

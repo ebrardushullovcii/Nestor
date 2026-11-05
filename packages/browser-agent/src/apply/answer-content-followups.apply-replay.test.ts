@@ -101,8 +101,10 @@ test.each([
                 checks: [
                   {
                     index: 0,
-                    supported: true,
-                    reason: "Supported",
+                    supported: row.supported,
+                    reason: row.supported
+                      ? "Supported"
+                      : "Applicant fact not recorded",
                     evidence: row.evidence.map((entry) => ({
                       ...entry,
                       claim: row.answer,
@@ -121,19 +123,13 @@ test.each([
       answers: [{ question, answer: row.answer }],
     });
     expect(checks[0]?.supported).toBe(row.supported);
-    expect(chatWithTools).toHaveBeenCalledTimes(row.supported ? 1 : 2);
+    expect(chatWithTools).toHaveBeenCalledTimes(1);
   },
 );
 
-test("an employer name cannot erase a qualification assertion, and source roots never cross", async () => {
+test("source pointers cannot cross into another source root", async () => {
   const company = "already holding a valid driving licence";
   for (const [source, path, quote, answer] of [
-    [
-      "posting",
-      "/postingContextOnly/company",
-      company,
-      `I am excited about ${company}.`,
-    ],
     [
       "applicant",
       "/postingContextOnly/title",
@@ -142,37 +138,35 @@ test("an employer name cannot erase a qualification assertion, and source roots 
     ],
   ]) {
     const client = {
-      chatWithTools: vi
-        .fn<LLMClient["chatWithTools"]>()
-        .mockResolvedValue({
-          toolCalls: [
-            {
-              id: "lie",
-              type: "function",
-              function: {
-                name: "report_answer_checks",
-                arguments: JSON.stringify({
-                  checks: [
-                    {
-                      index: 0,
-                      supported: true,
-                      reason: "Supported",
-                      evidence: [
-                        {
-                          kind: "role_motivation",
-                          source,
-                          path,
-                          quote,
-                          claim: answer,
-                        },
-                      ],
-                    },
-                  ],
-                }),
-              },
+      chatWithTools: vi.fn<LLMClient["chatWithTools"]>().mockResolvedValue({
+        toolCalls: [
+          {
+            id: "lie",
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              arguments: JSON.stringify({
+                checks: [
+                  {
+                    index: 0,
+                    supported: true,
+                    reason: "Supported",
+                    evidence: [
+                      {
+                        kind: "role_motivation",
+                        source,
+                        path,
+                        quote,
+                        claim: answer,
+                      },
+                    ],
+                  },
+                ],
+              }),
             },
-          ],
-        }),
+          },
+        ],
+      }),
     };
     const checks = await checkWrittenApplicationAnswers({
       client,

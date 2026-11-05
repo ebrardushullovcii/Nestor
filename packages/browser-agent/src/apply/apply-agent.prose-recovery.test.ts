@@ -9,9 +9,7 @@ import { runApplyAgent } from "./apply-agent";
 import { buildApplyFormObservation } from "./page-hands";
 import type { ApplyAgentConfig } from "./types";
 
-// Council D4: a held summary question whose resume line is labelled with
-// the question's own words ("Reporting routine: ...") gets that one exact
-// statement as Nestor's own proposal; the independent check still decides.
+// A checker outage leaves only the affected questions for the person.
 const QUESTION = "Describe your reporting routine";
 const STATEMENT = "I submit weekly reports";
 const now = () => new Date("2026-11-04T01:00:00Z");
@@ -141,7 +139,7 @@ function call(name: string, args: unknown) {
 }
 
 /**
- * The model paraphrases (which the summary rule refuses), then finishes. The
+ * The model proposes a paraphrase, then finishes. The
  * independent check supports only what `supports` allows.
  */
 function model(supports: (answer: string) => boolean) {
@@ -218,59 +216,6 @@ const asked = (result: Awaited<ReturnType<typeof runApplyAgent>>) =>
   result.pauses.flatMap(
     (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
   );
-
-test("one labelled resume statement is filled in its own words with no question", async () => {
-  const { raw, config } = setup(
-    `Jamie Example\nReporting routine: ${STATEMENT}\n`,
-  );
-  const { client, checked } = model((answer) => answer === STATEMENT);
-  const result = await runApplyAgent(config, client);
-  expect(raw.controls[0]?.value).toBe(STATEMENT);
-  expect(checked).toContain(STATEMENT);
-  expect(asked(result)).toEqual([]);
-  expect(result.technicalFailure).toBeUndefined();
-});
-
-test("a refused recovery keeps its question even when it is the only blocker", async () => {
-  const { config } = setup(`Jamie Example\nReporting routine: ${STATEMENT}\n`);
-  const { client, checked } = model(() => false);
-  const result = await runApplyAgent(config, client);
-  expect(checked).toContain(STATEMENT);
-  expect(asked(result).map((question) => question.prompt)).toEqual([QUESTION]);
-  expect(result.outcome).toBe("paused");
-  expect(result.readyToSend).toBeNull();
-  expect(result.technicalFailure).toBeUndefined();
-});
-
-test("two different labelled statements are no recovery: the question stays the person's", async () => {
-  const { raw, config } = setup(
-    `Reporting routine: ${STATEMENT}\nReporting routine: I submit monthly reports\n`,
-  );
-  const { client, checked } = model(() => false);
-  const result = await runApplyAgent(config, client);
-  expect(checked).not.toContain(STATEMENT);
-  expect(raw.controls[0]?.value).not.toBe(STATEMENT);
-  expect(asked(result).map((question) => question.prompt)).toContain(QUESTION);
-  expect(result.technicalFailure).toBeUndefined();
-});
-
-test("beside another real question a refused statement stays asked, offered as its suggestion", async () => {
-  const { config } = setup(`Jamie Example\nReporting routine: ${STATEMENT}\n`, {
-    notice: true,
-  });
-  const { client, checked } = model(() => false);
-  const result = await runApplyAgent(config, client);
-  expect(checked).toContain(STATEMENT);
-  expect(result.technicalFailure).toBeUndefined();
-  const questions = asked(result);
-  expect(questions.map((question) => question.prompt).sort()).toEqual(
-    [NOTICE, QUESTION].sort(),
-  );
-  expect(
-    questions.find((question) => question.prompt === QUESTION)
-      ?.suggestedAnswers,
-  ).toMatchObject([{ text: STATEMENT, sourceKind: "resume" }]);
-});
 
 test("a checking outage keeps a genuine question named by the actor", async () => {
   const { config } = setup(`Jamie Example\nReporting routine: ${STATEMENT}\n`, {

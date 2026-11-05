@@ -354,7 +354,7 @@ test("the classified meaning retains additional legal conditions in another lang
   ).toBe("needs_you");
 });
 
-test("a host semantic match preserves reference, own-words, country and history guards", () => {
+test("a proposed source preserves reference, own-words, country and history guards", () => {
   const sources = source();
   const field = {
     ...control("Contact identity"),
@@ -371,7 +371,7 @@ test("a host semantic match preserves reference, own-words, country and history 
       control: target,
       controls: [target],
       tags: { kind, sourceId: null, country: "GB" },
-      matchedSourceId: sourceId,
+      candidateSourceId: sourceId,
       answer,
       pageInstructions: "",
     });
@@ -414,7 +414,7 @@ test("a host semantic match preserves reference, own-words, country and history 
       control: title,
       controls: [title, company],
       tags: { kind: "other", country: null, sourceId: null },
-      matchedSourceId: "profile.experiences.two.title",
+      candidateSourceId: "profile.experiences.two.title",
       answer: "Designer",
       pageInstructions: "",
     }).kind,

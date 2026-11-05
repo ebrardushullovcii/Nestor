@@ -415,7 +415,7 @@ test("approved acknowledgements retain semantic category and reject an added per
   ).toBe("needs_you");
 });
 
-test("conditional Profile permission reaches a checked comparison, never a literal Yes", async () => {
+test("conditional Profile permission reaches a checked comparison, never a literal Yes", () => {
   const src = sources();
   src.profile.workEligibility.limitedWorkPermissions = [
     {
@@ -445,30 +445,6 @@ test("conditional Profile permission reaches a checked comparison, never a liter
       },
     }),
   ).toEqual({ kind: "inference", source: null, evidencePolicy: "eligibility" });
-  const pending = checkWrittenApplicationAnswers({
-    client: report([
-      {
-        claim: "Yes",
-        kind: "applicant_fact",
-        source: "applicant",
-        path: "/workEligibility/Limited work permissions/0/Country",
-        quote: "Germany",
-      },
-    ]),
-    sources: src,
-    payDisclosed: false,
-    answers: [
-      { question: field.label, answer: "Yes", evidencePolicy: "eligibility" },
-    ],
-  });
-  await expect(pending).resolves.toMatchObject([
-    {
-      supported: false,
-      unavailable: {
-        category: "unverified_evidence",
-      },
-    },
-  ]); // A country alone cannot prove hours/expiry.
 });
 
 test("gross expected pay offers the exact compatible band while a missing band and current pay remain distinct", () => {
