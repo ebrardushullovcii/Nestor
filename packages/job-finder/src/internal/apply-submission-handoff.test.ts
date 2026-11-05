@@ -543,3 +543,17 @@ it.each([
     ).toEqual({ summary, detail, nextActionLabel });
   },
 );
+
+it("an account-window send refusal asks the person to finish or close it", () => {
+  expect(
+    describeSubmissionOutcome({
+      result: notSubmitted("account_window_open"),
+      siteLabel: "Synthetic employer",
+    }),
+  ).toEqual({
+    summary: "Not sent: an account window is still open",
+    detail:
+      "Finish or close the account window, then continue this application. Nothing was sent.",
+    nextActionLabel: "Finish or close the account window",
+  });
+});

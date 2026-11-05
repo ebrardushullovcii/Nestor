@@ -385,15 +385,15 @@ describe("resume vision provider", () => {
       role: "vision",
       ready: true,
       label: "Resume visual scan",
-      model: "muse-spark-1.3-contributor",
+      model: "deepseek-v4.1-flash",
       baseUrl: "https://shared.example.com/v1",
-      modelContextWindowTokens: 139_000,
+      modelContextWindowTokens: 128_000,
       reservedHeadroomTokens: 30_000,
       requestTimeoutMs: 600_000,
     });
   });
 
-  test("sends shared AI credentials and Muse Spark xhigh to the Responses vision endpoint", async () => {
+  test("preserves explicitly selected Muse Responses vision with shared credentials", async () => {
     const originalFetch = globalThis.fetch;
     let capturedUrl = "";
     let capturedAuthorization = "";
@@ -436,6 +436,9 @@ describe("resume vision provider", () => {
     const provider = createResumeVisionProviderFromEnvironment({
       NESTOR_AI_API_KEY: "shared-test-key",
       NESTOR_AI_BASE_URL: "https://shared.example.com/v1",
+      NESTOR_AI_VISION_MODEL: "muse-spark-1.3-contributor",
+      NESTOR_AI_VISION_API_MODE: "responses",
+      NESTOR_AI_VISION_REASONING_EFFORT: "xhigh",
     });
     const bundle = createResumeImportFixtureBundle({
       id: "shared_vision_config_bundle",

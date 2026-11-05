@@ -109,6 +109,21 @@ beforeEach(() => {
                         written: true,
                         groundedIn: [],
                       },
+                      // A multi-select is kept as its exact options.
+                      {
+                        question: "Select your skills",
+                        answer: '["Writing, editing","Mentoring"]',
+                        source: "your matching saved answer or profile fact",
+                        written: false,
+                        groundedIn: [],
+                      },
+                      {
+                        question: "Anything else?",
+                        answer: '["not", 1] is what I wrote',
+                        source: "your matching saved answer or profile fact",
+                        written: false,
+                        groundedIn: [],
+                      },
                     ],
                     attachments: [],
                     letter: null,
@@ -412,6 +427,13 @@ describe("Applications", () => {
     expect(
       within(detail).getByText("I build design systems for clinics."),
     ).toBeTruthy();
+    // The stored option list reads as the person's choices; other text,
+    // even when it starts like a list, is shown exactly as written.
+    expect(
+      within(detail).getByText("Writing, editing, Mentoring"),
+    ).toBeTruthy();
+    expect(within(detail).getByText('["not", 1] is what I wrote')).toBeTruthy();
+    expect(within(detail).queryByText(/\["Writing/u)).toBeNull();
     expect(within(detail).getByText("Resume - Northfield.pdf")).toBeTruthy();
 
     fireEvent.click(
@@ -465,9 +487,9 @@ describe("a failed application is never a dead end", () => {
     const detail = await screen.findByRole("region", {
       name: "Application to Northfield 2",
     });
-    // One cause line, then "Nothing was sent.", in body text.
+    // The cause is not an unverified verdict about what the site received.
     const line = await within(detail).findByText(
-      "The page tried to send the application on its own. Nothing was sent.",
+      "The page tried to send the application on its own.",
     );
     expect(line.className).not.toContain("warning");
     // Both ways on, as its row says.
@@ -796,5 +818,89 @@ describe("an application waiting on the person", () => {
       new URLSearchParams(path.split("?")[1]).get("needs")!,
     );
     expect(view).toEqual({ tab: "tasks", focusId: 42 });
+  });
+});
+
+describe("the ACTION NEEDED line on an application", () => {
+  /** The detail's lead line, once Apply's record has loaded into it. */
+  async function leadLine(detail: HTMLElement) {
+    return waitFor(() => {
+      const line = detail.querySelector("[data-action-needed]");
+      if (!line?.textContent?.includes("Sent:")) throw new Error("No line");
+      return line.textContent;
+    });
+  }
+
+  it("names the site and the recorded step of a site sign-in, what was filled and that no send is recorded", async () => {
+    applyWrites(ids[1]!, "state = 'needs_you'");
+    const run = vi.fn((name: string) =>
+      Promise.resolve(
+        name === "application_needs"
+          ? [
+              {
+                id: 43,
+                kind: "sign_in",
+                key: "access:https://accounts.google.com",
+                scope: {
+                  country: "",
+                  siteOrigin: "https://accounts.google.com",
+                },
+                prompt: "Google needs you to finish this step.",
+                input: "text",
+                options: [],
+                openedAt: new Date().toISOString(),
+              },
+            ]
+          : [],
+      ),
+    );
+    Object.assign(window.nestor, { needsYou: { run } });
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 2,/ }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    expect(await leadLine(detail)).toMatch(
+      /^ACTION NEEDED — accounts\.google\.com: Google needs you to finish this step\. Then press “Check again” in Needs you\. Done so far: filled \d+ fields? \(.+\)\. Sent: no application send recorded\. Whether the site saved answers on its own is not verified\.$/u,
+    );
+    // The line leads; the actions and the record stay as they were.
+    expect(
+      within(detail).getByRole("button", { name: "Finish in Needs you" }),
+    ).toBeTruthy();
+    expect(within(detail).getByText("What Apply filled in")).toBeTruthy();
+  });
+
+  it("keeps an unconfirmed send unknown and leads with settling it on the site", async () => {
+    applyWrites(ids[1]!, "state = 'uncertain'");
+    receipt = {
+      outcome: "outcome_uncertain",
+      attemptedAt: new Date().toISOString(),
+      verifiedAt: null,
+      evidence: [],
+      browserAction: { reason: "confirmation_timeout", requestsAfterClick: [] },
+    } as unknown as ApplicationDetails["receipt"];
+    const list = renderScreen();
+    fireEvent.click(
+      await within(list).findByRole("button", { name: /^Northfield 2,/ }),
+    );
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    const line = await leadLine(detail);
+    expect(line).toMatch(
+      /^ACTION NEEDED — Northfield 2: Check your account on the employer’s site, then press “It went through” or “It didn’t go through”\. /u,
+    );
+    expect(line).toMatch(
+      /Sent: unknown\. Nestor pressed send \(.+\), but the site has not confirmed receipt\./u,
+    );
+    expect(line).not.toMatch(/Sent: (?:yes|no)|nothing was sent/iu);
+    expect(
+      within(detail).getByRole("button", { name: "It went through" }),
+    ).toBeTruthy();
+    expect(
+      within(detail).getByRole("button", { name: "It didn’t go through" }),
+    ).toBeTruthy();
   });
 });

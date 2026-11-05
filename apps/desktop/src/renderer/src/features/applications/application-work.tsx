@@ -19,8 +19,35 @@ import { Button } from "@renderer/components/ui/button";
 import { useToast } from "@renderer/components/ui/toast";
 import { openUrlInJobFinderBrowser } from "@renderer/features/job-finder/components/open-outside-links";
 
+import {
+  actionSite,
+  doneSoFar,
+  sentStatus,
+  taskAction,
+  type ActionNeeded,
+} from "./action-needed";
+import { ActionNeededLine } from "./action-needed-line";
 import { formatWhen } from "./tracker-format";
 import { describeError } from "./use-application";
+
+/**
+ * A multi-select answer is stored as a JSON list of its exact options so an
+ * option containing a comma keeps its identity. Show it as the plain list
+ * the person chose; any other answer is shown exactly as stored.
+ */
+function reviewAnswerText(answer: string): string {
+  if (!answer.startsWith("[")) return answer;
+  try {
+    const choices: unknown = JSON.parse(answer);
+    return Array.isArray(choices) &&
+      choices.length > 0 &&
+      choices.every((choice) => typeof choice === "string")
+      ? choices.join(", ")
+      : answer;
+  } catch {
+    return answer;
+  }
+}
 
 /** Apply's own record of one job's application, kept current as Apply works. */
 export function useApplicationWork(jobId: number | null) {
@@ -140,18 +167,19 @@ function needsYouPath(focusId: number) {
 }
 
 /**
- * The first open item an application waiting on the person waits for: the
- * step its status names, so its filled action leads there.
+ * The first open item an application waiting on the person waits for, and
+ * how many it waits on: the step its status names, so its filled action
+ * leads there and its lead line names it.
  */
 function useWaitingTask(application: ApplicationDetails["application"]) {
-  const [task, setTask] = useState<{
-    id: number;
-    kind: NeedsYouTask["kind"];
+  const [waiting, setWaiting] = useState<{
+    task: NeedsYouTask;
+    count: number;
   } | null>(null);
-  const waiting = application.state === "needs_you";
+  const isWaiting = application.state === "needs_you";
   useEffect(() => {
-    setTask(null);
-    if (!waiting) return;
+    setWaiting(null);
+    if (!isWaiting) return;
     let live = true;
     void Promise.resolve()
       .then(() =>
@@ -159,14 +187,47 @@ function useWaitingTask(application: ApplicationDetails["application"]) {
       )
       .then((tasks) => {
         const first = tasks[0];
-        if (live && first) setTask({ id: first.id, kind: first.kind });
+        if (live && first) setWaiting({ task: first, count: tasks.length });
       })
       .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, [application.id, application.attempt, waiting]);
-  return waiting ? task : null;
+  }, [application.id, application.attempt, isWaiting]);
+  return isWaiting ? waiting : null;
+}
+
+/**
+ * The lead line of an application handed to the person: what to do on which
+ * site, what the run recorded doing, and whether anything was sent. A send
+ * the app could not confirm leads with checking the site.
+ */
+function applicationActionLine(
+  details: ApplicationDetails,
+  waiting: { task: NeedsYouTask; count: number } | null,
+): ActionNeeded | null {
+  const { application } = details;
+  const done = doneSoFar(details);
+  const sent = sentStatus(details);
+  if (application.state === "uncertain")
+    return {
+      site: application.company,
+      action:
+        "Check your account on the employer’s site, then press “It went through” or “It didn’t go through”.",
+      done,
+      sent,
+    };
+  if (!waiting) return null;
+  const more = waiting.count - 1;
+  return {
+    site: actionSite(waiting.task, [application]),
+    action: `${taskAction(waiting.task, {
+      onApplication: true,
+      accessDetail: details.accessDetail ?? null,
+    })}${more > 0 ? ` ${more === 1 ? "1 more item waits" : `${more} more items wait`} in Needs you.` : ""}`,
+    done,
+    sent,
+  };
 }
 
 /**
@@ -185,7 +246,9 @@ function ApplyActions(props: {
     "open" | "stop" | "retry" | "sent" | "not_sent" | null
   >(null);
   const { application, receipt } = props.details;
-  const waiting = useWaitingTask(application);
+  const waitingOn = useWaitingTask(application);
+  const waiting = waitingOn?.task ?? null;
+  const line = applicationActionLine(props.details, waitingOn);
   const canOpen = ["ready", "needs_you", "uncertain"].includes(
     application.state,
   );
@@ -203,6 +266,8 @@ function ApplyActions(props: {
   // by hand") and as Shortlisted does.
   const byHand =
     application.state === "failed" && props.applyUrl ? props.applyUrl : null;
+  // A line only leads a handoff (needs you, or an unconfirmed send), and
+  // both always offer an action below it.
   if (!canOpen && !canStop && !canRetry && !canSettle && !byHand) return null;
 
   const settle = async (sent: boolean) => {
@@ -309,85 +374,88 @@ function ApplyActions(props: {
   };
 
   return (
-    <div className="flex flex-wrap gap-2">
-      {canRetry ? (
-        <Button
-          onClick={() => void retry()}
-          pending={busy === "retry"}
-          size="toolbar"
-        >
-          <RotateCcw aria-hidden />
-          {application.state === "stopped" ? "Apply again" : "Try again"}
-        </Button>
-      ) : null}
-      {byHand ? (
-        <Button
-          onClick={() => openUrlInJobFinderBrowser(byHand)}
-          size="toolbar"
-          title="Open the application page and apply yourself"
-          variant={canRetry ? "outline" : "primary"}
-        >
-          <ExternalLink aria-hidden />
-          Apply by hand
-        </Button>
-      ) : null}
-      {canSettle ? (
-        <>
+    <>
+      {line ? <ActionNeededLine line={line} /> : null}
+      <div className="flex flex-wrap gap-2">
+        {canRetry ? (
           <Button
-            disabled={busy !== null}
-            onClick={() => void settle(true)}
-            pending={busy === "sent"}
+            onClick={() => void retry()}
+            pending={busy === "retry"}
             size="toolbar"
           >
-            <Check aria-hidden />
-            It went through
+            <RotateCcw aria-hidden />
+            {application.state === "stopped" ? "Apply again" : "Try again"}
           </Button>
+        ) : null}
+        {byHand ? (
           <Button
-            disabled={busy !== null}
-            onClick={() => void settle(false)}
-            pending={busy === "not_sent"}
+            onClick={() => openUrlInJobFinderBrowser(byHand)}
+            size="toolbar"
+            title="Open the application page and apply yourself"
+            variant={canRetry ? "outline" : "primary"}
+          >
+            <ExternalLink aria-hidden />
+            Apply by hand
+          </Button>
+        ) : null}
+        {canSettle ? (
+          <>
+            <Button
+              disabled={busy !== null}
+              onClick={() => void settle(true)}
+              pending={busy === "sent"}
+              size="toolbar"
+            >
+              <Check aria-hidden />
+              It went through
+            </Button>
+            <Button
+              disabled={busy !== null}
+              onClick={() => void settle(false)}
+              pending={busy === "not_sent"}
+              size="toolbar"
+              variant="outline"
+            >
+              <X aria-hidden />
+              It didn’t go through
+            </Button>
+          </>
+        ) : null}
+        {waiting ? (
+          <Button
+            onClick={() => void navigate(needsYouPath(waiting.id))}
+            size="toolbar"
+          >
+            <ArrowRight aria-hidden />
+            {waiting.kind === "question"
+              ? "Answer in Needs you"
+              : "Finish in Needs you"}
+          </Button>
+        ) : null}
+        {canOpen ? (
+          <Button
+            onClick={() => void act("open")}
+            pending={busy === "open"}
+            size="toolbar"
+            variant={waiting ? "outline" : "primary"}
+          >
+            <ExternalLink aria-hidden />
+            {canSettle ? "Check site" : "Open application"}
+          </Button>
+        ) : null}
+        {canStop ? (
+          <Button
+            onClick={() => void act("stop")}
+            pending={busy === "stop"}
             size="toolbar"
             variant="outline"
           >
-            <X aria-hidden />
-            It didn’t go through
+            <CircleStop aria-hidden />
+            Stop
           </Button>
-        </>
-      ) : null}
-      {waiting ? (
-        <Button
-          onClick={() => void navigate(needsYouPath(waiting.id))}
-          size="toolbar"
-        >
-          <ArrowRight aria-hidden />
-          {waiting.kind === "question"
-            ? "Answer in Needs you"
-            : "Finish in Needs you"}
-        </Button>
-      ) : null}
-      {canOpen ? (
-        <Button
-          onClick={() => void act("open")}
-          pending={busy === "open"}
-          size="toolbar"
-          variant={waiting ? "outline" : "primary"}
-        >
-          <ExternalLink aria-hidden />
-          {canSettle ? "Check site" : "Open application"}
-        </Button>
-      ) : null}
-      {canStop ? (
-        <Button
-          onClick={() => void act("stop")}
-          pending={busy === "stop"}
-          size="toolbar"
-          variant="outline"
-        >
-          <CircleStop aria-hidden />
-          Stop
-        </Button>
-      ) : null}
-    </div>
+        ) : null}
+      </div>
+    </>
   );
 }
 
@@ -524,7 +592,7 @@ function SentReview(props: { details: ApplicationDetails }) {
             <div key={answer.fieldKey ?? `${answer.question}:${index}`}>
               <dt className="text-foreground-soft">{answer.question}</dt>
               <dd className="whitespace-pre-wrap">
-                {answer.answer}
+                {reviewAnswerText(answer.answer)}
                 {answer.written ? (
                   <span className="ml-2 text-xs text-foreground-muted">
                     written for this job

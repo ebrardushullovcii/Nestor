@@ -20,7 +20,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     config.authority.mode === "autonomous_submit"
       ? "When the form is complete, say so with submit_application; Job Finder checks everything again and sends it. The person chose to have it sent: never ask them to look over a complete form, and finish it with needsPerson false."
       : config.authority.mode === "confirm_before_submit"
-        ? "Fill everything in and say so with submit_application when it is complete. You do not send it — the person reads it and presses send. When the page explicitly shows more numbered steps, complete the current valid fields and propose Next or Continue. Job Finder advances only a proven local step under a read-only fence. A server-dependent or ambiguous step is handed to the person."
+        ? "Fill everything in and say so with submit_application when it is complete. You do not send it — the person reads it and presses send. Complete the current valid fields and propose the form's ordinary nonfinal Save, Continue or Next control, even without a complete step counter. Job Finder permits bounded intermediate saves and verifies that the next section opened. Stop if the press is uncertain; never repeat it or treat it as final Send."
         : "Fill everything in and stop. This application is set to fill in only.";
   // The saved AI applying behavior (Settings). Absent means the defaults.
   const coverLetterPolicy =
@@ -54,6 +54,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     : null;
 
   return [
+    "A short saved answer such as Yes, exactly this schedule confirms only the conditions actually stated in its saved question and answer. Never fill a gap in the source from the later target question, posting or legal work capacity. For example, confirmed weekly hours and dates do not confirm newly added weekdays, daily times or timezone. Reuse identical conditions; ask only for the added personal conditions. An explicit source exclusion can answer a more specific negative, such as no nights answering a proposed night shift. Choosing to apply never supplies personal hours or start-date availability. Use explicit saved availability; if it is missing, ask once so the answer can be remembered. Legal work capacity does not establish personal availability.",
     "You are applying for a job on this person's behalf, in their browser, with the ordinary powers a person has: you can look at the page, read it, click anything, follow links, type, go back, wait, and scroll.",
     "",
     "Work the site out the way a person would. Read what is on screen. Press the obvious button. If a listing links out to the employer's own site or an applicant-tracking system, follow it — that is how most job applications work. Close a cookie banner or a chat bubble yourself if it is in the way. If a link turns out to be the wrong way, go back and try another. If the page is still loading, wait and look again. Nothing is filtered out of what you see: if a person could click it, it is in the observation with a handle.",
@@ -164,6 +165,7 @@ function describeControl(
     control.required ? "required" : "optional",
     describeAnswered(control),
   ];
+  if (control.frame) parts.push(`frame: ${control.frame.origin}`);
   if (control.sectionPath?.length)
     parts.push(`sections: ${control.sectionPath.join(" > ")}`);
   if (control.acceptedTypes?.length)
@@ -177,7 +179,7 @@ function describeControl(
     const shown = control.options.slice(0, 12);
     const remaining = control.options.length - shown.length;
     parts.push(
-      `choices: ${shown.join(" | ")}${remaining > 0 ? ` | +${remaining} more` : ""}`,
+      `choices: ${shown.join(" | ")}${remaining > 0 ? ` | ${remaining} more; call read_text with ref ${control.ref} for all choices` : ""}`,
     );
   }
   if (control.attestationKind) {
@@ -252,7 +254,7 @@ export function describeObservation(
       ? `Buttons:\n${actions
           .map(
             (action) =>
-              `- ${action.ref}: ${action.label}${action.disabled ? " (disabled)" : ""}`,
+              `- ${action.ref}: ${action.label}${action.disabled ? " (disabled)" : ""}${action.frame ? ` (frame: ${action.frame.origin})` : ""}`,
           )
           .join("\n")}`
       : null,
@@ -261,14 +263,17 @@ export function describeObservation(
           .slice(0, options.linkLimit ?? 80)
           .map(
             (link) =>
-              `- ${link.ref}: ${link.label} → ${link.href}${link.opensNewWindow ? " (opens a new tab; follow_link opens it here)" : ""}`,
+              `- ${link.ref}: ${link.label} → ${link.href}${link.opensNewWindow ? " (opens a new tab; follow_link opens it here)" : ""}${link.frame ? ` (frame: ${link.frame.origin})` : ""}`,
           )
           .join("\n")}`
       : null,
     clickables.length > 0
       ? `Other clickable things:\n${clickables
           .slice(0, 40)
-          .map((entry) => `- ${entry.ref}: ${entry.label}`)
+          .map(
+            (entry) =>
+              `- ${entry.ref}: ${entry.label}${entry.disabled ? " (disabled)" : ""}${entry.frame ? ` (frame: ${entry.frame.origin})` : ""}`,
+          )
           .join("\n")}`
       : null,
     observation.bodyTextExcerpt.trim()
@@ -374,6 +379,11 @@ export function applyStepShape(
     tabs: observation.openedTabs,
     controls: observation.controls.map((control) => ({
       ...control,
+      // Local verification and inferred group requirements do not replace
+      // the site's field handles or native structure after a successful write.
+      required: control.requiredOnPage ?? control.required,
+      requiredOnPage: undefined,
+      answerUnverified: undefined,
       value: "",
       checked: false,
       answered: false,

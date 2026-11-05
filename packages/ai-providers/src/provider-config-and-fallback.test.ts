@@ -379,14 +379,14 @@ describe("ai provider config and fallback behavior", () => {
     }
   });
 
-  test("defaults ordinary text work to Muse Spark 1.3 on OpenCode Go", () => {
+  test("defaults ordinary text work to DeepSeek V4.1 Flash on OpenCode Go", () => {
     const client = createJobFinderAiClientFromEnvironment({
       NESTOR_AI_API_KEY: "go-test-key",
     });
 
     expect(client.getStatus()).toMatchObject({
       kind: "openai_compatible",
-      model: "muse-spark-1.3-contributor",
+      model: "deepseek-v4.1-flash",
       label: "AI resume agent",
     });
   });
@@ -1393,7 +1393,7 @@ describe("ai provider config and fallback behavior", () => {
   });
 });
 
-test("uses the verified no-reasoning title route while keeping fit on the primary model", async () => {
+test("keeps an explicit primary model for titles instead of implicitly switching providers", async () => {
   const capture = mockCapturingJsonFetch({
     output: [
       {
@@ -1427,10 +1427,9 @@ test("uses the verified no-reasoning title route while keeping fit on the primar
       },
     );
     expect(JSON.parse(capture.getCapturedBody())).toMatchObject({
-      model: "mimo-v2.6-flash",
-      reasoning_effort: "none",
-      temperature: 0,
-      response_format: { type: "json_object" },
+      model: "muse-spark-1.3-contributor",
+      reasoning: { effort: "low" },
+      text: { format: { type: "json_schema" } },
     });
     await client.chatWithTools!(
       [{ role: "user", content: "Fit evidence" }],

@@ -2,13 +2,13 @@
 
 ## Automated checks by change
 
-| Change                       | Run                                                                                                        |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| package-local code           | `pnpm validate:package <alias>` (`desktop`, `job-finder`, `browser-agent`, `browser-runtime`, `contracts`) |
-| contracts or IPC             | `pnpm validate:contracts` plus typecheck of affected packages                                              |
-| discovery or source-debug    | `pnpm source-generic:check` plus focused package tests                                                     |
-| desktop UI                   | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                  |
-| broad cross-package behavior | `pnpm verify:affected`                                                                                     |
+| Change                                   | Run                                                                                                                                                                                                                                     |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| package-local code                       | `pnpm validate:package <alias>` (`desktop`, `job-finder`, `browser-agent`, `browser-runtime`, `contracts`)                                                                                                                              |
+| contracts or IPC                         | `pnpm validate:contracts` plus typecheck of affected packages                                                                                                                                                                           |
+| discovery or source-debug                | `pnpm source-generic:check` plus focused package tests                                                                                                                                                                                  |
+| desktop UI                               | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                                                                                                                                               |
+| broad cross-package behavior             | `pnpm verify:affected`                                                                                                                                                                                                                  |
 
 Other entry points: `pnpm test:correctness`, `pnpm test:coverage`, `pnpm format`, `pnpm knip`, `pnpm structure:check`.
 
@@ -18,9 +18,8 @@ Builds and full suites are the slowest part of most changes. CI runs lint, typec
 
 - Run the row above that matches the change, not `pnpm test` or a full suite by habit. When shared contracts, IPC or several packages change, run their checks or `pnpm verify:affected`.
 - Batch related fixes, then check once per batch. Don't rerun a passing check after an edit that cannot affect it.
-- Build the desktop app once per batch, and only when you will run the built app. After that build, use the `:built` harness variants instead of the ones that rebuild. `verify-nestor up` refuses a build whose stamp doesn't match the source; `qa` and the `:built` harnesses don't check freshness, so rebuild after changing build inputs before using them. The stamp covers tracked changes and the names of untracked files, not their contents. Restarting an instance reuses its copied build, so start a fresh instance after a rebuild.
-- In the app, prove a change through the feature it affects: that feature's recipe in `.claude/skills/verify-nestor/features/` or one journey stage. Run the combined `full-check` journey (about 25 minutes plus a 12-minute batch, with live model calls) only when asked or when a change touches most of the app.
-- Use `--ai deterministic` to prove screens and flow. Use `--ai live` only when the result depends on the model (search, fit, resume, apply).
+- Build the desktop app once per batch, and only when you will run the built app. Use the `:built` harness variants after building, rebuild when build inputs change, and start a fresh isolated instance after a rebuild.
+- In the app, prove a change through the feature it affects. Run a full-app journey only when asked or when a change touches most of the app.
 
 ## Stop rules
 
@@ -31,9 +30,9 @@ Builds and full suites are the slowest part of most changes. CI runs lint, typec
 
 ## Testing the built app
 
-- To drive the built app like a user, use the `verify-nestor` skill (see `AGENTS.md`): an isolated instance with synthetic data, replica-only sends and saved evidence. `pnpm --filter @nestor/desktop qa` ([Agent development QA](AGENT_QA.md)) is an interactive Playwright alternative with fault injection; don't run both against one checkout at the same time. Existing focused harnesses remain available.
+- For exploratory agent testing, use `pnpm --filter @nestor/desktop qa`. It uses an isolated session with synthetic data and local replica sites. See [Agent development QA](AGENT_QA.md). Existing focused harnesses remain available.
 
-- Build first, but never in the owner's main checkout: its `out/` feeds their running `pnpm desktop:dev`, and verify-nestor's `build` refuses there. Build in a worktree with verify-nestor's `build` (`node .claude/skills/verify-nestor/bin/lib/cli.mjs build`), which runs `pnpm --filter @nestor/desktop build` and stamps the result for `up`. If the task must stay in the main checkout, drive the existing build only when it matches the source; otherwise report fresh-build verification as blocked. Don't bypass the guard. Scripts that launch `out/main/index.cjs` run whatever was last built.
+- Build first in a worktree: `pnpm --filter @nestor/desktop build`. Do not overwrite the owner's running main-checkout build. Scripts that launch `out/main/index.cjs` run whatever was last built; rebuild after changing build inputs.
 - Use a temporary user-data directory and synthetic data (`apps/desktop/test-fixtures/job-finder/resume-import-sample.txt`, or the synthetic personas in `apps/desktop/test-fixtures/job-finder/resume-import-personas/` in PDF, DOCX, TXT and Markdown), never the user's real workspace or a real person's resume.
 - Serialize isolated Electron launches unless a coordinated parallel run explicitly uses the QA launcher's shared `--parallel-group` with distinct `--session-id` values (see [Agent development QA](AGENT_QA.md)). Build once before starting the group and audit only the processes you own.
 - Harness commands live in `apps/desktop/package.json` (`ui:*`, `test:embedded-browser`, `test:live-assistant-*`). `:built` variants use the existing build; the others rebuild.
@@ -49,7 +48,7 @@ Builds and full suites are the slowest part of most changes. CI runs lint, typec
 
 ## Fit judging
 
-- The model judges fit (ADR 0041); there is no rule scorer to calibrate. Tests fake the fit model and check its verdict, with eligibility caps for blocked or unresolved permission. `LISTING_FIT_SCORER_VERSION` retires indexed listing fits; `MATCH_ASSESSMENT_SCORER_VERSION` covers legacy assessments. Stored verdicts remain visible while relevant profile, goals or listing changes are judged again.
+- The model judges fit (ADR 0041); there is no rule scorer to calibrate. Tests fake the fit model and check its verdict, with caps for confirmed conflicts. Unknown permission, unpublished/incomparable pay and uncertain terms retain explicit caveats without blanket below-Good caps; a fit label grants no application permission. Check both model ordering and surviving hard-pay/location negatives. `LISTING_FIT_SCORER_VERSION` retires indexed listing fits; `MATCH_ASSESSMENT_SCORER_VERSION` covers legacy assessments. Stored verdicts remain visible while relevant profile, goals or listing changes are judged again.
 
 ## Benchmarks
 
@@ -61,7 +60,7 @@ Builds and full suites are the slowest part of most changes. CI runs lint, typec
 
 - Unit and host tests: `pnpm validate:package job-finder` (session host, grants, change diff, action inventory) and `pnpm validate:package agent-runtime`.
 - Eval lane: `pnpm --filter @nestor/ai-evals assistant-lane` runs the scripted-model cases; add `-- --model live` for the configured assistant model (serial; `--case <id prefix>`, `--out <dir>`). Report actual passes and failures, not percentages.
-- Built app: use the verify-nestor feature recipes in `.claude/skills/verify-nestor/features/` for the sidebar, selection, Needs you and replica sends. The old `test-job-finder-assistant*.mjs` harnesses were retired with the workspace. Set `--ai live` for configured model checks.
+- Built app: use the isolated QA launcher described in [Agent development QA](AGENT_QA.md) for the sidebar, selection, Needs you and replica sends. The old `test-job-finder-assistant*.mjs` harnesses were retired with the workspace. Use configured-model checks for model-dependent behavior.
 
 ## Local replica job sites
 

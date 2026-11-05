@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   checkFormReadiness,
   fileUploadProblems,
+  retainedForFormSubmission,
   unresolvedRequiredControls,
 } from "./submit-preflight";
 import { buildApplyFormObservation } from "./page-hands";
@@ -257,6 +258,71 @@ describe("file uploads", () => {
         confirmedByPerson: () => true,
       }),
     ).toEqual([]);
+  });
+
+  // Captured on the workday replica (2026-11-03): the step autosave posted the
+  // whole form, file included, and got 200 {"saved":true}. The input kept the
+  // file inside the POST multipart form, and the final submit carried it.
+  test("a file the form itself will send is not handed over for an untied autosave; anything else still is", () => {
+    const held = {
+      network: "unconfirmed" as const,
+      fileName: "Taylor-Resume.pdf",
+      fileSize: 1140,
+      selectedFileName: "Taylor-Resume.pdf",
+      selectedFileSize: 1140,
+      formSubmits: true,
+    };
+    const retained = file({ upload: held });
+    expect(states({ controls: [retained] })).toEqual([]);
+    const [observed] = observe({ controls: [retained] }).controls;
+    expect(observed && retainedForFormSubmission(observed)).toBe(true);
+    expect(checkFormReadiness(observe({ controls: [retained] })).ok).toBe(true);
+    // Not the form's file: uploaded outside a multipart POST form, emptied by
+    // its widget, or replaced (same name, other size; other name).
+    for (const upload of [
+      { ...held, formSubmits: undefined },
+      { ...held, fileName: undefined, fileSize: undefined },
+      { ...held, fileSize: 2048 },
+      { ...held, fileName: "Other.pdf" },
+      { ...held, selectedFileSize: undefined },
+    ])
+      expect(
+        states({
+          controls: [
+            file({
+              ...(upload.fileName ? {} : { value: "" }),
+              upload,
+            }),
+          ],
+        }),
+      ).toEqual(["unconfirmed"]);
+    // A refusal, failure text or a widget still working outranks retention.
+    expect(
+      states({
+        controls: [file({ upload: { ...held, network: "rejected" } })],
+      }),
+    ).toEqual(["rejected"]);
+    expect(
+      states({
+        controls: [
+          file({
+            upload: {
+              ...held,
+              nearby: "Resume Upload failed Taylor-Resume.pdf",
+            },
+          }),
+        ],
+      }),
+    ).toEqual(["rejected"]);
+    expect(
+      states({
+        controls: [
+          file({
+            upload: { ...held, nearby: "Resume Uploading… Taylor-Resume.pdf" },
+          }),
+        ],
+      }),
+    ).toEqual(["uploading"]);
   });
 
   test("help text beside the field is not a failure", () => {

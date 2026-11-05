@@ -57,8 +57,6 @@ const ALLOWED_RESOURCE_KINDS = new Set<IntermediateMutationResourceKind>([
 // picker), never a step that completes the application.
 export const FINAL_ACTION_SIGNAL =
   /(?:^|[^a-z0-9])(?:submit(?:ted|ting)?|submission|finali[sz]e|complete[-_\s]*(?:the[-_\s]*)?application|send[-_\s]*application|apply[-_\s]*(?:to[-_\s]*job|now|job)|create[-_\s]*(?:account|application|user)|register)(?:[^a-z0-9]|$)|\/(?:apply|submit|complete|send)(?=\/|\s|[?#.;]|$)|\/(?:applications?|applicants?|candidates?)(?:\/(?:new|create))?\/?(?=\s|[?#.;]|$)|(?:^|[^a-z0-9])(?:is[-_\s]*)?(?:final|complete(?:d)?)["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?(?:true|1|on|yes)(?=["'\s,}&\]]|$)|(?:^|[^a-z0-9])(?:is[-_\s]*)?draft["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?(?:false|0|off|no)(?=["'\s,}&\]]|$)|(?:^|[^a-z0-9])step["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?final(?=["'\s,}&\]]|$)|(?:^|[^a-z0-9])status["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?(?:sent|applied)(?=["'\s,}&\]]|$)|(?:^|[^a-z0-9])(?:state|phase)["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?final(?=["'\s,}&\]]|$)|(?:^|[^a-z0-9])final[-_\s]*step["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?(?:true|1|on|yes)(?=["'\s,}&\]]|$)|(?:^|[^a-z0-9])action["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?(?:publish|send|confirm|submit|finish|apply)(?=["'\s,}&\]]|$)|(?:^|[^a-z0-9])operation[-_\s]*name["']?\s*(?::|=|,|\r?\n\s*\r?\n)\s*["']?[a-z0-9_\s-]*(?:apply|submit|finish|(?<!auto)complete)[a-z0-9_\s-]*(?=["',}&\]]|$)|\b(?:mutation|query)\s+[a-z0-9_\s-]*(?:apply|submit|finish|(?<!auto)complete)[a-z0-9_\s-]*(?=\s*[({])/iu;
-const INTERMEDIATE_ACTION_SIGNAL =
-  /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|set[-_\s]*(?:form[-_\s]*)?value|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;
 
 /** Self-contained: install the identical completion policy in each guarded frame. */
 export function hasUnsafeStepCompletion(bodyText?: string): boolean {
@@ -91,6 +89,8 @@ export function hasUnsafeStepCompletion(bodyText?: string): boolean {
   let seen = 0;
   const walk = (node: unknown, depth: number): boolean => {
     if (depth > 8) return true;
+    if (typeof node === "string" && /^\s*[[{]/u.test(node))
+      return hasUnsafeStepCompletion(node);
     if (!node || typeof node !== "object") return false;
     if (Array.isArray(node)) {
       if (
@@ -160,20 +160,40 @@ export function hasUnsafeStepCompletion(bodyText?: string): boolean {
   };
   if (walk(value, 0)) return true;
   // Lost duplicate keys and opaque completion fields cannot borrow a companion.
-  return (
-    [...bodyText.replace(/\\(["'])/gu, "$1").matchAll(completion)].length > seen
-  );
+  const fields = [
+    ...bodyText.matchAll(
+      /("(?:\\.|[^"\\])*")\s*:\s*("(?:\\.|[^"\\])*"|true|false|\d+)/gu,
+    ),
+  ]
+    .filter((match) =>
+      /^(?:status|state|phase|step[-_\s]*status)$/iu.test(
+        String(JSON.parse(match[1]!)),
+      ),
+    )
+    .map((match) => `${match[1]}:${match[2]}`)
+    .join(",");
+  return [...fields.matchAll(completion)].length > seen;
 }
 
 function normalizeMethod(method: string): string {
   return method.trim().toUpperCase();
 }
 
-function buildInspectableSignal(input: {
+/** Self-contained, shared by the DOM and network fences. Values stay in memory. */
+export function inspectIntermediateMutationSignal(input?: {
   bodyText?: string | null;
-  url: URL;
-}): string {
+  url: string;
+  finalActionSignal: string;
+}): "final_action_signal" | "ambiguous_mutation" | null {
+  if (!input) {
+    if (typeof window !== "undefined")
+      (
+        window as unknown as Record<string, unknown>
+      ).__nestorIntermediateSignal = inspectIntermediateMutationSignal;
+    return null;
+  }
   const body = input.bodyText ?? "";
+  if (body.length > 65_536) return "ambiguous_mutation";
   const safeDecode = (value: string): string => {
     let text = value;
     for (let pass = 0; pass < 4; pass++) {
@@ -194,9 +214,111 @@ function buildInspectableSignal(input: {
     }
     return text;
   };
-  return `${safeDecode(input.url.pathname)} ${safeDecode(input.url.search)} ${safeDecode(body)}`
-    .replace(/\\(["'])/gu, "$1")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  const final = new RegExp(input.finalActionSignal, "iu");
+  const semantic = (text: string) =>
+    safeDecode(text).replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  const signals: string[] = [];
+  try {
+    const url = new URL(input.url);
+    signals.push(semantic(`${url.pathname} ${url.search}`));
+    if (/\/(?:accounts?|users?)(?:\/(?:new|create))?\/?$/iu.test(url.pathname))
+      return "final_action_signal";
+  } catch {
+    return "ambiguous_mutation";
+  }
+  // GraphQL string literals and comments are data, not operation/field names.
+  const graphql = (text: string) =>
+    semantic(text.replace(/"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|#[^\r\n]*/gu, " "));
+  let value: unknown = {};
+  try {
+    if (body.trim()) {
+      try {
+        value = JSON.parse(body);
+        for (let pass = 0; pass < 3 && typeof value === "string"; pass++)
+          value = JSON.parse(value);
+      } catch {
+        if (/^\s*(?:mutation|query)\b/u.test(body)) {
+          signals.push(graphql(body));
+          value = {};
+        } else {
+          if (!body.includes("=")) return "ambiguous_mutation";
+          const fields = [...new URLSearchParams(body)];
+          if (
+            !fields.length ||
+            new Set(fields.map(([key]) => key)).size !== fields.length
+          )
+            return "ambiguous_mutation";
+          value = Object.fromEntries(fields);
+        }
+      }
+    }
+    if (!value || typeof value !== "object") return "ambiguous_mutation";
+    let visited = 0;
+    const walk = (node: unknown, depth: number): void => {
+      if (++visited > 2048 || depth > 8) throw new Error("Opaque mutation");
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        if (
+          node.every(
+            (entry) =>
+              Array.isArray(entry) &&
+              entry.length === 2 &&
+              typeof entry[0] === "string",
+          )
+        ) {
+          const entries = node as [string, unknown][];
+          if (new Set(entries.map(([key]) => key)).size !== entries.length)
+            throw new Error("Duplicate fields");
+          walk(Object.fromEntries(entries), depth + 1);
+        } else for (const entry of node) walk(entry, depth + 1);
+        return;
+      }
+      for (const [key, item] of Object.entries(
+        node as Record<string, unknown>,
+      )) {
+        const channel =
+          /^(?:operationName|query|action|operation|status|state|phase|step)$/iu.test(
+            key,
+          );
+        signals.push(semantic(key));
+        if (typeof item === "string") {
+          const decoded = safeDecode(item);
+          if (/^\s*[[{]/u.test(decoded)) {
+            try {
+              walk(JSON.parse(decoded), depth + 1);
+            } catch {
+              throw new Error("Opaque nested mutation");
+            }
+          }
+          if (key.toLowerCase() === "query") signals.push(graphql(decoded));
+          else if (
+            channel ||
+            (decoded.length <= 64 && /^[\w:.-]+$/u.test(decoded))
+          )
+            signals.push(semantic(JSON.stringify({ [key]: decoded })));
+        } else if (typeof item === "boolean" || typeof item === "number")
+          signals.push(semantic(JSON.stringify({ [key]: item })));
+        walk(item, depth + 1);
+      }
+    };
+    walk(value, 0);
+    // Preserve keys and enum signals even when JSON parsing would discard a
+    // duplicate key. Never scan arbitrary free-text answer contents.
+    for (const token of body.matchAll(
+      /("(?:\\.|[^"\\])*")\s*:\s*("(?:\\.|[^"\\])*"|true|false|\d+)/gu,
+    )) {
+      const key: unknown = JSON.parse(token[1]!);
+      const item: unknown = JSON.parse(token[2]!);
+      if (typeof key === "string") walk({ [key]: item }, 0);
+    }
+  } catch {
+    return "ambiguous_mutation";
+  }
+  if (signals.some((signal) => /\\u[\da-f]{4}|%[\da-f]{2}/iu.test(signal)))
+    return "ambiguous_mutation";
+  return signals.some((signal) => final.test(signal))
+    ? "final_action_signal"
+    : null;
 }
 
 /**
@@ -239,22 +361,14 @@ export function classifyIntermediateMutationRequest(
     return { allowed: false, reason: "cross_origin" };
   }
 
-  if ((input.bodyText?.length ?? 0) > 65_536)
-    return { allowed: false, reason: "ambiguous_mutation" };
-  const signal = buildInspectableSignal({
+  const signal = inspectIntermediateMutationSignal({
     bodyText: input.bodyText ?? null,
-    url: parsedUrl,
+    url: parsedUrl.href,
+    finalActionSignal: FINAL_ACTION_SIGNAL.source,
   });
-  if (/\\u[\da-f]{4}|%[\da-f]{2}/iu.test(signal))
-    return { allowed: false, reason: "ambiguous_mutation" };
-  if (
-    FINAL_ACTION_SIGNAL.test(signal) ||
-    hasUnsafeStepCompletion(input.bodyText ?? "")
-  ) {
+  if (signal) return { allowed: false, reason: signal };
+  if (hasUnsafeStepCompletion(input.bodyText ?? "")) {
     return { allowed: false, reason: "final_action_signal" };
-  }
-  if (!INTERMEDIATE_ACTION_SIGNAL.test(signal)) {
-    return { allowed: false, reason: "ambiguous_mutation" };
   }
 
   return { allowed: true, reason: "allowed_intermediate_mutation" };

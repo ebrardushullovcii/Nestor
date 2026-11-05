@@ -373,7 +373,7 @@ it("says where Apply failed: the toast names the job, and Approved marks it with
   expect(screen.queryByText("Applying to 1 job")).toBeNull();
   expect(
     screen.getByText(
-      "The application page did not load. Nothing was sent. It’s marked in Approved, with Try again.",
+      "The application page did not load. It’s marked in Approved, with Try again.",
     ),
   ).toBeTruthy();
 
@@ -383,7 +383,7 @@ it("says where Apply failed: the toast names the job, and Approved marks it with
   );
   expect(
     within(pane).getByText(
-      "The application page did not load. Nothing was sent.",
+      "The application page did not load.",
     ),
   ).toBeTruthy();
   expect(within(pane).getByRole("button", { name: "Try again" })).toBeTruthy();

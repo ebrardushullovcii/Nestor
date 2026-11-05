@@ -225,6 +225,13 @@ export const SavedOptionFallbackInputSchema = SavedOptionFallbackSchema.refine(
   { message: "The fallback must be a different choice.", path: ["fallback"] },
 );
 
+/** Exact current-field decision; reuse elsewhere still needs normal meaning checks. */
+export const CurrentApplicationFieldBindingSchema = z.object({
+  pageUrl: z.string().url(),
+  targetHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  instructionsHash: z.string().regex(/^[a-f0-9]{64}$/u),
+});
+
 export const CandidateReusableAnswerSchema = z.object({
   // Absent, not null, on answers without a rule: profiles keep their shape.
   optionFallback: SavedOptionFallbackSchema.nullable().optional(),
@@ -242,6 +249,7 @@ export const CandidateReusableAnswerSchema = z.object({
       applicationRecordId: NonEmptyStringSchema.nullable(),
       location: NonEmptyStringSchema.nullable(),
       hiringCountry: NonEmptyStringSchema.optional(),
+      currentFieldBinding: CurrentApplicationFieldBindingSchema.optional(),
     })
     .optional(),
 });

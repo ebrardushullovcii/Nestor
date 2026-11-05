@@ -286,18 +286,31 @@ export function sourceFingerprint() {
     "ls-files",
     "--others",
     "--exclude-standard",
+    "-z",
     "--",
     "apps/desktop/src",
     "packages",
-  ]);
-  const dirty =
-    diff || untracked
-      ? createHash("sha256")
-          .update(diff)
-          .update(untracked)
-          .digest("hex")
-          .slice(0, 12)
-      : null;
+  ])
+    .split("\0")
+    .filter(Boolean)
+    .sort();
+  let dirty = null;
+  if (diff || untracked.length) {
+    const hash = createHash("sha256").update(diff);
+    for (const file of untracked) {
+      // NUL-delimited paths and fixed-size content hashes avoid ambiguous records.
+      hash
+        .update("\0")
+        .update(file)
+        .update("\0")
+        .update(
+          createHash("sha256")
+            .update(readFileSync(path.join(checkout, file)))
+            .digest("hex"),
+        );
+    }
+    dirty = hash.digest("hex").slice(0, 12);
+  }
   return { head, dirty };
 }
 

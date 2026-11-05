@@ -14,6 +14,7 @@ import {
   buildModelRequestBody,
   buildModelUrl,
   DEFAULT_OPENCODE_GO_BASE_URL,
+  DEFAULT_VISION_MODEL,
   DEFAULT_VISION_MODEL_API_MODE,
   DEFAULT_VISION_MODEL_REASONING_EFFORT,
   modelApiModes,
@@ -33,7 +34,7 @@ import {
   modelConversationKeys,
 } from "./model-request-identity";
 
-const DEFAULT_BROWSER_VISUAL_MODEL = "muse-spark-1.3-contributor";
+const DEFAULT_BROWSER_VISUAL_MODEL = DEFAULT_VISION_MODEL;
 const DEFAULT_BROWSER_VISUAL_BASE_URL = DEFAULT_OPENCODE_GO_BASE_URL;
 const DEFAULT_BROWSER_VISUAL_TIMEOUT_MS = 120_000;
 

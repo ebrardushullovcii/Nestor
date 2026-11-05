@@ -1,3 +1,5 @@
+import { CandidateProfileSchema } from "./profile";
+import { intendedAccountEmail } from "./profile-contacts";
 import { describe, expect, it } from "vitest";
 import {
   BrowserAgentPermissionsSchema,
@@ -43,4 +45,43 @@ describe("browser agent permissions", () => {
         .success,
     ).toBe(false);
   });
+});
+
+it("uses the existing application email before primary email, without a new permission field", () => {
+  const profile = CandidateProfileSchema.parse({
+    id: "synthetic-google",
+    yearsExperience: 1,
+    baseResume: {
+      id: "synthetic",
+      fileName: "synthetic.txt",
+      uploadedAt: "2026-11-03T18:00:00Z",
+      extractionStatus: "ready",
+      textContent: "Fictional identity",
+    },
+    email: "primary@example.test",
+    applicationIdentity: { preferredEmail: "  Intended@Example.test  " },
+  });
+  expect(intendedAccountEmail(profile)).toBe("Intended@Example.test");
+  expect(
+    intendedAccountEmail({
+      ...profile,
+      applicationIdentity: {
+        ...profile.applicationIdentity,
+        preferredEmail: null,
+      },
+    }),
+  ).toBe("primary@example.test");
+  for (const preferredEmail of ["", " ", "not-an-email"]) {
+    expect(
+      intendedAccountEmail({
+        ...profile,
+        applicationIdentity: { ...profile.applicationIdentity, preferredEmail },
+      }),
+    ).toBeNull();
+  }
+  expect(
+    BrowserAgentPermissionsSchema.safeParse({
+      googleEmail: "target@example.test",
+    }).success,
+  ).toBe(false);
 });

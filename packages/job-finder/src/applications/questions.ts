@@ -7,6 +7,11 @@ import {
 } from "@nestor/browser-agent";
 import { normalizeFormQuestionPrompt } from "@nestor/contracts";
 import { explicitApplicationCountry } from "@nestor/browser-agent";
+import {
+  inferAdministrativeAreaCountry,
+  resolveStatedLocationPlace,
+} from "../internal/location-normalization";
+import type { ApplicationStore } from "@nestor/db/applications";
 import type {
   ApplicationAttemptQuestion,
   RequestNeedsYouInput,
@@ -14,7 +19,24 @@ import type {
   CandidateAnswerKind,
   RememberFormAnswerInput,
   SavedOptionFallback,
+  CandidateProfile,
 } from "@nestor/contracts";
+
+/** A listing hint uses stated geography, never residence or permit countries. */
+export function resolveListingCountry(location: string): string | null {
+  const parts = resolveStatedLocationPlace(location)
+    .split(/[,;|/]/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const countries = new Set(
+    parts.flatMap((part) => {
+      const area = inferAdministrativeAreaCountry([part]);
+      const code = explicitApplicationCountry(area ?? part);
+      return code ? [code] : [];
+    }),
+  );
+  return countries.size === 1 ? [...countries][0]! : null;
+}
 
 export type FormQuestion = Pick<
   ApplicationAttemptQuestion,
@@ -24,6 +46,7 @@ export type FormQuestion = Pick<
   | "answerOptions"
   | "inputConstraints"
   | "repeatedAtDifferentStep"
+  | "currentFieldBinding"
 > &
   Partial<Pick<ApplicationAttemptQuestion, "id">>;
 
@@ -74,7 +97,7 @@ export function pageAnswerSuggestion(
 }
 
 /** A semantic question and its answer format, scoped to the actual role's place. */
-export function describeFormQuestion(
+export function describeLegacyFormQuestion(
   question: FormQuestion,
   job: { id: number; location: string },
 ): {
@@ -152,6 +175,122 @@ export function describeFormQuestion(
   };
 }
 
+/** Eligibility answers bind the jurisdiction and the current recorded facts. */
+export function eligibilityQuestionContext(
+  question: FormQuestion,
+  job: { id: number; location: string },
+  profile: Pick<CandidateProfile, "workEligibility">,
+) {
+  if (
+    question.kind !== "work_authorization" &&
+    question.kind !== "visa_sponsorship"
+  )
+    return null;
+  const country =
+    explicitApplicationCountry(question.prompt) ??
+    resolveListingCountry(job.location);
+  const conditional =
+    question.repeatedAtDifferentStep ||
+    profile.workEligibility.limitedWorkPermissions?.length ||
+    /\b(?:permit|visa type|restrictions?|limited|permanent(?:ly)?|unrestricted|indefinite(?:ly)?|conditions?)\b/iu.test(
+      question.prompt,
+    );
+  return {
+    kind: question.kind,
+    country,
+    fingerprint: createHash("sha256")
+      .update(JSON.stringify(profile.workEligibility))
+      .digest("hex"),
+    jobId: !country || conditional ? job.id : null,
+  };
+}
+
+export function describeFormQuestion(
+  question: FormQuestion,
+  job: { id: number; location: string },
+  profile?: Pick<CandidateProfile, "workEligibility">,
+): ReturnType<typeof describeLegacyFormQuestion> {
+  const legacy = describeLegacyFormQuestion(question, job);
+  if (!["work_authorization", "visa_sponsorship"].includes(question.kind))
+    return legacy;
+  const eligibility = profile
+    ? eligibilityQuestionContext(question, job, profile)
+    : null;
+  const country =
+    eligibility?.country ??
+    explicitApplicationCountry(question.prompt) ??
+    resolveListingCountry(job.location);
+  const context =
+    eligibility?.jobId !== null
+      ? `job ${job.id}|${country ?? "unknown"}`
+      : `country ${country}`;
+  const fingerprint = eligibility?.fingerprint ?? "unknown";
+  return {
+    ...legacy,
+    key: `question:${digest(`${normalize(question.prompt)}|${legacy.input}|${legacy.options.map(normalize).sort().join("|")}|${context}|eligibility ${fingerprint}`)}`,
+    reusePrompt: false,
+  };
+}
+
+/** Old rows suggest a confirmation only when their original country is provable. */
+export function legacyEligibilityDraft(
+  memory: Pick<
+    ApplicationStore["needsYou"],
+    "listAnswers" | "savedAnswer" | "answerApplications"
+  >,
+  question: FormQuestion,
+  job: { id: number; location: string },
+  profile: Pick<CandidateProfile, "workEligibility">,
+  origin: string,
+): { answer: string; legacyAnswerId: number } | null {
+  const context = eligibilityQuestionContext(question, job, profile);
+  if (!context?.country || context.jobId !== null) return null;
+  const known = describeFormQuestion(question, job, profile);
+  const candidates: Array<{ answer: string; legacyAnswerId: number }> = [];
+  let after = 0;
+  do {
+    const page = memory.listAnswers({ after, limit: 200 });
+    for (const row of page.rows) {
+      if (
+        row.needsConfirmation ||
+        row.key === known.key ||
+        (row.scope.siteOrigin && row.scope.siteOrigin !== origin) ||
+        normalize(row.prompt) !== normalize(question.prompt) ||
+        row.input !== known.input
+      )
+        continue;
+      const countries = new Set<string>();
+      if (row.scope.country) countries.add(row.scope.country);
+      const named = explicitApplicationCountry(row.prompt);
+      if (named) countries.add(named);
+      const originalJobs = [...memory.answerApplications(row.id), job];
+      for (const original of originalJobs) {
+        const originalJob = {
+          id: "jobId" in original ? original.jobId : original.id,
+          location: original.location,
+        };
+        if (describeLegacyFormQuestion(question, originalJob).key !== row.key)
+          continue;
+        const country = resolveListingCountry(original.location);
+        if (country) countries.add(country);
+      }
+      if (countries.size !== 1 || !countries.has(context.country)) continue;
+      const saved = memory.savedAnswer(row.id);
+      if (!saved) continue;
+      const answer = known.options.length
+        ? known.options.find(
+            (option) => normalize(option) === normalize(saved.answer),
+          )
+        : saved.answer;
+      if (answer) candidates.push({ answer, legacyAnswerId: row.id });
+    }
+    after = page.nextCursor ?? 0;
+  } while (after);
+  return new Set(candidates.map((candidate) => candidate.answer)).size === 1
+    ? (candidates[0] ?? null)
+    : null;
+}
+
 export function describeSavedFormAnswer(
   prompt: string,
   answer: string,
@@ -225,6 +364,9 @@ export function toKnownFormAnswer(
                 ? `application_${applicationId}`
                 : null,
             location: geographic.has(question.kind) ? location : null,
+            ...(input.local && question.currentFieldBinding
+              ? { currentFieldBinding: question.currentFieldBinding }
+              : {}),
           },
         }
       : {}),

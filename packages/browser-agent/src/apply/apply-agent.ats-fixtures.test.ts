@@ -168,6 +168,7 @@ function buildRawPage(site: FixtureSite, state: FixtureState): RawApplyPage {
     clickables: clickables.map((entry, index) => ({
       index,
       label: entry.label,
+      disabled: false,
       role: "button",
       tagName: "div",
       visible: true,

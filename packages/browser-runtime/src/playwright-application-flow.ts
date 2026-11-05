@@ -1,3 +1,4 @@
+import { redactAccountUrl, recordAccountFlowEntry } from "./account-flow-entry";
 import { createHash } from "node:crypto";
 import { personSubmissionObserverSource } from "./person-submission-observer";
 import { installMutationResponseBodyObserver } from "./mutation-response-body";
@@ -49,6 +50,8 @@ import {
 } from "./application-read-request-policy";
 import {
   classifyIntermediateMutationRequest,
+  inspectIntermediateMutationSignal,
+  hasUnsafeStepCompletion,
   FINAL_ACTION_SIGNAL,
   INTERMEDIATE_MUTATION_WINDOW_DURATION_MS,
   INTERMEDIATE_MUTATION_WINDOW_MAX_REQUESTS,
@@ -186,7 +189,9 @@ function requestFrameOrigin(request: Request): string | null {
  * redirects on its own: Playwright never routes a redirect hop, so each hop
  * is fetched here and only when `hopAllowed` lets that exact address and
  * method through. A navigation that redirected is handed to the browser as
- * one redirect to the checked final address. Returns the final answer, or
+ * one redirect to the checked final address by default. Account windows can
+ * release the first checked safe redirect before fetching its destination.
+ * Returns the final answer (or released redirect), or
  * null when a hop was refused; nothing was sent there.
  */
 async function forwardCheckingHops(
@@ -195,6 +200,7 @@ async function forwardCheckingHops(
   hopAllowed: (url: string, method: string, body: string | null) => boolean,
   /** Runs on the final answer before the page sees it. */
   beforeAnswer?: (response: APIResponse) => Promise<void>,
+  options?: { releaseSafeRedirect?: boolean },
 ): Promise<APIResponse | null> {
   let url = request.url();
   let method = request.method();
@@ -203,10 +209,22 @@ async function forwardCheckingHops(
   // credentials; the context's own jar decides what it sends there.
   const hopHeaders = Object.fromEntries(
     Object.entries(request.headers()).filter(
-      ([name]) => !/^(?:cookie|authorization)$/iu.test(name),
+      ([name]) => !/^(?:cookie|authorization|content-length)$/iu.test(name),
     ),
   );
   for (let hop = 0; hop < 6; hop++) {
+    if (
+      request.isNavigationRequest() &&
+      request.resourceType() === "document"
+    ) {
+      try {
+        const frame = request.frame(),
+          page = frame.page();
+        if (frame === page.mainFrame()) recordAccountFlowEntry(page, url);
+      } catch {
+        /* A detached frame supplies no authorization proof. */
+      }
+    }
     const response = await route.fetch({
       url,
       method,
@@ -233,10 +251,18 @@ async function forwardCheckingHops(
       ((status === 301 || status === 302) && method !== "GET")
     ) {
       method = "GET";
-      postData = undefined;
+      // Route.fetch otherwise borrows the original request's POST body.
+      postData = Buffer.alloc(0);
     }
     if (!hopAllowed(next, method, postData?.toString("utf8") ?? null))
       return null;
+    if (options?.releaseSafeRedirect && PREPARE_ONLY_SAFE_METHODS.has(method)) {
+      await route.fulfill({
+        response,
+        headers: { ...response.headers(), location: next },
+      });
+      return response;
+    }
     url = next;
   }
   return null;
@@ -335,6 +361,14 @@ const prepareOnlyNetworkGuardStates = new WeakMap<
     attachmentUploadWindow: AttachmentUploadWindow | null;
     intermediateMutationAllowedOrigins: string[];
     intermediateMutationWindow: IntermediateMutationWindowSnapshot | null;
+    providerWriteWindow?: {
+      origins: readonly string[];
+      disclosableValues: readonly string[];
+      expiresAtMs: number;
+      remainingRequests: number;
+      active: () => boolean;
+      login?: { frame: Frame; formAction: string; token: string };
+    } | null;
     authorizedFormActionWindow: {
       method: string;
       url: string;
@@ -353,6 +387,249 @@ const prepareOnlyNetworkGuardStates = new WeakMap<
 // Pins are captured from actual frames when a bounded field window opens.
 // A request can save only to its initiating frame's own pinned origin.
 const intermediateFrameOrigins = new WeakMap<Page, Map<Frame, string>>();
+const accountSurfaceOrigins = new WeakMap<Page, readonly string[]>();
+export const registerAccountSurfaceOrigins = (
+  page: Page,
+  origins: readonly string[],
+): void => {
+  accountSurfaceOrigins.set(page, [...origins]);
+};
+const accountAttemptUrl = (page: Page, value: string | null): string | null =>
+  accountSurfaceOrigins
+    .get(page)
+    ?.includes(parseHttpOriginOrNull(value ?? "") ?? "")
+    ? redactAccountUrl(value)
+    : value;
+const claimedAccountWindows = new WeakSet<Page>();
+const activeAccountWindows = new WeakMap<Page, Page>();
+export const isClaimedAccountWindow = (page: Page): boolean =>
+  claimedAccountWindows.has(page);
+export const hasActiveAccountWindow = (page: Page): boolean => {
+  const child = activeAccountWindows.get(page);
+  return !!child && !child.isClosed();
+};
+export const ACCOUNT_WINDOW_OPEN_MESSAGE =
+  "An account window is open for this application; finish or close it first.";
+function assertNoAccountWindow(page: Page): void {
+  if (hasActiveAccountWindow(page))
+    throw new Error(ACCOUNT_WINDOW_OPEN_MESSAGE);
+}
+export const hasPrepareOnlyPreparedValues = (page: Page): boolean =>
+  (prepareOnlyNetworkGuardStates.get(page)?.preparedValues.size ?? 0) > 0;
+
+/** Evaluated at the exact ref so the arm belongs to its owning document. */
+export async function armAccountWindowInPage(
+  locator: Locator,
+  token: string,
+  expiresAtMs: number,
+): Promise<void> {
+  await locator.evaluate(
+    (_element, arm) => {
+      const state = (window as unknown as Record<string, unknown>)[
+        "__nestorPrepareOnlyMutationGuardV1"
+      ] as { accountWindowArm?: typeof arm } | undefined;
+      if (!state)
+        throw new Error("The account button has no prepare-only guard.");
+      state.accountWindowArm = arm;
+    },
+    { token, expiresAtMs },
+  );
+}
+export async function pendingAccountWindowInPage(
+  locator: Locator,
+  token: string,
+): Promise<boolean> {
+  return locator
+    .evaluate((_element, expected) => {
+      const state = (window as unknown as Record<string, unknown>)[
+        "__nestorPrepareOnlyMutationGuardV1"
+      ] as { pendingAccountWindow?: { token: string } } | undefined;
+      return state?.pendingAccountWindow?.token === expected;
+    }, token)
+    .catch(() => false);
+}
+export async function releaseAccountWindowInPage(
+  locator: Locator,
+  token: string,
+): Promise<boolean> {
+  return locator.evaluate((_element, expected) => {
+    const state = (window as unknown as Record<string, unknown>)[
+      "__nestorPrepareOnlyMutationGuardV1"
+    ] as
+      | {
+          accountWindowArm?: unknown;
+          pendingAccountWindow?: {
+            token: string;
+            window: Window;
+            url: string;
+          } | null;
+        }
+      | undefined;
+    const pending = state?.pendingAccountWindow;
+    if (
+      !state ||
+      pending?.token !== expected ||
+      pending.window.closed ||
+      (pending.window as unknown as Record<string, unknown>)[
+        "__nestorAccountWindowClaimToken"
+      ] !== expected
+    )
+      return false;
+    state.accountWindowArm = null;
+    state.pendingAccountWindow = null;
+    pending.window.location.replace(pending.url);
+    return true;
+  }, token);
+}
+export async function cancelAccountWindowInPage(
+  locator: Locator,
+  token: string,
+): Promise<void> {
+  await locator
+    .evaluate((_element, expected) => {
+      const state = (window as unknown as Record<string, unknown>)[
+        "__nestorPrepareOnlyMutationGuardV1"
+      ] as
+        | {
+            accountWindowArm?: { token: string } | null;
+            pendingAccountWindow?: { token: string; window: Window } | null;
+          }
+        | undefined;
+      if (state?.accountWindowArm?.token === expected)
+        state.accountWindowArm = null;
+      if (state?.pendingAccountWindow?.token === expected) {
+        try {
+          if (state.pendingAccountWindow.window.location.href === "about:blank")
+            state.pendingAccountWindow.window.close();
+        } catch {
+          /* Loaded windows belong to the host. */
+        }
+        state.pendingAccountWindow = null;
+      }
+    }, token)
+    .catch(() => undefined);
+}
+
+/** Containment is installed on a blank child before its requested navigation. */
+export async function installAccountWindowContainment(
+  child: Page,
+  input: {
+    opener: Page;
+    writeOrigins: readonly string[];
+    disclosableValues?: readonly string[];
+    canWrite?: () => boolean;
+  },
+): Promise<void> {
+  const applicationOrigin = parseHttpOriginOrNull(input.opener.url());
+  const origins = new Set(
+    input.writeOrigins.filter(
+      (origin) =>
+        origin !== applicationOrigin &&
+        parseHttpOriginOrNull(origin) === origin,
+    ),
+  );
+  if (origins.size !== input.writeOrigins.length)
+    throw new Error(
+      "Account writes must use exact origins distinct from the application.",
+    );
+  await child.route("**/*", async (route) => {
+    try {
+      const request = route.request();
+      const method = request.method().toUpperCase();
+      const allPrepared = [
+        ...new Set([
+          ...(prepareOnlyNetworkGuardStates.get(input.opener)?.preparedValues ??
+            []),
+          ...(input.disclosableValues ?? []),
+        ]),
+      ];
+      let carriedPreparedValue =
+        requestUrlCarriesPreparedValue(request.url(), allPrepared) ||
+        carriesPreparedValue(request.postData(), allPrepared);
+      let frameOrigin: string | null = null;
+      try {
+        frameOrigin = parseHttpOriginOrNull(request.frame().url());
+      } catch {
+        /* No pinned frame, no write. */
+      }
+      const allowed = (url: string, verb: string, body: string | null) => {
+        const provider =
+          origins.has(parseHttpOriginOrNull(url) ?? "") &&
+          origins.has(frameOrigin ?? "");
+        const prepared = provider
+          ? allPrepared.filter(
+              (value) => !(input.disclosableValues ?? []).includes(value),
+            )
+          : allPrepared;
+        const carries =
+          requestUrlCarriesPreparedValue(url, prepared) ||
+          carriesPreparedValue(body, prepared);
+        carriedPreparedValue ||= carries;
+        return (
+          !carries &&
+          (PREPARE_ONLY_SAFE_METHODS.has(verb.toUpperCase()) ||
+            (provider && (input.canWrite?.() ?? true)))
+        );
+      };
+      if (allowed(request.url(), method, request.postData())) {
+        // Inspect routed requests and every non-safe hop, including its first
+        // safe Location. Chromium owns safe redirects; Playwright does not route
+        // those native hops, so they are not claimed as inspected here.
+        if (PREPARE_ONLY_SAFE_METHODS.has(method)) {
+          await route.fallback();
+          return;
+        }
+        const forwarded = await forwardCheckingHops(
+          route,
+          request,
+          allowed,
+          undefined,
+          { releaseSafeRedirect: true },
+        );
+        if (forwarded) return;
+      }
+      recordPrepareOnlyRunInterruption(input.opener, {
+        kind: "network_request",
+        method,
+        url: origins.has(parseHttpOriginOrNull(request.url()) ?? "")
+          ? redactAccountUrl(request.url())
+          : request.url(),
+        at: new Date().toISOString(),
+        carriedPreparedValue,
+      });
+      await route.abort("blockedbyclient").catch(() => undefined);
+    } catch {
+      await route.abort("failed").catch(() => undefined);
+    }
+  });
+  await child.addInitScript(() => {
+    window.open = () => {
+      (window as unknown as Record<string, unknown>)[
+        "__nestorAccountWindowSecondWindow"
+      ] = true;
+      return null;
+    };
+    for (const key of ["WebSocket", "WebTransport"])
+      Object.defineProperty(window, key, {
+        configurable: true,
+        value: class {
+          constructor() {
+            throw new Error("Account windows cannot open another channel.");
+          }
+        },
+      });
+  });
+  child.on("download", (download) => {
+    recordPrepareOnlyRunInterruption(input.opener, {
+      kind: "download",
+      method: "GET",
+      url: download.url(),
+      at: new Date().toISOString(),
+      carriedPreparedValue: false,
+    });
+    void download.cancel().catch(() => undefined);
+  });
+}
 
 export function readPrepareOnlyIntermediateWriteCount(page: Page): number {
   return (
@@ -379,7 +656,9 @@ export async function openPrepareOnlyAuthorizedFormActionWindow(
   page: Page,
   locator: Locator,
   durationMs: number | null = 20_000,
+  expected?: { action: string; method: "POST" },
 ): Promise<void> {
+  assertNoAccountWindow(page);
   // Search pages do not necessarily arrive through an application session.
   // Install the same closed guard before granting this single form request;
   // preserve an existing session's independently authorized write settings.
@@ -400,15 +679,21 @@ export async function openPrepareOnlyAuthorizedFormActionWindow(
       const actionUrl = new URL(
         (actionElement.hasAttribute("formaction")
           ? actionElement.formAction
-          : form.action) || window.location.href,
-        window.location.href,
+          : form.getAttribute("action")) || window.location.href,
+        document.baseURI,
       ).toString();
       const method = (
         (actionElement.hasAttribute("formmethod")
           ? actionElement.formMethod
-          : form.method) || "GET"
+          : form.getAttribute("method")) || "GET"
       ).toUpperCase();
       if (method !== "POST") return null;
+      if (
+        input.expected &&
+        (actionUrl !== input.expected.action ||
+          method !== input.expected.method)
+      )
+        return null;
       actionElement.dataset.nestorAuthorizedFormAction = input.token;
       const state = (window as unknown as Record<string, unknown>)[
         "__nestorPrepareOnlyMutationGuardV1"
@@ -427,7 +712,7 @@ export async function openPrepareOnlyAuthorizedFormActionWindow(
       }
       return { method, url: actionUrl };
     },
-    { token, expiresAtMs },
+    { token, expiresAtMs, expected },
   );
   if (!action) {
     throw new Error("The authorized control is not attached to a form.");
@@ -497,6 +782,7 @@ export async function openPrepareOnlyFinalActionWindow(
   page: Page,
   durationMs = 20_000,
 ): Promise<void> {
+  assertNoAccountWindow(page);
   const networkGuardState = prepareOnlyNetworkGuardStates.get(page);
   if (networkGuardState) {
     networkGuardState.finalActionAllowedUntilMs = Date.now() + durationMs;
@@ -557,6 +843,12 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     intermediateMutationsAuthorized: boolean;
     intermediateMutationWindow: IntermediateMutationWindowSnapshot | null;
     attachmentUploadWindow: AttachmentUploadWindow | null;
+    providerWriteWindow?: {
+      origins: readonly string[];
+      disclosableValues: readonly string[];
+      expiresAtMs: number;
+      scriptLoginToken?: string;
+    } | null;
     authorizedFormActionWindow: AuthorizedFormActionWindow | null;
     submitListenerInstalled: boolean;
     finalControlListenerInstalled: boolean;
@@ -580,6 +872,12 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     eventSourceWrapper: typeof EventSource | null;
     webTransportWrapper: WebTransportPageConstructor | null;
     windowOpenWrapper: typeof window.open | null;
+    accountWindowArm?: { token: string; expiresAtMs: number } | null;
+    pendingAccountWindow?: {
+      token: string;
+      window: Window;
+      url: string;
+    } | null;
   }
 
   const pageWindow = window as unknown as Record<string, unknown>;
@@ -972,6 +1270,50 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       !carries(state.preparedValues.filter((value) => !chosen.includes(value)))
     );
   };
+  const providerRequestAllowed = (
+    url: string | null,
+    body: string | null,
+  ): boolean => {
+    const grant = state.providerWriteWindow;
+    if (
+      !grant ||
+      Date.now() >= grant.expiresAtMs ||
+      !grant.origins.includes(location.origin) ||
+      !url
+    )
+      return false;
+    try {
+      const parsed = new URL(url, location.href);
+      const protectedValues = state.preparedValues.filter(
+        (value) => !grant.disclosableValues.includes(value),
+      );
+      return (
+        grant.origins.includes(parsed.origin) &&
+        !carriesPreparedValue(parsed.href, protectedValues) &&
+        !carriesPreparedValue(body, protectedValues)
+      );
+    } catch {
+      return false;
+    }
+  };
+  const providerFormAllowed = (form: HTMLFormElement): boolean => {
+    try {
+      if (state.providerWriteWindow?.scriptLoginToken) return false;
+      return providerRequestAllowed(
+        new URL(
+          form.getAttribute("action") || window.location.href,
+          document.baseURI,
+        ).href,
+        new URLSearchParams(
+          [...new FormData(form)].filter(
+            (entry): entry is [string, string] => typeof entry[1] === "string",
+          ),
+        ).toString(),
+      );
+    } catch {
+      return false;
+    }
+  };
   const isPageOwnedRead = (
     method: string,
     url: string | null,
@@ -979,6 +1321,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     bodyIsFormData = false,
   ): boolean => {
     const normalized = normalizeMethod(method);
+    if (providerRequestAllowed(url, bodyText)) return true;
     const carriesPrepared = requestCarriesPreparedValue(url, bodyText);
     // The site's own CAPTCHA check (its script and token requests) goes on
     // to the network fence, which lets the token requests out only at the
@@ -1059,41 +1402,25 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     if (parsedUrl.origin !== mutationWindow.expectedOrigin) {
       return false;
     }
-    if ((input.bodyText?.length ?? 0) > 65_536) return false;
-    const decode = (value: string): string => {
-      let text = value;
-      for (let pass = 0; pass < 4; pass++) {
-        const next = text
-          .replace(/(?:%[\da-f]{2})+/giu, (part) => {
-            try {
-              return decodeURIComponent(part);
-            } catch {
-              return part;
-            }
-          })
-          .replace(/\\u([\da-f]{4})/giu, (_match: string, hex: string) =>
-            String.fromCharCode(Number.parseInt(hex, 16)),
-          )
-          .replace(/\\(["'\\])/gu, "$1");
-        if (next === text) break;
-        text = next;
-      }
-      return text;
-    };
-    const signal =
-      `${decode(parsedUrl.pathname)} ${decode(parsedUrl.search)} ${decode(input.bodyText ?? "")}`
-        .replace(/\\(["'])/gu, "$1")
-        .replace(/([a-z0-9])([A-Z])/g, "$1 $2");
-    const finalActionSignal = new RegExp(guardInput.finalActionSignal, "iu");
-    const intermediateActionSignal =
-      /(?:^|[^a-z0-9])(?:autosave|auto[-_\s]*save|draft|save[-_\s]*(?:field|answer|progress|draft)?|update[-_\s]*(?:field|answer|progress|draft|application|form)?|set[-_\s]*(?:form[-_\s]*)?value|field|answer|attachment|upload|progress)(?:[^a-z0-9]|$)/iu;
+    const inspect = (window as unknown as Record<string, unknown>)
+      .__nestorIntermediateSignal as
+      | typeof inspectIntermediateMutationSignal
+      | undefined;
+    const completion = (window as unknown as Record<string, unknown>)
+      .__nestorUnsafeStepCompletion as
+      | typeof hasUnsafeStepCompletion
+      | undefined;
     if (
-      /\\u[\da-f]{4}|%[\da-f]{2}/iu.test(signal) ||
-      finalActionSignal.test(signal) ||
-      !intermediateActionSignal.test(signal)
-    ) {
+      !inspect ||
+      !completion ||
+      inspect({
+        url: parsedUrl.href,
+        bodyText: input.bodyText ?? null,
+        finalActionSignal: guardInput.finalActionSignal,
+      }) ||
+      completion(input.bodyText ?? "")
+    )
       return false;
-    }
     mutationWindow.remainingRequests -= 1;
     return true;
   };
@@ -1207,12 +1534,12 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       normalizeMethod(
         submitter.hasAttribute("formmethod")
           ? (submitter as HTMLButtonElement | HTMLInputElement).formMethod
-          : form.method,
+          : form.getAttribute("method"),
       ) === authorized.method &&
       normalizeUrl(
         (submitter.hasAttribute("formaction")
           ? (submitter as HTMLButtonElement | HTMLInputElement).formAction
-          : form.action) || window.location.href,
+          : form.getAttribute("action")) || window.location.href,
       ) === authorized.url,
     );
   };
@@ -1232,6 +1559,19 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
           event instanceof SubmitEvent && event.submitter instanceof HTMLElement
             ? event.submitter
             : null;
+        const login = state.providerWriteWindow;
+        if (
+          form &&
+          login?.scriptLoginToken &&
+          Date.now() < login.expiresAtMs &&
+          form.dataset.nestorScriptLogin === login.scriptLoginToken &&
+          submitter?.dataset.nestorScriptLogin === login.scriptLoginToken
+        ) {
+          // Run the site's JS submit handler, but never the native GET/POST.
+          event.preventDefault();
+          return;
+        }
+        if (form && providerFormAllowed(form)) return;
         if (form && authorizedSubmitter(form, submitter)) {
           state.authorizedFormActionWindow = null;
           return;
@@ -1239,8 +1579,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         if (formCarriesPreparedValue(form) === true) {
           recordBlockedAttempt(
             "dom_submit",
-            form?.method ?? "FORM",
-            normalizeUrl(form?.action ?? window.location.href),
+            form?.getAttribute("method") ?? "FORM",
+            normalizeUrl(form?.getAttribute("action") ?? window.location.href),
             true,
           );
         }
@@ -1281,7 +1621,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         recordBlockedAttempt(
           "dom_submit",
           "POST",
-          normalizeUrl(form?.action || window.location.href),
+          normalizeUrl(form?.getAttribute("action") || window.location.href),
         );
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -1299,15 +1639,15 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
       function guardedFormSubmit(this: HTMLFormElement): void {
         // The authorized send (or the person finishing the form) often goes
         // through the site's own script calling submit().
-        if (state.finalActionAllowed) {
+        if (state.finalActionAllowed || providerFormAllowed(this)) {
           originalFormSubmit.call(this);
           return;
         }
         if (formCarriesPreparedValue(this) === true) {
           recordBlockedAttempt(
             "form_submit",
-            this.method || "FORM",
-            normalizeUrl(this.action || window.location.href),
+            this.getAttribute("method") || "FORM",
+            normalizeUrl(this.getAttribute("action") || window.location.href),
             true,
           );
         }
@@ -1327,7 +1667,7 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         this: HTMLFormElement,
         submitter?: HTMLElement,
       ): void {
-        if (state.finalActionAllowed) {
+        if (state.finalActionAllowed || providerFormAllowed(this)) {
           originalRequestSubmit.call(this, submitter);
           return;
         }
@@ -1343,8 +1683,8 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
         if (formCarriesPreparedValue(this) === true) {
           recordBlockedAttempt(
             "form_request_submit",
-            this.method || "FORM",
-            normalizeUrl(this.action || window.location.href),
+            this.getAttribute("method") || "FORM",
+            normalizeUrl(this.getAttribute("action") || window.location.href),
             true,
           );
         }
@@ -1671,13 +2011,48 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
     typeof window.open === "function" &&
     window.open !== state.windowOpenWrapper
   ) {
+    const nativeOpen = window.open;
     const guardedWindowOpen: typeof window.open = (
       url?,
       target?,
       features?,
     ) => {
-      void target;
-      void features;
+      const arm = state.accountWindowArm;
+      state.accountWindowArm = null;
+      let destination: URL | null = null;
+      try {
+        if (url && String(url).trim())
+          destination = new URL(String(url), location.href);
+      } catch {
+        /* Refused below. */
+      }
+      if (
+        arm &&
+        arm.expiresAtMs > Date.now() &&
+        !state.pendingAccountWindow &&
+        (!target || target === "_blank") &&
+        !/(?:^|[,\s])(?:noopener|noreferrer)(?:[=,\s]|$)/iu.test(
+          features ?? "",
+        ) &&
+        destination &&
+        /^https?:$/u.test(destination.protocol) &&
+        !destination.username &&
+        !destination.password &&
+        navigator.userActivation?.isActive
+      ) {
+        const child = nativeOpen.call(window, "", target ?? "_blank", features);
+        if (child && child !== window) {
+          (child as unknown as Record<string, unknown>)[
+            "__nestorAccountWindowClaimToken"
+          ] = arm.token;
+          state.pendingAccountWindow = {
+            token: arm.token,
+            window: child,
+            url: destination.href,
+          };
+          return child;
+        }
+      }
       recordBlockedAttempt(
         "window_open",
         "GET",
@@ -1971,6 +2346,8 @@ async function ensureFramePrepareOnlyMutationGuard(
   await frame.evaluate(installMutationResponseBodyObserver);
   await frame.evaluate(installPageMessageRecorderInPage);
   await frame.evaluate(personSubmissionObserverSource());
+  await frame.evaluate(inspectIntermediateMutationSignal, undefined);
+  await frame.evaluate(hasUnsafeStepCompletion, undefined);
   await frame.evaluate(installPrepareOnlyMutationGuardInPage, {
     intermediateMutationsAuthorized,
     finalActionSignal: FINAL_ACTION_SIGNAL.source,
@@ -2030,6 +2407,7 @@ export async function ensurePrepareOnlyMutationGuard(
     prepareOnlyNetworkGuardStates.set(page, networkGuardState);
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) {
+        networkGuardState!.providerWriteWindow = null;
         networkGuardState!.authorizedFormActionWindow = null;
         networkGuardState!.attachmentUploadWindow = null;
       }
@@ -2082,6 +2460,118 @@ export async function ensurePrepareOnlyMutationGuard(
       const request = route.request();
       const method = request.method().trim().toUpperCase();
       const resourceType = request.resourceType();
+      if (
+        hasActiveAccountWindow(page) &&
+        !PREPARE_ONLY_SAFE_METHODS.has(method)
+      ) {
+        networkGuardState!.blockedAttempts.push({
+          kind: "network_request",
+          method,
+          url: request.url(),
+          at: new Date().toISOString(),
+        });
+        await route.abort("blockedbyclient");
+        return;
+      }
+      const providerWindow = networkGuardState!.providerWriteWindow;
+      if (
+        providerWindow?.login &&
+        request.isNavigationRequest() &&
+        new URL(request.url()).origin + new URL(request.url()).pathname ===
+          providerWindow.login.formAction
+      ) {
+        await route.abort("blockedbyclient").catch(() => undefined);
+        return;
+      }
+      if (providerWindow && !PREPARE_ONLY_SAFE_METHODS.has(method)) {
+        const frameOrigin = requestFrameOrigin(request);
+        const protectedValues = [
+          ...new Set([
+            ...networkGuardState!.preparedValues,
+            ...providerWindow.disclosableValues,
+          ]),
+        ].filter((value) => !providerWindow.disclosableValues.includes(value));
+        const allowed = (url: string, verb: string, body: string | null) => {
+          if (
+            requestUrlCarriesPreparedValue(
+              url,
+              PREPARE_ONLY_SAFE_METHODS.has(verb.toUpperCase())
+                ? [
+                    ...networkGuardState!.preparedValues,
+                    ...providerWindow.disclosableValues,
+                  ]
+                : protectedValues,
+            ) ||
+            carriesPreparedValue(body, protectedValues)
+          )
+            return false;
+          if (PREPARE_ONLY_SAFE_METHODS.has(verb.toUpperCase())) return true;
+          if (
+            providerWindow.login &&
+            (verb.toUpperCase() !== "POST" ||
+              !["fetch", "xhr"].includes(request.resourceType()) ||
+              request.frame() !== providerWindow.login.frame ||
+              inspectIntermediateMutationSignal({
+                url,
+                bodyText: body,
+                finalActionSignal: FINAL_ACTION_SIGNAL.source,
+              }) ||
+              hasUnsafeStepCompletion(body ?? ""))
+          )
+            return false;
+          if (
+            !providerWindow.active() ||
+            Date.now() >= providerWindow.expiresAtMs ||
+            providerWindow.remainingRequests <= 0 ||
+            !providerWindow.origins.includes(
+              parseHttpOriginOrNull(page.url()) ?? "",
+            ) ||
+            !providerWindow.origins.includes(
+              parseHttpOriginOrNull(url) ?? "",
+            ) ||
+            !providerWindow.origins.includes(frameOrigin ?? "")
+          )
+            return false;
+          providerWindow.remainingRequests--;
+          return true;
+        };
+        try {
+          if (
+            allowed(request.url(), method, request.postData()) &&
+            (await forwardCheckingHops(route, request, allowed, undefined, {
+              releaseSafeRedirect: true,
+            }))
+          )
+            return;
+        } catch {
+          await route.abort("failed").catch(() => undefined);
+          return;
+        }
+        networkGuardState!.blockedAttempts.push({
+          kind: "network_request",
+          method,
+          url: redactAccountUrl(request.url()),
+          at: new Date().toISOString(),
+        });
+        await route.abort("blockedbyclient");
+        return;
+      }
+      if (
+        !PREPARE_ONLY_SAFE_METHODS.has(method) &&
+        Date.now() >= networkGuardState!.finalActionAllowedUntilMs &&
+        accountSurfaceOrigins
+          .get(page)
+          ?.includes(parseHttpOriginOrNull(page.url()) ?? "")
+      ) {
+        networkGuardState!.blockedAttempts.push({
+          kind: "network_request",
+          method,
+          url: redactAccountUrl(request.url()),
+          at: new Date().toISOString(),
+        });
+        await route.abort("blockedbyclient");
+        return;
+      }
       if (Date.now() < networkGuardState!.finalActionAllowedUntilMs) {
         await route.continue();
         return;
@@ -2457,7 +2947,36 @@ export async function ensurePrepareOnlyMutationGuard(
       if (decision.allowed) {
         networkGuardState!.intermediateMutationWindow!.remainingRequests -= 1;
         networkGuardState!.allowedIntermediateRequests.add(request);
-        await route.continue();
+        try {
+          const answer = await forwardCheckingHops(
+            route,
+            request,
+            (url, verb, body) => {
+              if (PREPARE_ONLY_SAFE_METHODS.has(verb.toUpperCase()))
+                return !requestUrlCarriesPreparedValue(url, [
+                  ...networkGuardState!.preparedValues,
+                ]);
+              return classifyIntermediateMutationRequest({
+                authorized: networkGuardState!.intermediateMutationsAuthorized,
+                bodyText: body,
+                method: verb,
+                nowMs: Date.now(),
+                resourceKind,
+                url,
+                window: {
+                  ...networkGuardState!.intermediateMutationWindow!,
+                  remainingRequests: 1,
+                  expectedOrigin: frameOrigin!,
+                },
+              }).allowed;
+            },
+            undefined,
+            { releaseSafeRedirect: true },
+          );
+          if (!answer) await denyRequest();
+        } catch {
+          await route.abort("failed").catch(() => undefined);
+        }
         return;
       }
 
@@ -2489,6 +3008,8 @@ export async function ensurePrepareOnlyMutationGuard(
     // A job page's alert, confirm or prompt never opens a window.
     await page.addInitScript(installPageMessageRecorderInPage);
     await page.addInitScript({ content: personSubmissionObserverSource() });
+    await page.addInitScript(inspectIntermediateMutationSignal);
+    await page.addInitScript(hasUnsafeStepCompletion);
     await page.addInitScript(installPrepareOnlyMutationGuardInPage, {
       intermediateMutationsAuthorized: false,
       finalActionSignal: FINAL_ACTION_SIGNAL.source,
@@ -2594,6 +3115,7 @@ async function setPrepareOnlyIntermediateMutationWindow(
 export async function openPrepareOnlyIntermediateMutationWindow(
   page: Page,
 ): Promise<void> {
+  assertNoAccountWindow(page);
   // A delayed handler from a local press must not borrow a later field-save
   // window. Keep this document read-only until the person explicitly sends.
   if (prepareOnlyNetworkGuardStates.get(page)?.localPressReadOnly) return;
@@ -2671,6 +3193,7 @@ export async function openPrepareOnlyAttachmentUploadWindow(
   file: ApplyUploadFile,
   field: string | null = null,
 ): Promise<void> {
+  assertNoAccountWindow(page);
   const guard = prepareOnlyNetworkGuardStates.get(page);
   const origin = new URL(page.url()).origin;
   if (!guard?.attachmentUploadsAuthorized) return; // Local selection stays local.
@@ -2854,7 +3377,12 @@ export async function getBlockedPrepareOnlyAttempts(
       // A frame that has navigated away has no ledger to read any more.
     }
   }
-  return ledger.sort((left, right) => left.at.localeCompare(right.at));
+  return ledger
+    .map((attempt) => ({
+      ...attempt,
+      url: accountAttemptUrl(page, attempt.url),
+    }))
+    .sort((left, right) => left.at.localeCompare(right.at));
 }
 
 /**
@@ -2891,7 +3419,10 @@ export function recordPrepareOnlyRunInterruption(
     prepareOnlyNetworkGuardStates.set(page, createdState);
     ledgerState = createdState;
   }
-  ledgerState.blockedAttempts.push(attempt);
+  ledgerState.blockedAttempts.push({
+    ...attempt,
+    url: accountAttemptUrl(page, attempt.url),
+  });
   ledgerState.blockedAttempts.splice(
     0,
     Math.max(0, ledgerState.blockedAttempts.length - 32),
@@ -3173,6 +3704,10 @@ export interface ApplicationRunServiceWorkerSentinel {
   attachPage(page: Page): void;
   pendingWorkerEventCount(): number;
   detach(): void;
+  armAccountWindow(token: string, expiresAtMs: number): Promise<Page | null>;
+  onDetach?(listener: () => void): void;
+  disarmAccountWindow(): void;
+  isDetached(): boolean;
 }
 
 /**
@@ -3197,6 +3732,19 @@ export function createApplicationRunServiceWorkerSentinel(input: {
   let eventChannelBroken = false;
   let contextRouteInstalled = false;
   let detached = false;
+  let accountArm: {
+    token: string;
+    expiresAtMs: number;
+    claimed: boolean;
+    resolve: (page: Page | null) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
+  const disarmAccountWindow = () => {
+    if (!accountArm) return;
+    clearTimeout(accountArm.timer);
+    accountArm.resolve(null);
+    accountArm = null;
+  };
 
   const recordInterruption = (attempt: PrepareOnlyBlockedAttempt): void => {
     if (detached) {
@@ -3217,12 +3765,15 @@ export function createApplicationRunServiceWorkerSentinel(input: {
     return pageUrl && isHttpUrlLike(pageUrl) ? pageUrl : input.targetUrl;
   };
 
-  const isOwnedPage = async (page: Page): Promise<boolean> => {
-    if (!ledgerPage || detached) return false;
+  const isOwnedPage = async (
+    page: Page,
+    owner = ledgerPage,
+  ): Promise<boolean> => {
+    if (!owner) return false;
     let current: Page | null = page;
     const seen = new Set<Page>();
     for (let depth = 0; current && depth < 8; depth += 1) {
-      if (current === ledgerPage || ownedPopups.has(current)) return true;
+      if (current === owner || ownedPopups.has(current)) return true;
       if (seen.has(current) || typeof current.opener !== "function") break;
       seen.add(current);
       current = await current.opener().catch(() => null);
@@ -3257,8 +3808,49 @@ export function createApplicationRunServiceWorkerSentinel(input: {
         void (async () => {
           // A shared context also contains other applications, searches, and
           // the person's tabs. Only this run's opener chain is contained.
-          if (!(await isOwnedPage(page))) return;
+          const opener = ledgerPage;
+          if (!opener || !(await isOwnedPage(page, opener))) return;
           ownedPopups.add(page);
+          const arm = accountArm;
+          const directOpener = await page.opener().catch(() => null);
+          const matchesToken =
+            arm &&
+            (await page
+              .evaluate(
+                (token) =>
+                  (window as unknown as Record<string, unknown>)[
+                    "__nestorAccountWindowClaimToken"
+                  ] === token,
+                arm.token,
+              )
+              .catch(() => false));
+          if (
+            !detached &&
+            arm &&
+            accountArm === arm &&
+            ledgerPage === opener &&
+            !arm.claimed &&
+            now().getTime() < arm.expiresAtMs &&
+            directOpener === opener &&
+            matchesToken
+          ) {
+            arm.claimed = true;
+            claimedAccountWindows.add(page);
+            activeAccountWindows.set(opener, page);
+            const clear = () => {
+              if (activeAccountWindows.get(opener) === page)
+                activeAccountWindows.delete(opener);
+              opener.off("domcontentloaded", navigated);
+            };
+            const navigated = () => clear();
+            page.once("close", clear);
+            opener.on("domcontentloaded", navigated);
+            detachListeners.push(() =>
+              opener.off("domcontentloaded", navigated),
+            );
+            arm.resolve(page);
+            return;
+          }
           let popupUrl: string | null = null;
           try {
             const candidateUrl = page.url();
@@ -3273,7 +3865,7 @@ export function createApplicationRunServiceWorkerSentinel(input: {
           } catch {
             popupUrl = null;
           }
-          recordInterruption({
+          recordPrepareOnlyRunInterruption(opener, {
             kind: "popup_open",
             method: "GET",
             url: popupUrl,
@@ -3413,11 +4005,33 @@ export function createApplicationRunServiceWorkerSentinel(input: {
     pendingWorkerEventCount() {
       return pendingWorkerEvents.length;
     },
+    onDetach(listener) {
+      if (detached) listener();
+      else detachListeners.push(listener);
+    },
+    armAccountWindow(token, expiresAtMs) {
+      if (detached || accountArm) return Promise.resolve(null);
+      return new Promise<Page | null>((resolve) => {
+        accountArm = {
+          token,
+          expiresAtMs,
+          claimed: false,
+          resolve,
+          timer: setTimeout(
+            disarmAccountWindow,
+            Math.max(0, expiresAtMs - now().getTime()),
+          ),
+        };
+      });
+    },
+    disarmAccountWindow,
+    isDetached: () => detached,
     detach() {
       if (detached) {
         return;
       }
       detached = true;
+      disarmAccountWindow();
       while (detachListeners.length > 0) {
         detachListeners.pop()?.();
       }
@@ -3617,5 +4231,61 @@ export function buildPreparationResult(input: {
     externalWrites: input.externalWrites
       ? [...input.externalWrites]
       : undefined,
+  });
+}
+
+export async function openPrepareOnlyProviderWriteWindow(
+  page: Page,
+  input: {
+    origins: readonly string[];
+    disclosableValues: readonly string[];
+    active: () => boolean;
+    login?: { frame: Frame; formAction: string; token: string };
+  },
+): Promise<(() => Promise<void>) & { writes(): number }> {
+  const state = prepareOnlyNetworkGuardStates.get(page);
+  if (!state) throw new Error("The application guard is not installed.");
+  const allowance = 8;
+  const grant = {
+    ...input,
+    expiresAtMs: Date.now() + 10_000,
+    remainingRequests: allowance,
+  };
+  state.providerWriteWindow = grant;
+  const target = input.login?.frame ?? page;
+  await target.evaluate(
+    ({ origins, disclosableValues, expiresAtMs, scriptLoginToken }) => {
+      const guard = (window as unknown as Record<string, unknown>)[
+        "__nestorPrepareOnlyMutationGuardV1"
+      ] as { providerWriteWindow?: unknown } | undefined;
+      if (guard)
+        guard.providerWriteWindow = {
+          origins,
+          disclosableValues,
+          expiresAtMs,
+          scriptLoginToken,
+        };
+    },
+    {
+      origins: grant.origins,
+      disclosableValues: grant.disclosableValues,
+      expiresAtMs: grant.expiresAtMs,
+      scriptLoginToken: input.login?.token,
+    },
+  );
+  const close = async () => {
+    if (state.providerWriteWindow === grant) state.providerWriteWindow = null;
+    await target
+      .evaluate(() => {
+        const guard = (window as unknown as Record<string, unknown>)[
+          "__nestorPrepareOnlyMutationGuardV1"
+        ] as { providerWriteWindow?: unknown } | undefined;
+        if (guard) guard.providerWriteWindow = null;
+      })
+      .catch(() => undefined);
+  };
+  // Provider writes this window let through, for a caller's commit count.
+  return Object.assign(close, {
+    writes: () => allowance - Math.max(0, grant.remainingRequests),
   });
 }

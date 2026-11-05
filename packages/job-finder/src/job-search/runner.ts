@@ -36,6 +36,7 @@ interface ActiveSearch {
   ready: Promise<FitQueue | null>;
   setReady(fits: FitQueue | null): void;
   queueProgress?: () => Partial<JobSearchProgress>;
+  flush?: () => void;
   enqueue?: (
     target: JobDiscoveryTarget,
     force: boolean,
@@ -62,6 +63,7 @@ export function createJobSearchRunner(
     siteDirty = false;
   let continuation: ReturnType<typeof setTimeout> | null = null;
   let recoveryQueue: FitQueue | null = null;
+  let recoveryError: string | null = null;
   let visibleIds: readonly number[] = [];
   const scheduleFit = (delay = 300) => {
     if (continuation) clearTimeout(continuation);
@@ -90,6 +92,12 @@ export function createJobSearchRunner(
       : { sources: [], progress: null };
     const fits = deps.store.fitCounts();
     return {
+      fitRunning: Boolean(
+        (active && !active.controller.signal.aborted) ||
+        (recovery && !recovery.controller.signal.aborted),
+      ),
+      fitError:
+        fits.checking > 0 ? (recoveryError ?? search?.error ?? null) : null,
       fitChecking: fits.checking,
       fitRechecking: fits.rechecking,
       search: search ? structuredClone(search) : null,
@@ -169,6 +177,7 @@ export function createJobSearchRunner(
     targets: JobDiscoveryTarget[],
     forced: { ids: ReadonlySet<string>; full: boolean },
   ) => {
+    recoveryError = null;
     setMaxListeners(0, run.controller.signal);
     const signal = run.controller.signal,
       settings = run.record!.settings;
@@ -227,6 +236,7 @@ export function createJobSearchRunner(
       dirty.add(source);
       flushTimer ??= setTimeout(flush, SOURCE_WRITE_GATHER_MS);
     };
+    run.flush = flush;
     const markDone = (source: SourceWork) => {
       if (
         !current(source) ||
@@ -332,7 +342,6 @@ export function createJobSearchRunner(
               `This site could not be read: ${errorMessage(error)}`,
             );
           source.collected = true;
-          source.processed = source.row.cards;
           markDone(source);
         });
     };
@@ -731,7 +740,7 @@ export function createJobSearchRunner(
         id !== undefined
           ? [String(id)]
           : search
-            ? resultRows.partialIds(search.id)
+            ? resultRows.unfinishedIds(search.id)
             : [];
       const targets = ids.flatMap((sourceId) => {
         const site = siteRows.get(Number(sourceId));
@@ -758,6 +767,29 @@ export function createJobSearchRunner(
       recovery?.controller.abort();
       if (!active) return;
       const run = active;
+      run.flush?.();
+      if (run.record) {
+        let after = 0;
+        for (;;) {
+          const page = resultRows.list({
+            searchId: run.record.id,
+            text: "",
+            state: null,
+            after,
+            limit: 100,
+          });
+          for (const row of page.rows)
+            if (row.state === "waiting" || row.state === "searching")
+              resultRows.put(run.record.id, {
+                ...row,
+                state: "stopped",
+                phase: null,
+                message: `Stopped with ${row.cards} listing cards collected. Saved results are kept; Continue unfinished sites resumes remaining work.`,
+              });
+          if (page.nextCursor === null) break;
+          after = page.nextCursor;
+        }
+      }
       run.controller.abort();
       run.setReady(null);
       finish(run, "stopped");
@@ -777,6 +809,7 @@ export function createJobSearchRunner(
     },
     scoreUnscored() {
       if (recovery) return recovery.result;
+      recoveryError = null;
       const controller = new AbortController();
       const result = Promise.resolve()
         .then(async () => {
@@ -821,7 +854,11 @@ export function createJobSearchRunner(
             controller.signal,
             concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
             () => notify(),
-            () => {},
+            () => {
+              recoveryError =
+                "Some saved jobs could not be scored. Your progress is kept; retry fit to continue.";
+              notify();
+            },
             // The last search's note was for that search only.
             search ? { ...search.settings, note: "" } : undefined,
             () => notify(),
@@ -839,6 +876,8 @@ export function createJobSearchRunner(
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return 0;
+          recoveryError =
+            "Fit scoring did not finish. Your progress is kept; retry fit to continue.";
           throw error;
         })
         .finally(() => {
@@ -847,6 +886,7 @@ export function createJobSearchRunner(
           notify();
         });
       recovery = { controller, result };
+      notify();
       return result;
     },
   };

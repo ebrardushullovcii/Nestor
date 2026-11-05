@@ -5,6 +5,26 @@ import { readInventoryHtml } from "./listing-html";
 
 const source = { id: "board", label: "Board" };
 const url = "https://board.example.test/jobs";
+
+test.each(["Show more vacancies", "Load 10 more positions", "Next results →"])(
+  "B2 recognizes observed pagination wording: %s",
+  (label) => {
+    expect(
+      readInventoryHtml(`<button>${label}</button>`, url, source)
+        .needsInteraction,
+    ).toBe(true);
+    expect(
+      readInventoryHtml(`<a href="?page=2">${label}</a>`, url, source).next,
+    ).toEqual([`${url}?page=2`]);
+    expect(
+      readInventoryHtml(
+        `<button disabled>${label}</button><button hidden>${label}</button><button aria-disabled="true">${label}</button>`,
+        url,
+        source,
+      ).needsInteraction,
+    ).toBe(false);
+  },
+);
 const job = (title: string, path: string) =>
   JSON.stringify({
     title,

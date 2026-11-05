@@ -159,7 +159,7 @@ describe("intermediate application mutation policy", () => {
     expect(
       classify({ url: "https://tracker.example.net/api/draft" }).reason,
     ).toBe("cross_origin");
-    expect(classify({ url: "https://apply.example.com/graphql" }).reason).toBe(
+    expect(classify({ bodyText: "opaque binary payload" }).reason).toBe(
       "ambiguous_mutation",
     );
     expect(classify({ method: "GET" }).reason).toBe("unsafe_method");
@@ -171,6 +171,36 @@ describe("intermediate application mutation policy", () => {
       "unsupported_transport",
     );
   });
+});
+
+test.each([
+  ["/api/candidate/42", '{"firstName":"Jamie"}'],
+  ["/draft/save", '{"answer":"I submit weekly reports"}'],
+  ["/answers", "answer=I+submit+weekly+reports"],
+  [
+    "/draft/save",
+    '{"answer":"I submit weekly reports; status:done is just prose"}',
+  ],
+])(
+  "bounded structured save needs no endpoint vocabulary: %s",
+  (path, bodyText) => {
+    expect(
+      classify({ url: `https://apply.example.com${path}`, bodyText }).allowed,
+    ).toBe(true);
+  },
+);
+
+test.each([
+  ["/graphql", '{"query":"mutation Save { submitApplication }"}'],
+  ["/api/draft?action=submit", '{"firstName":"Jamie"}'],
+  ["/draft", '{"answer":"submit"}'],
+  ["/draft", '{"operation":"SubmitApplication"}'],
+  ["/draft", '{"query":"mutation Save { x: submitApplication }"}'],
+  ["/draft", '{"action":"submit","action":"save"}'],
+])("final operation channels stay refused: %s %s", (path, bodyText) => {
+  expect(
+    classify({ url: `https://apply.example.com${path}`, bodyText }).allowed,
+  ).toBe(false);
 });
 
 describe("the second net refuses the Apply agent's completion probes in a Send for me save window", () => {

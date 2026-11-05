@@ -24,9 +24,9 @@ export function applyFailureCause(reason: string | null | undefined): string {
     : GENERIC;
 }
 
-/** The cause line and the one fact that matters next: nothing went out. */
+/** A failure alone does not establish what the site received. */
 export function applyFailureLine(reason: string | null | undefined): string {
-  return `${applyFailureCause(reason)} Nothing was sent.`;
+  return applyFailureCause(reason);
 }
 
 const GENERIC = "Apply couldn’t finish this application.";

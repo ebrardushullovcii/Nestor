@@ -1,46 +1,45 @@
-# ADR 0019: Muse Spark default routing with DeepSeek V4.1 Flash for aggressive tailoring
+# ADR 0019: DeepSeek V4.1 Flash product routing
 
 ## Status
 
-Partly superseded by ADR 0037 for the sidebar assistant's default route (DeepSeek V4.1 Flash; packages/ai-providers/src/assistant-model.ts). Muse text/vision defaults, the aggressive-resume route and independent overrides remain accepted; the 2026-10-23 resume-writer reasoning amendment still applies. The separate text and
-vision route configuration from ADR 0010 stays.
-
-Amended 2026-10-23: Muse resume writing has its own smaller reasoning budget.
+Accepted; amended 2026-11-04 by the owner-selected functionality campaign.
+This replaces the earlier Muse text/vision and implicit MiMo title-screen defaults.
+Independent role overrides and the separate transcription route remain.
 
 ## Context
 
-AI access ships bundled with the product: users never enter a key or choose a
-model, so the code defaults are what a packaged build runs with. ADR 0010 chose
-DeepSeek V4 Flash for text and GPT-5.6 Luna for images. Since then the owner has
-run Muse Spark Contributor on OpenCode Go for every surface, including images,
-and routed only aggressive resume tailoring to DeepSeek. OpenCode Go now offers
-`deepseek-v4.1-flash`.
+The earlier default was Muse Contributor via Responses with DeepSeek only for
+aggressive tailoring; ADR 0037 later moved the sidebar to DeepSeek. The owner
+now selects DeepSeek V4.1 Flash for every product inference role. Baseline search
+requests were pinned to this model, so they did not prove normal defaults.
+Some HTTP 200 fit responses exhausted output in reasoning or were unusable;
+these are incomplete judgments, not evidence that no jobs fit or a provider
+outage. Simple synthetic image inputs were accepted by the gateway, while the
+assistant's capability table still refused them.
 
 ## Decision
 
-- Default text, tool-calling, and every vision route (resume scan, browser
-  visual analysis, Live Assistant) to `muse-spark-1.3-contributor` through
-  the Responses API with `xhigh` reasoning.
-- Default aggressive resume tailoring to `deepseek-v4.1-flash` through Chat
-  Completions with `high` reasoning, on its own route so the whole aggressive
-  lifecycle stays on one provider (ADR 0018).
-- Muse resume writing uses `medium` reasoning for its complete proposal;
-  other models keep their route's writing effort. The independent claim
-  check and re-check of fixes keep their own effort. The internal
-  `NESTOR_AI_RESUME_WRITER_REASONING_EFFORT` override applies to either route.
-- Keep every route independently overridable through the existing env vars.
-- Keep local Whisper or an explicit audio model for transcription.
+- Default text, tools and image routes to `deepseek-v4.1-flash` via Chat
+  Completions. Use the existing DeepSeek sidebar's low-effort general default;
+  this is a routing baseline, not a quality conclusion from a search contrast.
+- Keep effort independent by task: bounded fit batches and title screening
+  default to none on DeepSeek; search/page/application turns stay low and claim
+  checks stay medium. Aggressive resume writing keeps high. Explicit task and
+  role overrides remain authoritative; there is no implicit model fallback.
+- Declare accepted image-input transport without claiming OCR or visual-task
+  accuracy. Keep local Whisper or an explicit audio model for transcription.
+- Retain full listing evidence and valid judgments when a row is malformed.
+  Retry only unfinished jobs in smaller groups. Saved unfinished fit work has
+  an explicit Retry fit action and honest inactive/remaining status.
+- Preserve explicit Muse Responses strict-schema handling independently of the
+  default constant, so changing defaults cannot accidentally grant a different
+  model that verified adapter behavior.
 
 ## Consequences
 
-- A packaged build with only `NESTOR_AI_API_KEY` set behaves like the
-  owner's dogfood setup; no local env file is needed to reproduce it.
-- `.env.example`, `docs/AI_PROVIDER_SETUP.md`, and the routing sentences in
-  `docs/ARCHITECTURE.md` describe this default.
-- Missing AI is presented to the user as a temporary outage, never as setup
-  they failed to do (the product has no user-facing AI settings).
-
-## References
-
-- ADR 0010: OpenCode Go mixed text and vision routing
-- ADR 0018: Aggressive tailoring user-owned claim relaxations
+A key-only installation uses the selected route. Existing local overrides need
+separate reconciliation; changing source does not change a configured model.
+Development probes establish parseability and routing only. Fresh built-app
+judgments, continuation, cancellation and later independent grading still
+establish whether the search outcome improved. No application authority,
+eligibility rule, board-specific policy or release gate changes here.

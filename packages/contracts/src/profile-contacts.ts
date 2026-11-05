@@ -49,3 +49,11 @@ export function followPrimaryContacts(
         },
       };
 }
+
+/** The existing application contact is the intended account identity. */
+export function intendedAccountEmail(profile: CandidateProfile): string | null {
+  const email = (
+    profile.applicationIdentity.preferredEmail ?? profile.email
+  )?.trim();
+  return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email) ? email : null;
+}

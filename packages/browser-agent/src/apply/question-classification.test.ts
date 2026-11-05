@@ -1,3 +1,4 @@
+import type { ApplicationAttestationKind } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
 import { buildApplyFormObservation } from "./page-hands";
@@ -6,7 +7,10 @@ import type { LLMClient } from "../agent/contracts";
 import {
   classifyApplicationQuestions,
   createQuestionClassifier,
+  applicationQuestionClassificationContext,
 } from "./question-classification";
+
+const readContext = () => "synthetic-resolved-context";
 
 const formQuestions = [
   ["First Name", "profile.firstName"],
@@ -375,7 +379,7 @@ test("shares one classification for concurrent decisions and changed values on t
   const classify = createQuestionClassifier({ client });
   const first = classify(controls(), "step1");
   const second = classify(controls(), "step1");
-  expect(first).toBe(second);
+  expect(await first).toEqual(await second);
   const questions = controls();
   questions[0].value = "Annual";
   questions[0].ref = "new-handle";
@@ -719,16 +723,20 @@ test("reuses a complete identical model read across applications, without sharin
     { index: 0, asksAboutPay: true, declarationKind: null },
   ]);
   const cacheScope = {};
-  const first = await createQuestionClassifier({ client, cacheScope })(
-    controls(),
-  );
+  const first = await createQuestionClassifier({
+    client,
+    cacheScope,
+    readContext,
+  })(controls());
   first.get("Pay")!.asksAboutPay = false;
   const nextControls = controls();
   nextControls[0].ref = "another-application";
   nextControls[0].value = "Annual";
-  const next = await createQuestionClassifier({ client, cacheScope })(
-    nextControls,
-  );
+  const next = await createQuestionClassifier({
+    client,
+    cacheScope,
+    readContext,
+  })(nextControls);
   expect(next.get("Pay")?.asksAboutPay).toBe(true);
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
@@ -744,9 +752,13 @@ test("shared meaning distinguishes question options, requirements and AI-client 
     controls("Pay", ["Hourly"]),
     controls("Rate"),
   ]) {
-    await createQuestionClassifier({ client, cacheScope })(questions);
+    await createQuestionClassifier({ client, cacheScope, readContext })(
+      questions,
+    );
   }
-  await createQuestionClassifier({ client, cacheScope: {} })(controls());
+  await createQuestionClassifier({ client, cacheScope: {}, readContext })(
+    controls(),
+  );
   expect(client.chatWithTools).toHaveBeenCalledTimes(4);
 });
 
@@ -754,15 +766,19 @@ test("incomplete, failed and cancelled reads never become reusable model decisio
   const cacheScope = {};
   const client = clientReplying([]);
   expect(
-    (await createQuestionClassifier({ client, cacheScope })(controls())).get(
-      "Pay",
-    )?.readFailed,
+    (
+      await createQuestionClassifier({ client, cacheScope, readContext })(
+        controls(),
+      )
+    ).get("Pay")?.readFailed,
   ).toBe(true);
   vi.mocked(client.chatWithTools).mockRejectedValueOnce(new Error("offline"));
   expect(
-    (await createQuestionClassifier({ client, cacheScope })(controls())).get(
-      "Pay",
-    )?.readFailed,
+    (
+      await createQuestionClassifier({ client, cacheScope, readContext })(
+        controls(),
+      )
+    ).get("Pay")?.readFailed,
   ).toBe(true);
   vi.mocked(client.chatWithTools).mockResolvedValue({
     toolCalls: [
@@ -793,15 +809,23 @@ test("incomplete, failed and cancelled reads never become reusable model decisio
     });
   });
   await expect(
-    createQuestionClassifier({ client, cacheScope, signal: abort.signal })(
-      controls(),
-    ),
+    createQuestionClassifier({
+      client,
+      cacheScope,
+      readContext,
+      signal: abort.signal,
+    })(controls()),
   ).rejects.toThrow("Stopped");
-  await createQuestionClassifier({ client, cacheScope })(controls());
+  await createQuestionClassifier({ client, cacheScope, readContext })(
+    controls(),
+  );
   await expect(
-    createQuestionClassifier({ client, cacheScope, signal: abort.signal })(
-      controls(),
-    ),
+    createQuestionClassifier({
+      client,
+      cacheScope,
+      readContext,
+      signal: abort.signal,
+    })(controls()),
   ).rejects.toThrow("Stopped");
   expect(client.chatWithTools).toHaveBeenCalledTimes(8);
 });
@@ -812,12 +836,16 @@ test("bounds shared question reads and reads an evicted page with the model agai
     { index: 0, asksAboutPay: false, declarationKind: null },
   ]);
   for (let page = 0; page < 513; page++)
-    await createQuestionClassifier({ client, cacheScope })(
+    await createQuestionClassifier({ client, cacheScope, readContext })(
       controls(`Page ${page}`),
     );
-  await createQuestionClassifier({ client, cacheScope })(controls("Page 512"));
+  await createQuestionClassifier({ client, cacheScope, readContext })(
+    controls("Page 512"),
+  );
   expect(client.chatWithTools).toHaveBeenCalledTimes(513);
-  await createQuestionClassifier({ client, cacheScope })(controls("Page 0"));
+  await createQuestionClassifier({ client, cacheScope, readContext })(
+    controls("Page 0"),
+  );
   expect(client.chatWithTools).toHaveBeenCalledTimes(514);
 }, 30_000);
 
@@ -932,7 +960,7 @@ test("settled readings are offered only once every question has come back", asyn
   expect(classify.settled(controls("Rate"))).toBeUndefined();
 });
 
-test("typed readings bind instructions while keeping meaning across a source refresh", async () => {
+test("typed readings bind instructions and invalidate changed source evidence", async () => {
   const client = clientReplying([]);
   vi.mocked(client.chatWithTools).mockImplementation(() =>
     Promise.resolve({
@@ -974,15 +1002,15 @@ test("typed readings bind instructions while keeping meaning across a source ref
   );
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
   value = "Edited text";
-  expect(classify.settled(page, context)).toBeDefined();
+  expect(classify.settled(page, context)).toBeUndefined();
   await classify(page, context);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
   expect(
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[0][0]),
   ).toContain("Write this yourself");
   page[0].groupLabel = "Employment";
   await classify(page, context);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
 });
 test("duplicate or malformed tags never become an answer permission", async () => {
   const client = clientReplying([]);
@@ -1043,35 +1071,37 @@ test("a GitHub help-text change is read again instead of reusing the URL reading
   ).toContain(page[0].hint);
 });
 
-test("shares individual meanings across changed batches and rebinds current saved answers", async () => {
+test("changed saved-answer evidence is read again across batches", async () => {
   const client: LLMClient = {
-    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) =>
-      Promise.resolve({
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
+      const questions = JSON.parse(messages[1].content) as {
+        question: string;
+      }[];
+      const id = messages[2]?.content.includes("answerLibrary.new")
+        ? "answerLibrary.new"
+        : "answerLibrary.old";
+      return Promise.resolve({
         toolCalls: [
           {
             id: "read",
-            type: "function" as const,
+            type: "function",
             function: {
               name: "report_question_kinds",
               arguments: JSON.stringify({
-                plainIndexes: [0],
+                plainIndexes: questions.map((_, index) => index),
                 flagged: [],
-                tags: [
-                  {
-                    index: 0,
-                    kind: "other",
-                    country: null,
-                    sourceId: messages[1].content.includes('"Email"')
-                      ? "answerLibrary.old"
-                      : null,
-                  },
-                ],
+                tags: questions.map((question, index) => ({
+                  index,
+                  kind: "other",
+                  country: null,
+                  sourceId: question.question === "Email" ? id : null,
+                })),
               }),
             },
           },
         ],
-      }),
-    ),
+      });
+    }),
   };
   const cacheScope = {};
   let sources = [
@@ -1086,6 +1116,7 @@ test("shares individual meanings across changed batches and rebinds current save
   const first = createQuestionClassifier({
     client,
     cacheScope,
+    readContext,
     sources: () => sources,
   });
   await first(controls("Email", []));
@@ -1101,6 +1132,7 @@ test("shares individual meanings across changed batches and rebinds current save
   const next = createQuestionClassifier({
     client,
     cacheScope,
+    readContext,
     sources: () => sources,
   });
   const email = controls("Email", []);
@@ -1114,9 +1146,9 @@ test("shares individual meanings across changed batches and rebinds current save
         vi.mocked(client.chatWithTools).mock.calls[1][0][1].content,
       ) as { question: string }[]
     ).map((q) => q.question),
-  ).toEqual(["Phone"]);
+  ).toEqual(["Phone", "Email"]);
   sources = [];
-  expect(next.settled(email)?.get("Email")?.answerTags?.sourceId).toBeNull();
+  expect(next.settled(email)).toBeUndefined();
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
 
@@ -1211,6 +1243,7 @@ test.each([
       const classify = createQuestionClassifier({
         client,
         cacheScope,
+        readContext,
         sources,
       });
       const readings = await classify(page);
@@ -1321,6 +1354,7 @@ test("a profile change during a pending read cannot borrow its source selection"
   ];
   const classify = createQuestionClassifier({ client, sources: () => sources });
   const result = classify(controls("Phone", []));
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
   sources[0].value = "Another Applicant";
   finish(report("profile.phone"));
   expect((await result).get("Phone")?.answerTags?.sourceId).toBeNull();
@@ -1381,7 +1415,7 @@ test("cached legal meaning rebinds country and evidence without inheriting permi
     sourceId: null,
     hasAdditionalConditions: true,
   });
-  expect(client.chatWithTools).toHaveBeenCalledOnce();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
 
 test("wizard chrome changes reuse meaning while changed own-word instructions reread it", async () => {
@@ -1505,4 +1539,115 @@ test("residence-relative work permission rereads changed residence, even for a r
     (await classify(question)).get(question[0].label)?.answerTags,
   ).toMatchObject({ country: "FR", sourceId: null });
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("classification cache uses all evidence and resolved recipient/permission/authority context without field-value churn", async () => {
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [
+      { index: 0, kind: "other", country: null, sourceId: "profile.email" },
+    ],
+  });
+  const cacheScope = {};
+  let evidence = [
+    {
+      id: "profile.email",
+      value: "synthetic@example.test",
+      purpose: "profile",
+      country: null as string | null,
+    },
+    {
+      id: "resume.text",
+      value: "Recorded experience.",
+      purpose: "writing",
+      country: null as string | null,
+    },
+  ];
+  const permissions = {
+    signIn: false,
+    googleSignIn: false,
+    createAccounts: false,
+    solveCaptchas: false,
+  };
+  const contextInput = {
+    sources: {
+      posting: {
+        company: "Synthetic employer",
+        title: "Engineer",
+        location: "Germany",
+        description: "Synthetic listing",
+      },
+    },
+    application: { startingUrl: "https://employer.example.test/job/1" },
+    payDisclosed: false,
+    approvedAttestations: [] as ApplicationAttestationKind[],
+    browserPermissions: permissions,
+  };
+  const make = () =>
+    createQuestionClassifier({
+      client,
+      cacheScope,
+      readContext: () => applicationQuestionClassificationContext(contextInput),
+      sources: () => evidence,
+    });
+  await make()(controls("Email", []));
+  const reviewed = controls("Email", []);
+  reviewed[0].ref = "send-ref";
+  reviewed[0].value = "synthetic@example.test";
+  reviewed[0].answered = true;
+  await make()(reviewed);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  for (const change of [
+    () => {
+      evidence = evidence.map((source) =>
+        source.id === "resume.text"
+          ? { ...source, value: "Changed resume evidence." }
+          : source,
+      );
+    },
+    () => {
+      evidence = [
+        ...evidence,
+        {
+          id: "posting.description",
+          value: "Changed requirements",
+          purpose: "writing",
+          country: null,
+        },
+      ];
+    },
+    () => {
+      permissions.googleSignIn = true;
+    },
+    () => {
+      contextInput.sources.posting.company = "Other recipient";
+    },
+    () => {
+      contextInput.application.startingUrl = "https://other.example.test/job/1";
+    },
+    () => {
+      contextInput.payDisclosed = true;
+    },
+    () => {
+      contextInput.approvedAttestations.push("truthfulness_certification");
+    },
+  ]) {
+    const before = vi.mocked(client.chatWithTools).mock.calls.length;
+    change();
+    await make()(reviewed);
+    expect(client.chatWithTools).toHaveBeenCalledTimes(before + 1);
+  }
+  const unresolved = () =>
+    createQuestionClassifier({ client, cacheScope, sources: () => evidence });
+  const count = vi.mocked(client.chatWithTools).mock.calls.length;
+  await unresolved()(reviewed);
+  await unresolved()(reviewed);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(count + 2);
+  expect(
+    applicationQuestionClassificationContext({
+      ...contextInput,
+      browserPermissions: undefined,
+    }),
+  ).toBeNull();
 });

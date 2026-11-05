@@ -62,6 +62,7 @@ export {
   type ApplyExecutionOutcome,
   type ApplyExecutorDeps,
 } from "./policy-executor";
+export { UNCONFIRMED_STEP_LABEL } from "./local-step-preflight";
 export {
   fileUploadProblems,
   runSubmitPreflight,
@@ -116,3 +117,6 @@ export { createQuestionClassifier } from "./question-classification";
 export { replaceApprovedApplicationLetter } from "./approved-letter";
 
 export { checkClassifiedApplicationAnswers } from "./classified-answer-check";
+export { duplicatedHistoryRows } from "./answer-source-catalog";
+
+export { equivalentApplicationQuestions } from "./question-equivalence";

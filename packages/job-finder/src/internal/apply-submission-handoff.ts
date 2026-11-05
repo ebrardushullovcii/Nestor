@@ -209,6 +209,13 @@ function describeNotSubmittedOutcome(input: {
   siteLabel: string;
 }): { summary: string; detail: string; nextActionLabel: string } {
   switch (input.reason) {
+    case "account_window_open":
+      return {
+        summary: "Not sent: an account window is still open",
+        detail:
+          "Finish or close the account window, then continue this application. Nothing was sent.",
+        nextActionLabel: "Finish or close the account window",
+      };
     case SITE_UNREACHABLE_REASON:
       return {
         summary: `Not sent: ${input.siteLabel} could not be reached`,

@@ -113,6 +113,33 @@ export function createFitQueue(
       const fingerprints = new Map(
         jobs.map((job) => [job.id, fitInputFingerprint(key, job)]),
       );
+      const answered = new Set<number>();
+      const persist = async (
+        updates: Awaited<ReturnType<typeof deps.engine.fitJobs>>,
+      ) => {
+        signal.throwIfAborted();
+        const latest = await liveContext();
+        signal.throwIfAborted();
+        const latestKey = fitContextFingerprint(latest, settings?.note);
+        const valid = updates.flatMap((update) => {
+          if (answered.has(update.id)) return [];
+          const job = deps.store.getJob(update.id);
+          const fingerprint = fingerprints.get(update.id);
+          if (
+            !job ||
+            !fingerprint ||
+            fingerprint !== fitInputFingerprint(latestKey, job)
+          ) {
+            deferred = true;
+            return [];
+          }
+          answered.add(update.id);
+          return [{ ...update, inputFingerprint: fingerprint }];
+        });
+        deps.store.setFit(valid);
+        scored += valid.length;
+        onScored(valid.length);
+      };
       let updates: Awaited<ReturnType<typeof deps.engine.fitJobs>>;
       try {
         updates = await abortable(
@@ -120,36 +147,27 @@ export function createFitQueue(
             jobs: jobs.map((job) => ({ ...job, fit: null })),
             context: current,
             signal,
+            onBatch: (fits) => persist([...fits]),
             ...(settings?.note ? { request: settings.note } : {}),
           }),
           signal,
         );
       } catch (error) {
         signal.throwIfAborted();
-        if (retry(jobs, true).length) throw error;
+        if (
+          retry(
+            jobs.filter((job) => !answered.has(job.id)),
+            answered.size === 0,
+          ).length
+        )
+          throw error;
         return;
       }
       signal.throwIfAborted();
-      const latest = await liveContext();
-      const latestKey = fitContextFingerprint(latest, settings?.note);
-      const valid = updates.flatMap((update) => {
-        const job = deps.store.getJob(update.id);
-        const fingerprint = fingerprints.get(update.id);
-        if (
-          !job ||
-          !fingerprint ||
-          fingerprint !== fitInputFingerprint(latestKey, job)
-        ) {
-          deferred = true;
-          return [];
-        }
-        return [{ ...update, inputFingerprint: fingerprint }];
-      });
-      deps.store.setFit(valid);
-      scored += valid.length;
-      onScored(valid.length);
+      await persist(updates);
       if (updates.length && ceiling < limit) ceiling++;
-      const answered = new Set(updates.map((update) => update.id));
+      // Superseded returned judgments are not technical omissions.
+      for (const update of updates) answered.add(update.id);
       // A superseded input is normal background work, not a model failure.
       if (
         retry(

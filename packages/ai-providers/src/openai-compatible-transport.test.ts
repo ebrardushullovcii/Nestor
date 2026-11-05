@@ -70,18 +70,18 @@ describe("Responses API transport", () => {
       apiMode: DEFAULT_TEXT_MODEL_API_MODE,
       reasoningEffort: DEFAULT_TEXT_MODEL_REASONING_EFFORT,
     }).toEqual({
-      model: "muse-spark-1.3-contributor",
-      apiMode: "responses",
-      reasoningEffort: "xhigh",
+      model: "deepseek-v4.1-flash",
+      apiMode: "chat_completions",
+      reasoningEffort: "low",
     });
     expect({
       model: DEFAULT_VISION_MODEL,
       apiMode: DEFAULT_VISION_MODEL_API_MODE,
       reasoningEffort: DEFAULT_VISION_MODEL_REASONING_EFFORT,
     }).toEqual({
-      model: "muse-spark-1.3-contributor",
-      apiMode: "responses",
-      reasoningEffort: "xhigh",
+      model: "deepseek-v4.1-flash",
+      apiMode: "chat_completions",
+      reasoningEffort: "low",
     });
   });
 

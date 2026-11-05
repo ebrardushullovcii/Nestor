@@ -1,3 +1,4 @@
+import { intendedAccountEmail } from "@nestor/contracts";
 import {
   ListingRejectionCategorySchema,
   toJobSearchGoals,
@@ -43,6 +44,7 @@ import {
 import type { AgentConfig, AgentProgress, AgentResult } from "../types";
 import type { SearchResultCache } from "./search-result-cache";
 import { readCachedSearchResult } from "./search-result-cache";
+import { collectRenderedInventory } from "./rendered-inventory";
 import { createSearchCatalogTools } from "./job-search-catalog-tools";
 import { normalizeExtractedJobSourceId, sanitizeUrl } from "./job-identity";
 import {
@@ -384,7 +386,12 @@ export async function runJobSearchAgent(
   input: JobSearchAgentInput,
 ): Promise<AgentResult> {
   const { config } = input;
-  const hands = withBrowserPermissions(input.hands, config);
+  const hands = withBrowserPermissions(input.hands, {
+    ...config,
+    readIntendedAccountEmail:
+      config.readIntendedAccountEmail ??
+      (() => intendedAccountEmail(config.userProfile)),
+  });
   const now = input.now ?? (() => new Date());
   const isSourceCheck = Boolean(config.promptContext.taskPacket);
   const siteLabel = config.promptContext.siteLabel;
@@ -410,6 +417,72 @@ export async function runJobSearchAgent(
       phaseCompletionReason:
         "This source has not changed; reused the previous search results.",
     };
+  }
+  if (config.inventoryOnly && input.page && !isSourceCheck) {
+    const postings = new Map<string, JobPosting>();
+    const inventory = await collectRenderedInventory({
+      page: input.page,
+      hands,
+      source: { id: config.source, label: siteLabel },
+      maxPages: config.maxSteps,
+      ...(input.signal ? { signal: input.signal } : {}),
+      allowUrl: (url) => isAllowedUrl(url, config.navigationPolicy).valid,
+      onPage: async (cards) => {
+        for (const card of cards)
+          postings.set(
+            card.url,
+            JobPostingSchema.parse({
+              source: config.source,
+              sourceJobId: card.sourceJobId ?? card.url,
+              canonicalUrl: card.url,
+              title: card.title,
+              company: card.companyHint || "Company not stated on card",
+              location: card.locationHint || "Location not stated on card",
+              description: card.text,
+              workMode: [],
+              applyPath: "unknown",
+              easyApplyEligible: false,
+              salaryText: null,
+              discoveredAt: now().toISOString(),
+              detailQuality: "card_only",
+              ...(card.closed
+                ? {
+                    searchRejection: {
+                      category: "closed",
+                      reason: "Closed vacancy card.",
+                    },
+                  }
+                : {}),
+            }),
+          );
+        await config.onCheckpoint?.({
+          revision: postings.size,
+          savedAt: now().toISOString(),
+          currentUrl: input.page!.url(),
+          lastStableUrl: input.page!.url(),
+          stepCount: 0,
+          collectedJobs: [...postings.values()],
+          visitedUrls: [],
+          phaseEvidence: SourceDebugPhaseEvidenceSchema.parse({}),
+        });
+      },
+    });
+    if (inventory)
+      return {
+        jobs: [...postings.values()],
+        steps: 0,
+        pagesCovered: inventory.pagesRead,
+        incomplete: !inventory.complete,
+        warning: inventory.notes.join(" "),
+        // Positive mechanical coverage, not just a model's finish statement.
+        phaseCompletionMode: inventory.complete
+          ? "structured_finish"
+          : "interrupted",
+        phaseCompletionReason: inventory.notes.join(" "),
+        transcriptMessageCount: 0,
+        reviewTranscript: [],
+        compactionState: null,
+      };
   }
   const collected: JobPosting[] = [];
   const known = new Set<string>();

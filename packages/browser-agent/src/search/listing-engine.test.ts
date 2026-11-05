@@ -36,6 +36,210 @@ const card = (title: string, id = title): ListingCard => ({
   sourceLabel: source.label,
 });
 
+test("a negative unusual title is checked against full duties and its page is reused", async () => {
+  const cards = [card("Trend Steward"), card("Metrics Caretaker")];
+  const pages = new Map(
+    cards.map((row) => [
+      row.url,
+      {
+        html: `<article><h1>${row.title}</h1><p>Analyse revenue with SQL joins, R extracts and Tableau dashboards. Check data quality and report findings to stakeholders. Remote in Germany, part time.</p></article>`,
+        finalUrl: row.url,
+      },
+    ]),
+  );
+  const readPage = vi.fn((url: string) => Promise.resolve(pages.get(url)!));
+  let calls = 0;
+  const client: LLMClient = {
+    chatWithTools: (messages) => {
+      const data = JSON.parse(String(messages[1].content)) as {
+        titles?: unknown[][];
+        listings: { id: number; title: string }[];
+      };
+      if (data.titles) {
+        calls++;
+        if (calls > 1)
+          for (const row of data.titles)
+            expect(row[2]).toContain("Analyse revenue with SQL joins");
+        return Promise.resolve({
+          content: JSON.stringify({
+            keep: { 0: calls === 1 ? 0 : 1, 1: calls === 1 ? 0 : 1 },
+          }),
+        });
+      }
+      return Promise.resolve({
+        content: JSON.stringify({
+          jobs: data.listings.map((row: { id: number; title: string }) => ({
+            id: row.id,
+            title: row.title,
+            company: "Real Employer",
+            location: "Germany",
+            workModes: ["remote"],
+            sourceJobId: null,
+            employmentType: "part_time",
+            seniority: null,
+            salaryText: null,
+            closed: false,
+          })),
+        }),
+      });
+    },
+  };
+  const result = await screenCards({
+    cards,
+    client,
+    readPage,
+    goals: {
+      targetRoles: ["Data Analyst"],
+      relatedRoles: [],
+      strategy: "wide_net",
+    },
+  });
+  expect(result.related.map((row) => row.url)).toEqual(
+    cards.map((row) => row.url),
+  );
+  expect(result.seen).toEqual([]);
+  expect(result.failed).toEqual([]);
+  expect(readPage).toHaveBeenCalledTimes(2);
+  expect(result.related[0].listingPage).toEqual(pages.get(cards[0].url));
+  const downstream = vi.fn(() =>
+    Promise.reject(new Error("The verified page should be reused")),
+  );
+  const read = await readListings({
+    cards: result.related,
+    client,
+    readPage: downstream,
+  });
+  expect(downstream).not.toHaveBeenCalled();
+  expect(read.jobs).toHaveLength(2);
+});
+
+test("failure to verify a negative profession is technical work, never remembered unrelated", async () => {
+  const decisions = new Map<string, boolean>();
+  const result = await screenCards({
+    cards: [card("Trend Steward")],
+    decisions,
+    goals: {
+      targetRoles: ["Data Analyst"],
+      relatedRoles: [],
+      strategy: "wide_net",
+    },
+    client: {
+      chatWithTools: () => Promise.resolve({ content: '{"keep":{"0":0}}' }),
+    },
+    readPage: () => Promise.reject(new Error("Temporary source failure")),
+  });
+  expect(result.related).toEqual([]);
+  expect(result.seen).toEqual([]);
+  expect(result.failed.map((row) => row.url)).toEqual([
+    card("Trend Steward").url,
+  ]);
+  expect(result.failed[0]?.reason).toContain(
+    "Profession not verified: Temporary source failure",
+  );
+  expect(decisions.size).toBe(0);
+});
+
+test.each([{ "0": 1, "1": 0 }, { "keep{": { "0": 1, "1": 0 } }])(
+  "B2 retains unambiguous indexed decisions despite a wrong wrapper: %j",
+  async (answer) => {
+    const cards = [card("Data Quality Assistant"), card("Dental Nurse")];
+    const result = await screenCards({
+      cards,
+      goals: {
+        targetRoles: ["Data Analyst"],
+        relatedRoles: [],
+        strategy: "target_roles",
+      },
+      client: {
+        chatWithTools: vi.fn(() =>
+          Promise.resolve({ content: JSON.stringify(answer) }),
+        ),
+      },
+    });
+    expect(result.related).toEqual([cards[0]]);
+    expect(result.seen.map((row) => row.url)).toEqual([cards[1].url]);
+    expect(result.failed).toEqual([]);
+  },
+);
+
+test("B2 repairs only missing or invalid screen judgments, including small batches", async () => {
+  const requests: unknown[][] = [];
+  const result = await screenCards({
+    cards: [card("Research Assistant"), card("Dental Nurse")],
+    goals: {
+      targetRoles: ["Data Analyst"],
+      relatedRoles: [],
+      strategy: "target_roles",
+    },
+    client: {
+      chatWithTools: vi.fn(
+        (messages: Parameters<LLMClient["chatWithTools"]>[0]) => {
+          const titles = (
+            JSON.parse(messages[1].content) as { titles: unknown[][] }
+          ).titles;
+          requests.push(titles);
+          return Promise.resolve({
+            content: JSON.stringify({
+              keep:
+                requests.length === 1 ? { "0": 1, "1": "invalid" } : { "0": 0 },
+            }),
+          });
+        },
+      ),
+    },
+  });
+  expect(requests.map((rows) => rows.length)).toEqual([2, 1]);
+  expect(JSON.stringify(requests[1])).toContain("dental nurse");
+  expect(result.related.map((row) => row.title)).toEqual([
+    "Research Assistant",
+  ]);
+  expect(result.seen).toHaveLength(1);
+  expect(result.failed).toEqual([]);
+});
+
+test("B2 title cache distinguishes actual duties and preserves evidence beyond a short byline", async () => {
+  const decisions = new Map<string, boolean>();
+  const client = {
+    chatWithTools: vi.fn(
+      (messages: Parameters<LLMClient["chatWithTools"]>[0]) =>
+        Promise.resolve({
+          content: JSON.stringify({
+            keep: {
+              "0": messages[1].content.includes("SQL validation") ? 1 : 0,
+            },
+          }),
+        }),
+    ),
+  };
+  const goals = {
+    targetRoles: ["Data Analyst"],
+    relatedRoles: [],
+    strategy: "target_roles" as const,
+  };
+  await screenCards({
+    client,
+    goals,
+    decisions,
+    cards: [
+      { ...card("Research Assistant", "lab"), text: "Laboratory animal care" },
+    ],
+  });
+  const analytical = {
+    ...card("Research Assistant", "data"),
+    text:
+      "Berlin office. ".repeat(24) +
+      "SQL validation and recurring reporting duties.",
+  };
+  const result = await screenCards({
+    client,
+    goals,
+    decisions,
+    cards: [analytical],
+  });
+  expect(result.related).toEqual([analytical]);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
 test.each(["No open positions", "No current vacancies", "0 open jobs"])(
   "an explicit empty HTML inventory is complete: %s",
   async (message) => {
@@ -59,6 +263,7 @@ test.each(["No open positions", "No current vacancies", "0 open jobs"])(
       requiresBrowser: false,
     });
     expect(inventory.notes.join(" ")).toContain("all observed pages covered");
+    expect(inventory.notes.join(" ")).toContain("1 page address attempted");
     expect(navigateFallback).not.toHaveBeenCalled();
   },
 );
@@ -74,21 +279,27 @@ test("an empty shell is incomplete and explicit emptiness cannot hide a failed p
   });
   expect(shell.complete).toBe(false);
   expect(shell.emptyConfirmed).not.toBe(true);
+  const attempts: string[] = [];
   const failed = await collectSource({
     source,
-    readPage: (url) =>
-      url === source.url
+    readPage: (url) => {
+      attempts.push(url);
+      return url === source.url
         ? Promise.resolve({
             finalUrl: url,
             html: '<main>No open positions<a rel="next" href="/page/2">Next</a></main>',
           })
-        : Promise.reject(new DiscoveryPageReadError(503)),
+        : Promise.reject(new DiscoveryPageReadError(503));
+    },
   });
   expect(failed).toMatchObject({
     cards: [],
     complete: false,
     emptyConfirmed: true,
   });
+  expect(attempts).toEqual([source.url, "https://board.example/page/2"]);
+  expect(failed.notes.join(" ")).toContain("2 page addresses attempted");
+  expect(failed.notes.join(" ")).not.toContain("collected from 2 pages");
 });
 
 test("a browser fallback may confirm an empty inventory but cannot assert emptiness without evidence", async () => {
@@ -508,12 +719,9 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
   const fitInput = JSON.parse(
     client.chatWithTools.mock.calls[0][0][1].content,
-  ) as { passages: string[]; listings: { passages: number[] }[] };
-  expect(
-    fitInput.listings[0].passages
-      .map((id) => fitInput.passages[id])
-      .join("\n\n"),
-  ).toBe(job.description);
+  ) as { listings: { description: string }[] };
+  expect(fitInput.listings[0].description).toBe(job.description);
+  expect(fitInput).not.toHaveProperty("passages");
   const fit = {
     id: 1,
     s: verdict.score,
@@ -524,12 +732,18 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     e: ["compatible", "Berlin", "unknown", "DE"],
   };
   const requests: number[][] = [];
+  const secondDescription =
+    "An unusual title\n\nBuild SQL extracts and explain weekly trends.\n\nEUR 26 per hour.";
   const retryClient = {
     chatWithTools: vi.fn(
       (messages: Parameters<LLMClient["chatWithTools"]>[0]) => {
         const data = JSON.parse(messages[1].content) as {
-          listings: { id: number }[];
+          listings: { id: number; description: string }[];
         };
+        for (const listing of data.listings)
+          expect(listing.description).toBe(
+            listing.id === 1 ? job.description : secondDescription,
+          );
         requests.push(data.listings.map((item) => item.id));
         return Promise.resolve({
           content: JSON.stringify({
@@ -543,7 +757,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     client: retryClient,
     profile,
     goals: { targetRoles: ["Data Analyst"], locations: ["Berlin"] },
-    jobs: [job, { ...job, id: 2 }],
+    jobs: [job, { ...job, id: 2, description: secondDescription }],
   });
   expect(requests).toEqual([[1, 2], [2]]);
   expect(repaired.map((fit) => fit.id)).toEqual([1, 2]);
@@ -572,6 +786,32 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   });
   expect(duplicateRequests).toEqual([[1, 2], [1]]);
   expect(duplicates.map((fit) => fit.id)).toEqual([2, 1]);
+  const mixedRequests: number[][] = [];
+  const partial = await fitJobs({
+    profile,
+    goals: { targetRoles: ["Data Analyst"], locations: ["Berlin"] },
+    jobs: [job, { ...job, id: 2 }, { ...job, id: 3 }],
+    client: {
+      chatWithTools: (messages) => {
+        const ids = (
+          JSON.parse(messages[1].content) as {
+            listings: { id: number }[];
+          }
+        ).listings.map((row) => row.id);
+        mixedRequests.push(ids);
+        return Promise.resolve({
+          content: JSON.stringify({
+            fits:
+              mixedRequests.length === 1
+                ? [fit, { ...fit, id: 2, s: "invalid" }, { ...fit, id: 999 }]
+                : ids.map((id) => ({ ...fit, id })),
+          }),
+        });
+      },
+    },
+  });
+  expect(mixedRequests).toEqual([[1, 2, 3], [2], [3]]);
+  expect(partial.map((fit) => fit.id)).toEqual([1, 2, 3]);
   const requestSchema =
     client.chatWithTools.mock.calls[0][2]?.jsonSchema?.schema;
   expect(requestSchema).toMatchObject({
@@ -1237,4 +1477,35 @@ test("a successful access step rechecks rendered inventory before claiming cover
   expect(readPage).toHaveBeenCalledTimes(2);
   expect(result.complete).toBe(true);
   expect(result.notes.join(" ")).not.toContain("HTTP 401");
+});
+
+test("completed browser coverage replaces the initial load-more warning", async () => {
+  const result = await collectSource({
+    source,
+    readPage: () =>
+      Promise.resolve({
+        finalUrl: source.url,
+        html: '<main>Loading</main><script src="app.js"></script>',
+      }),
+    navigateFallback: () =>
+      Promise.resolve({
+        cards: [
+          {
+            sourceId: source.id,
+            sourceLabel: source.label,
+            url: `${source.url}/job`,
+            title: "Analyst",
+            text: "Analyst",
+            cardFingerprint: "one",
+          },
+        ],
+        pagesRead: 2,
+        complete: true,
+        notes: ["Every observed forward control was exhausted."],
+      }),
+  });
+  expect(result.complete).toBe(true);
+  expect(result.notes).toEqual([
+    "Every observed forward control was exhausted.",
+  ]);
 });

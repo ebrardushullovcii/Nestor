@@ -1,4 +1,5 @@
 import { chromium, type Browser, type Locator } from "playwright";
+import { createServer } from "node:http";
 import {
   CandidateProfileSchema,
   type CandidateReusableAnswer,
@@ -13,10 +14,12 @@ import {
 
 import {
   createPlaywrightApplyPageMechanics,
+  createPlaywrightApplyPageSession,
   readRawApplyPage,
   collectApplyDocumentSnapshot,
   APPLY_PAGE_SELECTORS,
 } from "./apply-page-mechanics";
+import { openPrepareOnlyAuthorizedFormActionWindow } from "./playwright-application-flow";
 
 /**
  * Two lists the page draws itself, read one after the other.
@@ -72,6 +75,99 @@ describe("reading the choices of lists the page draws itself", () => {
     browser = await chromium.launch({ headless: true });
   }, 60_000);
 
+  test("a bound native step saves once and changed destinations remain closed", async () => {
+    const page = await browser.newPage();
+    const requests: string[] = [];
+    const server = createServer((request, response) => {
+      response.setHeader("content-type", "text/html");
+      if (request.method === "POST") {
+        requests.push(url);
+        request.resume();
+        response.end(
+          "<h1>Step 2 of 3</h1><form method='post'><button>Save and Continue</button></form>",
+        );
+      } else
+        response.end(
+          "<h1>Step 1 of 3</h1><form method='post' enctype='multipart/form-data'><input name='name' value='Synthetic Person'><input type='file' name='resume' required><button type='submit' name='action' value='save_step'>Save and Continue</button></form>",
+        );
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Missing fixture address");
+    const url = `http://127.0.0.1:${address.port}/application`;
+    try {
+      await page.goto(url);
+      const session = createPlaywrightApplyPageSession({ page });
+      await session.installPrepareOnlyGuard({
+        intermediateMutationsAuthorized: true,
+        attachmentUploadsAuthorized: true,
+        allowedOrigins: [new URL(url).origin],
+      });
+      await session.registerPreparedValue("Synthetic Person");
+      await page
+        .locator("input[type=file]")
+        .setInputFiles({
+          name: "synthetic.txt",
+          mimeType: "text/plain",
+          buffer: Buffer.from("Synthetic resume"),
+        });
+      await session.openIntermediateWriteWindow();
+      const fresh = await session.readPage();
+      const binding = {
+        ref: "a0",
+        label: "Save and Continue",
+        url,
+        stepLabel: fresh.stepLabel,
+        frame: null,
+        nativeForm: { action: url, method: "POST" as const },
+      };
+      await expect(
+        openPrepareOnlyAuthorizedFormActionWindow(
+          page,
+          page.locator("button"),
+          20_000,
+          { action: url + "/changed", method: "POST" },
+        ),
+      ).rejects.toThrow();
+      await page
+        .locator("form")
+        .evaluate((form) => form.setAttribute("action", "/changed"));
+      await expect(session.clickBoundAction!(binding)).resolves.toMatchObject({
+        ok: false,
+        reason: "binding_changed",
+      });
+      expect(requests).toEqual([]);
+      await page
+        .locator("form")
+        .evaluate((form) => form.removeAttribute("action"));
+      const result = await session.clickBoundAction!(binding);
+      if (!result.ok)
+        throw new Error(
+          JSON.stringify({
+            result,
+            before: fresh.actions,
+            after: (await session.readPage()).actions,
+            blocked: await session.readBlockedAttempt(),
+          }),
+        );
+      expect({ requests, blocked: await session.readBlockedAttempt() }).toEqual(
+        { requests: [url], blocked: null },
+      );
+      expect(await page.locator("h1").innerText()).toBe("Step 2 of 3");
+      // The one submitter token is consumed; the next form has no authority.
+      await page.locator("button").click();
+      expect(requests).toEqual([url]);
+    } finally {
+      await page.close();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
   test("replica Application and nested history markup retains ancestry and distinct row identities", async () => {
     const page = await browser.newPage();
     try {
@@ -122,13 +218,11 @@ describe("reading the choices of lists the page draws itself", () => {
       const hint = before.controls.find(
         (control) => control.inputType === "file",
       )!.hint;
-      await page
-        .locator("input[type=file]")
-        .setInputFiles({
-          name: "synthetic.pdf",
-          mimeType: "application/pdf",
-          buffer: Buffer.from("synthetic"),
-        });
+      await page.locator("input[type=file]").setInputFiles({
+        name: "synthetic.pdf",
+        mimeType: "application/pdf",
+        buffer: Buffer.from("synthetic"),
+      });
       await page.locator("#feedback").evaluate((element) => {
         element.textContent = "synthetic.pdf";
       });
@@ -151,6 +245,42 @@ describe("reading the choices of lists the page draws itself", () => {
           (control) => control.inputType === "file",
         )!.hint,
       ).not.toBe(hint);
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("a file input reports that its form's own submission sends it only in a named POST multipart form", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`
+        <form method="post" enctype="multipart/form-data"><label>Resume<input id="a" name="resume" type="file"></label></form>
+        <form method="get" enctype="multipart/form-data"><label>Resume<input id="b" name="resume" type="file"></label></form>
+        <form method="post"><label>Resume<input id="c" name="resume" type="file"></label></form>
+        <form method="post" enctype="multipart/form-data"><label>Resume<input id="d" type="file"></label></form>
+        <label>Resume<input id="e" name="resume" type="file"></label>`);
+      for (const id of ["a", "b", "c", "d", "e"])
+        await page.locator(`#${id}`).setInputFiles({
+          name: "synthetic.pdf",
+          mimeType: "application/pdf",
+          buffer: Buffer.from("synthetic"),
+        });
+      const raw = await readRawApplyPage(page);
+      const sends = Object.fromEntries(
+        raw.controls
+          .filter((control) => control.inputType === "file")
+          .map((control) => [control.id, control.upload?.formSubmits === true]),
+      );
+      expect(sends).toEqual({
+        a: true,
+        b: false,
+        c: false,
+        d: false,
+        e: false,
+      });
+      expect(
+        raw.controls.find((control) => control.id === "a")?.upload,
+      ).toMatchObject({ fileName: "synthetic.pdf", fileSize: 9 });
     } finally {
       await page.close();
     }
@@ -689,7 +819,12 @@ describe("reading the choices of lists the page draws itself", () => {
         });
         expect(
           controls.find((control) => control.id === "letter")?.upload,
-        ).toEqual({ described: "", nearby: "Cover letter", shown: true, ariaInvalid: false });
+        ).toEqual({
+          described: "",
+          nearby: "Cover letter",
+          shown: true,
+          ariaInvalid: false,
+        });
         expect(
           controls.find((control) => control.id === "")?.upload,
         ).toBeUndefined();

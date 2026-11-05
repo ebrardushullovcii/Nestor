@@ -41,11 +41,15 @@ export function answerProposals(
     const selected = values.map((entry) => matchOption(options, entry));
     if (selected.some((entry) => entry === null)) return [];
     return group
-      .filter((entry) => selected.includes(entry.label || entry.value))
+      .filter((entry) =>
+        control.kind === "radio"
+          ? selected.includes(entry.label || entry.value)
+          : entry.checked !== selected.includes(entry.label || entry.value),
+      )
       .map((entry) => ({
         tool: "set_checkbox",
         ref: entry.ref,
-        checked: true,
+        checked: selected.includes(entry.label || entry.value),
         storedFactId,
       }));
   }

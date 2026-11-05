@@ -1,16 +1,35 @@
 import {
+  currentApplicationAnswer,
+  meaningHash,
+  meaningTargetHash,
+} from "./answer-meaning";
+import { questionPrompt } from "./question-text";
+export { questionPrompt } from "./question-text";
+import type { ApplyAnswerEvidencePolicy } from "./types";
+import { intendedAccountEmail } from "@nestor/contracts";
+import {
   browserInteractionKind,
+  googleIdentityContext,
+  signInEntryActions,
   currentBrowserPermissions,
   withBrowserPermissions,
 } from "../browser-permission-policy";
-import { classifyAnswerPermission } from "./answer-source-catalog";
+import {
+  applicantLiteralSource,
+  answerSourceCatalog,
+  classifyAnswerPermission,
+} from "./answer-source-catalog";
 import { semanticAnswerKey } from "./answer-match";
 import {
   addedHistoryKind,
   completeHistoryCount,
   emptyHistoryRow,
 } from "./history-row-policy";
-import { questionClassificationKey } from "./question-classification";
+import {
+  asksPayCurrency,
+  modelQuestionKind,
+  questionClassificationKey,
+} from "./question-classification";
 import {
   OPINION_ANSWER_REASON,
   requiresSavedOpinionAnswer,
@@ -26,8 +45,8 @@ import {
 import { TEXT_RETENTION_MS, textRetentionError } from "./text-retention";
 import {
   resumeFormFileNames,
-  cleanFormQuestionPrompt,
   normalizeFormQuestionPrompt,
+  parseMultiChoiceAnswer,
   type ApplicationAttemptQuestion,
   type ApplyPickerAttempt,
   type StoredApplyPickerAttempt,
@@ -42,7 +61,13 @@ import {
   isAnswerFromThisApplication,
 } from "./application-facts";
 import { normalizeSignal } from "./control-classification";
-import { localStepPreflight, localStepAdvanced } from "./local-step-preflight";
+import {
+  localStepPreflight,
+  localStepAdvanced,
+  numberedStepAdvanced,
+  numberedStepPreflight,
+  unconfirmedStepText,
+} from "./local-step-preflight";
 import {
   fillPressFor,
   cookieConsentChoice,
@@ -50,6 +75,7 @@ import {
   type FillPressState,
 } from "./fill-presses";
 import { matchOption } from "./option-match";
+import { expectedPaySuggestion } from "./expected-pay";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { priorCompanyHistory } from "./prior-company";
 import { currentTimezoneAnswer } from "./current-timezone";
@@ -139,6 +165,12 @@ export type ApplyExecutionOutcome =
       note: string;
       observation: ApplyFormObservation;
       progress: boolean;
+      /**
+       * A numbered or local step Nestor itself confirmed it advanced: the
+       * exact fresh page it pressed on, for that step's send receipt.
+       */
+      confirmedStepPage?: ApplyFormObservation;
+      confirmedNativeForm?: { action: string; method: "POST" };
     }
   /** What the person's own facts say about one field, for the model to use. */
   | {
@@ -161,6 +193,8 @@ export type ApplyExecutionOutcome =
       reason: string;
       observation: ApplyFormObservation;
       uploadFailed?: boolean;
+      /** An answer refused before touching the page; independent fields may continue. */
+      fieldRef?: string;
     }
   | {
       kind: "ready_to_send";
@@ -197,16 +231,19 @@ export interface ApplyExecutorDeps {
   checkWrittenAnswer?: (
     question: string,
     answer: string,
-    evidencePolicy?: "factual_summary" | "factual_inference",
+    evidencePolicy?: ApplyAnswerEvidencePolicy,
   ) => Promise<{
     supported: boolean;
     reason: string;
     reviewWording?: string;
     groundedIn?: string[];
+    repairable?: boolean;
+    unavailable?: { category: string; index: number; stage: string };
   }>;
 }
 
 export interface ApplyGuardState extends FillPressState {
+  answerFeedback: Set<string>;
   addedHistoryCounts: Map<string, number>;
   ownedHistoryRows: Set<string>;
   /**
@@ -233,12 +270,18 @@ export interface ApplyGuardState extends FillPressState {
   approvedOrigins: Map<string, string>;
   /** Where the run last was, for the reviewer's "from". */
   lastOnSiteUrl: string | null;
+  /**
+   * Step presses whose result the page did not confirm, by their receipt
+   * text, with when they happened. None is pressed again, in any path.
+   */
+  uncertainAdvances: Map<string, string>;
 }
 
 export function createApplyGuardState(
   pickerAttempts: readonly StoredApplyPickerAttempt[] = [],
 ): ApplyGuardState {
   return {
+    answerFeedback: new Set<string>(),
     addedHistoryCounts: new Map(),
     ownedHistoryRows: new Set(),
     pickerAttempts: new Map(
@@ -261,6 +304,7 @@ export function createApplyGuardState(
     lastBlockedSave: null,
     approvedOrigins: new Map(),
     lastOnSiteUrl: null,
+    uncertainAdvances: new Map(),
   };
 }
 
@@ -351,6 +395,7 @@ function pickerHandover(
         detectedAt: at,
         suggestion: null,
         siblings: observation.controls,
+        observation,
         reason,
       }),
       answerOptions: [...offered],
@@ -469,6 +514,7 @@ async function applyPickerRule(input: {
       value: wanted,
       storedFactId: `answerLibrary.${saved.id}`,
       pageText: formWritingInstructions(observation),
+      pageUrl: observation.url,
       controls: observation.controls,
     });
     if (choice.kind === "leave") {
@@ -636,52 +682,9 @@ export function fileFieldHoldsOtherFile(
   return shown !== "" && !shown.includes(fileName) && !fileName.includes(shown);
 }
 
-export function questionPrompt(control: ApplyFormControl): string {
-  if (control.repeatedQuestion) return control.repeatedQuestion.prompt;
-  const label = control.label.trim();
-  const group =
-    control.attestationKind === null &&
-    (control.kind === "radio" || control.answerControlType === "multi_choice")
-      ? (
-          control.sectionPath?.at(-1) ??
-          control.groupLabel.split(" — ").at(-1) ??
-          ""
-        ).trim()
-      : control.groupLabel.trim();
-  // File tasks name the input, without its fieldset legend or required marker.
-  if (control.kind === "file") {
-    return label.replace(/[\s*:]+$/u, "").replace(/\s+upload$/iu, "") || "file";
-  }
-  const normalizedLabel = normalizeSignal(label);
-  const normalizedGroup = normalizeSignal(group);
-  if (
-    (control.kind === "radio" ||
-      (control.kind === "checkbox" &&
-        control.answerControlType === "multi_choice")) &&
-    group.length > 0
-  )
-    return control.attestationKind !== null
-      ? cleanFormQuestionPrompt(group) || group
-      : group;
-  const groupAddsSomething =
-    normalizedGroup.length > 0 &&
-    normalizedLabel.length > 0 &&
-    !normalizedLabel.includes(normalizedGroup) &&
-    !normalizedGroup.includes(normalizedLabel);
-  const prompt = groupAddsSomething ? `${group} — ${label}` : label || group;
-  const described =
-    prompt ||
-    control.placeholder.trim() ||
-    "A question on the application form";
-  // A declaration's section can change what "I agree" means. Keep that
-  // context for both its saved answer and the model's permission check.
-  return control.attestationKind !== null
-    ? cleanFormQuestionPrompt(described) || described
-    : described;
-}
-
 export function buildPendingQuestion(input: {
   control: ApplyFormControl;
+  observation?: ApplyFormObservation;
   jobId: string;
   detectedAt: string;
   suggestion: ApplyAnswer | null;
@@ -702,9 +705,23 @@ export function buildPendingQuestion(input: {
       : [];
   const answerOptions =
     radioSiblings.length > 0
-      ? radioSiblings.map((candidate) => candidate.value || candidate.label)
+      ? radioSiblings.map((candidate) => candidate.label || candidate.value)
       : control.options;
   return {
+    ...(input.observation?.url
+      ? {
+          currentFieldBinding: {
+            pageUrl: input.observation.url,
+            targetHash: meaningTargetHash(
+              control,
+              input.siblings ?? input.observation.controls,
+            ),
+            instructionsHash: meaningHash(
+              formWritingInstructions(input.observation),
+            ),
+          },
+        }
+      : {}),
     id: questionIdFor(control, input.jobId, input.siblings ?? []),
     askReason:
       input.askReason ??
@@ -778,7 +795,17 @@ async function withModelQuestionKinds(
   observation: ApplyFormObservation,
   control: ApplyFormControl,
 ): Promise<ApplyFormControl> {
-  if (!deps.classifyQuestions) {
+  if (
+    !deps.classifyQuestions ||
+    currentApplicationAnswer({
+      control,
+      controls: observation.controls,
+      sources: deps.config.sources,
+      application: deps.config.application,
+      pageUrl: observation.url,
+      pageInstructions: formWritingInstructions(observation),
+    })
+  ) {
     return { ...control, answerTags: null };
   }
   let classification: ApplyQuestionClassification | undefined;
@@ -792,17 +819,11 @@ async function withModelQuestionKinds(
       classifications.get(
         questionClassificationKey(control, observation.controls),
       ) ?? classifications.get(questionPrompt(control));
-    payCurrency =
-      /currency/iu.test(questionPrompt(control)) &&
-      (control.questionKind === "salary_expectation" ||
-        observation.controls.some(
-          (sibling) =>
-            (
-              classifications.get(
-                questionClassificationKey(sibling, observation.controls),
-              ) ?? classifications.get(questionPrompt(sibling))
-            )?.asksAboutPay === true,
-        ));
+    payCurrency = asksPayCurrency(
+      control,
+      observation.controls,
+      classifications,
+    );
   } catch {
     return { ...control, answerTags: null };
   }
@@ -812,13 +833,7 @@ async function withModelQuestionKinds(
   return {
     ...control,
     answerTags: classification.answerTags ?? null,
-    questionKind:
-      classification.eligibilityKind ??
-      (classification.asksAboutPay || payCurrency
-        ? "salary_expectation"
-        : control.questionKind === "salary_expectation"
-          ? "other"
-          : control.questionKind),
+    questionKind: modelQuestionKind(control, classification, payCurrency),
     attestationKind: classification.declarationKind,
     // A label's asterisk is how many forms say required; the reading knows.
     required: control.required || classification.required === true,
@@ -833,7 +848,7 @@ async function withModelQuestionKinds(
 }
 
 const PAY_KEPT_PRIVATE_REASON =
-  "Job Finder leaves pay questions to you. Answer it yourself if you want to.";
+  "Your pay setting is Pause for me on pay. Choose the amount you want to disclose for this application.";
 
 type AnswerDecision =
   | { kind: "use"; answer: ApplyAnswer }
@@ -844,6 +859,8 @@ type AnswerDecision =
   | {
       kind: "leave";
       reason: string;
+      actorFeedback?: boolean;
+      checkingUnavailable?: boolean;
       suggestion: ApplyAnswer | null;
       permission: boolean;
       askReason?: ApplicationAttemptQuestion["askReason"];
@@ -920,6 +937,61 @@ function proposedValueSuggestion(
  * themselves is left for them, whatever the model proposed. Without a fact
  * check (an offline run) only stored facts go in.
  */
+/** The pay setting applies to every handoff, including a direct model finish. */
+export function payDisclosurePause(
+  control: ApplyFormControl,
+  config: ApplyAgentConfig,
+  controls: readonly ApplyFormControl[],
+): Extract<AnswerDecision, { kind: "leave" }> | null {
+  const saved = savedSuggestion(control, config);
+  const savedPayRecord = savedAnswerForQuestion(
+    control,
+    config.sources.reusableAnswers,
+    controls,
+  );
+  const ownPay =
+    isAnswerFromThisApplication(
+      savedPayRecord,
+      config.application,
+      config.sources.posting.location,
+    ) ||
+    (savedPayRecord?.id.startsWith("application_") &&
+      !savedPayRecord.applicationScope);
+  if (
+    control.questionKind === "salary_expectation" &&
+    config.authority.salaryDisclosure !== "answer_from_profile" &&
+    !ownPay
+  ) {
+    const suggestion = saved ?? expectedPaySuggestion(control, config.sources);
+    const target =
+      suggestion?.sourceId === "preferences.compensation.maximum"
+        ? suggestion.groundedIn[0]
+        : suggestion?.value;
+    const detail = [
+      PAY_KEPT_PRIVATE_REASON,
+      target ? `Your saved expected pay is ${target}.` : "",
+      suggestion && target !== suggestion.value
+        ? `The matching option is ${suggestion.value}.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 4000);
+    return {
+      kind: "leave",
+      reason: PAY_KEPT_PRIVATE_REASON,
+      suggestion,
+      permission: true,
+      askReason: {
+        kind: "source_rejected",
+        check: "pay_permission",
+        detail,
+      },
+    };
+  }
+  return null;
+}
+
 async function decideAnswer(input: {
   deps: ApplyExecutorDeps;
   control: ApplyFormControl;
@@ -927,6 +999,7 @@ async function decideAnswer(input: {
   groundedIn?: readonly string[] | undefined;
   storedFactId?: string | undefined;
   pageText: string;
+  pageUrl?: string | null;
   controls: readonly ApplyFormControl[];
 }): Promise<AnswerDecision> {
   const { deps, control } = input;
@@ -976,7 +1049,18 @@ async function decideAnswer(input: {
   const payDisclosed =
     config.authority.salaryDisclosure === "answer_from_profile";
   const saved = savedSuggestion(control, config);
-  if (control.repeatedQuestion && !saved) {
+  const payPause = payDisclosurePause(control, config, input.controls);
+  if (payPause) return payPause;
+  if (
+    control.repeatedQuestion &&
+    !saved &&
+    applicantLiteralSource(
+      control,
+      input.controls,
+      config.sources,
+      input.pageText,
+    )?.value !== value
+  ) {
     return {
       kind: "leave",
       reason:
@@ -997,8 +1081,10 @@ async function decideAnswer(input: {
       sources: config.sources,
       answer: value,
       pageInstructions: input.pageText,
+      pageUrl: input.pageUrl,
       approvedAttestations: config.authority.preApprovedAttestationKinds,
       application: config.application,
+      payDisclosed,
       now: deps.now(),
     });
     if (permission.kind === "needs_you")
@@ -1006,8 +1092,11 @@ async function decideAnswer(input: {
         kind: "leave",
         reason: permission.reason,
         askReason: {
+          // Nothing was found and refused for a declaration the person did
+          // not allow: like a missing source, it was never answered.
           kind:
-            permission.check === "source_lookup"
+            permission.check === "source_lookup" ||
+            permission.check === "declaration_permission"
               ? "no_source"
               : "source_rejected",
           check: permission.check ?? "answer_permission",
@@ -1058,6 +1147,14 @@ async function decideAnswer(input: {
         },
       };
     }
+    // A send-time receipt proof is never permission to write a field.
+    if (permission.kind === "site_unchanged")
+      return {
+        kind: "leave",
+        reason: "A value the site filled is not Nestor's to write.",
+        suggestion: null,
+        permission: true,
+      };
     // Checked answers never fall through the legacy literal shortcuts.
     const inferred = permission.kind === "inference";
     if (!deps.checkWrittenAnswer)
@@ -1080,11 +1177,25 @@ async function decideAnswer(input: {
     if (!check?.supported)
       return {
         kind: "leave",
+        actorFeedback: !!check?.repairable,
+        checkingUnavailable: !check || !!check.unavailable,
         reason:
           check?.reason ??
           "This answer could not be checked against your sources.",
         suggestion: null,
         permission: true,
+      };
+    if (permission.evidencePolicy === "saved_answer" && permission.source)
+      return {
+        kind: "use",
+        answer: {
+          value,
+          kind: control.questionKind,
+          sourceKind: "answer_library",
+          sourceId: permission.source.id,
+          provenanceLabel: "your answer to the same question",
+          groundedIn: [permission.source.id],
+        },
       };
     return {
       kind: "use",
@@ -1252,7 +1363,13 @@ async function decideAnswer(input: {
     deps.onAnswerSource?.("stored_fact");
     return { kind: "use", answer: stored };
   }
-  if (ownWordsAppliesToQuestion(input.pageText, questionPrompt(control))) {
+  if (
+    ownWordsAppliesToQuestion(
+      input.pageText,
+      questionPrompt(control),
+      input.controls.map(questionPrompt),
+    )
+  ) {
     return {
       kind: "leave",
       reason: OWN_WORDS_REASON,
@@ -1285,6 +1402,8 @@ async function decideAnswer(input: {
     return {
       kind: "leave",
       reason: check.reason,
+      actorFeedback: !!check.repairable,
+      checkingUnavailable: !!check.unavailable,
       suggestion: check.reviewWording
         ? {
             value: check.reviewWording,
@@ -1362,6 +1481,7 @@ function leaveUnansweredForPerson(input: {
             detectedAt: at,
             suggestion,
             siblings: observation.controls,
+            observation,
             reason,
             ...(input.askReason ? { askReason: input.askReason } : {}),
           })
@@ -1396,6 +1516,7 @@ function unsupportedAnswer(input: {
           detectedAt: at,
           suggestion: input.suggestion,
           siblings: observation.controls,
+          observation,
           reason: eligibilityReviewReason(control, config, input.reason),
         })
       : null,
@@ -1423,6 +1544,25 @@ function notEntered(input: {
       ? { askReason: input.decision.askReason }
       : {}),
   };
+  if (input.decision.checkingUnavailable)
+    return leaveUnansweredForPerson({
+      ...args,
+      reason:
+        "Nestor could not finish checking this answer. You can answer it here or try again.",
+    });
+  if (input.decision.actorFeedback) {
+    const key = questionPrompt(input.control);
+    const first = !input.deps.guardState.answerFeedback.has(key);
+    input.deps.guardState.answerFeedback.add(key);
+    return {
+      kind: "refused",
+      fieldRef: input.control.ref,
+      reason: first
+        ? `Nestor could not accept this proposed answer: ${input.decision.reason} Correct the answer content/completeness once using these actual sources and the complete target constraints. Do not ask the person to repair a known answer or a checking format failure. Target: ${JSON.stringify({ question: key, options: input.control.options, constraints: input.control.inputConstraints })}. Sources: ${JSON.stringify(answerSourceCatalog(input.deps.config.sources, input.deps.config.authority.preApprovedAttestationKinds))}. Leave it unwritten if checking remains unavailable and finish with the retained technical stop.`
+        : "This answer is still unchecked after the bounded feedback. Leave it unwritten, finish the other fields and stop for technical recovery.",
+      observation: input.observation,
+    };
+  }
   return input.decision.permission || !input.deps.checkWrittenAnswer
     ? leaveUnansweredForPerson(args)
     : unsupportedAnswer(args);
@@ -1623,6 +1763,7 @@ async function writeUnderGuard(
   deps: ApplyExecutorDeps,
   input: {
     declaredValue: string | null;
+    intermediateWindow?: boolean;
     write: () => Promise<ApplyWriteResult>;
   },
 ): Promise<ApplyWriteResult> {
@@ -1633,12 +1774,17 @@ async function writeUnderGuard(
   if (input.declaredValue) {
     await safety.registerPreparedValue(input.declaredValue);
   }
-  if (deps.config.intermediateWritesAuthorized === true) {
+  if (
+    deps.config.intermediateWritesAuthorized === true &&
+    input.intermediateWindow !== false
+  ) {
     // Opened before the write and left to expire on its own. Sites save a
     // field a moment after it changes, not during the write; closing the
     // window the instant the write returned blocked exactly those saves and
     // left every select on the form reverting to empty.
     await safety.openIntermediateWriteWindow().catch(() => undefined);
+  } else if (input.intermediateWindow === false) {
+    await safety.closeIntermediateWriteWindow();
   }
   return input.write();
 }
@@ -1711,10 +1857,9 @@ async function reviewGuard(
 /**
  * The handover where Fill in for me stops pressing.
  *
- * Fill never presses the form's own buttons (Next, Continue, Save, Add):
- * any of them could send the application, and nothing tells which. So the
- * run fills what is on the page and hands the press to the person; continuing
- * afterwards picks the run up on the page they reached.
+ * Fill presses a form's own buttons (Next, Continue, Save, Add) only as a
+ * non-final step (`fillStepPress`) inside its bounded request guard. Other
+ * ambiguous presses stay with the person; continuation uses their next page.
  */
 export function pressOnSitePause(pressed: string, at: Date): ApplyPause {
   const summary = `Job Finder filled what it could on this page. Press ${pressed} on the site yourself, then continue and Job Finder fills the next page.`;
@@ -1729,6 +1874,12 @@ export function pressOnSitePause(pressed: string, at: Date): ApplyPause {
     answerControlType: "text" as const,
     isRequired: true,
     note: "Job Finder filled what it could on this page. It could not prove this control only changes a local, non-final step, so the press stays yours.",
+    askReason: {
+      kind: "page_refused" as const,
+      check: "step_handover",
+      detail:
+        "Job Finder filled what it could on this page. It could not prove this control only changes a local, non-final step, so the press stays yours.",
+    },
     detectedAt: at.toISOString(),
     answerOptions: [],
     suggestedAnswers: [],
@@ -1785,6 +1936,71 @@ export function formSendPause(label: string, at: Date): ApplyPause {
     },
     formSend: true,
   };
+}
+
+/**
+ * A step press Nestor made once that the page did not confirm. The prompt
+ * keeps the step-handover shape, so the person presses it themselves if the
+ * step is not done; the reason says Nestor already pressed it once.
+ */
+export function unconfirmedStepPause(
+  label: string,
+  page: Pick<ApplyFormObservation, "step">,
+  at: Date,
+): ApplyPause {
+  const pressed = `"${label}"`;
+  const pause = pressOnSitePause(pressed, at);
+  const { index, total } = page.step;
+  const where =
+    index !== null && total !== null
+      ? ` on step ${index} of ${total}, but the form did not show step ${index + 1} of ${total} afterwards`
+      : ", but the form did not show its next step afterwards";
+  const detail = `Nestor pressed ${pressed} once${where}. It will not press it again. Check the form; if that step is not done, press ${pressed} yourself.`;
+  const question = {
+    ...pause.question!,
+    note: detail,
+    askReason: {
+      kind: "page_refused" as const,
+      check: "step_not_confirmed",
+      detail,
+    },
+  };
+  return {
+    ...pause,
+    summary: detail,
+    question,
+    questions: [question],
+    blocker: pause.blocker && { ...pause.blocker, summary: detail, detail },
+    unconfirmedStep: true,
+  };
+}
+
+/**
+ * The step press Fill in for me may make on this exact control, if any. A
+ * non-final advance is pressed inside its own intermediate-write
+ * window, so the site can save the step (B6); without write authority only
+ * a proven local press under a read-only fence is possible.
+ */
+export function fillStepPress(
+  config: Pick<
+    ApplyAgentConfig,
+    "pressesFormButtons" | "intermediateWritesAuthorized" | "hands" | "safety"
+  >,
+  page: ApplyFormObservation,
+  ref: string,
+) {
+  if (pressesFormButtons(config)) return null;
+  if (
+    config.intermediateWritesAuthorized === true &&
+    config.safety &&
+    config.hands.clickBoundAction
+  ) {
+    const numbered = numberedStepPreflight(page, ref);
+    if (numbered) return { kind: "numbered" as const, ...numbered };
+  }
+  if (!config.hands.clickWithoutWrites) return null;
+  const local = localStepPreflight(page, ref);
+  return local ? { kind: "local" as const, ...local } : null;
 }
 
 /** Whether this run may press the form's own buttons (Send for me). */
@@ -2018,20 +2234,31 @@ export async function executeApplyProposal(
   // Puzzle answers use the browser permission, independently of candidate facts.
   // Account buttons use an exact form-action window, never the application send path.
   if ("ref" in proposal) {
-    const kind = browserInteractionKind(observation, proposal.ref);
+    const googleContext = await googleIdentityContext(config, config.hands);
+    const kind = browserInteractionKind(
+      observation,
+      proposal.ref,
+      googleContext,
+    );
     const permissions = await currentBrowserPermissions(config);
     if (kind === "google_handoff")
       return {
         kind: "refused",
         reason:
-          "Finish Google's account selection, sign-in or access request yourself in the browser.",
+          "This Google step cannot use the intended Profile email or proven basic identity access. Check the page in the browser.",
         observation,
       };
     const enabled =
       kind !== null &&
       kind !== "password" &&
       kind !== "mfa" &&
-      permissions[kind];
+      (permissions[kind] ||
+        (kind === "signIn" &&
+          proposal.tool === "click" &&
+          permissions.googleSignIn &&
+          signInEntryActions(observation).some(
+            (action) => action.ref === proposal.ref,
+          )));
     const challengeControl = observation.controls.find(
       (control) =>
         control.ref === proposal.ref && isSecurityChallengeControl(control),
@@ -2044,14 +2271,17 @@ export async function executeApplyProposal(
         (kind === "solveCaptchas" && !challengeControl));
     if (
       enabled &&
-      (kind === "signIn" || kind === "createAccounts") &&
+      (kind === "signIn" ||
+        kind === "createAccounts" ||
+        kind === "googleSignIn") &&
       proposal.tool === "type" &&
       observation.controls.find((control) => control.ref === proposal.ref)
         ?.credentialRole === "identifier"
     ) {
       const email =
-        config.sources.profile.applicationIdentity.preferredEmail ??
-        config.sources.profile.email;
+        kind === "googleSignIn"
+          ? googleContext.intendedEmail
+          : intendedAccountEmail(config.sources.profile);
       if (
         !email ||
         proposal.text.trim().toLowerCase() !== email.trim().toLowerCase()
@@ -2062,7 +2292,11 @@ export async function executeApplyProposal(
             "Use the person's saved email, or let them enter their account identifier on the website.",
           observation,
         };
-      const write = await config.hands.fillText(proposal.ref, email);
+      const hands = (deps.browserPermissionHands ??= withBrowserPermissions(
+        config.hands,
+        config,
+      ));
+      const write = await hands.fillText(proposal.ref, email);
       return write.ok
         ? {
             kind: "moved",
@@ -2258,12 +2492,25 @@ export async function executeApplyProposal(
           };
         removesOwnedEmptyRow = true;
       }
-      const localStep =
-        !pressesFormButtons(deps.config) &&
-        !fillPress &&
-        config.hands.clickWithoutWrites
-          ? localStepPreflight(observation, proposal.ref)
-          : null;
+      const stepPress = fillPress
+        ? null
+        : fillStepPress(config, observation, proposal.ref);
+      const localStep = stepPress?.kind === "local" ? stepPress : null;
+      const numberedStep = stepPress?.kind === "numbered" ? stepPress : null;
+      const stepReceipt = stepPress
+        ? unconfirmedStepText(observation, stepPress.label)
+        : null;
+      // A step whose earlier press the page never confirmed is not pressed
+      // again, from any path: model click, finish, replay or a continuation.
+      if (
+        stepPress &&
+        stepReceipt &&
+        deps.guardState.uncertainAdvances.has(stepReceipt)
+      )
+        return {
+          kind: "paused",
+          pause: unconfirmedStepPause(stepPress.label, observation, deps.now()),
+        };
       // "Apply now" before anything is filled opens the form; it sends nothing.
       const finalAction =
         fillPress?.kind === "open_form"
@@ -2296,7 +2543,8 @@ export async function executeApplyProposal(
         !pressesFormButtons(deps.config) &&
         !fillPress &&
         !removesOwnedEmptyRow &&
-        !localStep
+        !localStep &&
+        !numberedStep
       )
         return {
           kind: "paused",
@@ -2337,20 +2585,117 @@ export async function executeApplyProposal(
           !pressed.ok ||
           guard.openedWindowUrl ||
           !localStepAdvanced(livePage, after)
-        )
+        ) {
+          if (stepReceipt)
+            deps.guardState.uncertainAdvances.set(
+              stepReceipt,
+              deps.now().toISOString(),
+            );
           return {
             kind: "paused",
-            pause: pressOnSitePause(
-              describeRef(livePage, proposal.ref),
-              deps.now(),
-            ),
+            pause: unconfirmedStepPause(localStep.label, livePage, deps.now()),
           };
+        }
         afterWrite(deps, null);
         return {
           kind: "moved",
           note: `Advanced to step ${after.step.index} of ${after.step.total}.`,
           observation: after,
           progress: true,
+          confirmedStepPage: livePage,
+        };
+      }
+      if (numberedStep) {
+        // Rebind to a fresh exact observation immediately before the press.
+        if (
+          livePage.signature !== observation.signature ||
+          !numberedStepPreflight(livePage, proposal.ref)
+        )
+          return {
+            kind: "refused",
+            reason: "The step changed. Read the current page before advancing.",
+            observation: livePage,
+          };
+        // A selected file finishes uploading first; this press cannot carry it.
+        await config.safety?.closeUploadWindow?.().catch(() => undefined);
+        const handOver = (): ApplyExecutionOutcome => ({
+          kind: "paused",
+          pause: pressOnSitePause(
+            describeRef(livePage, proposal.ref),
+            deps.now(),
+          ),
+        });
+        if (await config.safety!.checkServiceWorker()) return handOver();
+        // The press opens its own per-action window: same-origin saves pass,
+        // final-action requests stay refused. No window, no server-backed step.
+        try {
+          await config.safety!.openIntermediateWriteWindow();
+        } catch {
+          return handOver();
+        }
+        const pressed = await config.hands.clickBoundAction!({
+          ref: numberedStep.ref,
+          label: numberedStep.label,
+          url: numberedStep.url,
+          stepLabel: numberedStep.stepLabel,
+          frame: numberedStep.frame,
+          ...(numberedStep.nativeForm
+            ? { nativeForm: numberedStep.nativeForm }
+            : {}),
+        });
+        if (!pressed.ok && pressed.reason === "binding_changed") {
+          await config.safety!.closeIntermediateWriteWindow();
+          return {
+            kind: "refused",
+            reason: "The step changed. Read the current page before advancing.",
+            observation: await config.hands.observe(),
+          };
+        }
+        afterWrite(deps, null);
+        // A server-backed step shows the next one when its save answers.
+        let after = await config.hands.observe();
+        for (
+          let wait = 0;
+          wait < 20 &&
+          (after.loading ||
+            (!numberedStepAdvanced(livePage, after) &&
+              !after.blocker &&
+              !after.validationErrors.length));
+          wait++
+        ) {
+          await config.hands.wait(500);
+          after = await config.hands.observe();
+        }
+        const guard = await reviewGuard(deps, after.url);
+        if (
+          !pressed.ok ||
+          guard.pause ||
+          guard.openedWindowUrl ||
+          !numberedStepAdvanced(livePage, after)
+        ) {
+          await config.safety!.closeIntermediateWriteWindow();
+          if (stepReceipt)
+            deps.guardState.uncertainAdvances.set(
+              stepReceipt,
+              deps.now().toISOString(),
+            );
+          return {
+            kind: "paused",
+            pause:
+              guard.pause ??
+              unconfirmedStepPause(numberedStep.label, livePage, deps.now()),
+          };
+        }
+        deps.guardState.lastOnSiteUrl = after.url;
+        return {
+          kind: "moved",
+          note: `Pressed "${numberedStep.label}"; the form moved to its next application section.`,
+          observation: after,
+          progress: true,
+          confirmedStepPage: livePage,
+          ...(numberedStep.nativeForm
+            ? { confirmedNativeForm: numberedStep.nativeForm }
+            : {}),
         };
       }
       const personOwnedBlocker = livePage.blocker?.requiresPerson
@@ -2379,8 +2724,21 @@ export async function executeApplyProposal(
       // A cookie banner is dismissed with the choice that keeps the least,
       // whichever of its buttons the model named.
       const pressRef = fillPress?.ref ?? proposal.ref;
+      const hadWritten = deps.guardState.hasWritten;
+      const advance = livePage.actions.find((item) => item.ref === pressRef);
+      const boundedAdvance =
+        advance?.kind === "advance" &&
+        advance.visible &&
+        !advance.disabled &&
+        !/\b(?:review|submit|send|finish|complete)\b/iu.test(advance.label) &&
+        !(
+          livePage.step.index !== null &&
+          livePage.step.total !== null &&
+          livePage.step.index >= livePage.step.total
+        );
       const write = await writeUnderGuard(deps, {
         declaredValue: null,
+        intermediateWindow: boundedAdvance,
         write: () => config.hands.clickElement(pressRef),
       });
       if (!write.ok) {
@@ -2396,6 +2754,19 @@ export async function executeApplyProposal(
       // it; so does the run, in the one tab it works in.
       const reason = proposal.reason ?? null;
       if (review.openedWindowUrl) {
+        if (hadWritten) {
+          let host = "another page";
+          try {
+            host = new URL(review.openedWindowUrl).host;
+          } catch {
+            // Keep an unusable popup URL out of the form's navigation path.
+          }
+          return {
+            kind: "refused",
+            reason: `The page tried to open ${host} in a new tab; the form stays in this tab.`,
+            observation: await config.hands.observe(),
+          };
+        }
         const before = await authorizeOrigin(
           review.openedWindowUrl,
           reason,
@@ -2647,6 +3018,7 @@ export async function executeApplyProposal(
         deps,
         control,
         pageText: formWritingInstructions(observation),
+        pageUrl: observation.url,
         value: proposal.text,
         groundedIn: proposal.groundedIn,
         storedFactId: proposal.storedFactId,
@@ -2720,6 +3092,7 @@ export async function executeApplyProposal(
         deps,
         control,
         pageText: formWritingInstructions(observation),
+        pageUrl: observation.url,
         value: matchOption(control.options, proposal.option) ?? proposal.option,
         storedFactId: proposal.storedFactId,
       });
@@ -2808,6 +3181,31 @@ export async function executeApplyProposal(
       // stands when the person's facts support it (ADR 0041). A declaration
       // is settled by the person's approvals below instead.
       let radioAnswer: ApplyAnswer | null = null;
+      const savedSet =
+        control.answerControlType === "multi_choice"
+          ? savedAnswerForQuestion(
+              control,
+              config.sources.reusableAnswers,
+              observation.controls,
+            )
+          : null;
+      const selectedSet = savedSet
+        ? parseMultiChoiceAnswer(savedSet.answer, control.options)
+        : null;
+      const clearingSavedOption =
+        control.kind === "checkbox" &&
+        !proposal.checked &&
+        selectedSet !== null &&
+        !selectedSet.includes(control.label || control.value);
+      if (clearingSavedOption && savedSet)
+        radioAnswer = {
+          value: savedSet.answer,
+          kind: control.questionKind,
+          sourceKind: "answer_library",
+          sourceId: `answerLibrary.${savedSet.id}`,
+          provenanceLabel: "your answer to this question",
+          groundedIn: [`answerLibrary.${savedSet.id}`],
+        };
       const eligibilityAnswer =
         control.questionKind === "work_authorization" ||
         control.questionKind === "visa_sponsorship";
@@ -2824,13 +3222,15 @@ export async function executeApplyProposal(
             config.sources.posting.location,
           ));
       if (
-        deps.classifyQuestions ||
-        ownToggle ||
-        ((control.kind === "radio" ||
-          control.answerControlType === "multi_choice") &&
-          proposal.checked &&
-          control.attestationKind === null) ||
-        (eligibilityAnswer && (control.kind === "checkbox" || proposal.checked))
+        !clearingSavedOption &&
+        (deps.classifyQuestions ||
+          ownToggle ||
+          ((control.kind === "radio" ||
+            control.answerControlType === "multi_choice") &&
+            proposal.checked &&
+            control.attestationKind === null) ||
+          (eligibilityAnswer &&
+            (control.kind === "checkbox" || proposal.checked)))
       ) {
         // Eligibility is a factual answer even when worded as a declaration.
         // A box in a checkbox group is one option of the group's question,
@@ -2848,6 +3248,7 @@ export async function executeApplyProposal(
           deps,
           control,
           pageText: formWritingInstructions(observation),
+          pageUrl: observation.url,
           value: proposedOption,
           storedFactId: proposal.storedFactId,
         });
@@ -2895,8 +3296,7 @@ export async function executeApplyProposal(
           control = selected;
           checked = true;
         } else if (control.answerControlType === "multi_choice") {
-          // decideAnswer accepted only an option the person included.
-          checked = true;
+          checked = clearingSavedOption ? false : true;
         } else if (control.answerControlType === "boolean") {
           const value = normalizeSignal(radioAnswer.value);
           if (value !== "yes" && value !== "no")
@@ -2963,6 +3363,7 @@ export async function executeApplyProposal(
                 detectedAt: at,
                 suggestion: null,
                 siblings: observation.controls,
+                observation,
               })
             : null,
           controlRef: control.ref,
@@ -3484,6 +3885,7 @@ async function provideApplicationLetter(
     ownWordsAppliesToQuestion(
       formWritingInstructions(observation),
       questionPrompt(control),
+      observation.controls.map(questionPrompt),
     )
   ) {
     return {
@@ -3550,6 +3952,15 @@ async function provideApplicationLetter(
     },
   });
 
+  if (!produced.ok && produced.checkingUnavailable)
+    return {
+      kind: "stop",
+      outcome: {
+        kind: "refused",
+        reason: produced.reason,
+        observation: await config.hands.observe(),
+      },
+    };
   if (!produced.ok) {
     return pauseWith(
       `Job Finder could not write the letter this form asks for. ${produced.reason}`,

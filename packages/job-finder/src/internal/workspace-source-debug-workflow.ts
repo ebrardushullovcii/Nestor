@@ -1,3 +1,4 @@
+import { intendedAccountEmail } from "@nestor/contracts";
 import { browserAgentPermissionsOf } from "@nestor/contracts";
 import { jobSiteTarget } from "@nestor/contracts";
 import {
@@ -589,8 +590,13 @@ export async function runSourceDebugWorkflow(
         const debugResult = await ctx.browserRuntime.runAgentDiscovery?.(
           adapterKind,
           {
-            browserPermissions: browserAgentPermissionsOf(await ctx.repository.getSettings()),
-            readBrowserPermissions: async () => browserAgentPermissionsOf(await ctx.repository.getSettings()),
+            browserPermissions: browserAgentPermissionsOf(
+              await ctx.repository.getSettings(),
+            ),
+            readIntendedAccountEmail: async () =>
+              intendedAccountEmail(await ctx.repository.getProfile()),
+            readBrowserPermissions: async () =>
+              browserAgentPermissionsOf(await ctx.repository.getSettings()),
             userProfile: profile,
             searchPreferences: {
               targetRoles:

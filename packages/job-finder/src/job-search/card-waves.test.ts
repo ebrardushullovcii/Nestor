@@ -53,3 +53,84 @@ test("a processing error reaches its checkpoint", async () => {
     controller.abort();
   }
 });
+
+test("a blocked source does not hold current or later healthy waves or its checkpoint", async () => {
+  const controller = new AbortController();
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const consumed: string[][] = [];
+  const waves = createCardWaves(
+    controller.signal,
+    async (cards) => {
+      if (cards[0]!.sourceId === "slow") await blocked;
+      consumed.push(cards.map((row) => row.url));
+    },
+    2,
+  );
+  try {
+    await waves.push([
+      { ...card, sourceId: "slow", url: "slow" },
+      { ...card, sourceId: "healthy", url: "first" },
+    ]);
+    await waves.checkpoint("healthy");
+    expect(consumed).toEqual([["first"]]);
+    await waves.push([{ ...card, sourceId: "healthy", url: "later" }]);
+    await waves.checkpoint("healthy");
+    expect(consumed).toEqual([["first"], ["later"]]);
+    let allDone = false;
+    const all = waves.checkpoint().then(() => {
+      allDone = true;
+    });
+    await Promise.resolve();
+    expect(allDone).toBe(false);
+    release();
+    await all;
+    await waves.drain();
+    expect(consumed).toEqual([["first"], ["later"], ["slow"]]);
+  } finally {
+    release();
+    controller.abort();
+  }
+});
+
+test("source waves are serial and total active work stays bounded", async () => {
+  const controller = new AbortController();
+  const releases: (() => void)[] = [];
+  const active = new Set<string>();
+  const starts: string[] = [];
+  const waves = createCardWaves(
+    controller.signal,
+    async (cards) => {
+      const source = cards[0]!.sourceId;
+      expect(active.has(source)).toBe(false);
+      active.add(source);
+      starts.push(source);
+      expect(active.size).toBeLessThanOrEqual(2);
+      await new Promise<void>((resolve) => releases.push(resolve));
+      active.delete(source);
+    },
+    2,
+  );
+  await waves.push(
+    Array.from({ length: 401 }, (_, i) => ({
+      ...card,
+      sourceId: "one",
+      url: String(i),
+    })),
+  );
+  await waves.push([
+    { ...card, sourceId: "two" },
+    { ...card, sourceId: "three" },
+  ]);
+  const drained = waves.drain();
+  await vi.waitFor(() => expect(starts).toEqual(["one", "two"]));
+  releases.shift()!();
+  await vi.waitFor(() => expect(starts).toHaveLength(3));
+  releases.shift()!();
+  await vi.waitFor(() => expect(starts).toHaveLength(4));
+  for (const release of releases.splice(0)) release();
+  await drained;
+  controller.abort();
+});

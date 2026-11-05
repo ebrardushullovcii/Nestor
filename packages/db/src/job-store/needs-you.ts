@@ -314,7 +314,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
        WHERE id IN (
          SELECT n.application_id FROM application_needs_you n
          JOIN applications a ON a.id = n.application_id
-         WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you'
+         WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state IN ('needs_you','failed')
        ) AND NOT EXISTS (
          SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
          WHERE n.application_id = applications.id AND n.attempt = applications.attempt
@@ -457,7 +457,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     const targets =
       sql(`SELECT n.application_id,n.field_key,n.task_id,t.prompt FROM application_needs_you n
       JOIN needs_you t ON t.id=n.task_id JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
-      WHERE a.state='needs_you' AND t.resolved_at IS NULL AND t.reuse_prompt=1 AND n.application_id IN
+      WHERE a.state IN ('needs_you','failed') AND t.resolved_at IS NULL AND t.reuse_prompt=1 AND n.application_id IN
         (SELECT application_id FROM application_needs_you WHERE task_id=?)`).all(
         task.id,
       ) as {
@@ -586,7 +586,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         sql(`SELECT DISTINCT a.id, a.job_id AS jobId, j.title, j.company, j.location, COALESCE(a.disposition,a.state) AS state
         FROM application_needs_you n JOIN applications a ON a.id = n.application_id JOIN jobs j ON j.id = a.job_id
         WHERE n.task_id = ? AND n.attempt = a.attempt
-          AND (a.state = 'needs_you' OR (? <> 'question' AND a.state IN ('queued','running')))
+          AND (a.state IN ('needs_you','failed') OR (? <> 'question' AND a.state IN ('queued','running')))
         ORDER BY a.id LIMIT 50`).all(
           id,
           task.kind,
@@ -634,6 +634,18 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
       });
     },
     savedAnswer,
+    /** Original application locations linked to an old answer; no Profile history is inferred. */
+    answerApplications(
+      answerId: number,
+    ): Array<{ jobId: number; location: string }> {
+      return sql(`SELECT DISTINCT j.id AS jobId,j.location FROM form_answers f
+        JOIN needs_you t ON t.answer_key=f.answer_key AND t.prompt=f.prompt AND t.answer IS NOT NULL
+        JOIN application_needs_you n ON n.task_id=t.id
+        JOIN applications a ON a.id=n.application_id JOIN jobs j ON j.id=a.job_id
+        WHERE f.id=? AND t.country=f.country AND t.site_origin=f.site_origin`).all(
+        answerId,
+      ) as Array<{ jobId: number; location: string }>;
+    },
     getAnswerByKey(input: SavedFormAnswerKey): SavedFormAnswer | null {
       const { key, scope } = SavedFormAnswerKeySchema.parse(input);
       const row = sql(
@@ -913,13 +925,88 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         ];
       });
     },
+    /** Full, current reusable question/answer pairs for semantic comparison.
+     * Selection, scope, drafts and option identity remain repository-owned. */
+    questionReuseCandidates(): {
+      task: NeedsYouTask;
+      answers: SavedFormAnswer[];
+      applications: number[];
+    }[] {
+      const tasks = sql(`SELECT DISTINCT t.* FROM needs_you t
+        JOIN application_needs_you n ON n.task_id=t.id
+        JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
+        WHERE t.kind='question' AND t.reuse_prompt=1 AND t.resolved_at IS NULL
+          AND a.state IN ('needs_you','failed') AND NOT EXISTS
+          (SELECT 1 FROM needs_you_drafts d WHERE d.task_id=t.id)
+        ORDER BY t.id`).all() as Task[];
+      return tasks.flatMap((row) => {
+        const task = toTask(row);
+        const answers = (
+          sql(`SELECT id FROM form_answers WHERE needs_confirmation=0
+          AND country=? AND site_origin=? ORDER BY id`).all(
+            row.country,
+            row.site_origin,
+          ) as { id: number }[]
+        )
+          .map(({ id }) => savedAnswer(id))
+          .filter((answer): answer is SavedFormAnswer => answer !== null);
+        // An exact answer refused by this attempt is not silently overridden.
+        if (answers.some((answer) => answer.key === task.key)) return [];
+        const applications =
+          sql(`SELECT DISTINCT n.application_id AS id FROM application_needs_you n
+          JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
+          WHERE n.task_id=? AND a.state IN ('needs_you','failed')
+          ORDER BY n.application_id`).all(row.id) as {
+            id: number;
+          }[];
+        return answers.length
+          ? [
+              {
+                task,
+                answers,
+                applications: applications.map(({ id }) => id),
+              },
+            ]
+          : [];
+      });
+    },
+    /** Resolve only a still-identical snapshot checked outside the transaction. */
+    resolveQuestionReuse(input: {
+      snapshot: string;
+      matches: { taskId: number; answerId: number; answer: string }[];
+    }): number {
+      return store.transaction(() => {
+        const current = this.questionReuseCandidates();
+        if (JSON.stringify(current) !== input.snapshot) return 0;
+        let queued = 0;
+        for (const match of input.matches) {
+          const candidate = current.find(
+            (entry) => entry.task.id === match.taskId,
+          );
+          const saved = candidate?.answers.find(
+            (entry) => entry.id === match.answerId,
+          );
+          const task = get(match.taskId);
+          if (!candidate || !saved || !task || task.resolved_at !== null)
+            continue;
+          let answer: string;
+          try {
+            answer = validateAnswer(task, match.answer);
+          } catch {
+            continue;
+          }
+          queued += resolve(task, answer);
+        }
+        return queued;
+      });
+    },
     /** Reuse human answers for older reworded handovers, without overriding an exact refusal. */
     reconcileSavedQuestions(): number {
       return store.transaction(() => {
         const waiting = sql(`SELECT DISTINCT t.* FROM needs_you t
           JOIN application_needs_you n ON n.task_id=t.id
           JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
-          WHERE t.kind='question' AND t.reuse_prompt=1 AND t.resolved_at IS NULL AND a.state='needs_you'`).all() as Task[];
+          WHERE t.kind='question' AND t.reuse_prompt=1 AND t.resolved_at IS NULL AND a.state IN ('needs_you','failed')`).all() as Task[];
         let queued = 0;
         for (const task of waiting) {
           if (
@@ -1169,8 +1256,26 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         }
         link(value, task.id);
         if (value.askReason) {
+          const earlier = toTask(task).askReason?.eligibilityContext;
+          const current = value.askReason.eligibilityContext;
+          const askReason =
+            earlier?.legacyAnswerId &&
+            current &&
+            !current.legacyAnswerId &&
+            earlier.fingerprint === current.fingerprint &&
+            earlier.country === current.country &&
+            earlier.jobId === current.jobId &&
+            earlier.kind === current.kind
+              ? {
+                  ...value.askReason,
+                  eligibilityContext: {
+                    ...current,
+                    legacyAnswerId: earlier.legacyAnswerId,
+                  },
+                }
+              : value.askReason;
           sql("UPDATE needs_you SET ask_reason_json=? WHERE id=?").run(
-            JSON.stringify(value.askReason),
+            JSON.stringify(askReason),
             task.id,
           );
           task = get(task.id)!;
@@ -1205,11 +1310,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
            w.company AS waiting_company, w.title AS waiting_title,
            (SELECT count(DISTINCT a.id) FROM application_needs_you n
              JOIN applications a ON a.id = n.application_id
-             WHERE n.task_id = t.id AND n.attempt = a.attempt AND a.state = 'needs_you') AS waiting_count
+             WHERE n.task_id = t.id AND n.attempt = a.attempt AND a.state IN ('needs_you','failed')) AS waiting_count
          FROM (SELECT * FROM needs_you WHERE ${where} AND id > ? ORDER BY id LIMIT ?) t
          LEFT JOIN jobs w ON w.id = (SELECT a.job_id FROM application_needs_you n
            JOIN applications a ON a.id = n.application_id
-           WHERE n.task_id = t.id AND n.attempt = a.attempt AND a.state = 'needs_you'
+           WHERE n.task_id = t.id AND n.attempt = a.attempt AND a.state IN ('needs_you','failed')
            ORDER BY a.id LIMIT 1)
          LEFT JOIN source_needs_you n ON n.task_id = t.id
          LEFT JOIN job_sites s ON s.id = n.source_id ORDER BY t.id`,
@@ -1247,6 +1352,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         if (task.kind !== "question")
           throw new Error("Finish this step in the browser.");
         const answer = validateAnswer(task, value.answer);
+        const eligibility = toTask(task).askReason?.eligibilityContext;
         if (value.remember)
           writeAnswer({
             key: task.answer_key,
@@ -1255,6 +1361,17 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
             input: inputOf(task) as NeedsYouTask["input"],
             options: JSON.parse(task.options_json) as string[],
             answer,
+            ...(eligibility
+              ? {
+                  kind: eligibility.kind,
+                  proofEntryIds: [
+                    `eligibility:${eligibility.fingerprint}`,
+                    ...(eligibility.legacyAnswerId
+                      ? [`legacy_form_answer:${eligibility.legacyAnswerId}`]
+                      : []),
+                  ],
+                }
+              : {}),
           });
         let queued = resolve(task, answer);
         if (value.remember && task.reuse_prompt === 1)
@@ -1298,7 +1415,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           return false;
         const linked =
           sql(`SELECT 1 FROM application_needs_you n JOIN applications a ON a.id=n.application_id
-          WHERE n.task_id=? AND n.application_id=? AND n.attempt=a.attempt AND a.state IN ('needs_you','running')`).get(
+          WHERE n.task_id=? AND n.application_id=? AND n.attempt=a.attempt AND a.state IN ('needs_you','running','failed')`).get(
             id,
             verifiedApplicationId,
           );
@@ -1307,14 +1424,14 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         // their GET checkpoint; never replay a credential, challenge or form POST.
         sql(`UPDATE application_details SET access_recheck=1 WHERE application_id<>?
           AND application_id IN (SELECT n.application_id FROM application_needs_you n
-          JOIN applications a ON a.id=n.application_id WHERE n.task_id=? AND n.attempt=a.attempt AND a.state='needs_you')`).run(
+          JOIN applications a ON a.id=n.application_id WHERE n.task_id=? AND n.attempt=a.attempt AND a.state IN ('needs_you','failed'))`).run(
           verifiedApplicationId,
           id,
         );
         sql(
           "DELETE FROM application_needs_you WHERE task_id=? AND application_id=?",
         ).run(id, verifiedApplicationId);
-        sql(`UPDATE applications SET state='queued',queued_at=?,updated_at=? WHERE id=? AND state='needs_you'
+        sql(`UPDATE applications SET state='queued',queued_at=?,updated_at=? WHERE id=? AND state IN ('needs_you','failed')
           AND NOT EXISTS (SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
           WHERE n.application_id=applications.id AND n.attempt=applications.attempt AND t.resolved_at IS NULL)`).run(
           Date.now(),
@@ -1323,7 +1440,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         );
         sql(`UPDATE needs_you SET resolved_at=? WHERE id=? AND resolved_at IS NULL AND NOT EXISTS (
           SELECT 1 FROM application_needs_you n JOIN applications a ON a.id=n.application_id
-          WHERE n.task_id=? AND n.attempt=a.attempt AND a.state IN ('queued','running','needs_you'))`).run(
+          WHERE n.task_id=? AND n.attempt=a.attempt AND a.state IN ('queued','running','needs_you','failed'))`).run(
           Date.now(),
           id,
           id,
@@ -1414,7 +1531,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           sql("DELETE FROM needs_you_drafts WHERE task_id = ?").run(
             link.task_id,
           );
-        sql(`UPDATE applications SET state='queued',queued_at=?,updated_at=? WHERE id=? AND state='needs_you'
+        sql(`UPDATE applications SET state='queued',queued_at=?,updated_at=? WHERE id=? AND state IN ('needs_you','failed')
           AND NOT EXISTS (SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
           WHERE n.application_id=applications.id AND n.attempt=applications.attempt AND t.resolved_at IS NULL)`).run(
           Date.now(),

@@ -37,7 +37,31 @@ export function guardApplicationPreparationSession(
     navigate: (url) => guard(() => session.navigate(url), url),
     clickElement: (ref) => guard(() => session.clickElement(ref)),
     ...(session.clickWithoutWrites
-      ? {clickWithoutWrites: (expected: Parameters<NonNullable<ApplyPageSession["clickWithoutWrites"]>>[0]) => guard(() => session.clickWithoutWrites!(expected))}
+      ? {
+          clickWithoutWrites: (
+            expected: Parameters<
+              NonNullable<ApplyPageSession["clickWithoutWrites"]>
+            >[0],
+          ) => guard(() => session.clickWithoutWrites!(expected)),
+        }
+      : {}),
+    ...(session.clickBoundAction
+      ? {
+          clickBoundAction: (
+            expected: Parameters<
+              NonNullable<ApplyPageSession["clickBoundAction"]>
+            >[0],
+          ) => guard(() => session.clickBoundAction!(expected)),
+        }
+      : {}),
+    ...(session.renewAccountWindow
+      ? {
+          renewAccountWindow: (
+            expected: Parameters<
+              NonNullable<ApplyPageSession["renewAccountWindow"]>
+            >[0],
+          ) => guard(() => session.renewAccountWindow!(expected)),
+        }
       : {}),
     pressKey: (ref, key) => guard(() => session.pressKey(ref, key)),
     scroll: (direction) => guard(() => session.scroll(direction)),
@@ -50,6 +74,15 @@ export function guardApplicationPreparationSession(
             guard(() => session.adoptOpenedTab!(index)),
         }
       : {}),
+    ...(session.clickOpeningAccountWindow
+      ? {
+          clickOpeningAccountWindow: (
+            grant: Parameters<
+              NonNullable<ApplyPageSession["clickOpeningAccountWindow"]>
+            >[0],
+          ) => guard(() => session.clickOpeningAccountWindow!(grant)),
+        }
+      : {}),
     installPrepareOnlyGuard: (input) =>
       guard(() => session.installPrepareOnlyGuard(input)),
     readBlockedAttempt: () => guard(() => session.readBlockedAttempt()),
@@ -60,6 +93,15 @@ export function guardApplicationPreparationSession(
     // Cleanup must still close a short write window when a run was aborted.
     closeIntermediateWriteWindow: () => session.closeIntermediateWriteWindow(),
     closeUploadWindow: () => session.closeUploadWindow(),
+    ...(session.clickAuthorizedLoginAction
+      ? {
+          clickAuthorizedLoginAction: (
+            grant: Parameters<
+              NonNullable<ApplyPageSession["clickAuthorizedLoginAction"]>
+            >[0],
+          ) => guard(() => session.clickAuthorizedLoginAction!(grant)),
+        }
+      : {}),
     clickAuthorizedFormAction: (ref) =>
       guard(() => session.clickAuthorizedFormAction(ref)),
     checkServiceWorker: () => guard(() => session.checkServiceWorker()),

@@ -237,9 +237,9 @@ it("shows failed sites and recovery advice instead of a successful empty search"
   await screen.findByText("Unreadable site 4");
   expect(screen.queryByText(/nothing new/i)).toBeNull();
   expect(screen.queryByText("No jobs yet")).toBeNull();
-  expect(
-    screen.getAllByText(/use the board’s main jobs page instead/),
-  ).toHaveLength(4);
+  expect(screen.getAllByRole("button", { name: "Continue site" })).toHaveLength(
+    4,
+  );
   expect(
     screen.getAllByText(
       "The vacancy title or hiring employer could not be identified on this page.",
@@ -403,4 +403,43 @@ it("keeps the fit floor choice across a restart and counts below it with the tex
       .getAttribute("aria-pressed"),
   ).toBe("true");
   expect(await screen.findByText("Supply Chain Analyst 2")).toBeTruthy();
+});
+
+it("offers Retry fit for retained unfinished jobs and Stop fit only while running", async () => {
+  const { SearchStatus } = await import("./search-panel");
+  const run = vi
+    .spyOn(window.nestor.jobs, "run")
+    .mockResolvedValue(searchStatus);
+  const status = {
+    ...searchStatus,
+    fitChecking: 2,
+    fitRunning: false,
+    fitError: "Model output was incomplete",
+  };
+  const view = render(
+    <MemoryRouter>
+      <SearchStatus status={status} error={null} noSites={false} />
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Retry fit" }));
+  await waitFor(() => expect(run).toHaveBeenCalledWith("retry_fit", {}));
+  expect(run).not.toHaveBeenCalledWith("start_search", expect.anything());
+  view.rerender(
+    <MemoryRouter>
+      <SearchStatus
+        status={{ ...status, fitRunning: true }}
+        error={null}
+        noSites={false}
+      />
+    </MemoryRouter>,
+  );
+  expect(screen.queryByRole("button", { name: "Retry fit" })).toBeNull();
+  expect(screen.getByText("Checking fit for 2 saved jobs…")).toBeTruthy();
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Stop fit" }).getAttribute("disabled"),
+    ).toBeNull(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Stop fit" }));
+  await waitFor(() => expect(run).toHaveBeenCalledWith("stop_search", {}));
 });

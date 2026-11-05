@@ -76,11 +76,11 @@ test("900 source results page on demand and repeat totals distinguish listings f
 test.each([
   [
     "The site took too long to respond. Open it to check it loads, then retry the search. Other sites continue normally.",
-    "This site took too long to respond. Other sites carried on.",
+    "This site took too long to respond.",
   ],
   [
     "page.goto: Timeout 20000ms exceeded.",
-    "This site took too long to respond. Other sites carried on.",
+    "This site took too long to respond.",
   ],
   [
     "page.goto: net::ERR_CONNECTION_REFUSED.",
@@ -143,55 +143,124 @@ test.each([
   },
 );
 
-test("a site Quick stopped early reads More to read, never Stopped, and Keep reading reads it whole", async () => {
-  const store = openJobStore(":memory:");
-  try {
-    const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1),
-      sources = createSearchSourcesStore(store);
-    sources.put(search.id, {
-      sourceId: "7",
-      label: "Big board",
-      url: "https://big.example/jobs",
-      state: "partial",
-      lane: "http",
-      phase: null,
-      cards: 300,
-      related: 120,
-      unrelated: 180,
-      seen: 0,
-      failedReads: 0,
-      found: 120,
-      added: 120,
-      hidden: 0,
-      message:
-        "300 listings; 120 new related; 180 unrelated; 0 already seen. Quick stopped after 100 listings in a row that don't match your profile.",
-    });
-    const calls: [string, unknown][] = [];
-    Object.defineProperty(window, "nestor", {
-      configurable: true,
-      value: {
-        jobs: {
-          run: (name: string, input: JobSearchSourceQuery) => {
-            calls.push([name, input]);
-            return Promise.resolve(
-              name === "list_search_sources" ? sources.list(input) : {},
-            );
+test.each([
+  ["waiting", null, "Queued to read this site."],
+  [
+    "searching",
+    null,
+    "This site's search is still in progress. No waiting reason has been reported.",
+  ],
+  [
+    "searching",
+    "The site asked for a pause before another read.",
+    "The site asked for a pause before another read.",
+  ],
+] as const)(
+  "active sites explain only recorded progress: %s / %s",
+  async (state, message, explanation) => {
+    const store = openJobStore(":memory:");
+    try {
+      const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);
+      const sources = createSearchSourcesStore(store);
+      sources.put(search.id, {
+        sourceId: "pending",
+        label: "Pending board",
+        url: "https://pending.example/",
+        state,
+        lane: "http",
+        phase: "http",
+        cards: 0,
+        related: 0,
+        unrelated: 0,
+        seen: 0,
+        failedReads: 0,
+        found: 0,
+        added: 0,
+        hidden: 0,
+        message,
+      });
+      Object.defineProperty(window, "nestor", {
+        configurable: true,
+        value: {
+          jobs: {
+            run: (_name: string, input: JobSearchSourceQuery) =>
+              Promise.resolve(sources.list(input)),
           },
         },
-      },
-    });
-    render(<SiteResults searchId={search.id} revision={1} />);
-    fireEvent.click(screen.getByText("What each site found"));
-    const row = await screen.findByText(/Big board/);
-    const item = row.closest<HTMLElement>("[data-site-result]")!;
-    expect(item.textContent).toContain("More to read");
-    expect(item.textContent).not.toContain("Stopped");
-    fireEvent.click(within(item).getByRole("button", { name: "Keep reading" }));
-    expect(calls.at(-1)).toEqual(["keep_reading", { id: 7 }]);
-  } finally {
-    store.close();
-  }
-});
+      });
+      render(<SiteResults searchId={search.id} revision={1} />);
+      fireEvent.click(screen.getByText("What each site found"));
+      const label = await screen.findByText("Pending board");
+      const item = label.closest<HTMLElement>("[data-site-result]")!;
+      fireEvent.click(label.closest("summary")!);
+      expect(within(item).getByText(explanation)).toBeTruthy();
+      expect(item.textContent).not.toContain("could not be read");
+      expect(within(item).queryByText("Technical details")).toBeNull();
+      if (!message) expect(item.textContent).not.toContain("asked for a pause");
+    } finally {
+      store.close();
+    }
+  },
+);
+
+test.each(["partial", "failed", "stopped"] as const)(
+  "B2 unfinished site %s has a concrete continuation",
+  async (state) => {
+    const store = openJobStore(":memory:");
+    try {
+      const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1),
+        sources = createSearchSourcesStore(store);
+      sources.put(search.id, {
+        sourceId: "7",
+        label: "Big board",
+        url: "https://big.example/jobs",
+        state,
+        lane: "http",
+        phase: null,
+        cards: 300,
+        related: 120,
+        unrelated: 180,
+        seen: 0,
+        failedReads: 0,
+        found: 120,
+        added: 120,
+        hidden: 0,
+        message:
+          "300 listings; 120 new related; 180 unrelated; 0 already seen. Quick stopped after 100 listings in a row that don't match your profile.",
+      });
+      const calls: [string, unknown][] = [];
+      Object.defineProperty(window, "nestor", {
+        configurable: true,
+        value: {
+          jobs: {
+            run: (name: string, input: JobSearchSourceQuery) => {
+              calls.push([name, input]);
+              return Promise.resolve(
+                name === "list_search_sources" ? sources.list(input) : {},
+              );
+            },
+          },
+        },
+      });
+      render(<SiteResults searchId={search.id} revision={1} />);
+      fireEvent.click(screen.getByText("What each site found"));
+      const row = await screen.findByText(/Big board/);
+      const item = row.closest<HTMLElement>("[data-site-result]")!;
+      if (state === "partial") {
+        expect(item.textContent).toContain("More to read");
+        expect(item.textContent).not.toContain("Stopped");
+      }
+      fireEvent.click(
+        within(item).getByRole("button", {
+          name: state === "partial" ? "Keep reading" : "Continue site",
+        }),
+      );
+      expect(calls.at(-1)).toEqual(["keep_reading", { id: 7 }]);
+    } finally {
+      store.close();
+    }
+  },
+);
 
 test("a site with no name of its own reads by its address", () => {
   expect(

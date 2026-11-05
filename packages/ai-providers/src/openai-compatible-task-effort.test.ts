@@ -2,7 +2,6 @@ import { afterEach, expect, test, vi } from "vitest";
 import { createJobFinderAiClientFromEnvironment } from "./openai-compatible";
 import {
   DEFAULT_OPENCODE_GO_BASE_URL,
-  DEFAULT_TEXT_MODEL,
   type ModelReasoningTask,
 } from "./openai-compatible-transport";
 import {
@@ -134,7 +133,7 @@ test("batch callers use strict response schemas only on the verified route", asy
   const client = createJobFinderAiClientFromEnvironment(
     createEnvironment({
       NESTOR_AI_BASE_URL: DEFAULT_OPENCODE_GO_BASE_URL,
-      NESTOR_AI_MODEL: DEFAULT_TEXT_MODEL,
+      NESTOR_AI_MODEL: "muse-spark-1.3-contributor",
       NESTOR_AI_API_MODE: "responses",
     }),
   );

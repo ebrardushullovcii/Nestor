@@ -33,10 +33,24 @@ On Windows the `bin/` scripts run from Git Bash as written. From PowerShell, cal
 
 Options: `--ai deterministic|live`, `--net replica|web`, `--video` (Playwright video of every window into `videos/`), `--no-test-api` (production preload, no `window.nestor.*.test`), `--reuse-data` (start on the folder a previous `down --keep-data` kept, for example to keep a passed Cloudflare check), `--allow-stale` (run a build that does not match the source; say so in the proof).
 
+`--launch native` is a verification backend for browser identity checks. It starts the same quiet Electron binary as a plain owned process, with the same isolated data and send guard. A Node main inspector and a second instance of the existing scoped bridge expose **only the main app UI** to the driver; embedded pages remain controlled by the app's own bridge. The default `--launch playwright` is unchanged. Native mode rejects `--video`, Electron object handles and `--page browser` input; main UI locators, JSON main `app.evaluate` and `shot --target browser` through capturePage remain available. It is not a general ElectronApplication replacement.
+
+Every native start/restart verifies the live userData path, reruns the send-guard probe and checks a real embedded replica page's unmodified webdriver and existing Chrome identity before returning ready. `drive identity` repeats that read-only identity check on open embedded pages after product automation attaches. No webdriver mutation or stealth flag is used. If any precondition fails, stop and diagnose the setup. A passing check does not establish Google/Cloudflare acceptance. Web mode still blocks external account/challenge POSTs; native launch adds no exception.
+
+Native preparation compiles only the existing scoped bridge into this instance's private state directory with the installed Vite dependency. It does not build the desktop app or write to `out/`. Record hashes of the helper sources and compiled bridge separately: the desktop build stamp does not cover `.claude/` helper changes. Native app proof must still use a fresh source-matching desktop build or a copied frozen candidate with established provenance.
+
+Focused helper gate (no Electron launch): `node --test .claude/skills/verify-nestor/bin/lib/native-app.test.mjs`, plus Node syntax checks for the changed helper modules. Native runtime proof additionally needs the foreground-app check, webdriver/identity before and after app-owned automation, popup ownership, replica receipt and owned-process cleanup. Do not run a native instance alongside an owner-reserved heavy/app slot.
+
 - `up` refuses when the build's stamp differs from the current commit or uncommitted app changes (`apps/desktop`, `packages`). Rebuild with `$V/build`. It copies `apps/desktop/out` into the instance, so a later build never changes a running instance.
 - `--ai live` reads `NESTOR_*` keys from this checkout's `.env.local`/`.env` (root and `apps/desktop`), then from the main checkout's, without printing them. Deterministic mode blanks every key. Deterministic mode can collect compact listings, but cannot prove model-based search, fit, resume or apply quality; use `--ai live` for that journey. Each live search, resume and apply is a real model call.
 - Side by side: give each instance its own `NESTOR_VERIFY_LABEL`. Each gets its own data folder, replica-sites port, driver port and Playwright debug ports. Measured: two instances (one live, one deterministic) running journeys at the same time on 2026-10-17.
 - Default label: `verify-<checkout folder name>`.
+
+### Synthetic provider host (isolated Playwright backend only)
+
+For a Google policy replica, `NESTOR_VERIFY_PROVIDER_FIXTURE=<absolute config.json>` may bind exactly `accounts.google.com` to one loopback TLS port in this label's private instance. The config has `label`, `host`, `port`, `certPath`, `spki` and a 24-byte hex `nonce`; the host, certificate public-key pin, label, private data path, test API and replica network mode are validated. A fresh certificate is generated outside the checkout. The helper supplies only the exact host mapping and certificate pin, never a global certificate bypass. Native launch currently refuses this optional fixture.
+
+Before arming, only GET `/__nestor_probe/<nonce>` is allowed on that host. Open it through this instance's browser, verify the unique body nonce, then call the main-only `__nestorVerify.armProviderFixture(webContentsId, nonce)` through the journey's `app.evaluate`. The helper checks the exact URL and private browser partition again. Only that session is armed. Every other external host keeps the normal guard. Guarded redirect forwarding also uses the pinned loopback TLS transport; synthetic provider data cannot fall through to real Google. Restart requires a new nonce probe/arm in the same fresh instance. Preserve `provider-mapping.jsonl` and fixture request counts, redact all authorization queries, and stop the fixture's own PID at cleanup. This proves local product behavior only, never real Google acceptance.
 
 ## Doctor
 
@@ -139,6 +153,7 @@ Proof standards:
 ```sh
 $V/down               # stop everything this instance started, keep the evidence, delete the data folder and build copy
 $V/down --keep-data   # also keep the data folder for `up --reuse-data`
+$V/down --private-data  # after a diagnosis on the owner's imported real state: no final-data databases, no app.log
 ```
 
 `down` asks the driver to close the app, then stops whatever is left of the recorded PIDs and their children, and any process holding the instance's own data folder. It copies the final databases and logs into the evidence, then deletes the data folder and `~/Projects/nestor-agent-work/.verify-state/<label>/`. Survivors are reported with their PIDs, the state is kept, and it exits 1; look at them, never sweep. Run `down` after every failed attempt too.
@@ -153,7 +168,7 @@ $V/down --keep-data   # also keep the data folder for `up --reuse-data`
 | `$V/drive <command> ...`                                                                 | act on the instance (commands above)                                                                                                    |
 | `$V/db [tables \| <table> [limit] [pattern]]`                                            | newest rows from the instance's SQLite files (live copy, or `final-data` after `down`); saved as evidence; exit 1 when nothing matches  |
 | `$V/website [shot [path] [name] \| run <journey>]`                                       | the public website from this checkout in headless Chromium                                                                              |
-| `$V/down [--keep-data]`                                                                  | stop what this instance started; keep the evidence                                                                                      |
+| `$V/down [--keep-data \| --private-data]`                                                | stop what this instance started; keep the evidence                                                                                      |
 
 Internals, for fixing the helpers: `bin/lib/cli.mjs` (commands), `bin/lib/driver.mjs` (the long-lived per-instance process that owns Playwright, Electron and the replica sites; never start it by hand), `bin/lib/instance-patch.cjs` (loaded into the app's main process with `-r`: quiet windows, dialog and link stubs, send guard), `bin/lib/sqlite.mjs`, `bin/lib/website.mjs`. State (ports, PIDs, token, build copy, logs) lives in `~/Projects/nestor-agent-work/.verify-state/<label>/`; read `driver.log` and `app.log` there when `up` fails.
 

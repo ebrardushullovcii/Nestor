@@ -1,3 +1,4 @@
+import { intendedAccountEmail } from "@nestor/contracts";
 import { browserAgentPermissionsOf } from "@nestor/contracts";
 import {
   createJobFinderRepository,
@@ -293,6 +294,8 @@ export function createDesktopBrowserRuntime(
             browserHost: {
               connect: () => embedded.connect(),
               getOpenBrowser: () => embedded.getOpenBrowser(),
+              ownedApplicationPage: (key: string) =>
+                embedded.ownedApplicationPage(key),
               close: () => embedded.releaseAutomationSession(),
               assertAutomationSafe: () => embedded.assertAutomationSafe(),
               openTabCount: () => embedded.openTabCount(),
@@ -464,6 +467,8 @@ async function createJobFinderRuntime(
               profile.currentCountry,
             ),
             browserPermissions: browserAgentPermissionsOf(settings),
+            readIntendedAccountEmail: async () =>
+              intendedAccountEmail(await repository.getProfile()),
             readBrowserPermissions: () =>
               browserAgentPermissionsOf(searchPreferencesStore.settings.read()),
             remoteCountsAsAnyLocation:

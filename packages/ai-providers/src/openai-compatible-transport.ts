@@ -14,22 +14,20 @@ export const modelReasoningEfforts = [
 export type ModelReasoningEffort = (typeof modelReasoningEfforts)[number];
 
 export const DEFAULT_OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1";
-// Primary text and vision use Muse Spark 1.3; title screening uses MiMo
-// Flash without reasoning. Aggressive resume tailoring uses DeepSeek V4.1
-// Flash. Model ids are verified against /models on the gateway.
-export const DEFAULT_TEXT_MODEL = "muse-spark-1.3-contributor";
-export const DEFAULT_TEXT_MODEL_API_MODE: ModelApiMode = "responses";
-export const DEFAULT_TEXT_MODEL_REASONING_EFFORT: ModelReasoningEffort =
-  "xhigh";
+// One owner-selected route for product inference. Role-specific effort and
+// explicit operator overrides remain independent; no implicit model fallback.
+export const DEFAULT_TEXT_MODEL = "deepseek-v4.1-flash";
+export const DEFAULT_TEXT_MODEL_API_MODE: ModelApiMode = "chat_completions";
+export const DEFAULT_TEXT_MODEL_REASONING_EFFORT: ModelReasoningEffort = "low";
 export const DEFAULT_AGGRESSIVE_RESUME_MODEL = "deepseek-v4.1-flash";
 export const DEFAULT_AGGRESSIVE_RESUME_MODEL_API_MODE: ModelApiMode =
   "chat_completions";
 export const DEFAULT_AGGRESSIVE_RESUME_MODEL_REASONING_EFFORT: ModelReasoningEffort =
   "high";
-export const DEFAULT_VISION_MODEL = "muse-spark-1.3-contributor";
-export const DEFAULT_VISION_MODEL_API_MODE: ModelApiMode = "responses";
+export const DEFAULT_VISION_MODEL = DEFAULT_TEXT_MODEL;
+export const DEFAULT_VISION_MODEL_API_MODE: ModelApiMode = "chat_completions";
 export const DEFAULT_VISION_MODEL_REASONING_EFFORT: ModelReasoningEffort =
-  "xhigh";
+  "low";
 
 export type CompatibleMessage = {
   role: "system" | "user" | "assistant" | "tool";

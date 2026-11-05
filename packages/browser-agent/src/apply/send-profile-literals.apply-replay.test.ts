@@ -1,9 +1,15 @@
-import { CandidateProfileSchema } from "@nestor/contracts";
+import {
+  BrowserAgentPermissionsSchema,
+  CandidateProfileSchema,
+} from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { answerSourceCatalog } from "./answer-source-catalog";
 import { checkClassifiedApplicationAnswers } from "./classified-answer-check";
-import { createQuestionClassifier } from "./question-classification";
+import {
+  applicationQuestionClassificationContext,
+  createQuestionClassifier,
+} from "./question-classification";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 
 // The local /employer-a/apply/1 replica, including its optional letter and
@@ -18,6 +24,15 @@ const fields = [
 ] as const;
 const pageText =
   "Apply: Engineer\nName *\nEmail *\nPhone *\nResume / CV\nCover letter\nI certify the information is true\nSubmit";
+// Preparation and Send share one complete classification context (B11):
+// the same recipient, permissions, pay and declaration authority.
+const application = {
+  jobId: "job",
+  applicationId: "application_1_attempt_1",
+  startingUrl: "http://127.0.0.1:47950/employer-a/apply/1",
+};
+const browserPermissions = BrowserAgentPermissionsSchema.parse({});
+const approvedAttestations = ["truthfulness_certification"] as const;
 
 function fixture() {
   const sources: ApplyAnswerSources = {
@@ -136,7 +151,15 @@ async function prepare(f: ReturnType<typeof fixture>, client: LLMClient) {
   await createQuestionClassifier({
     client,
     cacheScope: f.scope,
-    sources: () => answerSourceCatalog(f.sources),
+    readContext: () =>
+      applicationQuestionClassificationContext({
+        sources: f.sources,
+        application,
+        payDisclosed: false,
+        approvedAttestations,
+        browserPermissions,
+      }),
+    sources: () => answerSourceCatalog(f.sources, approvedAttestations),
   })(f.controls, JSON.stringify({ instructions: pageText }));
 }
 
@@ -149,7 +172,9 @@ function sendCheck(
     client,
     sources: f.sources,
     payDisclosed: false,
-    approvedAttestations: ["truthfulness_certification"],
+    approvedAttestations,
+    browserPermissions,
+    application,
     answers: f.answers,
     formControls: f.controls,
     questionReadCacheScope: f.scope,
@@ -162,12 +187,10 @@ test("replica Send keeps unchanged Profile contacts and the full form's reading"
     client = reader();
   await prepare(f, client);
   const checked = await sendCheck(f, client);
-  expect(checked.map((check) => check.supported)).toEqual([
-    true,
-    true,
-    true,
-    true,
-  ]);
+  expect(
+    checked.map((check) => check.supported),
+    JSON.stringify(checked),
+  ).toEqual([true, true, true, true]);
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
   const questions = JSON.parse(
     String(
@@ -226,9 +249,13 @@ test.each(["profile", "reference", "instructions"] as const)(
     expect(checked.slice(0, 3).map((check) => check.supported)).toEqual(
       change === "profile" ? [false, true, false] : [false, false, false],
     );
-    expect(client.chatWithTools).toHaveBeenCalledTimes(
-      change === "profile" ? 4 : 2,
-    );
+    expect(
+      vi
+        .mocked(client.chatWithTools)
+        .mock.calls.filter(
+          (call) => call[1][0]?.function.name === "report_question_kinds",
+        ),
+    ).toHaveLength(2);
   },
 );
 
@@ -249,5 +276,11 @@ test("plain identity resolves a missing source without authorizing unrelated con
     true,
     false,
   ]);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+  expect(
+    vi
+      .mocked(client.chatWithTools)
+      .mock.calls.filter(
+        (call) => call[1][0]?.function.name === "report_question_kinds",
+      ),
+  ).toHaveLength(1);
 });

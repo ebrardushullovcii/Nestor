@@ -115,7 +115,8 @@ test.each([
         pageInstructions,
       });
     };
-    expect(permission().kind).toBe(supported ? "writing" : "needs_you");
+    // Permission to check a summary is separate from support for its claims.
+    expect(permission().kind).toBe("writing");
     expect(permission(null).kind).toBe("needs_you");
     expect(permission("posting.description").kind).toBe("needs_you");
     expect(permission("profile.fullName").kind).toBe("needs_you");
@@ -246,7 +247,7 @@ test.each([
       answers: [{ question: "Why should we hire you?", answer }],
     });
     expect(result[0]?.supported).toBe(false);
-    expect(chatWithTools).toHaveBeenCalledTimes(1);
+    expect(chatWithTools).toHaveBeenCalledTimes(2);
   },
 );
 
@@ -409,7 +410,7 @@ test("a lying supported checker cannot authorize any pass-11 invention", async (
     answers: replay.cases,
   });
   expect(result.map((check) => check.supported)).toEqual([false, false, false]);
-  expect(chatWithTools).toHaveBeenCalledOnce();
+  expect(chatWithTools).toHaveBeenCalledTimes(2);
 });
 
 test("the whole applicant object cannot serve as a quote even with a lying checker", async () => {

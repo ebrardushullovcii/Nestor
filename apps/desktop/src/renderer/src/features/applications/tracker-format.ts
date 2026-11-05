@@ -129,12 +129,12 @@ export const WORK_HINT: Record<ApplicationWorkState, string> = {
   ready: "Filled in and waiting for you to send it.",
   submitting: "Apply is sending it.",
   submitted: "Sent. It moves to Applied.",
-  stopped: "Apply stopped before sending it.",
+  stopped: "Apply stopped.",
   skipped:
     "Your saved rule skipped this application. You can still open the job and apply by hand.",
   blocked:
     "The site blocked this browser. Open the job in your browser to continue by hand.",
-  failed: "Apply couldn’t finish this application. Nothing was sent.",
+  failed: "Apply couldn’t finish this application.",
   uncertain:
     "Apply could not tell whether it went through. Check the site, then say what you found.",
 };

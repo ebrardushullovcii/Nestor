@@ -477,7 +477,32 @@ export function withAttachmentUploadOutcomes(
       if (!control.upload) return control;
       // The file Nestor gave this control, with its exact identity; an
       // emptied input is judged by it too.
-      const mine = given.get(page)?.get(controlHandle(control));
+      // A ref is a position in this read: a row the form inserts above the
+      // field moves it (workday replica, candidate 5). The input still
+      // holding exactly one file Nestor gave on this page, by name and size,
+      // is that file. Nothing here says the server kept it.
+      const files = [...(given.get(page)?.values() ?? [])];
+      const held = files.filter(
+        (file) =>
+          file.name === control.upload?.fileName &&
+          file.size === control.upload.fileSize,
+      );
+      // Name and size choose only when nothing else could be meant: one file
+      // Nestor gave, held by one input on the page.
+      const holders = raw.controls.filter(
+        (other) =>
+          other.upload?.fileName === control.upload?.fileName &&
+          other.upload?.fileSize === control.upload?.fileSize,
+      );
+      const direct = given.get(page)?.get(controlHandle(control));
+      const directMatches =
+        direct &&
+        (!control.upload.fileName ||
+          (direct.name === control.upload.fileName &&
+            direct.size === control.upload.fileSize));
+      const mine =
+        (directMatches ? direct : undefined) ??
+        (held.length === 1 && holders.length === 1 ? held[0] : undefined);
       const shown = control.upload.fileName;
       const file =
         mine && (!shown || shown.toLowerCase() === mine.name.toLowerCase())
@@ -495,7 +520,9 @@ export function withAttachmentUploadOutcomes(
         ...control,
         upload: {
           ...control.upload,
-          ...(mine ? { selectedFileName: mine.name } : {}),
+          ...(mine
+            ? { selectedFileName: mine.name, selectedFileSize: mine.size }
+            : {}),
           ...evidence,
         },
       };

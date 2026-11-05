@@ -1,4 +1,9 @@
-import { inferAttestationKind } from "./control-classification";
+import { currentApplicationAnswer } from "./answer-meaning";
+import { questionPrompt } from "./question-text";
+import {
+  inferAttestationKind,
+  inferQuestionKind,
+} from "./control-classification";
 import { addressAnswerMatches, addressLabels } from "./address-answer";
 import {
   asksListingDiscoveryControl,
@@ -13,6 +18,7 @@ import {
   storedFacts,
   savedAnswerForQuestion,
   applicantContactGroup,
+  isAnswerFromThisApplication,
   RESIDENCE_COUNTRY_LABELS,
   PROFILE_TEXT_FIELD_LABELS,
 } from "./application-facts";
@@ -46,11 +52,9 @@ import { employmentMonthEvidence, isScalarAnswer } from "./answer-evidence";
 import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import { isShortValueAnswer } from "./written-answer-grounding";
+import { expectedPaySuggestion } from "./expected-pay";
 import { asksGithubUsername, fieldNamesAnotherPerson } from "./github-username";
-import {
-  asksForSpecificStory,
-  factualSummaryIsSourced,
-} from "./factual-summary";
+import { asksForSpecificStory } from "./factual-summary";
 import type {
   ApplyAgentConfig,
   ApplyAnswerSources,
@@ -97,11 +101,14 @@ export function legalQuestionCountry(
       ? residenceCountry ||
           sources.find((row) => row.id === "profile.currentLocation")?.value ||
           ""
-      : sources.find((row) => row.id === "posting.location")?.value || "",
+      : sources.find((row) => row.id === "posting.country")?.value ||
+          sources.find((row) => row.id === "posting.location")?.value ||
+          "",
   );
 }
 export function answerSourceCatalog(
   sources: ApplyAnswerSources,
+  approvedAttestations: readonly ApplicationAttestationKind[] = [],
 ): ClassifiedAnswerSource[] {
   const rows: ClassifiedAnswerSource[] = storedFacts(sources, {
     payDisclosed: true,
@@ -129,7 +136,19 @@ export function answerSourceCatalog(
       !rows.some((row) => row.id === id)
     )
       rows.push({ id, value, purpose: "profile", country: null });
-    else if (value && typeof value === "object")
+    else if (
+      (typeof value === "number" && Number.isFinite(value)) ||
+      typeof value === "boolean"
+    ) {
+      if (!rows.some((row) => row.id === id))
+        rows.push({
+          id,
+          value:
+            typeof value === "boolean" ? (value ? "Yes" : "No") : String(value),
+          purpose: "profile",
+          country: null,
+        });
+    } else if (value && typeof value === "object")
       for (const [key, child] of Object.entries(value))
         if (key !== "id") addWritingFact(child, `${id}.${key}`);
   };
@@ -139,13 +158,34 @@ export function answerSourceCatalog(
     "profile.professionalSummary",
   );
   addWritingFact(sources.profile.narrative, "profile.narrative");
+  addWritingFact(sources.preferences, "profile.preferences");
   addWritingFact(sources.profile.proofBank, "profile.proofBank");
+  for (const key of [
+    "willingToTravel",
+    "remoteEligible",
+    "willingToRelocate",
+    "noticePeriodDays",
+    "availableStartDate",
+  ] as const)
+    addWritingFact(
+      sources.profile.workEligibility[key],
+      `profile.workEligibility.${key}`,
+    );
   rows.push({
     id: "posting.location",
     value: sources.posting.location,
     purpose: "context",
-    country: country(sources.posting.location),
+    country: country(
+      sources.posting.resolvedCountry ?? sources.posting.location,
+    ),
   });
+  if (sources.posting.resolvedCountry)
+    rows.push({
+      id: "posting.country",
+      value: sources.posting.resolvedCountry,
+      purpose: "listing",
+      country: country(sources.posting.resolvedCountry),
+    });
   const eligibilityFacts = sources.profile.workEligibility;
   if (eligibilityFacts.availableStartDate)
     rows.push({
@@ -221,6 +261,15 @@ export function answerSourceCatalog(
         country: code,
       });
   }
+  for (const [index, permit] of (
+    eligibility.limitedWorkPermissions ?? []
+  ).entries())
+    rows.push({
+      id: `profile.workEligibility.limitedWorkPermissions.${index}`,
+      value: JSON.stringify(permit),
+      purpose: "work_auth",
+      country: country(permit.country),
+    });
   for (const saved of sources.reusableAnswers.filter(
     (answer) => !answer.needsConfirmation,
   ))
@@ -259,13 +308,25 @@ export function answerSourceCatalog(
       purpose: "writing",
       country: null,
     });
+  for (const kind of approvedAttestations)
+    rows.push({
+      id: `authority.attestation.${kind}`,
+      value: `The person permits Nestor to accept ${kind} declarations.`,
+      purpose: "authority",
+      country: null,
+    });
   return rows;
 }
 const contactLabels: Record<string, readonly string[]> = {
   "profile.fullName": ["name", "full name", "your full name", "your name"],
-  "profile.firstName": ["first name", "given name"],
+  "profile.firstName": ["first name", "given name", "legal first name"],
   "profile.middleName": ["middle name"],
-  "profile.lastName": ["last name", "surname", "family name"],
+  "profile.lastName": [
+    "last name",
+    "surname",
+    "family name",
+    "legal last name",
+  ],
   "profile.email": ["email", "email address", "your email"],
   "profile.phone": phoneLabels,
   ...PROFILE_TEXT_FIELD_LABELS,
@@ -386,8 +447,8 @@ function historyRecordMatches(
   const record = /^(profile\.(experiences|education)\.[^.]+)\.[^.]+$/u.exec(
     source.id,
   );
-  if (!record) return true;
-  const prefix = record[1];
+  const prefix = record?.[1];
+  if (!record || !prefix) return true;
   const group = (control: ApplyFormControl) => {
     const group = normalizeFormQuestionPrompt(control.groupLabel);
     return group === normalizeFormQuestionPrompt(control.label) ? "" : group;
@@ -396,32 +457,137 @@ function historyRecordMatches(
     record[2] === "experiences"
       ? ["companyName", "title", "startDate", "endDate"]
       : ["schoolName", "degree", "fieldOfStudy", "startDate", "endDate"];
-  return input.controls
-    .filter(
-      (control) =>
-        control.ref !== input.control.ref &&
-        control.visible &&
-        (control.rowScopeKey && input.control.rowScopeKey
-          ? control.rowScopeKey === input.control.rowScopeKey
-          : group(control) === group(input.control)) &&
-        (!control.scopeKey ||
-          !input.control.scopeKey ||
-          control.scopeKey === input.control.scopeKey) &&
-        control.value.trim(),
-    )
-    .every((control) => {
-      const leaf = leaves.find((leaf) =>
-        knownLiteralField({ ...source, id: `${prefix}.${leaf}` }, control),
+  return (
+    input.controls
+      .filter(
+        (control) =>
+          control.ref !== input.control.ref &&
+          control.visible &&
+          (control.rowScopeKey && input.control.rowScopeKey
+            ? control.rowScopeKey === input.control.rowScopeKey
+            : group(control) === group(input.control)) &&
+          (!control.scopeKey ||
+            !input.control.scopeKey ||
+            control.scopeKey === input.control.scopeKey) &&
+          control.value.trim(),
+      )
+      .every((control) => {
+        const leaf = leaves.find((leaf) =>
+          knownLiteralField({ ...source, id: `${prefix}.${leaf}` }, control),
+        );
+        if (!leaf) return true;
+        const expected = catalog.find((row) => row.id === `${prefix}.${leaf}`);
+        return (
+          !!expected && literalValueMatches(expected, control, control.value)
+        );
+      }) && !historyRecordInAnotherRow(prefix, input, catalog)
+  );
+}
+
+const HISTORY_LEAVES = {
+  experiences: ["companyName", "title", "startDate", "endDate"],
+  education: ["schoolName", "degree", "fieldOfStudy", "startDate", "endDate"],
+} as const;
+
+/** The Profile records a filled history row is, by every filled field in it. */
+function historyRowRecords(
+  row: readonly ApplyFormControl[],
+  kind: "experiences" | "education",
+  catalog: readonly ClassifiedAnswerSource[],
+): string[] {
+  const identity = kind === "experiences" ? "companyName" : "schoolName";
+  const prefixes = [
+    ...new Set(
+      catalog.flatMap((source) => {
+        const match = new RegExp(`^(profile\\.${kind}\\.[^.]+)\\.`, "u").exec(
+          source.id,
+        );
+        return match?.[1] ? [match[1]] : [];
+      }),
+    ),
+  ];
+  return prefixes.filter((prefix) => {
+    const filled = row.filter((control) => control.value.trim());
+    const leafOf = (control: ApplyFormControl) =>
+      HISTORY_LEAVES[kind].find((leaf) =>
+        knownLiteralField({ id: `${prefix}.${leaf}` }, control),
       );
+    // A row is a record only once its employer or school says so.
+    if (!filled.some((control) => leafOf(control) === identity)) return false;
+    return filled.every((control) => {
+      const leaf = leafOf(control);
       if (!leaf) return true;
-      const expected = catalog.find((row) => row.id === `${prefix}.${leaf}`);
+      const expected = catalog.find(
+        (source) => source.id === `${prefix}.${leaf}`,
+      );
       return (
         !!expected && literalValueMatches(expected, control, control.value)
       );
     });
+  });
 }
 
-function literalValueMatches(
+/**
+ * Rows are bound by what they hold, never by order (council D2): a Profile
+ * record another row of the same form already holds cannot fill this row.
+ */
+function historyRecordInAnotherRow(
+  prefix: string,
+  input: { control: ApplyFormControl; controls: readonly ApplyFormControl[] },
+  catalog: readonly ClassifiedAnswerSource[],
+): boolean {
+  const kind = prefix.includes(".experiences.") ? "experiences" : "education";
+  const own = input.control.rowScopeKey;
+  if (!own) return false;
+  const rows = new Map<string, ApplyFormControl[]>();
+  for (const control of input.controls)
+    if (
+      control.rowScopeKey &&
+      control.rowScopeKey !== own &&
+      (!control.scopeKey ||
+        !input.control.scopeKey ||
+        control.scopeKey === input.control.scopeKey)
+    )
+      rows.set(control.rowScopeKey, [
+        ...(rows.get(control.rowScopeKey) ?? []),
+        control,
+      ]);
+  return [...rows.values()].some((row) =>
+    historyRowRecords(row, kind, catalog).includes(prefix),
+  );
+}
+
+/**
+ * Filled history rows that hold the same single Profile record as another
+ * row, wherever they sit in the form (hidden earlier steps included). Sending
+ * such a form would repeat one job or school as two.
+ */
+export function duplicatedHistoryRows(
+  controls: readonly ApplyFormControl[],
+  sources: ApplyAnswerSources,
+): string[] {
+  const catalog = answerSourceCatalog(sources);
+  const rows = new Map<string, ApplyFormControl[]>();
+  for (const control of controls)
+    if (control.rowScopeKey)
+      rows.set(`${control.scopeKey ?? ""}|${control.rowScopeKey}`, [
+        ...(rows.get(`${control.scopeKey ?? ""}|${control.rowScopeKey}`) ?? []),
+        control,
+      ]);
+  const held = new Map<string, string[]>();
+  for (const row of rows.values())
+    for (const kind of ["experiences", "education"] as const) {
+      const records = historyRowRecords(row, kind, catalog);
+      const [only] = records;
+      if (records.length !== 1 || !only) continue;
+      const label =
+        row[0]?.sectionPath?.at(-1) ?? row[0]?.groupLabel ?? "history entry";
+      held.set(only, [...(held.get(only) ?? []), label]);
+    }
+  return [...held.values()].filter((labels) => labels.length > 1).flat();
+}
+
+export function literalValueMatches(
   source: ClassifiedAnswerSource,
   control: ApplyFormControl,
   answer: string,
@@ -525,6 +691,78 @@ const routineDeclarations: Partial<
   ],
 };
 
+/** Only an explicit instruction to certify the supplied answers grants this
+ * routine acknowledgement. It grants no licence, eligibility or other fact. */
+function taskAllowsTruthfulness(instructions: readonly string[]): boolean {
+  const sentences = instructions.flatMap((instruction) =>
+    instruction.split(/[.!?;\n]+/u),
+  );
+  const certifies = /\b(?:certify|attest|confirm)\b/iu;
+  if (
+    sentences.some(
+      (sentence) =>
+        certifies.test(sentence) &&
+        /\b(?:not|never|unless|only if|provided that|cannot|can t|don t)\b/iu.test(
+          sentence,
+        ),
+    )
+  )
+    return false;
+  return sentences.some(
+    (sentence) =>
+      /^(?:\s*(?:you\s+)?(?:may|can|please)\s+)?\s*(?:certify|attest|confirm)\b/iu.test(
+        sentence,
+      ) &&
+      /\b(?:truthful|true|accurate|accuracy)\b/iu.test(sentence) &&
+      /\b(?:supplied|provided|answers?|responses?|information|facts|details)\b/iu.test(
+        sentence,
+      ),
+  );
+}
+
+/**
+ * "Authorized to work in C without sponsorship" is settled only when C is
+ * the resolved job country, a listed country covers it unconditionally (no
+ * limited permit there), the recorded sponsorship fact is "no", and the
+ * question's only extra condition is sponsorship. Restrictions, permanence
+ * or a permit type still go to the person (council D6).
+ */
+function withoutSponsorshipSettled(
+  input: {
+    control: ApplyFormControl;
+    tags: ApplyAnswerTags | null | undefined;
+    sources: ApplyAnswerSources;
+    answer: string;
+  },
+  target: string | null,
+  source: ClassifiedAnswerSource | undefined,
+): boolean {
+  const question = [
+    ...(input.control.sectionPath ?? []),
+    input.control.groupLabel,
+    input.control.label,
+    input.control.hint ?? "",
+  ].join(" ");
+  const eligibility = input.sources.profile.workEligibility;
+  return (
+    input.tags?.kind === "work_auth" &&
+    input.answer === "Yes" &&
+    !!target &&
+    source?.purpose === "work_auth" &&
+    source.country === target &&
+    /\bwithout\s+(?:(?:the\s+)?need(?:ing)?\s+(?:for\s+|of\s+)?|requiring\s+(?:any\s+)?|any\s+)?(?:visa\s+|employer\s+|company\s+)?sponsor(?:ship|ing)\b/iu.test(
+      question,
+    ) &&
+    !/\b(?:restrictions?|limitations?|limited|permanent(?:ly)?|unrestricted|indefinite(?:ly)?|permit\s+type|visa\s+type|condition(?:s|al)?)\b/iu.test(
+      question,
+    ) &&
+    eligibility.requiresVisaSponsorship === false &&
+    !eligibility.limitedWorkPermissions?.some((permission) =>
+      countriesIn(permission.country).has(target),
+    )
+  );
+}
+
 function permitConditionsFit(
   sources: ApplyAnswerSources,
   target: string,
@@ -571,15 +809,90 @@ export type ClassifiedAnswerDecision =
   | {
       kind: "inference";
       source: null;
-      evidencePolicy: "factual_inference";
+      evidencePolicy: "factual_inference" | "eligibility";
     }
   | {
       kind: "writing";
       source: ClassifiedAnswerSource | null;
-      evidencePolicy?: "factual_summary";
+      evidencePolicy?: "factual_summary" | "saved_answer" | "declaration";
     }
-  | { kind: "needs_you"; reason: string; check?: string };
+  | { kind: "needs_you"; reason: string; check?: string }
+  /**
+   * Send only: the site filled this, Nestor left it unchanged, and the
+   * checker proved that from this attempt's receipts. Never a Profile fact,
+   * never permission to write or reuse it.
+   */
+  | { kind: "site_unchanged" };
 /** An affirmative allow list. Tags or a positive checker verdict alone grant nothing. */
+/** Immutable applicant facts need no semantic guess, including on a later step. */
+export function applicantLiteralSource(
+  control: ApplyFormControl,
+  controls: readonly ApplyFormControl[],
+  sources: ApplyAnswerSources,
+  /** The page's instructions for this question; they can change its meaning. */
+  instructions: string,
+): ClassifiedAnswerSource | null {
+  const fieldWords = normalizeFormQuestionPrompt(control.label)
+    .split(/\s+/u)
+    .filter(
+      (word) =>
+        word.length > 2 && !["your", "the", "full", "legal"].includes(word),
+    );
+  const relevantInstructions = instructions
+    .split(/[.!?;\n]/u)
+    .filter(
+      (sentence) =>
+        fieldWords.some((word) =>
+          normalizeFormQuestionPrompt(sentence).split(/\s+/u).includes(word),
+        ) || /\bthis field\b/iu.test(sentence),
+    )
+    .join(". ");
+  if (
+    control.kind !== "text" ||
+    streetAddressLine(control, controls) ||
+    // "Enter your reference's full name" or a name as on a passport, said
+    // only in the page text, makes a plain "Full name" someone else's or a
+    // document's. The classified fallback refuses the same wording.
+    fieldNamesAnotherPerson({ ...control, hint: relevantInstructions }) ||
+    /\b(?:passport|identity document|national id|as (?:it )?appears on)\b/iu.test(
+      instructions,
+    ) ||
+    control.credentialRole ||
+    control.attestationKind ||
+    inferAttestationKind(control) ||
+    !["other", "personal_info", "portfolio", "location"].includes(
+      inferQuestionKind(control),
+    ) ||
+    control.hint?.trim() ||
+    fieldNamesAnotherPerson(control) ||
+    /\b(?:work history|employment|experience|education|school|reference|supervisor|referrer|emergency contact|passport)\b/iu.test(
+      [...(control.sectionPath ?? []), control.groupLabel].join(" "),
+    ) ||
+    (control.placeholder.trim() &&
+      normalizeFormQuestionPrompt(control.placeholder) !==
+        normalizeFormQuestionPrompt(control.label)) ||
+    controls.filter(
+      (candidate) =>
+        candidate.visible &&
+        !candidate.disabled &&
+        candidate.kind === control.kind &&
+        candidate.label === control.label &&
+        candidate.groupLabel === control.groupLabel,
+    ).length !== 1
+  )
+    return null;
+  return (
+    answerSourceCatalog(sources).find(
+      (source) =>
+        // Country is left to the classified residence rules: a bare Country can
+        // mean citizenship or the hiring country.
+        /^profile\.(?:fullName|firstName|middleName|lastName|email|phone|currentCity|currentRegion|portfolioUrl|linkedinUrl|githubUrl|personalWebsiteUrl|timeZone)$/u.test(
+          source.id,
+        ) && knownLiteralField(source, control),
+    ) ?? null
+  );
+}
+
 export function classifyAnswerPermission(input: {
   control: ApplyFormControl;
   controls: readonly ApplyFormControl[];
@@ -589,11 +902,19 @@ export function classifyAnswerPermission(input: {
   pageInstructions: string;
   approvedAttestations?: readonly ApplicationAttestationKind[];
   application?: ApplyAgentConfig["application"];
+  payDisclosed?: boolean;
   now?: Date;
+  pageUrl?: string | null | undefined;
   /** Supplied only by the host after the independent answer check. */
   matchedSourceId?: string | undefined;
   /** A proposed catalog reference; it grants no semantic-match permission. */
   candidateSourceId?: string | undefined;
+  /**
+   * Supplied only by the send-time checker: this attempt's receipts prove
+   * the site prefilled this exact value and Nestor never wrote it. `echo`:
+   * the read-only repeat of a qualifying original on a later step.
+   */
+  siteUnchanged?: { echo: boolean } | undefined;
 }): ClassifiedAnswerDecision {
   const deny = (
     reason: string,
@@ -604,17 +925,45 @@ export function classifyAnswerPermission(input: {
     check,
   });
   const tags = input.tags;
+  const declarationApproved =
+    !!input.control.attestationKind &&
+    (input.approvedAttestations?.includes(input.control.attestationKind) ||
+      (input.control.attestationKind === "truthfulness_certification" &&
+        taskAllowsTruthfulness(
+          input.sources.taskInstructions ??
+            input.application?.instructions ??
+            [],
+        )));
   if (input.control.credentialRole)
     return deny("Credentials and verification codes stay with the person.");
-  if (!tags)
+  const localAnswer = currentApplicationAnswer(input);
+  if (localAnswer?.answer.trim() === input.answer.trim()) {
+    return {
+      kind: "literal",
+      source: {
+        id: `answerLibrary.${localAnswer.id}`,
+        value: localAnswer.answer,
+        purpose: "saved",
+        country: null,
+      },
+    };
+  }
+  if (!tags) {
+    const literal = applicantLiteralSource(
+      input.control,
+      input.controls,
+      input.sources,
+      input.pageInstructions,
+    );
+    if (literal && literal.value === input.answer)
+      return { kind: "literal", source: literal };
     return deny(
-      "This question has not been classified safely. Please supply your answer.",
+      "Nestor could not read this question safely. Your saved facts are kept; try again or complete this control on the form.",
       "question_classification",
     );
+  }
   const identity = (control: ApplyFormControl) =>
-    normalizeFormQuestionPrompt(
-      [control.groupLabel, control.label].filter(Boolean).join(" — "),
-    );
+    normalizeFormQuestionPrompt(questionPrompt(control));
   const phonePicker = phoneCountryPicker(input.control, input.controls);
   const same = input.controls.filter(
     (control) =>
@@ -649,7 +998,47 @@ export function classifyAnswerPermission(input: {
       input.control,
       input.sources.reusableAnswers,
       input.controls,
-    ) ?? pickerRule?.saved;
+    ) ??
+    pickerRule?.saved ??
+    null;
+  if (
+    input.payDisclosed === false &&
+    input.control.questionKind === "salary_expectation" &&
+    !isAnswerFromThisApplication(
+      matchingSaved,
+      input.application ?? {},
+      input.sources.posting.location,
+    ) &&
+    !(
+      matchingSaved?.id.startsWith("application_") &&
+      !matchingSaved.applicationScope
+    )
+  )
+    return deny(
+      "Your pay setting is Pause for me on pay. Choose what to disclose for this application.",
+      "pay_permission",
+    );
+  if (
+    input.payDisclosed === true &&
+    tags.kind === "salary" &&
+    input.control.questionKind === "salary_expectation"
+  ) {
+    const pay = expectedPaySuggestion(input.control, input.sources);
+    if (
+      pay &&
+      pay.value === input.answer &&
+      input.control.options.includes(pay.value)
+    )
+      return {
+        kind: "literal",
+        source: {
+          id: pay.sourceId,
+          value: pay.value,
+          purpose: "profile",
+          country: null,
+        },
+      };
+  }
   const priorCompany =
     tags.kind === "other"
       ? priorCompanyHistory(input.control, input.sources)
@@ -708,22 +1097,214 @@ export function classifyAnswerPermission(input: {
     );
     if (human) return { kind: "literal", source: human };
   }
-  const target = legalQuestionCountry(
-    input.control.groupLabel + " " + input.control.label,
-    catalog,
-  );
+  const legalPrompt = [
+    ...(input.control.sectionPath ?? []),
+    input.control.groupLabel,
+    input.control.label,
+    input.control.hint ?? "",
+  ].join(" ");
+  const namedCountries = countriesIn(legalPrompt);
+  const resolvedTarget = legalQuestionCountry(legalPrompt, catalog);
+  // A question may explicitly contrast jurisdictions. The independent check
+  // must confirm the reader's selection against the whole question.
+  const target =
+    resolvedTarget ??
+    (legal && tags.country && namedCountries.has(tags.country)
+      ? tags.country
+      : null);
+  const conditionalEligibility = (): ClassifiedAnswerDecision | null => {
+    const permitted =
+      legal &&
+      typeof tags.hasAdditionalConditions === "boolean" &&
+      tags.country &&
+      !fieldNamesAnotherPerson(input.control) &&
+      (namedCountries.size === 0 || namedCountries.has(tags.country)) &&
+      input.sources.profile.workEligibility.limitedWorkPermissions?.some(
+        (permit) =>
+          country(permit.country) === tags.country ||
+          countriesIn(permit.conditions).has(tags.country!),
+      );
+    return permitted
+      ? { kind: "inference", source: null, evidencePolicy: "eligibility" }
+      : null;
+  };
   if (legal && !target)
-    return deny("The work-permission country is unknown or ambiguous.");
+    return (
+      conditionalEligibility() ??
+      deny("The work-permission country is unknown or ambiguous.")
+    );
   const knownLegalQuestion = legal && !fieldNamesAnotherPerson(input.control);
   if (knownLegalQuestion && !source)
     source = catalog.find(
       (row) => row.purpose === tags.kind && row.country === target,
     );
+  // The countries where the person may work are a complete list (ADR 0029):
+  // a resolved job country it plainly does not cover is a No. A region in
+  // the list, a limited permit there, or extra conditions leave it asked.
+  if (
+    knownLegalQuestion &&
+    tags.kind === "work_auth" &&
+    target &&
+    input.answer === "No" &&
+    tags.hasAdditionalConditions !== true &&
+    (!source || source.purpose === "work_auth")
+  ) {
+    const eligibility = input.sources.profile.workEligibility;
+    const listed = eligibility.authorizedWorkCountries.map((name) =>
+      countriesIn(name),
+    );
+    const excluded =
+      listed.length > 0 &&
+      listed.every(
+        (codes) =>
+          codes.size === 1 &&
+          !codes.has(target) &&
+          ![...codes].some((code) => ["EU", "EEA"].includes(code)),
+      ) &&
+      !eligibility.limitedWorkPermissions?.some((permission) =>
+        countriesIn(permission.country).has(target),
+      ) &&
+      !catalog.some(
+        (row) => row.purpose === "work_auth" && row.country === target,
+      );
+    if (excluded)
+      source = {
+        id: "profile.workEligibility.authorizedWorkCountries",
+        value: "No",
+        purpose: "work_auth",
+        country: target,
+      };
+  }
   if (matchingSaved) {
     const human = catalog.find(
       (row) => row.id === `answerLibrary.${matchingSaved.id}`,
     );
     if (human && (!legal || human.country === target)) source = human;
+  }
+  const selectedSaved =
+    source?.purpose === "saved"
+      ? input.sources.reusableAnswers.find(
+          (saved) => `answerLibrary.${saved.id}` === source?.id,
+        )
+      : null;
+  const changedCurrentBinding =
+    !!selectedSaved?.applicationScope?.currentFieldBinding &&
+    localAnswer?.id !== selectedSaved.id;
+  // Semantic reuse needs an independent whole-question check. Plain phone,
+  // date and picker formatting below first retain their exact source binding.
+  // Legal reuse keeps its existing country and permit checks here.
+  const semanticSavedPermission = (): ClassifiedAnswerDecision | null => {
+    let savedSetOffered = false;
+    if (matchingSaved && input.control.answerControlType === "multi_choice") {
+      try {
+        const selected: unknown = JSON.parse(matchingSaved.answer);
+        const offered = input.control.options.length
+          ? input.control.options
+          : input.controls
+              .filter(
+                (control) =>
+                  control.choiceGroupKey === input.control.choiceGroupKey,
+              )
+              .map((control) => control.label || control.value);
+        savedSetOffered =
+          Array.isArray(selected) &&
+          selected.every(
+            (value) => typeof value === "string" && offered.includes(value),
+          );
+      } catch {
+        /* Non-set answers cannot grant an individual selection. */
+      }
+    }
+    if (
+      (!matchingSaved ||
+        changedCurrentBinding ||
+        (source &&
+          !literalValueMatches(
+            source,
+            input.control,
+            input.answer,
+            input.controls,
+            input.sources,
+          ) &&
+          !savedSetOffered &&
+          !(
+            addressLabels.includes(
+              normalizeFormQuestionPrompt(input.control.label),
+            ) &&
+            addressAnswerMatches(
+              source.value,
+              input.answer,
+              input.sources.profile,
+            )
+          ))) &&
+      source?.purpose === "saved" &&
+      !input.control.repeatedQuestion &&
+      !fieldNamesAnotherPerson(input.control) &&
+      (!(
+        tags.kind === "own_words" ||
+        requiresOwnWords(input.control.label) ||
+        ownWordsAppliesToQuestion(
+          `${input.control.groupLabel}\n${input.pageInstructions}`,
+          input.control.label,
+          (input.controls ?? [input.control]).map(questionPrompt),
+        )
+      ) ||
+        source.value.trim() === input.answer.trim())
+    ) {
+      const record = input.sources.reusableAnswers.find(
+        (entry) => source?.id === `answerLibrary.${entry.id}`,
+      );
+      const conflicting = catalog.some(
+        (entry) =>
+          entry.purpose === "saved" &&
+          normalizeFormQuestionPrompt(entry.question ?? "") ===
+            normalizeFormQuestionPrompt(source?.question ?? "") &&
+          entry.value.trim() !== source?.value.trim(),
+      );
+      // Differing text can be one accepted numeric/option meaning. The whole-source
+      // checker resolves that once; it still refuses genuinely conflicting facts.
+      if (conflicting && !legal)
+        return {
+          kind: "writing",
+          source,
+          evidencePolicy: "saved_answer",
+        } as const;
+      const scope = record?.applicationScope;
+      const local =
+        !!input.application &&
+        !!scope &&
+        ((!!input.application.applicationRecordId &&
+          scope.applicationRecordId ===
+            input.application.applicationRecordId) ||
+          (!!input.application.resultId &&
+            scope.resultId === input.application.resultId));
+      if (
+        !legal ||
+        (target &&
+          source.country === target &&
+          (local ||
+            (permitConditionsFit(input.sources, target) &&
+              !(
+                tags.kind === "sponsorship" &&
+                input.answer === "No" &&
+                input.sources.profile.workEligibility.limitedWorkPermissions?.some(
+                  (permit) =>
+                    country(permit.country) === target &&
+                    permit.requiresFutureSponsorship === true,
+                )
+              ))))
+      )
+        return {
+          kind: "writing",
+          source,
+          evidencePolicy: "saved_answer",
+        } as const;
+    }
+    return null;
+  };
+  if (legal) {
+    const semantic = semanticSavedPermission();
+    if (semantic) return semantic;
   }
   // A saved "Phone" answer may omit the repeated Phone group in its key.
   // Bind it to the Profile only when that is independently the same number
@@ -782,14 +1363,14 @@ export function classifyAnswerPermission(input: {
           /^profile\.skills\.\d+$/u.test(row.id) && row.value === input.answer,
       ) ?? source;
   if (
-    !source &&
+    !matchingSaved &&
     tags.kind === "other" &&
     input.control.attestationKind &&
-    input.approvedAttestations?.includes(input.control.attestationKind) &&
-    tags.declarationPurpose !== "personal_fact" &&
+    declarationApproved &&
     (tags.declarationPurpose === "consent" ||
       tags.declarationPurpose === "acknowledgement" ||
-      (inferAttestationKind(input.control) === input.control.attestationKind &&
+      (tags.hasAdditionalConditions !== true &&
+        inferAttestationKind(input.control) === input.control.attestationKind &&
         routineDeclarations[input.control.attestationKind]?.some(
           (statement) =>
             normalizeFormQuestionPrompt(statement) ===
@@ -802,6 +1383,24 @@ export function classifyAnswerPermission(input: {
       value: "Yes",
       purpose: "authority",
       country: null,
+    };
+  if (
+    tags.kind === "other" &&
+    input.control.attestationKind &&
+    declarationApproved &&
+    (tags.declarationPurpose === "consent" ||
+      tags.declarationPurpose === "acknowledgement") &&
+    input.answer !== "Yes"
+  )
+    return {
+      kind: "writing",
+      source: {
+        id: `authority.attestation.${input.control.attestationKind}`,
+        value: input.control.attestationKind,
+        purpose: "authority",
+        country: null,
+      },
+      evidencePolicy: "declaration",
     };
   // A listing source has its own deterministic evidence, after all gated kinds.
   if (priorCompany?.answer)
@@ -833,16 +1432,53 @@ export function classifyAnswerPermission(input: {
     !ownWordsAppliesToQuestion(
       `${input.control.groupLabel}\n${input.pageInstructions}`,
       input.control.label,
+      (input.controls ?? [input.control]).map(questionPrompt),
     ) &&
     !requiresSavedNationalityAnswer(input.control.label) &&
     !requiresSavedOpinionAnswer(input.control.label, input.answer)
   )
     return { kind: "writing", source: null };
+  // "Which skills would you bring?" is answered from the recorded skills
+  // list, not an opinion (council D2/D3): every item must be a Profile skill,
+  // verbatim. A top or favourite skill, own-words wording or another person
+  // stays with the person.
+  // An Address field next to its own City or Postal code field is the street
+  // line: the recorded city or location is never its answer, whatever source
+  // proposed it (workday replica, candidate 5 sent "Berlin, Germany"). A lone
+  // Address field is still the person's location.
+  if (streetAddressLine(input.control, input.controls)) {
+    const location = catalog.filter((row) =>
+      /^profile\.current(?:City|Location)$/u.test(row.id),
+    );
+    if (
+      location.some((row) =>
+        addressAnswerMatches(row.value, input.answer, input.sources.profile),
+      )
+    )
+      return deny(
+        "This is the street line of an address with its own city field; your city or location is not its answer.",
+        "street_address_line",
+      );
+    if (source && location.some((row) => row.id === source?.id))
+      source = undefined;
+  }
+  const skills = recordedSkillsAnswer({ ...input, tags }, catalog);
+  if (skills) return { kind: "literal", source: skills };
+  // A declaration whose kind the person has not allowed is theirs to tick.
+  // Say that, rather than that no source answers it.
+  if (!source && input.control.attestationKind && !declarationApproved)
+    return deny(
+      "This declaration is not one of those you let Nestor tick for you (Settings, Declarations it may tick for you), so it is yours to confirm.",
+      "declaration_permission",
+    );
+  if (!source && input.siteUnchanged && siteUnchangedAnswerAllowed(input))
+    return { kind: "site_unchanged" };
+  if (!source && conditionalEligibility()) return conditionalEligibility()!;
   if (!source)
     return factualInferenceAllowed(input)
       ? { kind: "inference", source: null, evidencePolicy: "factual_inference" }
       : deny(
-          "There is no matching verbatim source for this question. Please supply your answer.",
+          "Nestor could not establish an answer to this whole question from your saved facts or permissions. Please supply the missing answer.",
           "source_lookup",
         );
   const saved =
@@ -905,7 +1541,49 @@ export function classifyAnswerPermission(input: {
     }
   }
   const exactSaved =
-    !!saved && source.id === `answerLibrary.${saved.id}` && savedValueMatches;
+    !!saved &&
+    !changedCurrentBinding &&
+    source.id === `answerLibrary.${saved.id}` &&
+    savedValueMatches;
+  // A start date ("Preferred start date" included) is calculated from the
+  // recorded availability, not an opinion. When the selected source is the
+  // one the start-date rule uses, that rule decides before the opinion and
+  // preference gates. Other "preferred …" questions stay gated.
+  const start =
+    (tags.kind === "other" || tags.kind === "preference") &&
+    isStartDateControl(input.control)
+      ? startDateAnswer(
+          input.control,
+          input.sources,
+          input.controls,
+          input.now ?? new Date(),
+        )
+      : null;
+  if (start && start.id === source.id)
+    return canonicalStartDate(input.answer) === start.value
+      ? { kind: "literal", source: { ...source, value: input.answer } }
+      : deny(
+          "This date must be calculated from your recorded availability or notice period.",
+        );
+  if (
+    tags.kind === "preference" &&
+    source.purpose === "profile" &&
+    (/^profile\.preferences\./u.test(source.id) ||
+      (source.id === "profile.workEligibility.willingToRelocate" &&
+        /relocat/iu.test(questionPrompt(input.control))) ||
+      source.id === "profile.workEligibility.willingToTravel" ||
+      source.id === "profile.workEligibility.remoteEligible") &&
+    !requiresOwnWords(input.control.label)
+  )
+    return {
+      kind: "inference",
+      source: null,
+      evidencePolicy: "factual_inference",
+    };
+  if (!legal && !exactSaved && !asksListingDiscoveryControl(input.control)) {
+    const semantic = semanticSavedPermission();
+    if (semantic) return semantic;
+  }
   const gated =
     [
       "citizenship",
@@ -919,6 +1597,7 @@ export function classifyAnswerPermission(input: {
       ownWordsAppliesToQuestion(
         `${input.control.groupLabel}\n${input.pageInstructions}`,
         input.control.label,
+        (input.controls ?? [input.control]).map(questionPrompt),
       )) ||
     requiresSavedNationalityAnswer(input.control.label) ||
     (["motivation", "factual_summary"].includes(tags.kind) &&
@@ -989,6 +1668,7 @@ export function classifyAnswerPermission(input: {
   if (tags.kind === "work_auth" || tags.kind === "sponsorship") {
     if (
       !exactSaved &&
+      !withoutSponsorshipSettled(input, target, source) &&
       (tags.hasAdditionalConditions === true ||
         (tags.kind === "work_auth" &&
           /\b(?:restrictions?|limitations?|sponsor(?:ship|ing|ed)?|without)\b/iu.test(
@@ -1000,13 +1680,19 @@ export function classifyAnswerPermission(input: {
             ].join(" "),
           )))
     )
-      return deny(
-        "Authorization alone does not establish the question's additional restrictions or sponsorship conditions.",
-        "permit_conditions",
+      return (
+        conditionalEligibility() ??
+        deny(
+          "Authorization alone does not establish the question's additional restrictions or sponsorship conditions.",
+          "permit_conditions",
+        )
       );
     if (!target || tags.country !== target || source.country !== target)
-      return deny(
-        "The work-permission country is unknown or does not match the source. Please answer for this job's country.",
+      return (
+        conditionalEligibility() ??
+        deny(
+          "The work-permission country is unknown or does not match the source. Please answer for this job's country.",
+        )
       );
     if (
       (!(
@@ -1030,8 +1716,11 @@ export function classifyAnswerPermission(input: {
             permission.requiresFutureSponsorship === true,
         ))
     )
-      return deny(
-        "The current permit conditions have not been shown to fit this job. Please confirm this answer.",
+      return (
+        conditionalEligibility() ??
+        deny(
+          "The current permit conditions have not been shown to fit this job. Please confirm this answer.",
+        )
       );
     if (
       exactSaved ||
@@ -1040,8 +1729,11 @@ export function classifyAnswerPermission(input: {
         source.value.trim() === input.answer.trim())
     )
       return { kind: "literal", source };
-    return deny(
-      "No matching country-specific work-permission source answers this question.",
+    return (
+      conditionalEligibility() ??
+      deny(
+        "No matching country-specific work-permission source answers this question.",
+      )
     );
   }
   if (
@@ -1102,6 +1794,18 @@ export function classifyAnswerPermission(input: {
       : [];
     if (alternatives.length === 1 && alternatives[0]) source = alternatives[0];
   }
+  const recordPrefix = /^(profile\.(?:experiences|education)\.[^.]+)\./u.exec(
+    source.id,
+  )?.[1];
+  if (
+    source.purpose === "profile" &&
+    recordPrefix &&
+    historyRecordInAnotherRow(recordPrefix, input, catalog)
+  )
+    return deny(
+      "Another entry on this form already holds this Profile record. Fill this entry from a different record, or remove it if this run added it; leave an optional entry empty.",
+      "history_record_in_use",
+    );
   if (
     source.purpose === "profile" &&
     !historyRecordMatches(source, input, catalog)
@@ -1156,16 +1860,7 @@ export function classifyAnswerPermission(input: {
           source.id,
         )))
   )
-    return factualSummaryIsSourced(
-      input.answer,
-      catalog
-        .filter((row) => row.purpose === "profile" || row.id === "resume.text")
-        .map((row) => row.value),
-    )
-      ? { kind: "writing", source, evidencePolicy: "factual_summary" }
-      : deny(
-          "This summary must use complete statements from your resume or Profile, without joining separate facts into a new claim.",
-        );
+    return { kind: "writing", source, evidencePolicy: "factual_summary" };
   return factualInferenceAllowed(input)
     ? { kind: "inference", source: null, evidencePolicy: "factual_inference" }
     : deny(
@@ -1174,11 +1869,152 @@ export function classifyAnswerPermission(input: {
 }
 
 /** Permission to ask the checker, never permission to enter its proposal. */
+const STREET_LINE_LABELS = [
+  "address",
+  "current address",
+  "street address",
+  "street",
+  "address line 1",
+  "address line",
+];
+const LOCALITY_PART_LABELS = [
+  "city",
+  "town",
+  "postal code",
+  "postcode",
+  "post code",
+  "zip",
+  "zip code",
+];
+
+/** An address field that has its own city or postal code field beside it. */
+function streetAddressLine(
+  control: ApplyFormControl,
+  controls: readonly ApplyFormControl[],
+): boolean {
+  if (
+    control.kind !== "text" ||
+    !STREET_LINE_LABELS.includes(normalizeFormQuestionPrompt(control.label))
+  )
+    return false;
+  return controls.some(
+    (other) =>
+      other !== control &&
+      other.ref !== control.ref &&
+      (!other.scopeKey ||
+        !control.scopeKey ||
+        other.scopeKey === control.scopeKey) &&
+      LOCALITY_PART_LABELS.includes(normalizeFormQuestionPrompt(other.label)),
+  );
+}
+
+function recordedSkillsAnswer(
+  input: {
+    control: ApplyFormControl;
+    controls?: readonly ApplyFormControl[];
+    tags: ApplyAnswerTags;
+    answer: string;
+    pageInstructions: string;
+  },
+  catalog: readonly ClassifiedAnswerSource[],
+): ClassifiedAnswerSource | null {
+  const { control } = input;
+  const question = [control.groupLabel, control.label, control.hint ?? ""].join(
+    "\n",
+  );
+  if (
+    !["other", "factual_summary"].includes(input.tags.kind) ||
+    !["text", "long_text"].includes(control.kind) ||
+    !/\bskills?\b/iu.test(control.label) ||
+    fieldNamesAnotherPerson(control) ||
+    requiresOwnWords(question) ||
+    ownWordsAppliesToQuestion(
+      `${control.groupLabel}\n${input.pageInstructions}`,
+      control.label,
+      (input.controls ?? [input.control]).map(questionPrompt),
+    ) ||
+    requiresSavedOpinionAnswer(question, input.answer)
+  )
+    return null;
+  const recorded = catalog.filter((row) =>
+    /^profile\.skills\.\d+$/u.test(row.id),
+  );
+  const key = (value: string) => value.normalize("NFKC").trim().toLowerCase();
+  const items = input.answer
+    .split(/\s*(?:,|;|\n|\band\b)\s*/u)
+    .map((item) => item.replace(/^[-•*]\s*/u, "").trim())
+    .filter(Boolean);
+  if (
+    !items.length ||
+    !items.every((item) => recorded.some((row) => key(row.value) === key(item)))
+  )
+    return null;
+  return {
+    id: "profile.skills",
+    value: input.answer,
+    purpose: "profile",
+    country: null,
+  };
+}
+
+/**
+ * A short value the site filled and Nestor left unchanged, on a plain text
+ * question that is no known Profile field and none of identity, declarations,
+ * pay, the hiring country, eligibility, citizenship or passport, preference,
+ * own words, a story or the person's history. The proof itself (receipts,
+ * values) is the checker's; this only decides whether such a field may pass.
+ */
+export function siteUnchangedAnswerAllowed(input: {
+  control: ApplyFormControl;
+  tags: ApplyAnswerTags | null | undefined;
+  sources: ApplyAnswerSources;
+  pageInstructions: string;
+  answer: string;
+  siteUnchanged?: { echo: boolean } | undefined;
+}): boolean {
+  const { control, tags } = input;
+  if (!tags || tags.kind !== "other" || control.kind !== "text") return false;
+  if (control.questionKind !== "other" || control.required) return false;
+  // A repeated question passes only as the read-only echo of its original.
+  if (
+    control.repeatedQuestion &&
+    !(input.siteUnchanged?.echo === true && control.readOnly)
+  )
+    return false;
+  if (!isShortValueAnswer(control, input.answer)) return false;
+  const question = [
+    ...(control.sectionPath ?? []),
+    control.groupLabel,
+    control.label,
+    control.hint ?? "",
+  ].join("\n");
+  if (
+    /\b(?:citizen(?:ship)?|nationality|passport|eligib(?:le|ility)|authori[sz](?:ed|ation)|sponsor(?:ship)?|visa|salary|pay|compensation|wage|prefer(?:red|ence)?|history|employer|employment|education|school|degree|reference|supervisor|referrer)\b/iu.test(
+      question,
+    )
+  )
+    return false;
+  // A wrong prefilled name, email or phone resolves to its Profile field.
+  if (
+    answerSourceCatalog(input.sources).some(
+      (source) =>
+        source.id.startsWith("profile.") && knownLiteralField(source, control),
+    )
+  )
+    return false;
+  // The echo is judged as its original question, without the repeat note.
+  const original: ApplyFormControl = { ...control };
+  delete original.repeatedQuestion;
+  return factualInferenceAllowed({ ...input, control: original });
+}
+
 function factualInferenceAllowed(input: {
   control: ApplyFormControl;
+  controls?: readonly ApplyFormControl[];
   tags: ApplyAnswerTags | null | undefined;
   pageInstructions: string;
   answer: string;
+  payDisclosed?: boolean;
 }): boolean {
   const { control, tags } = input;
   const question = [
@@ -1189,14 +2025,24 @@ function factualInferenceAllowed(input: {
   ].join("\n");
   return (
     !!tags &&
-    ["other", "residence_country"].includes(tags.kind) &&
+    (["other", "residence_country"].includes(tags.kind) ||
+      (tags.kind === "salary" && input.payDisclosed === true)) &&
     ["text", "select", "combobox", "radio", "checkbox"].includes(
       control.kind,
     ) &&
-    (control.kind !== "text" || isShortValueAnswer(control, input.answer)) &&
-    !["salary_expectation", "work_authorization", "visa_sponsorship"].includes(
+    (control.kind !== "text" ||
+      isShortValueAnswer(
+        input.payDisclosed === true &&
+          control.questionKind === "salary_expectation"
+          ? { ...control, questionKind: "other" }
+          : control,
+        input.answer,
+      )) &&
+    !["work_authorization", "visa_sponsorship"].includes(
       control.questionKind,
     ) &&
+    (control.questionKind !== "salary_expectation" ||
+      input.payDisclosed === true) &&
     !control.asksCurrentPay &&
     !control.asksHiringCountry &&
     !control.credentialRole &&
@@ -1213,6 +2059,7 @@ function factualInferenceAllowed(input: {
     !ownWordsAppliesToQuestion(
       `${control.groupLabel}\n${input.pageInstructions}`,
       control.label,
+      (input.controls ?? [input.control]).map(questionPrompt),
     ) &&
     !requiresSavedNationalityAnswer(question) &&
     !requiresSavedOpinionAnswer(question, input.answer) &&

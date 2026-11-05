@@ -58,7 +58,7 @@ export function useKeepReading() {
 }
 function failureReason(message: string | null): string {
   if (/\btimed? out\b|\btimeout\b|\btook too long\b/iu.test(message ?? ""))
-    return "This site took too long to respond. Other sites carried on.";
+    return "This site took too long to respond.";
   if (/\bHTTP 404\b|\bpage not found\b/iu.test(message ?? ""))
     return "The page was not found.";
   if (/\bHTTP 410\b/iu.test(message ?? ""))
@@ -322,10 +322,21 @@ export function SiteResults(props: {
                     <p className="mt-1">{failureReason(source.message)}</p>
                   ) : source.message ? (
                     <p className="mt-1 whitespace-pre-wrap">{source.message}</p>
+                  ) : source.state === "waiting" ? (
+                    <p className="mt-1">Queued to read this site.</p>
+                  ) : source.state === "searching" ? (
+                    <p className="mt-1">
+                      This site's search is still in progress. No waiting reason
+                      has been reported.
+                    </p>
                   ) : null}
-                  {source.state === "partial" ? (
+                  {["partial", "failed", "stopped"].includes(source.state) ? (
                     <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span>This site has more listings.</span>
+                      <span>
+                        {source.state === "partial"
+                          ? "This site's coverage is unfinished."
+                          : "Saved results are kept. Continue this site's unfinished work."}
+                      </span>
                       <Button
                         size="toolbar"
                         variant="outline"
@@ -334,16 +345,11 @@ export function SiteResults(props: {
                           more.keepReading(Number(source.sourceId))
                         }
                       >
-                        Keep reading
+                        {source.state === "partial"
+                          ? "Keep reading"
+                          : "Continue site"}
                       </Button>
                     </div>
-                  ) : null}
-                  {source.state === "failed" ? (
-                    <p className="mt-2">
-                      Check its address in Profile → Job sites, then search
-                      again. For a single vacancy page, use the board’s main
-                      jobs page instead.
-                    </p>
                   ) : null}
                   {source.state === "failed" && source.message ? (
                     <Disclosure

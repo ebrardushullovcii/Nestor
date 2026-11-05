@@ -1,4 +1,5 @@
 import type { ApplyBlocker } from "@nestor/browser-agent";
+import * as browserAgent from "@nestor/browser-agent";
 import { createHash } from "node:crypto";
 import type * as ApplicationPreparation from "../internal/agent-application-preparation";
 import replay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/invented-personal-answers.json";
@@ -14,6 +15,7 @@ import {
   serializeApplicationAuthorityDecisionPolicyForDigest,
   type ApplicationReviewAnswer,
   ApplicationReviewCardSchema,
+  CandidateProfileSchema,
   ApplicationAuthorityStopConditionsSchema,
   ApplyExecutionResultSchema,
   SourceInstructionArtifactSchema,
@@ -36,13 +38,18 @@ import {
   createApplicationService,
   type ApplicationServiceDeps,
 } from "./application-service";
-import { describeFormQuestion } from "./questions";
+import {
+  describeFormQuestion,
+  describeSavedFormAnswer,
+  describeLegacyFormQuestion,
+} from "./questions";
 
 const preparation = vi.hoisted(() => ({
   answers: [] as ApplicationReviewAnswer[],
   blocker: null as ApplyBlocker | null,
   /** The run filled the form but could not confirm its send was ready. */
   notReadyToSend: false,
+  technicalFailure: false,
   uploadsConfirmed: [] as boolean[],
   /** The files each run was told an earlier attempt attached on its page. */
   earlierFiles: [] as string[][],
@@ -50,6 +57,10 @@ const preparation = vi.hoisted(() => ({
   pickerTries: [] as string[][],
   /** What each run was given to bring a closed form back. */
   replays: [] as unknown[],
+  activities: [] as unknown[],
+  givenAnswers: [] as NonNullable<
+    ApplicationPreparation.AgentApplicationPreparationInput["reusableAnswers"]
+  >[],
   /** The file field the run saw accepted on the form, if any. */
   attachedField: "Resume" as string | null,
   readAnswers:
@@ -64,7 +75,9 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
       input: Parameters<typeof actual.createApplyFormPreparer>[0],
     ) => {
       preparation.readAnswers = input.readReusableAnswers;
+      preparation.givenAnswers.push(input.reusableAnswers ?? []);
       preparation.replays.push(input.replay ?? null);
+      preparation.activities.push(input.earlierActivity ?? []);
       preparation.pickerTries.push(
         (input.initialPickerAttempts ?? []).flatMap((attempt) => attempt.tried),
       );
@@ -78,7 +91,16 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
       );
       input.onPrepared?.({
         result: {
-          outcome: "ready_to_send",
+          outcome: preparation.technicalFailure ? "stuck" : "ready_to_send",
+          ...(preparation.technicalFailure
+            ? {
+                technicalFailure: {
+                  code: "question_classification_unavailable" as const,
+                  retryable: true as const,
+                  pageDisposition: "retain" as const,
+                },
+              }
+            : {}),
           reason: "Ready",
           steps: 1,
           finalUrl: input.executionInput.job.canonicalUrl,
@@ -97,9 +119,10 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
           notes: [],
           timeline: [],
           modelTurns: 0,
-          readyToSend: preparation.notReadyToSend
-            ? null
-            : { actionRef: "submit", actionLabel: "Apply" },
+          readyToSend:
+            preparation.notReadyToSend || preparation.technicalFailure
+              ? null
+              : { actionRef: "submit", actionLabel: "Apply" },
         },
         reviewCard: ApplicationReviewCardSchema.parse({
           siteLabel: "Replica",
@@ -213,6 +236,7 @@ it("closes a saved-rule skip without adding a Needs you question", async () => {
 afterEach(async () => {
   preparation.blocker = null;
   preparation.notReadyToSend = false;
+  preparation.technicalFailure = false;
   preparation.answers = [];
   preparation.attachedField = "Resume";
   vi.useRealTimers();
@@ -563,7 +587,7 @@ it("a Send for me form waiting on a question keeps Send through Open's refill an
 async function setup(
   count: number,
   concurrency?: number,
-  options: { onDisk?: boolean } = {},
+  options: { onDisk?: boolean; locations?: string[] } = {},
 ) {
   const directory = await mkdtemp(path.join(tmpdir(), "nestor-apply-"));
   const imported = path.join(directory, "imported.txt");
@@ -586,7 +610,7 @@ async function setup(
       (_, i): FoundJob => ({
         title: `Engineer ${i}`,
         company: "Replica",
-        location: "Remote",
+        location: options.locations?.[i] ?? "Remote",
         workModes: ["remote"],
         url: `https://replica.test/jobs/${i}`,
         applyUrl: null,
@@ -652,7 +676,9 @@ async function setup(
     transferApplicationPageBinding: vi.fn<
       (source: string, oldKey: string, nextKey: string) => Promise<boolean>
     >(() => Promise.resolve(true)),
-    handApplicationPageToPerson: vi.fn(() => Promise.resolve()),
+    handApplicationPageToPerson: vi.fn<
+      NonNullable<BrowserSessionRuntime["handApplicationPageToPerson"]>
+    >(() => Promise.resolve()),
     releaseApplicationPageBinding: vi.fn(() => Promise.resolve()),
     readApplicationPageWithPerson: vi.fn<
       NonNullable<BrowserSessionRuntime["readApplicationPageWithPerson"]>
@@ -1534,6 +1560,298 @@ it("opens a restored Ready form without preparing or authorizing a send again", 
   expect(f.applications.getApplication(row.id)?.state).toBe("ready");
   expect(f.execute).toHaveBeenCalledTimes(1);
   expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it("a failed snapshot reopen queues a linked Fill-only restoration instead of leaving a dead Ready row", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  f.browser.focusApplicationPageBinding.mockRejectedValueOnce(
+    new Error("Saved multistep form could not reopen"),
+  );
+  expect(await f.service.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(f.applications.getApplication(row.id)?.attempt).toBe(row.attempt + 1);
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+  f.releases.shift()!();
+});
+
+it("a database-backed refill carries the actual Google selection checkpoint into the next caller", async () => {
+  const f = await setup(1, undefined, { onDisk: true });
+  preparation.activities.length = 0;
+  const checkpoint = {
+    id: "selected",
+    at: "2026-11-03T06:00:00.000Z",
+    label: "Google account selected",
+    detail:
+      "Selected Google account robin@example.test. Sign-in completion has not been verified.",
+    state: "in_progress" as const,
+    visualEvidence: [],
+  };
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!({ ...ready(), checkpoints: [checkpoint] });
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  f.service.stop();
+  const restarted = createApplicationService(f.deps);
+  cleanups.unshift(() => restarted.stop());
+  await restarted.start();
+  const row = f.applications.listApplications().rows[0]!;
+  expect(await restarted.open(row.id)).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(preparation.activities.at(-1)).toEqual([checkpoint]);
+  f.releases.shift()!();
+});
+
+it("eligibility answer storage reuses Berlin to Munich but rejects changed facts, unknown and limited cross-job contexts", async () => {
+  const f = await setup(2);
+  const question = {
+    prompt: "Are you authorized to work here?",
+    kind: "work_authorization" as const,
+    answerControlType: "boolean" as const,
+    answerOptions: ["Yes", "No"],
+  };
+  const profile = CandidateProfileSchema.parse({
+    ...f.seed.profile,
+    workEligibility: {
+      authorizedWorkCountries: ["Germany"],
+      requiresVisaSponsorship: false,
+    },
+  });
+  const remember = (job: { id: number; location: string }, facts = profile) => {
+    const descriptor = describeFormQuestion(question, job, facts);
+    f.applications.needsYou.remember({
+      key: descriptor.key,
+      input: descriptor.input,
+      options: descriptor.options,
+      prompt: question.prompt,
+      answer: "Yes",
+      kind: question.kind,
+      scope: {},
+    });
+  };
+  const read = (job: { id: number; location: string }, facts = profile) =>
+    f.applications.needsYou.answersForQuestions(
+      1,
+      [
+        {
+          ...describeFormQuestion(question, job, facts),
+          prompt: question.prompt,
+        },
+      ],
+      "https://replica.test",
+    );
+  remember({ id: 1, location: "Berlin, Germany" });
+  expect(read({ id: 2, location: "Munich, Germany" })[0]?.answer).toBe("Yes");
+  const changed = {
+    ...profile,
+    workEligibility: {
+      ...profile.workEligibility,
+      requiresVisaSponsorship: true,
+    },
+  };
+  expect(read({ id: 2, location: "Munich, Germany" }, changed)).toEqual([]);
+  remember({ id: 1, location: "Remote, Europe" });
+  expect(read({ id: 2, location: "Remote, Europe" })).toEqual([]);
+  const limited = CandidateProfileSchema.parse({
+    ...profile,
+    workEligibility: {
+      ...profile.workEligibility,
+      limitedWorkPermissions: [
+        {
+          country: "Germany",
+          conditions: "20 hours",
+          requiresFutureSponsorship: true,
+        },
+      ],
+    },
+  });
+  remember({ id: 1, location: "Germany" }, limited);
+  expect(read({ id: 2, location: "Germany" }, limited)).toEqual([]);
+});
+
+it.each([false, true])(
+  "old local eligibility never directly fills without a verifiable eligibility context (changed=%s)",
+  async (changed) => {
+    const f = await setup(1);
+    const question = ApplyExecutionResultSchema.parse({
+      ...ready(),
+      questions: [
+        {
+          id: "eligibility",
+          prompt: "Are you authorized to work here?",
+          kind: "work_authorization",
+          answerControlType: "boolean",
+          answerOptions: ["Yes", "No"],
+          detectedAt: "2026-11-03T06:00:00.000Z",
+        },
+      ],
+    }).questions[0]!;
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+    );
+    f.service.stop();
+    const row = f.applications.listApplications().rows[0]!;
+    const job = f.jobs.getJob(row.jobId)!;
+    const old = describeLegacyFormQuestion(question, job);
+    const requested = f.applications.needsYou.request({
+      ...old,
+      applicationId: row.id,
+      attempt: row.attempt,
+      fieldKey: question.id,
+      kind: "question",
+      scope: {},
+      prompt: question.prompt,
+    });
+    expect(requested.status).toBe("needs_you");
+    if (requested.status !== "needs_you")
+      throw new Error("Expected old local question");
+    f.applications.needsYou.answer({
+      id: requested.task.id,
+      answer: "Yes",
+      remember: false,
+    });
+    if (changed)
+      f.seed.profile.workEligibility.requiresVisaSponsorship =
+        !f.seed.profile.workEligibility.requiresVisaSponsorship;
+    const restarted = createApplicationService(f.deps);
+    cleanups.unshift(() => restarted.stop());
+    await restarted.start();
+    await restarted.open(row.id);
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+    const answers = await preparation.readAnswers!([question]);
+    expect(answers.some((answer) => answer.answer === "Yes")).toBe(false);
+    f.releases.shift()!();
+  },
+);
+
+it("unknown eligibility shares a country-matched legacy confirmation draft, then reuses only the newly confirmed fingerprint", async () => {
+  const f = await setup(5, 2, {
+    locations: [
+      "Berlin, Germany",
+      "Munich, Germany",
+      "Hamburg, Germany",
+      "Frankfurt, Germany",
+      "Remote, Europe",
+    ],
+  });
+  f.seed.profile.workEligibility = CandidateProfileSchema.parse({
+    ...f.seed.profile,
+    workEligibility: {},
+  }).workEligibility;
+  const question = ApplyExecutionResultSchema.parse({
+    ...ready(),
+    state: "paused",
+    questions: [
+      {
+        id: "eligibility",
+        prompt: "Are you authorized to work here?",
+        kind: "work_authorization",
+        answerControlType: "boolean",
+        answerOptions: ["Yes", "No"],
+        detectedAt: "2026-11-03T06:00:00.000Z",
+      },
+    ],
+  }).questions[0]!;
+  const berlin = f.jobs.getJob(f.ids[0]!)!;
+  const legacy = describeLegacyFormQuestion(question, berlin);
+  const old = f.applications.needsYou.remember({
+    key: legacy.key,
+    input: legacy.input,
+    options: legacy.options,
+    prompt: question.prompt,
+    answer: "Yes",
+    kind: "work_authorization",
+    scope: {},
+  });
+  preparation.givenAnswers.length = 0;
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids.slice(0, 2) } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(preparation.givenAnswers.flat()).toEqual([]);
+  expect(await preparation.readAnswers!([question])).toEqual([]);
+  const waiting = () => ({
+    ...ready(),
+    state: "paused" as const,
+    questions: [question],
+  });
+  f.releases.shift()!(waiting());
+  f.releases.shift()!(waiting());
+  await vi.waitFor(() =>
+    expect(
+      f.applications.listApplications({ state: "needs_you" }).rows,
+    ).toHaveLength(2),
+  );
+  const tasks = f.applications.needsYou.list();
+  expect(tasks.total).toBe(1);
+  const task = tasks.rows[0]!;
+  expect(f.applications.needsYou.details(task.id)?.draft).toMatchObject({
+    answer: "Yes",
+    remember: true,
+  });
+  expect(task.askReason?.eligibilityContext).toMatchObject({
+    country: "DE",
+    jobId: null,
+    legacyAnswerId: old.id,
+  });
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+  expect(
+    f.applications.needsYou.answer({
+      id: task.id,
+      answer: "Yes",
+      remember: true,
+    }).resolved,
+  ).toBe(true);
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(4));
+  expect((await preparation.readAnswers!([question]))[0]?.answer).toBe("Yes");
+  const current = describeFormQuestion(question, berlin, f.seed.profile);
+  const saved = f.applications.needsYou.getAnswerByKey({
+    key: current.key,
+    scope: {},
+  });
+  expect(saved?.proofEntryIds).toContain(`legacy_form_answer:${old.id}`);
+  expect(saved?.proofEntryIds).toContain(
+    `eligibility:${task.askReason!.eligibilityContext!.fingerprint}`,
+  );
+  f.releases.shift()!();
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(
+      f.applications.listApplications({ state: "ready" }).rows,
+    ).toHaveLength(2),
+  );
+  f.applications.applyJobs({ selection: { ids: [f.ids[2]!] } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(5));
+  expect((await preparation.readAnswers!([question]))[0]?.answer).toBe("Yes");
+  f.releases.shift()!();
+  f.seed.profile.workEligibility.authorizedWorkCountries = ["Germany"];
+  f.applications.applyJobs({ selection: { ids: [f.ids[3]!] } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(6));
+  expect(await preparation.readAnswers!([question])).toEqual([]);
+  expect(preparation.givenAnswers.at(-1)).toEqual([]);
+  f.releases.shift()!();
+  f.applications.applyJobs({ selection: { ids: [f.ids[4]!] } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(7));
+  expect(await preparation.readAnswers!([question])).toEqual([]);
+  f.releases.shift()!(waiting());
+  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
+  expect(
+    f.applications.needsYou.details(f.applications.needsYou.list().rows[0]!.id)
+      ?.draft,
+  ).toBeNull();
 });
 
 it("brings back a form waiting on a question after a restart, still waiting with the same item", async () => {
@@ -2743,6 +3061,285 @@ it("a refused Send answer offers the current page value as a draft, without trea
   expect(f.onError).not.toHaveBeenCalled();
 });
 
+// Captured from the ledgerleaf replica (2026-11-03): a retained "Salary
+// currency" and "Years of analysis experience" in a Compensation step, both
+// answered by the person's saved form answers, were refused at Send and the
+// application was silently stopped.
+it.each([
+  { pageValue: "EUR", sends: true },
+  { pageValue: "USD", sends: false },
+])(
+  "Send grounds a retained value in the saved form answers; a mismatch stays ready with its reason (page $pageValue)",
+  async ({ pageValue, sends }) => {
+    const f = await setup(1);
+    f.seed.settings.salaryDisclosure = "answer_from_profile";
+    const field = (
+      index: number,
+      label: string,
+      value: string,
+      options: string[] = [],
+    ) => ({
+      index,
+      tagName: options.length ? "select" : "input",
+      inputType: options.length ? "" : "text",
+      role: "",
+      id: `f${index}`,
+      name: `f${index}`,
+      label,
+      groupLabel: "Compensation",
+      placeholder: "",
+      autocomplete: "",
+      required: true,
+      invalid: false,
+      validationMessage: "",
+      disabled: false,
+      readOnly: false,
+      visible: true,
+      value,
+      checked: false,
+      multiple: false,
+      options,
+      selectedOptionLabel: options.length ? value : "",
+    });
+    f.browser.readApplicationPageBinding.mockResolvedValue({
+      ...f.personPage,
+      title: "Apply",
+      bodyText: "Compensation",
+      controls: [
+        field(0, "Salary currency *", pageValue, ["USD", "EUR"]),
+        field(1, "Years of analysis experience *", "5"),
+      ],
+      actions: [
+        {
+          ref: "a0",
+          index: 0,
+          label: "Submit Application",
+          visible: true,
+          disabled: false,
+        },
+      ],
+    });
+    for (const [prompt, answer] of [
+      ["Salary currency", "EUR"],
+      ["Years of analysis experience", "5"],
+    ] as const)
+      f.applications.needsYou.remember({
+        ...describeSavedFormAnswer(prompt, answer),
+        prompt,
+        scope: {},
+      });
+    preparation.answers = [
+      {
+        question: "Compensation — Salary currency *",
+        answer: pageValue,
+        source: "the filled application form",
+        written: false,
+        groundedIn: [],
+      },
+      {
+        question: "Compensation — Years of analysis experience *",
+        answer: "5",
+        source: "the filled application form",
+        written: false,
+        groundedIn: [],
+      },
+    ];
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+    );
+    const row = f.applications.listApplications().rows[0]!;
+    f.authorizeSending.mockResolvedValue(
+      sendEnvelope(
+        row.jobId,
+        f.applications.getWork(row.id)!.resumeArtifact.sha256!,
+      ),
+    );
+    f.deps.aiClient = {
+      ...f.deps.aiClient,
+      chatWithTools: () =>
+        Promise.resolve({
+          toolCalls: [
+            {
+              id: "read",
+              type: "function",
+              function: {
+                name: "report_question_kinds",
+                arguments: JSON.stringify({
+                  plainIndexes: [1],
+                  flagged: [
+                    {
+                      index: 0,
+                      eligibilityKind: null,
+                      asksAboutPay: true,
+                      asksCurrentPay: false,
+                      asksHiringCountry: false,
+                      required: true,
+                      declarationKind: null,
+                    },
+                  ],
+                  tags: [
+                    { index: 0, kind: "salary", country: null, sourceId: null },
+                    { index: 1, kind: "other", country: null, sourceId: null },
+                  ],
+                }),
+              },
+            },
+          ],
+        }),
+    };
+    const action = vi.fn();
+    Object.assign(f.browser, { executeExactlyOneFinalAction: action });
+    // Grounding is the step under test; the envelope lookup after it ends
+    // the run at a known point.
+    const envelopes = vi.fn(() => Promise.resolve([]));
+    Object.assign(f.deps.authorityRepository, {
+      listApplicationAuthorityEnvelopes: envelopes,
+    });
+    await f.service.sendPrepared(row.id);
+    const application = f.applications.getApplication(row.id)!;
+    if (sends) {
+      // Grounding passed: no question about a fact the person already saved.
+      expect(envelopes).toHaveBeenCalled();
+      expect(f.applications.needsYou.list().total).toBe(0);
+      expect(application.error ?? "").not.toMatch(/could not be verified/u);
+    } else {
+      expect(action).not.toHaveBeenCalled();
+      expect(application.state).not.toBe("stopped");
+      expect(
+        application.state === "needs_you" ||
+          (application.state === "ready" &&
+            /^Not sent:/u.test(application.error ?? "")) ||
+          (application.state === "failed" &&
+            /could not finish checking/u.test(application.error ?? "")),
+      ).toBe(true);
+    }
+    expect(f.onError).not.toHaveBeenCalled();
+  },
+);
+
+// Captured ledgerleaf receipt (candidate 2): two work-history rows held the
+// same Profile record and were sent. Such a form is never sent; distinct
+// records are (council D2).
+it.each([
+  {
+    second: ["Staff Frontend Engineer", "Signal Systems", "2021-03"],
+    blocked: true,
+  },
+  {
+    second: ["Software Engineer", "Copper Finch Software", "2016-01"],
+    blocked: false,
+  },
+])(
+  "Send refuses a form whose history rows repeat one Profile record (blocked $blocked)",
+  async ({ second, blocked }) => {
+    const f = await setup(1);
+    f.seed.profile.experiences = CandidateProfileSchema.parse({
+      ...f.seed.profile,
+      experiences: [
+        {
+          id: "signal",
+          companyName: "Signal Systems",
+          title: "Staff Frontend Engineer",
+          startDate: "2021-03",
+          isCurrent: true,
+        },
+        {
+          id: "copper",
+          companyName: "Copper Finch Software",
+          title: "Software Engineer",
+          startDate: "2016-01",
+          endDate: "2021-02",
+        },
+      ],
+    }).experiences;
+    let index = 0;
+    const row = (n: number, values: string[]) =>
+      ["Job title", "Company", "From"].map((label, at) => ({
+        index: index++,
+        tagName: "input",
+        inputType: label === "From" ? "month" : "text",
+        role: "",
+        id: `work${n}${at}`,
+        name: `work${n}${at}`,
+        scopeKey: "form0",
+        rowScopeKey: `row${n}`,
+        label,
+        groupLabel: `Work history (optional) — Work history ${n}`,
+        sectionPath: ["Work history (optional)", `Work history ${n}`],
+        placeholder: "",
+        autocomplete: "",
+        required: true,
+        invalid: false,
+        validationMessage: "",
+        disabled: true,
+        readOnly: false,
+        visible: false,
+        value: values[at]!,
+        checked: false,
+        multiple: false,
+        options: [],
+        selectedOptionLabel: "",
+      }));
+    f.browser.readApplicationPageBinding.mockResolvedValue({
+      ...f.personPage,
+      title: "Apply",
+      bodyText: "Review and send",
+      controls: [
+        ...row(1, ["Staff Frontend Engineer", "Signal Systems", "2021-03"]),
+        ...row(2, second),
+      ],
+      actions: [
+        {
+          ref: "a0",
+          index: 0,
+          label: "Send application",
+          visible: true,
+          disabled: false,
+        },
+      ],
+    });
+    preparation.answers = [];
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+    );
+    const application = f.applications.listApplications().rows[0]!;
+    f.authorizeSending.mockResolvedValue(
+      sendEnvelope(
+        application.jobId,
+        f.applications.getWork(application.id)!.resumeArtifact.sha256!,
+      ),
+    );
+    const action = vi.fn();
+    Object.assign(f.browser, { executeExactlyOneFinalAction: action });
+    const envelopes = vi.fn(() => Promise.resolve([]));
+    Object.assign(f.deps.authorityRepository, {
+      listApplicationAuthorityEnvelopes: envelopes,
+    });
+    await f.service.sendPrepared(application.id);
+    const after = f.applications.getApplication(application.id)!;
+    expect(action).not.toHaveBeenCalled();
+    if (blocked) {
+      expect(after.state).toBe("ready");
+      expect(after.error).toMatch(
+        /^Not sent: "Work history 1" and "Work history 2" hold the same entry/u,
+      );
+      expect(envelopes).not.toHaveBeenCalled();
+    } else {
+      expect(after.error ?? "").not.toMatch(/same entry/u);
+      expect(envelopes).toHaveBeenCalled();
+    }
+    expect(f.onError).not.toHaveBeenCalled();
+  },
+);
+
 it("Send for me resumes after two Needs-you answers and forwards only the final target once", async () => {
   const f = await setup(1);
   const guards = createSendGuards(f.jobs);
@@ -2991,4 +3588,1090 @@ it("Check again on a sign-in the page still shows runs the application again fro
     f.applications.needsYou.details(task.id)?.applications.map((a) => a.id),
   ).toEqual([row!.id]);
   expect(f.onError).not.toHaveBeenCalled();
+});
+
+it("opening an account child keeps the form ready with finish-or-close guidance", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  const error =
+    "An account window is open for this application; finish or close it first.";
+  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+  f.browser.handApplicationPageToPerson.mockResolvedValue({ ok: false, error });
+  expect(await f.service.open(row.id)).toBe(true);
+  expect(f.applications.getApplication(row.id)).toMatchObject({
+    state: "ready",
+    error,
+  });
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+  expect(f.execute).toHaveBeenCalledTimes(1);
+  expect(f.onError).not.toHaveBeenCalled();
+});
+
+it.each([false, true])(
+  "recovers this application's older live owner past a failed attempt without its replay or attachment claims (newer tab closes=%s)",
+  async (closes) => {
+    const f = await setup(1);
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+    );
+    const first = f.applications.listApplications().rows[0]!;
+    f.applications.reprepareForReview(first.id, first.attempt, "Recheck");
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+    f.releases.shift()!(
+      ApplyExecutionResultSchema.parse({
+        ...ready(),
+        state: "failed",
+        detail: "A different attempt failed",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(f.applications.getApplication(first.id)?.state).toBe("failed"),
+    );
+    let newerLive = closes;
+    const has = vi.fn((_source: string, key: string) =>
+      Promise.resolve(
+        key === `application_${first.id}_attempt_1` ||
+          (newerLive && key === `application_${first.id}_attempt_2`),
+      ),
+    );
+    Object.assign(f.browser, { hasApplicationPageBinding: has });
+    f.browser.readApplicationPageBinding.mockResolvedValue({
+      ...f.personPage,
+      url: "https://replica.test/kept-step",
+    });
+    f.browser.transferApplicationPageBinding.mockClear();
+    if (closes)
+      f.browser.transferApplicationPageBinding.mockImplementation(
+        (_source, key) => {
+          if (key.endsWith("_attempt_2")) {
+            newerLive = false;
+            return Promise.resolve(false);
+          }
+          return Promise.resolve(true);
+        },
+      );
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
+    expect(has.mock.calls.map(([, key]) => key)).toEqual(
+      closes
+        ? [
+            `application_${first.id}_attempt_2`,
+            `application_${first.id}_attempt_2`,
+            `application_${first.id}_attempt_1`,
+          ]
+        : [
+            `application_${first.id}_attempt_2`,
+            `application_${first.id}_attempt_1`,
+          ],
+    );
+    expect(f.browser.transferApplicationPageBinding).toHaveBeenLastCalledWith(
+      "target_site",
+      `application_${first.id}_attempt_1`,
+      `application_${first.id}_attempt_3`,
+    );
+    expect(f.execute.mock.calls[2]![1].startingUrl).toBe(
+      "https://replica.test/kept-step",
+    );
+    expect(preparation.replays.at(-1)).toBeNull();
+    expect(preparation.earlierFiles.at(-1)).toEqual([]);
+    expect(preparation.activities.at(-1)).toEqual([]);
+    f.releases.shift()!();
+  },
+);
+
+it("does not consider another application's live key when this application's prior keys are gone", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({ ...ready(), state: "failed" }),
+  );
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("failed"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  const has = vi.fn((_source: string, key: string) =>
+    Promise.resolve(key === `application_${row.id + 1}_attempt_1`),
+  );
+  Object.assign(f.browser, { hasApplicationPageBinding: has });
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(has).toHaveBeenCalledExactlyOnceWith(
+    "target_site",
+    `application_${row.id}_attempt_1`,
+  );
+  expect(f.browser.transferApplicationPageBinding).not.toHaveBeenCalled();
+  f.releases.shift()!();
+});
+
+it.each(["submitted", "uncertain"] as const)(
+  "a current %s result appearing during owner lookup is preserved without adoption or new execution",
+  async (state) => {
+    const f = await setup(1);
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    f.releases.shift()!(
+      ApplyExecutionResultSchema.parse({ ...ready(), state: "failed" }),
+    );
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("failed"),
+    );
+    const first = f.applications.listApplications().rows[0]!;
+    const adopt = vi.fn(() => Promise.resolve(true));
+    Object.assign(f.browser, {
+      adoptApplicationPageOwnership: adopt,
+      hasApplicationPageBinding: vi.fn(() => {
+        f.jobs
+          .sql("UPDATE applications SET state=? WHERE id=?")
+          .run(state, first.id);
+        return Promise.resolve(true);
+      }),
+    });
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() =>
+      expect(f.applications.getApplication(first.id)?.state).toBe(state),
+    );
+    expect(adopt).not.toHaveBeenCalled();
+    expect(f.browser.transferApplicationPageBinding).not.toHaveBeenCalled();
+    expect(f.execute).toHaveBeenCalledOnce();
+  },
+);
+
+it.each([false, true])(
+  "unattachable live owner is adopted under the current attempt without execution; send-evidence refusal stops (refused=%s)",
+  async (refused) => {
+    const f = await setup(1);
+    vi.useFakeTimers();
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    f.releases.shift()!(
+      ApplyExecutionResultSchema.parse({ ...ready(), state: "failed" }),
+    );
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("failed"),
+    );
+    const first = f.applications.listApplications().rows[0]!;
+    let owner = `application_${first.id}_attempt_1`;
+    const adopt = vi.fn((_source: string, old: string, next: string) => {
+      expect(old).toBe(owner);
+      if (refused) return Promise.resolve(false);
+      owner = next;
+      return Promise.resolve(true);
+    });
+    Object.assign(f.browser, {
+      hasApplicationPageBinding: vi.fn((_source: string, key: string) =>
+        Promise.resolve(key === owner),
+      ),
+      adoptApplicationPageOwnership: adopt,
+    });
+    f.browser.transferApplicationPageBinding.mockResolvedValue(false);
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() =>
+      expect(f.applications.getApplication(first.id)).toMatchObject({
+        attempt: 2,
+        state: refused ? "failed" : "needs_you",
+      }),
+    );
+    expect(adopt).toHaveBeenCalledExactlyOnceWith(
+      "target_site",
+      `application_${first.id}_attempt_1`,
+      `application_${first.id}_attempt_2`,
+    );
+    expect(f.execute).toHaveBeenCalledOnce();
+    if (refused) {
+      expect(f.applications.getApplication(first.id)?.error).toContain(
+        "send may have been pressed",
+      );
+      return;
+    }
+    expect(f.applications.getWork(first.id)?.execution.questions[0]?.id).toBe(
+      "step_handover",
+    );
+    expect(f.applications.needsYou.list().rows[0]).toMatchObject({
+      input: "text",
+      waitingFor: { count: 1 },
+    });
+    expect(f.applications.needsYou.list().rows[0]?.prompt).toMatch(
+      /^Press .+ on the site, then continue$/u,
+    );
+    const pressedAt = new Date().toISOString();
+    f.browser.readApplicationPageWithPerson.mockImplementation((_source, key) =>
+      Promise.resolve(
+        key === owner
+          ? {
+              ...f.personPage,
+              sendPressedAt: pressedAt,
+              sendConfirmationBefore: [],
+              sendOrigin: "https://replica.test",
+            }
+          : null,
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(f.onError).not.toHaveBeenCalled();
+    expect(f.applications.getApplication(first.id)).toMatchObject({
+      attempt: 2,
+      state: "submitted",
+    });
+    expect(f.applications.getSubmissionReceipt(first.id)?.resultId).toBe(owner);
+    expect(f.execute).toHaveBeenCalledOnce();
+  },
+);
+
+it("Send for me retains bounded field saves even for an older envelope with its save flag off", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  f.authorizeSending.mockImplementation(async ({ artifact, application }) => {
+    const envelope = {
+      ...sendEnvelope(application.jobId, artifact.sha256!),
+      mode: "autonomous_submit" as const,
+      intermediateMutationsAuthorized: false,
+    };
+    await guards.commitApplicationAuthorityEnvelope({
+      envelope,
+      expectedRevision: null,
+    });
+    return envelope;
+  });
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await f.service.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const input = f.execute.mock.calls[0]![1];
+  expect(input.intermediateMutationsAuthorized).toBe(true);
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://replica.test",
+      "answers",
+    ),
+  ).toBe(true);
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://unrelated.test",
+      "answers",
+    ),
+  ).toBe(false);
+  f.seed.profile.phone = "+447700900999";
+  expect(
+    await input.recheckIntermediateMutationAuthority!(
+      "https://replica.test",
+      "answers",
+    ),
+  ).toBe(false);
+});
+
+it("a retryable raw classifier outage retains only its current page and creates no personal question", async () => {
+  const f = await setup(1);
+  preparation.technicalFailure = true;
+  Object.assign(f.browser, {
+    hasApplicationPageBinding: (_source: string, key: string) =>
+      Promise.resolve(key.endsWith("_attempt_1")),
+  });
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await f.service.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const first = f.applications.listApplications().rows[0]!;
+  const failed = ApplyExecutionResultSchema.parse({
+    ...ready(),
+    state: "failed",
+    summary: "Nestor could not read",
+    detail: "Provider temporarily unavailable",
+  });
+  const retain = f.execute.mock.calls[0]![1].shouldRetainFailedApplicationPage;
+  expect(retain?.(failed)).toBe(true);
+  expect(retain?.({ ...failed, submittedAt: new Date().toISOString() })).toBe(
+    false,
+  );
+  expect(retain?.({ ...failed, state: "submitted" })).toBe(false);
+  f.releases.shift()!(failed);
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(first.id)?.state).toBe("failed"),
+  );
+  expect(f.applications.getApplication(first.id)?.error).toContain(
+    "page and your answers are kept",
+  );
+  expect(f.applications.needsYou.list().total).toBe(0);
+  expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
+  expect(f.execute).toHaveBeenCalledOnce();
+  // A completed failed attempt can no longer extend its own page lifetime.
+  expect(retain?.(failed)).toBe(false);
+  preparation.technicalFailure = false;
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(f.applications.getApplication(first.id)?.attempt).toBe(
+    first.attempt + 1,
+  );
+  expect(f.browser.transferApplicationPageBinding).toHaveBeenCalledWith(
+    "target_site",
+    `application_${first.id}_attempt_${first.attempt}`,
+    `application_${first.id}_attempt_${first.attempt + 1}`,
+  );
+  f.releases.shift()!();
+});
+
+it("Send checker reads browser permissions live after observing the current page", async () => {
+  const f = await setup(1);
+  preparation.answers = [
+    {
+      question: "First name",
+      answer: "Jamie",
+      source: "Profile",
+      written: true,
+      groundedIn: [],
+    },
+  ];
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  f.authorizeSending.mockResolvedValue(
+    sendEnvelope(
+      row.jobId,
+      f.applications.getWork(row.id)!.resumeArtifact.sha256!,
+    ),
+  );
+  f.browser.readApplicationPageBinding.mockImplementation(() => {
+    f.seed.settings = {
+      ...f.seed.settings,
+      aiBehavior: AiBehaviorPreferenceSchema.parse({
+        ...f.seed.settings.aiBehavior,
+        browserPermissions: { googleSignIn: true },
+      }),
+    };
+    return Promise.resolve({
+      ...f.personPage,
+      title: "Application",
+      bodyText: "Application form",
+    });
+  });
+  f.deps.aiClient = {
+    ...f.deps.aiClient,
+    chatWithTools: vi.fn(() => Promise.resolve({ toolCalls: [] })),
+  };
+  const check = vi
+    .spyOn(browserAgent, "checkClassifiedApplicationAnswers")
+    .mockResolvedValue([]);
+  try {
+    await f.service.sendPrepared(row.id);
+    expect(check).toHaveBeenCalledOnce();
+    expect(check.mock.calls[0]![0].browserPermissions).toEqual({
+      solveCaptchas: false,
+      signIn: false,
+      googleSignIn: true,
+      createAccounts: false,
+    });
+  } finally {
+    check.mockRestore();
+  }
+});
+
+// Council D1: the Send caller hands the checker every card answer with its
+// field key, this attempt's stored step receipts and the review page's rows.
+// A step it cannot bind keeps the whole send Ready with nothing discarded.
+const RECEIPT_ROWS = [
+  ["First name", "Jamie"],
+  ["Last name", "Example"],
+  ["Email", "jamie@clientnest.example"],
+  ["Referral code", "LOCAL-REFERRAL-27"],
+  ["First name (repeated question on step 2)", "Jamie"],
+  ["Referral code (repeated question on step 2)", "LOCAL-REFERRAL-27"],
+  ["Describe your reporting routine", "I submit weekly reports"],
+] as const;
+
+it.each([
+  [
+    "unverified",
+    "Not sent: Nestor could not check the answers from earlier steps against this review page. The filled form is ready for your review; your answers are kept.",
+  ],
+  [
+    "no_receipt",
+    "Not sent: an earlier step was continued on the site by you, so Nestor cannot check its answers before sending. The filled form is ready for your review; your answers are kept.",
+  ],
+] as const)(
+  "Send passes all seven card answers and the stored receipts; a %s earlier step holds the whole send",
+  async (priorStep, reason) => {
+    const f = await setup(1);
+    preparation.answers = RECEIPT_ROWS.map(([question, answer], index) => ({
+      question,
+      answer,
+      source: index === 6 ? "Written for this application" : "Profile",
+      written: index === 6,
+      groundedIn: [],
+      fieldKey: `https://replica.test/jobs/0|step|${index}|${question}`,
+    }));
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    const pending = f.applications.listApplications().rows[0]!;
+    const resultId = `application_${pending.id}_attempt_${pending.attempt}`;
+    const receipts = [1, 2].map((stepIndex) => ({
+      kind: "advance" as const,
+      resultId,
+      url: "https://replica.test/jobs/0",
+      origin: "https://replica.test",
+      stepIndex,
+      stepTotal: 3,
+      stepLabel: `Step ${stepIndex} of 3`,
+      frame: null,
+      instructions: `Step ${stepIndex} of 3`,
+      fields: RECEIPT_ROWS.slice(
+        stepIndex === 1 ? 0 : 4,
+        stepIndex === 1 ? 4 : 7,
+      ).map(([label, value], offset) => ({
+        fieldKey: `https://replica.test/jobs/0|step|${(stepIndex === 1 ? 0 : 4) + offset}|${label}`,
+        label,
+        groupLabel: "",
+        sectionPath: [],
+        hint: "",
+        placeholder: "",
+        kind: "text" as const,
+        answerControlType: "text" as const,
+        choiceGroupKey: null,
+        options: [],
+        required: true,
+        readOnly: stepIndex === 2 && offset < 2,
+        questionKind: "other" as const,
+        attestationKind: null,
+        repeatedQuestion: null,
+        telInput: false,
+        urlInput: false,
+        value,
+        provenance: "executor_write" as const,
+      })),
+      at: "2026-11-04T01:00:00.000Z",
+    }));
+    f.releases.shift()!(
+      ApplyExecutionResultSchema.parse({
+        state: "ready",
+        summary: "Ready",
+        detail: "Filled form",
+        submittedAt: null,
+        outcome: null,
+        nextActionLabel: "Open form",
+        stepReceipts: receipts,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+    );
+    const row = f.applications.listApplications().rows[0]!;
+    expect(f.applications.getWork(row.id)?.execution.stepReceipts).toEqual(
+      receipts,
+    );
+    f.authorizeSending.mockResolvedValue(
+      sendEnvelope(
+        row.jobId,
+        f.applications.getWork(row.id)!.resumeArtifact.sha256!,
+      ),
+    );
+    const rows = [
+      { label: "First name", value: "Jamie" },
+      { label: "Reporting routine", value: "I submit weekly reports" },
+    ];
+    f.browser.readApplicationPageBinding.mockResolvedValue({
+      ...f.personPage,
+      url: "https://replica.test/jobs/0",
+      title: "Review",
+      bodyText: "Step 3 of 3\nReview your application",
+      summaryRows: rows,
+    });
+    f.deps.aiClient = {
+      ...f.deps.aiClient,
+      chatWithTools: vi.fn(() => Promise.resolve({ toolCalls: [] })),
+    };
+    const check = vi
+      .spyOn(browserAgent, "checkClassifiedApplicationAnswers")
+      .mockResolvedValue(
+        RECEIPT_ROWS.map((_, index) =>
+          index === 3
+            ? { supported: false, reason: "Not bound.", priorStep }
+            : { supported: true, reason: "Supported." },
+        ),
+      );
+    const action = vi.fn();
+    Object.assign(f.browser, { executeExactlyOneFinalAction: action });
+    try {
+      expect(await f.service.sendPrepared(row.id)).toBe(false);
+      expect(check).toHaveBeenCalledOnce();
+      const input = check.mock.calls[0]![0];
+      expect(
+        input.answers.map((answer) => [
+          answer.question,
+          answer.answer,
+          answer.fieldKey,
+        ]),
+      ).toEqual(
+        preparation.answers.map((answer) => [
+          answer.question,
+          answer.answer,
+          answer.fieldKey,
+        ]),
+      );
+      expect(input.stepReceipts).toEqual(receipts);
+      expect(input.summaryRows).toEqual(rows);
+      expect(input.sendPage).toEqual({
+        origin: "https://replica.test",
+        stepIndex: 3,
+        stepTotal: 3,
+      });
+      // No final request, nothing discarded, no new question.
+      expect(action).not.toHaveBeenCalled();
+      expect(f.applications.getApplication(row.id)?.state).toBe("ready");
+      expect(f.applications.getApplication(row.id)?.error).toBe(reason);
+      expect(f.applications.needsYou.list().total).toBe(0);
+      expect(f.applications.getWork(row.id)?.reviewCard?.answers).toHaveLength(
+        7,
+      );
+    } finally {
+      check.mockRestore();
+    }
+  },
+);
+
+// Council D1 positive at the Send caller: the native case-2 shape. Seven card
+// answers bind through this attempt's persisted receipts, the review page's
+// rows and current sources (Profile literals, the reporting answer, the
+// site-prefilled referral and both read-only echoes), and the one final
+// action goes out.
+it("Send binds the seven earlier-step answers of a numbered form through its stored receipts and sends once", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  f.seed.settings.applicationAutomationMode = "autonomous_submit";
+  const resume =
+    "Jamie Example\nEmail: jamie@clientnest.example\nFrontend Engineer (fictional)\nReporting routine: I submit weekly reports\n";
+  Object.assign(f.seed.profile, {
+    firstName: "Jamie",
+    lastName: "Example",
+    fullName: "Jamie Example",
+    email: "jamie@clientnest.example",
+    applicationIdentity: {
+      ...f.seed.profile.applicationIdentity,
+      preferredEmail: "jamie@clientnest.example",
+    },
+    baseResume: { ...f.seed.profile.baseResume, textContent: resume },
+  });
+  let envelope: ReturnType<typeof sendEnvelope> | null = null;
+  f.authorizeSending.mockImplementation(async ({ artifact, application }) => {
+    if (envelope) return envelope;
+    envelope = {
+      ...sendEnvelope(application.jobId, artifact.sha256!),
+      mode: "autonomous_submit" as const,
+    };
+    await guards.commitApplicationAuthorityEnvelope({
+      envelope,
+      expectedRevision: null,
+    });
+    return envelope;
+  });
+  const url = "https://replica.test/jobs/0";
+  const key = (step: number, prompt: string) =>
+    `${url}|Step ${step} of 3|${prompt.toLowerCase()}|${prompt}`;
+  const ECHO = (label: string) => `${label} (repeated question on step 2)`;
+  const card = [
+    [1, "First name", "Jamie"],
+    [1, "Last name", "Example"],
+    [1, "Email", "jamie@clientnest.example"],
+    [1, "Referral code", "LOCAL-REFERRAL-27"],
+    [2, ECHO("First name"), "Jamie"],
+    [2, ECHO("Referral code"), "LOCAL-REFERRAL-27"],
+    [2, "Describe your reporting routine", "I submit weekly reports"],
+  ] as const;
+  preparation.answers = card.map(([step, question, answer], index) => ({
+    question,
+    answer,
+    source: index === 6 ? "Written for this application" : "Profile",
+    written: index === 6,
+    groundedIn: [],
+    fieldKey: key(step, question),
+  }));
+  // Ready for the person's Send, as Send for me leaves a form it could not
+  // confirm; the Send-time check is the same either way.
+  preparation.notReadyToSend = true;
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await f.service.start();
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const pending = f.applications.listApplications().rows[0]!;
+  const resultId = `application_${pending.id}_attempt_${pending.attempt}`;
+  const field = (
+    step: number,
+    label: string,
+    value: string,
+    provenance: "executor_write" | "site_unchanged",
+    extra: Record<string, unknown> = {},
+  ) => ({
+    fieldKey: key(step, label),
+    label,
+    groupLabel: "",
+    sectionPath: [],
+    hint: "",
+    placeholder: "",
+    kind: "text" as const,
+    answerControlType: "text" as const,
+    choiceGroupKey: null,
+    options: [],
+    required: true,
+    readOnly: false,
+    questionKind: "other" as const,
+    attestationKind: null,
+    repeatedQuestion: null,
+    telInput: false,
+    urlInput: false,
+    value,
+    provenance,
+    ...extra,
+  });
+  const echo = (label: string, value: string) =>
+    field(2, ECHO(label), value, "site_unchanged", {
+      readOnly: true,
+      repeatedQuestion: { prompt: ECHO(label), step: "step 2" },
+      ...(label === "Referral code" ? { required: false } : {}),
+    });
+  const receipt = (stepIndex: number, fields: ReturnType<typeof field>[]) => ({
+    kind: "advance" as const,
+    resultId,
+    url,
+    origin: "https://replica.test",
+    stepIndex,
+    stepTotal: 3,
+    stepLabel: `Step ${stepIndex} of 3`,
+    frame: null,
+    instructions: `Step ${stepIndex} of 3`,
+    fields,
+    at: "2026-11-04T01:00:00.000Z",
+  });
+  const receipts = [
+    receipt(1, [
+      field(1, "First name", "Jamie", "executor_write"),
+      field(1, "Last name", "Example", "executor_write"),
+      field(1, "Email", "jamie@clientnest.example", "executor_write"),
+      field(1, "Referral code", "LOCAL-REFERRAL-27", "site_unchanged", {
+        required: false,
+      }),
+    ]),
+    receipt(2, [
+      echo("First name", "Jamie"),
+      echo("Referral code", "LOCAL-REFERRAL-27"),
+      field(
+        2,
+        "Describe your reporting routine",
+        "I submit weekly reports",
+        "executor_write",
+        { kind: "long_text" },
+      ),
+    ]),
+  ];
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      state: "ready",
+      summary: "Ready",
+      detail: "Filled form",
+      submittedAt: null,
+      outcome: null,
+      nextActionLabel: "Open form",
+      stepReceipts: receipts,
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  // The receipts survive the store exactly as the run recorded them.
+  expect(f.applications.getWork(row.id)?.execution.stepReceipts).toEqual(
+    receipts,
+  );
+  f.browser.readApplicationPageBinding.mockResolvedValue({
+    ...f.personPage,
+    url,
+    title: "Review",
+    bodyText: "Step 3 of 3\nReview your application",
+    summaryRows: [
+      { label: "First name", value: "Jamie" },
+      { label: "Last name", value: "Example" },
+      { label: "Email", value: "jamie@clientnest.example" },
+      { label: "Referral code", value: "LOCAL-REFERRAL-27" },
+      { label: "Reporting routine", value: "I submit weekly reports" },
+    ],
+    actions: [
+      {
+        ref: "a0",
+        index: 0,
+        label: "Submit application",
+        visible: true,
+        disabled: false,
+      },
+    ],
+  });
+  const reads: string[] = [];
+  f.deps.aiClient = {
+    ...f.deps.aiClient,
+    chatWithTools: vi.fn<
+      NonNullable<ApplicationServiceDeps["aiClient"]["chatWithTools"]>
+    >((messages, tools) => {
+      const name = tools[0]!.function.name;
+      const payload = JSON.parse(
+        String(messages.find((message) => message.role === "user")?.content),
+      ) as unknown;
+      if (name === "report_question_kinds") {
+        const questions = payload as { index: number; question: string }[];
+        reads.push(...questions.map((question) => question.question));
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "read",
+              type: "function" as const,
+              function: {
+                name,
+                arguments: JSON.stringify({
+                  plainIndexes: questions.map((question) => question.index),
+                  flagged: [],
+                  tags: questions.map(({ index, question }) => ({
+                    index,
+                    kind: /reporting/iu.test(question)
+                      ? "factual_summary"
+                      : "other",
+                    country: null,
+                    sourceId: /^first name/iu.test(question)
+                      ? "profile.firstName"
+                      : /^last name/iu.test(question)
+                        ? "profile.lastName"
+                        : /^email/iu.test(question)
+                          ? "profile.email"
+                          : /reporting/iu.test(question)
+                            ? "resume.text"
+                            : null,
+                  })),
+                }),
+              },
+            },
+          ],
+        });
+      }
+      const answers =
+        (payload as { answers?: { proposedAnswer: string }[] }).answers ?? [];
+      return Promise.resolve({
+        toolCalls: [
+          {
+            id: "check",
+            type: "function" as const,
+            function: {
+              name,
+              arguments: JSON.stringify({
+                checks: answers.map((answer, index) => ({
+                  index,
+                  supported:
+                    answer.proposedAnswer === "I submit weekly reports",
+                  reason: "The resume states this.",
+                  evidence: [
+                    {
+                      kind: "applicant_fact",
+                      claim: answer.proposedAnswer,
+                      source: "resume",
+                      path: "",
+                      quote: "Reporting routine: I submit weekly reports",
+                    },
+                  ],
+                })),
+              }),
+            },
+          },
+        ],
+      });
+    }),
+  };
+  const observation = {
+    identity: { id: "review-form", revision: 1, digest: "a".repeat(64) },
+    page: { origin: "https://replica.test", safePath: "/jobs/0" },
+    complete: true,
+    controls: [
+      {
+        identity: { ref: "final-control-0", signature: "c".repeat(64) },
+        ordinal: 0,
+        kind: "button" as const,
+        label: "Submit application",
+        formIndex: -1,
+        action: { origin: "https://replica.test", safePath: "/jobs/0" },
+      },
+    ],
+  };
+  const action = vi.fn<
+    NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>
+  >(async (_source, input) => {
+    expect(
+      await input.veto({ observation, control: observation.controls[0]! }),
+    ).toBe(true);
+    return {
+      outcome: "submitted",
+      reason: "employer_confirmation",
+      observation,
+      control: observation.controls[0]!,
+      facts: {
+        actionAttempted: true,
+        actionIssued: true,
+        actionCompleted: true,
+        pageBefore: observation.page,
+        pageAfter: observation.page,
+        urlChanged: false,
+        requestsObservedDuringAction: 1,
+        requestsAfterClick: [],
+      },
+      confirmation: {
+        observedAt: new Date().toISOString(),
+        destination: observation.page,
+        summary: "Application received.",
+      },
+    };
+  });
+  Object.assign(f.browser, {
+    observeApplicationForm: () => Promise.resolve(observation),
+    executeExactlyOneFinalAction: action,
+  });
+  expect(await f.service.sendPrepared(row.id)).toBe(true);
+  expect(action).toHaveBeenCalledOnce();
+  expect(f.applications.getApplication(row.id)?.state).toBe("submitted");
+  expect(f.applications.needsYou.list().total).toBe(0);
+  // The Send-time read covered the stored earlier-step questions.
+  expect(reads).toEqual(expect.arrayContaining(card.map(([, q]) => q)));
+  expect(f.onError).not.toHaveBeenCalled();
+});
+
+it.each([false, true])(
+  "Send retains an already checked eligibility dependency with hidden options; changed whole question %s",
+  async (changed) => {
+    const f = await setup(1);
+    const original = "Are you authorized to work in the job's country?";
+    const question = {
+      prompt: original,
+      kind: "work_authorization" as const,
+      answerControlType: "boolean" as const,
+      answerOptions: ["Yes", "No"],
+    };
+    preparation.answers = [
+      {
+        question: changed ? original + " permanently?" : original,
+        answer: "Yes",
+        source: "your matching saved answer or profile fact",
+        written: false,
+        groundedIn: [],
+      },
+    ];
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    const row = f.applications.listApplications().rows[0]!;
+    const job = f.jobs.getJob(row.jobId)!;
+    const known = describeFormQuestion(question, job, f.seed.profile);
+    f.applications.needsYou.remember({
+      key: known.key,
+      prompt: original,
+      answer: "Yes",
+      input: "boolean",
+      options: ["Yes", "No"],
+      kind: "work_authorization",
+      scope: {},
+    });
+    expect((await preparation.readAnswers!([question]))[0]?.answer).toBe("Yes");
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
+    );
+    f.authorizeSending.mockResolvedValue(
+      sendEnvelope(
+        row.jobId,
+        f.applications.getWork(row.id)!.resumeArtifact.sha256!,
+      ),
+    );
+    f.browser.readApplicationPageBinding.mockResolvedValue({
+      ...f.personPage,
+      bodyText: "Review the application",
+      controls: [],
+    });
+    f.deps.aiClient = {
+      ...f.deps.aiClient,
+      chatWithTools: vi.fn(() => Promise.resolve({ toolCalls: [] })),
+    };
+    const check = vi
+      .spyOn(browserAgent, "checkClassifiedApplicationAnswers")
+      .mockResolvedValue([
+        {
+          supported: false,
+          reason: "Test holds final action after checking caller inputs.",
+          priorStep: "unverified",
+        },
+      ]);
+    try {
+      expect(await f.service.sendPrepared(row.id)).toBe(false);
+      expect(check).toHaveBeenCalledOnce();
+      const saved = check.mock.calls[0]![0].sources.reusableAnswers;
+      expect(
+        saved.filter((answer) => answer.question === original),
+      ).toHaveLength(changed ? 0 : 1);
+      expect(f.applications.needsYou.list().total).toBe(0);
+    } finally {
+      check.mockRestore();
+    }
+  },
+);
+
+it("bounds an unavailable equivalent-question read until its source snapshot changes", async () => {
+  const f = await setup(1);
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  const row = f.applications.claimNext()!;
+  const requested = f.applications.needsYou.request(
+    {
+      applicationId: row.id,
+      attempt: row.attempt,
+      fieldKey: "availability",
+      key: "waiting-question",
+      kind: "question",
+      scope: {},
+      prompt: "Days available for this scheduled call",
+      input: "multi_choice",
+      options: ["Tuesday", "Thursday"],
+      reusePrompt: true,
+    },
+    { reuseAnswers: false },
+  );
+  if (requested.status !== "needs_you")
+    throw new Error("Expected a waiting task");
+  const saved = f.applications.needsYou.remember({
+    key: "saved-question",
+    prompt: "Availability for the scheduled call",
+    scope: {},
+    input: "multi_choice",
+    options: ["Thursday", "Tuesday"],
+    answer: JSON.stringify(["Tuesday"]),
+  });
+  const compare = vi
+    .spyOn(browserAgent, "equivalentApplicationQuestions")
+    .mockRejectedValueOnce(new Error("Comparison unavailable"))
+    .mockResolvedValue(
+      new Map([
+        [`${requested.task.id}:${saved.id}`, JSON.stringify(["Thursday"])],
+      ]),
+    );
+  f.deps.aiClient = {
+    ...f.deps.aiClient,
+    chatWithTools: vi.fn(() => Promise.resolve({ toolCalls: [] })),
+  };
+  await f.service.start();
+  await vi.waitFor(() => expect(compare).toHaveBeenCalledOnce());
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  f.service.wake();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(compare).toHaveBeenCalledOnce();
+  expect(f.applications.getApplication(row.id)?.state).toBe("needs_you");
+  f.applications.needsYou.saveAnswer({
+    id: saved.id,
+    answer: JSON.stringify(["Thursday"]),
+  });
+  f.service.wake();
+  await vi.waitFor(() => expect(compare).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  expect(
+    f.applications.needsYou.list().rows.map((task) => task.id),
+  ).not.toContain(requested.task.id);
+  f.releases.shift()!();
+});
+
+it("carries the original current-field binding through a remembered local answer on continuation", async () => {
+  const f = await setup(1);
+  const question = ApplyExecutionResultSchema.parse({
+    ...ready(),
+    state: "paused",
+    questions: [
+      {
+        id: "availability",
+        prompt: "Saturday hours 09:00–17:00",
+        kind: "other",
+        answerControlType: "text",
+        answerOptions: [],
+        detectedAt: new Date().toISOString(),
+        currentFieldBinding: {
+          pageUrl: "https://replica.test/jobs/0",
+          targetHash: "a".repeat(64),
+          instructionsHash: "b".repeat(64),
+        },
+      },
+    ],
+  }).questions[0]!;
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [question],
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("needs_you"),
+  );
+  const task = f.applications.needsYou.list().rows[0]!;
+  f.applications.needsYou.answer({ id: task.id, answer: "8", remember: true });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  const answers = await preparation.readAnswers!([
+    { ...question, prompt: "Saturday hours 09:00 — 17:00" },
+  ]);
+  expect(
+    answers.find((a) => a.id.startsWith("application_"))?.applicationScope
+      ?.currentFieldBinding,
+  ).toEqual(question.currentFieldBinding);
+  f.releases.shift()!();
+});
+
+it("a technical failure keeps Try again visible while a separate genuine question stays open", async () => {
+  const f = await setup(1);
+  preparation.technicalFailure = true;
+  Object.assign(f.browser, {
+    hasApplicationPageBinding: (_source: string, key: string) =>
+      Promise.resolve(key.endsWith("_attempt_1")),
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const paused = ApplyExecutionResultSchema.parse({
+    ...ready(),
+    state: "paused",
+    questions: [
+      {
+        id: "missing-contact",
+        prompt: "Preferred contact time",
+        kind: "other",
+        answerControlType: "text",
+        answerOptions: [],
+        detectedAt: new Date().toISOString(),
+      },
+    ],
+  });
+  expect(
+    f.execute.mock.calls[0]![1].shouldRetainFailedApplicationPage?.(paused),
+  ).toBe(true);
+  f.releases.shift()!(paused);
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("failed"),
+  );
+  expect(f.applications.needsYou.list().rows.map((q) => q.prompt)).toEqual([
+    "Preferred contact time",
+  ]);
+  expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
 });

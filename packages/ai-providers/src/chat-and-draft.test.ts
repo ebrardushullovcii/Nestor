@@ -1,3 +1,4 @@
+import type { AgentMessage } from "./shared";
 import { describe, expect, test, vi } from "vitest";
 import {
   runConversationTurn,
@@ -1848,5 +1849,108 @@ test("the provider forwards parallel tool proposals and returns both in order", 
     ]);
   } finally {
     mock.restore();
+  }
+});
+
+test("reasoning continuation is bound to the endpoint, model and API route over two tool turns", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const fetched = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation((_url, init) => {
+      bodies.push(
+        JSON.parse(typeof init?.body === "string" ? init.body : "{}") as Record<
+          string,
+          unknown
+        >,
+      );
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  reasoning_content: "synthetic private continuation",
+                  tool_calls: [
+                    {
+                      id: `turn_${bodies.length}`,
+                      type: "function",
+                      function: { name: "look", arguments: "{}" },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+      );
+    });
+  const options = {
+    apiKey: "synthetic-key",
+    baseUrl: "https://one.example.test/v1",
+    model: "same-alias",
+    label: "Synthetic route",
+    streaming: false,
+    maxAttempts: 1,
+  };
+  const client = createOpenAiCompatibleJobFinderAiClient(options);
+  const messages: AgentMessage[] = [
+    { role: "user", content: "synthetic task" },
+  ];
+  try {
+    for (let turn = 0; turn < 3; turn++) {
+      const result = await client.chatWithTools(messages, []);
+      const assistantMessages = (
+        bodies.at(-1)?.messages as Array<Record<string, unknown>>
+      ).filter((message) => message.role === "assistant");
+      expect(assistantMessages).toHaveLength(turn);
+      expect(
+        assistantMessages.every(
+          (message) =>
+            message.reasoning_content === "synthetic private continuation",
+        ),
+      ).toBe(true);
+      messages.push({
+        role: "assistant",
+        content: result.content ?? "",
+        ...(result.toolCalls ? { toolCalls: result.toolCalls } : {}),
+        ...(result.continuation ? { continuation: result.continuation } : {}),
+      });
+      messages.push({
+        role: "tool",
+        toolCallId: result.toolCalls![0]!.id,
+        content: "synthetic result",
+      });
+    }
+    const previous = messages.find(
+      (message) => message.role === "assistant" && message.continuation,
+    );
+    if (previous?.role !== "assistant" || !previous.continuation)
+      throw new Error("Missing synthetic continuation");
+    messages.push({
+      role: "assistant",
+      content: "Synthetic host-readable note",
+      continuation: previous.continuation,
+    });
+    await client.chatWithTools(messages, []);
+    expect(
+      (bodies.at(-1)?.messages as Array<Record<string, unknown>>).at(-1)
+        ?.reasoning_content,
+    ).toBe("synthetic private continuation");
+    for (const override of [
+      { baseUrl: "https://two.example.test/v1" },
+      { model: "different-model" },
+      { apiMode: "responses" as const },
+    ]) {
+      await createOpenAiCompatibleJobFinderAiClient({
+        ...options,
+        ...override,
+      }).chatWithTools(messages, []);
+      expect(JSON.stringify(bodies.at(-1))).not.toContain(
+        "synthetic private continuation",
+      );
+    }
+  } finally {
+    fetched.mockRestore();
   }
 });

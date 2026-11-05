@@ -2156,3 +2156,148 @@ it("a select-all-that-apply question takes, saves and reuses a list of options",
     '["Tuesday"]',
   );
 });
+
+it("semantic answer reuse offers different options while preserving drafts and a changed snapshot", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 2) } });
+  const [first, second] = [
+    applications.claimNext()!,
+    applications.claimNext()!,
+  ];
+  const memory = applications.needsYou;
+  const options = ["Tuesday", "Thursday"];
+  const asked = memory.request(
+    question(first.id, first.attempt, {
+      key: "interview-v2",
+      prompt: "Days available for the remote interview",
+      input: "multi_choice",
+      options,
+      reusePrompt: true,
+      scope: {},
+    }),
+    { reuseAnswers: false },
+  );
+  memory.request(
+    question(second.id, second.attempt, {
+      key: "different-options",
+      prompt: "Days available for the remote interview",
+      input: "multi_choice",
+      options: ["Tuesday", "Wednesday"],
+      reusePrompt: true,
+      scope: {},
+    }),
+    { reuseAnswers: false },
+  );
+  if (asked.status !== "needs_you")
+    throw new Error("Expected a waiting question");
+  const saved = memory.remember({
+    key: "interview-v1",
+    prompt: "Remote interview availability",
+    input: "multi_choice",
+    options: [...options].reverse(),
+    answer: JSON.stringify(["Tuesday"]),
+    scope: {},
+  });
+  const candidates = memory.questionReuseCandidates();
+  expect(candidates.map((row) => row.task.id)).toContain(asked.task.id);
+  const snapshot = JSON.stringify(candidates);
+  memory.saveDraft({
+    id: asked.task.id,
+    answer: JSON.stringify(["Thursday"]),
+    remember: false,
+    revision: 0,
+  });
+  expect(
+    memory.resolveQuestionReuse({
+      snapshot,
+      matches: [
+        { taskId: asked.task.id, answerId: saved.id, answer: saved.answer },
+      ],
+    }),
+  ).toBe(0);
+  expect(applications.getApplication(first.id)?.state).toBe("needs_you");
+});
+
+it("resolves a current waiting task with the checked target value across input types", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!;
+  const memory = applications.needsYou;
+  const asked = memory.request(
+    question(row.id, row.attempt, {
+      key: "travel-target",
+      prompt: "Maximum business travel",
+      input: "choice",
+      options: ["None", "Up to 25%", "Up to 50%"],
+      reusePrompt: true,
+      scope: {},
+    }),
+    { reuseAnswers: false },
+  );
+  if (asked.status !== "needs_you") throw new Error("Waiting question missing");
+  const saved = memory.remember({
+    key: "travel-saved",
+    prompt: "Business travel limit",
+    input: "text",
+    options: [],
+    answer: "At most 25%",
+    scope: {},
+  });
+  let snapshot = JSON.stringify(memory.questionReuseCandidates());
+  expect(
+    memory.resolveQuestionReuse({
+      snapshot,
+      matches: [
+        { taskId: asked.task.id, answerId: saved.id, answer: "At most 25%" },
+      ],
+    }),
+  ).toBe(0);
+  snapshot = JSON.stringify(memory.questionReuseCandidates());
+  expect(
+    memory.resolveQuestionReuse({
+      snapshot,
+      matches: [
+        { taskId: asked.task.id, answerId: saved.id, answer: "Up to 25%" },
+      ],
+    }),
+  ).toBe(1);
+  expect(applications.getApplication(row.id)?.state).toBe("queued");
+  expect(memory.list().total).toBe(0);
+  expect(memory.savedAnswer(saved.id)?.answer).toBe("At most 25%");
+});
+
+it("an unavailable pre-send check retains Ready work for explicit retry and cannot reopen an armed send", () => {
+  const { jobs, applications } = open();
+  const ids = add(jobs, 1);
+  applications.applyJobs({ selection: { ids } });
+  const first = applications.claimNext()!;
+  applications.finishPreparation({
+    id: first.id,
+    attempt: first.attempt,
+    state: "ready",
+  });
+  expect(
+    applications.failBeforeSubmission(first.id, first.attempt + 1, "stale"),
+  ).toBe(false);
+  expect(
+    applications.failBeforeSubmission(
+      first.id,
+      first.attempt,
+      "Nestor could not finish checking. Try again.",
+    ),
+  ).toBe(true);
+  expect(applications.getApplication(first.id)?.state).toBe("failed");
+  expect(applications.getSubmissionReceipt(first.id)).toBeNull();
+  applications.applyJobs({ selection: { ids } });
+  const retry = applications.claimNext()!;
+  applications.finishPreparation({
+    id: retry.id,
+    attempt: retry.attempt,
+    state: "ready",
+  });
+  expect(applications.beginSubmission(retry.id, retry.attempt)).toBe(true);
+  expect(
+    applications.failBeforeSubmission(retry.id, retry.attempt, "cannot re-arm"),
+  ).toBe(false);
+  expect(applications.getApplication(retry.id)?.state).toBe("submitting");
+});

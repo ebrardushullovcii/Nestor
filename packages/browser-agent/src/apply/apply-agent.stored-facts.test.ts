@@ -192,6 +192,7 @@ async function ledgerleafRun(conditionalContact = false) {
           {
             index: 0,
             label: "Add another work history entry",
+            disabled: false,
             visible: true,
             topOffset: 0,
             role: "button",

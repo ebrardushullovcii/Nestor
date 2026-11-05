@@ -1,3 +1,4 @@
+import { intendedAccountEmail } from "@nestor/contracts";
 import type {
   ApplyExecutionResult,
   ApplyRecoveryContext,
@@ -542,7 +543,7 @@ export function buildScreeningQuestions(input: {
     const questionId = `question_${input.job.id}_contact`;
     const prompt = "Which contact details should we use for this application?";
     const contactText = [
-      input.profile.applicationIdentity.preferredEmail ?? input.profile.email,
+      intendedAccountEmail(input.profile),
       input.profile.applicationIdentity.preferredPhone ?? input.profile.phone,
     ]
       .filter((value): value is string => Boolean(value))

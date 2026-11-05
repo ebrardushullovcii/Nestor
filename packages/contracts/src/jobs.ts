@@ -442,6 +442,9 @@ export type JobSearchProgress = z.infer<typeof JobSearchProgressSchema>;
 
 /** A bounded active sample; the paged site-results command owns the complete list. */
 export const JobSearchStatusSchema = z.object({
+  /** Live work, distinct from the persisted number still needing a score. */
+  fitRunning: z.boolean().optional(),
+  fitError: z.string().nullable().optional(),
   fitChecking: z.number().int().nonnegative().optional(),
   fitRechecking: z.number().int().nonnegative().optional(),
   search: JobSearchRecordSchema.nullable(),

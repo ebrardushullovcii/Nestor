@@ -68,21 +68,32 @@ export function rows(userDataDir, scratch, table, { limit = 5, pattern } = {}) {
         .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
         .get(table);
       if (!exists) continue;
-      const columns = db
-        .prepare(`PRAGMA table_info("${table}")`)
-        .all()
-        .map((c) => c.name);
-      const order = ["updated_at", "created_at", "at", "rowid"].find(
-        (c) => c === "rowid" || columns.includes(c),
+      const columnInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
+      const columns = columnInfo.map((c) => c.name);
+      const timestamp = ["updated_at", "created_at", "at"].find((c) =>
+        columns.includes(c),
       );
+      const withoutRowid =
+        db.prepare(`PRAGMA main.table_list("${table}")`).get().wr === 1;
+      const primaryKey = withoutRowid
+        ? columnInfo
+            .filter((c) => c.pk > 0)
+            .sort((a, b) => a.pk - b.pk)
+            .map((c) => c.name)
+        : [];
+      // WITHOUT ROWID has no insertion order: use its declared key, also for ties.
+      const order =
+        [...new Set([...(timestamp ? [timestamp] : []), ...primaryKey])]
+          .map((c) => `"${c.replaceAll('"', '""')}" DESC`)
+          .join(", ") || (withoutRowid ? null : "rowid DESC");
+      if (!order)
+        throw new Error(`No ordering key for WITHOUT ROWID table ${table}`);
       const where = pattern
         ? `WHERE ${columns.map((c) => `CAST("${c}" AS TEXT) LIKE ?`).join(" OR ")}`
         : "";
       const params = pattern ? columns.map(() => `%${pattern}%`) : [];
       const found = db
-        .prepare(
-          `SELECT * FROM "${table}" ${where} ORDER BY ${order === "rowid" ? "rowid" : `"${order}"`} DESC LIMIT ?`,
-        )
+        .prepare(`SELECT * FROM "${table}" ${where} ORDER BY ${order} LIMIT ?`)
         .all(...params, Number(limit))
         .map((row) =>
           Object.fromEntries(

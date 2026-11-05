@@ -522,7 +522,33 @@ export function readInventoryHtml(
     }
   }
   const next = new Set<string>();
+  // Read the observed control's accessible label, including counts and icons.
+  // These are navigation semantics, never a site-specific URL builder.
+  const moreLabel = (node: Element) =>
+    /^(?:(?:load|show|view|see)\s+(?:\d+\s+)?more(?:\s+(?:jobs|roles|positions|vacancies|opportunities|results))?|more\s+(?:jobs|roles|positions|vacancies|opportunities|results)|next(?:\s+(?:page|results|jobs|positions|vacancies))?)(?:\s*[→›»]+)?$/iu.test(
+      (attr(node, "aria-label") || text(node)).replace(/\s+/gu, " ").trim(),
+    );
+  const unavailable = (node: Element) => {
+    for (
+      let parent: Node | undefined = node;
+      parent;
+      parent =
+        "parentNode" in parent ? (parent.parentNode ?? undefined) : undefined
+    ) {
+      if (
+        element(parent) &&
+        (parent.attrs.some(
+          (a) => a.name === "hidden" || a.name === "disabled",
+        ) ||
+          attr(parent, "aria-hidden") === "true" ||
+          attr(parent, "aria-disabled") === "true")
+      )
+        return true;
+    }
+    return false;
+  };
   for (const node of nodes.filter((node) => node.tagName === "a")) {
+    if (unavailable(node)) continue;
     const label = text(node).toLowerCase();
     let parent = node.parentNode;
     let inNavigation = false;
@@ -535,7 +561,7 @@ export function readInventoryHtml(
     }
     if (
       !attr(node, "rel").split(/\s/u).includes("next") &&
-      !/^(?:next(?: page)?|load more|show more|more jobs)$/iu.test(label) &&
+      !moreLabel(node) &&
       !(inNavigation && /^\d+$/u.test(label))
     )
       continue;
@@ -545,7 +571,8 @@ export function readInventoryHtml(
   const needsInteraction = nodes.some(
     (node) =>
       (node.tagName === "button" || attr(node, "role") === "button") &&
-      /^(?:load more|show more|more jobs|next(?: page)?)$/iu.test(text(node)),
+      !unavailable(node) &&
+      moreLabel(node),
   );
   const portals = nodes
     .filter(

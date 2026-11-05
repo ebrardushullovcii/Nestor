@@ -1,3 +1,4 @@
+import { intendedAccountEmail } from "@nestor/contracts";
 import { browserAgentPermissionsOf } from "@nestor/contracts";
 import { createHash } from "node:crypto";
 import { createModelUsageRecorder } from "@nestor/ai-providers";
@@ -14,6 +15,8 @@ import {
   browserStepReadyForAgent,
   canContinueApplicationAfterAccess,
   checkClassifiedApplicationAnswers,
+  equivalentApplicationQuestions,
+  duplicatedHistoryRows,
   inferQuestionKind,
   fileUploadProblems,
   questionPrompt,
@@ -30,6 +33,8 @@ import {
 import {
   AiBehaviorPreferenceSchema,
   ApplicationResumeArtifactSchema,
+  ApplyExecutionResultSchema,
+  ApplyStepReceiptSchema,
   SubmissionOutcomeRecordSchema,
   UPLOAD_ATTACHED_ANSWER,
   isUploadRepairPrompt,
@@ -44,6 +49,7 @@ import {
   type ApplyExecutionResult,
   type RawApplyPage,
   type CandidateProfile,
+  type CandidateReusableAnswer,
   type CandidateAnswerKind,
   type JobFinderSettings,
   type SubmissionOutcomeRecord,
@@ -68,6 +74,7 @@ import type { JobFinderAiClient } from "@nestor/ai-providers";
 
 import {
   createApplyFormPreparer,
+  mergeApplyReviewCards,
   buildApplyLetterDependencies,
   toApplyLlmClient,
 } from "../internal/agent-application-preparation";
@@ -85,6 +92,10 @@ import type { JobFinderDocumentManager } from "../internal/workspace-service-con
 import { toResumeJob } from "../resumes/write-resume";
 import {
   describeFormQuestion,
+  resolveListingCountry,
+  type FormQuestion,
+  eligibilityQuestionContext,
+  legacyEligibilityDraft,
   pageAnswerSuggestion,
   toKnownFormAnswer,
 } from "./questions";
@@ -100,6 +111,25 @@ import {
   resolveActiveSourceInstructionArtifact,
 } from "../internal/workspace-helpers";
 import { uniqueStrings } from "../internal/shared";
+
+/** A country-free legacy legal answer has no jurisdiction to apply elsewhere. */
+function generalSavedAnswer(answer: CandidateReusableAnswer): boolean {
+  const legal =
+    ["work_authorization", "visa_sponsorship"].includes(answer.kind) ||
+    ["work_authorization", "visa_sponsorship"].includes(
+      inferQuestionKind({
+        kind: "text",
+        label: answer.question,
+        groupLabel: "",
+        placeholder: "",
+      }),
+    );
+  return (
+    !legal ||
+    !!resolveListingCountry(answer.question) ||
+    !!resolveListingCountry(answer.applicationScope?.location ?? "")
+  );
+}
 
 /**
  * Why a Send for me application waits for the person's Send. A Ready row
@@ -285,10 +315,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     // An open file item kept it in Needs you; the person's page stays watched.
     if (state === "needs_you") waiting.set(row.id, row.attempt);
     if (state !== "ready") return;
-    await browser.handApplicationPageToPerson?.(
+    const handoff = await browser.handApplicationPageToPerson?.(
       "target_site",
       applicationIdentity(row.id, row.attempt).resultId,
     );
+    if (handoff && !handoff.ok)
+      applications.submissionRefused(row.id, row.attempt, handoff.error);
     waiting.set(row.id, row.attempt);
   }
 
@@ -387,6 +419,32 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     return row.mode;
   }
 
+  function instructionsFor(
+    job: JobDetail,
+    sourceInstructionArtifacts: readonly SourceInstructionArtifact[] = [],
+  ): string[] {
+    const target = job.applyUrl ?? job.url;
+    const sighting =
+      job.sightings.find((row) => (row.applyUrl ?? row.url) === target) ??
+      job.sightings.find((row) => row.url === job.url);
+    const siteId = Number(sighting?.sourceId);
+    const site =
+      Number.isSafeInteger(siteId) && siteId > 0
+        ? createJobSitesStore(jobs).get(siteId)
+        : null;
+    return site
+      ? uniqueStrings([
+          site.customInstructions ?? "",
+          ...buildInstructionGuidance(
+            resolveActiveSourceInstructionArtifact(
+              jobSiteTarget(site),
+              sourceInstructionArtifacts,
+            ),
+          ),
+        ])
+      : [];
+  }
+
   async function run(row: ApplicationRow, signal: AbortSignal): Promise<void> {
     const job = jobs.getJob(row.jobId);
     const approved = resumes.get(row.jobId);
@@ -454,8 +512,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     });
     signal.throwIfAborted();
     if (!current(row)) return;
-    const previous = applications.getWork(row.id);
+    let previous = applications.getWork(row.id);
     const profileDigest = profileFactsDigest(savedProfile);
+    const describeForRun = (question: FormQuestion) => {
+      return describeFormQuestion(question, job, profile);
+    };
     if (
       !applications.setResumeArtifact(
         row.id,
@@ -486,43 +547,180 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       : null;
     const identity = applicationIdentity(row.id, row.attempt);
     const target = job.applyUrl ?? job.url;
-    const sighting =
-      job.sightings.find((row) => (row.applyUrl ?? row.url) === target) ??
-      job.sightings.find((row) => row.url === job.url);
-    const siteId = Number(sighting?.sourceId);
-    const site =
-      Number.isSafeInteger(siteId) && siteId > 0
-        ? createJobSitesStore(jobs).get(siteId)
-        : null;
-    const instructions = site
-      ? uniqueStrings([
-          site.customInstructions ?? "",
-          ...buildInstructionGuidance(
-            resolveActiveSourceInstructionArtifact(
-              jobSiteTarget(site),
-              sourceInstructionArtifacts,
-            ),
-          ),
-        ])
-      : [];
+    const instructions = instructionsFor(job, sourceInstructionArtifacts);
     let startingUrl: string | undefined;
     // A continue keeps the page, and with it the files already attached.
     let keptPage = false;
-    if (
+    let sourceAttempt: number | null = null;
+    if (browser.hasApplicationPageBinding) {
+      for (let attempt = row.attempt - 1; attempt >= 1; attempt -= 1) {
+        if (
+          await browser.hasApplicationPageBinding(
+            "target_site",
+            applicationIdentity(row.id, attempt).resultId,
+          )
+        ) {
+          sourceAttempt = attempt;
+          break;
+        }
+        if (!current(row) || signal.aborted) return;
+      }
+    } else if (
       row.attempt > 1 &&
       (!previous ||
         !["failed", "unsupported", "submitted"].includes(
           previous.execution.state,
         ))
     ) {
+      // Non-native runtimes predating the binding query retain their old transfer path.
+      sourceAttempt = previous?.attempt ?? row.attempt - 1;
+    }
+    if (!current(row) || signal.aborted) return;
+    while (sourceAttempt !== null) {
+      const sourceKey = applicationIdentity(row.id, sourceAttempt).resultId;
+      const receipt = applications.getSubmissionReceipt(row.id);
+      const older = sourceAttempt < row.attempt - 1;
+      if (
+        receipt?.outcome === "submitted" ||
+        receipt?.outcome === "outcome_uncertain" ||
+        previous?.execution.state === "submitted" ||
+        (older &&
+          !(
+            previous?.attempt === row.attempt - 1 &&
+            ["failed", "unsupported"].includes(previous.execution.state)
+          ))
+      ) {
+        applications.finishPreparation({
+          id: row.id,
+          attempt: row.attempt,
+          state: "failed",
+          error:
+            "An earlier application page is still open and may have been sent. Check that page before continuing; Nestor has not opened or sent another application.",
+        });
+        return;
+      }
       const transferred = await browser
         .transferApplicationPageBinding?.(
           "target_site",
-          applicationIdentity(row.id, previous?.attempt ?? row.attempt - 1)
-            .resultId,
+          sourceKey,
           identity.resultId,
         )
         .catch(() => false);
+      if (!current(row) || signal.aborted) return;
+      const sourceStillLive =
+        !transferred &&
+        (await browser.hasApplicationPageBinding?.("target_site", sourceKey));
+      if (!current(row) || signal.aborted) return;
+      if (
+        !transferred &&
+        browser.hasApplicationPageBinding &&
+        !sourceStillLive
+      ) {
+        // The selected tab closed during attachment. Look for an older live tab
+        // before allowing a fresh page; a failed attachment is not a retry.
+        let remaining: number | null = null;
+        for (let attempt = sourceAttempt - 1; attempt >= 1; attempt -= 1) {
+          const live = await browser.hasApplicationPageBinding(
+            "target_site",
+            applicationIdentity(row.id, attempt).resultId,
+          );
+          if (!current(row) || signal.aborted) return;
+          if (live) {
+            remaining = attempt;
+            break;
+          }
+        }
+        sourceAttempt = remaining;
+        continue;
+      }
+      if (!transferred && sourceStillLive) {
+        const adopted = await browser
+          .adoptApplicationPageOwnership?.(
+            "target_site",
+            sourceKey,
+            identity.resultId,
+          )
+          .catch(() => false);
+        if (!current(row) || signal.aborted) return;
+        if (!adopted) {
+          applications.finishPreparation({
+            id: row.id,
+            attempt: row.attempt,
+            state: "failed",
+            error:
+              "The earlier application page is still open and a send may have been pressed there. Check the site before continuing. Nestor has not opened or sent another application.",
+          });
+          return;
+        }
+        const raw = await browser
+          .readApplicationPageWithPerson?.("target_site", identity.resultId)
+          .catch(() => null);
+        if (!current(row) || signal.aborted) return;
+        const advance = raw
+          ? buildApplyFormObservation(
+              raw,
+              new Date().toISOString(),
+            ).actions.find(
+              (action) =>
+                action.visible && !action.disabled && action.kind === "advance",
+            )
+          : undefined;
+        const detail =
+          "Your application page and entered values are still open. Nestor could not attach automation to that exact tab. Complete the next non-sending step on that page, then continue here.";
+        const question = {
+          id: STEP_HANDOVER_QUESTION_ID,
+          prompt: `Press ${advance ? JSON.stringify(advance.label) : "the next non-sending step"} on the site, then continue`,
+          kind: "other" as const,
+          answerControlType: "text" as const,
+          answerOptions: [],
+          status: "detected" as const,
+          detectedAt: new Date().toISOString(),
+          askReason: {
+            kind: "page_refused" as const,
+            check: "native_page_attachment",
+            detail,
+          },
+        };
+        const execution = ApplyExecutionResultSchema.parse({
+          state: "paused",
+          summary: detail,
+          detail,
+          submittedAt: null,
+          outcome: null,
+          nextActionLabel: "Open application",
+          questions: [question],
+        });
+        if (
+          !applications.saveWork(row.id, {
+            attempt: row.attempt,
+            resumeArtifact: artifact,
+            execution,
+            reviewCard: null,
+            authorityEnvelopeId: envelope?.id ?? null,
+            profileDigest,
+          })
+        )
+          return;
+        const known = describeForRun(question);
+        applications.needsYou.request({
+          applicationId: row.id,
+          attempt: row.attempt,
+          fieldKey: question.id,
+          kind: "question",
+          key: known.key,
+          scope: {},
+          prompt: question.prompt,
+          input: "text",
+          options: [],
+          reusePrompt: false,
+          askReason: question.askReason,
+        });
+        waiting.set(row.id, row.attempt);
+        return;
+      }
+      if (!current(row) || signal.aborted) return;
+      // N-1 was a different, failed page. Its replay and attachment claims cannot describe this tab.
+      if (transferred && older) previous = null;
       if (transferred)
         startingUrl =
           (
@@ -539,6 +737,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         );
       if (transferred && previous?.accessRecheck) startingUrl = target;
       keptPage = Boolean(transferred) && !previous?.accessRecheck;
+      break;
     }
     const origin = new URL(target).origin;
     const allowedOrigins = new Set([
@@ -568,7 +767,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ],
       origin,
     );
-    const savedAnswers = readSavedApplicationAnswers(jobs, undefined, origin);
+    const savedAnswers = readSavedApplicationAnswers(
+      jobs,
+      undefined,
+      origin,
+    ).filter(generalSavedAnswer);
     const answerDependencies = applicationAnswerDependencies(
       applications.needsYou,
       row.id,
@@ -599,15 +802,18 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ...(startingUrl ? { startingUrl } : {}),
       accountCreationAuthorized:
         browserAgentPermissionsOf(settings).createAccounts,
+      readIntendedAccountEmail: async () =>
+        intendedAccountEmail((await deps.readInputs()).profile),
       readBrowserPermissions: async () =>
         browserAgentPermissionsOf((await deps.readInputs()).settings),
       // The form's own field saves go out as the run fills, as they do when
       // a person fills the form by hand (Ashby keeps the form only in what
       // it saved). Fill in for me still presses no form button and sends
       // nothing shaped like a final submit: the click stays the person's.
-      // Send for me's envelope can still withhold saves.
+      // Send for me includes these same bounded field saves.
       intermediateMutationsAuthorized: envelope
-        ? envelope.intermediateMutationsAuthorized === true
+        ? envelope.mode === "autonomous_submit" ||
+          envelope.intermediateMutationsAuthorized === true
         : true,
       attachmentUploadsAuthorized: true,
       // No envelope: the browser pins each live form frame's own origin.
@@ -620,6 +826,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         if (
           purpose === "answers" &&
           envelope &&
+          envelope.mode !== "autonomous_submit" &&
           envelope.intermediateMutationsAuthorized !== true
         )
           return false;
@@ -647,6 +854,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             !permission.allowedResumeSha256.includes(sha256) ||
             !permission.allowedOrigins.includes(observedOrigin) ||
             (purpose === "answers" &&
+              permission.mode !== "autonomous_submit" &&
               !permission.intermediateMutationsAuthorized)
           )
             return false;
@@ -701,6 +909,34 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     };
     let agent: ApplyAgentResult | null = null;
     let review: ApplicationReviewCard | null = null;
+    let currentReview: ApplicationReviewCard | null = null;
+    const shouldRetainFailedApplicationPage = (
+      execution: ApplyExecutionResult,
+    ): boolean => {
+      const technical = agent;
+      return (
+        current(row) &&
+        !signal.aborted &&
+        (technical?.outcome === "stuck" || technical?.outcome === "paused") &&
+        (technical.technicalFailure?.code ===
+          "question_classification_unavailable" ||
+          technical.technicalFailure?.code ===
+            "answer_grounding_unavailable") &&
+        technical.technicalFailure.retryable &&
+        technical.technicalFailure.pageDisposition === "retain" &&
+        !!technical.finalUrl &&
+        technical.readyToSend === null &&
+        technical.pauses.every(
+          (pause) => pause.code === "question_needs_you" && !pause.blocker,
+        ) &&
+        ["failed", "paused"].includes(execution.state) &&
+        !execution.submittedAt &&
+        execution.outcome === null &&
+        !["submitted", "outcome_uncertain"].includes(
+          applications.getSubmissionReceipt(row.id)?.outcome ?? "",
+        )
+      );
+    };
     const usageRecorder = createModelUsageRecorder();
     const executeApplicationFlow: BrowserSessionRuntime["executeApplicationFlow"] =
       (...args) =>
@@ -709,6 +945,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       "target_site",
       {
         ...facts,
+        shouldRetainFailedApplicationPage,
         prepareApplicationForm: createApplyFormPreparer({
           reusableAnswers: savedAnswers,
           initialUnansweredPickerQuestions:
@@ -721,7 +958,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     row.id,
                     [
                       {
-                        ...describeFormQuestion(question, job),
+                        ...describeForRun(question),
                         prompt: question.prompt,
                       },
                     ],
@@ -762,6 +999,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           earlierAttachments: keptPage
             ? (previous?.reviewCard?.attachments ?? [])
             : [],
+          earlierActivity: previous?.execution.checkpoints ?? [],
           // What the attempt before left on the form: a page that was closed
           // (or reopened) comes back from it without the model, and so do
           // the questions it left with the person.
@@ -784,47 +1022,71 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           readReusableAnswers: (questions) => {
             const byKey = new Map(
               questions.map((question) => [
-                describeFormQuestion(question, job).key,
+                describeForRun(question).key,
                 question,
               ]),
             );
             return Promise.resolve([
-              ...answerDependencies.includeContext(
-                readSavedApplicationAnswers(jobs, undefined, origin),
-              ),
-              ...answerDependencies
-                .read(
-                  questions.map((question) => ({
-                    ...describeFormQuestion(question, job),
-                    prompt: question.prompt,
-                    kind: [
-                      "work_authorization",
-                      "visa_sponsorship",
-                      "relocation",
-                      "travel",
-                      "notice_period",
-                      "availability",
-                      "salary_expectation",
-                      "self_intro",
-                      "career_transition",
-                    ].includes(question.kind)
-                      ? (question.kind as CandidateAnswerKind)
-                      : "other",
-                  })),
-                )
-                .map((answer) =>
-                  toKnownFormAnswer(
-                    answer,
-                    byKey.get(answer.key)!,
-                    job.location,
-                    row.id,
+              ...new Map(
+                [
+                  ...answerDependencies.includeContext(
+                    readSavedApplicationAnswers(jobs, undefined, origin).filter(
+                      generalSavedAnswer,
+                    ),
                   ),
-                ),
+                  ...answerDependencies
+                    .read(
+                      questions.map((question) => ({
+                        ...describeForRun(question),
+                        prompt: question.prompt,
+                        kind: [
+                          "work_authorization",
+                          "visa_sponsorship",
+                          "relocation",
+                          "travel",
+                          "notice_period",
+                          "availability",
+                          "salary_expectation",
+                          "self_intro",
+                          "career_transition",
+                        ].includes(question.kind)
+                          ? (question.kind as CandidateAnswerKind)
+                          : "other",
+                      })),
+                    )
+                    .map((answer) => {
+                      const current = byKey.get(answer.key)!;
+                      const asked = previous?.execution.questions.filter(
+                        (question) =>
+                          normalizeFormQuestionPrompt(question.prompt) ===
+                          normalizeFormQuestionPrompt(current.prompt),
+                      );
+                      return toKnownFormAnswer(
+                        answer,
+                        {
+                          ...current,
+                          // Reuse only the original question binding the person saw.
+                          currentFieldBinding:
+                            asked?.length === 1
+                              ? asked[0]?.currentFieldBinding
+                              : undefined,
+                        },
+                        job.location,
+                        row.id,
+                      );
+                    }),
+                ].map((answer) => [answer.id, answer]),
+              ).values(),
             ]);
           },
           onPrepared: (outcome) => {
             agent = outcome.result;
-            review = outcome.reviewCard;
+            currentReview = outcome.reviewCard;
+            review = mergeApplyReviewCards(
+              previous?.reviewCard ?? null,
+              outcome.reviewCard,
+              { freshPreparation: !keptPage },
+            );
           },
         }),
       },
@@ -855,12 +1117,49 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       })
     )
       return;
+    const retainedTechnicalFailure = shouldRetainFailedApplicationPage(result);
+    const finishTechnicalFailure = async () => {
+      // Only this live, cancelled-checked attempt may retain its owned binding.
+      // A provider/read outage creates no personal question or automatic retry.
+      const retained = await browser
+        .hasApplicationPageBinding?.("target_site", identity.resultId)
+        .catch(() => false);
+      // A grounding failure says which answer it could not confirm (council D4).
+      // Assigned by the preparer callback, so read it without narrowing.
+      const technical = agent;
+      const grounding =
+        technical?.technicalFailure?.code === "answer_grounding_unavailable"
+          ? technical.outcome === "stuck"
+            ? technical.reason
+            : "Nestor could not finish checking the remaining application answers. Your page and answers are kept. Try again."
+          : null;
+      if (current(row) && !signal.aborted)
+        applications.finishPreparation({
+          id: row.id,
+          attempt: row.attempt,
+          state: "failed",
+          error: grounding
+            ? retained
+              ? grounding
+              : grounding.replace(
+                  "Your page and answers are kept.",
+                  "The page is unavailable; your recorded answers are kept.",
+                )
+            : retained
+              ? "Nestor could not read this form after three tries. The page and your answers are kept. Try again."
+              : "Nestor could not read this form after three tries. The page is unavailable; your recorded answers are kept. Try again.",
+        });
+    };
+    if (retainedTechnicalFailure && result.questions.length === 0) {
+      await finishTechnicalFailure();
+      return;
+    }
     // The site took the file this time: its upload item is done, even when
     // the form now stops on another question.
     if (
       (result.state === "ready" ||
         result.questions.some((question) => question.status === "detected")) &&
-      uploadRepaired(row, result, review as ApplicationReviewCard | null)
+      uploadRepaired(row, result, currentReview as ApplicationReviewCard | null)
     )
       applications.needsYou.dropQuestion(
         row.id,
@@ -901,7 +1200,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       waiting.set(row.id, row.attempt);
       return;
     }
-    if (result.state === "failed" || result.state === "unsupported") {
+    if (
+      !retainedTechnicalFailure &&
+      (result.state === "failed" || result.state === "unsupported")
+    ) {
       applications.finishPreparation({
         id: row.id,
         attempt: row.attempt,
@@ -931,14 +1233,26 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     for (const question of result.questions.filter(
       (q) => q.status === "detected" && !q.submittedAnswer,
     )) {
-      const known = describeFormQuestion(question, job);
+      const known = describeForRun(question);
       const repeated =
         previous?.execution.questions.some(
           (earlier) =>
             earlier.status === "detected" &&
-            describeFormQuestion(earlier, job).key === known.key,
+            describeForRun(earlier).key === known.key,
         ) ?? false;
       const refusedWrite = question.askReason?.kind === "page_refused";
+      const eligibility = eligibilityQuestionContext(question, job, profile);
+      const legacyDraft =
+        !refusedWrite &&
+        (!question.askReason || question.askReason.kind === "no_source")
+          ? legacyEligibilityDraft(
+              applications.needsYou,
+              question,
+              job,
+              profile,
+              origin,
+            )
+          : null;
       const currentAnswer = applications.needsYou
         .answersForQuestions(
           row.id,
@@ -982,10 +1296,30 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           input: known.input,
           options: known.options,
           reusePrompt: known.reusePrompt,
-          askReason: question.askReason ?? {
-            kind: "no_source",
-            detail:
-              "No applicable saved answer or Profile fact answered this question.",
+          askReason: {
+            ...(question.askReason ??
+              (question.id === STEP_HANDOVER_QUESTION_ID
+                ? {
+                    kind: "page_refused" as const,
+                    check: "step_handover",
+                    detail:
+                      "Job Finder filled what it could on this page. It could not prove this control only changes a local, non-final step, so the press stays yours.",
+                  }
+                : {
+                    kind: "no_source" as const,
+                    detail:
+                      "No applicable saved answer or Profile fact answered this question.",
+                  })),
+            ...(eligibility
+              ? {
+                  eligibilityContext: {
+                    ...eligibility,
+                    ...(legacyDraft
+                      ? { legacyAnswerId: legacyDraft.legacyAnswerId }
+                      : {}),
+                  },
+                }
+              : {}),
           },
         },
         // A refused upload, or a button handed to the person, is never
@@ -997,7 +1331,22 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             question.id !== STEP_HANDOVER_QUESTION_ID,
         },
       );
+      if (
+        requested.status === "needs_you" &&
+        legacyDraft &&
+        !applications.needsYou.details(requested.task.id)?.draft
+      )
+        applications.needsYou.saveDraft({
+          id: requested.task.id,
+          answer: legacyDraft.answer,
+          remember: true,
+          revision: 0,
+        });
       fromMemory ||= requested.status === "answered";
+    }
+    if (retainedTechnicalFailure) {
+      await finishTechnicalFailure();
+      return;
     }
     // The raw engine's typed blockers distinguish access steps from technical failures.
     const prepared = agent as ApplyAgentResult | null;
@@ -1072,7 +1421,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         deps.authorityRepository,
         signal,
         async () => {
-          const { settings, profile } = await deps.readInputs();
+          const {
+            settings,
+            profile,
+            searchPreferences,
+            sourceInstructionArtifacts = [],
+          } = await deps.readInputs();
           if (
             !current(row) ||
             (!personClicked && (await modeFor(row)) !== "autonomous_submit")
@@ -1113,6 +1467,36 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               void wake();
             return;
           }
+          // One Profile job or school filling two history rows is wrong data
+          // wherever those rows sit, including earlier hidden steps the
+          // review card never read (council D2). It is never sent.
+          const history = await browser
+            .readApplicationPageBinding?.("target_site", identity.resultId)
+            .catch(() => null);
+          const repeatedRecords = history
+            ? duplicatedHistoryRows(
+                buildApplyFormObservation(history, new Date().toISOString())
+                  .controls,
+                {
+                  profile,
+                  resumeText: profile.baseResume.textContent,
+                  reusableAnswers: [],
+                  documents: [],
+                  posting: {
+                    title: job.title,
+                    company: job.company,
+                    location: job.location,
+                    resolvedCountry: resolveListingCountry(job.location),
+                    description: job.description ?? "",
+                  },
+                },
+              )
+            : [];
+          if (repeatedRecords.length)
+            return leaveForPerson(
+              row,
+              `Not sent: ${[...new Set(repeatedRecords)].map((label) => `"${label}"`).join(" and ")} hold the same entry from your Profile. Check the history entries on the form before sending.`,
+            );
           // A Ready row may predate a grounding fix. Re-ground generated
           // answers from current Profile/resume/scoped answers before arming
           // either automatic sending or the person's sidebar Send instruction.
@@ -1136,14 +1520,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             const form = await browser
               .readApplicationPageBinding?.("target_site", identity.resultId)
               .catch(() => null);
-            const formControls = form
+            const formObservation = form
               ? buildApplyFormObservation(form, new Date().toISOString())
-                  .controls
-              : [];
+              : null;
+            const formControls = formObservation?.controls ?? [];
             const suggestions = written.map((answer) =>
               pageAnswerSuggestion(answer.question, formControls),
             );
-            const questions = written.map((answer) => ({
+            const questions = written.map((answer, index) => ({
               prompt: answer.question,
               kind: inferQuestionKind({
                 label: answer.question,
@@ -1151,15 +1535,49 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 placeholder: "",
                 kind: "text",
               }),
-              answerControlType: /^(?:yes|no)$/iu.test(answer.answer)
-                ? ("boolean" as const)
-                : ("text" as const),
-              answerOptions: [] as string[],
+              answerControlType:
+                suggestions[index]?.control?.answerControlType ??
+                (/^(?:yes|no)$/iu.test(answer.answer)
+                  ? ("boolean" as const)
+                  : ("text" as const)),
+              answerOptions: suggestions[index]?.control?.options ?? [],
+              ...(suggestions[index]?.control?.inputConstraints
+                ? {
+                    inputConstraints:
+                      suggestions[index].control.inputConstraints,
+                  }
+                : {}),
             }));
-            const queries = questions.map((question) => ({
-              ...describeFormQuestion(question, job),
-              prompt: question.prompt,
-            }));
+            const queries = questions.map((question, index) => {
+              const query = {
+                ...describeFormQuestion(question, job, profile),
+                prompt: question.prompt,
+              };
+              // Hidden prior-step controls no longer expose their options.
+              // Their reconstructed key must not lose the person's own answer.
+              // The dependency keys and values were checked live above, in this
+              // application, with unchanged Profile facts. Bind only the same
+              // whole question, kind and value, and never a repeated entry.
+              const used = proof?.form.filter(
+                (entry) =>
+                  entry.kind === question.kind &&
+                  entry.answer === written[index]?.answer &&
+                  normalizeFormQuestionPrompt(entry.prompt) ===
+                    normalizeFormQuestionPrompt(question.prompt),
+              );
+              return !suggestions[index]?.control &&
+                ["work_authorization", "visa_sponsorship"].includes(
+                  question.kind,
+                ) &&
+                written.filter(
+                  (answer) =>
+                    normalizeFormQuestionPrompt(answer.question) ===
+                    normalizeFormQuestionPrompt(question.prompt),
+                ).length === 1 &&
+                used?.length === 1
+                ? { ...query, key: used[0]!.key, reusePrompt: false }
+                : query;
+            });
             const saved = applications.needsYou
               .answersForQuestions(row.id, queries, origin)
               .map((answer) =>
@@ -1177,12 +1595,19 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               client && form
                 ? await checkClassifiedApplicationAnswers({
                     client,
+                    browserPermissions: browserAgentPermissionsOf(
+                      (await deps.readInputs()).settings,
+                    ),
                     application: {
                       jobId: String(job.id),
                       applicationId: identity.resultId,
                       resultId: identity.resultId,
                       applicationRecordId: identity.applicationRecordId,
                       startingUrl: form.url ?? job.applyUrl ?? job.url,
+                      instructions: instructionsFor(
+                        job,
+                        sourceInstructionArtifacts,
+                      ),
                     },
                     questionReadCacheScope: deps.aiClient,
                     approvedAttestations: AiBehaviorPreferenceSchema.parse(
@@ -1190,19 +1615,52 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     ).applying.preApprovedDeclarations,
                     formControls,
                     sources: {
+                      preferences: searchPreferences,
                       listingDiscovery: listingDiscovery(job),
                       profile,
                       resumeText: profile.baseResume.textContent,
-                      reusableAnswers: saved,
+                      reusableAnswers: [
+                        ...new Map(
+                          [
+                            ...readSavedApplicationAnswers(
+                              jobs,
+                              undefined,
+                              origin,
+                            ).filter(generalSavedAnswer),
+                            ...saved,
+                          ].map((answer) => [answer.id, answer]),
+                        ).values(),
+                      ],
                       documents: [],
                       posting: {
                         title: job.title,
                         company: job.company,
                         location: job.location,
+                        resolvedCountry: resolveListingCountry(job.location),
                         description: job.description ?? "",
                       },
                     },
                     answers: written,
+                    // Council D1: an earlier step binds only through this
+                    // attempt's own receipts and the review page's rows.
+                    stepReceipts: ApplyStepReceiptSchema.array()
+                      .catch([])
+                      .parse(
+                        applications.getWork(row.id)?.execution.stepReceipts ??
+                          [],
+                      ),
+                    ...(formObservation?.summaryRows
+                      ? { summaryRows: formObservation.summaryRows }
+                      : {}),
+                    ...(formObservation
+                      ? {
+                          sendPage: {
+                            origin: formObservation.origin,
+                            stepIndex: formObservation.step.index,
+                            stepTotal: formObservation.step.total,
+                          },
+                        }
+                      : {}),
                     formContext: {
                       pageText: form?.bodyText ?? "",
                       fields: [],
@@ -1212,9 +1670,31 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     signal,
                   }).catch(() => null)
                 : null;
+            const unchecked =
+              !checks || checks.some((check) => check.unavailable);
             const rejected = questions.flatMap((question, index) =>
-              checks?.[index]?.supported ? [] : [{ question, index }],
+              checks?.[index]?.supported || checks?.[index]?.unavailable
+                ? []
+                : [{ question, index }],
             );
+            if (unchecked && rejected.length === 0) {
+              applications.failBeforeSubmission(
+                row.id,
+                row.attempt,
+                "Nestor could not finish checking this application before sending. Nothing was sent. Your page and answers are kept. Try again to continue.",
+              );
+              return;
+            }
+            // An earlier step Nestor could not check on this review page holds
+            // the whole send: nothing is discarded and nothing new is asked.
+            const unbound = checks?.filter((check) => check.priorStep) ?? [];
+            if (unbound.length)
+              return leaveForPerson(
+                row,
+                unbound.some((check) => check.priorStep === "no_receipt")
+                  ? "Not sent: an earlier step was continued on the site by you, so Nestor cannot check its answers before sending. The filled form is ready for your review; your answers are kept."
+                  : "Not sent: Nestor could not check the answers from earlier steps against this review page. The filled form is ready for your review; your answers are kept.",
+              );
             if (rejected.length) {
               const repeatedAnswer = rejected.find(
                 ({ index }) =>
@@ -1224,16 +1704,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     origin,
                   ).length > 0,
               );
-              if (repeatedAnswer) {
-                applications.submissionRefused(
-                  row.id,
-                  row.attempt,
-                  `Job Finder stopped because your saved answer to "${repeatedAnswer.question.prompt}" could not be verified before sending: ${checks?.[repeatedAnswer.index]?.reason ?? "The answer check was unavailable."} Your earlier answers are kept.`,
+              if (repeatedAnswer)
+                // The row is still running here, so a bare refusal would not
+                // land. Keep the filled form and say why it was not sent.
+                return leaveForPerson(
+                  row,
+                  `Not sent: your saved answer to "${repeatedAnswer.question.prompt}" could not be verified before sending (${checks?.[repeatedAnswer.index]?.reason ?? "the answer check was unavailable"}). The filled form is ready for your review; your answers are kept.`,
                 );
-                applications.stop(row.id);
-                await closePage(row.id, row.attempt);
-                return;
-              }
               applications.discardReviewAnswers(
                 row.id,
                 row.attempt,
@@ -1254,6 +1731,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       }
                     : question,
                   job,
+                  profile,
                 );
                 const requested = applications.needsYou.request(
                   {
@@ -1820,9 +2298,15 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         : null);
     if (!raw || raw.loading || !current(row)) return;
     const page = buildApplyFormObservation(raw, new Date().toISOString());
+    const currentInputs = await deps.readInputs();
     const readyForAgent = browserStepReadyForAgent(
       page,
-      browserAgentPermissionsOf((await deps.readInputs()).settings),
+      browserAgentPermissionsOf(currentInputs.settings),
+      {
+        intendedEmail: intendedAccountEmail(currentInputs.profile),
+        entry: "unproven",
+        fenced: false,
+      },
     );
     if (!current(row)) return;
     // A newly entered password or newly enabled visible challenge can resume
@@ -1975,6 +2459,93 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
   }
 
+  let lastQuestionReuseSnapshot = "";
+  let unavailableQuestionReuseSnapshot = "";
+  const reconcileEquivalentQuestions = async (): Promise<void> => {
+    const client = toApplyLlmClient(deps.aiClient);
+    if (!client) return;
+    const candidates = applications.needsYou.questionReuseCandidates();
+    const snapshot = JSON.stringify(candidates);
+    if (
+      !candidates.length ||
+      snapshot === lastQuestionReuseSnapshot ||
+      snapshot === unavailableQuestionReuseSnapshot
+    )
+      return;
+    const pairs = candidates.flatMap(({ task, answers }) =>
+      answers.map((saved) => ({
+        id: `${task.id}:${saved.id}`,
+        saved: {
+          question: saved.prompt,
+          answer: saved.answer,
+          options: saved.options,
+        },
+        waiting: { question: task.prompt, options: task.options },
+      })),
+    );
+    const equivalent = new Map<string, string>();
+    let comparisonUnavailable = false;
+    for (let offset = 0; offset < pairs.length && !stopped; offset += 20) {
+      const checked = await equivalentApplicationQuestions({
+        client,
+        pairs: pairs.slice(offset, offset + 20),
+      }).catch(() => {
+        comparisonUnavailable = true;
+        return new Map<string, string>();
+      });
+      for (const [id, answer] of checked) equivalent.set(id, answer);
+    }
+    if (stopped) return;
+    // The reader already made its bounded retry. An unavailable report is
+    // not a negative decision and must not become a timer-driven retry loop.
+    // Changed questions or sources supply a fresh snapshot to check.
+    if (comparisonUnavailable) {
+      unavailableQuestionReuseSnapshot = snapshot;
+      return;
+    }
+    unavailableQuestionReuseSnapshot = "";
+    lastQuestionReuseSnapshot = snapshot;
+    const matches = candidates.flatMap((candidate) => {
+      const answers = candidate.answers.filter((answer) =>
+        equivalent.has(`${candidate.task.id}:${answer.id}`),
+      );
+      // Conflicting sources and two meanings within one application stay open.
+      if (
+        !answers.length ||
+        new Set(
+          answers.map((answer) =>
+            equivalent.get(`${candidate.task.id}:${answer.id}`),
+          ),
+        ).size !== 1
+      )
+        return [];
+      if (
+        candidate.applications.some((id) =>
+          candidates.some(
+            (other) =>
+              other.task.id !== candidate.task.id &&
+              other.applications.includes(id) &&
+              other.answers.some(
+                (answer) =>
+                  answers.some((saved) => saved.id === answer.id) &&
+                  equivalent.has(`${other.task.id}:${answer.id}`),
+              ),
+          ),
+        )
+      )
+        return [];
+      return [
+        {
+          taskId: candidate.task.id,
+          answerId: answers[0]!.id,
+          answer: equivalent.get(`${candidate.task.id}:${answers[0]!.id}`)!,
+        },
+      ];
+    });
+    if (matches.length)
+      applications.needsYou.resolveQuestionReuse({ snapshot, matches });
+  };
+
   function wake(): void {
     if (stopped) return;
     if (pumping) {
@@ -1982,6 +2553,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return;
     }
     pumping = (async () => {
+      await reconcileEquivalentQuestions();
       while (!stopped && active.size < capacity() && !(await deps.isPaused())) {
         const row = applications.claimNext();
         if (!row) break;
@@ -2193,10 +2765,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     if (!row || !work || !["ready", "needs_you"].includes(row.state))
       return false;
     const key = applicationIdentity(id, work.attempt).resultId;
-    let focused = await browser.focusApplicationPageBinding?.(
-      "target_site",
-      key,
-    );
+    let focused = await browser
+      .focusApplicationPageBinding?.("target_site", key)
+      .catch((error: unknown) => {
+        onError(error);
+        return false;
+      });
     if (
       !focused &&
       row.state === "needs_you" &&
@@ -2217,7 +2791,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return false;
     }
     if (focused) {
-      await browser.handApplicationPageToPerson?.("target_site", key);
+      const handoff = await browser.handApplicationPageToPerson?.(
+        "target_site",
+        key,
+      );
+      if (handoff && !handoff.ok)
+        applications.submissionRefused(id, work.attempt, handoff.error);
       waiting.set(id, work.attempt);
       watchClosely(id);
       return true;

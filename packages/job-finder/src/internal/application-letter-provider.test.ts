@@ -356,3 +356,29 @@ test("renders the person's approved letter word for word without writing or chec
   // Named as the person's letter, not "v1" of this run.
   expect(result.document.label).toBe("Cover letter you approved");
 });
+
+test("an unavailable letter check keeps its draft as a technical outcome", async () => {
+  const letters = provider({
+    writeLetter: () =>
+      Promise.reject(
+        new ApplicationLetterGroundingError(
+          "Nestor could not finish checking this letter. Try again.",
+          "Synthetic retained draft.",
+          true,
+        ),
+      ),
+  });
+  const result = await letters.provide({
+    ...REQUEST,
+    delivery: "text",
+    fileType: null,
+  });
+  expect(result).toMatchObject({
+    ok: false,
+    checkingUnavailable: true,
+    draftText: "Synthetic retained draft.",
+  });
+  expect(!result.ok && result.reason).not.toMatch(
+    /needs your review|supply|confirm/i,
+  );
+});

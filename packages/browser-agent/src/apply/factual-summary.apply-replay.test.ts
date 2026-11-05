@@ -14,6 +14,30 @@ import type { ApplyAgentConfig } from "./types";
 const remote = "I worked remotely with a distributed team.";
 test.each([
   {
+    name: "a harmless first-person subject preserves the complete recorded claim",
+    resume: "Built accessible interfaces.",
+    answer: "I built accessible interfaces.",
+    question: "Describe your interface experience.",
+    postingEvidence: false,
+    accepted: true,
+  },
+  {
+    name: "a condition cannot be discarded from a recorded claim",
+    resume: "Built accessible interfaces only under supervision.",
+    answer: "I built accessible interfaces.",
+    question: "Describe your interface experience.",
+    postingEvidence: false,
+    accepted: false,
+  },
+  {
+    name: "a first-person subject does not remove recorded negation",
+    resume: "Never built accessible interfaces.",
+    answer: "I built accessible interfaces.",
+    question: "Describe your interface experience.",
+    postingEvidence: false,
+    accepted: false,
+  },
+  {
     name: "separate training and Docker work never become Kubernetes production experience",
     resume:
       "Completed Kubernetes training. Supported production deployments using Docker.",
@@ -230,7 +254,12 @@ test.each([
     (
       question: string,
       answer: string,
-      evidencePolicy?: "factual_summary" | "factual_inference",
+      evidencePolicy?:
+        | "factual_summary"
+        | "factual_inference"
+        | "saved_answer"
+        | "declaration"
+        | "eligibility",
     ) =>
       checkWrittenApplicationAnswer({
         client,
@@ -260,7 +289,7 @@ test.each([
       checkWrittenAnswer: check,
     },
   );
-  expect(result.kind === "filled").toBe(entry.accepted);
+  expect(result.kind === "filled", JSON.stringify(result)).toBe(entry.accepted);
   expect(fillText).toHaveBeenCalledTimes(entry.accepted ? 1 : 0);
   if (entry.motivation) expect(check).not.toHaveBeenCalled();
   if (check.mock.calls.length)

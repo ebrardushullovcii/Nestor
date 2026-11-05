@@ -253,9 +253,14 @@ test("a background search merges all sightings before fitting; repeat reads and 
   );
   expect(store.getJob(judged.id)?.fitScore).toBe(82);
   expect(runner.status().search?.alreadySaved).toBe(0);
+  const completedReads = engine.readListings.mock.calls.length;
   await runner.start({ postedWithin: "any" });
   await finished(runner);
-  expect(engine.readListings.mock.calls[1]![0].cards).toEqual([]);
+  expect(
+    engine.readListings.mock.calls
+      .slice(completedReads)
+      .flatMap(([input]) => input.cards),
+  ).toEqual([]);
   expect(engine.fitJobs).toHaveBeenCalledTimes(1);
   expect(
     createSearchSourcesStore(store)
@@ -337,6 +342,11 @@ test("stop ends the search promptly and ignores a source that completes afterwar
   expect(record.state).toBe("running");
   runner.stop();
   expect(runner.status().search?.state).toBe("stopped");
+  for (const row of createSearchSourcesStore(store).list({}).rows) {
+    expect(row.state).toBe("stopped");
+    expect(row.phase).toBeNull();
+    expect(row.message).toContain("Continue unfinished sites");
+  }
   pending.resolve({
     cards: [card("one")],
     complete: true,
@@ -700,7 +710,7 @@ test("a source timeout explains retry without creating a sign-in ticket", async 
   expect(status.search?.state).toBe("failed");
   expect(status.progress).toMatchObject({ failed: 2, needsYou: 0 });
   for (const row of createSearchSourcesStore(store).list({}).rows)
-    expect(row.message).toContain("Open it to check it loads, then retry");
+    expect(row.message).toContain("Nestor's reading time limit");
   expect(store.sql("SELECT count(*) AS n FROM source_needs_you").get()?.n).toBe(
     0,
   );
@@ -842,6 +852,129 @@ test("Quick has no listing cap: a board that keeps paying off is read whole", as
     cards: 400,
     related: 400,
   });
+});
+
+test("B2 failed source continuation survives runner restart and reuses saved details", async () => {
+  const { runner, engine, context, store } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://complete.example/jobs" });
+  sites.add({ text: "https://interrupted.example/jobs" });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  const last = context.sources[1]!.id;
+  engine.readListings.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      jobs: cards.map((row) => ({
+        ...found(row),
+        company: `Employer ${row.sourceId}`,
+        sourceJobId: row.url.split("/").at(-1)!,
+      })),
+      failures: [],
+    }),
+  );
+  let recover = false;
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [
+        card(target.id),
+        ...(recover && target.id === last
+          ? [
+              {
+                ...card(target.id),
+                url: `https://${target.id}.example/jobs/two`,
+                sourceJobId: "two",
+                title: "Backend Engineer II",
+              },
+            ]
+          : []),
+      ],
+      complete: recover || target.id !== last,
+      pagesRead: 1,
+      notes:
+        target.id === last && !recover
+          ? ["The next results page could not be read."]
+          : [],
+    }),
+  );
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await finished(runner);
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(2);
+  const rows = createSearchSourcesStore(store).list({}).rows;
+  expect(rows.find((row) => row.sourceId === last)?.state).toBe("failed");
+  const completedReads = engine.readListings.mock.calls.length;
+  recover = true;
+  const restarted = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+  });
+  runners.push(restarted);
+  await restarted.keepReading();
+  await finished(restarted);
+  expect(
+    engine.collectSource.mock.calls.slice(2).map(([input]) => input.target.id),
+  ).toEqual([last]);
+  expect(
+    engine.readListings.mock.calls
+      .slice(completedReads)
+      .flatMap(([input]) => input.cards)
+      .map((row) => row.url),
+  ).toEqual([`https://${last}.example/jobs/two`]);
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(3);
+});
+
+test("B2 stop preserves early results and continuation only restarts the unfinished site", async () => {
+  const { runner, engine, context, store } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://complete.example/jobs" });
+  sites.add({ text: "https://pending.example/jobs" });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  const last = context.sources[1]!.id;
+  engine.readListings.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      jobs: cards.map((row) => ({
+        ...found(row),
+        company: `Employer ${row.sourceId}`,
+      })),
+      failures: [],
+    }),
+  );
+  const pending =
+    deferred<Awaited<ReturnType<JobSearchEngine["collectSource"]>>>();
+  engine.collectSource.mockImplementation(({ target }) =>
+    target.id === last
+      ? pending.promise
+      : Promise.resolve({
+          cards: [card(target.id)],
+          complete: true,
+          pagesRead: 1,
+          notes: [],
+        }),
+  );
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await vi.waitFor(() =>
+    expect(
+      createSearchSourcesStore(store)
+        .list({})
+        .rows.some((row) => row.state === "done"),
+    ).toBe(true),
+  );
+  runner.stop();
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(1);
+  pending.resolve({ cards: [], complete: false, pagesRead: 0, notes: [] });
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [card(target.id)],
+      complete: true,
+      pagesRead: 1,
+      notes: [],
+    }),
+  );
+  await runner.keepReading();
+  await finished(runner);
+  expect(
+    engine.collectSource.mock.calls.slice(2).map(([input]) => input.target.id),
+  ).toEqual([last]);
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(2);
 });
 
 test("Keep reading gives a site Quick stopped a full read and keeps the next search's choices", async () => {
@@ -1194,3 +1327,108 @@ test("a search the person starts may use a browser they closed; background fit m
   await expect(runner.keepReading()).rejects.toThrow();
   expect(onExplicitStart).toHaveBeenCalledTimes(2);
 });
+
+test("failed fit work retains jobs and retries saved listings without reading sites", async () => {
+  const { runner, engine, store } = setup();
+  const original = engine.fitJobs.getMockImplementation()!;
+  engine.fitJobs.mockResolvedValue([]);
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(runner.status()).toMatchObject({ fitRunning: false, fitChecking: 1 });
+  expect(runner.status().search?.error).toContain("waiting");
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(1);
+  const reads = engine.readListings.mock.calls.length;
+  const screens = engine.screenCards.mock.calls.length;
+  const collect = engine.collectSource.mock.calls.length;
+  const gate = deferred<JobFitUpdate[]>();
+  engine.fitJobs.mockImplementationOnce(() => gate.promise);
+  const retry = runner.scoreUnscored();
+  expect(runner.status().fitRunning).toBe(true);
+  await vi.waitFor(() => expect(engine.fitJobs).toHaveBeenCalledTimes(3));
+  runner.stop();
+  await retry;
+  expect(runner.status().fitRunning).toBe(false);
+  expect(store.unscoredJobIds(100)).toHaveLength(1);
+  gate.resolve([]);
+  engine.fitJobs.mockImplementation(original);
+  expect(await runner.scoreUnscored()).toBe(1);
+  expect(runner.status()).toMatchObject({
+    fitRunning: false,
+    fitChecking: 0,
+    fitError: null,
+  });
+  expect(engine.readListings).toHaveBeenCalledTimes(reads);
+  expect(engine.screenCards).toHaveBeenCalledTimes(screens);
+  expect(engine.collectSource).toHaveBeenCalledTimes(collect);
+  await runner.scoreUnscored();
+  expect(engine.fitJobs).toHaveBeenCalledTimes(4);
+});
+
+test("complete fit batches persist before later work is cancelled", async () => {
+  const { runner, engine, store } = setup();
+  const gate = deferred<JobFitUpdate[]>();
+  engine.fitJobs.mockImplementation(async ({ jobs, onBatch }) => {
+    await onBatch?.(
+      jobs.map((job) => ({
+        id: job.id,
+        score: 77,
+        summary: "Complete model judgment",
+        reasons: [],
+        gaps: [],
+      })),
+    );
+    return gate.promise;
+  });
+  await runner.start({ postedWithin: "any" });
+  await vi.waitFor(() =>
+    expect(store.listJobs({ stage: "found" }).rows[0]?.fitScore).toBe(77),
+  );
+  expect(runner.status().fitRunning).toBe(true);
+  runner.stop();
+  await finished(runner);
+  gate.resolve([]);
+  expect(store.listJobs({ stage: "found" }).rows[0]?.fitScore).toBe(77);
+  expect(runner.status()).toMatchObject({ fitRunning: false, fitChecking: 0 });
+});
+
+test("healthy-source jobs persist and score while another source detail is held", async () => {
+  const { runner, engine, store } = setup();
+  const held = deferred<Awaited<ReturnType<JobSearchEngine["readListings"]>>>();
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [card(target.id)],
+      pagesRead: 1,
+      complete: true,
+      notes: [],
+    }),
+  );
+  engine.readListings.mockImplementation(({ cards }) =>
+    cards[0]?.sourceId === "one"
+      ? held.promise
+      : Promise.resolve({
+          jobs: cards.map((row) => ({
+            ...found(row),
+            company: `Employer ${row.sourceId}`,
+          })),
+          failures: [],
+        }),
+  );
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await vi.waitFor(
+    () => {
+      const rows = store.listJobs({ stage: "found" }).rows;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.fitScore).toBe(82);
+    },
+    { timeout: 8000 },
+  );
+  expect(runner.status().search?.state).toBe("running");
+  expect(
+    engine.readListings.mock.calls.some(
+      ([input]) => input.cards[0]?.sourceId === "one",
+    ),
+  ).toBe(true);
+  held.resolve({ jobs: [found(card("one"))], failures: [] });
+  await finished(runner);
+  expect(store.listJobs({ stage: "found" }).rows).toHaveLength(2);
+}, 10000);

@@ -412,3 +412,29 @@ test("work from wherever is corroborated by a global remote location", () => {
     ]).status,
   ).toBe("review");
 });
+
+test.each(["remote", "hybrid"] as const)(
+  "missing permission retains a listing-true %s explanation",
+  (mode) => {
+    const result = assessFitWorkLocation(
+      profile,
+      {
+        location: "United States",
+        description: "Remote within the United States",
+        workModes: [mode],
+      },
+      [
+        "compatible",
+        "Remote within the United States",
+        mode === "remote" ? "country_remote" : "hybrid",
+        "US",
+      ],
+    );
+    expect(result.status).toBe("review");
+    expect(result.reason).toContain(
+      "permission for this role still needs checking",
+    );
+    expect(result.reason.includes("On-site or hybrid")).toBe(mode === "hybrid");
+    expect(profile.workEligibility.authorizedWorkCountries).toEqual(["Kosovo"]);
+  },
+);

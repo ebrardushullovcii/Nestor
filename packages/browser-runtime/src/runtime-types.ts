@@ -10,6 +10,7 @@ import type {
   ApplicationAutomationMode,
   ApplyPageSession,
   ApplyRawPageHands,
+  ApplyWriteResult,
   RawApplyPage,
   ApplicationFormActionHandoff,
   ApplicationSalaryDisclosureRule,
@@ -113,6 +114,7 @@ export interface ApplicationAttachmentArtifact {
 export interface ExecuteApplicationFlowInput extends ExecuteEasyApplyInput {
   /** Main-owned exact-site autofill; returns no credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;
+  readIntendedAccountEmail?: () => string | null | Promise<string | null>;
   readBrowserPermissions?: () =>
     | BrowserAgentPermissions
     | Promise<BrowserAgentPermissions>;
@@ -129,6 +131,13 @@ export interface ExecuteApplicationFlowInput extends ExecuteEasyApplyInput {
    * save memory even when the form cannot be snapshotted here.
    */
   restorableByRefill?: boolean;
+  /**
+   * The caller may keep this exact bound page after a retryable preparation
+   * failure. Evaluated before terminal cleanup, while the run still owns it.
+   * Never applies to an unbound, submitted, cancelled or unsupported run and
+   * grants no browser write or submission permission.
+   */
+  shouldRetainFailedApplicationPage?: (result: ApplyExecutionResult) => boolean;
   applicationAttachments?: readonly ApplicationAttachmentArtifact[];
   mode: ApplicationExecutionMode;
   /**
@@ -398,7 +407,7 @@ export interface BrowserSessionRuntime {
   handApplicationPageToPerson?(
     source: JobSource,
     pageBindingKey: string,
-  ): Promise<void>;
+  ): Promise<void | ApplyWriteResult>;
   /**
    * Reads a prepared application page only while it is handed to the person
    * (after `handApplicationPageToPerson`, before it is locked again). Null
@@ -417,6 +426,18 @@ export interface BrowserSessionRuntime {
   ): Promise<void>;
   /** Move a retained page to a replacement attempt without reloading it. */
   transferApplicationPageBinding?(
+    source: JobSource,
+    previousKey: string,
+    nextKey: string,
+  ): Promise<boolean>;
+  /** Rename key-scoped state without opening, reclaiming or changing a page's guard. */
+  renameApplicationPageBinding?(
+    source: JobSource,
+    previousKey: string,
+    nextKey: string,
+  ): Promise<void>;
+  /** Move a live native handoff to the current attempt without attaching automation. */
+  adoptApplicationPageOwnership?(
     source: JobSource,
     previousKey: string,
     nextKey: string,
@@ -492,6 +513,7 @@ export interface AgentDiscoveryOptions {
   /** Main-owned exact-site autofill; returns no credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;
   browserPermissions?: BrowserAgentPermissions;
+  readIntendedAccountEmail?: () => string | null | Promise<string | null>;
   readBrowserPermissions?: () =>
     | BrowserAgentPermissions
     | Promise<BrowserAgentPermissions>;

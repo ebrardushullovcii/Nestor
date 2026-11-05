@@ -62,8 +62,11 @@ export class ApplicationLetterGroundingError extends Error {
   constructor(
     reason: string,
     readonly draftText: string,
+    readonly checkingUnavailable = false,
   ) {
-    super(`The letter needs your review: ${reason}`);
+    super(
+      checkingUnavailable ? reason : `The letter needs your review: ${reason}`,
+    );
     this.name = "ApplicationLetterGroundingError";
   }
 }
@@ -115,6 +118,9 @@ export function createApplicationLetterProvider(
               ok: false,
               reason: error.message,
               draftText: error.draftText,
+              ...(error.checkingUnavailable
+                ? { checkingUnavailable: true }
+                : {}),
             };
           }
           return {

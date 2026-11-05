@@ -27,6 +27,7 @@ import {
   type ReadListingResult,
   type SeenListingCard,
   type SourceInventory,
+  type JobPosting,
 } from "@nestor/contracts";
 import type { JobSearchContext } from "./types";
 
@@ -68,6 +69,8 @@ export interface JobSearchEngine {
     signal: AbortSignal;
   }): Promise<ReadListingResult>;
   fitJobs(input: {
+    /** Save complete judgments before another batch or repair can fail. */
+    onBatch?: (fits: readonly JobFitUpdate[]) => Promise<void>;
     onUsage?: (usage: ModelTokenUsage) => void;
     request?: string;
     jobs: readonly JobDetail[];
@@ -132,6 +135,34 @@ export function createListingSearchEngine(deps: {
         ...(artifact?.searchGuidance ?? []),
         ...(target.customInstructions ? [target.customInstructions] : []),
       ];
+      const toCards = (jobs: readonly JobPosting[]): ListingCard[] =>
+        jobs.map((job) => ({
+          url: job.canonicalUrl,
+          title: job.title,
+          text: [job.title, job.company, job.location, job.description].join(
+            "\n",
+          ),
+          cardFingerprint: createHash("sha256")
+            .update(JSON.stringify(job.title.trim().toLowerCase()))
+            .digest("hex")
+            .slice(0, 32),
+          sourceId: target.id,
+          sourceLabel: target.label,
+          ...(job.sourceJobId ? { sourceJobId: job.sourceJobId } : {}),
+          ...(job.company && job.company !== "Company not stated on card"
+            ? { companyHint: job.company }
+            : {}),
+          ...(job.location && job.location !== "Location not stated on card"
+            ? { locationHint: job.location }
+            : {}),
+          ...(job.postedAt ? { postedAt: job.postedAt } : {}),
+          ...(job.searchRejection?.category === "closed"
+            ? { closed: true }
+            : {}),
+          ...(job.listingDetailFetch?.outcome === "enriched"
+            ? { listingText: job.description }
+            : {}),
+        }));
       return collectSource({
         browserAccessAuthorized,
         source: { id: target.id, label: target.label, url: target.startingUrl },
@@ -170,6 +201,12 @@ export function createListingSearchEngine(deps: {
                       ...(context.browserPermissions
                         ? { browserPermissions: context.browserPermissions }
                         : {}),
+                      ...(context.readIntendedAccountEmail
+                        ? {
+                            readIntendedAccountEmail:
+                              context.readIntendedAccountEmail,
+                          }
+                        : {}),
                       ...(context.readBrowserPermissions
                         ? {
                             readBrowserPermissions:
@@ -177,6 +214,14 @@ export function createListingSearchEngine(deps: {
                           }
                         : {}),
                       inventoryOnly: true,
+                      onCheckpoint: async (checkpoint) => {
+                        input.message(
+                          `Collected ${checkpoint.collectedJobs.length} listing cards; remaining batches are still being checked.`,
+                        );
+                        await input.onCards?.(
+                          toCards(checkpoint.collectedJobs),
+                        );
+                      },
                       dedicatedPage: true,
                       retainAllFound: true,
                       userProfile: context.profile,
@@ -207,33 +252,16 @@ export function createListingSearchEngine(deps: {
                       aiClient: deps.aiClient,
                     }),
                 );
-                const cards = result.jobs.map((job) => ({
-                  url: job.canonicalUrl,
-                  title: job.title,
-                  text: [
-                    job.title,
-                    job.company,
-                    job.location,
-                    job.description,
-                  ].join("\n"),
-                  cardFingerprint: createHash("sha256")
-                    .update(JSON.stringify(job.title.trim().toLowerCase()))
-                    .digest("hex")
-                    .slice(0, 32),
-                  sourceId: target.id,
-                  sourceLabel: target.label,
-                  ...(job.sourceJobId ? { sourceJobId: job.sourceJobId } : {}),
-                  ...(job.company ? { companyHint: job.company } : {}),
-                  ...(job.location ? { locationHint: job.location } : {}),
-                  ...(job.postedAt ? { postedAt: job.postedAt } : {}),
-                  ...(job.listingDetailFetch?.outcome === "enriched"
-                    ? { listingText: job.description }
-                    : {}),
-                }));
+                const cards = toCards(result.jobs);
                 return {
                   cards,
                   pagesRead: 0,
-                  complete: result.inventoryCompleteness === "complete",
+                  complete:
+                    result.inventoryCompleteness === "complete" ||
+                    (result.agentMetadata?.phaseCompletionMode ===
+                      "structured_finish" &&
+                      result.agentMetadata.incomplete === false &&
+                      cards.length > 0),
                   needsYou:
                     result.agentMetadata?.accessBlockerReason ===
                       "auth_required" ||
@@ -277,6 +305,7 @@ export function createListingSearchEngine(deps: {
         lookupKnownUrls: (urls) => Promise.resolve(input.knownUrls(urls)),
         lookupSeenCards: (cards, key) =>
           Promise.resolve(input.seenCards(cards, key)),
+        readPage,
       });
     },
     readListings: (input) =>

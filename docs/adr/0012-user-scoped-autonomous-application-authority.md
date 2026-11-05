@@ -75,7 +75,10 @@ these permissions separately from sending authority and recheck them before
 acting. An enabled step may be attempted using the site's visible controls; an
 unavailable password, MFA, an unreadable challenge or an ambiguous action still
 hands the exact page to the person. Account and verification POSTs use the exact
-observed form action, with no application-send window. A solved challenge or a
+observed form action, or a per-press, same-origin window of at most ten seconds
+and eight fetch/XHR POSTs for a host-verified existing-account Sign In control
+after exact-site saved-account autofill; native form navigation, account creation
+and application-send signals remain refused, with no application-send window. A solved challenge or a
 successful sign-in never proves an application was sent.
 
 The owner also authorized local password import, explicit save/update offers and
@@ -85,8 +88,29 @@ Agent autofill additionally requires the sign-in permission and one unambiguous
 saved account on an existing-account form.
 
 The Google opt-in is independent of password-based sign-in and account creation.
-It permits the site's visible Google button and a single already signed-in
-Google account choice. An empty password form beside that button does not block
-it. Multiple Google accounts, Google credentials, Google account creation and
-Google consent/access requests still hand off to the person. It does not grant
-application-sending authority.
+It permits the site's visible Google button, choosing the one offered account
+matching the Profile application email (otherwise the primary email), typing
+that known email as Google's identifier, and pressing a basic identity confirmation
+when transient authorization evidence proves only name/profile/email access.
+It never selects another email, including a sole non-matching account. A visible
+Use another account action may be taken once to reach the identifier for that
+same intended email; it does not authorize a Google account's creation. An
+optional Google offer, such as creating a passkey, may be declined with its own
+Not now or Skip on a page that asks for no credential, code, choice, consent or
+other identity; accepting it and any passkey sign-in stay with the person.
+
+One Google surface allows at most four actions that actually send a Google
+write; typing the email and plain navigation do not count. Its 90-second
+deadline restarts only after a validated move to a new Google page with the
+same intended email, still proven basic access and Google sign-in still on,
+never to repeat an uncertain choice or confirmation. An unproven authorization
+entry is read once more without clicking, then handed off with only its host,
+path and parameter names.
+
+An empty password form beside the button does not block it. Passwords, MFA,
+Google account creation, other identities and additional or unproven data access
+hand off. Each action rechecks the live page, current Profile email and Google
+permission. An uncertain action is not repeated, and confirmation is recorded as
+an attempt rather than a completed sign-in. This grants no application-send
+permission. Owner instruction 2026-11-03 supersedes the former blanket handoff of
+multiple accounts and every separate Google confirmation.

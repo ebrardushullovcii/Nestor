@@ -10,7 +10,14 @@
  * schemas: the values are transient page reads, not persisted state.
  */
 
+/** Owning child document, without URL credentials, query or fragment. */
+export interface ApplyFrameOwner {
+  origin: string;
+  pathname: string;
+}
+
 export interface RawApplyControl {
+  frame?: ApplyFrameOwner;
   /** Stable handle supplied by the browser when the control is inside a frame. */
   ref?: string;
   /** Position among the form controls on the page. Refs are built from this. */
@@ -67,6 +74,16 @@ export interface RawApplyUpload {
   fileSize?: number;
   /** The file selected by this runtime, even if the widget emptied its input. */
   selectedFileName?: string;
+  /** That file's size, so a replaced file of the same name is told apart. */
+  selectedFileSize?: number;
+  /**
+   * The input is named inside a POST multipart/form-data form, so the
+   * form's own submission sends whatever file the input holds then (HTML
+   * form submission). Not a storage receipt for any earlier request.
+   */
+  formSubmits?: boolean;
+  /** Resolved action of that native multipart form. */
+  formAction?: string;
   /** Distinguishes an ARIA refusal from native file validation. */
   ariaInvalid?: boolean;
   /**
@@ -93,6 +110,7 @@ export interface RawApplyUpload {
  * whether that part is a form with fields. Nothing here says what to press.
  */
 export interface RawApplyPlacement {
+  frame?: ApplyFrameOwner;
   section?: string;
   inForm?: boolean;
   /** For a toggle button: the question it answers is marked required. */
@@ -129,6 +147,7 @@ export interface ApplyFinalActionTarget {
  * which link matters; that is a reading of the words, and it happens above.
  */
 export interface RawApplyLink {
+  frame?: ApplyFrameOwner;
   ref?: string;
   /** Position among the page's links. Refs are built from this. */
   index: number;
@@ -158,6 +177,7 @@ export interface RawApplyClickable extends RawApplyPlacement {
   role: string;
   tagName: string;
   visible: boolean;
+  disabled: boolean;
   topOffset: number;
 }
 
@@ -174,7 +194,27 @@ export interface RawApplyOpenedTab {
   title: string;
 }
 
+/**
+ * One visible description-list row (`dt` and its single `dd`), as a review
+ * page shows it. A generic read: nothing here says what the row means.
+ */
+export interface RawApplySummaryRow {
+  frame?: ApplyFrameOwner;
+  label: string;
+  value: string;
+}
+
 export interface RawApplyPage {
+  /** Visible `dt`/`dd` rows, outermost document first; absent when none. */
+  summaryRows?: RawApplySummaryRow[];
+  /** Transient account surface; never includes query, fragment or userinfo. */
+  accountWindow?: {
+    surface?: "same_tab";
+    origin: string;
+    pathname: string;
+    actionsLeft: number;
+    refusal?: { reason: "second_window"; detail: string };
+  };
   url: string | null;
   title: string | null;
   bodyText: string;
@@ -241,7 +281,8 @@ export type ApplyWriteResult =
   | {
       ok: false;
       error: string;
-      reason?: "option_not_offered";
+      /** `binding_changed`: refused before anything was pressed. */
+      reason?: "option_not_offered" | "binding_changed";
       offeredOptions?: string[];
     };
 
@@ -249,6 +290,31 @@ export type ApplyWriteResult =
 export type ApplyNavigationResult =
   | { ok: true; url: string }
   | { ok: false; error: string };
+
+/** One fresh, policy-approved click that may open one account window. */
+export interface ApplyAccountWindowGrant {
+  ref: string;
+  frame: { origin: string; pathname: string } | null;
+  writeOrigins: readonly string[];
+  maxActions?: number;
+  disclosableValues?: readonly string[];
+}
+export type ApplyAccountWindowResult =
+  | { kind: "opened"; url: string }
+  | { kind: "no_window"; url: string }
+  | {
+      kind: "refused";
+      reason:
+        | "ref_changed"
+        | "frame_changed"
+        | "busy"
+        | "window_blocked"
+        | "not_claimed"
+        | "navigated_before_containment"
+        | "second_window"
+        | "aborted";
+      detail: string;
+    };
 
 /** One file, already verified by whoever owns it, on its way into a form. */
 export interface ApplyUploadFile {
@@ -268,6 +334,13 @@ export interface ApplyUploadFile {
 export interface ApplyRawPageHands {
   /** Host-only exact-site autofill. It never returns credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;
+  /** One host-autofilled existing-account JS sign-in press, never a native submit. */
+  clickAuthorizedLoginAction?: (input: {
+    ref: string;
+    frame: { origin: string; pathname: string } | null;
+    /** Current Profile identifier, for its existing saved-username fallback only. */
+    identifier?: string;
+  }) => Promise<ApplyWriteResult>;
   /** One exact POST form action, authorized by the workflow policy. */
   clickAuthorizedFormAction?: (ref: string) => Promise<ApplyWriteResult>;
   readPage: () => Promise<RawApplyPage>;
@@ -298,6 +371,21 @@ export interface ApplyRawPageHands {
     url: string;
     stepLabel: string | null;
   }) => Promise<ApplyWriteResult>;
+  /**
+   * One press of the exact control a fresh read showed: same page, step
+   * label, label, owning frame, visible and enabled. An explicit nativeForm
+   * binds one native POST; otherwise only existing write authority applies. A changed
+   * binding is refused with `binding_changed` before anything is pressed.
+   */
+  clickBoundAction?: (input: {
+    ref: string;
+    label: string;
+    url: string;
+    stepLabel: string | null;
+    frame: ApplyFrameOwner | null;
+    /** Workflow-approved non-final native save, bound to this exact POST. */
+    nativeForm?: { action: string; method: "POST" };
+  }) => Promise<ApplyWriteResult>;
   /** Presses a keyboard key on one element, or on the active page. */
   pressKey: (ref: string | undefined, key: string) => Promise<ApplyWriteResult>;
   /** Moves the page, so content that loads on scroll can be seen. */
@@ -317,6 +405,21 @@ export interface ApplyRawPageHands {
    * site that opens the form in a new one has moved the work, not blocked it.
    */
   adoptOpenedTab?: (index: number) => Promise<ApplyNavigationResult>;
+  /** Private transient policy input; never include these URLs in observations or logs. */
+  readAccountFlowEntry?: (
+    origins: readonly string[],
+  ) => Promise<readonly string[]>;
+  clickOpeningAccountWindow?: (
+    grant: ApplyAccountWindowGrant,
+  ) => Promise<ApplyAccountWindowResult>;
+  /**
+   * Restarts an open account surface's deadline once the workflow has
+   * validated forward progress on it. Refused unless that surface is still
+   * live on exactly this origin and path, has committing actions left, and has
+   * moved to a new document since it opened or was last renewed. It never
+   * restores spent committing actions.
+   */
+  renewAccountWindow?: (expected: ApplyFrameOwner) => Promise<boolean>;
 }
 
 /**

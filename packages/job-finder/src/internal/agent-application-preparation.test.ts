@@ -454,7 +454,20 @@ function modelThatNeedsThePerson(reason: string): LLMClient {
 function modelThatFinishes(reason = "Nothing left to fill in"): LLMClient {
   let calls = 0;
   return {
-    chatWithTools: () => {
+    chatWithTools: (_messages, tools) => {
+      if (tools[0]?.function.name === "match_application_answer")
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "no-match",
+              type: "function" as const,
+              function: {
+                name: "match_application_answer",
+                arguments: JSON.stringify({ sourceId: null, answer: null }),
+              },
+            },
+          ],
+        });
       calls += 1;
       return Promise.resolve({
         toolCalls: [
@@ -471,6 +484,107 @@ function modelThatFinishes(reason = "Nothing left to fill in"): LLMClient {
     },
   };
 }
+
+test("production preparation retains the typed Google selection activity on recovery", async () => {
+  const selection = {
+    id: "selection",
+    at: "2026-09-14T10:00:00.000Z",
+    label: "Google account selected",
+    detail:
+      "Selected Google account robin@example.test. Sign-in completion has not been verified.",
+    state: "in_progress" as const,
+    visualEvidence: [],
+  };
+  const result = await runAgentApplicationPreparation({
+    session: session(),
+    currentUrl: PAGE_URL,
+    executionInput: executionInput(),
+    earlierActivity: [selection],
+    llmClient: modelThatNeedsThePerson("Review this form"),
+    startedAt: "2026-09-14T10:01:00.000Z",
+    siteLabel: "local replica",
+  });
+  expect(
+    result.checkpoints.filter((line) => line.label === selection.label),
+  ).toEqual([
+    expect.objectContaining({ at: selection.at, detail: selection.detail }),
+  ]);
+});
+
+test("an unconfirmed step press and a Google confirmation stay on record for the next run", async () => {
+  const receipts = [
+    {
+      id: "step",
+      at: "2026-09-14T10:00:00.000Z",
+      label: "Step press not confirmed",
+      detail:
+        "Pressed “Save and Continue” once on step 1 of 3 at apply.example.test/form. The form did not show step 2 of 3 afterwards, so Nestor will not press it again.",
+      state: "in_progress" as const,
+      visualEvidence: [],
+    },
+    {
+      id: "confirmed",
+      at: "2026-09-14T10:00:01.000Z",
+      label: "Google sign-in confirmed",
+      detail:
+        "Pressed Google’s sign-in confirmation for robin@example.test. Sign-in completion has not been verified.",
+      state: "in_progress" as const,
+      visualEvidence: [],
+    },
+  ];
+  const result = await runAgentApplicationPreparation({
+    session: session(),
+    currentUrl: PAGE_URL,
+    executionInput: executionInput(),
+    earlierActivity: receipts,
+    llmClient: modelThatNeedsThePerson("Review this form"),
+    startedAt: "2026-09-14T10:01:00.000Z",
+    siteLabel: "local replica",
+  });
+  for (const receipt of receipts)
+    expect(
+      result.checkpoints.filter((line) => line.label === receipt.label),
+    ).toEqual([
+      expect.objectContaining({ at: receipt.at, detail: receipt.detail }),
+    ]);
+});
+
+test.each([
+  ["Austin, TX", "US"],
+  ["Toronto, ON", "CA"],
+])(
+  "production preparation passes the shared resolved country for %s",
+  async (location, code) => {
+    const facts = executionInput();
+    facts.job.location = location!;
+    const observed: string[] = [];
+    const pageSession = session();
+    const raw = rawPage("Eligibility");
+    raw.controls[0]!.label = "Are you authorized to work here?";
+    pageSession.readPage = () => Promise.resolve(raw);
+    const client = fixtureQuestionReadings(
+      modelThatNeedsThePerson("Review eligibility"),
+    );
+    await runProductionApplicationPreparation({
+      session: pageSession,
+      currentUrl: PAGE_URL,
+      executionInput: facts,
+      llmClient: {
+        chatWithTools: (messages, tools, options) => {
+          observed.push(
+            messages.map((message) => String(message.content)).join("\n"),
+          );
+          return client.chatWithTools(messages, tools, options);
+        },
+      },
+      startedAt: "2026-09-14T10:00:00.000Z",
+      siteLabel: "local replica",
+    });
+    expect(observed.join(" ")).toContain(
+      `"id":"posting.country","purpose":"listing","country":"${code}"`,
+    );
+  },
+);
 
 function modelThatGetsStuck(): LLMClient {
   return {

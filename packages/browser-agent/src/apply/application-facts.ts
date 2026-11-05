@@ -1,3 +1,4 @@
+import { questionLabel, questionPrompt } from "./question-text";
 import {
   normalizeFormQuestionPrompt,
   preserveTechnologyTokens,
@@ -164,7 +165,26 @@ export function applicationFacts(
     narrative: profile.narrative,
     targetRoles: profile.targetRoles,
     preferredLocations: profile.locations,
-    preferences: sources.preferences,
+    taskGuidance: sources.taskInstructions,
+    preferences: sources.preferences
+      ? {
+          ...sources.preferences,
+          salaryCurrency:
+            sources.preferences.compensation.currencyStatus === "explicit"
+              ? sources.preferences.compensation.currency
+              : null,
+          ...(sources.preferences.compensation.currencyStatus ===
+          "needs_clarification"
+            ? {
+                salaryCurrency: null,
+                compensation: {
+                  ...sources.preferences.compensation,
+                  currency: null,
+                },
+              }
+            : {}),
+        }
+      : undefined,
     yearsExperience: profile.yearsExperience,
     workEligibility: profile.workEligibility,
     ...(profile.workEligibility.limitedWorkPermissions?.length
@@ -181,7 +201,18 @@ export function applicationFacts(
         label: saved.label,
         question: saved.question,
         answer: saved.answer,
-        applicationScope: saved.applicationScope,
+        // Native execution binding is host metadata, not a new applicant fact.
+        // Fill and Send see the same scope even when only Fill has that marker.
+        applicationScope: saved.applicationScope
+          ? {
+              resultId: saved.applicationScope.resultId,
+              applicationRecordId: saved.applicationScope.applicationRecordId,
+              location: saved.applicationScope.location,
+              ...(saved.applicationScope.hiringCountry
+                ? { hiringCountry: saved.applicationScope.hiringCountry }
+                : {}),
+            }
+          : undefined,
         optionFallback: saved.optionFallback,
       })),
     spokenLanguages: profile.spokenLanguages,
@@ -482,22 +513,7 @@ export function savedAnswerForQuestion(
   controls?: readonly ApplyFormControl[],
 ): CandidateReusableAnswer | null {
   if (control.credentialRole) return null;
-  const prompt = (candidate: ApplyFormControl) =>
-    candidate.repeatedQuestion?.prompt ??
-    ((candidate.kind === "radio" ||
-      candidate.answerControlType === "multi_choice") &&
-    candidate.choiceGroupKey &&
-    candidate.groupLabel
-      ? candidate.attestationKind === null
-        ? (candidate.sectionPath?.at(-1) ??
-          candidate.groupLabel.split(" — ").at(-1) ??
-          candidate.groupLabel)
-        : candidate.groupLabel
-      : key(candidate.groupLabel) === key(candidate.label)
-        ? candidate.label
-        : [candidate.groupLabel, candidate.label]
-            .filter((part) => part.trim())
-            .join(" — "));
+  const prompt = questionPrompt;
   const key = (value: string) =>
     normalizeFormQuestionPrompt(preserveTechnologyTokens(value));
   const rawPrompt = prompt(control);
@@ -539,6 +555,10 @@ export function savedAnswerForQuestion(
       savedQuestionMatches(saved.question, rawPrompt, saved.answer, context),
   );
   if (exact.length || control.repeatedQuestion) return unique(exact);
+  // Extra instructions and outer subjects are part of the saved question.
+  // A shorter legacy label can still be proposed through the independent
+  // whole-question checker; it cannot grant literal reuse here.
+  if (key(rawPrompt) !== key(questionLabel(control))) return null;
   const semantic = usable.filter((saved) => {
     if (!savedQuestionMatches(saved.question, rawPrompt, saved.answer, context))
       return false;

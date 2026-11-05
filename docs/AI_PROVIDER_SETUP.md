@@ -1,125 +1,66 @@
 # AI provider setup
 
-Nestor uses a mixed OpenCode Go route:
+The owner-selected default for all product inference is `deepseek-v4.1-flash`
+on OpenCode Go through Chat Completions. Text, tools, assistant, resume vision,
+browser vision and Live Assistant text/screenshots use this route unless an
+explicit existing role override is configured. There is no implicit MiMo or
+Contributor fallback. Audio transcription remains local Whisper or an explicit
+audio model.
 
-- Muse Spark 1.3 Contributor with `xhigh` reasoning handles text, tool-based
-  agent work, and image-capable résumé, browser, and Live Assistant analysis
-  through the Responses API.
-- DeepSeek V4.1 Flash with `high` reasoning handles aggressive resume tailoring
-  only, through Chat Completions.
-- Audio transcription remains local Whisper or an explicit audio-model concern.
+## Production defaults and overrides
 
-These are also the code defaults, so a packaged build behaves this way with
-only an API key. See ADR 0019; the contract-first agent boundaries from ADR
-0009 are unchanged.
-
-## Recommended production setup
-
-Create an OpenCode Go key, then use the same key for both text and vision:
+Only `NESTOR_AI_API_KEY` is needed for the code defaults. Existing local model,
+API and effort variables still override code defaults; updating source does not
+change a configured installation. Check those role overrides when adopting this
+route. Keep credentials in ignored local configuration, never in evidence.
 
 ```dotenv
 NESTOR_AI_API_KEY=your-opencode-go-key
 NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
-NESTOR_AI_MODEL=muse-spark-1.3-contributor
-NESTOR_AI_API_MODE=responses
-NESTOR_AI_REASONING_EFFORT=xhigh
-# "Judge fit" (a full listing read) uses the effort above. Muse resume
-# writing uses medium; other writers keep their route's effort. An optional
-# NESTOR_AI_RESUME_WRITER_REASONING_EFFORT overrides either writer.
-# Other repeated work has its own variable (code defaults shown).
-# Search and source-check turns:
-NESTOR_AI_SEARCH_REASONING_EFFORT=low
-# Reading the jobs on a page:
-NESTOR_AI_PAGE_READ_REASONING_EFFORT=low
-# Fit judged in batches during and after a search (bundled Muse route;
-# other model routes retain medium unless explicitly overridden):
-NESTOR_AI_FIT_REASONING_EFFORT=low
-# Fact checks of resume lines and of written application answers:
-NESTOR_AI_CLAIM_CHECK_REASONING_EFFORT=medium
-# Application form turns, reading a form's questions, and checking short
-# form values (a date, a number, a chosen option) that are not about
-# eligibility, pay or a declaration:
-NESTOR_AI_APPLY_REASONING_EFFORT=low
-# "Judge fit"; unset means NESTOR_AI_REASONING_EFFORT:
-# NESTOR_AI_LISTING_READ_REASONING_EFFORT=high
-# Other tool-calling work (resume import sections, the profile and resume
-# assistants, letters). It does not change the tasks above.
+NESTOR_AI_MODEL=deepseek-v4.1-flash
+NESTOR_AI_API_MODE=chat_completions
+NESTOR_AI_REASONING_EFFORT=low
 NESTOR_AI_AGENT_REASONING_EFFORT=low
-
-# Aggressive resume tailoring runs on its own dedicated route so the whole
-# aggressive lifecycle (draft, re-tailor, and model-backed review/regenerate)
-# stays on one provider. Its writer and edits use this route's effort, except
-# Muse writing as described above. Fact checks use the check effort.
+NESTOR_AI_FIT_REASONING_EFFORT=none
+NESTOR_AI_LISTING_SCREEN_REASONING_EFFORT=none
+NESTOR_AI_SEARCH_REASONING_EFFORT=low
+NESTOR_AI_PAGE_READ_REASONING_EFFORT=low
+NESTOR_AI_APPLY_REASONING_EFFORT=low
+NESTOR_AI_CLAIM_CHECK_REASONING_EFFORT=medium
+# Unset listing-read and resume-writer effort inherits the route's effort.
 NESTOR_AI_AGGRESSIVE_MODEL=deepseek-v4.1-flash
 NESTOR_AI_AGGRESSIVE_API_MODE=chat_completions
 NESTOR_AI_AGGRESSIVE_REASONING_EFFORT=high
-
-NESTOR_AI_VISION_BASE_URL=https://opencode.ai/zen/go/v1
-NESTOR_AI_VISION_MODEL=muse-spark-1.3-contributor
-NESTOR_AI_VISION_API_MODE=responses
-NESTOR_AI_VISION_REASONING_EFFORT=xhigh
-NESTOR_RESUME_VISION_MODEL=muse-spark-1.3-contributor
-NESTOR_RESUME_VISION_REASONING_EFFORT=xhigh
-NESTOR_BROWSER_VISION_MODEL=muse-spark-1.3-contributor
-NESTOR_BROWSER_VISION_REASONING_EFFORT=xhigh
-NESTOR_INTERVIEW_AI_MODEL=muse-spark-1.3-contributor
-NESTOR_INTERVIEW_AI_API_MODE=responses
-NESTOR_INTERVIEW_REASONING_EFFORT=xhigh
-NESTOR_INTERVIEW_VISION_MODEL=muse-spark-1.3-contributor
-NESTOR_INTERVIEW_VISION_API_MODE=responses
-NESTOR_INTERVIEW_VISION_REASONING_EFFORT=xhigh
+NESTOR_AI_VISION_MODEL=deepseek-v4.1-flash
+NESTOR_AI_VISION_API_MODE=chat_completions
+NESTOR_AI_VISION_REASONING_EFFORT=low
+# Narrow overrides, if set, must also name the intended route:
+# NESTOR_RESUME_VISION_MODEL=deepseek-v4.1-flash
+# NESTOR_RESUME_VISION_API_MODE=chat_completions
+# NESTOR_BROWSER_VISION_MODEL=deepseek-v4.1-flash
+# NESTOR_BROWSER_VISION_API_MODE=chat_completions
+# NESTOR_AI_ASSISTANT_MODEL=deepseek-v4.1-flash
+# NESTOR_AI_ASSISTANT_API_MODE=chat_completions
+# NESTOR_INTERVIEW_AI_MODEL=deepseek-v4.1-flash
+# NESTOR_INTERVIEW_AI_API_MODE=chat_completions
+# NESTOR_INTERVIEW_VISION_MODEL=deepseek-v4.1-flash
+# NESTOR_INTERVIEW_VISION_API_MODE=chat_completions
 ```
 
-Use the raw API model IDs shown above. The `opencode-go/...` prefix is only for
-OpenCode's own configuration file, not direct HTTP API requests. Provider
-output remains locally parsed and schema-validated before it can modify Job
-Finder state.
+Fit batches and title screens have role-specific effort so structured judgments
+can finish within the answer budget. A provider's HTTP 200 with incomplete
+output is unfinished technical work, not a score or evidence of exhaustion.
+Valid fit rows are retained; incomplete rows stay unscored. **Retry fit** in Find
+jobs scores saved full listings without rereading sites; **Stop fit** cancels it.
+A later Search also picks up unfinished fits while reusing unchanged listings.
 
-Audio configuration is intentionally not included in this mixed provider routing.
-Keep local Whisper or an explicit audio-capable transcription model configured
-for Live Assistant audio.
-
-## Muse Contributor route details
-
-Muse Spark Contributor is the product route for shared text, tool-based agent
-work, and image-capable surfaces. Muse Contributor accepts image input on this
-route; the defaults are:
-
-```dotenv
-NESTOR_AI_API_KEY=your-opencode-go-key
-NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
-NESTOR_AI_MODEL=muse-spark-1.3-contributor
-NESTOR_AI_API_MODE=responses
-NESTOR_AI_REASONING_EFFORT=xhigh
-
-NESTOR_AI_VISION_BASE_URL=https://opencode.ai/zen/go/v1
-NESTOR_AI_VISION_MODEL=muse-spark-1.3-contributor
-NESTOR_AI_VISION_API_MODE=responses
-NESTOR_AI_VISION_REASONING_EFFORT=xhigh
-```
-
-The shared text variables cover Job Finder generative work, browser-agent
-tool loops, and Live Assistant text unless a narrower override is present.
-The shared vision variables cover resume visual analysis, browser visual
-analysis, and Live Assistant screenshot analysis unless a narrower override
-is present. Audio transcription remains local Whisper or a separately
-configured audio model.
-
-OpenCode Go serves `muse-spark-1.3-contributor` on the Responses API
-(`https://opencode.ai/zen/go/v1/responses`). Chat Completions is the wrong
-transport for this model and can drop tool-call streams. This is the default
-route (ADR 0019), not an end-to-end capability, quality, privacy, or release
-acceptance result.
-
-`muse-spark-1.3-contributor` is the discounted Go contributor model, not the
-zero-cost Zen route `muse-spark-1.2-contributor-free`. OpenCode's published
-terms state that prompts and completions on the contributor route may be used
-to train future Meta models. Do not send a private resume, credentials,
-application answers, interview media, or other personal/confidential data
-through this route without explicit informed user consent. Use synthetic data
-for initial testing. Keep the API key only in ignored `.env.local`, never
-documentation or tracked examples, and rotate any temporary key shared through
-a conversation.
+The gateway accepted simple synthetic image input on this DeepSeek route. The
+assistant capability declares that transport support; it does not establish
+resume OCR, browser grounding or Live Assistant quality. Each feature still
+needs its own acceptance. Explicit Contributor alternatives below are legacy
+operator choices, not automatic fallback or the production default. Muse's
+verified strict-schema Responses adapter remains available only when explicitly
+selected. It must not be inferred from the new default model name.
 
 Live Job Finder search during a desktop test-API session also requires
 `NESTOR_TEST_API_USE_LIVE_AI=1` for model/tool escalation.
@@ -149,7 +90,7 @@ The same OpenCode API key works on both endpoints.
 
 ### Primary (local dogfood default)
 
-Keep Go with Muse Contributor on the Responses API:
+Explicit legacy alternative: Go with Muse Contributor on the Responses API:
 
 ```dotenv
 NESTOR_AI_BASE_URL=https://opencode.ai/zen/go/v1
@@ -270,7 +211,7 @@ A legacy provider can still be used explicitly:
 NESTOR_AI_API_MODE=chat_completions
 ```
 
-That mode is the dedicated aggressive DeepSeek route. Keep Muse image work
+That mode is the dedicated aggressive DeepSeek route. Keep explicitly selected Muse image work
 on the separate Responses route.
 
 ## Reliability on slow or dropping connections
@@ -304,7 +245,7 @@ With a configured OpenCode Go key:
 
 1. confirm `GET https://opencode.ai/zen/go/v1/models` is reachable;
 2. run `pnpm validate:package ai-providers`;
-3. check the resolved route against `muse-spark-1.3-contributor`
+3. check the resolved route against the selected `deepseek-v4.1-flash` default (or an explicit override)
    (or the explicit environment override); Settings has no model picker;
 4. use synthetic candidate data for the first resume, vision, and tool-loop
    smoke checks;

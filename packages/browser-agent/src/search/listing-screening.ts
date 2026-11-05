@@ -45,12 +45,19 @@ export function professionEvidence(card: ListingCard): string {
       ]
         .filter((part): part is string => typeof part === "string")
         .join("; ")
-        .slice(0, 300);
+        .slice(0, 1200);
     }
   } catch {
     /* Plain visible cards are also useful evidence. */
   }
-  return card.text.replaceAll(card.title, "").trim().slice(0, 300);
+  return card.text
+    .replaceAll(card.title, "")
+    .replace(
+      /^(?:Posted\s+)?\d+\s+(?:minutes?|hours?|days?|weeks?)\s+ago\s*$/gimu,
+      "",
+    )
+    .trim()
+    .slice(0, 1200);
 }
 
 /** A provider already supplied the body: challenge a negative title verdict with
@@ -102,7 +109,7 @@ export function professionInstructions(goals: RoleScreenGoals): string {
     )
   )
     guides.push(
-      "Requested analysis/BI work includes hands-on reporting/analytics in operations, sales/revenue, finance or people analytics, and analytics engineering/data science where duties overlap. Analytics engineering means data models, pipelines and analytics, not generic software or systems hosting. Infrastructure, SRE/DevOps, generic Software Engineer/Systems Engineer, ML research scientists, and executive/department leadership are different functions unless explicitly requested or actual card duties show analysis work. An analytics manager can still analyze; data/analytics/research in a team or product name alone does not establish overlap. Senior Data Analyst is the same profession as Data Analyst.",
+      "Requested analysis/BI work includes hands-on reporting/analytics in operations, sales/revenue, finance or people analytics, and analytics engineering/data science where duties overlap. Data quality, validation and reporting support can involve the same analysis work; assistant or coordinator rank alone does not establish a different profession. Keep those ambiguous cards for the full listing to resolve. Analytics engineering means data models, pipelines and analytics, not generic software or systems hosting. Infrastructure, SRE/DevOps, generic Software Engineer/Systems Engineer, ML research scientists, and executive/department leadership are different functions unless explicitly requested or actual card duties show analysis work. An analytics manager can still analyze; data/analytics/research in a team or product name alone does not establish overlap. Senior Data Analyst is the same profession as Data Analyst.",
     );
   return (
     'Classify each title by actual day-to-day profession against the requested work. Return {"keep":{"0":1,"1":0,...}}, every title index once: 1 for requested work, substantially overlapping duties or genuinely ambiguous professions; 0 for clearly different functions. target_roles includes synonyms; related_roles also includes the requested related professions; wide_net adds transferable neighboring duties. Read the request as additional goals and constraints. Shared industry, technology or a broad word is not shared professional duties. Never discard for location, work mode, pay, hours, contract, seniority or low expected fit. Judge languages naturally. No explanations. ' +

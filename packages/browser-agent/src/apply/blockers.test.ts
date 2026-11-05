@@ -176,6 +176,86 @@ describe("detectApplyBlocker", () => {
     expect(blocker?.requiresPerson).toBe(true);
   });
 
+  test.each([false, true])(
+    "one existing-account password beside a registration alternative is sign-in (answered=%s)",
+    (answered) => {
+      const blocker = detectApplyBlocker({
+        bodyText: "Sign In. New here? Create an account.",
+        controls: [
+          {
+            ...checkbox(answered),
+            kind: "text",
+            label: "Password",
+            credentialRole: "password",
+          },
+        ],
+        actions: [
+          {
+            ref: "a0",
+            label: "Sign In",
+            kind: "advance",
+            visible: true,
+            disabled: false,
+            inForm: true,
+            submitsForm: true,
+            formMethod: "GET",
+          },
+          {
+            ref: "a1",
+            label: "Create Account",
+            kind: "advance",
+            visible: true,
+            disabled: false,
+            submitsForm: false,
+          },
+        ],
+      });
+      expect(blocker).toMatchObject({
+        code: "site_login_required",
+        requiresPerson: !answered,
+        nextActionLabel: "Sign in on the site",
+      });
+    },
+  );
+
+  test.each(["registration-submit", "two-passwords", "three-passwords"])(
+    "%s is not mistaken for the single-password login surface",
+    (variant) => {
+      const count =
+        variant === "two-passwords" ? 2 : variant === "three-passwords" ? 3 : 1;
+      const blocker = detectApplyBlocker({
+        bodyText: "Sign In or Create an account",
+        controls: Array.from({ length: count }, (_, index) => ({
+          ...checkbox(false),
+          ref: `c${index}`,
+          kind: "text" as const,
+          label: index ? "Confirm password" : "Password",
+          credentialRole: "password" as const,
+        })),
+        actions: [
+          {
+            ref: "a0",
+            label: "Sign In",
+            kind: "advance",
+            visible: true,
+            disabled: false,
+            inForm: true,
+            submitsForm: true,
+          },
+          {
+            ref: "a1",
+            label: "Create Account",
+            kind: "advance",
+            visible: true,
+            disabled: false,
+            submitsForm: variant === "registration-submit",
+          },
+        ],
+      });
+      expect(blocker?.code).toBe("account_creation_required");
+    },
+  );
+
   test("a supplied credential form is not an unconditional terminal handoff", () => {
     const blocker = detectApplyBlocker({
       bodyText: "Sign in to continue",
@@ -239,10 +319,15 @@ test("access continuation needs an actual form or application entry, never just 
   };
   expect(canContinue(entry)).toBe(true);
   const codePage = buildApplyFormObservation(entry, new Date().toISOString());
-  codePage.controls = [{
-    ...checkbox(false), kind: "text", label: "Code", groupLabel: "",
-    credentialRole: "one_time_code",
-  }];
+  codePage.controls = [
+    {
+      ...checkbox(false),
+      kind: "text",
+      label: "Code",
+      groupLabel: "",
+      credentialRole: "one_time_code",
+    },
+  ];
   expect(canContinueApplicationAfterAccess(codePage)).toBe(false);
   expect(
     canContinue({

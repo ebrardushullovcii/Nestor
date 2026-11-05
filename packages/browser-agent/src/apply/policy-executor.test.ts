@@ -2,11 +2,13 @@ import githubReplay from "../../../../apps/desktop/test-fixtures/job-finder/appl
 import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
 import typedReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/typed-answer-permissions.json";
 import { answerSourceCatalog } from "./answer-source-catalog";
+import { questionPrompt } from "./question-text";
 import type { ApplyAnswerTags } from "@nestor/contracts";
 import { createApplyUserPrompt } from "./apply-prompts";
 import { replaceApprovedApplicationLetter } from "./approved-letter";
 import {
   CandidateProfileSchema,
+  JobSearchPreferencesSchema,
   type CandidateProfile,
 } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
@@ -2825,6 +2827,7 @@ describe("a site that saves as you go", () => {
         {
           index: 0,
           label: "Portugal",
+          disabled: false,
           role: "option",
           tagName: "li",
           visible: true,
@@ -3484,72 +3487,85 @@ describe("a question keeps its name across runs", () => {
 });
 
 describe("a button that opens a new tab", () => {
-  test("the run goes where the tab was going, in this tab, and says so", async () => {
-    const listing = rawPage({
-      url: "https://remoteok.test/remote-jobs/staff-engineer",
-      actions: [{ index: 0, label: "Apply", visible: true, disabled: false }],
-    });
-    const employerForm = rawPage({
-      url: "https://jobs.employer.test/apply/123",
-      controls: [rawControl({ index: 0, label: "First Name" })],
-    });
-    let popupHandedOut = false;
-    let onEmployerSite = false;
-    const navigated: string[] = [];
-    const { config } = configFor(listing, {
-      hands: {
-        observe: () =>
-          Promise.resolve(
-            observationOf(onEmployerSite ? employerForm : listing),
-          ),
-        navigate: (url) => {
-          navigated.push(url);
-          onEmployerSite = true;
-          return Promise.resolve({ ok: true, url });
+  test.each([false, true])(
+    "popup adoption protects existing prepared values (%s)",
+    async (hadWritten) => {
+      const listing = rawPage({
+        url: "https://remoteok.test/remote-jobs/staff-engineer",
+        actions: [{ index: 0, label: "Apply", visible: true, disabled: false }],
+      });
+      const employerForm = rawPage({
+        url: "https://jobs.employer.test/apply/123",
+        controls: [rawControl({ index: 0, label: "First Name" })],
+      });
+      let popupHandedOut = false;
+      let onEmployerSite = false;
+      const navigated: string[] = [];
+      const { config } = configFor(listing, {
+        hands: {
+          observe: () =>
+            Promise.resolve(
+              observationOf(onEmployerSite ? employerForm : listing),
+            ),
+          navigate: (url) => {
+            navigated.push(url);
+            onEmployerSite = true;
+            return Promise.resolve({ ok: true, url });
+          },
         },
-      },
-    });
-    const withSafety: ApplyAgentConfig = {
-      ...config,
-      safety: {
-        readBlockedAttempt: () => {
-          if (popupHandedOut) return Promise.resolve(null);
-          popupHandedOut = true;
-          return Promise.resolve({
-            kind: "popup_open" as const,
-            method: "GET",
-            url: "https://jobs.employer.test/apply/123",
-            at: "2026-09-14T10:00:01.000Z",
-          });
+      });
+      const withSafety: ApplyAgentConfig = {
+        ...config,
+        safety: {
+          readBlockedAttempt: () => {
+            if (popupHandedOut) return Promise.resolve(null);
+            popupHandedOut = true;
+            return Promise.resolve({
+              kind: "popup_open" as const,
+              method: "GET",
+              url: "https://jobs.employer.test/apply/123",
+              at: "2026-09-14T10:00:01.000Z",
+            });
+          },
+          registerPreparedValue: () => Promise.resolve(),
+          openIntermediateWriteWindow: () => Promise.resolve(),
+          closeIntermediateWriteWindow: () => Promise.resolve(),
+          checkServiceWorker: () => Promise.resolve(null),
         },
-        registerPreparedValue: () => Promise.resolve(),
-        openIntermediateWriteWindow: () => Promise.resolve(),
-        closeIntermediateWriteWindow: () => Promise.resolve(),
-        checkServiceWorker: () => Promise.resolve(null),
-      },
-    };
+      };
 
-    const outcome = await executeApplyProposal(
-      { tool: "click", ref: "a0" },
-      observationOf(listing).signature,
-      {
-        config: withSafety,
-        now: () => new Date("2026-09-14T10:00:00.000Z"),
-        guardState: createApplyGuardState(),
-      },
-    );
-
-    expect(navigated).toEqual(["https://jobs.employer.test/apply/123"]);
-    expect(outcome.kind).toBe("moved");
-    if (outcome.kind === "moved") {
-      expect(outcome.note).toContain('"Apply"');
-      expect(outcome.note).toContain("new tab");
-      expect(outcome.note).toContain("https://jobs.employer.test/apply/123");
-      expect(outcome.observation.url).toBe(
-        "https://jobs.employer.test/apply/123",
+      const outcome = await executeApplyProposal(
+        { tool: "click", ref: "a0" },
+        observationOf(listing).signature,
+        {
+          config: withSafety,
+          now: () => new Date("2026-09-14T10:00:00.000Z"),
+          guardState: { ...createApplyGuardState(), hasWritten: hadWritten },
+        },
       );
-    }
-  });
+
+      if (hadWritten) {
+        expect(navigated).toEqual([]);
+        expect(outcome).toMatchObject({
+          kind: "refused",
+          reason:
+            "The page tried to open jobs.employer.test in a new tab; the form stays in this tab.",
+          observation: { url: listing.url },
+        });
+        return;
+      }
+      expect(navigated).toEqual(["https://jobs.employer.test/apply/123"]);
+      expect(outcome.kind).toBe("moved");
+      if (outcome.kind === "moved") {
+        expect(outcome.note).toContain('"Apply"');
+        expect(outcome.note).toContain("new tab");
+        expect(outcome.note).toContain("https://jobs.employer.test/apply/123");
+        expect(outcome.observation.url).toBe(
+          "https://jobs.employer.test/apply/123",
+        );
+      }
+    },
+  );
 });
 
 describe("Round 2 application recovery", () => {
@@ -3991,7 +4007,7 @@ describe("one-use answers and compatible originals", () => {
           id: "application_once",
           kind: "other",
           label,
-          question: `${groupLabel} — ${label}`,
+          question: questionPrompt(observationOf(source).controls[0]),
           answer,
           roleFamilies: [],
           proofEntryIds: [],
@@ -4083,8 +4099,8 @@ describe("one-use answers and compatible originals", () => {
         checkWrittenAnswer,
       },
     );
-    expect(result.kind).toBe("suggestion");
-    expect(checkWrittenAnswer).not.toHaveBeenCalled();
+    expect(result.kind).toBe("filled");
+    expect(checkWrittenAnswer).toHaveBeenCalledTimes(1);
     source.controls[0].label = "Current compensation";
     config.authority.salaryDisclosure = "pause_for_user";
     const current = await executeApplyProposal(
@@ -4111,7 +4127,7 @@ describe("one-use answers and compatible originals", () => {
       },
     );
     expect(current.kind).toBe("suggestion");
-    expect(checkWrittenAnswer).not.toHaveBeenCalled();
+    expect(checkWrittenAnswer).toHaveBeenCalledTimes(1);
   });
 
   test("attaches an unchanged TXT copy when an Original Markdown resume is rejected", async () => {
@@ -4264,7 +4280,7 @@ test.each([
     kind: "suggestion",
     answer: { value: "60000" },
     question: {
-      note: "Job Finder leaves pay questions to you. Answer it yourself if you want to.",
+      note: "Your pay setting is Pause for me on pay. Choose the amount you want to disclose for this application.",
     },
   });
   expect(hands.fillText).not.toHaveBeenCalled();
@@ -5723,4 +5739,125 @@ test("Needs you keeps every offered choice in the form's order", () => {
       suggestion: null,
     }).answerOptions,
   ).toEqual(options);
+});
+
+test.each(["Target@Example.test", "wrong@example.test"])(
+  "Google identifier grounding writes canonical Profile application email only: %s",
+  async (text) => {
+    const seen = rawPage({
+      url: "https://accounts.google.com/v3/signin/identifier",
+      title: "Sign in",
+      controls: [rawControl({ index: 0, label: "Email", inputType: "email" })],
+      actions: [{ index: 0, label: "Next", visible: true, disabled: false }],
+    });
+    const { config, hands } = configFor(seen);
+    config.sources.profile.applicationIdentity.preferredEmail =
+      "Target@Example.test";
+    config.readIntendedAccountEmail = () => "Target@Example.test";
+    config.browserPermissions = {
+      googleSignIn: true,
+      signIn: false,
+      createAccounts: false,
+      solveCaptchas: false,
+    };
+    const write = vi.spyOn(hands, "fillText");
+    const result = await executeApplyProposal(
+      { tool: "type", ref: "c0", text },
+      observationOf(seen).signature,
+      { config, guardState: createApplyGuardState(), now },
+    );
+    if (text === "wrong@example.test") {
+      expect(result.kind).toBe("refused");
+      expect(write).not.toHaveBeenCalled();
+    } else {
+      expect(result.kind).toBe("moved");
+      expect(write).toHaveBeenCalledExactlyOnceWith(
+        "c0",
+        "Target@Example.test",
+      );
+    }
+  },
+);
+
+test.each(["Next", "Review", "Show details"])(
+  "only a visible non-final advance opens a write window: %s",
+  async (label) => {
+    const page = rawPage({
+      actions: [
+        {
+          index: 0,
+          label,
+          visible: true,
+          disabled: false,
+          inForm: true,
+          submitsForm: false,
+        },
+      ],
+    });
+    const { config } = configFor(page);
+    const opened = vi.fn(() => Promise.resolve()),
+      closed = vi.fn(() => Promise.resolve());
+    config.safety = {
+      readBlockedAttempt: () => Promise.resolve(null),
+      registerPreparedValue: () => Promise.resolve(),
+      openIntermediateWriteWindow: opened,
+      closeIntermediateWriteWindow: closed,
+      checkServiceWorker: () => Promise.resolve(null),
+    };
+    await executeApplyProposal(
+      { tool: "click", ref: "a0" },
+      observationOf(page).signature,
+      { config, now, guardState: createApplyGuardState() },
+    );
+    expect(opened).toHaveBeenCalledTimes(label === "Next" ? 1 : 0);
+    if (label !== "Next") expect(closed).toHaveBeenCalledOnce();
+  },
+);
+
+test("a required pay pause offers the recorded target and exact range without entering it", async () => {
+  const page = rawPage({
+    controls: [
+      rawControl({
+        index: 0,
+        label: "Expected annual salary range (EUR)",
+        required: true,
+        tagName: "select",
+        options: ["70 000 EUR – 80 000 EUR", "80 000 EUR – 90 000 EUR"],
+      }),
+    ],
+  });
+  const { config, hands } = configFor(page);
+  config.sources.preferences = JobSearchPreferencesSchema.parse({
+    minimumSalaryUsd: null,
+    approvalMode: "review_before_submit",
+    tailoringMode: "balanced",
+    compensation: {
+      maximum: 85000,
+      currency: "EUR",
+      currencyStatus: "explicit",
+      interval: "year",
+    },
+  });
+  const choose = vi.spyOn(hands, "chooseOption");
+  const outcome = await executeApplyProposal(
+    { tool: "select", ref: "c0", option: "80 000 EUR – 90 000 EUR" },
+    observationOf(page).signature,
+    { config, now, guardState: createApplyGuardState() },
+  );
+  expect(outcome).toMatchObject({
+    kind: "suggestion",
+    answer: { value: "80 000 EUR – 90 000 EUR" },
+    question: {
+      askReason: {
+        check: "pay_permission",
+      },
+    },
+  });
+  if (outcome.kind === "suggestion") {
+    expect(outcome.question?.askReason?.detail).toContain("85000 EUR per year");
+    expect(outcome.question?.askReason?.detail).toContain(
+      "The matching option is 80 000 EUR – 90 000 EUR",
+    );
+  }
+  expect(choose).not.toHaveBeenCalled();
 });

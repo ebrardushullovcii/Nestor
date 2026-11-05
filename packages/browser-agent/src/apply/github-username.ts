@@ -78,7 +78,7 @@ export function fieldNamesAnotherPerson(
     "label" | "groupLabel" | "placeholder" | "hint" | "sectionPath"
   >,
 ): boolean {
-  return /\b(?:references?|referees?|emergency contacts?|another person|other person|someone else|spouse|partner)\b/iu.test(
+  return /\b(?:references?|referees?|supervisors?|referrers?|person who referred you|emergency contacts?|another person|other person|someone else|spouse|partner)\b/iu.test(
     `${control.sectionPath?.join(" ") ?? ""} ${control.groupLabel} ${control.label} ${control.hint ?? ""} ${control.placeholder}`,
   );
 }

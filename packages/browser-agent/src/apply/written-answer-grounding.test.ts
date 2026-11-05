@@ -4,6 +4,55 @@ import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
 import type { LLMClient } from "../agent/contracts";
 import letterRetry from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/letter-check-retry.json";
 
+test("a timed-out short check leaves a full independent recovery window", async () => {
+  vi.useFakeTimers();
+  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  });
+  try {
+    const chatWithTools = vi
+      .fn<LLMClient["chatWithTools"]>()
+      .mockImplementationOnce(
+        (_m, _t, o) =>
+          new Promise((_resolve, reject) => {
+            o?.signal?.addEventListener(
+              "abort",
+              () => reject(new Error("Aborted")),
+              { once: true },
+            );
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve(checkedReply), 1000),
+          ),
+      );
+    const pending = expect(
+      checkWrittenApplicationAnswers({
+        client: { chatWithTools },
+        sources,
+        payDisclosed: false,
+        answers: [
+          { question: "Why this role?", answer: letterRetry.answerSentence },
+        ],
+      }),
+    ).resolves.toMatchObject([{ supported: true }]);
+    await vi.advanceTimersByTimeAsync(61000);
+    await pending;
+    expect(chatWithTools).toHaveBeenCalledTimes(2);
+    expect(chatWithTools.mock.calls[0]?.[2]?.signal).not.toBe(
+      chatWithTools.mock.calls[1]?.[2]?.signal,
+    );
+  } finally {
+    timeout.mockRestore();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
 test("a slow incomplete letter check leaves time for its grounded retry", async () => {
   vi.useFakeTimers();
   const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
@@ -272,20 +321,22 @@ test.each([
           },
         ],
       });
-    const result = await checkWrittenApplicationAnswers({
-      client: { chatWithTools },
-      sources,
-      payDisclosed: false,
-      answers: [
-        {
-          question: "Describe your Rust experience",
-          answer: "Four years using Rust",
-        },
-      ],
-    });
-    expect(result[0]?.supported).toBe(false);
-    expect(result[0]?.reason).toContain("could not verify");
-    expect(chatWithTools).toHaveBeenCalledOnce();
+    await expect(
+      checkWrittenApplicationAnswers({
+        client: { chatWithTools },
+        sources,
+        payDisclosed: false,
+        answers: [
+          {
+            question: "Describe your Rust experience",
+            answer: "Four years using Rust",
+          },
+        ],
+      }),
+    ).resolves.toMatchObject([
+      { supported: false, unavailable: { category: "unverified_evidence" } },
+    ]);
+    expect(chatWithTools).toHaveBeenCalledTimes(2);
   },
 );
 
@@ -383,7 +434,12 @@ test("a repeated incomplete check reports plain copy without provider errors", a
       payDisclosed: false,
       answers: [{ question: "Authorization?", answer: "Yes" }],
     }),
-  ).rejects.toThrow("could not check the facts");
+  ).resolves.toMatchObject([
+    {
+      supported: false,
+      unavailable: { category: "request_failed", stage: "request" },
+    },
+  ]);
   expect(chatWithTools).toHaveBeenCalledTimes(2);
 });
 
@@ -435,4 +491,69 @@ test("conflicts propose wording for person review and omission cannot hide a wor
   expect(prompt).toContain(
     "review the wording before it goes on this application's form",
   );
+});
+
+test("a malformed citation gets one correction against the same Profile facts", async () => {
+  let calls = 0;
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(() => {
+    const first = calls++ === 0;
+    return Promise.resolve({
+      toolCalls: [
+        {
+          id: "check",
+          type: "function",
+          function: {
+            name: "report_answer_checks",
+            arguments: JSON.stringify({
+              checks: [
+                {
+                  index: 0,
+                  supported: true,
+                  reason: "Recorded paid work.",
+                  evidence: [
+                    {
+                      claim: "TypeScript",
+                      kind: "applicant_fact",
+                      source: "applicant",
+                      path: first ? "/skills" : "/summary",
+                      quote: first
+                        ? "TypeScript"
+                        : "Paid work with TypeScript.",
+                    },
+                  ],
+                },
+              ],
+            }),
+          },
+        },
+      ],
+    });
+  });
+  const checked = await checkWrittenApplicationAnswers({
+    client: { chatWithTools },
+    sources: {
+      ...sources,
+      profile: CandidateProfileSchema.parse({
+        ...sources.profile,
+        summary: "Paid work with TypeScript.",
+      }),
+    },
+    payDisclosed: false,
+    answers: [
+      {
+        question: "Select technologies used in paid work.",
+        answer: "TypeScript",
+        evidencePolicy: "factual_inference",
+      },
+    ],
+  });
+  expect(checked[0]?.supported).toBe(true);
+  expect(chatWithTools).toHaveBeenCalledTimes(2);
+  const correction = JSON.stringify(chatWithTools.mock.calls[1]?.[0].at(-1));
+  expect(correction).toContain("priorReports");
+  expect(correction).toContain("evidenceIndex");
+  expect(correction).toContain("/skills");
+  expect(correction).toContain("source_path_not_found");
+  expect(correction).not.toContain("did not return a valid");
+  expect(correction).not.toContain("JSON-encoded");
 });
