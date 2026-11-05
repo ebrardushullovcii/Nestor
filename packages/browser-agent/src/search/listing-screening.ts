@@ -60,36 +60,6 @@ export function professionEvidence(card: ListingCard): string {
     .slice(0, 1200);
 }
 
-/** A provider already supplied the body: challenge a negative title verdict with
- * explicit duties in the requested profession, without another network read. */
-export function roleDutyEvidence(
-  card: ListingCard,
-  goals: RoleScreenGoals,
-): string | null {
-  if (!card.listingText) return null;
-  const titleWords = new Set(words(card.title).split(" "));
-  const roles =
-    goals.strategy === "target_roles"
-      ? goals.targetRoles
-      : [...goals.targetRoles, ...goals.relatedRoles];
-  for (const role of roles) {
-    const tokens = words(role).replace(rank, "").split(" ");
-    const profession = tokens.pop();
-    if (!profession || !titleWords.has(profession) || !tokens.length) continue;
-    const paragraph = card.listingText.split(/\n\s*\n/u).find((paragraph) => {
-      const facts = words(paragraph).split(" ");
-      return (
-        tokens.every((token) => facts.includes(token)) &&
-        /\b(?:build|design|develop|operat|writ|maintain|implement)\w*/iu.test(
-          paragraph,
-        )
-      );
-    });
-    if (paragraph) return paragraph.slice(0, 600);
-  }
-  return null;
-}
-
 /** Give a small classifier only examples for the person's requested professions. */
 export function professionInstructions(goals: RoleScreenGoals): string {
   const roles = [

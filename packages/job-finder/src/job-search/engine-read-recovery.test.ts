@@ -53,7 +53,6 @@ test("a navigation checkpoint can wait for profession verification to render its
   });
   const chatWithTools = vi
     .fn<NonNullable<JobFinderAiClient["chatWithTools"]>>()
-    .mockResolvedValueOnce({ content: '{"keep":{"0":0}}' })
     .mockResolvedValueOnce({ content: '{"keep":{"0":1}}' });
   const readRenderedPage = vi.fn((url: string) =>
     Promise.resolve({

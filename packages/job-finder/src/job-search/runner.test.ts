@@ -162,6 +162,75 @@ function finished(runner: JobSearchRunner): Promise<JobSearchStatus> {
   });
 }
 
+test("streamed matches persist before screening finishes and final results do not reread or recount them", async () => {
+  const { runner, engine, store } = setup();
+  const gate = deferred<void>();
+  engine.screenCards.mockImplementation(async ({ cards, onRelated }) => {
+    const related = cards.filter((card) => card.title !== "Nurse");
+    await onRelated?.(related);
+    await onRelated?.(related);
+    await gate.promise;
+    return { related, seen: [], skipped: 0 };
+  });
+  await runner.start({ postedWithin: "any" });
+  await vi.waitFor(() => expect(store.stageCounts().found).toBe(1));
+  expect(runner.status().search?.state).toBe("running");
+  expect(engine.readListings).toHaveBeenCalledTimes(2);
+  gate.resolve();
+  await finished(runner);
+  expect(engine.readListings).toHaveBeenCalledTimes(2);
+  const sources = createSearchSourcesStore(store).list({}).rows;
+  expect(sources.map((source) => source.found)).toEqual([1, 1]);
+  expect(sources.map((source) => source.related)).toEqual([1, 1]);
+});
+
+test("Stop retains streamed matches while the remaining screening is unfinished", async () => {
+  const { runner, engine, store } = setup();
+  engine.screenCards.mockImplementation(
+    async ({ cards, onRelated, signal }) => {
+      await onRelated?.(cards.filter((card) => card.title !== "Nurse"));
+      await new Promise<void>((_resolve, reject) =>
+        signal.addEventListener(
+          "abort",
+          () => reject(new Error("Search stopped")),
+          {
+            once: true,
+          },
+        ),
+      );
+      return { related: [], seen: [], skipped: 0 };
+    },
+  );
+  await runner.start({ postedWithin: "any" });
+  await vi.waitFor(() => expect(store.stageCounts().found).toBe(1));
+  runner.stop();
+  await finished(runner);
+  expect(store.stageCounts().found).toBe(1);
+  expect(runner.status().search?.state).toBe("stopped");
+});
+
+test("a source completed entirely by streamed matches keeps its finished phase and counts", async () => {
+  const { runner, engine, store } = setup();
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [card(target.id)],
+      pagesRead: 1,
+      complete: true,
+      notes: [],
+    }),
+  );
+  engine.screenCards.mockImplementation(async ({ cards, onRelated }) => {
+    await onRelated?.([...cards]);
+    return { related: [...cards], seen: [], skipped: 0 };
+  });
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  const sources = createSearchSourcesStore(store).list({}).rows;
+  expect(sources.map((source) => source.phase)).toEqual([null, null]);
+  expect(sources.map((source) => source.related)).toEqual([1, 1]);
+  expect(sources.map((source) => source.found)).toEqual([1, 1]);
+});
+
 test.each([false, true])(
   "source retry keeps its ticket until detail reads finish (blocked=%s)",
   async (blocked) => {

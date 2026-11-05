@@ -133,4 +133,14 @@ export async function setup(app: App) {
     noticePeriodDays: 30,
     salaryDisclosure: "pause_for_user",
   });
+  // A faster collector can save jobs before setup's Stop reaches the app.
+  // Release this isolated fixture-only hold after setup, so search timings
+  // always start with the same cold inventory rather than saved shortcuts.
+  await ctx.app.evaluate(() => {
+    const release = Reflect.get(
+      globalThis,
+      "__nestorReleaseScoreboardReads",
+    ) as (() => void) | undefined;
+    release?.();
+  });
 }

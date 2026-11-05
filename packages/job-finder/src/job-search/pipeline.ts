@@ -157,7 +157,99 @@ export function createSearchPipeline(input: {
         }
         input.write(source);
       }
+      const emitted = new Set<string>();
+      let reading = Promise.resolve();
+      const readRelated = async (relatedCards: readonly ListingCard[]) => {
+        const result = await deps.engine
+          .readListings({
+            cards: relatedCards,
+            signal,
+            lane: "http",
+          })
+          .catch((error: unknown): ReadListingResult => {
+            signal.throwIfAborted();
+            const reason =
+              error instanceof Error ? error.message : String(error);
+            return {
+              jobs: [],
+              failures: relatedCards.map((card) => ({
+                url: card.url,
+                reason,
+              })),
+            };
+          });
+        signal.throwIfAborted();
+        const deferredUrls = new Set(
+          result.failures
+            .filter((failure) => failure.requiresBrowser)
+            .map((failure) => failure.url),
+        );
+        const fastCards = relatedCards.filter(
+          (card) => !deferredUrls.has(card.url),
+        );
+        finishRead(fastCards, {
+          jobs: result.jobs,
+          failures: result.failures.filter(
+            (failure) => !deferredUrls.has(failure.url),
+          ),
+        });
+        const deferred = new Map<string, ListingCard[]>();
+        for (const card of relatedCards)
+          if (deferredUrls.has(card.url)) {
+            const group = deferred.get(card.sourceId) ?? [];
+            group.push(card);
+            deferred.set(card.sourceId, group);
+          }
+        for (const [id, group] of deferred) {
+          const source = sources.get(id)!;
+          input.browser(source, async (browserSignal) => {
+            let result: ReadListingResult;
+            try {
+              result = await deps.engine.readListings({
+                cards: group,
+                signal: browserSignal,
+                lane: "browser",
+              });
+            } catch (error) {
+              signal.throwIfAborted();
+              result = {
+                jobs: [],
+                failures: group.map((card) => ({
+                  url: card.url,
+                  reason:
+                    error instanceof Error ? error.message : String(error),
+                })),
+              };
+            }
+            signal.throwIfAborted();
+            browserSignal.throwIfAborted();
+            finishRead(group, result);
+          });
+        }
+      };
+      // Keep each source's reads bounded and persist them before waiting for
+      // unrelated cards. The final result may repeat these streamed matches.
+      const readNewRelated = (
+        relatedCards: readonly ListingCard[],
+        account = true,
+      ) => {
+        const fresh = relatedCards.filter(
+          (card) => !emitted.has(`${card.sourceId}\n${card.url}`),
+        );
+        for (const card of fresh) {
+          emitted.add(`${card.sourceId}\n${card.url}`);
+          if (account) {
+            const source = sources.get(card.sourceId)!;
+            source.screened++;
+            source.row.related++;
+            input.write(source);
+          }
+        }
+        if (fresh.length) reading = reading.then(() => readRelated(fresh));
+        return reading;
+      };
       const screened = await deps.engine.screenCards({
+        onRelated: readNewRelated,
         cards,
         context,
         settings,
@@ -177,9 +269,10 @@ export function createSearchPipeline(input: {
       const failedSources = new Map<string, string>();
       for (const card of cards) {
         const source = sources.get(card.sourceId)!;
-        source.screened++;
+        const streamed = emitted.has(`${card.sourceId}\n${card.url}`);
+        if (!streamed) source.screened++;
         if (related.has(`${card.sourceId}\n${card.url}`)) {
-          source.row.related++;
+          if (!streamed) source.row.related++;
           source.unrelatedRun = 0;
         } else {
           source.processed++;
@@ -201,74 +294,12 @@ export function createSearchPipeline(input: {
         );
       for (const id of touched) {
         const source = sources.get(id)!;
-        if (!settledState(source.row.state)) source.row.phase = "reading";
+        if (!source.counted && !settledState(source.row.state))
+          source.row.phase = "reading";
         input.write(source);
         input.settled(source);
       }
-      const result = await deps.engine
-        .readListings({
-          cards: screened.related,
-          signal,
-          lane: "http",
-        })
-        .catch((error: unknown): ReadListingResult => {
-          signal.throwIfAborted();
-          const reason = error instanceof Error ? error.message : String(error);
-          return {
-            jobs: [],
-            failures: screened.related.map((card) => ({
-              url: card.url,
-              reason,
-            })),
-          };
-        });
-      signal.throwIfAborted();
-      const deferredUrls = new Set(
-        result.failures
-          .filter((failure) => failure.requiresBrowser)
-          .map((failure) => failure.url),
-      );
-      const fastCards = screened.related.filter(
-        (card) => !deferredUrls.has(card.url),
-      );
-      finishRead(fastCards, {
-        jobs: result.jobs,
-        failures: result.failures.filter(
-          (failure) => !deferredUrls.has(failure.url),
-        ),
-      });
-      const deferred = new Map<string, ListingCard[]>();
-      for (const card of screened.related)
-        if (deferredUrls.has(card.url)) {
-          const group = deferred.get(card.sourceId) ?? [];
-          group.push(card);
-          deferred.set(card.sourceId, group);
-        }
-      for (const [id, group] of deferred) {
-        const source = sources.get(id)!;
-        input.browser(source, async (browserSignal) => {
-          let result: ReadListingResult;
-          try {
-            result = await deps.engine.readListings({
-              cards: group,
-              signal: browserSignal,
-              lane: "browser",
-            });
-          } catch (error) {
-            signal.throwIfAborted();
-            result = {
-              jobs: [],
-              failures: group.map((card) => ({
-                url: card.url,
-                reason: error instanceof Error ? error.message : String(error),
-              })),
-            };
-          }
-          signal.throwIfAborted();
-          browserSignal.throwIfAborted();
-          finishRead(group, result);
-        });
-      }
+      await readNewRelated(screened.related, false);
       for (const id of touched) input.settled(sources.get(id)!);
     },
     concurrency(deps.concurrency?.sources, 12),

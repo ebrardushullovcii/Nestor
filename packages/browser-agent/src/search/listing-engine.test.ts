@@ -36,7 +36,7 @@ const card = (title: string, id = title): ListingCard => ({
   sourceLabel: source.label,
 });
 
-test("a negative unusual title is checked against full duties and its page is reused", async () => {
+test("an unusual title is judged with full duties once and its page is reused", async () => {
   const cards = [card("Trend Steward"), card("Metrics Caretaker")];
   const pages = new Map(
     cards.map((row) => [
@@ -57,12 +57,11 @@ test("a negative unusual title is checked against full duties and its page is re
       };
       if (data.titles) {
         calls++;
-        if (calls > 1)
-          for (const row of data.titles)
-            expect(row[2]).toContain("Analyse revenue with SQL joins");
+        for (const row of data.titles)
+          expect(row[3]).toContain("Analyse revenue with SQL joins");
         return Promise.resolve({
           content: JSON.stringify({
-            keep: { 0: calls === 1 ? 0 : 1, 1: calls === 1 ? 0 : 1 },
+            keep: { 0: 1, 1: 1 },
           }),
         });
       }
@@ -100,6 +99,7 @@ test("a negative unusual title is checked against full duties and its page is re
   expect(result.seen).toEqual([]);
   expect(result.failed).toEqual([]);
   expect(readPage).toHaveBeenCalledTimes(2);
+  expect(calls).toBe(1);
   expect(result.related[0].listingPage).toEqual(pages.get(cards[0].url));
   const downstream = vi.fn(() =>
     Promise.reject(new Error("The verified page should be reused")),
@@ -1169,7 +1169,7 @@ test("malformed screening retries only its unfinished titles in small groups", a
   expect(calls).toBe(8);
 });
 
-test("negative titles get a second look when cached full text names requested duties", async () => {
+test("ambiguous provider titles include cached full duties in their first judgment", async () => {
   const listing = {
     ...card("Software Engineer - Marketplaces"),
     listingText: "Our team develops and operates backend services.",
@@ -1180,7 +1180,11 @@ test("negative titles get a second look when cached full text names requested du
         Promise.resolve({
           content: JSON.stringify({
             keep: {
-              0: messages[1].content.includes("Role-duty evidence") ? 1 : 0,
+              0: messages[1].content.includes(
+                "Our team develops and operates backend services",
+              )
+                ? 1
+                : 0,
             },
           }),
         }),
@@ -1197,7 +1201,7 @@ test("negative titles get a second look when cached full text names requested du
   });
   expect(result.related).toEqual([listing]);
   expect(result.seen).toEqual([]);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
 test("uncertain metadata expands only the unresolved listing; full descriptions stay intact", async () => {
