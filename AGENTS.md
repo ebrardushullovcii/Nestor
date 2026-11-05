@@ -4,7 +4,7 @@ Local-first Electron monorepo (pnpm + turbo) with two modules: `Job Finder` and 
 
 ## Rules
 
-- Never commit, push, or create/update a PR unless the user explicitly asks. A requested commit is pushed in the same step; if the current branch was already merged, use a new branch off `origin/main`.
+- Never commit, push, or create/update a PR unless the user explicitly asks. A commit request alone does not authorize a push; a requested PR includes the push needed to create or update it. If the current branch was already merged, use a new branch off `origin/main`.
 - Don't run a release-acceptance chain unless the user declares a release candidate. `docs/TESTING.md` maps changes to automated checks.
 - Never kill a process you did not start. No `pkill -f electron`, `pkill -f Nestor` or `killall Electron`: they hit the user's own `pnpm desktop:dev`. Stop only what you launched, through its handle or PID tree.
 - Test runs send applications only to the local replica job sites (`docs/TESTING.md`); anywhere else they stay `prepare_only` with `submitAuthorized: false`. Final submission, account creation, credentials, CAPTCHA and MFA stay the person's unless they authorize the step (ADR 0012, 0024, 0027).
