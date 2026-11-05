@@ -95,6 +95,9 @@ async function answerWorkday(app: App, need: Need) {
     .first()
     .click();
   const pane = p.getByRole("region", { name: "Task details" });
+  await pane
+    .getByRole("heading", { name: need.prompt, exact: true })
+    .waitFor({ state: "visible", timeout: 15000 });
   const remember = pane.getByRole("checkbox", {
     name: /Save this answer|Remember/,
   });
