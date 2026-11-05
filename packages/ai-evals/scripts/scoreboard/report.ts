@@ -108,6 +108,48 @@ export function markDuplicates(questions: Question[]) {
   });
 }
 
+export function auditQuestions(run: Run) {
+  const quality = run.results.find((r) => r.id === "needs-you");
+  if (!quality) return;
+  const cases = run.results.filter((r) => !["needs-you", "v2"].includes(r.id));
+  const questions = new Map<string, Question>();
+  for (const r of cases)
+    for (const q of r.questions)
+      questions.set(`${q.instance}:${q.id}:${q.text}`, q);
+  quality.questions = markDuplicates(
+    [...questions.values()].sort((a, b) =>
+      a.firstSeenAt.localeCompare(b.firstSeenAt),
+    ),
+  );
+  const known = quality.questions.filter((q) => q.profileAnswers).length;
+  const duplicates = quality.questions.filter((q) => q.duplicate).length;
+  const unmeasured = cases.filter((r) =>
+    /^(setup \/|runner$)/.test(r.failure?.step ?? ""),
+  );
+  const observed = cases.filter(
+    (r) => r.status !== "not run" && !unmeasured.includes(r),
+  );
+  quality.status =
+    known || duplicates || unmeasured.length
+      ? "fail"
+      : observed.length
+        ? "pass"
+        : "not run";
+  quality.metrics.summary = `${quality.questions.length} items; profile answered=${known}; duplicate asks=${duplicates}; coverage=${observed.length}/8 scenarios`;
+  quality.metrics.coverage = observed.map((r) => r.id);
+  quality.metrics.unmeasured = unmeasured.map((r) => r.id);
+  delete quality.failure;
+  if (known || duplicates || unmeasured.length)
+    quality.failure = {
+      step: "aggregate question audit",
+      happened: `${known} questions already answered by the profile; ${duplicates} repeated asks.${unmeasured.length ? ` No product measurement for: ${unmeasured.map((r) => r.id).join(", ")}.` : ""}`,
+      likelyPackage:
+        known || duplicates
+          ? "packages/browser-agent/src/apply (question selection/reuse)"
+          : "scoreboard runner/setup (question coverage incomplete)",
+    };
+}
+
 const cell = (value: unknown) =>
   (typeof value === "string" ? value : JSON.stringify(value ?? "—"))
     .replace(/\|/g, "\\|")

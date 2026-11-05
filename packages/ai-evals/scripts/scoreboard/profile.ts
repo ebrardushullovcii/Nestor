@@ -55,8 +55,19 @@ export async function setup(app: App) {
   // Guided setup starts search automatically. Stop it before establishing the
   // measured search's starting set. Its rows are retained and recorded.
   const stop = p.getByRole("button", { name: "Stop search", exact: true });
-  await stop.waitFor({ timeout: 15000 });
-  await stop.click();
+  await app.until(
+    async () => {
+      const search = app.read<{ state: string }>(
+        "SELECT state FROM searches ORDER BY started_at DESC LIMIT 1",
+      )[0];
+      if (search && search.state !== "running") return true;
+      if (!(await stop.isVisible())) return false;
+      await stop.click();
+      return true;
+    },
+    15,
+    "stop setup search, or accept that it already finished",
+  );
   await app.until(
     () =>
       !app

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
-import { markDuplicates, markdown, profileAnswer } from "./report.ts";
+import {
+  auditQuestions,
+  markDuplicates,
+  markdown,
+  profileAnswer,
+} from "./report.ts";
 import type { Question, Run } from "./types.ts";
 
 test("profile audit flags known facts without inventing sensitive or foreign-country answers", () => {
@@ -131,4 +136,29 @@ test("report keeps failures, unrun scenarios and v2 distinct from passes", () =>
   assert.match(report, /site \\\| failed/);
   assert.match(report, /Checker failed.*Step: check.*browser-agent/);
   assert.doesNotMatch(report, /\| PASS \|/);
+  run.results.push({
+    id: "needs-you",
+    name: "Needs you quality",
+    status: "pass",
+    seconds: 0,
+    questions: [],
+    metrics: {},
+  });
+  // A setup failure is not a scenario with zero questions and full coverage.
+  run.results[0].failure!.step = "setup / search";
+  auditQuestions(run);
+  const quality = run.results.at(-1)!;
+  assert.equal(quality.status, "fail");
+  assert.deepEqual(quality.metrics.coverage, []);
+  assert.deepEqual(quality.metrics.unmeasured, ["standard"]);
+  assert.match(
+    quality.failure!.happened,
+    /No product measurement for: standard/,
+  );
+  run.results[0].failure = undefined;
+  run.results[0].status = "pass";
+  auditQuestions(run);
+  assert.equal(quality.status, "pass");
+  assert.equal(quality.failure, undefined, "a new audit clears stale failures");
+  assert.deepEqual(quality.metrics.coverage, ["standard"]);
 });

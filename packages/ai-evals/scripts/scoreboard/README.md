@@ -3,11 +3,11 @@
 From the repository root, with dependencies installed and Node 24 or newer:
 
 ```sh
-node packages/ai-evals/scripts/scoreboard/run.ts
-node packages/ai-evals/scripts/scoreboard/run.ts --scenario captcha
+/Users/ebrardushullovci/Projects/nestor-agent-work/bin/heavy node packages/ai-evals/scripts/scoreboard/run.ts
+/Users/ebrardushullovci/Projects/nestor-agent-work/bin/heavy node packages/ai-evals/scripts/scoreboard/run.ts --scenario captcha
 ```
 
-The command builds the desktop through `~/Projects/nestor-agent-work/bin/heavy`, runs each scenario in a fresh isolated live-AI app, one at a time, using the existing local replicas, writes the scoreboard, and stops its own processes. Fresh instances prevent shared host sign-in/CAPTCHA items from contaminating later scenarios. It never attaches to a development app. `--no-build` requires an already matching stamped build. `--timeout 240` sets the application deadline in seconds; search has a 240-second minimum and the ten-job batch a 420-second minimum. Time spent importing the profile, building and cleaning up is reported separately from scenario time.
+The whole command holds the Mac's one shared heavy slot, including the build and every app session. The runner checks that the lock owner is its ancestor and refuses to start without it. It builds the desktop, runs each scenario in a fresh isolated live-AI app, one at a time, using the existing local replicas, writes the scoreboard, and stops its own processes. Fresh instances prevent shared host sign-in/CAPTCHA items from contaminating later scenarios. It never attaches to a development app. `--no-build` requires an already matching stamped build. `--timeout 240` sets the application deadline in seconds; search has a 240-second minimum and the ten-job batch a 420-second minimum. Time spent importing the profile, building and cleaning up is reported separately from scenario time.
 
 Use `--list` for scenario IDs, or `--out /absolute/outside-repo/path` for a different result directory. Default output is `~/Projects/nestor-agent-work/functionality-hill-climb/scoreboard/YYYYMMDD-HHMM/`. An existing scoreboard is never overwritten. `scoreboard.json` is saved after every scenario; `scoreboard.md` has the table, failures, persona and every question. `steps/<scenario>.log` records actions, state and questions. Driver proof is under the run's isolated-instance subfolder. Only failures take screenshots. Exit codes are 0 for requested v1 passes, 1 for scenario failures, 2 for setup/driver/cleanup failures. The v2 row says **not built yet**.
 
@@ -32,5 +32,5 @@ The driver location is confined to `DRIVER_PATHS` in `run.ts`, preferring `packa
 ```sh
 pnpm exec tsc -p packages/ai-evals/scripts/scoreboard/tsconfig.json
 pnpm exec eslint packages/ai-evals/scripts/scoreboard --ext .ts
-pnpm exec vitest run packages/ai-evals/scripts/scoreboard/report.test.ts
+pnpm exec vitest run packages/ai-evals/scripts/scoreboard/report.test.ts --maxWorkers=2
 ```

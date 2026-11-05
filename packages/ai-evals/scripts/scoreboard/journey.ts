@@ -4,7 +4,7 @@ import { App } from "./app.ts";
 import * as applications from "./applications.ts";
 import { setup } from "./profile.ts";
 import { search } from "./search.ts";
-import { markDuplicates, PERSONA, save, SCENARIOS } from "./report.ts";
+import { auditQuestions, PERSONA, save, SCENARIOS } from "./report.ts";
 import type { Context, Result, Run } from "./types.ts";
 
 const handlers: Record<string, (app: App, result: Result) => Promise<void>> = {
@@ -73,6 +73,7 @@ export default async function journey(ctx: Context) {
     run.setupSeconds =
       (run.setupSeconds ?? 0) + (Date.now() - setupStarted) / 1000;
     await ctx.shot("scoreboard-setup-failed").catch(() => {});
+    auditQuestions(run);
     save(run);
     return { setupFailed: message };
   }
@@ -140,36 +141,12 @@ export default async function journey(ctx: Context) {
       );
     }
   }
+  auditQuestions(run);
   const quality = run.results.find((r) => r.id === "needs-you")!;
-  const questions = new Map<string, Result["questions"][number]>();
-  for (const r of run.results.filter((r) => r.id !== "needs-you"))
-    for (const q of r.questions)
-      questions.set(`${q.instance}:${q.id}:${q.text}`, q);
-  quality.questions = markDuplicates(
-    [...questions.values()].sort((a, b) =>
-      a.firstSeenAt.localeCompare(b.firstSeenAt),
-    ),
-  );
-  const covered = quality.questions.filter((q) => q.profileAnswers).length;
-  const duplicates = quality.questions.filter((q) => q.duplicate).length;
-  const attempted = run.results.filter(
-    (r) => !["needs-you", "v2"].includes(r.id) && r.status !== "not run",
-  );
-  quality.status =
-    covered || duplicates ? "fail" : attempted.length ? "pass" : "not run";
-  quality.metrics.summary = `${quality.questions.length} items; profile answered=${covered}; duplicate asks=${duplicates}; coverage=${attempted.length}/8 scenarios`;
-  quality.metrics.coverage = attempted.map((r) => r.id);
   writeFileSync(
     path.join(config.output, "steps", "needs-you.log"),
     `${new Date().toISOString()} ${quality.status}: ${quality.metrics.summary}\n`,
   );
-  if (covered || duplicates)
-    quality.failure = {
-      step: "aggregate question audit",
-      happened: `${covered} questions already answered by the profile; ${duplicates} repeated asks.`,
-      likelyPackage:
-        "packages/browser-agent/src/apply (question selection/reuse)",
-    };
   save(run);
   return {
     results: run.results
