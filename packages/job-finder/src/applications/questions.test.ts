@@ -9,6 +9,7 @@ import {
   describeSavedFormAnswer,
   describeLegacyFormQuestion,
   resolveListingCountry,
+  toKnownFormAnswer,
   type FormQuestion,
 } from "./questions";
 
@@ -158,7 +159,11 @@ test("an explicit authorization country has a fingerprinted key across posting l
   };
   const saved = describeSavedFormAnswer(prompt, "No");
   const profile = { workEligibility: CandidateWorkEligibilitySchema.parse({}) };
-  const target = describeFormQuestion(question, { id: 1, location: "Germany" }, profile);
+  const target = describeFormQuestion(
+    question,
+    { id: 1, location: "Germany" },
+    profile,
+  );
   expect(target.reusePrompt).toBe(false);
   expect(target.key).not.toBe(saved.key);
   expect(
@@ -259,4 +264,32 @@ test.each([
   ["Canada / Germany", null],
 ])("listing country %s resolves conservatively", (location, expected) => {
   expect(resolveListingCountry(location)).toBe(expected);
+});
+
+test("only an application-local answer carries the original exact field binding", () => {
+  const question: FormQuestion = {
+    prompt: "Saturday hours",
+    kind: "availability",
+    answerControlType: "text",
+    answerOptions: [],
+    currentFieldBinding: {
+      pageUrl: "http://127.0.0.1:47950/apply/42",
+      targetHash: "a".repeat(64),
+      instructionsHash: "b".repeat(64),
+    },
+  };
+  const answer = {
+    id: "42",
+    prompt: question.prompt,
+    answer: "8",
+    local: true,
+  };
+  expect(
+    toKnownFormAnswer(answer, question, "Germany", 42).applicationScope
+      ?.currentFieldBinding,
+  ).toEqual(question.currentFieldBinding);
+  expect(
+    toKnownFormAnswer({ ...answer, local: false }, question, "Germany", 42)
+      .applicationScope?.currentFieldBinding,
+  ).toBeUndefined();
 });

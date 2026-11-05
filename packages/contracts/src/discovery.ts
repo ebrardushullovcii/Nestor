@@ -1,3 +1,4 @@
+import { CurrentApplicationFieldBindingSchema } from "./profile";
 import {
   ApplyAgentTimingSchema,
   ApplicationApplyUsageTotalsSchema,
@@ -2056,6 +2057,7 @@ export const ApplicationQuestionInputConstraintsSchema = z.object({
 });
 
 export const ApplicationAttemptQuestionSchema = z.object({
+  currentFieldBinding: CurrentApplicationFieldBindingSchema.optional(),
   askReason: ApplicationQuestionAskReasonSchema.optional(),
   id: NonEmptyStringSchema,
   prompt: NonEmptyStringSchema,

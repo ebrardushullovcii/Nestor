@@ -4591,3 +4591,87 @@ it("bounds an unavailable equivalent-question read until its source snapshot cha
   ).not.toContain(requested.task.id);
   f.releases.shift()!();
 });
+
+it("carries the original current-field binding through a remembered local answer on continuation", async () => {
+  const f = await setup(1);
+  const question = ApplyExecutionResultSchema.parse({
+    ...ready(),
+    state: "paused",
+    questions: [
+      {
+        id: "availability",
+        prompt: "Saturday hours 09:00–17:00",
+        kind: "other",
+        answerControlType: "text",
+        answerOptions: [],
+        detectedAt: new Date().toISOString(),
+        currentFieldBinding: {
+          pageUrl: "https://replica.test/jobs/0",
+          targetHash: "a".repeat(64),
+          instructionsHash: "b".repeat(64),
+        },
+      },
+    ],
+  }).questions[0]!;
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.releases.shift()!(
+    ApplyExecutionResultSchema.parse({
+      ...ready(),
+      state: "paused",
+      questions: [question],
+    }),
+  );
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("needs_you"),
+  );
+  const task = f.applications.needsYou.list().rows[0]!;
+  f.applications.needsYou.answer({ id: task.id, answer: "8", remember: true });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  const answers = await preparation.readAnswers!([
+    { ...question, prompt: "Saturday hours 09:00 — 17:00" },
+  ]);
+  expect(
+    answers.find((a) => a.id.startsWith("application_"))?.applicationScope
+      ?.currentFieldBinding,
+  ).toEqual(question.currentFieldBinding);
+  f.releases.shift()!();
+});
+
+it("a technical failure keeps Try again visible while a separate genuine question stays open", async () => {
+  const f = await setup(1);
+  preparation.technicalFailure = true;
+  Object.assign(f.browser, {
+    hasApplicationPageBinding: (_source: string, key: string) =>
+      Promise.resolve(key.endsWith("_attempt_1")),
+  });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const paused = ApplyExecutionResultSchema.parse({
+    ...ready(),
+    state: "paused",
+    questions: [
+      {
+        id: "missing-contact",
+        prompt: "Preferred contact time",
+        kind: "other",
+        answerControlType: "text",
+        answerOptions: [],
+        detectedAt: new Date().toISOString(),
+      },
+    ],
+  });
+  expect(
+    f.execute.mock.calls[0]![1].shouldRetainFailedApplicationPage?.(paused),
+  ).toBe(true);
+  f.releases.shift()!(paused);
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("failed"),
+  );
+  expect(f.applications.needsYou.list().rows.map((q) => q.prompt)).toEqual([
+    "Preferred contact time",
+  ]);
+  expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
+});

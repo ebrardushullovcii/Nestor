@@ -201,7 +201,18 @@ export function applicationFacts(
         label: saved.label,
         question: saved.question,
         answer: saved.answer,
-        applicationScope: saved.applicationScope,
+        // Native execution binding is host metadata, not a new applicant fact.
+        // Fill and Send see the same scope even when only Fill has that marker.
+        applicationScope: saved.applicationScope
+          ? {
+              resultId: saved.applicationScope.resultId,
+              applicationRecordId: saved.applicationScope.applicationRecordId,
+              location: saved.applicationScope.location,
+              ...(saved.applicationScope.hiringCountry
+                ? { hiringCountry: saved.applicationScope.hiringCountry }
+                : {}),
+            }
+          : undefined,
         optionFallback: saved.optionFallback,
       })),
     spokenLanguages: profile.spokenLanguages,

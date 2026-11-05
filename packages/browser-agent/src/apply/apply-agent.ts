@@ -1,4 +1,5 @@
 import {
+  currentApplicationAnswer,
   meaningHash,
   meaningSourcesHash,
   meaningTargetHash,
@@ -819,6 +820,7 @@ async function runMeasuredApplyAgent(
                   sources: runConfig.sources,
                   answer: "",
                   pageInstructions: formWritingInstructions(page),
+                  pageUrl: page.url,
                 });
                 if (permission.kind !== "writing")
                   return {
@@ -941,6 +943,7 @@ async function runMeasuredApplyAgent(
       sources: runConfig.sources,
       answer,
       pageInstructions: formWritingInstructions(observation),
+      pageUrl: observation.url,
       approvedAttestations: runConfig.authority.preApprovedAttestationKinds,
       application: config.application,
       payDisclosed,
@@ -1210,8 +1213,10 @@ async function runMeasuredApplyAgent(
         controls: observation.controls,
         tags: reading?.answerTags,
         sources: runConfig.sources,
+        application: config.application,
         answer,
         pageInstructions: formWritingInstructions(observation),
+        pageUrl: observation.url,
       });
       if (permission.kind !== "writing" && permission.kind !== "inference")
         return null;
@@ -1284,7 +1289,11 @@ async function runMeasuredApplyAgent(
             reading.asksCurrentPay ?? input.control.asksCurrentPay ?? false,
         }
       : input.control;
-    const pendingInput = { ...input, control };
+    const pendingInput = {
+      ...input,
+      control,
+      ...(page ? { observation: page } : {}),
+    };
     const pause = payDisclosurePause(control, runConfig, controls);
     const pay = expectedPayHandoff(control, runConfig.sources);
     if (!pay && pause)
@@ -1370,6 +1379,7 @@ async function runMeasuredApplyAgent(
         payDisclosed,
         answer: value,
         pageInstructions: formWritingInstructions(observation),
+        pageUrl: observation.url,
         approvedAttestations: config.authority.preApprovedAttestationKinds,
         matchedSourceId: matchedAnswers.get(semanticAnswerKey(control, value)),
         now: now(),
@@ -1425,6 +1435,18 @@ async function runMeasuredApplyAgent(
         pickerExhausted(guardState, control))
     )
       return null;
+    const direct = currentApplicationAnswer({
+      control,
+      controls: observation.controls,
+      sources: runConfig.sources,
+      application: config.application,
+      pageUrl: observation.url,
+      pageInstructions: formWritingInstructions(observation),
+    });
+    if (direct && (!proposed || proposed.trim() === direct.answer.trim())) {
+      literalSourceIds.set(control.ref, `answerLibrary.${direct.id}`);
+      return direct.answer;
+    }
     const readings = classifyQuestions?.settled(
       observation.controls,
       questionReadContext(observation),
@@ -1458,6 +1480,7 @@ async function runMeasuredApplyAgent(
         payDisclosed,
         answer: "Yes",
         pageInstructions: formWritingInstructions(observation),
+        pageUrl: observation.url,
       });
       if (
         permission.kind === "literal" &&
@@ -1491,6 +1514,7 @@ async function runMeasuredApplyAgent(
         answer: payRange.value,
         payDisclosed,
         pageInstructions: formWritingInstructions(observation),
+        pageUrl: observation.url,
         approvedAttestations: config.authority.preApprovedAttestationKinds,
       });
       if (permission.kind === "literal") {
@@ -1523,6 +1547,7 @@ async function runMeasuredApplyAgent(
         payDisclosed,
         answer: value,
         pageInstructions: formWritingInstructions(observation),
+        pageUrl: observation.url,
         approvedAttestations: config.authority.preApprovedAttestationKinds,
       });
       if (permission.kind !== "literal") continue;
@@ -2459,7 +2484,21 @@ async function runMeasuredApplyAgent(
         if (outcome.question) {
           pendingQuestions.set(
             control ? pendingQuestionKey(control) : outcome.controlRef,
-            outcome.question,
+            control && outcome.observation.url
+              ? {
+                  ...outcome.question,
+                  currentFieldBinding: {
+                    pageUrl: outcome.observation.url,
+                    targetHash: meaningTargetHash(
+                      control,
+                      outcome.observation.controls,
+                    ),
+                    instructionsHash: meaningHash(
+                      formWritingInstructions(outcome.observation),
+                    ),
+                  },
+                }
+              : outcome.question,
           );
           if (
             control &&
@@ -2480,7 +2519,7 @@ async function runMeasuredApplyAgent(
         return {
           kind: "ok",
           status: "refused",
-          stopBatch: true,
+          stopBatch: !outcome.fieldRef,
           content: withPage
             ? `${outcome.reason}\n\nThe page now:\n\n${describePage(outcome.observation)}`
             : outcome.reason,
@@ -3427,6 +3466,7 @@ async function runMeasuredApplyAgent(
         answer: value,
         approvedAttestations: config.authority.preApprovedAttestationKinds,
         pageInstructions: formWritingInstructions(current),
+        pageUrl: current.url,
       });
       // A refusal holds that unsupported answer, not every different value
       // of the group. A new proposal still needs the independent fact check.
@@ -4277,7 +4317,8 @@ async function runMeasuredApplyAgent(
         // as it was; the rest of the batch still goes in instead of costing
         // another model turn.
         const leftForPerson =
-          outcome.kind === "suggestion" &&
+          (outcome.kind === "suggestion" ||
+            (outcome.kind === "refused" && outcome.fieldRef === step.ref)) &&
           (step.tool === "type" ||
             step.tool === "select" ||
             step.tool === "set_checkbox") &&
@@ -4825,6 +4866,7 @@ async function runMeasuredApplyAgent(
           payDisclosed,
           answer: value,
           pageInstructions: formWritingInstructions(page),
+          pageUrl: page.url,
           now: now(),
         });
         if (permission.kind === "literal") continue;
@@ -4928,6 +4970,7 @@ async function runMeasuredApplyAgent(
             payDisclosed,
             answer,
             pageInstructions: formWritingInstructions(page),
+            pageUrl: page.url,
           });
           return permission.kind === "inference" ||
             permission.kind === "writing"
@@ -5059,14 +5102,22 @@ async function runMeasuredApplyAgent(
             payDisclosed,
             answer: candidate.value,
             pageInstructions: formWritingInstructions(page),
+            pageUrl: page.url,
           });
-          const grounding = await checkOne(
-            questionPrompt(control),
-            candidate.value,
-            permission.kind === "inference" || permission.kind === "writing"
-              ? permission.evidencePolicy
-              : undefined,
-          );
+          const grounding =
+            permission.kind === "literal"
+              ? {
+                  supported: true,
+                  reason: "The exact current answer is bound to its source.",
+                }
+              : await checkOne(
+                  questionPrompt(control),
+                  candidate.value,
+                  permission.kind === "inference" ||
+                    permission.kind === "writing"
+                    ? permission.evidencePolicy
+                    : undefined,
+                );
           if (grounding.supported) {
             matchedAnswers.set(
               semanticAnswerKey(control, candidate.value),

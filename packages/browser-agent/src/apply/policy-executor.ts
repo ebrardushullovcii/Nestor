@@ -1,3 +1,8 @@
+import {
+  currentApplicationAnswer,
+  meaningHash,
+  meaningTargetHash,
+} from "./answer-meaning";
 import { questionPrompt } from "./question-text";
 export { questionPrompt } from "./question-text";
 import type { ApplyAnswerEvidencePolicy } from "./types";
@@ -188,6 +193,8 @@ export type ApplyExecutionOutcome =
       reason: string;
       observation: ApplyFormObservation;
       uploadFailed?: boolean;
+      /** An answer refused before touching the page; independent fields may continue. */
+      fieldRef?: string;
     }
   | {
       kind: "ready_to_send";
@@ -388,6 +395,7 @@ function pickerHandover(
         detectedAt: at,
         suggestion: null,
         siblings: observation.controls,
+        observation,
         reason,
       }),
       answerOptions: [...offered],
@@ -506,6 +514,7 @@ async function applyPickerRule(input: {
       value: wanted,
       storedFactId: `answerLibrary.${saved.id}`,
       pageText: formWritingInstructions(observation),
+      pageUrl: observation.url,
       controls: observation.controls,
     });
     if (choice.kind === "leave") {
@@ -675,6 +684,7 @@ export function fileFieldHoldsOtherFile(
 
 export function buildPendingQuestion(input: {
   control: ApplyFormControl;
+  observation?: ApplyFormObservation;
   jobId: string;
   detectedAt: string;
   suggestion: ApplyAnswer | null;
@@ -698,6 +708,20 @@ export function buildPendingQuestion(input: {
       ? radioSiblings.map((candidate) => candidate.label || candidate.value)
       : control.options;
   return {
+    ...(input.observation?.url
+      ? {
+          currentFieldBinding: {
+            pageUrl: input.observation.url,
+            targetHash: meaningTargetHash(
+              control,
+              input.siblings ?? input.observation.controls,
+            ),
+            instructionsHash: meaningHash(
+              formWritingInstructions(input.observation),
+            ),
+          },
+        }
+      : {}),
     id: questionIdFor(control, input.jobId, input.siblings ?? []),
     askReason:
       input.askReason ??
@@ -771,7 +795,17 @@ async function withModelQuestionKinds(
   observation: ApplyFormObservation,
   control: ApplyFormControl,
 ): Promise<ApplyFormControl> {
-  if (!deps.classifyQuestions) {
+  if (
+    !deps.classifyQuestions ||
+    currentApplicationAnswer({
+      control,
+      controls: observation.controls,
+      sources: deps.config.sources,
+      application: deps.config.application,
+      pageUrl: observation.url,
+      pageInstructions: formWritingInstructions(observation),
+    })
+  ) {
     return { ...control, answerTags: null };
   }
   let classification: ApplyQuestionClassification | undefined;
@@ -826,6 +860,7 @@ type AnswerDecision =
       kind: "leave";
       reason: string;
       actorFeedback?: boolean;
+      checkingUnavailable?: boolean;
       suggestion: ApplyAnswer | null;
       permission: boolean;
       askReason?: ApplicationAttemptQuestion["askReason"];
@@ -964,6 +999,7 @@ async function decideAnswer(input: {
   groundedIn?: readonly string[] | undefined;
   storedFactId?: string | undefined;
   pageText: string;
+  pageUrl?: string | null;
   controls: readonly ApplyFormControl[];
 }): Promise<AnswerDecision> {
   const { deps, control } = input;
@@ -1045,6 +1081,7 @@ async function decideAnswer(input: {
       sources: config.sources,
       answer: value,
       pageInstructions: input.pageText,
+      pageUrl: input.pageUrl,
       approvedAttestations: config.authority.preApprovedAttestationKinds,
       application: config.application,
       payDisclosed,
@@ -1140,7 +1177,8 @@ async function decideAnswer(input: {
     if (!check?.supported)
       return {
         kind: "leave",
-        actorFeedback: !!(check?.repairable || check?.unavailable),
+        actorFeedback: !!check?.repairable,
+        checkingUnavailable: !check || !!check.unavailable,
         reason:
           check?.reason ??
           "This answer could not be checked against your sources.",
@@ -1358,7 +1396,8 @@ async function decideAnswer(input: {
     return {
       kind: "leave",
       reason: check.reason,
-      actorFeedback: !!(check.repairable || check.unavailable),
+      actorFeedback: !!check.repairable,
+      checkingUnavailable: !!check.unavailable,
       suggestion: check.reviewWording
         ? {
             value: check.reviewWording,
@@ -1436,6 +1475,7 @@ function leaveUnansweredForPerson(input: {
             detectedAt: at,
             suggestion,
             siblings: observation.controls,
+            observation,
             reason,
             ...(input.askReason ? { askReason: input.askReason } : {}),
           })
@@ -1470,6 +1510,7 @@ function unsupportedAnswer(input: {
           detectedAt: at,
           suggestion: input.suggestion,
           siblings: observation.controls,
+          observation,
           reason: eligibilityReviewReason(control, config, input.reason),
         })
       : null,
@@ -1497,14 +1538,22 @@ function notEntered(input: {
       ? { askReason: input.decision.askReason }
       : {}),
   };
+  if (input.decision.checkingUnavailable)
+    return {
+      kind: "refused",
+      fieldRef: input.control.ref,
+      reason: `This answer remains unwritten because checking is unavailable. Continue the independent fields, then retain the technical Try again state. ${input.decision.reason}`,
+      observation: input.observation,
+    };
   if (input.decision.actorFeedback) {
     const key = questionPrompt(input.control);
     const first = !input.deps.guardState.answerFeedback.has(key);
     input.deps.guardState.answerFeedback.add(key);
     return {
       kind: "refused",
+      fieldRef: input.control.ref,
       reason: first
-        ? `Nestor could not accept this proposed answer: ${input.decision.reason} Reconsider it once using these actual sources and the complete target constraints. Do not ask the person to repair a known answer or a checking format failure. Target: ${JSON.stringify({ question: key, options: input.control.options, constraints: input.control.inputConstraints })}. Sources: ${JSON.stringify(answerSourceCatalog(input.deps.config.sources, input.deps.config.authority.preApprovedAttestationKinds))}. Leave it unwritten if checking remains unavailable and finish with the retained technical stop.`
+        ? `Nestor could not accept this proposed answer: ${input.decision.reason} Correct the answer content/completeness once using these actual sources and the complete target constraints. Do not ask the person to repair a known answer or a checking format failure. Target: ${JSON.stringify({ question: key, options: input.control.options, constraints: input.control.inputConstraints })}. Sources: ${JSON.stringify(answerSourceCatalog(input.deps.config.sources, input.deps.config.authority.preApprovedAttestationKinds))}. Leave it unwritten if checking remains unavailable and finish with the retained technical stop.`
         : "This answer is still unchecked after the bounded feedback. Leave it unwritten, finish the other fields and stop for technical recovery.",
       observation: input.observation,
     };
@@ -2967,6 +3016,7 @@ export async function executeApplyProposal(
         deps,
         control,
         pageText: formWritingInstructions(observation),
+        pageUrl: observation.url,
         value: proposal.text,
         groundedIn: proposal.groundedIn,
         storedFactId: proposal.storedFactId,
@@ -3040,6 +3090,7 @@ export async function executeApplyProposal(
         deps,
         control,
         pageText: formWritingInstructions(observation),
+        pageUrl: observation.url,
         value: matchOption(control.options, proposal.option) ?? proposal.option,
         storedFactId: proposal.storedFactId,
       });
@@ -3195,6 +3246,7 @@ export async function executeApplyProposal(
           deps,
           control,
           pageText: formWritingInstructions(observation),
+          pageUrl: observation.url,
           value: proposedOption,
           storedFactId: proposal.storedFactId,
         });
@@ -3309,6 +3361,7 @@ export async function executeApplyProposal(
                 detectedAt: at,
                 suggestion: null,
                 siblings: observation.controls,
+                observation,
               })
             : null,
           controlRef: control.ref,

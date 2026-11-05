@@ -549,7 +549,11 @@ test("a malformed citation gets one correction against the same Profile facts", 
   });
   expect(checked[0]?.supported).toBe(true);
   expect(chatWithTools).toHaveBeenCalledTimes(2);
-  expect(JSON.stringify(chatWithTools.mock.calls[1]?.[0])).toContain(
-    "Correct the citation",
-  );
+  const correction = JSON.stringify(chatWithTools.mock.calls[1]?.[0].at(-1));
+  expect(correction).toContain("priorReports");
+  expect(correction).toContain("evidenceIndex");
+  expect(correction).toContain("/skills");
+  expect(correction).toContain("source_path_not_found");
+  expect(correction).not.toContain("did not return a valid");
+  expect(correction).not.toContain("JSON-encoded");
 });

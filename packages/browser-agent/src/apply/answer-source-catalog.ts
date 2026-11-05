@@ -1,3 +1,4 @@
+import { currentApplicationAnswer } from "./answer-meaning";
 import { questionPrompt } from "./question-text";
 import {
   inferAttestationKind,
@@ -159,6 +160,17 @@ export function answerSourceCatalog(
   addWritingFact(sources.profile.narrative, "profile.narrative");
   addWritingFact(sources.preferences, "profile.preferences");
   addWritingFact(sources.profile.proofBank, "profile.proofBank");
+  for (const key of [
+    "willingToTravel",
+    "remoteEligible",
+    "willingToRelocate",
+    "noticePeriodDays",
+    "availableStartDate",
+  ] as const)
+    addWritingFact(
+      sources.profile.workEligibility[key],
+      `profile.workEligibility.${key}`,
+    );
   rows.push({
     id: "posting.location",
     value: sources.posting.location,
@@ -892,6 +904,7 @@ export function classifyAnswerPermission(input: {
   application?: ApplyAgentConfig["application"];
   payDisclosed?: boolean;
   now?: Date;
+  pageUrl?: string | null | undefined;
   /** Supplied only by the host after the independent answer check. */
   matchedSourceId?: string | undefined;
   /** A proposed catalog reference; it grants no semantic-match permission. */
@@ -923,6 +936,18 @@ export function classifyAnswerPermission(input: {
         )));
   if (input.control.credentialRole)
     return deny("Credentials and verification codes stay with the person.");
+  const localAnswer = currentApplicationAnswer(input);
+  if (localAnswer?.answer.trim() === input.answer.trim()) {
+    return {
+      kind: "literal",
+      source: {
+        id: `answerLibrary.${localAnswer.id}`,
+        value: localAnswer.answer,
+        purpose: "saved",
+        country: null,
+      },
+    };
+  }
   if (!tags) {
     const literal = applicantLiteralSource(
       input.control,
@@ -1156,6 +1181,15 @@ export function classifyAnswerPermission(input: {
     );
     if (human && (!legal || human.country === target)) source = human;
   }
+  const selectedSaved =
+    source?.purpose === "saved"
+      ? input.sources.reusableAnswers.find(
+          (saved) => `answerLibrary.${saved.id}` === source?.id,
+        )
+      : null;
+  const changedCurrentBinding =
+    !!selectedSaved?.applicationScope?.currentFieldBinding &&
+    localAnswer?.id !== selectedSaved.id;
   // A semantic source selection is only a proposal. A second model must
   // verify that the saved question has the same complete meaning and value.
   // Current-application answers can settle their own conditional eligibility;
@@ -1183,6 +1217,7 @@ export function classifyAnswerPermission(input: {
   }
   if (
     (!matchingSaved ||
+      changedCurrentBinding ||
       (source &&
         !literalValueMatches(
           source,
@@ -1489,7 +1524,10 @@ export function classifyAnswerPermission(input: {
     }
   }
   const exactSaved =
-    !!saved && source.id === `answerLibrary.${saved.id}` && savedValueMatches;
+    !!saved &&
+    !changedCurrentBinding &&
+    source.id === `answerLibrary.${saved.id}` &&
+    savedValueMatches;
   // A start date ("Preferred start date" included) is calculated from the
   // recorded availability, not an opinion. When the selected source is the
   // one the start-date rule uses, that rule decides before the opinion and
@@ -1515,7 +1553,9 @@ export function classifyAnswerPermission(input: {
     source.purpose === "profile" &&
     (/^profile\.preferences\./u.test(source.id) ||
       (source.id === "profile.workEligibility.willingToRelocate" &&
-        /relocat/iu.test(questionPrompt(input.control)))) &&
+        /relocat/iu.test(questionPrompt(input.control))) ||
+      source.id === "profile.workEligibility.willingToTravel" ||
+      source.id === "profile.workEligibility.remoteEligible") &&
     !requiresOwnWords(input.control.label)
   )
     return {

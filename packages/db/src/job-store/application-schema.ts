@@ -134,15 +134,16 @@ WHEN OLD.task_id <> NEW.task_id BEGIN
     AND NOT EXISTS (SELECT 1 FROM application_needs_you WHERE task_id = OLD.task_id);
 END;
 
-CREATE TRIGGER IF NOT EXISTS applications_stop_tasks AFTER UPDATE OF state ON applications
-WHEN NEW.state IN ('stopped', 'failed', 'submitted', 'uncertain') BEGIN
+DROP TRIGGER IF EXISTS applications_stop_tasks;
+CREATE TRIGGER applications_stop_tasks AFTER UPDATE OF state ON applications
+WHEN NEW.state IN ('stopped', 'submitted', 'uncertain') BEGIN
   UPDATE needs_you SET resolved_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
   WHERE resolved_at IS NULL
     AND id IN (SELECT task_id FROM application_needs_you WHERE application_id = NEW.id)
     AND NOT EXISTS (
       SELECT 1 FROM application_needs_you n JOIN applications a ON a.id = n.application_id
       WHERE n.task_id = needs_you.id AND n.attempt = a.attempt
-        AND a.state IN ('running', 'needs_you')
+        AND a.state IN ('running', 'needs_you', 'failed')
     );
 END;
 

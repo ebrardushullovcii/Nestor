@@ -537,6 +537,8 @@ test("a resume quote binds the one plaintext document while an invented quote st
         },
       ],
     });
+  expect((await check())[0]?.supported).toBe(false);
+  evidence[0].path = "";
   expect((await check())[0]?.supported).toBe(true);
   evidence[0].quote = "Paid work with Ruby.";
   await expect(check()).resolves.toMatchObject([

@@ -835,7 +835,7 @@ export function createApplicationStore(store: JobStore) {
             WHERE n.application_id = applications.id AND t.kind = 'question'
               AND t.input = 'file' AND t.resolved_at IS NULL) THEN 'needs_you' ELSE ? END,
            error = ?, updated_at = ?
-           WHERE id = ? AND attempt = ? AND state = 'running' RETURNING job_id, state`,
+           WHERE id = ? AND attempt = ? AND (state = 'running' OR (? = 'failed' AND state = 'needs_you')) RETURNING job_id, state`,
         ).get(
           input.state,
           input.state,
@@ -843,6 +843,7 @@ export function createApplicationStore(store: JobStore) {
           Date.now(),
           input.id,
           input.attempt,
+          input.state,
         ) as { job_id: number; state: string } | undefined;
         // A Ready form waits on nothing: an earlier attempt's open questions
         // that this attempt never asked again (a press handed over on a page

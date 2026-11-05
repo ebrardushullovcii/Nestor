@@ -46,6 +46,7 @@ export type FormQuestion = Pick<
   | "answerOptions"
   | "inputConstraints"
   | "repeatedAtDifferentStep"
+  | "currentFieldBinding"
 > &
   Partial<Pick<ApplicationAttemptQuestion, "id">>;
 
@@ -363,6 +364,9 @@ export function toKnownFormAnswer(
                 ? `application_${applicationId}`
                 : null,
             location: geographic.has(question.kind) ? location : null,
+            ...(input.local && question.currentFieldBinding
+              ? { currentFieldBinding: question.currentFieldBinding }
+              : {}),
           },
         }
       : {}),

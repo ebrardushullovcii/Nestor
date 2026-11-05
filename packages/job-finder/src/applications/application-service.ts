@@ -917,7 +917,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return (
         current(row) &&
         !signal.aborted &&
-        technical?.outcome === "stuck" &&
+        (technical?.outcome === "stuck" || technical?.outcome === "paused") &&
         (technical.technicalFailure?.code ===
           "question_classification_unavailable" ||
           technical.technicalFailure?.code ===
@@ -926,9 +926,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         technical.technicalFailure.pageDisposition === "retain" &&
         !!technical.finalUrl &&
         technical.readyToSend === null &&
-        technical.pauses.length === 0 &&
-        execution.state === "failed" &&
-        execution.questions.length === 0 &&
+        technical.pauses.every(
+          (pause) => pause.code === "question_needs_you" && !pause.blocker,
+        ) &&
+        ["failed", "paused"].includes(execution.state) &&
         !execution.submittedAt &&
         execution.outcome === null &&
         !["submitted", "outcome_uncertain"].includes(
@@ -1053,14 +1054,27 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                           : "other",
                       })),
                     )
-                    .map((answer) =>
-                      toKnownFormAnswer(
+                    .map((answer) => {
+                      const current = byKey.get(answer.key)!;
+                      const asked = previous?.execution.questions.filter(
+                        (question) =>
+                          normalizeFormQuestionPrompt(question.prompt) ===
+                          normalizeFormQuestionPrompt(current.prompt),
+                      );
+                      return toKnownFormAnswer(
                         answer,
-                        byKey.get(answer.key)!,
+                        {
+                          ...current,
+                          // Reuse only the original question binding the person saw.
+                          currentFieldBinding:
+                            asked?.length === 1
+                              ? asked[0]?.currentFieldBinding
+                              : undefined,
+                        },
                         job.location,
                         row.id,
-                      ),
-                    ),
+                      );
+                    }),
                 ].map((answer) => [answer.id, answer]),
               ).values(),
             ]);
@@ -1103,7 +1117,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       })
     )
       return;
-    if (shouldRetainFailedApplicationPage(result)) {
+    const retainedTechnicalFailure = shouldRetainFailedApplicationPage(result);
+    const finishTechnicalFailure = async () => {
       // Only this live, cancelled-checked attempt may retain its owned binding.
       // A provider/read outage creates no personal question or automatic retry.
       const retained = await browser
@@ -1111,10 +1126,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         .catch(() => false);
       // A grounding failure says which answer it could not confirm (council D4).
       // Assigned by the preparer callback, so read it without narrowing.
-      const technical = agent as ApplyAgentResult | null;
+      const technical = agent;
       const grounding =
         technical?.technicalFailure?.code === "answer_grounding_unavailable"
-          ? technical.reason
+          ? technical.outcome === "stuck"
+            ? technical.reason
+            : "Nestor could not finish checking the remaining application answers. Your page and answers are kept. Try again."
           : null;
       if (current(row) && !signal.aborted)
         applications.finishPreparation({
@@ -1132,6 +1149,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               ? "Nestor could not read this form after three tries. The page and your answers are kept. Try again."
               : "Nestor could not read this form after three tries. The page is unavailable; your recorded answers are kept. Try again.",
         });
+    };
+    if (retainedTechnicalFailure && result.questions.length === 0) {
+      await finishTechnicalFailure();
       return;
     }
     // The site took the file this time: its upload item is done, even when
@@ -1180,7 +1200,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       waiting.set(row.id, row.attempt);
       return;
     }
-    if (result.state === "failed" || result.state === "unsupported") {
+    if (
+      !retainedTechnicalFailure &&
+      (result.state === "failed" || result.state === "unsupported")
+    ) {
       applications.finishPreparation({
         id: row.id,
         attempt: row.attempt,
@@ -1320,6 +1343,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           revision: 0,
         });
       fromMemory ||= requested.status === "answered";
+    }
+    if (retainedTechnicalFailure) {
+      await finishTechnicalFailure();
+      return;
     }
     // The raw engine's typed blockers distinguish access steps from technical failures.
     const prepared = agent as ApplyAgentResult | null;

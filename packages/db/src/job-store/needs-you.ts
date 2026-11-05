@@ -314,7 +314,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
        WHERE id IN (
          SELECT n.application_id FROM application_needs_you n
          JOIN applications a ON a.id = n.application_id
-         WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state = 'needs_you'
+         WHERE n.task_id = ? AND n.attempt = a.attempt AND a.state IN ('needs_you','failed')
        ) AND NOT EXISTS (
          SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
          WHERE n.application_id = applications.id AND n.attempt = applications.attempt
@@ -457,7 +457,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
     const targets =
       sql(`SELECT n.application_id,n.field_key,n.task_id,t.prompt FROM application_needs_you n
       JOIN needs_you t ON t.id=n.task_id JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
-      WHERE a.state='needs_you' AND t.resolved_at IS NULL AND t.reuse_prompt=1 AND n.application_id IN
+      WHERE a.state IN ('needs_you','failed') AND t.resolved_at IS NULL AND t.reuse_prompt=1 AND n.application_id IN
         (SELECT application_id FROM application_needs_you WHERE task_id=?)`).all(
         task.id,
       ) as {
@@ -586,7 +586,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         sql(`SELECT DISTINCT a.id, a.job_id AS jobId, j.title, j.company, j.location, COALESCE(a.disposition,a.state) AS state
         FROM application_needs_you n JOIN applications a ON a.id = n.application_id JOIN jobs j ON j.id = a.job_id
         WHERE n.task_id = ? AND n.attempt = a.attempt
-          AND (a.state = 'needs_you' OR (? <> 'question' AND a.state IN ('queued','running')))
+          AND (a.state IN ('needs_you','failed') OR (? <> 'question' AND a.state IN ('queued','running')))
         ORDER BY a.id LIMIT 50`).all(
           id,
           task.kind,
@@ -936,7 +936,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         JOIN application_needs_you n ON n.task_id=t.id
         JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
         WHERE t.kind='question' AND t.reuse_prompt=1 AND t.resolved_at IS NULL
-          AND a.state='needs_you' AND NOT EXISTS
+          AND a.state IN ('needs_you','failed') AND NOT EXISTS
           (SELECT 1 FROM needs_you_drafts d WHERE d.task_id=t.id)
         ORDER BY t.id`).all() as Task[];
       return tasks.flatMap((row) => {
@@ -955,7 +955,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         const applications =
           sql(`SELECT DISTINCT n.application_id AS id FROM application_needs_you n
           JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
-          WHERE n.task_id=? AND a.state='needs_you'
+          WHERE n.task_id=? AND a.state IN ('needs_you','failed')
           ORDER BY n.application_id`).all(row.id) as {
             id: number;
           }[];
@@ -1006,7 +1006,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         const waiting = sql(`SELECT DISTINCT t.* FROM needs_you t
           JOIN application_needs_you n ON n.task_id=t.id
           JOIN applications a ON a.id=n.application_id AND a.attempt=n.attempt
-          WHERE t.kind='question' AND t.reuse_prompt=1 AND t.resolved_at IS NULL AND a.state='needs_you'`).all() as Task[];
+          WHERE t.kind='question' AND t.reuse_prompt=1 AND t.resolved_at IS NULL AND a.state IN ('needs_you','failed')`).all() as Task[];
         let queued = 0;
         for (const task of waiting) {
           if (
@@ -1310,11 +1310,11 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
            w.company AS waiting_company, w.title AS waiting_title,
            (SELECT count(DISTINCT a.id) FROM application_needs_you n
              JOIN applications a ON a.id = n.application_id
-             WHERE n.task_id = t.id AND n.attempt = a.attempt AND a.state = 'needs_you') AS waiting_count
+             WHERE n.task_id = t.id AND n.attempt = a.attempt AND a.state IN ('needs_you','failed')) AS waiting_count
          FROM (SELECT * FROM needs_you WHERE ${where} AND id > ? ORDER BY id LIMIT ?) t
          LEFT JOIN jobs w ON w.id = (SELECT a.job_id FROM application_needs_you n
            JOIN applications a ON a.id = n.application_id
-           WHERE n.task_id = t.id AND n.attempt = a.attempt AND a.state = 'needs_you'
+           WHERE n.task_id = t.id AND n.attempt = a.attempt AND a.state IN ('needs_you','failed')
            ORDER BY a.id LIMIT 1)
          LEFT JOIN source_needs_you n ON n.task_id = t.id
          LEFT JOIN job_sites s ON s.id = n.source_id ORDER BY t.id`,
@@ -1415,7 +1415,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           return false;
         const linked =
           sql(`SELECT 1 FROM application_needs_you n JOIN applications a ON a.id=n.application_id
-          WHERE n.task_id=? AND n.application_id=? AND n.attempt=a.attempt AND a.state IN ('needs_you','running')`).get(
+          WHERE n.task_id=? AND n.application_id=? AND n.attempt=a.attempt AND a.state IN ('needs_you','running','failed')`).get(
             id,
             verifiedApplicationId,
           );
@@ -1424,14 +1424,14 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         // their GET checkpoint; never replay a credential, challenge or form POST.
         sql(`UPDATE application_details SET access_recheck=1 WHERE application_id<>?
           AND application_id IN (SELECT n.application_id FROM application_needs_you n
-          JOIN applications a ON a.id=n.application_id WHERE n.task_id=? AND n.attempt=a.attempt AND a.state='needs_you')`).run(
+          JOIN applications a ON a.id=n.application_id WHERE n.task_id=? AND n.attempt=a.attempt AND a.state IN ('needs_you','failed'))`).run(
           verifiedApplicationId,
           id,
         );
         sql(
           "DELETE FROM application_needs_you WHERE task_id=? AND application_id=?",
         ).run(id, verifiedApplicationId);
-        sql(`UPDATE applications SET state='queued',queued_at=?,updated_at=? WHERE id=? AND state='needs_you'
+        sql(`UPDATE applications SET state='queued',queued_at=?,updated_at=? WHERE id=? AND state IN ('needs_you','failed')
           AND NOT EXISTS (SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
           WHERE n.application_id=applications.id AND n.attempt=applications.attempt AND t.resolved_at IS NULL)`).run(
           Date.now(),
@@ -1440,7 +1440,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
         );
         sql(`UPDATE needs_you SET resolved_at=? WHERE id=? AND resolved_at IS NULL AND NOT EXISTS (
           SELECT 1 FROM application_needs_you n JOIN applications a ON a.id=n.application_id
-          WHERE n.task_id=? AND n.attempt=a.attempt AND a.state IN ('queued','running','needs_you'))`).run(
+          WHERE n.task_id=? AND n.attempt=a.attempt AND a.state IN ('queued','running','needs_you','failed'))`).run(
           Date.now(),
           id,
           id,
@@ -1531,7 +1531,7 @@ export function createNeedsYouStore(store: JobStore, changed: () => void) {
           sql("DELETE FROM needs_you_drafts WHERE task_id = ?").run(
             link.task_id,
           );
-        sql(`UPDATE applications SET state='queued',queued_at=?,updated_at=? WHERE id=? AND state='needs_you'
+        sql(`UPDATE applications SET state='queued',queued_at=?,updated_at=? WHERE id=? AND state IN ('needs_you','failed')
           AND NOT EXISTS (SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id=n.task_id
           WHERE n.application_id=applications.id AND n.attempt=applications.attempt AND t.resolved_at IS NULL)`).run(
           Date.now(),
