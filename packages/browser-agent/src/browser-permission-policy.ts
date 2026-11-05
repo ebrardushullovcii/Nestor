@@ -689,7 +689,16 @@ export function withBrowserPermissions(
     const kind = browserInteractionKind(page, ref, ctx);
     const action = page.actions.find((entry) => entry.ref === ref);
     const scriptLogin = kind === "signIn" && scriptLoginAction(page, ref);
-    if (scriptLogin && hands.clickAuthorizedLoginAction && prepareCredentials) {
+    if (
+      scriptLogin &&
+      !(
+        action?.submitsForm &&
+        action.formMethod?.toUpperCase() === "POST" &&
+        action.formAction
+      ) &&
+      hands.clickAuthorizedLoginAction &&
+      prepareCredentials
+    ) {
       // Only the host can resolve and fill one saved exact-origin account.
       // A masked password readback alone is never proof of host autofill.
       if (!(await prepareCredentials(page.url!)))

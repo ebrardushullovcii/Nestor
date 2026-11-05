@@ -260,6 +260,23 @@ describe("Google with no Profile email", () => {
   });
 });
 
+test("a native saved-password POST uses its exact form action instead of the JS-only login window", async () => {
+  const { hands } = setup("signIn");
+  const jsPress = vi.fn(() =>
+    Promise.resolve({ ok: true as const, observedValue: "clicked" }),
+  );
+  const guarded = withBrowserPermissions(
+    { ...hands, clickAuthorizedLoginAction: jsPress },
+    {
+      browserPermissions: BrowserAgentPermissionsSchema.parse({ signIn: true }),
+      prepareBrowserCredentials: () => Promise.resolve(true),
+    },
+  );
+  expect(await guarded.clickElement("a0")).toMatchObject({ ok: true });
+  expect(hands.clickAuthorizedFormAction).toHaveBeenCalledExactlyOnceWith("a0");
+  expect(jsPress).not.toHaveBeenCalled();
+});
+
 test.each(["GET", "button"])(
   "host-completed saved login uses the bounded JS press for %s",
   async (method) => {
@@ -295,6 +312,7 @@ test.each(["host_refused", "changed", "permission_off", "create"])(
     const { hands, raw } = setup(
       failure === "create" ? "createAccounts" : "signIn",
     );
+    raw.actions[0].formMethod = "GET";
     const press = vi.fn(() =>
       Promise.resolve({
         ok: true as const,
