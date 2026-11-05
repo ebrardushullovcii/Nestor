@@ -1154,7 +1154,10 @@ async function runMeasuredApplyAgent(
         answer,
         ...(evidencePolicy ? { evidencePolicy } : {}),
       },
-    ]).then(([check]) => check);
+    ]).then(([check]) => {
+      if (!check) throw new Error("The answer check returned no result.");
+      return check;
+    });
   // Precheck exactly the answer the executor will ask about. The executor
   // still decides whether that answer and the person's permissions allow a write.
   const fillFieldCheck = (
