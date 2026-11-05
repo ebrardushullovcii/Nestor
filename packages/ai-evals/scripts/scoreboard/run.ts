@@ -118,7 +118,7 @@ if (args.help || args.list) {
     output,
     preconditions: [
       "Applications use fixed synthetic listings inserted into this isolated job store; Original resumes are then approved through the visible app. Search does not use those seeded rows.",
-      "Resume writing, fit quality and account automation are outside v1. A person may create a made-up Workday account and answer synthetic address/postcode gaps; ordinary Save/Continue handoffs fail.",
+      "Resume writing, fit quality and account automation are outside v1. A person may create a made-up Workday account and answer synthetic job-source/address/postcode/start-month gaps; ordinary Save/Continue handoffs fail.",
       "The setup-triggered search is stopped, retaining any rows it produced; its count is separate from measured search results. AI timings and questions may vary between runs.",
     ],
     results: SCENARIOS.map(([id, name]) => ({

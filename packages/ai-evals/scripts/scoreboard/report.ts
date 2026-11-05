@@ -34,6 +34,8 @@ export const PERSONA = {
     jobSource: "Job board",
     streetAddress: "12 Example Street",
     postalCode: "10115",
+    experienceStartMonth:
+      "2018-01 (made-up application-only detail; absent from the resume)",
   },
 };
 

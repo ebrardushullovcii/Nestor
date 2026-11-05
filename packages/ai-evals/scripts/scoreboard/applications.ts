@@ -76,6 +76,8 @@ async function answerWorkday(app: App, need: Need) {
   else if (/hear.*(?:job|role)|how.*(?:find|learn).*job/i.test(need.prompt))
     answer = "Job board";
   else if (/address/i.test(need.prompt)) answer = "12 Example Street";
+  else if (/work experience 1.*(?:from|start)/i.test(need.prompt))
+    answer = "2018-01";
   else if (/notice/i.test(need.prompt))
     answer =
       need.input === "number"
@@ -121,7 +123,12 @@ async function answerWorkday(app: App, need: Need) {
 export async function multistep(app: App, r: Result) {
   await app.mode("Fill in for me");
   const job = await app.fixture("workday", 1);
-  const before = app.ctx.sites.submissions().length;
+  // The replica also logs Save and continue POSTs; only this path submits.
+  const finalPosts = () =>
+    app.ctx.sites
+      .submissions()
+      .filter((post) => post.path === new URL(job.apply_url).pathname).length;
+  const before = finalPosts();
   await app.queue(job);
   let accountHandled = false;
   const answered = new Set<number>();
@@ -181,12 +188,12 @@ export async function multistep(app: App, r: Result) {
   const form = await app.openForm(job);
   const review = await form.locator('[data-step="3"]').isVisible();
   r.metrics.reviewVisible = review;
+  r.metrics.savePosts = app.ctx.sites
+    .submissions()
+    .filter((post) => post.path === "/workday/api/save").length;
+  r.metrics.finalSubmissionPosts = finalPosts() - before;
   r.metrics.summary = `state=${app.application(job)?.state}; review=${review}; person answers=${answered.size}`;
-  assert.equal(
-    app.ctx.sites.submissions().length,
-    before,
-    "Fill mode did not press final Submit",
-  );
+  assert.equal(finalPosts(), before, "Fill mode did not press final Submit");
   assert.equal(review, true, "Workday did not reach its Review step");
   assert.equal(finalApplication.mode, "confirm_before_submit");
 }
