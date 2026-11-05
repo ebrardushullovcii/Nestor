@@ -16,7 +16,7 @@ Minimizing preserves pages and automation. Agent input arrives over CDP and neve
 
 The browser presents as the Google Chrome its Chromium is built from: the user agent drops only Electron and app tokens, client-hint headers and the in-page brand list carry the Chrome brand, and a bridge-free page preload gives `window.chrome` its Chrome shape. Google's sign-in refuses the bare Chromium identity before any credentials are entered but accepts this one; nothing about automation or the device is hidden or faked. Reaching a sign-in page is not proof of authentication. Credentials, consent, CAPTCHA and MFA remain user-owned. The app does not bypass provider restrictions.
 
-Users may bring sign-ins over from a browser profile already on the device, chosen from a list the app discovers (Chrome, Chromium, Brave, Edge, Arc, Firefox), the way browsers import from each other. Main copies the profile's cookie store, decrypts it where the platform allows (macOS through a Keychain prompt that is the user's consent; Linux with the default key; Windows Chromium stores are reported as unreadable), and writes only unexpired, unpartitioned cookies into the embedded session. Renderer receives profile names, counts and generic messages, never paths or cookie values. Passwords, bookmarks and history are not imported, and an imported sign-in is not promised to work. Renderer state, prompts and logs must never contain imported cookie values.
+Users may bring sign-ins over from a browser profile already on the device, chosen from a list the app discovers (Chrome, Chromium, Brave, Edge, Arc, Firefox), the way browsers import from each other. Main copies the profile's cookie store, decrypts it where the platform allows (macOS through a Keychain prompt that is the user's consent; Linux with the default key; Windows legacy v10 values through the current user's DPAPI key; app-bound v20 values are detected and never decrypted), and writes only unexpired, unpartitioned cookies into the embedded session. Import reports distinguish imported cookies from protected, unsupported, undecryptable, filtered and rejected cookies; copying cookies is not proof of a working sign-in. Protected sessions require signing in once in Nestor. Renderer receives profile names, counts and generic messages, never paths or cookie values. Cookie import does not include passwords, bookmarks or history, and an imported sign-in is not promised to work. Renderer state, prompts and logs must never contain imported cookie values.
 
 ## Consequences
 
@@ -29,9 +29,10 @@ The default live desktop host is embedded. `NESTOR_BROWSER_HOST=external` retain
 The browser now has a separate password manager in addition to persistent
 sessions and cookie import. Save/update offers require the person's choice;
 passwords are encrypted through Electron safeStorage and persisted behind a db
-repository. No plaintext fallback is allowed. Browser-profile password import
-reports platform limitations and offers native password-CSV import when a store
-cannot be read. Website credentials never pass through the app renderer, AI
+repository. No plaintext fallback is allowed. Explicit browser-profile password
+import reads both local and account password stores, independently of cookie
+import, reports platform limitations and offers native password-CSV import when
+a store cannot be read. Website credentials never pass through the app renderer, AI
 tools, prompts or diagnostic logs. Autofill validates the current tab, frame,
 form action and exact origin, including submitter overrides.
 

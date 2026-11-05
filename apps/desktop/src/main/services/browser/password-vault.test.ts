@@ -5,7 +5,11 @@ import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { createBrowserPasswordRepository } from "@nestor/db";
 import { PasswordVault, type PasswordEncryption } from "./password-vault";
-import { importPasswordCsv, parsePasswordCsv } from "./password-csv";
+import {
+  importPasswordCsv,
+  importPasswordValues,
+  parsePasswordCsv,
+} from "./password-csv";
 import { passwordOrigin, passwordOriginsMatch } from "./password-origin";
 
 const dirs: string[] = [];
@@ -130,6 +134,45 @@ it("rejects malformed CSV without including rejected content in errors", () => {
     throw new Error("expected rejection");
   } catch (error) {
     expect(String(error).includes(secret)).toBe(false);
+  }
+});
+it("does not report an empty or wholly rejected password import as successful", () => {
+  const { vault, repository } = setup();
+  try {
+    expect(importPasswordCsv(vault, "url,username,password")).toMatchObject({
+      status: "failed",
+      added: 0,
+    });
+    expect(
+      importPasswordValues(vault, [
+        {
+          origin: "http://remote.test",
+          username: "synthetic",
+          password: "synthetic",
+        },
+      ]),
+    ).toMatchObject({ status: "failed", skipped: 1 });
+    const value = {
+      origin: "https://example.test",
+      username: "synthetic",
+      password: "synthetic",
+    };
+    expect(importPasswordValues(vault, [value], 2)).toMatchObject({
+      status: "imported",
+      added: 1,
+      skipped: 2,
+    });
+    expect(importPasswordValues(vault, [value])).toMatchObject({
+      status: "imported",
+      added: 0,
+      skipped: 1,
+    });
+    expect(importPasswordValues(vault, [], 3).message).toContain(
+      "Import password CSV",
+    );
+    expect(vault.list()).toHaveLength(1);
+  } finally {
+    repository.close();
   }
 });
 it("uses exact secure origins including ports; loopback HTTP is allowed for replicas", () => {
