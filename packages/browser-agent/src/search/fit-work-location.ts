@@ -113,8 +113,8 @@ export function assessFitWorkLocation(
     return {
       status: "review",
       reason: physical
-        ? "On-site or hybrid work requires permission in the work country; it is not recorded."
-        : "This remote role is limited to its work country; permission there is not recorded.",
+        ? "On-site or hybrid work requires permission in the work country; permission for this role still needs checking."
+        : "This remote role is limited to its work country; permission for this role still needs checking.",
     };
   if (foreign && physical && profile.workEligibility.willingToRelocate !== true)
     return {

@@ -263,6 +263,7 @@ test.each(["No open positions", "No current vacancies", "0 open jobs"])(
       requiresBrowser: false,
     });
     expect(inventory.notes.join(" ")).toContain("all observed pages covered");
+    expect(inventory.notes.join(" ")).toContain("1 page address attempted");
     expect(navigateFallback).not.toHaveBeenCalled();
   },
 );
@@ -278,21 +279,27 @@ test("an empty shell is incomplete and explicit emptiness cannot hide a failed p
   });
   expect(shell.complete).toBe(false);
   expect(shell.emptyConfirmed).not.toBe(true);
+  const attempts: string[] = [];
   const failed = await collectSource({
     source,
-    readPage: (url) =>
-      url === source.url
+    readPage: (url) => {
+      attempts.push(url);
+      return url === source.url
         ? Promise.resolve({
             finalUrl: url,
             html: '<main>No open positions<a rel="next" href="/page/2">Next</a></main>',
           })
-        : Promise.reject(new DiscoveryPageReadError(503)),
+        : Promise.reject(new DiscoveryPageReadError(503));
+    },
   });
   expect(failed).toMatchObject({
     cards: [],
     complete: false,
     emptyConfirmed: true,
   });
+  expect(attempts).toEqual([source.url, "https://board.example/page/2"]);
+  expect(failed.notes.join(" ")).toContain("2 page addresses attempted");
+  expect(failed.notes.join(" ")).not.toContain("collected from 2 pages");
 });
 
 test("a browser fallback may confirm an empty inventory but cannot assert emptiness without evidence", async () => {

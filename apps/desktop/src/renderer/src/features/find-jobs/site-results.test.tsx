@@ -76,11 +76,11 @@ test("900 source results page on demand and repeat totals distinguish listings f
 test.each([
   [
     "The site took too long to respond. Open it to check it loads, then retry the search. Other sites continue normally.",
-    "This site took too long to respond. Other sites carried on.",
+    "This site took too long to respond.",
   ],
   [
     "page.goto: Timeout 20000ms exceeded.",
-    "This site took too long to respond. Other sites carried on.",
+    "This site took too long to respond.",
   ],
   [
     "page.goto: net::ERR_CONNECTION_REFUSED.",
@@ -137,6 +137,66 @@ test.each([
           "[data-site-result] > details",
         )?.open,
       ).toBe(true);
+    } finally {
+      store.close();
+    }
+  },
+);
+
+test.each([
+  ["waiting", null, "Queued to read this site."],
+  [
+    "searching",
+    null,
+    "This site's search is still in progress. No waiting reason has been reported.",
+  ],
+  [
+    "searching",
+    "The site asked for a pause before another read.",
+    "The site asked for a pause before another read.",
+  ],
+] as const)(
+  "active sites explain only recorded progress: %s / %s",
+  async (state, message, explanation) => {
+    const store = openJobStore(":memory:");
+    try {
+      const search = store.searches.start(JobSearchSettingsSchema.parse({}), 1);
+      const sources = createSearchSourcesStore(store);
+      sources.put(search.id, {
+        sourceId: "pending",
+        label: "Pending board",
+        url: "https://pending.example/",
+        state,
+        lane: "http",
+        phase: "http",
+        cards: 0,
+        related: 0,
+        unrelated: 0,
+        seen: 0,
+        failedReads: 0,
+        found: 0,
+        added: 0,
+        hidden: 0,
+        message,
+      });
+      Object.defineProperty(window, "nestor", {
+        configurable: true,
+        value: {
+          jobs: {
+            run: (_name: string, input: JobSearchSourceQuery) =>
+              Promise.resolve(sources.list(input)),
+          },
+        },
+      });
+      render(<SiteResults searchId={search.id} revision={1} />);
+      fireEvent.click(screen.getByText("What each site found"));
+      const label = await screen.findByText("Pending board");
+      const item = label.closest<HTMLElement>("[data-site-result]")!;
+      fireEvent.click(label.closest("summary")!);
+      expect(within(item).getByText(explanation)).toBeTruthy();
+      expect(item.textContent).not.toContain("could not be read");
+      expect(within(item).queryByText("Technical details")).toBeNull();
+      if (!message) expect(item.textContent).not.toContain("asked for a pause");
     } finally {
       store.close();
     }

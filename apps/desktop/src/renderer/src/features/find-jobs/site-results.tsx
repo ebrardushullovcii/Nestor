@@ -58,7 +58,7 @@ export function useKeepReading() {
 }
 function failureReason(message: string | null): string {
   if (/\btimed? out\b|\btimeout\b|\btook too long\b/iu.test(message ?? ""))
-    return "This site took too long to respond. Other sites carried on.";
+    return "This site took too long to respond.";
   if (/\bHTTP 404\b|\bpage not found\b/iu.test(message ?? ""))
     return "The page was not found.";
   if (/\bHTTP 410\b/iu.test(message ?? ""))
@@ -322,6 +322,13 @@ export function SiteResults(props: {
                     <p className="mt-1">{failureReason(source.message)}</p>
                   ) : source.message ? (
                     <p className="mt-1 whitespace-pre-wrap">{source.message}</p>
+                  ) : source.state === "waiting" ? (
+                    <p className="mt-1">Queued to read this site.</p>
+                  ) : source.state === "searching" ? (
+                    <p className="mt-1">
+                      This site's search is still in progress. No waiting reason
+                      has been reported.
+                    </p>
                   ) : null}
                   {["partial", "failed", "stopped"].includes(source.state) ? (
                     <div className="mt-2 flex flex-wrap items-center gap-2">

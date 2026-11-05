@@ -105,6 +105,9 @@ test.each([
     if (below) {
       expect(result[0].summary).toContain("below your 24/hour minimum");
       expect(result[0].preferences?.assessment).toBe("conflict");
+    } else {
+      expect(result[0].score).toBe(94);
+      expect(result[0].summary).toBe("Excellent match worth applying");
     }
   },
 );
@@ -150,6 +153,10 @@ test.each([
     expect(fits[0].score).toBe(94);
     expect(fits[0].summary).toContain("Excellent match worth applying");
     expect(fits[0].summary).toContain("cannot yet be compared");
+    expect(fits[0].summary).not.toContain("Published pay");
+    expect(fits[0].summary).not.toContain(
+      "its currency, interval, basis or amount is unresolved",
+    );
     expect(fits[0].short).toBeUndefined();
     expect(fits[0].preferences?.assessment).toBe("unknown");
   },

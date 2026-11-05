@@ -431,7 +431,9 @@ test.each(["remote", "hybrid"] as const)(
       ],
     );
     expect(result.status).toBe("review");
-    expect(result.reason).toContain("not recorded");
+    expect(result.reason).toContain(
+      "permission for this role still needs checking",
+    );
     expect(result.reason.includes("On-site or hybrid")).toBe(mode === "hybrid");
     expect(profile.workEligibility.authorizedWorkCountries).toEqual(["Kosovo"]);
   },

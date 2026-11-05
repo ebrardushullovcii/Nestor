@@ -331,9 +331,70 @@ test("a response with no eligibility verdict retains its score with visible unce
     },
   });
   expect(fit?.score).toBe(99);
-  expect(fit?.summary).toContain("unconfirmed");
+  expect(fit?.summary).toContain("Location or eligibility needs review");
   expect(fit?.preferences?.assessment).toBe("unknown");
 });
+
+test.each([
+  { authorized: true, status: "compatible", review: false },
+  { authorized: true, status: "review", review: true },
+  { authorized: false, status: "compatible", review: true },
+])(
+  "location review preserves saved permission facts: $authorized / $status",
+  async ({ authorized, status, review }) => {
+    const person = CandidateProfileSchema.parse({
+      ...profile,
+      currentCountry: "Germany",
+      workEligibility: {
+        authorizedWorkCountries: authorized ? ["Germany"] : [],
+      },
+    });
+    const [fit] = await fitJobs({
+      profile: person,
+      jobs: [
+        {
+          ...job,
+          location: "Germany",
+          workModes: ["onsite"],
+          description: "Synthetic Lab · Germany. Build TypeScript products.",
+        },
+      ],
+      goals: { targetRoles: ["Software Engineer"], locations: ["Germany"] },
+      client: {
+        chatWithTools: () =>
+          Promise.resolve({
+            content: JSON.stringify({
+              fits: [
+                {
+                  id: job.id,
+                  s: 87,
+                  why: "Direct TypeScript experience",
+                  r: ["strong", "Requested work"],
+                  p: ["aligned", "Germany"],
+                  c: ["strong", "Direct evidence"],
+                  e: [status, "Synthetic Lab · Germany", "onsite", "DE"],
+                },
+              ],
+            }),
+          }),
+      },
+    });
+    expect(fit?.score).toBe(87);
+    expect(fit?.summary).toContain("Direct TypeScript experience");
+    expect(fit?.summary.includes("needs review")).toBe(review);
+    expect(fit?.summary).not.toContain(
+      "Work permission or hiring scope is unconfirmed",
+    );
+    if (authorized) expect(fit?.summary).not.toContain("not recorded");
+    else
+      expect(fit?.summary).toContain(
+        "permission for this role still needs checking",
+      );
+    expect(person.workEligibility.authorizedWorkCountries).toEqual(
+      authorized ? ["Germany"] : [],
+    );
+  },
+);
 
 test.each([
   "Work remotely from any European country, including non-EU countries",

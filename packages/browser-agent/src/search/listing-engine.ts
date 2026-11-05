@@ -353,7 +353,7 @@ export async function collectSource(
   }
   const covered = complete && recognized && (cards.size > 0 || emptyConfirmed);
   notes.push(
-    `${cards.size} listings collected from ${visited.size} pages; ${covered ? "all observed pages covered" : "coverage incomplete"}.`,
+    `${cards.size} listings collected; ${visited.size} page ${visited.size === 1 ? "address" : "addresses"} attempted; ${covered ? "all observed pages covered" : "coverage incomplete"}.`,
   );
   return {
     cards: [...cards.values()],
@@ -1359,7 +1359,7 @@ export async function fitJobs(
             const payReason = belowFloor
               ? `Published ${pay!.currency} ${pay!.maximum}/${pay!.interval} is below your ${payFloor!.minimum}/${payFloor!.interval} minimum.`
               : unknownPay
-                ? "Published pay cannot yet be compared with your saved minimum; its currency, interval, basis or amount is unresolved."
+                ? "Pay cannot yet be compared with your saved minimum."
                 : null;
             const hardLimited = belowFloor || fit.h?.[0] === "conflict";
             const cap =
@@ -1373,7 +1373,7 @@ export async function fitJobs(
             const uncertainty = [
               ...(eligibility === "review"
                 ? [
-                    `Work permission or hiring scope is unconfirmed: ${eligibilityReason}`,
+                    `Location or eligibility needs review: ${eligibilityReason}`,
                   ]
                 : []),
               ...(unknownPay && payReason ? [payReason] : []),
