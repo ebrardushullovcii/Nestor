@@ -1612,7 +1612,7 @@ it("a database-backed refill carries the actual Google selection checkpoint into
   f.releases.shift()!();
 });
 
-it("eligibility answer storage reuses Berlin to Munich but rejects changed facts, unknown and limited cross-job contexts", async () => {
+it("eligibility answer storage shares a country or identical unresolved location but rejects changed facts, different places and limited permits", async () => {
   const f = await setup(2);
   const question = {
     prompt: "Are you authorized to work here?",
@@ -1652,6 +1652,7 @@ it("eligibility answer storage reuses Berlin to Munich but rejects changed facts
     );
   remember({ id: 1, location: "Berlin, Germany" });
   expect(read({ id: 2, location: "Munich, Germany" })[0]?.answer).toBe("Yes");
+  expect(read({ id: 2, location: "Paris, France" })).toEqual([]);
   const changed = {
     ...profile,
     workEligibility: {
@@ -1661,7 +1662,10 @@ it("eligibility answer storage reuses Berlin to Munich but rejects changed facts
   };
   expect(read({ id: 2, location: "Munich, Germany" }, changed)).toEqual([]);
   remember({ id: 1, location: "Remote, Europe" });
-  expect(read({ id: 2, location: "Remote, Europe" })).toEqual([]);
+  expect(read({ id: 2, location: "Remote, Europe" })[0]?.answer).toBe("Yes");
+  expect(read({ id: 2, location: "Remote, Europe" }, changed)).toEqual([]);
+  for (const location of ["Remote, Worldwide", "EMEA"])
+    expect(read({ id: 2, location })).toEqual([]);
   const limited = CandidateProfileSchema.parse({
     ...profile,
     workEligibility: {
