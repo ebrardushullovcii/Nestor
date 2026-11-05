@@ -1857,6 +1857,7 @@ async function reviewGuard(
  * ambiguous presses stay with the person; continuation uses their next page.
  */
 export function pressOnSitePause(pressed: string, at: Date): ApplyPause {
+  if (/https?:\/\//iu.test(pressed)) pressed = "the application link";
   const summary = `Job Finder filled what it could on this page. Press ${pressed} on the site yourself, then continue and Job Finder fills the next page.`;
   // One Needs you item for this application: the person presses it on the
   // site and says so, and the run continues on the page they reached.

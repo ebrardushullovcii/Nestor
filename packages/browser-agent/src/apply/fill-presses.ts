@@ -47,21 +47,22 @@ const FIELD_PART_ROLES = new Set([
 ]);
 
 /**
- * Whether Fill in for me may open this address itself: only the application
- * form it was started on, the page it is on, or the page an earlier run of
- * this application filled its form on or followed a link to. Any other link
- * (a "Continue", a step) is the person's, like any other button.
+ * Fill may open an observed Apply link before any answers are entered, and
+ * return to this application's known pages. A later ambiguous link still
+ * needs its own non-final step or permission check.
  */
 export function fillMayOpen(
   config: Pick<ApplyAgentConfig, "application" | "replay">,
   currentUrl: string | null,
   href: string,
+  opening?: { observation: ApplyFormObservation; state: FillPressState },
 ): boolean {
-  const address = (value: string | null | undefined) => {
+  const address = (value: string | null | undefined, full = false) => {
     if (!value) return null;
     try {
       const url = new URL(value, currentUrl ?? undefined);
-      return `${url.origin}${url.pathname}`;
+      if (!/^https?:$/u.test(url.protocol)) return null;
+      return full ? url.href : `${url.origin}${url.pathname}`;
     } catch {
       return null;
     }
@@ -69,7 +70,19 @@ export function fillMayOpen(
   const target = address(href);
   return (
     target !== null &&
-    (target === address(currentUrl) ||
+    ((opening &&
+      !config.application.continuation &&
+      opening.state.fieldWrites === 0 &&
+      !opening.state.openedForm &&
+      !opening.observation.controls.some(
+        (control) => control.visible && !control.disabled && control.answered,
+      ) &&
+      opening.observation.links.some(
+        (link) =>
+          address(link.href, true) === address(href, true) &&
+          OPENS_FORM.test(normalizeSignal(link.label)),
+      )) ||
+      target === address(currentUrl) ||
       target === address(config.application.startingUrl) ||
       // The page an earlier run of this application filled the form on, and
       // the way it went there (a job page's Application tab): a refill
@@ -189,7 +202,10 @@ export function fillPressFor(input: {
     return { kind: "field_part", ref };
   const link = observation.links.find((entry) => entry.ref === ref);
   if (link)
-    return fillMayOpen(config, observation.url, link.href)
+    return fillMayOpen(config, observation.url, link.href, {
+      observation,
+      state,
+    })
       ? { kind: "link", ref }
       : null;
   const entry = pressables(observation).find(

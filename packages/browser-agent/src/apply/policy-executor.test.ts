@@ -15,6 +15,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import {
   buildPendingQuestion,
+  pressOnSitePause,
   createApplyGuardState,
   executeApplyProposal,
   pickerExhausted,
@@ -5860,4 +5861,15 @@ test("a required pay pause offers the recorded target and exact range without en
     );
   }
   expect(choose).not.toHaveBeenCalled();
+});
+
+test("navigation handoffs never turn a raw URL into a question", () => {
+  const pause = pressOnSitePause(
+    "http://127.0.0.1:47950/application/42",
+    now(),
+  );
+  expect(pause.question?.prompt).toBe(
+    "Press the application link on the site, then continue",
+  );
+  expect(JSON.stringify(pause)).not.toContain("http://");
 });

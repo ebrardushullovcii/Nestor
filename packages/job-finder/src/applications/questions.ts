@@ -201,7 +201,8 @@ export function eligibilityQuestionContext(
     fingerprint: createHash("sha256")
       .update(JSON.stringify(profile.workEligibility))
       .digest("hex"),
-    jobId: !country || conditional ? job.id : null,
+    jobId:
+      conditional || (!country && !normalize(job.location)) ? job.id : null,
   };
 }
 
@@ -223,7 +224,9 @@ export function describeFormQuestion(
   const context =
     eligibility?.jobId !== null
       ? `job ${job.id}|${country ?? "unknown"}`
-      : `country ${country}`;
+      : country
+        ? `country ${country}`
+        : `location ${normalize(job.location)}`;
   const fingerprint = eligibility?.fingerprint ?? "unknown";
   return {
     ...legacy,
