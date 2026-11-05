@@ -1,5 +1,8 @@
 import { meaningHash, meaningTargetHash } from "./answer-meaning";
-import { formWritingInstructions } from "./own-words";
+import {
+  formWritingInstructions,
+  ownWordsAppliesToQuestion,
+} from "./own-words";
 import {
   executeApplyProposal,
   createApplyGuardState,
@@ -165,7 +168,7 @@ function checkingClient() {
       });
     }
     if (name === "match_application_answer")
-      return reply(name, { sourceId: null });
+      return reply(name, { sourceId: null, answer: null });
     if (name === "report_answer_checks") {
       const data = JSON.parse(String(messages[1].content)) as {
         answers: { index: number; question: string }[];
@@ -237,8 +240,15 @@ test("a checker refusal before a supported sibling leaves only the refused field
     JSON.stringify(result.timeline),
   ).toEqual(["", "3–5"]);
   expect(write).toHaveBeenCalledWith("c1", "3–5");
-  expect(result.technicalFailure?.code).toBe("answer_grounding_unavailable");
-  expect(JSON.stringify(calls)).toContain("checking is unavailable");
+  expect(result.technicalFailure).toBeUndefined();
+  expect(
+    result.pauses
+      .flatMap((p) => p.questions ?? (p.question ? [p.question] : []))
+      .map((q) => q.prompt),
+  ).toContain("Weekly rota capacity");
+  expect(JSON.stringify(calls)).toContain(
+    "could not finish checking this answer",
+  );
   expect(JSON.stringify(calls)).not.toContain("Reconsider it once");
   expect(input.hands.clickAction).not.toHaveBeenCalled();
 });
@@ -399,4 +409,85 @@ test("the whole apply path does not semantically reauthorize an unchanged curren
   expect(seen).not.toContain("report_answer_checks");
   expect(seen).not.toContain("match_application_answer");
   expect(result.technicalFailure).toBeUndefined();
+});
+
+test.each([
+  "In your own words, describe a time you managed a warehouse team",
+  "Explain your approach to a difficult delivery in your own words",
+])("a writing rule on %s leaves supported siblings usable", async (story) => {
+  const { raw, input } = setup([
+    field(0, "Applicant email"),
+    field(1, story),
+    field(2, "Can your recorded permit cover these hours?"),
+  ]);
+  raw.bodyText = `Application questions\nApplicant email\n${story}\nCan your recorded permit cover these hours?`;
+  const observation = await input.hands.observe();
+  const questions = observation.controls.map((control) => control.label);
+  expect(
+    ownWordsAppliesToQuestion(raw.bodyText, "Applicant email", questions),
+  ).toBe(false);
+  expect(ownWordsAppliesToQuestion(raw.bodyText, story, questions)).toBe(true);
+  const checked = vi
+    .fn<NonNullable<ApplyExecutorDeps["checkWrittenAnswer"]>>()
+    .mockResolvedValue({
+      supported: true,
+      reason: "Supplied facts answer this question.",
+    });
+  const deps: ApplyExecutorDeps = {
+    config: input,
+    guardState: createApplyGuardState(),
+    now: () => new Date("2026-11-05T00:00:00Z"),
+    checkWrittenAnswer: checked,
+  };
+  await executeApplyProposal(
+    { tool: "type", ref: "c0", text: "jamie@example.test" },
+    observation.signature,
+    deps,
+  );
+  const current = await input.hands.observe();
+  await executeApplyProposal(
+    { tool: "type", ref: "c2", text: "No" },
+    current.signature,
+    deps,
+  );
+  const withSiblings = await input.hands.observe();
+  const held = await executeApplyProposal(
+    { tool: "type", ref: "c1", text: "An invented warehouse story." },
+    withSiblings.signature,
+    deps,
+  );
+  expect(raw.controls.map((control) => control.value)).toEqual([
+    "jamie@example.test",
+    "",
+    "No",
+  ]);
+  expect(held.kind).not.toBe("filled");
+  expect(
+    checked.mock.calls.some(([question]) => question.includes(story)),
+  ).toBe(false);
+});
+
+test("a separate writing instruction names only its narrative field", () => {
+  const questions = [
+    "Applicant email",
+    "Warehouse-team narrative",
+    "Permit hours",
+  ];
+  const instructions = "Write the Warehouse-team narrative in your own words.";
+  expect(ownWordsAppliesToQuestion(instructions, questions[0], questions)).toBe(
+    false,
+  );
+  expect(ownWordsAppliesToQuestion(instructions, questions[1], questions)).toBe(
+    true,
+  );
+  expect(ownWordsAppliesToQuestion(instructions, questions[2], questions)).toBe(
+    false,
+  );
+  expect(
+    ownWordsAppliesToQuestion(
+      "Write all answers in your own words.",
+      questions[1],
+      questions,
+    ),
+  ).toBe(true);
 });

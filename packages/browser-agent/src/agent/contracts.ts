@@ -34,6 +34,7 @@ export interface LLMClient {
     content?: string
     toolCalls?: ToolCall[]
     reasoning?: string
+    finishReason?: string
     usage?: ModelTokenUsage
   }>
 }

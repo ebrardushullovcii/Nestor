@@ -1363,7 +1363,13 @@ async function decideAnswer(input: {
     deps.onAnswerSource?.("stored_fact");
     return { kind: "use", answer: stored };
   }
-  if (ownWordsAppliesToQuestion(input.pageText, questionPrompt(control))) {
+  if (
+    ownWordsAppliesToQuestion(
+      input.pageText,
+      questionPrompt(control),
+      input.controls.map(questionPrompt),
+    )
+  ) {
     return {
       kind: "leave",
       reason: OWN_WORDS_REASON,
@@ -1539,12 +1545,11 @@ function notEntered(input: {
       : {}),
   };
   if (input.decision.checkingUnavailable)
-    return {
-      kind: "refused",
-      fieldRef: input.control.ref,
-      reason: `This answer remains unwritten because checking is unavailable. Continue the independent fields, then retain the technical Try again state. ${input.decision.reason}`,
-      observation: input.observation,
-    };
+    return leaveUnansweredForPerson({
+      ...args,
+      reason:
+        "Nestor could not finish checking this answer. You can answer it here or try again.",
+    });
   if (input.decision.actorFeedback) {
     const key = questionPrompt(input.control);
     const first = !input.deps.guardState.answerFeedback.has(key);
@@ -1853,10 +1858,8 @@ async function reviewGuard(
  * The handover where Fill in for me stops pressing.
  *
  * Fill presses a form's own buttons (Next, Continue, Save, Add) only as a
- * proven numbered step (`fillStepPress`): any other could send the
- * application, and nothing tells which. So the run fills what is on the page
- * and hands the press to the person; continuing afterwards picks the run up
- * on the page they reached.
+ * non-final step (`fillStepPress`) inside its bounded request guard. Other
+ * ambiguous presses stay with the person; continuation uses their next page.
  */
 export function pressOnSitePause(pressed: string, at: Date): ApplyPause {
   const summary = `Job Finder filled what it could on this page. Press ${pressed} on the site yourself, then continue and Job Finder fills the next page.`;
@@ -1974,7 +1977,7 @@ export function unconfirmedStepPause(
 
 /**
  * The step press Fill in for me may make on this exact control, if any. A
- * numbered, non-final step is pressed inside its own intermediate-write
+ * non-final advance is pressed inside its own intermediate-write
  * window, so the site can save the step (B6); without write authority only
  * a proven local press under a read-only fence is possible.
  */
@@ -2655,8 +2658,7 @@ export async function executeApplyProposal(
           let wait = 0;
           wait < 20 &&
           (after.loading ||
-            (after.step.index === livePage.step.index &&
-              after.step.total === livePage.step.total &&
+            (!numberedStepAdvanced(livePage, after) &&
               !after.blocker &&
               !after.validationErrors.length));
           wait++
@@ -2687,7 +2689,7 @@ export async function executeApplyProposal(
         deps.guardState.lastOnSiteUrl = after.url;
         return {
           kind: "moved",
-          note: `Pressed "${numberedStep.label}" on step ${livePage.step.index} of ${livePage.step.total}; the form moved to step ${after.step.index} of ${after.step.total}.`,
+          note: `Pressed "${numberedStep.label}"; the form moved to its next application section.`,
           observation: after,
           progress: true,
           confirmedStepPage: livePage,
@@ -3883,6 +3885,7 @@ async function provideApplicationLetter(
     ownWordsAppliesToQuestion(
       formWritingInstructions(observation),
       questionPrompt(control),
+      observation.controls.map(questionPrompt),
     )
   ) {
     return {

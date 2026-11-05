@@ -84,20 +84,22 @@ test.each([
       goals,
       jobs: [job(1, `Remote within Germany. ${quote}. SQL reporting duties.`)],
       client: {
-        chatWithTools: vi.fn(async () => ({
-          content: JSON.stringify({
-            fits: [
-              verdict(1, {
-                minimum,
-                maximum,
-                currency: "EUR",
-                interval: "hour",
-                basis: "base",
-                quote,
-              }),
-            ],
+        chatWithTools: vi.fn(() =>
+          Promise.resolve({
+            content: JSON.stringify({
+              fits: [
+                verdict(1, {
+                  minimum,
+                  maximum,
+                  currency: "EUR",
+                  interval: "hour",
+                  basis: "base",
+                  quote,
+                }),
+              ],
+            }),
           }),
-        })),
+        ),
       },
     });
     expect(result).toHaveLength(1);
@@ -145,9 +147,10 @@ test.each([
       goals,
       jobs: [job(1, `Remote within Germany. SQL. ${pay.quote}`)],
       client: {
-        chatWithTools: async () => ({
-          content: JSON.stringify({ fits: [verdict(1, pay)] }),
-        }),
+        chatWithTools: () =>
+          Promise.resolve({
+            content: JSON.stringify({ fits: [verdict(1, pay)] }),
+          }),
       },
     });
     expect(fits[0].score).toBe(94);
@@ -176,9 +179,11 @@ test("borrowed pay evidence leaves only that row retryable and retains a valid s
     job(2, "Remote within Germany. Pay to be discussed. SQL reporting."),
   ];
   const client = {
-    chatWithTools: vi.fn(async () => ({
-      content: JSON.stringify({ fits: [verdict(1, good), verdict(2, good)] }),
-    })),
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({
+        content: JSON.stringify({ fits: [verdict(1, good), verdict(2, good)] }),
+      }),
+    ),
   };
   const fits = await fitJobs({ profile, goals, jobs, client });
   expect(fits.map((f) => f.id)).toEqual([1]);
@@ -206,26 +211,31 @@ test("Chat receives the required pay contract and repairs only the omitted sibli
       batches.push(updates.map((row) => row.id));
     },
     client: {
-      chatWithTools: async (messages, _tools, options) => {
+      chatWithTools: (messages, _tools, options) => {
         const instruction = String(messages[0].content);
         expect(options?.jsonOutput).not.toBe(true);
         const schema = JSON.parse(
           instruction.split("Required response JSON Schema: ")[1],
-        );
+        ) as { properties: { fits: { items: { required: string[] } } } };
         expect(schema.properties.fits.items.required).toContain("pay");
         expect(instruction).toContain(
           '"h":["met|conflict|unknown|not_requested","mandatory requirements reason"],"pay":',
         );
-        const input = JSON.parse(String(messages[1].content));
+        const input = JSON.parse(String(messages[1].content)) as {
+          listings: { id: number }[];
+          repair?: { id: number; issues: string[] }[];
+        };
         requests.push(input.listings.map((row: { id: number }) => row.id));
         if (requests.length === 1)
-          return {
+          return Promise.resolve({
             content: JSON.stringify({
               fits: [verdict(1, pay), verdict(2, undefined)],
             }),
-          };
+          });
         expect(input.repair).toEqual([{ id: 2, issues: ["missing_pay"] }]);
-        return { content: JSON.stringify({ fits: [verdict(2, pay)] }) };
+        return Promise.resolve({
+          content: JSON.stringify({ fits: [verdict(2, pay)] }),
+        });
       },
     },
   });
@@ -241,10 +251,13 @@ test("pay repair identifies an ungrounded quote and keeps the grounding gate", a
     goals,
     jobs: [job(1, "Remote within Germany. EUR 27 per hour. SQL reporting.")],
     client: {
-      chatWithTools: async (messages) => {
-        const input = JSON.parse(String(messages[1].content));
+      chatWithTools: (messages) => {
+        const input = JSON.parse(String(messages[1].content)) as {
+          listings: { id: number }[];
+          repair?: { id: number; issues: string[] }[];
+        };
         if (input.repair) issues.push(input.repair[0].issues);
-        return {
+        return Promise.resolve({
           content: JSON.stringify({
             fits: [
               verdict(1, {
@@ -257,7 +270,7 @@ test("pay repair identifies an ungrounded quote and keeps the grounding gate", a
               }),
             ],
           }),
-        };
+        });
       },
     },
   });

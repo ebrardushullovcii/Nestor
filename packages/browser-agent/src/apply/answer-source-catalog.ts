@@ -1190,105 +1190,121 @@ export function classifyAnswerPermission(input: {
   const changedCurrentBinding =
     !!selectedSaved?.applicationScope?.currentFieldBinding &&
     localAnswer?.id !== selectedSaved.id;
-  // A semantic source selection is only a proposal. A second model must
-  // verify that the saved question has the same complete meaning and value.
-  // Current-application answers can settle their own conditional eligibility;
-  // reuse elsewhere still has to fit this jurisdiction and permit conditions.
-  let savedSetOffered = false;
-  if (matchingSaved && input.control.answerControlType === "multi_choice") {
-    try {
-      const selected: unknown = JSON.parse(matchingSaved.answer);
-      const offered = input.control.options.length
-        ? input.control.options
-        : input.controls
-            .filter(
-              (control) =>
-                control.choiceGroupKey === input.control.choiceGroupKey,
-            )
-            .map((control) => control.label || control.value);
-      savedSetOffered =
-        Array.isArray(selected) &&
-        selected.every(
-          (value) => typeof value === "string" && offered.includes(value),
-        );
-    } catch {
-      /* Non-set answers cannot grant an individual selection. */
-    }
-  }
-  if (
-    (!matchingSaved ||
-      changedCurrentBinding ||
-      (source &&
-        !literalValueMatches(
-          source,
-          input.control,
-          input.answer,
-          input.controls,
-          input.sources,
-        ) &&
-        !savedSetOffered &&
-        !(
-          addressLabels.includes(
-            normalizeFormQuestionPrompt(input.control.label),
-          ) &&
-          addressAnswerMatches(
-            source.value,
-            input.answer,
-            input.sources.profile,
-          )
-        ))) &&
-    source?.purpose === "saved" &&
-    !input.control.repeatedQuestion &&
-    !fieldNamesAnotherPerson(input.control) &&
-    (!(
-      tags.kind === "own_words" ||
-      requiresOwnWords(input.control.label) ||
-      ownWordsAppliesToQuestion(
-        `${input.control.groupLabel}\n${input.pageInstructions}`,
-        input.control.label,
-      )
-    ) ||
-      source.value.trim() === input.answer.trim())
-  ) {
-    const record = input.sources.reusableAnswers.find(
-      (entry) => source?.id === `answerLibrary.${entry.id}`,
-    );
-    const conflicting = catalog.some(
-      (entry) =>
-        entry.purpose === "saved" &&
-        normalizeFormQuestionPrompt(entry.question ?? "") ===
-          normalizeFormQuestionPrompt(source?.question ?? "") &&
-        entry.value.trim() !== source?.value.trim(),
-    );
-    // Differing text can be one accepted numeric/option meaning. The whole-source
-    // checker resolves that once; it still refuses genuinely conflicting facts.
-    if (conflicting && !legal)
-      return { kind: "writing", source, evidencePolicy: "saved_answer" };
-    const scope = record?.applicationScope;
-    const local =
-      !!input.application &&
-      !!scope &&
-      ((!!input.application.applicationRecordId &&
-        scope.applicationRecordId === input.application.applicationRecordId) ||
-        (!!input.application.resultId &&
-          scope.resultId === input.application.resultId));
-    if (
-      !legal ||
-      (target &&
-        source.country === target &&
-        (local ||
-          (permitConditionsFit(input.sources, target) &&
-            !(
-              tags.kind === "sponsorship" &&
-              input.answer === "No" &&
-              input.sources.profile.workEligibility.limitedWorkPermissions?.some(
-                (permit) =>
-                  country(permit.country) === target &&
-                  permit.requiresFutureSponsorship === true,
+  // Semantic reuse needs an independent whole-question check. Plain phone,
+  // date and picker formatting below first retain their exact source binding.
+  // Legal reuse keeps its existing country and permit checks here.
+  const semanticSavedPermission = (): ClassifiedAnswerDecision | null => {
+    let savedSetOffered = false;
+    if (matchingSaved && input.control.answerControlType === "multi_choice") {
+      try {
+        const selected: unknown = JSON.parse(matchingSaved.answer);
+        const offered = input.control.options.length
+          ? input.control.options
+          : input.controls
+              .filter(
+                (control) =>
+                  control.choiceGroupKey === input.control.choiceGroupKey,
               )
-            ))))
-    )
-      return { kind: "writing", source, evidencePolicy: "saved_answer" };
+              .map((control) => control.label || control.value);
+        savedSetOffered =
+          Array.isArray(selected) &&
+          selected.every(
+            (value) => typeof value === "string" && offered.includes(value),
+          );
+      } catch {
+        /* Non-set answers cannot grant an individual selection. */
+      }
+    }
+    if (
+      (!matchingSaved ||
+        changedCurrentBinding ||
+        (source &&
+          !literalValueMatches(
+            source,
+            input.control,
+            input.answer,
+            input.controls,
+            input.sources,
+          ) &&
+          !savedSetOffered &&
+          !(
+            addressLabels.includes(
+              normalizeFormQuestionPrompt(input.control.label),
+            ) &&
+            addressAnswerMatches(
+              source.value,
+              input.answer,
+              input.sources.profile,
+            )
+          ))) &&
+      source?.purpose === "saved" &&
+      !input.control.repeatedQuestion &&
+      !fieldNamesAnotherPerson(input.control) &&
+      (!(
+        tags.kind === "own_words" ||
+        requiresOwnWords(input.control.label) ||
+        ownWordsAppliesToQuestion(
+          `${input.control.groupLabel}\n${input.pageInstructions}`,
+          input.control.label,
+          (input.controls ?? [input.control]).map(questionPrompt),
+        )
+      ) ||
+        source.value.trim() === input.answer.trim())
+    ) {
+      const record = input.sources.reusableAnswers.find(
+        (entry) => source?.id === `answerLibrary.${entry.id}`,
+      );
+      const conflicting = catalog.some(
+        (entry) =>
+          entry.purpose === "saved" &&
+          normalizeFormQuestionPrompt(entry.question ?? "") ===
+            normalizeFormQuestionPrompt(source?.question ?? "") &&
+          entry.value.trim() !== source?.value.trim(),
+      );
+      // Differing text can be one accepted numeric/option meaning. The whole-source
+      // checker resolves that once; it still refuses genuinely conflicting facts.
+      if (conflicting && !legal)
+        return {
+          kind: "writing",
+          source,
+          evidencePolicy: "saved_answer",
+        } as const;
+      const scope = record?.applicationScope;
+      const local =
+        !!input.application &&
+        !!scope &&
+        ((!!input.application.applicationRecordId &&
+          scope.applicationRecordId ===
+            input.application.applicationRecordId) ||
+          (!!input.application.resultId &&
+            scope.resultId === input.application.resultId));
+      if (
+        !legal ||
+        (target &&
+          source.country === target &&
+          (local ||
+            (permitConditionsFit(input.sources, target) &&
+              !(
+                tags.kind === "sponsorship" &&
+                input.answer === "No" &&
+                input.sources.profile.workEligibility.limitedWorkPermissions?.some(
+                  (permit) =>
+                    country(permit.country) === target &&
+                    permit.requiresFutureSponsorship === true,
+                )
+              ))))
+      )
+        return {
+          kind: "writing",
+          source,
+          evidencePolicy: "saved_answer",
+        } as const;
+    }
+    return null;
+  };
+  if (legal) {
+    const semantic = semanticSavedPermission();
+    if (semantic) return semantic;
   }
   // A saved "Phone" answer may omit the repeated Phone group in its key.
   // Bind it to the Profile only when that is independently the same number
@@ -1416,6 +1432,7 @@ export function classifyAnswerPermission(input: {
     !ownWordsAppliesToQuestion(
       `${input.control.groupLabel}\n${input.pageInstructions}`,
       input.control.label,
+      (input.controls ?? [input.control]).map(questionPrompt),
     ) &&
     !requiresSavedNationalityAnswer(input.control.label) &&
     !requiresSavedOpinionAnswer(input.control.label, input.answer)
@@ -1563,6 +1580,10 @@ export function classifyAnswerPermission(input: {
       source: null,
       evidencePolicy: "factual_inference",
     };
+  if (!legal && !exactSaved && !asksListingDiscoveryControl(input.control)) {
+    const semantic = semanticSavedPermission();
+    if (semantic) return semantic;
+  }
   const gated =
     [
       "citizenship",
@@ -1576,6 +1597,7 @@ export function classifyAnswerPermission(input: {
       ownWordsAppliesToQuestion(
         `${input.control.groupLabel}\n${input.pageInstructions}`,
         input.control.label,
+        (input.controls ?? [input.control]).map(questionPrompt),
       )) ||
     requiresSavedNationalityAnswer(input.control.label) ||
     (["motivation", "factual_summary"].includes(tags.kind) &&
@@ -1889,6 +1911,7 @@ function streetAddressLine(
 function recordedSkillsAnswer(
   input: {
     control: ApplyFormControl;
+    controls?: readonly ApplyFormControl[];
     tags: ApplyAnswerTags;
     answer: string;
     pageInstructions: string;
@@ -1908,6 +1931,7 @@ function recordedSkillsAnswer(
     ownWordsAppliesToQuestion(
       `${control.groupLabel}\n${input.pageInstructions}`,
       control.label,
+      (input.controls ?? [input.control]).map(questionPrompt),
     ) ||
     requiresSavedOpinionAnswer(question, input.answer)
   )
@@ -1986,6 +2010,7 @@ export function siteUnchangedAnswerAllowed(input: {
 
 function factualInferenceAllowed(input: {
   control: ApplyFormControl;
+  controls?: readonly ApplyFormControl[];
   tags: ApplyAnswerTags | null | undefined;
   pageInstructions: string;
   answer: string;
@@ -2034,6 +2059,7 @@ function factualInferenceAllowed(input: {
     !ownWordsAppliesToQuestion(
       `${control.groupLabel}\n${input.pageInstructions}`,
       control.label,
+      (input.controls ?? [input.control]).map(questionPrompt),
     ) &&
     !requiresSavedNationalityAnswer(question) &&
     !requiresSavedOpinionAnswer(question, input.answer) &&

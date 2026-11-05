@@ -237,9 +237,9 @@ it("shows failed sites and recovery advice instead of a successful empty search"
   await screen.findByText("Unreadable site 4");
   expect(screen.queryByText(/nothing new/i)).toBeNull();
   expect(screen.queryByText("No jobs yet")).toBeNull();
-  expect(
-    screen.getAllByText(/use the board’s main jobs page instead/),
-  ).toHaveLength(4);
+  expect(screen.getAllByRole("button", { name: "Continue site" })).toHaveLength(
+    4,
+  );
   expect(
     screen.getAllByText(
       "The vacancy title or hiring employer could not be identified on this page.",

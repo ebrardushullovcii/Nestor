@@ -47,7 +47,11 @@ type Variant = "saves" | "unchanged" | "wrong_total" | "no_numbers";
 
 function wizard(
   variant: Variant,
-  options: { emptyStep?: boolean; startStep?: number } = {},
+  options: {
+    emptyStep?: boolean;
+    startStep?: number;
+    advanceLabel?: string;
+  } = {},
 ) {
   const state = {
     step: options.startStep ?? 1,
@@ -102,7 +106,7 @@ function wizard(
       : [
           {
             index: 0,
-            label: "Save and Continue",
+            label: options.advanceLabel ?? "Save and Continue",
             visible: true,
             disabled: false,
             inForm: true,
@@ -502,29 +506,34 @@ test("an empty numbered step is advanced through the same windowed press", async
   expect(result.outcome).toBe("prepared");
 });
 
-test("a step without numbers is handed to the person without any press", async () => {
-  const { state, hands, config } = wizard("no_numbers");
-  // The model presses the step when told the form has another one.
-  const turns = [
-    { name: "finish", args: { reason: "This step is filled." } },
-    { name: "click", args: { ref: "a0" } },
-    { name: "finish", args: { reason: "This step is filled." } },
-  ];
-  let turn = 0;
-  const result = await runApplyAgent(
-    config,
-    model(() => turns[Math.min(turn++, turns.length - 1)]),
-  );
-  expect(hands.clickBoundAction).not.toHaveBeenCalled();
-  expect(hands.clickWithoutWrites).not.toHaveBeenCalled();
-  expect(hands.clickElement).not.toHaveBeenCalled();
-  expect(state.saves).toEqual([]);
-  expect(state.step).toBe(1);
-  expect(result.outcome).toBe("paused");
-  expect(result.pauses.at(-1)?.question?.prompt).toBe(
-    'Press "Save and Continue" on the site, then continue',
-  );
-});
+test.each(["Save these details and proceed", "Continue with saved details"])(
+  "an unnumbered %s completes each saved section and keeps final Send with the person",
+  async (label) => {
+    const { state, hands, config } = wizard("no_numbers", {
+      advanceLabel: label,
+    });
+    const result = await runApplyAgent(config, finishing());
+    expect(
+      state.saves,
+      JSON.stringify({
+        reason: result.reason,
+        notes: result.notes.slice(0, 5),
+        events: state.events,
+      }),
+    ).toEqual([1, 2]);
+    expect(hands.clickBoundAction).toHaveBeenCalledTimes(2);
+    expect(state.finalPresses).toBe(0);
+    expect(result.outcome).toBe("prepared");
+    expect(result.pauses.flatMap((pause) => pause.questions ?? [])).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ prompt: "a0" })]),
+    );
+    expect(
+      (result.stepReceipts ?? []).filter(
+        (receipt) => receipt.kind === "advance",
+      ),
+    ).toHaveLength(2);
+  },
+);
 
 test.each(["unchanged", "wrong_total"] as const)(
   "a press whose counter does not show exactly the next step (%s) stops after one press and records it",
@@ -658,23 +667,6 @@ test.each(["unchanged", "wrong_total"] as const)(
   },
 );
 
-test("a step without numbers stores no advance receipt", async () => {
-  const { config } = wizard("no_numbers");
-  const turns = [
-    { name: "finish", args: { reason: "This step is filled." } },
-    { name: "click", args: { ref: "a0" } },
-    { name: "finish", args: { reason: "This step is filled." } },
-  ];
-  let turn = 0;
-  const result = await runApplyAgent(
-    config,
-    model(() => turns[Math.min(turn++, turns.length - 1)]),
-  );
-  expect(
-    (result.stepReceipts ?? []).filter((receipt) => receipt.kind === "advance"),
-  ).toEqual([]);
-});
-
 // Council D5: the model restating the press already handed over is that one
 // handover; anything more is still asked.
 async function handoverRun(
@@ -682,6 +674,8 @@ async function handoverRun(
   page: (source: RawApplyPage) => void = () => undefined,
 ) {
   const { hands, config, source } = wizard("no_numbers");
+  // Keep these tests about a genuine handoff, with no intermediate-save authority.
+  config.intermediateWritesAuthorized = false;
   page(source);
   const turns = [
     { name: "finish", args: { reason: "This step is filled." } },

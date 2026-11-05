@@ -118,20 +118,21 @@ test.each([
 );
 
 test.each([
-  [undefined, "low"],
+  [undefined, "none"],
   ["high", "high"],
 ] as const)(
   "bundled fit effort honors %s while a full read keeps its own effort",
   async (override, expected) => {
+    const verdict = {
+      score: 60,
+      reasons: [],
+      gaps: [],
+      judgments: [
+        { jobId: "0", score: 60, recommendation: "review_before_applying" },
+      ],
+    };
     const mock = mockCapturingJsonFetch({
-      output_text: JSON.stringify({
-        score: 60,
-        reasons: [],
-        gaps: [],
-        judgments: [
-          { jobId: "0", score: 60, recommendation: "review_before_applying" },
-        ],
-      }),
+      choices: [{ message: { content: JSON.stringify(verdict) } }],
     });
     try {
       const client = createJobFinderAiClientFromEnvironment({
@@ -150,13 +151,13 @@ test.each([
         jobs: [{ jobId: "one", posting: createJobPosting() }],
       });
       expect(JSON.parse(mock.getCapturedBody())).toMatchObject({
-        temperature: 0,
-        reasoning: { effort: expected },
+        model: "deepseek-v4.1-flash",
+        reasoning_effort: expected,
       });
       await client.assessJobFit({ ...input, job: createJobPosting() });
       expect(JSON.parse(mock.getCapturedBody())).toMatchObject({
-        temperature: 0,
-        reasoning: { effort: "xhigh" },
+        model: "deepseek-v4.1-flash",
+        reasoning_effort: "low",
       });
     } finally {
       mock.restore();

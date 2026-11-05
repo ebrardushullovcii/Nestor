@@ -167,6 +167,25 @@ export function browserInteractionKind(
     return "signIn";
   if (CREATE_ACCOUNT_ACTION.test(label)) return "createAccounts";
   if (SIGN_IN_ACTION.test(label)) {
+    // "Continue with ..." is also ordinary application progression. A bound
+    // advance beside applicant fields, with no account surface, is not SSO.
+    // Google/provider entry and account walls retain their checks above/below.
+    if (
+      /^continue with (?:the )?(?:saved|entered|current|these|your) (?:details|answers|information|application|profile)\b/iu.test(
+        label,
+      ) &&
+      item &&
+      "kind" in item &&
+      item.kind === "advance" &&
+      item.inForm === true &&
+      !page.blocker &&
+      !hasExistingAccountLoginForm(page) &&
+      ![page.title ?? "", ...page.headings.map((heading) => heading.text)].some(
+        (text) => SIGN_IN_ACTION.test(text) || CREATE_ACCOUNT_ACTION.test(text),
+      ) &&
+      page.controls.some((field) => field.visible && !field.credentialRole)
+    )
+      return null;
     if (EXACT_SIGN_IN_ACTION.test(label) && hasExistingAccountLoginForm(page))
       return "signIn";
     // An SSO button on a registration page creates an account, even if its

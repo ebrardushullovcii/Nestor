@@ -312,7 +312,7 @@ test("an unavailable fact check keeps draft text and a plain review reason", asy
   await expect(result).rejects.toMatchObject({
     draftText: "Supported draft to review.",
   });
-  await expect(result).rejects.toThrow("could not check this draft right now");
+  await expect(result).rejects.toThrow("could not finish checking this letter");
 });
 
 test.each([

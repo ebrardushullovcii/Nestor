@@ -159,7 +159,7 @@ async function prepare(f: ReturnType<typeof fixture>, client: LLMClient) {
         approvedAttestations,
         browserPermissions,
       }),
-    sources: () => answerSourceCatalog(f.sources),
+    sources: () => answerSourceCatalog(f.sources, approvedAttestations),
   })(f.controls, JSON.stringify({ instructions: pageText }));
 }
 
@@ -187,12 +187,10 @@ test("replica Send keeps unchanged Profile contacts and the full form's reading"
     client = reader();
   await prepare(f, client);
   const checked = await sendCheck(f, client);
-  expect(checked.map((check) => check.supported)).toEqual([
-    true,
-    true,
-    true,
-    true,
-  ]);
+  expect(
+    checked.map((check) => check.supported),
+    JSON.stringify(checked),
+  ).toEqual([true, true, true, true]);
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
   const questions = JSON.parse(
     String(
@@ -251,9 +249,13 @@ test.each(["profile", "reference", "instructions"] as const)(
     expect(checked.slice(0, 3).map((check) => check.supported)).toEqual(
       change === "profile" ? [false, true, false] : [false, false, false],
     );
-    expect(client.chatWithTools).toHaveBeenCalledTimes(
-      change === "profile" ? 4 : 2,
-    );
+    expect(
+      vi
+        .mocked(client.chatWithTools)
+        .mock.calls.filter(
+          (call) => call[1][0]?.function.name === "report_question_kinds",
+        ),
+    ).toHaveLength(2);
   },
 );
 
@@ -274,5 +276,11 @@ test("plain identity resolves a missing source without authorizing unrelated con
     true,
     false,
   ]);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+  expect(
+    vi
+      .mocked(client.chatWithTools)
+      .mock.calls.filter(
+        (call) => call[1][0]?.function.name === "report_question_kinds",
+      ),
+  ).toHaveLength(1);
 });

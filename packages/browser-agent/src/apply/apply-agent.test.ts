@@ -36,10 +36,7 @@ import type {
   ApplyAgentResult,
   ApplyPageHands,
 } from "./types";
-import {
-  checkWrittenApplicationAnswer,
-  WrittenAnswerCheckUnavailableError,
-} from "./written-answer-grounding";
+import { checkWrittenApplicationAnswer } from "./written-answer-grounding";
 
 /**
  * How the loop ends.
@@ -1728,7 +1725,7 @@ describe("written answer fact check recovery", () => {
     const lastCall = vi.mocked(client.chatWithTools).mock.lastCall;
     expect(
       lastCall?.[0].some((message) =>
-        message.content.includes("previous check did not return"),
+        message.content.includes("Repair only the unresolved checker report"),
       ),
     ).toBe(true);
     expect(lastCall?.[1].length).toBeGreaterThan(0);
@@ -1741,7 +1738,10 @@ describe("written answer fact check recovery", () => {
     };
     await expect(
       checkWrittenApplicationAnswer({ ...input(), client }),
-    ).rejects.toBeInstanceOf(WrittenAnswerCheckUnavailableError);
+    ).resolves.toMatchObject({
+      supported: false,
+      unavailable: { category: "invalid_report" },
+    });
     expect(client.chatWithTools).toHaveBeenCalledTimes(2);
   });
 
@@ -1808,7 +1808,10 @@ describe("written answer fact check recovery", () => {
         question: "Do you need visa sponsorship in Germany?",
         answer: "Yes",
       }),
-    ).rejects.toMatchObject({ category: "unverified_evidence" });
+    ).resolves.toMatchObject({
+      supported: false,
+      unavailable: { category: "unverified_evidence" },
+    });
     const content = vi
       .mocked(client.chatWithTools)
       .mock.calls[0]?.[0].find((message) => message.role === "user")?.content;
@@ -11784,7 +11787,7 @@ test.each([false, true])(
                         claim: answer.proposedAnswer,
                         kind: "applicant_fact",
                         source: "resume",
-                        path: "/experience/0",
+                        path: "",
                         quote:
                           "Paid work with TypeScript, PostgreSQL and Playwright.",
                       },
@@ -11793,7 +11796,10 @@ test.each([false, true])(
           });
         }
         if (tools[0]?.function.name === "match_application_answer")
-          return report("match_application_answer", { sourceId: null });
+          return report("match_application_answer", {
+            sourceId: null,
+            answer: null,
+          });
         turns++;
         return turns === 1
           ? report("fill_fields", {
@@ -11929,3 +11935,116 @@ test("a direct handoff uses classified pay meaning for missing options and unkno
   );
   expect(source.controls.map((control) => control.value)).toEqual(["", ""]);
 });
+
+test.each(["select", "radio"] as const)(
+  "pay paused for the person is one question with no match/checker and valid siblings filled (%s)",
+  async (kind) => {
+    const source = page({
+      controls: [
+        { ...nameControl(), value: "" },
+        {
+          ...nameControl(),
+          index: 1,
+          id: "pay",
+          name: "pay",
+          label:
+            "Expected gross annual base pay in EUR for this part-time role",
+          tagName: "select",
+          inputType: "",
+          value: "",
+          options: ["32000–33999", "34000–35999"],
+        },
+      ],
+    });
+    const payQuestion = source.controls[1].label;
+    if (kind === "radio")
+      source.controls = [
+        source.controls[0],
+        ...source.controls[1].options.map((label, index) => ({
+          ...source.controls[1],
+          index: index + 1,
+          id: `pay-${index}`,
+          tagName: "input",
+          inputType: "radio",
+          groupLabel: payQuestion,
+          label,
+          value: label,
+          options: [],
+        })),
+      ];
+    const beforePay = source.controls.slice(1).map((control) => control.value);
+    const input = config(source, { modelQuestionClassification: true });
+    const auxiliary: string[] = [];
+    const fallback = scriptedModel([
+      {
+        name: "fill_fields",
+        args: {
+          fields: [{ tool: "type", ref: "c0", text: "Robin Ashford" }],
+          finishWhenReady: true,
+        },
+      },
+    ]);
+    const result = await runApplyAgent(input, {
+      chatWithTools: (messages, tools, options) => {
+        const name = tools[0]?.function.name;
+        if (name === "report_question_kinds")
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "read",
+                type: "function",
+                function: {
+                  name,
+                  arguments: JSON.stringify({
+                    plainIndexes: [0],
+                    flagged: [
+                      {
+                        index: 1,
+                        asksAboutPay: true,
+                        asksCurrentPay: false,
+                        declarationKind: null,
+                        required: true,
+                      },
+                    ],
+                    tags: [
+                      {
+                        index: 0,
+                        kind: "other",
+                        country: null,
+                        sourceId: "profile.fullName",
+                      },
+                      {
+                        index: 1,
+                        kind: "salary",
+                        country: null,
+                        sourceId: "posting.description",
+                      },
+                    ],
+                  }),
+                },
+              },
+            ],
+          });
+        if (
+          name === "match_application_answer" ||
+          name === "report_answer_checks"
+        )
+          auxiliary.push(name);
+        return fallback.chatWithTools(messages, tools, options);
+      },
+    });
+    expect(source.controls[0].value).toBe("Robin Ashford");
+    expect(source.controls.slice(1).map((c) => c.value)).toEqual(beforePay);
+    expect(source.controls.slice(1).some((c) => c.checked)).toBe(false);
+    expect(auxiliary).toEqual([]);
+    const questions = result.pauses.flatMap(
+      (p) => p.questions ?? (p.question ? [p.question] : []),
+    );
+    expect(questions).toHaveLength(1);
+    expect(questions[0]?.prompt).toBe(payQuestion);
+    expect(questions[0]?.askReason?.check).toBe("pay_permission");
+    expect(result.outcome).toBe("paused");
+    expect(result.technicalFailure).toBeUndefined();
+    expect(result.reason).not.toContain("could not finish checking");
+  },
+);

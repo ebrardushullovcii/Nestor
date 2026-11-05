@@ -17,40 +17,42 @@ function setup(kind: "append" | "replace", blocked = false) {
       ? "<button>Show more roles</button>"
       : "<button disabled>Show more roles</button>");
   const page = {
-    content: async () => html(),
+    content: () => Promise.resolve(html()),
     url: () => "https://example.test/jobs",
   };
   const hands = {
-    observe: async () =>
-      buildApplyFormObservation(
-        {
-          url: page.url(),
-          title: "Jobs",
-          bodyText: "Open jobs",
-          headings: [],
-          links: [],
-          controls: [],
-          clickables: [],
-          openedTabs: [],
-          loading: false,
-          validationErrors: [],
-          stepLabel: null,
-          actions: [
-            {
-              index: 0,
-              label: "Show more roles",
-              visible: true,
-              disabled: batch === 3,
-            },
-          ],
-        },
-        "2026-11-05T00:00:00Z",
+    observe: () =>
+      Promise.resolve(
+        buildApplyFormObservation(
+          {
+            url: page.url(),
+            title: "Jobs",
+            bodyText: "Open jobs",
+            headings: [],
+            links: [],
+            controls: [],
+            clickables: [],
+            openedTabs: [],
+            loading: false,
+            validationErrors: [],
+            stepLabel: null,
+            actions: [
+              {
+                index: 0,
+                label: "Show more roles",
+                visible: true,
+                disabled: batch === 3,
+              },
+            ],
+          },
+          "2026-11-05T00:00:00Z",
+        ),
       ),
-    clickElement: vi.fn(async () => {
+    clickElement: vi.fn(() => {
       if (!blocked) batch++;
-      return { ok: true };
+      return Promise.resolve({ ok: true });
     }),
-    wait: vi.fn(async () => {}),
+    wait: vi.fn(() => Promise.resolve()),
   } as unknown as ApplyPageHands;
   return { page, hands };
 }
@@ -65,8 +67,9 @@ test.each(["append", "replace"] as const)(
       source: { id: "s", label: "Example" },
       maxPages: 8,
       allowUrl: () => true,
-      onPage: async (cards) => {
+      onPage: (cards) => {
         saved.push(cards.map((c) => Number(c.url.split("/").at(-1))));
+        return Promise.resolve();
       },
     });
     expect(saved).toEqual([[1], [2], [3]]);
@@ -82,7 +85,7 @@ test("a failed next-batch wait keeps early cards and an honest continuation", as
     source: { id: "s", label: "Example" },
     maxPages: 8,
     allowUrl: () => true,
-    onPage: async () => {},
+    onPage: () => Promise.resolve(),
   });
   expect(result?.complete).toBe(false);
   expect(result?.cards).toHaveLength(1);
@@ -107,9 +110,9 @@ test("a temporarily disabled loading button is not completion evidence", async (
     if (pending) for (const action of view.actions) action.disabled = true;
     return view;
   };
-  input.hands.clickElement = async () => {
+  input.hands.clickElement = () => {
     pending = true;
-    return { ok: true, observedValue: "clicked" };
+    return Promise.resolve({ ok: true, observedValue: "clicked" });
   };
   input.hands.wait = async () => {
     if (++waits % 2 === 0) {
@@ -122,7 +125,7 @@ test("a temporarily disabled loading button is not completion evidence", async (
     source: { id: "s", label: "Example" },
     maxPages: 8,
     allowUrl: () => true,
-    onPage: async () => {},
+    onPage: () => Promise.resolve(),
   });
   expect(result?.complete).toBe(true);
   expect(result?.cards).toHaveLength(3);
@@ -131,7 +134,10 @@ test("a temporarily disabled loading button is not completion evidence", async (
 
 test("cancellation after a saved batch preserves the callback rather than transcribing", async () => {
   const controller = new AbortController(),
-    saved = vi.fn(async (_cards: ListingCard[]) => controller.abort());
+    saved = vi.fn<(cards: ListingCard[]) => Promise<void>>(() => {
+      controller.abort();
+      return Promise.resolve();
+    });
   await expect(
     collectRenderedInventory({
       ...setup("append"),

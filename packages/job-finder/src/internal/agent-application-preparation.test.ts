@@ -454,7 +454,20 @@ function modelThatNeedsThePerson(reason: string): LLMClient {
 function modelThatFinishes(reason = "Nothing left to fill in"): LLMClient {
   let calls = 0;
   return {
-    chatWithTools: () => {
+    chatWithTools: (_messages, tools) => {
+      if (tools[0]?.function.name === "match_application_answer")
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "no-match",
+              type: "function" as const,
+              function: {
+                name: "match_application_answer",
+                arguments: JSON.stringify({ sourceId: null, answer: null }),
+              },
+            },
+          ],
+        });
       calls += 1;
       return Promise.resolve({
         toolCalls: [

@@ -135,10 +135,6 @@ test("a native non-final save binds its exact same-origin POST", () => {
 
 test.each([
   [
-    "no step numbers",
-    step({ stepLabel: "My Information", bodyText: "Tell us" }),
-  ],
-  [
     "the last step",
     step({ stepLabel: "Step 3 of 3", bodyText: "Step 3 of 3" }),
   ],
@@ -427,3 +423,45 @@ test("Send for me keeps its own presses; the Fill step press is not used there",
     fillStepPress({ ...config, safety: undefined }, page, "a0"),
   ).toBeNull();
 });
+
+test.each(["Save these details and proceed", "Continue with saved details"])(
+  "an ordinary %s without a complete step counter is a bounded advance",
+  (label) => {
+    const before = read(
+      step({
+        bodyText: "Application section 1",
+        stepLabel: "Application section 1",
+        actions: [
+          {
+            index: 0,
+            label,
+            visible: true,
+            disabled: false,
+            inForm: true,
+            submitsForm: false,
+          },
+        ],
+      }),
+    );
+    expect(numberedStepPreflight(before, "a0")).not.toBeNull();
+    const after = read(
+      step({
+        stepLabel: "Application section 2",
+        bodyText: "Application section 2",
+        controls: [
+          control({ label: "Applicant email", value: "robin@example.test" }),
+        ],
+      }),
+    );
+    expect(numberedStepAdvanced(before, after)).toBe(true);
+    expect(
+      numberedStepAdvanced(before, { ...before, url: `${before.url}/next` }),
+    ).toBe(false);
+    expect(
+      numberedStepAdvanced(before, { ...before, bodyTextExcerpt: "Saved" }),
+    ).toBe(false);
+    expect(unconfirmedStepText(before, label)).toContain(
+      "will not press it again",
+    );
+  },
+);

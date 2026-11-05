@@ -231,22 +231,15 @@ test("one labelled resume statement is filled in its own words with no question"
   expect(result.technicalFailure).toBeUndefined();
 });
 
-test("a refused recovery that is the only blocker is Nestor's retained technical failure", async () => {
+test("a refused recovery keeps its question even when it is the only blocker", async () => {
   const { config } = setup(`Jamie Example\nReporting routine: ${STATEMENT}\n`);
   const { client, checked } = model(() => false);
   const result = await runApplyAgent(config, client);
   expect(checked).toContain(STATEMENT);
-  expect(asked(result)).toEqual([]);
-  expect(result.outcome).toBe("stuck");
+  expect(asked(result).map((question) => question.prompt)).toEqual([QUESTION]);
+  expect(result.outcome).toBe("paused");
   expect(result.readyToSend).toBeNull();
-  expect(result.technicalFailure).toEqual({
-    code: "answer_grounding_unavailable",
-    retryable: true,
-    pageDisposition: "retain",
-  });
-  expect(result.reason).toBe(
-    `Nestor could not confirm its answer to "${QUESTION}" against your resume. Your page and answers are kept. Try again.`,
-  );
+  expect(result.technicalFailure).toBeUndefined();
 });
 
 test("two different labelled statements are no recovery: the question stays the person's", async () => {
@@ -299,7 +292,11 @@ test("a checking outage keeps a genuine question named by the actor", async () =
     },
   };
   const result = await runApplyAgent(config, client);
-  expect(asked(result).map((question) => question.prompt)).toEqual([NOTICE]);
+  expect(
+    asked(result)
+      .map((question) => question.prompt)
+      .sort(),
+  ).toEqual([NOTICE, QUESTION].sort());
   expect(result.readyToSend).toBeNull();
 });
 
@@ -316,8 +313,12 @@ test("a checking outage preserves a separately readable missing fact even when t
     },
   };
   const result = await runApplyAgent(config, client);
-  expect(asked(result).map((question) => question.prompt)).toEqual([NOTICE]);
-  expect(result.technicalFailure?.code).toBe("answer_grounding_unavailable");
+  expect(
+    asked(result)
+      .map((question) => question.prompt)
+      .sort(),
+  ).toEqual([NOTICE, QUESTION].sort());
+  expect(result.technicalFailure).toBeUndefined();
   expect(result.readyToSend).toBeNull();
 });
 
@@ -350,6 +351,10 @@ test("technical cleanup waits for the current reading after page instructions ch
   };
   const result = await runApplyAgent(config, client);
   expect(failures).toBeGreaterThanOrEqual(2);
-  expect(asked(result).map((question) => question.prompt)).toEqual([NOTICE]);
-  expect(result.technicalFailure?.code).toBe("answer_grounding_unavailable");
+  expect(
+    asked(result)
+      .map((question) => question.prompt)
+      .sort(),
+  ).toEqual([NOTICE, QUESTION].sort());
+  expect(result.technicalFailure).toBeUndefined();
 });

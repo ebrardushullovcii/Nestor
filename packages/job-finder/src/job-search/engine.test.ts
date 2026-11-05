@@ -60,6 +60,8 @@ test("passes remote location policy into fit and retains the model's changed sco
               p: [off ? "conflict" : "aligned", "Location preference."],
               c: ["strong", "React and TypeScript experience."],
               e: ["compatible", "Fully remote worldwide", "broader_remote", ""],
+              h: ["met", "No unmet mandatory requirements."],
+              pay: {minimum: null, maximum: null, currency: null, interval: null, basis: null, quote: ""},
             },
           ],
         }),

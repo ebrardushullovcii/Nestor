@@ -1461,3 +1461,35 @@ test("a second permission wrapper does not duplicate the original selection rece
   expect((await second.clickElement("a0")).ok).toBe(true);
   expect(receipt).toHaveBeenCalledExactlyOnceWith("target@example.test");
 });
+
+test("an ordinary Continue with saved details is not a sign-in permission", async () => {
+  const { raw, hands } = setup("signIn");
+  raw.url = "https://fixture.test/application";
+  raw.title = "Application";
+  raw.bodyText = "Application section 1";
+  raw.controls = [{ ...control("Full name", "text"), value: "Robin Ashford" }];
+  raw.actions = [
+    {
+      index: 0,
+      label: "Continue with saved details",
+      visible: true,
+      disabled: false,
+      inForm: true,
+      submitsForm: false,
+    },
+  ];
+  const guarded = withBrowserPermissions(hands, {});
+  expect(browserInteractionKind(await guarded.observe(), "a0")).toBeNull();
+  expect(await guarded.clickElement("a0")).toMatchObject({ ok: true });
+  expect(hands.clickElement).toHaveBeenCalledOnce();
+  raw.actions[0].label = "Continue with Example ID";
+  expect(browserInteractionKind(await guarded.observe(), "a0")).toBe("signIn");
+  expect(await guarded.clickElement("a0")).toMatchObject({ ok: false });
+  raw.actions[0].label = "Continue with saved details";
+  raw.title = "Sign in";
+  raw.bodyText = "Sign in to your account";
+  raw.controls.push(control("Password", "password", 1));
+  expect(browserInteractionKind(await guarded.observe(), "a0")).toBe("signIn");
+  expect(await guarded.clickElement("a0")).toMatchObject({ ok: false });
+  expect(hands.clickElement).toHaveBeenCalledOnce();
+});

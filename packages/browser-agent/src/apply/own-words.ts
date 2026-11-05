@@ -39,12 +39,32 @@ export function formWritingInstructions(
 export function ownWordsAppliesToQuestion(
   instructions: string,
   question: string,
+  questions: readonly string[] = [],
 ): boolean {
   if (requiresOwnWords(question)) return true;
+  const normalize = (text: string) =>
+    text
+      .normalize("NFKC")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+  const prompts = questions.map(normalize);
+  const localQuestions = questions.filter(requiresOwnWords).map(normalize);
   const letter =
     /\b(?:cover\s+letter|application\s+letter|anschreiben|lettre\s+de\s+motivation|carta\s+de\s+(?:presentacion|apresentacao))\b/iu;
   return instructions.split(/[\n.!?;]+/u).some((clause) => {
     if (!requiresOwnWords(clause)) return false;
+    // A field label in the page body is that field's rule, not an instruction
+    // for every sibling. Its own full question retains the restriction above.
+    const words = normalize(clause);
+    const named = prompts.filter((prompt) => prompt && words.includes(prompt));
+    if (named.length) {
+      const target = normalize(question);
+      return named.some(
+        (prompt) => prompt.includes(target) || target.includes(prompt),
+      );
+    }
+    if (localQuestions.some((prompt) => prompt.includes(words))) return false;
     return (
       !letter.test(clause.normalize("NFKD").replace(/\p{M}/gu, "")) ||
       letter.test(question.normalize("NFKD").replace(/\p{M}/gu, ""))

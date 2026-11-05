@@ -73,9 +73,9 @@ function originOf(url: string | null): string | null {
 }
 
 /**
- * A numbered, non-final step whose advance may save the step through the
- * site's own requests (Workday-style Save and Continue). The page's own
- * counter is the evidence that more steps remain; the label proves nothing.
+ * An ordinary non-final advance may save through the site's own requests.
+ * A complete progress counter is useful evidence, not a prerequisite. The
+ * observed advance and request guard keep final submission separate.
  * The press runs inside the per-action intermediate-write window, so the
  * final-action deny still covers every request it makes. A last step, a
  * review screen or a page with a visible send control is never advanced here.
@@ -102,11 +102,9 @@ export function numberedStepPreflight(page: ApplyFormObservation, ref: string) {
     action.disabled ||
     (action.submitsForm === true && !nativeForm) ||
     FINAL_WORDING.test(action.label) ||
-    index === null ||
-    total === null ||
-    index < 1 ||
-    total <= index ||
-    total > 99 ||
+    (index !== null &&
+      total !== null &&
+      (index < 1 || total <= index || total > 99)) ||
     REVIEW_SCREEN.test(page.step.label ?? "") ||
     page.headings.some(
       (heading) => heading.level <= 2 && REVIEW_SCREEN.test(heading.text),
@@ -133,16 +131,46 @@ export function numberedStepAdvanced(
   before: ApplyFormObservation,
   after: ApplyFormObservation,
 ): boolean {
+  if (
+    !originOf(before.url) ||
+    originOf(before.url) !== originOf(after.url) ||
+    after.loading ||
+    after.blocker ||
+    after.validationErrors.length
+  )
+    return false;
+  if (before.step.index !== null && after.step.index !== null) {
+    return (
+      after.step.index === before.step.index + 1 &&
+      after.step.total === before.step.total &&
+      before.signature !== after.signature
+    );
+  }
+  // URL, entered values and loading text alone do not prove a new section.
+  // Observe changed section identity or new questions after the bounded press.
+  const section = (page: ApplyFormObservation) =>
+    JSON.stringify([
+      page.step.label,
+      page.headings.map((heading) => [heading.level, heading.text]),
+    ]);
+  const questions = (page: ApplyFormObservation) =>
+    JSON.stringify(
+      page.controls
+        .filter((control) => control.visible)
+        .map((control) => [
+          control.kind,
+          control.label,
+          control.groupLabel,
+          control.sectionPath,
+          control.hint,
+          control.options,
+          control.frame,
+        ]),
+    );
   return (
-    !!originOf(before.url) &&
-    originOf(before.url) === originOf(after.url) &&
-    before.step.index !== null &&
-    before.step.total !== null &&
-    after.step.index === before.step.index + 1 &&
-    after.step.total === before.step.total &&
-    !after.loading &&
-    !after.blocker?.requiresPerson &&
-    before.signature !== after.signature
+    after.controls.some((control) => control.visible) &&
+    (section(before) !== section(after) ||
+      questions(before) !== questions(after))
   );
 }
 
@@ -156,7 +184,7 @@ export function unconfirmedStepText(
   label: string,
 ): string | null {
   const { index, total } = page.step;
-  if (index === null || total === null || !page.url) return null;
+  if (!page.url) return null;
   let where: string;
   try {
     const url = new URL(page.url);
@@ -164,7 +192,16 @@ export function unconfirmedStepText(
   } catch {
     return null;
   }
-  return `Pressed “${label.trim().slice(0, 120)}” once on step ${index} of ${total} at ${where}. The form did not show step ${index + 1} of ${total} afterwards, so Nestor will not press it again.`;
+  const numbered = index !== null && total !== null;
+  const stage = numbered
+    ? `step ${index} of ${total}`
+    : page.step.label?.trim()
+      ? `“${page.step.label.trim().slice(0, 120)}”`
+      : "this form";
+  const expected = numbered
+    ? `step ${index + 1} of ${total}`
+    : "a new application section";
+  return `Pressed “${label.trim().slice(0, 120)}” once on ${stage} at ${where}. The form did not show ${expected} afterwards, so Nestor will not press it again.`;
 }
 
 export const UNCONFIRMED_STEP_LABEL = "Step press not confirmed";

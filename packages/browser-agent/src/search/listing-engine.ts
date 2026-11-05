@@ -1357,7 +1357,7 @@ export async function fitJobs(
                 (pay.maximum === null &&
                   (pay.minimum === null || pay.minimum < payFloor.minimum)));
             const payReason = belowFloor
-              ? `Published ${pay!.currency} ${pay!.maximum}/${pay!.interval} is below your ${payFloor!.minimum}/${payFloor!.interval} minimum.`
+              ? `Published ${pay.currency} ${pay.maximum}/${pay.interval} is below your ${payFloor.minimum}/${payFloor.interval} minimum.`
               : unknownPay
                 ? "Pay cannot yet be compared with your saved minimum."
                 : null;

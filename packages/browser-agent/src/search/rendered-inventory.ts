@@ -99,7 +99,7 @@ export async function collectRenderedInventory(input: {
         );
       continue;
     }
-    const next = pending.values().next().value as string | undefined;
+    const next = pending.values().next().value;
     if (next) {
       input.signal?.throwIfAborted();
       const outcome = await input.hands.navigate(next);

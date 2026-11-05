@@ -796,6 +796,7 @@ async function runMeasuredApplyAgent(
                 ownWordsAppliesToQuestion(
                   formWritingInstructions(pageTools.state.observation),
                   control ? questionPrompt(control) : request.prompt,
+                  page?.controls.map(questionPrompt),
                 )
               )
                 return Promise.resolve({ ok: false, reason: OWN_WORDS_REASON });
@@ -999,13 +1000,9 @@ async function runMeasuredApplyAgent(
       config.signal?.aborted
     )
       return;
-    technicalFailure = {
-      code: "answer_grounding_unavailable",
-      retryable: true,
-      pageDisposition: "retain",
-    };
-    groundingFailureReason =
-      "Nestor could not finish checking this application. Nothing was sent. Your page and answers are kept. Try again to continue.";
+    note(
+      `An answer check is unavailable (${error.category}); continuing independent fields.`,
+    );
   };
   const initialReusableAnswers = JSON.stringify(
     runConfig.sources.reusableAnswers,
@@ -4944,6 +4941,58 @@ async function runMeasuredApplyAgent(
         runConfig.sources.reusableAnswers,
         page.controls,
       );
+      const reading = classifyQuestions
+        .settled(page.controls, questionReadContext(page))
+        ?.get(questionClassificationKey(control, page.controls));
+      if (reading?.readFailed) continue;
+      const permissionControl = {
+        ...control,
+        questionKind: modelQuestionKind(
+          control,
+          reading,
+          asksPayCurrency(
+            control,
+            page.controls,
+            classifyQuestions.settled(page.controls, questionReadContext(page)),
+          ),
+        ),
+        attestationKind: reading?.declarationKind ?? control.attestationKind,
+      };
+      const permissionFor = (answer: string, candidateSourceId?: string) =>
+        classifyAnswerPermission({
+          control: permissionControl,
+          controls: page.controls,
+          tags: reading?.answerTags,
+          sources: runConfig.sources,
+          application: config.application,
+          approvedAttestations: config.authority.preApprovedAttestationKinds,
+          payDisclosed,
+          answer,
+          candidateSourceId,
+          pageInstructions: formWritingInstructions(page),
+          pageUrl: page.url,
+        });
+      const hold = (reason: string, check: string) =>
+        pendingQuestions.set(
+          pendingQuestionKey(control),
+          buildPendingQuestion({
+            control,
+            siblings: page.controls,
+            jobId: config.application.jobId,
+            detectedAt: now().toISOString(),
+            suggestion: null,
+            reason,
+            askReason: { kind: "source_rejected", check, detail: reason },
+          }),
+        );
+      const initialPermission = permissionFor(saved?.answer ?? "");
+      if (
+        initialPermission.kind === "needs_you" &&
+        initialPermission.check === "pay_permission"
+      ) {
+        hold(initialPermission.reason, initialPermission.check);
+        continue;
+      }
       const candidates = saved
         ? [{ sourceId: `answerLibrary.${saved.id}`, value: saved.answer }]
         : [];
@@ -5082,28 +5131,20 @@ async function runMeasuredApplyAgent(
           ),
           rejection: pending?.note ?? pending?.askReason?.detail ?? null,
           ...(config.signal ? { signal: config.signal } : {}),
-        }).catch(() => null);
+        }).catch((error: unknown) => {
+          if (config.signal?.aborted) throw error;
+          hold(
+            "Nestor could not match a saved answer for this question. You can answer it here or try again.",
+            "answer_match_unavailable",
+          );
+          return null;
+        });
         if (candidate) {
-          const reading = classifyQuestions
-            .settled(page.controls, questionReadContext(page))
-            ?.get(questionClassificationKey(control, page.controls));
-          const permission = classifyAnswerPermission({
-            control: {
-              ...control,
-              attestationKind:
-                reading?.declarationKind ?? control.attestationKind,
-            },
-            controls: page.controls,
-            tags: reading?.answerTags,
-            candidateSourceId: candidate.sourceId,
-            sources: runConfig.sources,
-            application: config.application,
-            approvedAttestations: config.authority.preApprovedAttestationKinds,
-            payDisclosed,
-            answer: candidate.value,
-            pageInstructions: formWritingInstructions(page),
-            pageUrl: page.url,
-          });
+          const permission = permissionFor(candidate.value, candidate.sourceId);
+          if (permission.kind === "needs_you") {
+            hold(permission.reason, permission.check ?? "answer_permission");
+            continue;
+          }
           const grounding =
             permission.kind === "literal"
               ? {
@@ -5124,7 +5165,7 @@ async function runMeasuredApplyAgent(
               candidate.sourceId,
             );
             await attempt(candidate);
-          } else if (!grounding.unavailable) {
+          } else {
             const question = buildPendingQuestion({
               control,
               jobId: config.application.jobId,
@@ -5570,7 +5611,6 @@ async function runMeasuredApplyAgent(
   let technicalFailure: ApplyAgentResult["technicalFailure"];
   let partialOutageTurns = 0;
   let groundingFailureReason: string | null = null;
-  const technicalFeedback = new Set<string>();
   const loop = await runAgentLoop({
     // What stays the same for every application this person makes leads:
     // the instructions, then their facts. The job, its resume and its page
@@ -5742,21 +5782,6 @@ async function runMeasuredApplyAgent(
     // Once every remaining field is held for the person, another model turn
     // cannot fill anything. This includes answer refusals, not just pickers.
     beforeModelTurn: async () => {
-      if (
-        technicalFailure?.code === "answer_grounding_unavailable" &&
-        unavailableQuestions.size === 0 &&
-        ![...refusedProseCandidates.keys()].some((key) =>
-          pendingQuestions.has(key),
-        )
-      )
-        technicalFailure = undefined;
-      if (technicalFailure?.code === "answer_grounding_unavailable") {
-        const feedback = JSON.stringify([...unavailableQuestions].sort());
-        if (!technicalFeedback.has(feedback)) {
-          technicalFeedback.add(feedback);
-          return null; // One actor turn can repair its proposal and keep genuine questions.
-        }
-      }
       if (technicalFailure)
         return {
           reason:
@@ -6227,70 +6252,20 @@ async function runMeasuredApplyAgent(
       "Nestor could not read this page after three attempts. Your page and answers are kept. Retry this application when Nestor is available.";
     note(groundingFailureReason);
   }
-  // Council D4: the one labelled statement was proposed and still refused,
-  // and that question is the run's only blocker: Nestor's grounding failed,
-  // not a fact the person must supply. The page and answers are kept.
-  const refusedProse = [...refusedProseCandidates.keys()].filter((key) =>
-    pendingQuestions.has(key),
-  );
-  const heldQuestionIds = new Set([
-    ...[...pendingQuestions.values()].map((question) => question.id),
-    ...pauses.flatMap((pause) =>
-      (pause.questions ?? (pause.question ? [pause.question] : [])).map(
-        (question) => question.id,
-      ),
-    ),
-  ]);
-  const soleProse = refusedProse[0]
-    ? pendingQuestions.get(refusedProse[0])
-    : undefined;
-  if (
-    !technicalFailure &&
-    !skipReason &&
-    refusedProse.length === 1 &&
-    soleProse &&
-    heldQuestionIds.size === 1 &&
-    heldQuestionIds.has(soleProse.id) &&
-    pauses.every((pause) => pause.question || pause.questions?.length) &&
-    !deferredPress &&
-    !(pageTools.state.observation?.blocker?.requiresPerson === true)
-  ) {
-    const question = soleProse;
-    technicalFailure = {
-      code: "answer_grounding_unavailable",
-      retryable: true,
-      pageDisposition: "retain",
-    };
-    unavailableQuestions.add(normalizeFormQuestionPrompt(question.prompt));
-    pendingQuestions.clear();
-    forPerson = [];
-    needsPersonFinishPending = false;
-    groundingFailureReason = `Nestor could not confirm its answer to "${question.prompt}" against your resume. Your page and answers are kept. Try again.`;
-    note(groundingFailureReason);
-  } else
-    for (const key of refusedProse) {
-      // Other real questions are pending: this one stays, with the exact
-      // source statement offered as its suggestion.
-      const question = pendingQuestions.get(key);
-      const candidate = refusedProseCandidates.get(key);
-      if (question && candidate && !question.suggestedAnswers.length)
-        question.suggestedAnswers = [
-          {
-            id: `${question.id}_resume`,
-            text: candidate,
-            sourceKind: "resume",
-            sourceId: "resume.text",
-            confidenceLabel: null,
-            provenance: [],
-          },
-        ];
-    }
-  if (
-    technicalFailure?.code === "answer_grounding_unavailable" &&
-    unavailableQuestions.size === 0 &&
-    ![...refusedProseCandidates.keys()].some((key) => pendingQuestions.has(key))
-  )
-    technicalFailure = undefined;
+  for (const [key, candidate] of refusedProseCandidates) {
+    const question = pendingQuestions.get(key);
+    if (question && !question.suggestedAnswers.length)
+      question.suggestedAnswers = [
+        {
+          id: `${question.id}_resume`,
+          text: candidate,
+          sourceKind: "resume",
+          sourceId: "resume.text",
+          confidenceLabel: null,
+          provenance: [],
+        },
+      ];
+  }
   if (technicalFailure?.code === "question_classification_unavailable") {
     const page = pageTools.state.observation;
     const controls = page?.controls ?? [];
@@ -6389,29 +6364,20 @@ async function runMeasuredApplyAgent(
           }),
         );
     }
+    // A question we could not read remains a page-reading failure; a failed
+    // answer check above always keeps its own field question.
+    const unread = new Set(
+      controls
+        .filter(
+          (control) =>
+            readings?.get(questionClassificationKey(control, controls))
+              ?.readFailed,
+        )
+        .map((control) => normalizeFormQuestionPrompt(questionPrompt(control))),
+    );
     for (const [key, question] of pendingQuestions)
-      if (
-        unavailableQuestions.has(normalizeFormQuestionPrompt(question.prompt))
-      )
+      if (unread.has(normalizeFormQuestionPrompt(question.prompt)))
         pendingQuestions.delete(key);
-    for (let index = pauses.length - 1; index >= 0; index--) {
-      const pause = pauses[index];
-      if (!pause) continue;
-      if (!pause.question && !pause.questions?.length) continue;
-      const genuine = (
-        pause.questions ?? (pause.question ? [pause.question] : [])
-      ).filter(
-        (question) =>
-          !unavailableQuestions.has(
-            normalizeFormQuestionPrompt(question.prompt),
-          ),
-      );
-      if (!genuine.length) pauses.splice(index, 1);
-      else {
-        pause.question = genuine[0]!;
-        pause.questions = genuine;
-      }
-    }
     forPerson = [];
     needsPersonFinishPending = false;
     readyToSend = null;

@@ -121,7 +121,7 @@ test.each([
       answers: [{ question, answer: row.answer }],
     });
     expect(checks[0]?.supported).toBe(row.supported);
-    expect(chatWithTools).toHaveBeenCalledTimes(1);
+    expect(chatWithTools).toHaveBeenCalledTimes(row.supported ? 1 : 2);
   },
 );
 
