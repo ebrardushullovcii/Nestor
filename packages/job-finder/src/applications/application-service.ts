@@ -324,6 +324,28 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     waiting.set(row.id, row.attempt);
   }
 
+  async function showAccessPage(row: ApplicationRow): Promise<void> {
+    const key = applicationIdentity(row.id, row.attempt).resultId;
+    try {
+      // Show the retained challenge itself. A missing page stays available
+      // through Needs you's Open action; this never restores or navigates it.
+      const shown = await browser.focusRetainedApplicationPage?.(
+        "target_site",
+        key,
+      );
+      if (!shown || !current(row)) return;
+      const handoff = await browser.handApplicationPageToPerson?.(
+        "target_site",
+        key,
+      );
+      if (handoff && !handoff.ok)
+        applications.submissionRefused(row.id, row.attempt, handoff.error);
+      watchClosely(row.id);
+    } catch (error) {
+      onError(error);
+    }
+  }
+
   /**
    * The file fields the person said are attached on the site, from the
    * upload item of the attempt just before this one. The word lasts one
@@ -1198,6 +1220,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       applications.needsYou.accessForApplication(row.id).length
     ) {
       waiting.set(row.id, row.attempt);
+      await showAccessPage(row);
       return;
     }
     if (
@@ -1370,6 +1393,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
     if (applications.getApplication(row.id)?.state === "needs_you") {
       waiting.set(row.id, row.attempt);
+      if (applications.needsYou.accessForApplication(row.id).length)
+        await showAccessPage(row);
       return;
     }
     if (fromMemory) {

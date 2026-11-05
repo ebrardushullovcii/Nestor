@@ -141,6 +141,49 @@ function makeContents(id: string) {
 }
 
 describe("embedded browser tab state", () => {
+  test("an access handoff opens its own retained page without activating the app", () => {
+    const { browser, state, pages } = makeBrowser();
+    const focus = vi.fn();
+    const show = vi.fn();
+    Object.assign(browser, {
+      window: {
+        isDestroyed: () => false,
+        isFocused: () => false,
+        focus,
+        show,
+        getContentSize: () => [1200, 800],
+        webContents: { getZoomFactor: () => 1, send: vi.fn(), focus },
+      },
+    });
+    for (const page of state.pageMap.values())
+      Object.assign(page, {
+        view: {
+          getBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+          setBounds: vi.fn(),
+          setVisible: vi.fn(),
+        },
+      });
+    state.ownedTabs.set("application_1_attempt_1", new Set(["prepared"]));
+    state.ownedTabs.set("application_2_attempt_1", new Set(["working"]));
+
+    expect(
+      browser.focusRetainedApplicationPage("application_1_attempt_1"),
+    ).toBe(true);
+    expect(browser.getState()).toMatchObject({
+      presentation: "peek",
+      activeTabId: "prepared",
+    });
+    expect(browser.focusRetainedApplicationPage("missing")).toBe(false);
+    expect(browser.getState().activeTabId).toBe("prepared");
+    expect(focus).not.toHaveBeenCalled();
+    expect(show).not.toHaveBeenCalled();
+    for (const contents of pages.values()) {
+      expect(contents.loadURL).not.toHaveBeenCalled();
+      expect(contents.reload).not.toHaveBeenCalled();
+      expect(contents.close).not.toHaveBeenCalled();
+    }
+  });
+
   test("opening outside exports only the displayed address and keeps the waiting tab intact", async () => {
     const { browser, state, pages } = makeBrowser();
     const page = pages.get("failed")!;
