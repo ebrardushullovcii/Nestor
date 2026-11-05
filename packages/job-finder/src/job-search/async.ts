@@ -40,6 +40,6 @@ export function errorMessage(error: unknown): string {
     (error.name === "TimeoutError" ||
       /timed? out|timeout/iu.test(error.message))
   )
-    return "The site took too long to respond. Open it to check it loads, then retry the search. Other sites continue normally.";
+    return "Nestor's reading time limit was reached. Saved progress is kept; Continue unfinished sites resumes remaining work. Other sites continue normally.";
   return (error instanceof Error ? error.message : String(error)).slice(0, 240);
 }

@@ -96,13 +96,14 @@ test.each(["conflict", "met", "unknown"] as const)(
                   c: ["strong", "Experience"],
                   e: ["compatible", "Worldwide", "broader_remote", ""],
                   h: [hard, "Pay compared with the explicit hourly minimum"],
+                  pay: { minimum: 19, maximum: 19, currency: "EUR", interval: "hour", basis: "base", quote: "EUR19 hourly" },
                 },
               ],
             }),
           }),
       },
     });
-    expect(fit?.score).toBe(hard === "met" ? 84 : JOB_FIT_BANDS.good - 1);
+    expect(fit?.score).toBe(JOB_FIT_BANDS.good - 1);
     expect(fit?.limit?.kind).toBe("preferences");
   },
 );
@@ -500,7 +501,7 @@ test("different fit batches retain the exact context prefix and response schema"
   expect(requests[0][0][0]).toEqual(requests[1][0][0]);
   expect(requests[0][2]?.jsonSchema).toEqual(requests[1][2]?.jsonSchema);
   const prefixes = requests.map(
-    ([messages]) => messages[1].content.split(',"passages":')[0],
+    ([messages]) => messages[1].content.split(',"listings":')[0],
   );
   expect(prefixes[0]).toBe(prefixes[1]);
   expect(Object.keys(JSON.parse(requests[0][0][1].content) as object)).toEqual([
@@ -509,7 +510,6 @@ test("different fit batches retain the exact context prefix and response schema"
     "goals",
     "countryOptionFallbacks",
     "request",
-    "passages",
     "listings",
   ]);
   expect(requests[0][0][1].content).not.toBe(requests[1][0][1].content);

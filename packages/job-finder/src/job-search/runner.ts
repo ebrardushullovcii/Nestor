@@ -36,6 +36,7 @@ interface ActiveSearch {
   ready: Promise<FitQueue | null>;
   setReady(fits: FitQueue | null): void;
   queueProgress?: () => Partial<JobSearchProgress>;
+  flush?: () => void;
   enqueue?: (
     target: JobDiscoveryTarget,
     force: boolean,
@@ -235,6 +236,7 @@ export function createJobSearchRunner(
       dirty.add(source);
       flushTimer ??= setTimeout(flush, SOURCE_WRITE_GATHER_MS);
     };
+    run.flush = flush;
     const markDone = (source: SourceWork) => {
       if (
         !current(source) ||
@@ -340,7 +342,6 @@ export function createJobSearchRunner(
               `This site could not be read: ${errorMessage(error)}`,
             );
           source.collected = true;
-          source.processed = source.row.cards;
           markDone(source);
         });
     };
@@ -766,6 +767,29 @@ export function createJobSearchRunner(
       recovery?.controller.abort();
       if (!active) return;
       const run = active;
+      run.flush?.();
+      if (run.record) {
+        let after = 0;
+        for (;;) {
+          const page = resultRows.list({
+            searchId: run.record.id,
+            text: "",
+            state: null,
+            after,
+            limit: 100,
+          });
+          for (const row of page.rows)
+            if (row.state === "waiting" || row.state === "searching")
+              resultRows.put(run.record.id, {
+                ...row,
+                state: "stopped",
+                phase: null,
+                message: `Stopped with ${row.cards} listing cards collected. Saved results are kept; Continue unfinished sites resumes remaining work.`,
+              });
+          if (page.nextCursor === null) break;
+          after = page.nextCursor;
+        }
+      }
       run.controller.abort();
       run.setReady(null);
       finish(run, "stopped");

@@ -337,6 +337,11 @@ test("stop ends the search promptly and ignores a source that completes afterwar
   expect(record.state).toBe("running");
   runner.stop();
   expect(runner.status().search?.state).toBe("stopped");
+  for (const row of createSearchSourcesStore(store).list({}).rows) {
+    expect(row.state).toBe("stopped");
+    expect(row.phase).toBeNull();
+    expect(row.message).toContain("Continue unfinished sites");
+  }
   pending.resolve({
     cards: [card("one")],
     complete: true,
@@ -700,7 +705,7 @@ test("a source timeout explains retry without creating a sign-in ticket", async 
   expect(status.search?.state).toBe("failed");
   expect(status.progress).toMatchObject({ failed: 2, needsYou: 0 });
   for (const row of createSearchSourcesStore(store).list({}).rows)
-    expect(row.message).toContain("Open it to check it loads, then retry");
+    expect(row.message).toContain("Nestor's reading time limit");
   expect(store.sql("SELECT count(*) AS n FROM source_needs_you").get()?.n).toBe(
     0,
   );

@@ -36,6 +36,60 @@ const card = (title: string, id = title): ListingCard => ({
   sourceLabel: source.label,
 });
 
+test("a negative unusual title is checked against full duties and its page is reused", async () => {
+  const cards = [card("Trend Steward"), card("Metrics Caretaker")];
+  const pages = new Map(cards.map((row) => [row.url, {
+    html: `<article><h1>${row.title}</h1><p>Analyse revenue with SQL joins, R extracts and Tableau dashboards. Check data quality and report findings to stakeholders. Remote in Germany, part time.</p></article>`,
+    finalUrl: row.url,
+  }]));
+  const readPage = vi.fn(async (url: string) => pages.get(url)!);
+  let calls = 0;
+  const client: LLMClient = {
+    chatWithTools: async (messages) => {
+      const data = JSON.parse(String(messages[1].content));
+      if (data.titles) {
+        calls++;
+        if (calls > 1)
+          for (const row of data.titles)
+            expect(row[2]).toContain("Analyse revenue with SQL joins");
+        return { content: JSON.stringify({ keep: { 0: calls === 1 ? 0 : 1, 1: calls === 1 ? 0 : 1 } }) };
+      }
+      return { content: JSON.stringify({ jobs: data.listings.map((row: { id: number; title: string }) => ({
+        id: row.id, title: row.title, company: "Real Employer", location: "Germany",
+        workModes: ["remote"], sourceJobId: null, employmentType: "part_time",
+        seniority: null, salaryText: null, closed: false,
+      })) }) };
+    },
+  };
+  const result = await screenCards({
+    cards, client, readPage,
+    goals: { targetRoles: ["Data Analyst"], relatedRoles: [], strategy: "wide_net" },
+  });
+  expect(result.related.map((row) => row.url)).toEqual(cards.map((row) => row.url));
+  expect(result.seen).toEqual([]);
+  expect(result.failed).toEqual([]);
+  expect(readPage).toHaveBeenCalledTimes(2);
+  expect(result.related[0].listingPage).toEqual(pages.get(cards[0].url));
+  const downstream = vi.fn(async () => { throw new Error("The verified page should be reused"); });
+  const read = await readListings({ cards: result.related, client, readPage: downstream });
+  expect(downstream).not.toHaveBeenCalled();
+  expect(read.jobs).toHaveLength(2);
+});
+
+test("failure to verify a negative profession is technical work, never remembered unrelated", async () => {
+  const decisions = new Map<string, boolean>();
+  const result = await screenCards({
+    cards: [card("Trend Steward")], decisions,
+    goals: { targetRoles: ["Data Analyst"], relatedRoles: [], strategy: "wide_net" },
+    client: { chatWithTools: async () => ({ content: '{"keep":{"0":0}}' }) },
+    readPage: async () => { throw new Error("Temporary source failure"); },
+  });
+  expect(result.related).toEqual([]);
+  expect(result.seen).toEqual([]);
+  expect(result.failed).toEqual([{ url: card("Trend Steward").url, reason: expect.stringContaining("Profession not verified: Temporary source failure") }]);
+  expect(decisions.size).toBe(0);
+});
+
 test.each([{ "0": 1, "1": 0 }, { "keep{": { "0": 1, "1": 0 } }])(
   "B2 retains unambiguous indexed decisions despite a wrong wrapper: %j",
   async (answer) => {
@@ -609,12 +663,9 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
   const fitInput = JSON.parse(
     client.chatWithTools.mock.calls[0][0][1].content,
-  ) as { passages: string[]; listings: { passages: number[] }[] };
-  expect(
-    fitInput.listings[0].passages
-      .map((id) => fitInput.passages[id])
-      .join("\n\n"),
-  ).toBe(job.description);
+  ) as { listings: { description: string }[] };
+  expect(fitInput.listings[0].description).toBe(job.description);
+  expect(fitInput).not.toHaveProperty("passages");
   const fit = {
     id: 1,
     s: verdict.score,
@@ -625,12 +676,17 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     e: ["compatible", "Berlin", "unknown", "DE"],
   };
   const requests: number[][] = [];
+  const secondDescription = "An unusual title\n\nBuild SQL extracts and explain weekly trends.\n\nEUR 26 per hour.";
   const retryClient = {
     chatWithTools: vi.fn(
       (messages: Parameters<LLMClient["chatWithTools"]>[0]) => {
         const data = JSON.parse(messages[1].content) as {
-          listings: { id: number }[];
+          listings: { id: number; description: string }[];
         };
+        for (const listing of data.listings)
+          expect(listing.description).toBe(
+            listing.id === 1 ? job.description : secondDescription,
+          );
         requests.push(data.listings.map((item) => item.id));
         return Promise.resolve({
           content: JSON.stringify({
@@ -644,7 +700,7 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
     client: retryClient,
     profile,
     goals: { targetRoles: ["Data Analyst"], locations: ["Berlin"] },
-    jobs: [job, { ...job, id: 2 }],
+    jobs: [job, { ...job, id: 2, description: secondDescription }],
   });
   expect(requests).toEqual([[1, 2], [2]]);
   expect(repaired.map((fit) => fit.id)).toEqual([1, 2]);
