@@ -44,7 +44,7 @@ async function fixture(t) {
   );
   const helper = path.join(
     root,
-    ".claude/skills/verify-nestor/bin/lib/common.mjs",
+    "packages/ai-evals/scripts/isolated-app/common.mjs",
   );
   mkdirSync(path.dirname(helper), { recursive: true });
   copyFileSync(new URL("./common.mjs", import.meta.url), helper);

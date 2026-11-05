@@ -611,7 +611,7 @@ export function huntOutcomeCases(origin: string): BuiltAppBatch[] {
               equalOutcome(
                 "data",
                 "Exact one-time answer stored",
-                "needs_you row read through verify-nestor",
+                "needs_you row read through isolated-app",
                 evidence.needAnswers?.find((row) => row.id === f.questionIds[0])
                   ?.answer,
                 "Remote",
@@ -671,7 +671,7 @@ export function huntOutcomeCases(origin: string): BuiltAppBatch[] {
               equalOutcome(
                 "data",
                 "Exact remembered answer stored on waiting question",
-                "needs_you row read through verify-nestor",
+                "needs_you row read through isolated-app",
                 evidence.needAnswers?.find((row) => row.id === f.questionIds[1])
                   ?.answer,
                 "15",

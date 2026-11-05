@@ -163,7 +163,7 @@ export async function run(
     );
   if (!path.basename(ctx.userDataDir).startsWith("nestor-verify-"))
     throw Error(
-      "Refusing to seed anything except an isolated verify-nestor data folder",
+      "Refusing to seed anything except an isolated isolated-app data folder",
     );
   const available = allBatches(ctx.sites.url);
   const batches = selectBatches(

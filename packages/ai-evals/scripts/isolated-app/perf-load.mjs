@@ -1,7 +1,7 @@
 // `perf --load`: memory, CPU and browser pages while Job Finder searches
 // hundreds of replica sites or runs an Apply batch, with a scripted model, and
 // how smooth the open screen stays meanwhile. Also the sampler `perf --observe`
-// attaches to a running verify-nestor instance.
+// attaches to a running isolated-app instance.
 import { execFileSync, spawn } from "node:child_process";
 import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -773,7 +773,7 @@ export async function measureNestorPages(
 }
 
 /**
- * Attaches to a running verify-nestor instance (`bin/up`) and samples it
+ * Attaches to a running isolated-app instance (`bin/up`) and samples it
  * while its search or Apply batch runs, until both stop or `seconds` pass.
  */
 export function observe(label, seconds = 900, { heap = false } = {}) {
@@ -784,7 +784,7 @@ export function observe(label, seconds = 900, { heap = false } = {}) {
       cli,
       "drive",
       "run",
-      path.join(import.meta.dirname, "../../journeys/observe.mjs"),
+      path.join(import.meta.dirname, "observe.mjs"),
       String(seconds),
       ...(heap ? ["heap"] : []),
     ],

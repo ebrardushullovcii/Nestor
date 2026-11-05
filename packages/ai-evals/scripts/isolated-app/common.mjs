@@ -1,4 +1,4 @@
-// Paths, labels and state shared by every verify-nestor helper.
+// Paths, labels and state shared by every isolated-app helper.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -13,8 +13,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
-export const skillDir = path.resolve(import.meta.dirname, "../..");
-export const checkout = path.resolve(skillDir, "../../..");
+export const checkout = path.resolve(import.meta.dirname, "../../../..");
 export const desktopDir = path.join(checkout, "apps/desktop");
 export const requireDesktop = createRequire(
   path.join(desktopDir, "package.json"),

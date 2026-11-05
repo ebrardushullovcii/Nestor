@@ -1,4 +1,4 @@
-// verify-nestor command line: up, doctor, drive, db, down, build.
+// isolated-app command line: up, doctor, drive, db, down, build.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   cpSync,

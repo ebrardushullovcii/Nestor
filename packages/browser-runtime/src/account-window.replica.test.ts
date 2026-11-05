@@ -1357,7 +1357,7 @@ import { withBrowserPermissions } from "@nestor/browser-agent";
 const fixtureRequire = createRequire(import.meta.url);
 const { loadProviderFixture, providerArgs, installProviderTransport } =
   fixtureRequire(
-    "../../../.claude/skills/verify-nestor/bin/lib/provider-fixture.cjs",
+    "../../../packages/ai-evals/scripts/isolated-app/provider-fixture.cjs",
   ) as {
     loadProviderFixture: (
       file: string,
