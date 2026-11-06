@@ -36,9 +36,17 @@ import { SEEN_CARDS_SCHEMA } from "./seen-cards";
 
 /**
  * The layout the store keeps from. A file from before it (an earlier
- * development layout) is started over once; from this version on, nothing is.
+ * development layout) is retained separately; from this version on, its rows
+ * are upgraded in place.
  */
 export const JOB_STORE_KEPT_FROM_VERSION = 6;
+
+// Import receipts survive Reset everything, so retained old files never
+// resurrect data the person intentionally cleared.
+export const LEGACY_WORKSPACE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS legacy_workspace_imports(source TEXT PRIMARY KEY,completed_at TEXT NOT NULL,counts_json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS legacy_workspace_jobs(old_id TEXT PRIMARY KEY,job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE);
+`;
 
 export interface AddedColumn {
   table: string;
@@ -331,4 +339,5 @@ export const JOB_STORE_SCHEMA: readonly string[] = [
   ACTIVITY_CONTROL_SCHEMA,
   SEND_GUARDS_SCHEMA,
   PREPARED_FORMS_SCHEMA,
+  LEGACY_WORKSPACE_SCHEMA,
 ];

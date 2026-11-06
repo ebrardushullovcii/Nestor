@@ -21,12 +21,21 @@ export function getJobStoreFilePath(): string {
 /** The Job Finder store, opened on first use. Main process only. */
 export function getJobStore(): JobStore {
   if (store) return store;
-  const opened = openJobStore(getJobStoreFilePath());
+  const pending = readPendingResetIntentSync();
+  const opened = openJobStore(getJobStoreFilePath(), {
+    ...(pending.status === "none"
+      ? {
+          legacyWorkspacePath: path.join(
+            resolveDesktopUserDataDirectory(app),
+            "job-finder-workspace.sqlite",
+          ),
+        }
+      : {}),
+  });
   // A confirmed reset that stopped part way finishes clearing the store
   // before any screen reads it; the workspace's own recovery handles the
   // rest. A marker that can't be read clears nothing: the person is told the
   // reset didn't finish and can start it again.
-  const pending = readPendingResetIntentSync();
   if (pending.status === "readable") {
     try {
       resetJobStore(opened);

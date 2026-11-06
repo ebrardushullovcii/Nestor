@@ -34,7 +34,7 @@ The agent already sees the whole page. It can tell a logo from a company, a tag 
 
 Ordinary result pages cost HTTP reads rather than model navigation and transcription. New profession decisions and merged full-text jobs are batched. Fit scores appear as batches finish. Existing fit stays stable; an unscored job remains visibly unscored if the model fails. A form page still uses model classification for its questions.
 
-There are no old-data migrations or search-plan allowances. Indexed lookups recognize saved URLs and rejected cards. Searches write only new sightings, new jobs, their fit updates and their own run counts; they do not reload or synchronize the whole workspace.
+Opening a retained older workspace imports its saved data into the indexed store once, in a verified transaction, while keeping the original file. Searches have no search-plan allowances. Indexed lookups recognize saved URLs and rejected cards. Searches write only new sightings, new jobs, their fit updates and their own run counts; they do not reload or synchronize the whole workspace.
 
 A form page is usually filled in one or two model turns plus one fact-check call, instead of a turn and a lookup per field. Required questions the model could not answer from the facts reach the person once, after a single reminder, rather than the run stalling on them.
 

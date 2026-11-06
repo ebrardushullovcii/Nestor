@@ -268,6 +268,7 @@ export function createProfileWorkspace(store: JobStore) {
   return {
     profile,
     preferences,
+    writeSetup,
     methods: { ...methods, ...imports.methods },
   };
 }
