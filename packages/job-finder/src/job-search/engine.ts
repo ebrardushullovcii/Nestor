@@ -3,6 +3,7 @@ import {
   type JobFinderAiClient,
 } from "@nestor/ai-providers";
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   collectSource,
   listingInventoryReady,
@@ -30,6 +31,7 @@ import {
   type JobPosting,
 } from "@nestor/contracts";
 import type { JobSearchContext } from "./types";
+import { coalesceScreening } from "./coalesce-screening";
 
 interface SearchInput {
   context: JobSearchContext;
@@ -56,6 +58,7 @@ export interface JobSearchEngine {
         cards: readonly ListingCard[],
         roleGoalsKey: string,
       ): readonly SeenListingCard[];
+      onRelated?: (cards: ListingCard[]) => Promise<void>;
     },
   ): Promise<{
     related: ListingCard[];
@@ -90,7 +93,9 @@ export function createListingSearchEngine(deps: {
 }): JobSearchEngine {
   if (!deps.aiClient.chatWithTools)
     throw new Error("Search needs an available AI model.");
-  const client = { chatWithTools: deps.aiClient.chatWithTools };
+  const client = {
+    chatWithTools: coalesceScreening(deps.aiClient.chatWithTools),
+  };
   const onUsage = (usage: ModelTokenUsage, stage: string) =>
     console.info("[Job search AI]", JSON.stringify({ stage, ...usage }));
   const browser = createHostQueue({
@@ -98,16 +103,86 @@ export function createListingSearchEngine(deps: {
     perHost: 1,
   });
   const decisions = new Map<string, Map<string, boolean>>();
-  const readPage = createHttpPageReader({
+  const profiling = process.env.NESTOR_SEARCH_PROFILE === "1";
+  const timing = (
+    phase: string,
+    startedAt: number,
+    fields: Record<string, string | number | boolean>,
+  ) => {
+    if (profiling)
+      console.info(
+        "[Search timing]",
+        JSON.stringify({
+          phase,
+          startedAt,
+          durationMs: Date.now() - startedAt,
+          ...fields,
+        }),
+      );
+  };
+  const reads = new AsyncLocalStorage<{ firstFetchAt?: number }>();
+  const reader = createHttpPageReader({
+    ...(profiling
+      ? {
+          fetch: (...args: Parameters<typeof fetch>) => {
+            const read = reads.getStore();
+            if (read) read.firstFetchAt ??= Date.now();
+            return fetch(...args);
+          },
+        }
+      : {}),
     readRendered: (url, options) => {
+      const queuedAt = Date.now();
       const signal = options.signal ?? new AbortController().signal;
-      return browser.run(new URL(url).hostname, signal, () => {
+      return browser.run(new URL(url).hostname, signal, async () => {
+        const startedAt = Date.now();
+        let settleAt: number | null = null;
+        let settleMs = 0;
         if (!deps.browserRuntime.readRenderedPage)
           throw new Error("Browser reading is unavailable.");
-        return deps.browserRuntime.readRenderedPage(url, options);
+        try {
+          return await deps.browserRuntime.readRenderedPage(url, {
+            ...options,
+            ...(profiling && options.ready
+              ? {
+                  ready: (html: string) => {
+                    const ready = options.ready!(html);
+                    if (!ready) settleAt ??= Date.now();
+                    else if (settleAt !== null) {
+                      settleMs += Date.now() - settleAt;
+                      settleAt = null;
+                    }
+                    return ready;
+                  },
+                }
+              : {}),
+          });
+        } finally {
+          timing("browser_read", startedAt, {
+            url: new URL(url).pathname,
+            queueMs: startedAt - queuedAt,
+            settleMs:
+              settleMs + (settleAt === null ? 0 : Date.now() - settleAt),
+          });
+        }
       });
     },
   });
+  const readPage: typeof reader = (url, options) => {
+    if (!profiling || options.rendered) return reader(url, options);
+    const startedAt = Date.now();
+    const read: { firstFetchAt?: number } = {};
+    return reads.run(read, async () => {
+      try {
+        return await reader(url, options);
+      } finally {
+        timing("http_read", startedAt, {
+          url: new URL(url).pathname,
+          queueMs: (read.firstFetchAt ?? Date.now()) - startedAt,
+        });
+      }
+    });
+  };
 
   return {
     async collectSource(input) {
@@ -294,6 +369,7 @@ export function createListingSearchEngine(deps: {
         if (decisions.size > 8)
           decisions.delete(decisions.keys().next().value!);
       }
+      const startedAt = Date.now();
       return screenCards({
         decisions: cache,
         client,
@@ -305,7 +381,13 @@ export function createListingSearchEngine(deps: {
         lookupSeenCards: (cards, key) =>
           Promise.resolve(input.seenCards(cards, key)),
         readPage,
-      });
+        ...(input.onRelated ? { onRelated: input.onRelated } : {}),
+      }).finally(() =>
+        timing("screen", startedAt, {
+          count: input.cards.length,
+          source: input.cards[0]?.sourceId ?? "",
+        }),
+      );
     },
     readListings: (input) =>
       readListings({ client, onUsage, ...input, readPage }),

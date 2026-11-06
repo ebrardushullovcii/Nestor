@@ -111,7 +111,7 @@ test("Stop during a truncated model turn prevents the larger retry", async () =>
   expect(chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test("negative profession verification waits for a rendered listing through an interstitial and overlays", async () => {
+test("profession screening waits for a rendered listing through an interstitial and overlays", async () => {
   const signal = new AbortController().signal;
   const readPage = vi.fn<
     NonNullable<Parameters<typeof screenCards>[0]["readPage"]>
@@ -128,7 +128,6 @@ test("negative profession verification waits for a rendered listing through an i
   });
   const chatWithTools = vi
     .fn<LLMClient["chatWithTools"]>()
-    .mockResolvedValueOnce({ content: '{"keep":{"0":0}}' })
     .mockResolvedValueOnce({ content: '{"keep":{"0":1}}' });
   const result = await screenCards({
     cards: [card],
@@ -172,7 +171,7 @@ test("a persistent check remains a retryable screening failure without rememberi
   expect(result.seen).toEqual([]);
   expect(result.failed).toHaveLength(1);
   expect(readPage).toHaveBeenCalledTimes(2);
-  expect(chatWithTools).toHaveBeenCalledTimes(1);
+  expect(chatWithTools).not.toHaveBeenCalled();
 });
 
 test("listing metadata also retries truncation and accounts for both model turns", async () => {

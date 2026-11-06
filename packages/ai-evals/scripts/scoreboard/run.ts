@@ -64,7 +64,7 @@ if (args.help || args.list) {
   } catch {
     /* No owned heavy slot. Refuse before creating results or starting work. */
   }
-  if (!owner || ancestor !== owner) {
+  if (process.platform === "darwin" && (!owner || ancestor !== owner)) {
     console.error(
       `Run the whole scoreboard through the shared lock:\n${heavy} node packages/ai-evals/scripts/scoreboard/run.ts`,
     );
@@ -99,6 +99,7 @@ if (args.help || args.list) {
   const label = `scoreboard-${Date.now()}`;
   const env = {
     ...process.env,
+    NESTOR_SCOREBOARD_HOLD_SETUP_READS: "1",
     NESTOR_VERIFY_LABEL: label,
     NESTOR_VERIFY_WORK: output,
   };

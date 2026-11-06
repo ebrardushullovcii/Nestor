@@ -37,6 +37,74 @@ const providerFixture = loadProviderFixture(
 const providerSessions = new WeakSet();
 let providerArmed = false;
 installProviderTransport(providerFixture, () => providerArmed);
+
+// Scoreboard setup stops its automatic search before measuring a fresh one.
+// Hold only this instance's replica GETs until that setup is complete. Aborted
+// reads are rejected immediately; no job rows are removed to reset the test.
+const scoreboardReadsReleased = path.join(
+  stateDir,
+  "scoreboard-reads-released",
+);
+if (
+  process.env.NESTOR_SCOREBOARD_HOLD_SETUP_READS === "1" &&
+  !fs.existsSync(scoreboardReadsReleased)
+) {
+  const state = JSON.parse(
+    fs.readFileSync(path.join(stateDir, "state.json"), "utf8"),
+  );
+  const fixtureOrigin = new URL(state.sitesUrl).origin;
+  if (
+    !["127.0.0.1", "localhost"].includes(new URL(fixtureOrigin).hostname) ||
+    netMode !== "replica"
+  )
+    throw new Error(
+      "Scoreboard read hold requires this instance's loopback replicas.",
+    );
+  const fetchPage = globalThis.fetch;
+  const waiting = new Set();
+  let held = true;
+  globalThis.__nestorReleaseScoreboardReads = () => {
+    fs.writeFileSync(scoreboardReadsReleased, "released\n", { mode: 0o600 });
+    held = false;
+    for (const release of [...waiting]) release();
+  };
+  globalThis.fetch = async (input, options) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    const method =
+      options?.method ?? (input instanceof Request ? input.method : "GET");
+    if (
+      held &&
+      url.origin === fixtureOrigin &&
+      method.toUpperCase() === "GET"
+    ) {
+      const signal =
+        options?.signal ??
+        (input instanceof Request ? input.signal : undefined);
+      signal?.throwIfAborted();
+      await new Promise((resolve, reject) => {
+        const detach = () => {
+          waiting.delete(release);
+          signal?.removeEventListener("abort", abort);
+        };
+        const release = () => {
+          detach();
+          resolve();
+        };
+        const abort = () => {
+          detach();
+          reject(
+            signal.reason instanceof Error
+              ? signal.reason
+              : new Error("Stopped"),
+          );
+        };
+        waiting.add(release);
+        signal?.addEventListener("abort", abort, { once: true });
+      });
+    }
+    return fetchPage(input, options);
+  };
+}
 // Unseen windows: macOS draws an accessory app's windows on the active Space,
 // even over a full-screen app, so every window is fully transparent and
 // click-through. Screenshots read the page with capturePage and Playwright

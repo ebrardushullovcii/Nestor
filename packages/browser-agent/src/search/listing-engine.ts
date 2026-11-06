@@ -2,7 +2,6 @@ import {
   clearRoleMatch,
   professionEvidence,
   professionInstructions,
-  roleDutyEvidence,
 } from "./listing-screening";
 import { listingClosedReason } from "./listing-status";
 import { z } from "zod";
@@ -166,7 +165,7 @@ export function roleGoalsKey(goals: RoleScreenGoals): string {
   const normalized = (values: readonly string[]) =>
     [...new Set(values.map((value) => value.trim().toLowerCase()))].sort();
   return fingerprint([
-    7,
+    8,
     normalized(goals.targetRoles),
     normalized(goals.relatedRoles),
     goals.strategy,
@@ -414,6 +413,8 @@ export async function screenCards(
     lookupKnownUrls?: (urls: readonly string[]) => Promise<readonly string[]>;
     /** Verify a negative card verdict against its own full listing before remembering it. */
     readPage?: ListingSearchReader["readPage"];
+    /** Publish proven matches while other titles and negative verifications finish. */
+    onRelated?: (cards: ListingCard[]) => Promise<void>;
   },
 ): Promise<{
   related: ListingCard[];
@@ -447,9 +448,23 @@ export async function screenCards(
   // hands-on analytics and a different management or infrastructure profession.
   const title = (card: ListingCard) =>
     card.title.toLowerCase().replace(/\s+/gu, " ").trim();
-  const titleKey = (card: ListingCard) =>
-    `${title(card)}\n${professionEvidence(card)}`;
-  const allTitles = [...new Set(fresh.map(titleKey))];
+  const titleKeys = new Map<ListingCard, string>();
+  const titleKey = (card: ListingCard) => {
+    let key = titleKeys.get(card);
+    if (key === undefined) {
+      key = `${title(card)}\n${professionEvidence(card)}`;
+      titleKeys.set(card, key);
+    }
+    return key;
+  };
+  const groups = new Map<string, ListingCard[]>();
+  for (const card of fresh) {
+    const key = titleKey(card),
+      group = groups.get(key) ?? [];
+    group.push(card);
+    groups.set(key, group);
+  }
+  const allTitles = [...groups.keys()];
   const decisions = input.decisions ?? new Map<string, boolean>();
   for (const card of fresh)
     if (
@@ -457,26 +472,49 @@ export async function screenCards(
       clearRoleMatch(card.title, input.goals)
     )
       decisions.set(titleKey(card), true);
-  const titles = allTitles.filter((key) => !decisions.has(key));
   const evidence = new Map(
     fresh.map((card) => [titleKey(card), professionEvidence(card)]),
   );
+  const cardEvidence = new Map(evidence);
   const unrelated = new Set(
     allTitles.filter((key) => decisions.get(key) === false),
   );
   const failedTitles = new Map<string, string>();
+  const positive = new Set(
+    allTitles.filter((key) => decisions.get(key) === true),
+  );
+  const enriched = new Map<string, ListingCard>();
+  const published = new Set<ListingCard>();
+  const publishRelated = async () => {
+    if (!input.onRelated) return;
+    input.signal?.throwIfAborted();
+    const ready = fresh.filter(
+      (card) =>
+        !published.has(card) &&
+        positive.has(titleKey(card)) &&
+        !failedTitles.has(titleKey(card)),
+    );
+    for (const card of ready) published.add(card);
+    if (ready.length)
+      await input.onRelated(
+        ready.map((card) => enriched.get(card.url) ?? card),
+      );
+  };
   const judge = async (titles: string[], repair = true): Promise<void> => {
     let remaining = titles;
     try {
       const raw = await ask(
         input,
-        professionInstructions(input.goals),
+        `${professionInstructions(input.goals)} Each titles row is [index, title, cardEvidence, fullListingDutyEvidence]. Preserve the two-stage screening gate: first judge only the title and card evidence. A broader profession that can contain the requested specialty stays ambiguous unless the card explicitly identifies incompatible work. Missing specialty keywords, generic duties, location or rank do not prove a different profession. Never infer pure management from rank alone when the advertised duties are unknown. Keep a requested, substantially overlapping or genuinely ambiguous card even if its full listing would receive a low fit score. Full listing duties can rescue a card that otherwise looks clearly unrelated; they cannot revoke a keep from the card gate. Return 0 only when the card is clearly a different profession and the full duties, when supplied, do not rescue it. Fit is judged separately after saving.`,
         {
           goals: input.goals,
           titles: titles.map((key, index) => [
             index,
             key.split("\n")[0],
-            evidence.get(key) || undefined,
+            cardEvidence.get(key) || undefined,
+            evidence.get(key) === cardEvidence.get(key)
+              ? undefined
+              : evidence.get(key),
           ]),
         },
         z.unknown(),
@@ -542,8 +580,13 @@ export async function screenCards(
         }
         decisions.set(key, keep === 1);
         failedTitles.delete(key);
-        if (keep === 0) unrelated.add(key);
-        else unrelated.delete(key);
+        if (keep === 0) {
+          unrelated.add(key);
+          positive.delete(key);
+        } else {
+          unrelated.delete(key);
+          positive.add(key);
+        }
       }
     } catch (error) {
       input.signal?.throwIfAborted();
@@ -553,6 +596,7 @@ export async function screenCards(
         return;
       }
     }
+    await publishRelated();
     if (repair && remaining.length) {
       await mapConcurrent(batches(remaining, 20), 2, (batch) =>
         judge(batch, false),
@@ -565,89 +609,108 @@ export async function screenCards(
         );
     }
   };
-  await mapConcurrent(batches(titles, 120), 3, (batch) => judge(batch));
-  const enriched = new Map<string, ListingCard>();
-  const secondLook = (
-    await mapConcurrent([...unrelated], 6, async (key) => {
-      const group = fresh.filter((card) => titleKey(card) === key);
-      if (!input.readPage) {
-        const body = group
-          .map((card) => roleDutyEvidence(card, input.goals))
-          .find(Boolean);
-        if (!body) return null;
-        evidence.set(
-          key,
-          `Role-duty evidence from the full provider listing: ${body}`,
-        );
-        return key;
-      }
-      try {
-        const bodies: string[] = [];
-        for (const card of group) {
-          if (card.listingText) {
-            bodies.push(card.listingText);
-            continue;
-          }
-          let page =
-            card.listingPage ??
-            (await input.readPage(card.url, {
-              signal: input.signal,
-            }));
-          let body = readListingHtml(page.html, card.title);
-          // A negative title verdict needs the actual duties. HTTP cannot
-          // finish script rendering or a passive security redirect; use the
-          // same isolated browser reader as full listing reads, without
-          // clicking consent, authentication or security controls.
-          if (blockedByCheck(page.html) || body.renderSuggested) {
-            page = await input.readPage(card.url, {
-              signal: input.signal,
-              rendered: true,
-              ready: (html) => {
-                const detail = readListingHtml(html, card.title);
-                return (
-                  !blockedByCheck(html) &&
-                  detail.detailHeading &&
-                  Boolean(detail.text)
-                );
-              },
+  await publishRelated();
+  // An uncertain card will need its full duties whether the title model says
+  // yes or no. Read once up front, then make one grounded profession decision
+  // instead of asking a title-only question followed by a second body question.
+  const unresolved = allTitles.filter((key) => !positive.has(key));
+  const prepared = new Set(
+    (
+      await mapConcurrent(unresolved, 6, async (key) => {
+        const group = groups.get(key)!;
+        if (!input.readPage && group.some((card) => !card.listingText))
+          return null;
+        try {
+          const bodies: string[] = [];
+          for (const card of group) {
+            if (card.listingText) {
+              bodies.push(card.listingText);
+              continue;
+            }
+            const readPage = input.readPage;
+            if (!readPage)
+              throw new Error("The full listing could not be read.");
+            const render = () =>
+              readPage(card.url, {
+                signal: input.signal,
+                rendered: true,
+                ready: (html) => {
+                  const detail = readListingHtml(html, card.title);
+                  return (
+                    !blockedByCheck(html) &&
+                    detail.detailHeading &&
+                    Boolean(detail.text)
+                  );
+                },
+              });
+            let rendered = false;
+            let page: Awaited<ReturnType<ListingSearchReader["readPage"]>>;
+            try {
+              page =
+                card.listingPage ??
+                (await readPage(card.url, { signal: input.signal }));
+            } catch (error) {
+              input.signal?.throwIfAborted();
+              if (
+                !(error instanceof DiscoveryPageReadError) ||
+                ![401, 403].includes(error.status)
+              )
+                throw error;
+              rendered = true;
+              page = await render();
+            }
+            let body = readListingHtml(page.html, card.title);
+            // Profession judgments need the actual duties. HTTP cannot
+            // finish script rendering or a passive security redirect; use the
+            // same isolated browser reader as full listing reads, without
+            // clicking consent, authentication or security controls.
+            if (
+              !rendered &&
+              (blockedByCheck(page.html) || body.renderSuggested)
+            ) {
+              page = await render();
+              body = readListingHtml(page.html, card.title);
+            }
+            if (
+              blockedByCheck(page.html) ||
+              listingSignInRequired(page.html) ||
+              body.renderSuggested ||
+              !body.detailHeading ||
+              !body.text
+            )
+              throw new Error(
+                "The full listing is not readable enough to verify its profession.",
+              );
+            enriched.set(card.url, {
+              ...card,
+              listingPage: page,
+              listingText: body.text,
             });
-            body = readListingHtml(page.html, card.title);
+            bodies.push(body.text);
           }
-          if (
-            blockedByCheck(page.html) ||
-            listingSignInRequired(page.html) ||
-            body.renderSuggested ||
-            !body.detailHeading ||
-            !body.text
-          )
-            throw new Error(
-              "The full listing is not readable enough to verify its profession.",
-            );
-          enriched.set(card.url, {
-            ...card,
-            listingPage: page,
-            listingText: body.text,
-          });
-          bodies.push(body.text);
+          evidence.set(
+            key,
+            `Full listing duty evidence. Keep this shared card identity if any listing contains requested or ambiguous work:\n${bodies.join("\n\n---\n\n")}`,
+          );
+          return key;
+        } catch (error) {
+          input.signal?.throwIfAborted();
+          failedTitles.set(
+            key,
+            `Profession not verified: ${error instanceof Error ? error.message : String(error)} Try this site again to continue.`,
+          );
+          return null;
         }
-        evidence.set(
-          key,
-          `Full listing duty evidence. Keep this shared card identity if any listing contains requested or ambiguous work:\n${bodies.join("\n\n---\n\n")}`,
-        );
-        return key;
-      } catch (error) {
-        input.signal?.throwIfAborted();
-        failedTitles.set(
-          key,
-          `Profession not verified: ${error instanceof Error ? error.message : String(error)} Try this site again to continue.`,
-        );
-        return null;
-      }
-    })
-  ).filter((key): key is string => key !== null);
+      })
+    ).filter((key): key is string => key !== null),
+  );
+  const titles = unresolved.filter(
+    (key) =>
+      !failedTitles.has(key) && (prepared.has(key) || !decisions.has(key)),
+  );
   await mapConcurrent(
-    batches(secondLook, 40, (key) => evidence.get(key)?.length ?? 0, 360000),
-    2,
+    batches(titles, 120, (key) => evidence.get(key)?.length ?? 0, 360000),
+    3,
     (batch) => judge(batch),
   );
   for (const key of failedTitles.keys()) {
