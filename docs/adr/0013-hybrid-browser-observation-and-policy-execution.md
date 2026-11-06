@@ -2,6 +2,8 @@
 
 Status: accepted
 
+Status update (2026-11-06): partly superseded by [ADR 0079](0079-job-finder-is-a-harness.md). Its harness decision wins wherever this ADR disagrees; see its per-ADR supersession list for the provisions replaced and retained.
+
 Date: 2026-08-26
 
 ## Context

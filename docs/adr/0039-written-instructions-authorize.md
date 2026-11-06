@@ -2,6 +2,8 @@
 
 Status: accepted (2026-09-27).
 
+Status update (2026-11-06): partly superseded by [ADR 0079](0079-job-finder-is-a-harness.md). Its harness decision wins wherever this ADR disagrees; see its per-ADR supersession list for the provisions replaced and retained.
+
 Supersedes the Send-press wording of ADR 0024 for work the assistant does. ADR 0012's preflight, idempotency and outcome truth are unchanged.
 
 ## Context

@@ -40,9 +40,19 @@ external-host runs do not establish that the in-app browser works.
 Default AI is deterministic. Add `--provider configured` for the app's real AI
 configuration. This reads the existing environment files without copying secrets
 into artifacts and enables the live-AI test flags for both modules. The selected
-mode overrides inherited live-AI test flags. Neither mode restricts browsing. Keep data synthetic. Agent
-applications may send only to the local replica job sites; everywhere else they stay
-`prepare_only` with `submitAuthorized: false`, as in `TESTING.md`.
+mode overrides inherited live-AI test flags. Neither mode restricts browsing. CI and
+synthetic regression runs keep data synthetic and send applications only to the local
+replica job sites. Never send a synthetic applicant to a real employer. Without an
+owner grant, other runs stay `prepare_only` with `submitAuthorized: false`.
+The owner's standing grant covers real-site runs, scripted or unattended included,
+with his real profile, browser data, settings and application history. Use the
+isolated live driver with `NESTOR_LIVE_APPLY_AUTHORIZED=1` and
+`up --ai live --net live --reuse-data`, as described in
+[Real-site runs](TESTING.md#real-site-runs); retain and reuse that profile and check
+the send ledger and site before any send that could repeat one. Do not turn off
+permissions or switch an authorized live run to prepare-only. Replicas are regression
+only and never count toward live grades. Record requested and reported model and
+effort, build, profile, network and permissions for live runs.
 Label which provider actually ran; deterministic results cannot prove model quality.
 
 To check production behavior without test hooks, set `NESTOR_ENABLE_TEST_API=0`

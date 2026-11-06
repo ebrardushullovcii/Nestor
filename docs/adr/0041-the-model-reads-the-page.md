@@ -2,6 +2,8 @@
 
 Status: accepted with amendments (2026-10-02 through 2026-10-25); ADR 0051 removes unchecked-line approval gates. Partly superseded for Aggressive resumes: local number checks replace model claim checks (588a399e), and code adds listing skills and cleans repeated or generic prose (fef8af09). Other levels retain model claim checks; the discovery decision below remains accepted.
 
+Status update (2026-11-06): partly superseded by [ADR 0079](0079-job-finder-is-a-harness.md). Its harness decision wins wherever this ADR disagrees; see its per-ADR supersession list for the provisions replaced and retained.
+
 Discovery amended by the owner's rewrite request (2026-10-25): deterministic collection is the default; AI owns profession screening, uncertain interpretation and fit. This supersedes the earlier ban on mechanical card collection and the earlier repeated fit passes.
 
 ## Context
