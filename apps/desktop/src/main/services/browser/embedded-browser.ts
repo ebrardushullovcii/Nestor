@@ -1,3 +1,4 @@
+import { traceEvent } from "@nestor/core/run-trace";
 import { reportSelfLimitHit, forwardPageSelfLimitHit } from "@nestor/core";
 import {
   APPLY_PAGE_SELECTORS,
@@ -22,6 +23,7 @@ import {
   session,
   shell,
   WebContentsView,
+  nativeImage,
   type Session,
   type BrowserWindowConstructorOptions,
 } from "electron";
@@ -1151,6 +1153,14 @@ export class EmbeddedBrowser {
 
   /** Called only after the native input ledger has excluded automation. */
   private notePersonInput(tabId: string): void {
+    const applicationKeys = [...this.ownedTabs.entries()]
+      .filter(([, tabs]) => tabs.has(tabId))
+      .map(([key]) => key);
+    traceEvent("operator_action", {
+      tabId,
+      applicationKeys,
+      source: "native user input ledger",
+    });
     this.personInputTabs.add(tabId);
     this.personInputAt.set(tabId, Date.now());
     // An idle prepared form has no running claim, but its guard and network
@@ -2240,6 +2250,59 @@ export class EmbeddedBrowser {
     Page,
     Promise<string | null>
   >();
+
+  /** Read-only native capture of the exact Playwright-owned tab. No animation-frame or focus wait. */
+  async capturePageForTrace(
+    automationPage: Page,
+    input: {
+      masks: { x: number; y: number; width: number; height: number }[];
+      viewport: { width: number; height: number };
+    },
+  ): Promise<Uint8Array> {
+    let identity = this.automationPageTabIds.get(automationPage);
+    if (!identity) {
+      identity = this.identifyAutomationPage(automationPage).catch(() => null);
+      this.automationPageTabIds.set(automationPage, identity);
+    }
+    const id = await identity;
+    const page = id ? this.pageMap.get(id) : null;
+    if (!page || page.contents.isDestroyed())
+      throw new Error("The traced application tab is unavailable.");
+    let image = await page.contents.capturePage(undefined, {
+      stayHidden: true,
+    });
+    if (image.isEmpty())
+      throw new Error("The traced application tab produced no image.");
+    if (input.masks.length) {
+      const size = image.getSize();
+      const bitmap = image.toBitmap();
+      const sx = size.width / input.viewport.width,
+        sy = size.height / input.viewport.height;
+      for (const box of input.masks) {
+        for (
+          let y = Math.max(0, Math.floor(box.y * sy));
+          y < Math.min(size.height, Math.ceil((box.y + box.height) * sy));
+          y++
+        ) {
+          const left = Math.max(
+            0,
+            Math.min(size.width, Math.floor(box.x * sx)),
+          );
+          const right = Math.max(
+            left,
+            Math.min(size.width, Math.ceil((box.x + box.width) * sx)),
+          );
+          bitmap.fill(
+            0,
+            (y * size.width + left) * 4,
+            (y * size.width + right) * 4,
+          );
+        }
+      }
+      image = nativeImage.createFromBitmap(bitmap, size);
+    }
+    return image.toPNG();
+  }
 
   async ownedApplicationPage(
     owner: string,

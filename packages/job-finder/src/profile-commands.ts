@@ -1,3 +1,4 @@
+import { traceEvent } from "@nestor/core/run-trace";
 import {
   CandidateProfileSchema,
   ProfileEditConflictError,
@@ -154,10 +155,16 @@ export function createProfileCommandHandlers(
       preferences.goals.patch(input);
       return preferences.goals.read();
     },
-    get_settings: () => preferences.settings.read(),
+    get_settings: () => {
+      const settings = preferences.settings.read();
+      traceEvent("settings_observed", { settings });
+      return settings;
+    },
     patch_settings: (input) => {
       preferences.settings.patch(input);
-      return preferences.settings.read();
+      const settings = preferences.settings.read();
+      traceEvent("settings_changed", { settings });
+      return settings;
     },
   };
 }

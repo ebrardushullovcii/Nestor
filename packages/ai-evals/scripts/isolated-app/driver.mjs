@@ -18,7 +18,8 @@ import {
   descendants,
   desktopDir,
   evidenceDir,
-  holdersOf,
+  ownedProcessTree,
+  stillOurs,
   isAlive,
   loadAiEnv,
   readState,
@@ -30,6 +31,8 @@ import {
   writeState,
 } from "./common.mjs";
 import { rows, saveRows, tables } from "./sqlite.mjs";
+import { record } from "./trace.mjs";
+import { profileProvenance, assertLiveProfile } from "./live-profile.mjs";
 import { readNativeIdentity, startNativeApp } from "./native-app.mjs";
 
 const { _electron } = requireDesktop("playwright");
@@ -70,6 +73,7 @@ let env;
 let app = null;
 let sites = null;
 let generation = 0;
+let applicationKey = process.env.NESTOR_TRACE_APPLICATION_KEY || null;
 
 function update(values) {
   writeState({ ...readState(), ...values });
@@ -171,18 +175,34 @@ async function startSites() {
 
 // --- Electron -------------------------------------------------------------
 function killOrphans() {
-  // Only processes holding this instance's own private data folder.
-  const holders = holdersOf(launch.userDataDir);
-  for (const pid of holders) {
-    step(`orphan: stopping pid ${pid} that held ${launch.userDataDir}`);
+  const state = readState();
+  const owned = ownedProcessTree([[state?.electronPid, state?.electronStart]]);
+  for (const [pid, started] of owned) {
+    if (!stillOurs(pid, started)) continue;
+    step(`orphan: stopping recorded instance pid ${pid}`);
     try {
       process.kill(pid, "SIGTERM");
     } catch {}
   }
-  return holders;
+  return [...owned.keys()];
 }
 
 async function startApp() {
+  assertLiveProfile(launch.userDataDir, launch.net);
+  record("run_header", {
+    build: readState()?.build,
+    machine: {
+      hostname: (await import("node:os")).hostname(),
+      platform: process.platform,
+      arch: process.arch,
+    },
+    ai: launch.ai,
+    network: launch.net,
+    profile: profileProvenance(launch.userDataDir),
+    liveApplyAuthorized: process.env.NESTOR_LIVE_APPLY_AUTHORIZED === "1",
+    testApi: launch.testApi,
+    applicationKey,
+  });
   generation += 1;
   let lastError;
   const native = launch.launch === "native";
@@ -328,16 +348,24 @@ async function stopApp() {
     return stopped;
   }
   const pid = app.process().pid;
-  const owned = descendants(pid);
+  const owned = ownedProcessTree([[pid, startTime(pid)]]);
   await Promise.race([app.close().catch(() => {}), sleep(20000)]);
-  for (let i = 0; i < 40 && owned.some(isAlive); i += 1) await sleep(250);
-  for (const p of owned.filter(isAlive))
-    try {
-      process.kill(p, "SIGTERM");
-    } catch {}
+  for (
+    let i = 0;
+    i < 40 && [...owned].some(([pid, started]) => stillOurs(pid, started));
+    i += 1
+  )
+    await sleep(250);
+  for (const [p, started] of owned)
+    if (stillOurs(p, started))
+      try {
+        process.kill(p, "SIGTERM");
+      } catch {}
   await sleep(500);
   app = null;
-  return owned.filter(isAlive);
+  return [...owned]
+    .filter(([pid, started]) => stillOurs(pid, started))
+    .map(([pid]) => pid);
 }
 
 /** The app can replace its main window; always talk to the current one. */
@@ -359,29 +387,65 @@ async function mainPage(seconds = 30) {
   );
 }
 
-/** `--page browser` targets the newest in-app browser page (or the one whose URL contains `--url`). */
-async function pageFor({ page: which, url } = {}) {
+/** Resolve the application's own prepared-page binding, never the last tab. */
+async function browserTargets({
+  url,
+  applicationKey: key = applicationKey,
+} = {}) {
+  return app.evaluate(
+    async ({ webContents, session }, input) => {
+      const pages = webContents
+        .getAllWebContents()
+        .filter(
+          (w) =>
+            !w.isDestroyed() &&
+            w.session === session.fromPartition("persist:nestor-browser") &&
+            /^https?:/.test(w.getURL()),
+        );
+      const targets = [];
+      for (const w of pages) {
+        const binding = await w
+          .executeJavaScript("window.__nestorPreparedApplication || null")
+          .catch(() => null);
+        if (input.key && binding !== input.key) continue;
+        if (input.url && !w.getURL().includes(input.url)) continue;
+        targets.push({ id: w.id, url: w.getURL(), applicationKey: binding });
+      }
+      return targets;
+    },
+    { key, url },
+  );
+}
+async function pageFor({ page: which, url, applicationKey: key } = {}) {
   if (which !== "browser") return mainPage();
   if (launch.launch === "native")
     throw new Error(
       "Native launch does not expose embedded page input. Use the app's scoped browser workflow; capturePage shots remain available.",
     );
-  for (let i = 0; i < 20; i += 1) {
-    const pages = app
-      .context()
-      .pages()
-      .filter(
-        (p) =>
-          !p.isClosed() &&
-          /^https?:/.test(p.url()) &&
-          (!url || p.url().includes(url)),
+  for (let i = 0; i < 20; i++) {
+    const targets = await browserTargets({
+      url,
+      applicationKey: key ?? applicationKey,
+    });
+    if (targets.length > 1)
+      throw new Error(
+        "Several application tabs match. Use drive bind <application_N_attempt_N> or --url to identify this application's tab.",
       );
-    if (pages.length) return pages.at(-1);
+    if (targets.length === 1) {
+      const matches = app
+        .context()
+        .pages()
+        .filter((p) => !p.isClosed() && p.url() === targets[0].url);
+      for (const page of matches) {
+        const binding = await page
+          .evaluate(() => window.__nestorPreparedApplication || null)
+          .catch(() => null);
+        if (binding === targets[0].applicationKey) return page;
+      }
+    }
     await sleep(500);
   }
-  throw new Error(
-    `No in-app browser page${url ? ` with ${url} in its URL` : ""} is open. Open the Job Finder browser first.`,
-  );
+  throw new Error("No matching application tab is open.");
 }
 
 // Main-process window lookup still works when Playwright's page handle has died.
@@ -398,21 +462,26 @@ function nextShotName(name) {
   return `${String(n).padStart(3, "0")}-${name.replace(/[^A-Za-z0-9._-]+/g, "-")}`;
 }
 
-async function shot(name, { target = "main", url } = {}) {
+async function shot(
+  name,
+  { target = "main", url, applicationKey: key = applicationKey } = {},
+) {
+  const selected =
+    target === "browser"
+      ? await browserTargets({ url, applicationKey: key })
+      : null;
+  if (selected && selected.length !== 1)
+    throw new Error(
+      "A browser screenshot needs exactly one application tab; bind its key or give --url.",
+    );
   const images = await app.evaluate(
-    async ({ BrowserWindow, webContents }, input) => {
+    async ({ BrowserWindow, webContents, nativeImage }, input) => {
       const find = eval(input.finder);
       let targets;
       if (input.target === "browser") {
-        targets = webContents
-          .getAllWebContents()
-          .filter(
-            (w) =>
-              !w.isDestroyed() &&
-              /^https?:/.test(w.getURL()) &&
-              (!input.url || w.getURL().includes(input.url)),
-          )
-          .slice(-1);
+        targets = [webContents.fromId(input.contentsId)].filter(
+          (w) => w && !w.isDestroyed(),
+        );
       } else
         targets = find(BrowserWindow, input.target)
           .slice(0, input.target === "overlay" ? 2 : 1)
@@ -428,14 +497,45 @@ async function shot(name, { target = "main", url } = {}) {
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
         if (!image) throw new Error(`Could not capture ${w.getURL()}`);
+        // Mask credential/code controls in the bitmap; never mutate the live DOM.
+        const rects = await w
+          .executeJavaScript(
+            `Array.from(document.querySelectorAll('input[type="password"],input[name*="password" i],input[autocomplete*="password" i],input[autocomplete="one-time-code"],input[name*="otp" i],input[name*="mfa" i],input[name*="token" i],input[name="code" i],input[name="passcode" i],iframe')).map(e => {const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,vw:innerWidth,vh:innerHeight}})`,
+          )
+          .catch(() => []);
+        if (rects.length && image && !image.isEmpty()) {
+          const size = image.getSize();
+          const bitmap = image.toBitmap();
+          for (const r of rects) {
+            const sx = size.width / r.vw,
+              sy = size.height / r.vh;
+            for (
+              let y = Math.max(0, Math.floor(r.y * sy));
+              y < Math.min(size.height, Math.ceil((r.y + r.height) * sy));
+              y++
+            )
+              bitmap.fill(
+                0,
+                (y * size.width + Math.max(0, Math.floor(r.x * sx))) * 4,
+                (y * size.width +
+                  Math.min(size.width, Math.ceil((r.x + r.width) * sx))) *
+                  4,
+              );
+          }
+          image = nativeImage.createFromBitmap(bitmap, size);
+        }
         out.push({
-          url: w.getURL().split("?")[0],
+          url: w.getURL(),
+          visibleText: await w
+            .executeJavaScript("document.body.innerText")
+            .catch(() => null),
+          contentsId: w.id,
           png: image.isEmpty() ? null : image.toPNG().toString("base64"),
         });
       }
       return out;
     },
-    { finder: WINDOW_FINDER, target, url },
+    { finder: WINDOW_FINDER, target, url, contentsId: selected?.[0]?.id },
   );
   if (!images.length)
     throw new Error(`Nothing to capture for target ${target}`);
@@ -451,6 +551,14 @@ async function shot(name, { target = "main", url } = {}) {
     );
     writeFileSync(`${base}.png`, Buffer.from(image.png, "base64"));
     files.push(`${base}.png`);
+    record("driver_snapshot", {
+      applicationKey: key,
+      target,
+      path: `${base}.png`,
+      url: image.url,
+      visibleText: image.visibleText,
+      contentsId: image.contentsId,
+    });
   }
   if (target === "main") {
     const tree = await see().catch(() => null);
@@ -547,12 +655,22 @@ async function find(
 }
 
 async function click(text, opts = {}) {
+  if (opts.page === "browser")
+    record("operator_action", {
+      applicationKey,
+      source: "driver browser click",
+    });
   const { locator, count } = await find(text, opts);
   await locator.click({ timeout: opts.timeout ?? 10000 });
   return count > 1 ? `clicked the first of ${count} matches` : "clicked";
 }
 
 async function fill(label, value, opts = {}) {
+  if (opts.page === "browser")
+    record("operator_action", {
+      applicationKey,
+      source: "driver browser fill",
+    });
   const page = await pageFor(opts);
   const name = toName(label);
   const tries = [
@@ -654,6 +772,12 @@ function context(extra = {}) {
       return result.rows;
     },
     tables: () => tables(launch.userDataDir, path.join(stateDir, "db-copy")),
+    bindApplication: (key) => {
+      applicationKey = key;
+      record("application_bound", { applicationKey });
+    },
+    operatorActed: (note) =>
+      record("operator_action", { applicationKey, note }),
     browserPages: () =>
       app.evaluate(({ webContents }) =>
         webContents.getAllWebContents().map((w) => ({
@@ -678,6 +802,15 @@ function readJsonl(file) {
 }
 
 const commands = {
+  bind: (key) => {
+    applicationKey = key;
+    record("application_bound", { applicationKey });
+    return key;
+  },
+  operator: (note = "Operator acted") => {
+    record("operator_action", { applicationKey, note });
+    return "recorded";
+  },
   async status() {
     const appPid = app?.process().pid ?? null;
     return {
@@ -752,9 +885,26 @@ const commands = {
 
 async function failureShot(cmd) {
   // Live workspaces contain personal data; never save automatic screenshots.
-  if (launch.net === "live") return null;
+  if (launch.net === "live" && !process.env.NESTOR_RUN_TRACE_DIR) return null;
   try {
-    if (app) return await shot(`failure-${cmd}`);
+    if (app) {
+      const files = await shot(`failure-${cmd}`);
+      if (process.env.NESTOR_RUN_TRACE_DIR) {
+        try {
+          files.push(
+            ...(await shot(`failure-${cmd}-application`, {
+              target: "browser",
+            })),
+          );
+        } catch (error) {
+          record("driver_snapshot_error", {
+            applicationKey,
+            error: String(error.message),
+          });
+        }
+      }
+      return files;
+    }
   } catch {}
   return null;
 }

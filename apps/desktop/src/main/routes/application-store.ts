@@ -1,3 +1,4 @@
+import { traceEvent } from "@nestor/core/run-trace";
 import {
   ApplicationListPageSchema,
   ApplicationListQuerySchema,
@@ -45,6 +46,14 @@ export async function executeApplicationStoreCommand(
       const value = ApplyJobsInputSchema.parse(input);
       const { repository } = await startJobFinderRuntime();
       const settings = await repository.getSettings();
+      traceEvent("application_requested", {
+        input: value,
+        settings,
+        instruction:
+          instruction?.mode ??
+          settings.applicationAutomationMode ??
+          DEFAULT_APPLICATION_APPLY_MODE,
+      });
       if ((await repository.getActivityControl()).paused)
         throw new Error(
           "The person paused background work. Resume it before applying.",

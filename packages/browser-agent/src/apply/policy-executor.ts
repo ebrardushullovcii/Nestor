@@ -1,3 +1,4 @@
+import { traceOurs } from "@nestor/core/run-trace";
 import {
   currentApplicationAnswer,
   meaningHash,
@@ -2019,7 +2020,7 @@ function afterWrite(deps: ApplyExecutorDeps, label: string | null): void {
  * on refuses the write and hands back what is there now, so the model can try
  * again against the real page rather than the run stopping.
  */
-export async function executeApplyProposal(
+async function executeApplyProposalObserved(
   proposal: ApplyProposal,
   seenSignature: string,
   deps: ApplyExecutorDeps,
@@ -3018,6 +3019,12 @@ export async function executeApplyProposal(
         return notEntered({ deps, control, observation, at, decision });
       }
       const answer = decision.answer;
+      if (answer.value !== proposal.text)
+        traceOurs(
+          "packages/browser-agent/src/apply/policy-executor.ts:decideAnswer/type",
+          "rewritten",
+          "Model-proposed text replaced by the executor answer",
+        );
 
       const write = await writeUnderGuard(deps, {
         declaredValue: answer.value,
@@ -3095,6 +3102,12 @@ export async function executeApplyProposal(
       const option =
         matchOption(control.options, choice.answer.value) ??
         choice.answer.value;
+      if (option !== proposal.option)
+        traceOurs(
+          "packages/browser-agent/src/apply/policy-executor.ts:decideAnswer/select",
+          "rewritten",
+          "Model-proposed choice replaced or normalized by the executor",
+        );
       const key = pickerQuestionKey(control);
       if (pickerRefused(deps.guardState, control, option)) {
         deps.guardState.repeatedPickers.add(key);
@@ -4043,4 +4056,25 @@ function describeRef(observation: ApplyFormObservation, ref: string): string {
   const clickable = observation.clickables.find((entry) => entry.ref === ref);
   if (clickable?.label) return `"${clickable.label}"`;
   return ref;
+}
+
+/** Records the existing policy's decisions without changing them. */
+export async function executeApplyProposal(
+  proposal: ApplyProposal,
+  seenSignature: string,
+  deps: ApplyExecutorDeps,
+): Promise<ApplyExecutionOutcome> {
+  const outcome = await executeApplyProposalObserved(
+    proposal,
+    seenSignature,
+    deps,
+  );
+  const by =
+    "packages/browser-agent/src/apply/policy-executor.ts:executeApplyProposal";
+  if (outcome.kind === "refused") traceOurs(by, "blocked", outcome.reason);
+  if (outcome.kind === "paused")
+    traceOurs(by, "asked_person", JSON.stringify(outcome.pause));
+  if (outcome.kind === "suggestion" && outcome.question)
+    traceOurs(by, "asked_person", outcome.note);
+  return outcome;
 }

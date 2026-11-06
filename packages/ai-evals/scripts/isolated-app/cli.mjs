@@ -27,12 +27,14 @@ import {
   fail,
   frontPid,
   holdersOf,
+  ownedProcessTree,
   isAlive,
   isMainCheckout,
   isPrivateDataDir,
   isWindows,
   label,
   loadAiEnv,
+  mainCheckout,
   readStamp,
   readState,
   requireDesktop,
@@ -46,6 +48,12 @@ import {
   workRoot,
   writeState,
 } from "./common.mjs";
+import {
+  prepareLiveProfile,
+  assertLiveProfile,
+  profileProvenance,
+  inside,
+} from "./live-profile.mjs";
 import { rows, saveRows, tables } from "./sqlite.mjs";
 import { prepareNativeBridge, validateLaunchMode } from "./native-app.mjs";
 
@@ -176,6 +184,8 @@ async function up() {
       "no-test-api": { type: "boolean", default: false },
       "allow-stale": { type: "boolean", default: false },
       "reuse-data": { type: "boolean", default: false },
+      "live-profile": { type: "string" },
+      "campaign-dir": { type: "string" },
     },
   });
   if (!["deterministic", "live"].includes(values.ai))
@@ -191,6 +201,13 @@ async function up() {
   } catch (error) {
     fail(error.message);
   }
+  if (
+    process.env.NESTOR_RUN_TRACE_DIR &&
+    [checkout, mainCheckout].some((root) =>
+      inside(process.env.NESTOR_RUN_TRACE_DIR, root),
+    )
+  )
+    fail("NESTOR_RUN_TRACE_DIR must be outside the repository.");
   const previous = readState();
   if (driverUp(previous)) {
     console.log(
@@ -253,7 +270,19 @@ async function up() {
   const electronPath = quietElectron();
 
   let userDataDir;
-  if (
+  if (values["live-profile"]) {
+    try {
+      userDataDir = prepareLiveProfile(values["live-profile"], [
+        checkout,
+        mainCheckout,
+        appDataRoot,
+        process.env.NESTOR_RUN_TRACE_DIR,
+        values["campaign-dir"],
+      ]);
+    } catch (error) {
+      fail(error.message);
+    }
+  } else if (
     values["reuse-data"] &&
     previous?.userDataDir &&
     existsSync(previous.userDataDir)
@@ -261,12 +290,22 @@ async function up() {
     userDataDir = previous.userDataDir;
   else
     userDataDir = mkdtempSync(path.join(tempRoot, `nestor-verify-${label}-`));
-  if (userDataDir.startsWith(appDataRoot) || !isPrivateDataDir(userDataDir))
+  if (
+    inside(userDataDir, appDataRoot) ||
+    (!values["live-profile"] && !isPrivateDataDir(userDataDir))
+  )
     fail(
       `Refusing user data folder ${userDataDir}: not a private temp folder.`,
     );
 
+  try {
+    assertLiveProfile(userDataDir, values.net);
+  } catch (error) {
+    fail(error.message);
+  }
   const launch = {
+    liveProfile: Boolean(values["live-profile"]),
+    profileProvenance: profileProvenance(userDataDir),
     userDataDir,
     appDir,
     electronPath,
@@ -288,6 +327,12 @@ async function up() {
     checkout,
     evidenceDir,
     startedAt: new Date().toISOString(),
+    ...(previous?.electronPid
+      ? {
+          electronPid: previous.electronPid,
+          electronStart: previous.electronStart,
+        }
+      : {}),
     ...launch,
     build: stamp ?? null,
     source: now,
@@ -559,11 +604,15 @@ function db() {
 
 // --- down -----------------------------------------------------------------
 async function down() {
-  const keepData = rest.includes("--keep-data");
+  const keepData =
+    rest.includes("--keep-data") || Boolean(readState()?.liveProfile);
   // A run on the owner's imported real state: archive no databases or app log.
   const state = readState();
-  const privateData = rest.includes("--private-data") || state?.net === "live";
-  if (keepData && rest.includes("--private-data"))
+  const privateData =
+    rest.includes("--private-data") ||
+    state?.net === "live" ||
+    Boolean(state?.liveProfile);
+  if (keepData && rest.includes("--private-data") && !state?.liveProfile)
     fail("--private-data deletes the data folder; it cannot be kept.");
   if (!state) return console.log(`Nothing recorded for label ${label}.`);
   if (driverUp(state) && state.driverPort) {
@@ -572,23 +621,27 @@ async function down() {
       await sleep(250);
   }
   // Whatever is left: only recorded PIDs whose start time still matches, and their children.
-  const recorded = [
+  const targets = ownedProcessTree([
     [state.electronPid, state.electronStart],
     [state.sitesPid, state.sitesStart],
     [state.driverPid, state.driverStart],
-  ].filter(([pid, start]) => stillOurs(pid, start));
-  const targets = new Set(recorded.flatMap(([pid]) => descendants(pid)));
-  for (const pid of holdersOf(state.userDataDir)) targets.add(pid);
+  ]);
   for (const signal of ["SIGTERM", "SIGKILL"]) {
-    for (const pid of targets)
-      if (isAlive(pid))
+    for (const [pid, started] of targets)
+      if (stillOurs(pid, started))
         try {
           process.kill(pid, signal);
         } catch {}
-    for (let i = 0; i < 20 && [...targets].some(isAlive); i += 1)
+    for (
+      let i = 0;
+      i < 20 && [...targets].some(([pid, started]) => stillOurs(pid, started));
+      i += 1
+    )
       await sleep(250);
   }
-  const survivors = [...targets].filter(isAlive);
+  const survivors = [...targets]
+    .filter(([pid, started]) => stillOurs(pid, started))
+    .map(([pid]) => pid);
 
   // Keep the proof: final databases, diagnostics and logs go to the evidence folder.
   const finalData = path.join(evidenceDir, "final-data");
@@ -607,7 +660,7 @@ async function down() {
       cpSync(path.join(stateDir, name), path.join(logs, name));
 
   if (!survivors.length) {
-    if (!keepData && isPrivateDataDir(state.userDataDir))
+    if (!keepData && !state.liveProfile && isPrivateDataDir(state.userDataDir))
       rmSync(state.userDataDir, { recursive: true, force: true });
     if (keepData) {
       rmSync(path.join(stateDir, "app"), { recursive: true, force: true });
@@ -615,6 +668,7 @@ async function down() {
         label,
         checkout,
         userDataDir: state.userDataDir,
+        liveProfile: state.liveProfile,
         ...(state.net === "live" ? { net: "live" } : {}),
         keptAt: new Date().toISOString(),
       });

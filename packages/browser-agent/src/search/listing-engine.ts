@@ -1,3 +1,4 @@
+import { traceEvent, withTraceScope } from "@nestor/core/run-trace";
 import {
   clearRoleMatch,
   professionEvidence,
@@ -195,7 +196,7 @@ export function listingInventoryReady(html: string, url: string): boolean {
 }
 
 /** No browser or model for ordinary HTTP lists. An incomplete source explicitly asks for navigation fallback. */
-export async function collectSource(
+async function collectSourceObserved(
   input: ListingSearchReader & {
     source: { id: string; label: string; url: string };
     onPage?: (cards: ListingCard[]) => Promise<void> | void;
@@ -968,7 +969,10 @@ export async function readListings(
           read.card.postedAt ??
           null,
         description: read.body.text,
-        facts: { fullListingRead: !read.publishedOnly || !read.structured?.descriptionLikelyTruncated },
+        facts: {
+          fullListingRead:
+            !read.publishedOnly || !read.structured?.descriptionLikelyTruncated,
+        },
         summary: null,
         salaryMin: null,
         salaryMax: null,
@@ -1480,4 +1484,34 @@ export async function fitJobs(
     },
   );
   return output;
+}
+
+/** Optional evidence of the source engine's own counts, not a second collector. */
+export async function collectSource(
+  input: Parameters<typeof collectSourceObserved>[0],
+): Promise<SourceInventory> {
+  return withTraceScope(
+    { sourceId: input.source.id, sourceUrl: input.source.url },
+    async () => {
+      try {
+        const result = await collectSourceObserved(input);
+        traceEvent("search_source_result", {
+          sourceId: input.source.id,
+          sourceUrl: input.source.url,
+          pagesFetched: result.pagesRead,
+          listingsRead: result.cards.length,
+          complete: result.complete,
+          notes: result.notes,
+        });
+        return result;
+      } catch (error) {
+        traceEvent("search_source_error", {
+          sourceId: input.source.id,
+          sourceUrl: input.source.url,
+          error,
+        });
+        throw error;
+      }
+    },
+  );
 }

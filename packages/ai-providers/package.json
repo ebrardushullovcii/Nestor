@@ -15,6 +15,7 @@
   "dependencies": {
     "@nestor/agent-runtime": "workspace:*",
     "@nestor/contracts": "workspace:*",
+    "@nestor/core": "workspace:*",
     "zod": "^3.24.2"
   }
 }

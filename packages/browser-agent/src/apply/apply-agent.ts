@@ -1,3 +1,4 @@
+import { traceOurs, traceEvent, runTraceEnabled } from "@nestor/core/run-trace";
 import {
   currentApplicationAnswer,
   meaningHash,
@@ -624,6 +625,16 @@ async function runMeasuredApplyAgent(
   const timeline = activity;
   const reviewObservedFieldKeys = new Set<string>();
   const pendingQuestions = new Map<string, ApplicationAttemptQuestion>();
+  const setPendingQuestion = pendingQuestions.set.bind(pendingQuestions);
+  if (runTraceEnabled())
+    pendingQuestions.set = (key, question) => {
+      traceOurs(
+        "packages/browser-agent/src/apply/apply-agent.ts:pendingQuestions.set",
+        "asked_person",
+        JSON.stringify(question),
+      );
+      return setPendingQuestion(key, question);
+    };
   const attemptedWrites = new Set<string>();
   const attemptedManualEntries = new Set<string>();
   const attemptedSignInEntries = new Set<string>();
@@ -6653,6 +6664,7 @@ async function runMeasuredApplyAgent(
   // Nothing waiting on the person, or a run that could not finish, is never
   // ready to send.
   if (outcome === "paused" || outcome === "stuck") readyToSend = null;
+  traceEvent("apply_outcome", { outcome, pauses, notes });
 
   const agentTiming = timingRecord.snapshot();
   const fieldsPerTurn = agentTiming.requests

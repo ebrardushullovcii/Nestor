@@ -292,6 +292,8 @@ export function createDesktopBrowserRuntime(
               embedded.markPreparedForm(key);
             },
             browserHost: {
+              capturePageForTrace: (page, input) =>
+                embedded.capturePageForTrace(page, input),
               connect: () => embedded.connect(),
               getOpenBrowser: () => embedded.getOpenBrowser(),
               ownedApplicationPage: (key: string) =>

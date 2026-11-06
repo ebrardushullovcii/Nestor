@@ -25,7 +25,52 @@ const log = (file, entry) =>
   );
 
 // --- 1. Focus -------------------------------------------------------------
-const { app, BrowserWindow, dialog, shell, session, Menu } = electron;
+const { app, BrowserWindow, dialog, shell, session, Menu, ipcMain } = electron;
+// Permanent provenance: every mutating test API marks this data folder synthetic.
+// Reading test metadata does not. The marker is written before invoking the seed.
+const provenancePath = path.join(
+  process.env.NESTOR_USER_DATA_DIR,
+  "nestor-profile-provenance.json",
+);
+const readProvenance = () => {
+  try {
+    return JSON.parse(fs.readFileSync(provenancePath, "utf8"));
+  } catch {
+    return { version: 1, kind: "unknown" };
+  }
+};
+const assertLiveProfile = () => {
+  if (netMode === "live" && readProvenance().kind === "synthetic")
+    throw new Error(
+      "Live network refused: profile was seeded through a synthetic/test API.",
+    );
+};
+assertLiveProfile();
+const handle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, listener) =>
+  handle(channel, async (...args) => {
+    if (
+      channel.startsWith("job-finder:test-") &&
+      !channel.startsWith("job-finder:test-get-")
+    ) {
+      fs.writeFileSync(
+        provenancePath,
+        JSON.stringify(
+          {
+            ...readProvenance(),
+            kind: "synthetic",
+            seededAt: new Date().toISOString(),
+            seedChannel: channel,
+          },
+          null,
+          2,
+        ),
+        { mode: 0o600 },
+      );
+      assertLiveProfile();
+    }
+    return listener(...args);
+  });
 const {
   loadProviderFixture,
   installProviderTransport,
@@ -321,11 +366,14 @@ function guard(ses) {
     const synthetic = provider && (probe || providerSessions.has(ses));
     const remote =
       /^(https?|wss?):$/.test(url.protocol) && !LOOPBACK.has(url.hostname);
+    const syntheticLive =
+      netMode === "live" && readProvenance().kind === "synthetic";
     const blocked =
-      remote &&
-      !synthetic &&
-      netMode !== "live" &&
-      (netMode === "replica" || !READS.has(details.method));
+      (remote && syntheticLive && !READS.has(details.method)) ||
+      (remote &&
+        !synthetic &&
+        netMode !== "live" &&
+        (netMode === "replica" || !READS.has(details.method)));
     if (blocked)
       log("blocked-requests.jsonl", {
         method: details.method,

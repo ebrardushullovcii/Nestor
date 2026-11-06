@@ -1,3 +1,5 @@
+import { traceOurs, traceEvent, withTraceScope } from "@nestor/core/run-trace";
+import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 import {
   ModelOutputLimitError,
   isModelOutputLimit,
@@ -107,7 +109,7 @@ export interface ConversationTurnCeilings {
   noProgressStepLimit?: number;
 }
 
-export interface RunConversationTurnOptions {
+export interface RunConversationTurnOptions extends RuntimeObservers {
   model: ConversationModel;
   tools: ConversationTool[];
   /** Optional lazy catalog; execution still uses the host's validated registry. */
@@ -319,10 +321,15 @@ export async function runConversationTurn(
       try {
         response = await runModelTurn(
           (turnOptions) =>
-            options.model.chatWithTools(messages, definitions, {
-              ...turnOptions,
-              ...(outputLimit ? { maxOutputTokens: outputLimit } : {}),
-            }),
+            observeModel(
+              options,
+              { messages, tools: definitions, maxOutputTokens: outputLimit },
+              () =>
+                options.model.chatWithTools(messages, definitions, {
+                  ...turnOptions,
+                  ...(outputLimit ? { maxOutputTokens: outputLimit } : {}),
+                }),
+            ),
           {
             signal: options.signal,
             idleTimeoutMs: options.ceilings?.modelIdleTimeoutMs,
@@ -420,194 +427,219 @@ export async function runConversationTurn(
     let redirected = false;
     let batchSucceeded = true;
     for (const [index, toolCall] of toolCalls.entries()) {
-      const tool = toolsByName.get(toolCall.function.name);
-      if (redirected) {
-        turnMessages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content:
-            "Not run: the person sent a new message before this step. Read it and decide again.",
-        });
-        continue;
-      }
-      if (options.signal?.aborted || !current()) {
-        turnMessages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content: "Not run: the turn was stopped.",
-        });
-        continue;
-      }
-      // Steering is read at every tool boundary. A new message could change
-      // what the pending action should be, so nothing further is dispatched
-      // until the model has read it.
-      if (index > 0 && (await readSteering()) > 0) {
-        redirected = true;
-        // The steering messages were appended after the assistant message;
-        // move them after the answered calls so every call stays paired.
-        const steering: AgentLoopMessage[] = [];
-        while (turnMessages.at(-1)?.role === "user") {
-          steering.unshift(turnMessages.pop()!);
-        }
-        turnMessages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content:
-            "Not run: the person sent a new message before this step. Read it and decide again.",
-        });
-        for (const rest of toolCalls.slice(index + 1)) {
-          turnMessages.push({
-            role: "tool",
-            toolCallId: rest.id,
-            content:
-              "Not run: the person sent a new message before this step. Read it and decide again.",
-          });
-        }
-        turnMessages.push(...steering);
-        break;
-      }
-      if (!tool) {
-        batchSucceeded = false;
-        turnMessages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content: `There is no tool called ${toolCall.function.name}.`,
-        });
-        continue;
-      }
-      const args = parseArguments(toolCall.function.arguments);
-      const label = tool.label(args);
-      await emit({
-        type: "tool_started",
-        toolCallId: toolCall.id,
-        toolName: toolCall.function.name,
-        label,
-        status: readStatusNote(args),
-      });
-      step += 1;
-      let outcome: AgentLoopToolOutcome;
+      const observedToolStart = Date.now();
       try {
-        outcome = await runModelTurn(
-          ({ signal, onStreamEvent }) =>
-            tool.execute(toolCall.function.arguments, {
-              step,
-              signal,
-              onProgress: () =>
-                onStreamEvent({ type: "tool_call_delta", index: 0 }),
-            }),
-          {
-            signal: options.signal,
-            idleTimeoutMs: options.ceilings?.toolIdleTimeoutMs,
-          },
-        );
-      } catch (error) {
-        batchSucceeded = false;
-        if (options.signal?.aborted || isAbortError(error)) {
+        const tool = toolsByName.get(toolCall.function.name);
+        if (redirected) {
           turnMessages.push({
             role: "tool",
             toolCallId: toolCall.id,
-            content: "Stopped during this step.",
+            content:
+              "Not run: the person sent a new message before this step. Read it and decide again.",
+          });
+          continue;
+        }
+        if (options.signal?.aborted || !current()) {
+          turnMessages.push({
+            role: "tool",
+            toolCallId: toolCall.id,
+            content: "Not run: the turn was stopped.",
+          });
+          continue;
+        }
+        // Steering is read at every tool boundary. A new message could change
+        // what the pending action should be, so nothing further is dispatched
+        // until the model has read it.
+        if (index > 0 && (await readSteering()) > 0) {
+          redirected = true;
+          // The steering messages were appended after the assistant message;
+          // move them after the answered calls so every call stays paired.
+          const steering: AgentLoopMessage[] = [];
+          while (turnMessages.at(-1)?.role === "user") {
+            steering.unshift(turnMessages.pop()!);
+          }
+          turnMessages.push({
+            role: "tool",
+            toolCallId: toolCall.id,
+            content:
+              "Not run: the person sent a new message before this step. Read it and decide again.",
+          });
+          for (const rest of toolCalls.slice(index + 1)) {
+            turnMessages.push({
+              role: "tool",
+              toolCallId: rest.id,
+              content:
+                "Not run: the person sent a new message before this step. Read it and decide again.",
+            });
+          }
+          turnMessages.push(...steering);
+          break;
+        }
+        if (!tool) {
+          batchSucceeded = false;
+          turnMessages.push({
+            role: "tool",
+            toolCallId: toolCall.id,
+            content: `There is no tool called ${toolCall.function.name}.`,
+          });
+          continue;
+        }
+        const args = parseArguments(toolCall.function.arguments);
+        const label = tool.label(args);
+        await emit({
+          type: "tool_started",
+          toolCallId: toolCall.id,
+          toolName: toolCall.function.name,
+          label,
+          status: readStatusNote(args),
+        });
+        step += 1;
+        traceEvent("tool_call_started", {
+          id: toolCall.id,
+          name: toolCall.function.name,
+          arguments: toolCall.function.arguments,
+        });
+        let outcome: AgentLoopToolOutcome;
+        try {
+          outcome = await runModelTurn(
+            ({ signal, onStreamEvent }) =>
+              withTraceScope({ toolCallId: toolCall.id }, () =>
+                tool.execute(toolCall.function.arguments, {
+                  step,
+                  signal,
+                  onProgress: () =>
+                    onStreamEvent({ type: "tool_call_delta", index: 0 }),
+                }),
+              ),
+            {
+              signal: options.signal,
+              idleTimeoutMs: options.ceilings?.toolIdleTimeoutMs,
+            },
+          );
+        } catch (error) {
+          batchSucceeded = false;
+          if (options.signal?.aborted || isAbortError(error)) {
+            turnMessages.push({
+              role: "tool",
+              toolCallId: toolCall.id,
+              content: "Stopped during this step.",
+            });
+            await emit({
+              type: "tool_finished",
+              toolCallId: toolCall.id,
+              toolName: toolCall.function.name,
+              label,
+              outcome: "cancelled",
+              summary: "Stopped",
+            });
+            if (options.signal?.aborted) return result("aborted");
+            continue;
+          }
+          const text =
+            error instanceof ModelTurnTimeoutError
+              ? "That step stopped reporting progress. Look again before deciding what to do next."
+              : (tool.describeError?.(error) ??
+                "That tool could not complete this step. Try a different approach, or say what remains.");
+          turnMessages.push({
+            role: "tool",
+            toolCallId: toolCall.id,
+            content: text,
           });
           await emit({
             type: "tool_finished",
             toolCallId: toolCall.id,
             toolName: toolCall.function.name,
             label,
-            outcome: "cancelled",
-            summary: "Stopped",
+            outcome: "failed",
+            summary: text.slice(0, 300),
           });
-          if (options.signal?.aborted) return result("aborted");
           continue;
         }
-        const text =
-          error instanceof ModelTurnTimeoutError
-            ? "That step stopped reporting progress. Look again before deciding what to do next."
-            : (tool.describeError?.(error) ??
-              "That tool could not complete this step. Try a different approach, or say what remains.");
-        turnMessages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content: text,
-        });
-        await emit({
-          type: "tool_finished",
-          toolCallId: toolCall.id,
-          toolName: toolCall.function.name,
-          label,
-          outcome: "failed",
-          summary: text.slice(0, 300),
-        });
-        continue;
-      }
 
-      if (outcome.kind === "stop") {
-        turnMessages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content: `Stopped: ${outcome.reason}`,
-        });
-        await emit({
-          type: "tool_finished",
-          toolCallId: toolCall.id,
-          toolName: toolCall.function.name,
-          label,
-          outcome: "refused",
-          summary: outcome.reason.slice(0, 300),
-        });
-        return result("stopped", {
-          stop: {
-            reason: outcome.reason,
-            ...(outcome.data !== undefined ? { data: outcome.data } : {}),
-          },
-        });
-      }
-      if (outcome.kind === "finish") {
-        turnMessages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content: outcome.finish.output ?? outcome.finish.reason,
-        });
-        await emit({
-          type: "tool_finished",
-          toolCallId: toolCall.id,
-          toolName: toolCall.function.name,
-          label,
-          outcome: "done",
-          summary: outcome.finish.reason.slice(0, 300),
-        });
-        // A completion request never drops other calls or hides an earlier failure.
-        if (batchSucceeded && index === toolCalls.length - 1) {
+        if (outcome.kind === "stop") {
           turnMessages.push({
-            role: "assistant",
-            content: outcome.finish.reason,
+            role: "tool",
+            toolCallId: toolCall.id,
+            content: `Stopped: ${outcome.reason}`,
           });
-          return result("replied", { reply: outcome.finish.reason });
+          await emit({
+            type: "tool_finished",
+            toolCallId: toolCall.id,
+            toolName: toolCall.function.name,
+            label,
+            outcome: "refused",
+            summary: outcome.reason.slice(0, 300),
+          });
+          return result("stopped", {
+            stop: {
+              reason: outcome.reason,
+              ...(outcome.data !== undefined ? { data: outcome.data } : {}),
+            },
+          });
         }
-        continue;
+        if (outcome.kind === "finish") {
+          turnMessages.push({
+            role: "tool",
+            toolCallId: toolCall.id,
+            content: outcome.finish.output ?? outcome.finish.reason,
+          });
+          await emit({
+            type: "tool_finished",
+            toolCallId: toolCall.id,
+            toolName: toolCall.function.name,
+            label,
+            outcome: "done",
+            summary: outcome.finish.reason.slice(0, 300),
+          });
+          // A completion request never drops other calls or hides an earlier failure.
+          if (batchSucceeded && index === toolCalls.length - 1) {
+            turnMessages.push({
+              role: "assistant",
+              content: outcome.finish.reason,
+            });
+            return result("replied", { reply: outcome.finish.reason });
+          }
+          continue;
+        }
+        madeProgress ||= outcome.progress === true;
+        if (outcome.status === "failed" || outcome.status === "refused")
+          batchSucceeded = false;
+        let content = outcome.content;
+        if (content.length > resultLimit) {
+          const note = options.storeOverflow
+            ? await options.storeOverflow(toolCall.function.name, content)
+            : "The rest was cut to save room.";
+          traceOurs(
+            "packages/agent-runtime/src/conversation-turn.ts:runConversationTurn",
+            "rewritten",
+            `Tool result shortened to ${resultLimit} characters`,
+          );
+          content = `${content.slice(0, resultLimit)}\n… ${note}`;
+        }
+        turnMessages.push({
+          role: "tool",
+          toolCallId: toolCall.id,
+          content,
+        });
+        await emit({
+          type: "tool_finished",
+          toolCallId: toolCall.id,
+          toolName: toolCall.function.name,
+          label,
+          outcome: outcome.status ?? "done",
+          summary: content.split("\n")[0]?.slice(0, 300) ?? "",
+        });
+      } finally {
+        const message = [...turnMessages]
+          .reverse()
+          .find((m) => m.role === "tool" && m.toolCallId === toolCall.id);
+        observeTool(
+          options,
+          toolCall,
+          message?.content ?? null,
+          observedToolStart,
+        );
       }
-      madeProgress ||= outcome.progress === true;
-      if (outcome.status === "failed" || outcome.status === "refused")
-        batchSucceeded = false;
-      let content = outcome.content;
-      if (content.length > resultLimit) {
-        const note = options.storeOverflow
-          ? await options.storeOverflow(toolCall.function.name, content)
-          : "The rest was cut to save room.";
-        content = `${content.slice(0, resultLimit)}\n… ${note}`;
-      }
-      turnMessages.push({
-        role: "tool",
-        toolCallId: toolCall.id,
-        content,
-      });
-      await emit({
-        type: "tool_finished",
-        toolCallId: toolCall.id,
-        toolName: toolCall.function.name,
-        label,
-        outcome: outcome.status ?? "done",
-        summary: content.split("\n")[0]?.slice(0, 300) ?? "",
-      });
     }
     const batch = JSON.stringify({
       calls: toolCalls.map(({ function: fn }) => fn),

@@ -195,6 +195,9 @@ importers:
 
   packages/ai-evals:
     dependencies:
+      '@napi-rs/canvas':
+        specifier: 0.1.97
+        version: 0.1.97
       '@nestor/ai-providers':
         specifier: workspace:*
         version: link:../ai-providers
@@ -235,6 +238,9 @@ importers:
       '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@nestor/core':
+        specifier: workspace:*
+        version: link:../core
       zod:
         specifier: ^3.24.2
         version: 3.25.76

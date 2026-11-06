@@ -1,3 +1,10 @@
+import { withTraceScope } from "@nestor/core/run-trace";
+import {
+  bindTracePage,
+  configureTraceCapture,
+  tracePage,
+  type TracePageCapture,
+} from "./trace-page";
 import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core";
 
 import {
@@ -653,6 +660,7 @@ export interface BrowserAgentRuntimeOptions {
   preparedFormStore?: PreparedApplicationFormStore;
   /** Host-owned pages, for example a desktop application's embedded browser. */
   browserHost?: {
+    capturePageForTrace?: TracePageCapture;
     connect(): Promise<Browser>;
     getOpenBrowser(): Promise<Browser | null>;
     /** Native ownership is authoritative even when CDP has no Page yet. */
@@ -1632,6 +1640,7 @@ export function createBrowserAgentRuntime(
   }
 
   function bindPreparedApplicationPage(key: string, page: Page): void {
+    bindTracePage(page, key, options.browserHost?.capturePageForTrace);
     const alreadyBound = preparedApplicationPages.get(key) === page;
     preparedApplicationPages.set(key, page);
     markedPreparedApplicationKeys.add(key);
@@ -2216,6 +2225,7 @@ export function createBrowserAgentRuntime(
 
     await blockServiceWorkersOnManagedContext(context);
 
+    configureTraceCapture(context, options.browserHost?.capturePageForTrace);
     return context;
   }
 
@@ -2386,6 +2396,7 @@ export function createBrowserAgentRuntime(
           }
         : {}),
     });
+    await tracePage(page, "visual_snapshot", screenshotBuffer);
     const capturedAt = new Date().toISOString();
     const dataUrl = `data:image/png;base64,${screenshotBuffer.toString("base64")}`;
     const snapshotId = createVisualSnapshotId();
@@ -2587,6 +2598,7 @@ export function createBrowserAgentRuntime(
     try {
       return await executeExactlyOneFinalActionOnPage(page, actionInput);
     } finally {
+      await tracePage(page, "final_action");
       releasePageUse();
     }
   }
@@ -3469,12 +3481,18 @@ export function createBrowserAgentRuntime(
                       });
                       options?.signal?.throwIfAborted();
                     }
-                    executionResult = await input.prepareApplicationForm({
-                      session: applicationSession,
-                      currentUrl: prepared.page.url(),
-                      startedAt,
-                      ...(options?.signal ? { signal: options.signal } : {}),
-                    });
+                    executionResult = await withTraceScope(
+                      { applicationKey: input.applicationPageBindingKey },
+                      () =>
+                        input.prepareApplicationForm({
+                          session: applicationSession,
+                          currentUrl: prepared.page.url(),
+                          startedAt,
+                          ...(options?.signal
+                            ? { signal: options.signal }
+                            : {}),
+                        }),
+                    );
                     await preparationLease.moveTo(prepared.page.url());
                     options?.signal?.throwIfAborted();
                     recordExecutionTiming(

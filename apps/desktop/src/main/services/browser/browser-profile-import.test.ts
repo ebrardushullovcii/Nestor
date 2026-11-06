@@ -1,5 +1,13 @@
 import { createCipheriv, createHash } from "node:crypto";
-import { copyFile, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdtemp,
+  mkdir,
+  rm,
+  writeFile,
+  readdir,
+  readFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -29,6 +37,7 @@ vi.mock("@nestor/os-integration", () => ({
 }));
 afterEach(async () => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
   for (const directory of temporary.splice(0))
     await rm(directory, { recursive: true, force: true });
 });
@@ -383,6 +392,9 @@ describe("Windows cookie import accounting", () => {
   });
 
   test("imports readable Windows cookies, reports partial coverage and browser rejections, and clears the key", async () => {
+    const traceDir = await mkdtemp(path.join(tmpdir(), "nestor-import-trace-"));
+    temporary.push(traceDir);
+    vi.stubEnv("NESTOR_RUN_TRACE_DIR", traceDir);
     const { env, key } = await windowsCookieProfile();
     const unwrapped = Buffer.from(key);
     dpapi.mockResolvedValueOnce(unwrapped);
@@ -413,6 +425,18 @@ describe("Windows cookie import accounting", () => {
     expect(result.message).toContain("do not guarantee a working sign-in");
     expect(JSON.stringify(result)).not.toMatch(/synthetic|example|legacy/);
     expect(unwrapped.every((byte) => byte === 0)).toBe(true);
+    const traceFile = (await readdir(traceDir)).find((file) =>
+      file.endsWith(".jsonl"),
+    )!;
+    const trace = await readFile(path.join(traceDir, traceFile), "utf8");
+    expect(trace).toContain('"event":"browser_import_inventory"');
+    expect(trace).toContain('"found":8');
+    expect(trace).toContain('"importedCookieCount":1');
+    expect(trace).not.toContain("synthetic-private-value");
+    for (const call of set.mock.calls) {
+      const cookie = call[0] as { value?: string };
+      if (cookie.value) expect(trace).not.toContain(cookie.value);
+    }
   });
 
   test("does not attempt app-bound decryption and explains a protected-only profile", async () => {

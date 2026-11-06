@@ -1,3 +1,4 @@
+import { traceEvent } from "@nestor/core/run-trace";
 import { createHostQueue } from "./host-queue";
 import { createConnectionIdleTimeout, reportSelfLimitHit } from "@nestor/core";
 import {
@@ -41,6 +42,11 @@ export function createHttpPageReader(
           );
           const signal = AbortSignal.any([idle.signal, queueSignal]);
           try {
+            traceEvent("search_page_started", {
+              url,
+              rendered: false,
+              attempt,
+            });
             const response = await request(url, {
               method: readOptions.jsonQuery ? "POST" : "GET",
               signal,
@@ -59,6 +65,12 @@ export function createHttpPageReader(
               },
             });
             idle.progress();
+            traceEvent("search_page_fetched", {
+              url,
+              finalUrl: response.url || url,
+              status: response.status,
+              attempt,
+            });
             if (
               (response.status === 429 || response.status === 503) &&
               attempt < 3

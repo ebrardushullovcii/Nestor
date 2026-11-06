@@ -102,7 +102,10 @@ const workspaceAliases = {
     "../../packages/job-list-policy/src/index.ts",
   ),
   "@nestor/ai-providers": aiProvidersPath,
-  "@nestor/browser-agent/listing-detail-extraction": path.resolve(currentDir, "../../packages/browser-agent/src/search/listing-detail-extraction.ts"),
+  "@nestor/browser-agent/listing-detail-extraction": path.resolve(
+    currentDir,
+    "../../packages/browser-agent/src/search/listing-detail-extraction.ts",
+  ),
   "@nestor/browser-agent": browserAgentPath,
   "@nestor/browser-runtime/apply-page": path.resolve(
     currentDir,
@@ -110,6 +113,10 @@ const workspaceAliases = {
   ),
   "@nestor/browser-runtime": browserRuntimePath,
   "@nestor/contracts": contractsPath,
+  "@nestor/core/run-trace": path.resolve(
+    currentDir,
+    "../../packages/core/src/run-trace.ts",
+  ),
   "@nestor/core": corePath,
   "@nestor/db/applications": path.resolve(
     currentDir,
@@ -357,10 +364,7 @@ function rendererConfig(plugins: PluginOption[]): ViteUserConfig {
     // waiting on it module by module.
     server: {
       warmup: {
-        clientFiles: [
-          "./src/main.tsx",
-          "./src/features/home/home-screen.tsx",
-        ],
+        clientFiles: ["./src/main.tsx", "./src/features/home/home-screen.tsx"],
       },
     },
   };
