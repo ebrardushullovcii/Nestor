@@ -816,6 +816,32 @@ test("ordinary clicks retain uncertainty until the model settles them as not sen
     }),
   );
 });
+test("finishWhenReady never invents a not-sent report for a batched press", async () => {
+  const input = config(page());
+  input.submitApplication = vi.fn(() =>
+    Promise.resolve({
+      sendCallId: "possible-send",
+      outcome: "outcome_uncertain" as const,
+      content: "The click was issued; inspect its page and requests.",
+    }),
+  );
+  input.recordSendOutcome = vi.fn(() =>
+    Promise.resolve({ recorded: true, content: "Recorded" }),
+  );
+  const result = await runApplyAgent(
+    input,
+    model([
+      {
+        name: "fill_fields",
+        id: "batch-press",
+        args: { fields: [{ tool: "click", ref: "a0" }], finishWhenReady: true },
+      },
+    ]),
+  );
+  expect(result.outcome).toBe("uncertain");
+  expect(input.recordSendOutcome).not.toHaveBeenCalled();
+});
+
 test("Stop prevents the next batch write", async () => {
   const source = page({
     controls: [0, 1].map((index) => ({

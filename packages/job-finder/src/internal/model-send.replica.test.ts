@@ -77,6 +77,7 @@ test.each([
   { trace: false, tool: "submit_application", shape: "slotted" },
   { trace: false, tool: "submit_application", shape: "role" },
   { trace: false, tool: "submit_application", shape: "closed" },
+  { trace: false, tool: "submit_application", shape: "frame" },
   { trace: false, tool: "click", shape: "slotted" },
   { trace: false, tool: "fill_fields", shape: "slotted" },
 ])(
@@ -99,7 +100,7 @@ test.each([
         .locator("[name=coverLetter]")
         .fill("Synthetic local regression application.");
       await page.locator("[name=certify]").check();
-      if (shape !== "native")
+      if (shape !== "native" && shape !== "frame")
         await page.evaluate((shape) => {
           const form = document.querySelector("form")!;
           const original = form.querySelector(
@@ -128,6 +129,14 @@ test.each([
         mimeType: "text/plain",
         buffer: Buffer.from(resume),
       });
+      if (shape === "frame")
+        await page.evaluate(() => {
+          const form = document.querySelector("form")!;
+          const frame = document.createElement("iframe");
+          frame.style.cssText = "width:100%;height:900px";
+          document.body.append(frame);
+          frame.contentDocument!.body.append(form);
+        });
       let accepted = 0;
       page.on("response", (response) => {
         if (
@@ -146,7 +155,8 @@ test.each([
           ("kind" in action && action.kind === "final"),
       )!;
       expect(action?.ref).toBeTruthy();
-      if (shape !== "native") expect(action.label).toBe("Submit");
+      if (shape !== "native" && shape !== "frame")
+        expect(action.label).toBe("Submit");
       let input: ApplicationSubmissionRuntimeInput | null = null;
       const submit = vi.fn(
         async (decision: {
@@ -320,7 +330,7 @@ test.each([
         expect.objectContaining({ outcome: "outcome_uncertain" }),
         expect.objectContaining({ outcome: "submitted" }),
       ]);
-      expect(await page.locator("body").innerText()).toContain(
+      expect((await hands.observe()).bodyTextExcerpt).toContain(
         "Your application has been received",
       );
       // Reconnect/retry with the same call uses the recorded outcome even after

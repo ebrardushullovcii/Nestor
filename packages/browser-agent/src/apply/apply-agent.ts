@@ -660,15 +660,6 @@ export async function runApplyAgent(
           }
         }
         if (parsed.finishWhenReady) {
-          const error = await reportFinishedSend(
-            {
-              outcome: "not_sent",
-              evidence:
-                "The model finished filling this form without sending (finishWhenReady).",
-            },
-            batchCallId,
-          );
-          if (error) return { kind: "ok", status: "failed", content: error };
           return finish("The model finished filling this form.");
         }
         return { kind: "ok", content: lines.join("\n"), progress: true };
