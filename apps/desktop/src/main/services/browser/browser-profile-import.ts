@@ -301,8 +301,10 @@ interface ResolvedSource extends DesktopBrowserImportSource {
   passwordCount: number;
 }
 
-const encodeId = (value: string) =>
-  Buffer.from(value, "utf8").toString("base64url");
+// Source IDs cross IPC and must stay bounded even for deep profile paths.
+// The complete path remains in ResolvedSource for discovery and import.
+const sourceIdFor = (value: string) =>
+  createHash("sha256").update(value, "utf8").digest("hex");
 
 const PASSWORDS_LOCKED =
   "This browser keeps its passwords locked to itself. Export a CSV instead.";
@@ -425,7 +427,7 @@ async function resolveSources(
         const { count: passwordCount, ...passwordImport } =
           await passwordSupport(profile.directory, env);
         sources.push({
-          id: encodeId(`${family.browser}:${profile.directory}`),
+          id: sourceIdFor(`${family.browser}:${profile.directory}`),
           browser: family.browser,
           browserLabel: family.label,
           profileLabel: profile.label,
@@ -445,7 +447,7 @@ async function resolveSources(
   for (const root of familyRoots(FIREFOX_FAMILY, env)) {
     for (const profile of await firefoxProfiles(root)) {
       sources.push({
-        id: encodeId(`firefox:${profile.directory}`),
+        id: sourceIdFor(`firefox:${profile.directory}`),
         browser: "firefox",
         browserLabel: FIREFOX_FAMILY.label,
         profileLabel: profile.label,
