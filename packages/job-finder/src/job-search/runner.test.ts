@@ -361,6 +361,28 @@ afterEach(() => {
   for (const store of stores.splice(0)) store.close();
 });
 
+test("a source stays partial with the model's unfinished-work report after its saved jobs are read", async () => {
+  const { runner, engine, store } = setup();
+  const report =
+    "Read API page 1 of 53. Pages 2–53 and the visible remaining cards are unread.";
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [card(target.id)],
+      pagesRead: 1,
+      complete: false,
+      notes: [report],
+    }),
+  );
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  const rows = createSearchSourcesStore(store).list({}).rows;
+  expect(rows).toHaveLength(2);
+  for (const row of rows) {
+    expect(row.state).toBe("partial");
+    expect(row.message).toContain(report);
+  }
+});
+
 test("a remote-policy change during a model call cannot save an old score; retry judges with the new policy", async () => {
   let remoteCountsAsAnyLocation = true;
   const { runner, engine, store } = setup(() => remoteCountsAsAnyLocation);
@@ -1054,7 +1076,7 @@ test("B2 failed source continuation survives runner restart and reuses saved det
   await finished(runner);
   expect(store.listJobs({ stage: "found" }).rows).toHaveLength(2);
   const rows = createSearchSourcesStore(store).list({}).rows;
-  expect(rows.find((row) => row.sourceId === last)?.state).toBe("failed");
+  expect(rows.find((row) => row.sourceId === last)?.state).toBe("partial");
   const completedReads = engine.readListings.mock.calls.length;
   recover = true;
   const restarted = createJobSearchRunner({

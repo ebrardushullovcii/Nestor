@@ -1,10 +1,11 @@
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import type { Frame, Page } from "playwright";
+import { pageClickReferences } from "./page-control-refs";
 
 /** A generic page read: keep a link beside its words and retain HTML item boundaries. */
 export async function readPageLinkedText(page: Page): Promise<string> {
   const readFrame = (frame: Page | Frame) =>
-    frame.locator("body").evaluate((body) => {
+    frame.locator("body").evaluate((body, refs) => {
       let item = 0;
       const read = (node: Node): string => {
         if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
@@ -31,7 +32,32 @@ export async function readPageLinkedText(page: Page): Promise<string> {
         const index = node.matches("article, li, [role='listitem']")
           ? ++item
           : null;
-        const text = Array.from(node.childNodes, read).join("");
+        const clickable = node.matches(
+          "button, [role='button'], [onclick], [tabindex]",
+        );
+        const attributes =
+          clickable || index !== null
+            ? Object.fromEntries(
+                node
+                  .getAttributeNames()
+                  .filter(
+                    (name) =>
+                      name === "id" ||
+                      name === "role" ||
+                      name === "aria-controls" ||
+                      /^data-(?:.*-)?(?:id|urn|url|href|target|key)$/u.test(
+                        name,
+                      ),
+                  )
+                  .map((name) => [name, node.getAttribute(name)]),
+              )
+            : {};
+        const ref = refs[node.getAttribute("data-nestor-control-ref") ?? ""];
+        const target =
+          Object.keys(attributes).length || ref
+            ? `\n[Page target ${JSON.stringify({ ...attributes, ...(ref ? { clickRef: ref } : {}) })}]\n`
+            : "";
+        const text = target + Array.from(node.childNodes, read).join("");
         if (index !== null)
           return `\n[Page item ${index}]\n${text}\n[End page item ${index}]\n`;
         return [
@@ -49,7 +75,7 @@ export async function readPageLinkedText(page: Page): Promise<string> {
         .replace(/[\t ]+/gu, " ")
         .replace(/\n\s*\n/gu, "\n")
         .trim();
-    });
+    }, pageClickReferences(page));
   return withBrowserReadLiveness(page, async () => {
     const root = await readFrame(page);
     const children = await Promise.all(

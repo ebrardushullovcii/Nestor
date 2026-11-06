@@ -273,7 +273,7 @@ export function createJobSearchRunner(
         source.completeAccess?.();
       source.row.phase = null;
       source.row.message =
-        `${source.row.cards} listings; ${source.row.related} new related; ${source.row.unrelated} unrelated; ${source.row.seen} already seen.` +
+        `${source.row.cards} listings; ${source.row.related} related; ${source.row.unrelated} unrelated; ${source.row.seen} already seen.` +
         (source.row.failedReads
           ? ` ${source.row.failedReads} listing reads need attention.`
           : "") +
@@ -449,14 +449,14 @@ export function createJobSearchRunner(
           source,
           `${source.target.label}: ${inventory.notes.join(" ") || "The site's sign-in or verification attempt still needs you on the open page."}`,
         );
-      else if (!inventory.complete)
-        failedSource(
-          source,
-          inventory.cards.length
-            ? "Some listings could not be read completely."
-            : "No listings found; this site could not be read completely.",
-        );
-      else if (
+      else if (!inventory.complete) {
+        if (inventory.cards.length) source.row.state = "partial";
+        else
+          failedSource(
+            source,
+            "No listings found; this site could not be read completely.",
+          );
+      } else if (
         source.row.state !== "needs_you" &&
         source.row.state !== "failed"
       ) {

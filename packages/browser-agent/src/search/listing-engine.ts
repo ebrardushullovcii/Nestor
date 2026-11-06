@@ -426,7 +426,7 @@ export async function screenCards(
   );
   const fresh = input.cards.filter(
     (card) =>
-      !saved.has(card.url) &&
+      saved.has(card.url) ||
       !seenKeys.has(`${card.url}\n${screeningFingerprint(card)}`),
   );
   // Keep the whole title: stripping rank also erased the distinction between
@@ -460,8 +460,14 @@ export async function screenCards(
   );
   const failedTitles = new Map<string, string>();
   const positive = new Set(
-    allTitles.filter((key) => decisions.get(key) === true),
+    allTitles.filter(
+      (key) =>
+        decisions.get(key) === true ||
+        groups.get(key)!.some((card) => saved.has(card.url)),
+    ),
   );
+  // A saved posting is reread even if an older title-only decision was negative.
+  for (const key of positive) unrelated.delete(key);
   const enriched = new Map<string, ListingCard>();
   const published = new Set<ListingCard>();
   const publishRelated = async () => {

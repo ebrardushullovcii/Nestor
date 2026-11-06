@@ -14,6 +14,131 @@ import { expect, test, vi } from "vitest";
 import { createSeed } from "../test-fixtures";
 import { createListingSearchEngine } from "./engine";
 
+test("a saved crossed row is refreshed from browser data without losing its own posting facts or partial coverage report", async () => {
+  const seed = createSeed();
+  const store = openJobStore(":memory:");
+  const url = "https://board.example/jobs/one";
+  const applyUrl = "https://employer.example/forms/one";
+  const report = "Read API page 1; pages 2–53 remain unread.";
+  const job = {
+    ...seed.savedJobs[0]!,
+    canonicalUrl: url,
+    company: "Own Employer",
+    location: "Remote, Worldwide",
+    applicationUrl: applyUrl,
+    salaryText: "EUR 100,000 / year",
+    description: "Own employer's complete duties and requirements.",
+    listingDetailFetch: {
+      attemptedAt: new Date().toISOString(),
+      outcome: "enriched",
+      method: "page_text",
+      detail: "Complete text read from API",
+    },
+  };
+  const chatWithTools = vi.fn<NonNullable<JobFinderAiClient["chatWithTools"]>>(
+    () =>
+      Promise.reject(
+        Error("No extra model read is needed for these already-read facts"),
+      ),
+  );
+  const engine = createListingSearchEngine({
+    aiClient: { ...createDeterministicJobFinderAiClient(), chatWithTools },
+    browserRuntime: {
+      readRenderedPage: (finalUrl) =>
+        Promise.resolve({
+          finalUrl,
+          html: '<main>Loading</main><script src="/app.js"></script>',
+        }),
+      runAgentDiscovery: () =>
+        Promise.resolve(
+          DiscoveryRunResultSchema.parse({
+            source: "target_site",
+            startedAt: new Date().toISOString(),
+            completedAt: new Date().toISOString(),
+            querySummary: "Synthetic API read",
+            warning: null,
+            inventoryCompleteness: "partial",
+            jobs: [job],
+            agentMetadata: {
+              incomplete: true,
+              pagesCovered: 1,
+              phaseCompletionMode: "structured_finish",
+              phaseCompletionReason: report,
+            },
+          }),
+        ),
+    },
+  });
+  const context = {
+    profile: seed.profile,
+    searchPreferences: seed.searchPreferences,
+    sources: [],
+    sourceInstructionArtifacts: [],
+  };
+  const settings = JobSearchSettingsSchema.parse({ depth: "thorough" });
+  const signal = new AbortController().signal;
+  try {
+    const inventory = await engine.collectSource({
+      context,
+      settings,
+      signal,
+      lane: "browser",
+      target: JobDiscoveryTargetSchema.parse({
+        id: "source",
+        label: "Synthetic",
+        startingUrl: "https://board.example/",
+      }),
+      message: () => {},
+      knownUrls: (urls) => [...urls],
+    });
+    expect(inventory.complete).toBe(false);
+    expect(inventory.notes).toContain(report);
+    expect(inventory.pagesRead).toBeGreaterThanOrEqual(1);
+    const current = await engine.readListings({
+      context,
+      cards: inventory.cards,
+      signal,
+      lane: "http",
+    });
+    expect(current.failures).toEqual([]);
+    const crossed = {
+      ...current.jobs[0]!,
+      description: "Other employer's description",
+      location: "Wrong country",
+      applyUrl: "https://board.example/blog/applying",
+    };
+    const [id] = store.saveFoundJobs({
+      searchId: "old",
+      jobs: [crossed],
+    }).added;
+    const screened = await engine.screenCards({
+      cards: inventory.cards,
+      context,
+      settings,
+      signal,
+      knownUrls: (urls) => store.findKnownUrls(urls),
+      seenCards: () => [],
+    });
+    expect(screened.related).toHaveLength(1);
+    const reread = await engine.readListings({
+      context,
+      cards: screened.related,
+      signal,
+      lane: "http",
+    });
+    store.saveFoundJobs({ searchId: "new", jobs: reread.jobs });
+    expect(store.getJob(id!)).toMatchObject({
+      description: job.description,
+      location: job.location,
+      applyUrl,
+      salaryText: job.salaryText,
+    });
+    expect(chatWithTools).not.toHaveBeenCalled();
+  } finally {
+    store.close();
+  }
+});
+
 test("passes remote location policy into fit and retains the model's changed score", async () => {
   const seed = createSeed();
   const store = openJobStore(":memory:");

@@ -236,7 +236,18 @@ export function createListingSearchEngine(deps: {
             ? { closed: true }
             : {}),
           ...(job.listingDetailFetch?.outcome === "enriched"
-            ? { listingText: job.description }
+            ? {
+                listingText: job.description,
+                providerFacts: {
+                  company: job.company,
+                  location: job.location,
+                  workModes: job.workMode,
+                  employmentType: job.employmentType ?? null,
+                  salaryText: job.salaryText ?? null,
+                  applyUrl: job.applicationUrl ?? null,
+                  postedAt: job.postedAt ?? null,
+                },
+              }
             : {}),
         }));
       return collectSource({
@@ -302,8 +313,6 @@ export function createListingSearchEngine(deps: {
                     searchPreferences: toJobSearchGoals(
                       context.searchPreferences,
                     ),
-                    lookupKnownUrls: (urls) =>
-                      Promise.resolve(input.knownUrls(urls)),
                     startingUrls: [portalUrl ?? target.startingUrl],
                     navigationHostnames: [
                       new URL(target.startingUrl).hostname,
@@ -329,18 +338,21 @@ export function createListingSearchEngine(deps: {
                 const cards = toCards(result.jobs);
                 return {
                   cards,
-                  pagesRead: 0,
-                  complete:
-                    result.inventoryCompleteness === "complete" ||
-                    (result.agentMetadata?.phaseCompletionMode ===
-                      "structured_finish" &&
-                      result.agentMetadata.incomplete === false),
+                  pagesRead: result.agentMetadata?.pagesCovered ?? 0,
+                  complete: result.agentMetadata
+                    ? result.agentMetadata.phaseCompletionMode ===
+                        "structured_finish" &&
+                      result.agentMetadata.incomplete === false
+                    : result.inventoryCompleteness === "complete",
                   needsYou:
                     result.agentMetadata?.accessBlockerReason ===
                       "auth_required" ||
                     result.agentMetadata?.accessBlockerReason ===
                       "site_protection",
                   notes: [
+                    ...(result.agentMetadata?.phaseCompletionReason
+                      ? [result.agentMetadata.phaseCompletionReason]
+                      : []),
                     result.warning ??
                       `${cards.length} listings collected with browser navigation.`,
                   ],
@@ -445,6 +457,7 @@ export function createListingSearchEngine(deps: {
                 siteLabel: card.sourceLabel,
                 siteInstructions: [
                   "Read the supplied vacancy in full, including every requirement and the application link. This is a full listing read, not a fit decision: retain this vacancy regardless of its expected fit. Preserve its complete text in description. Missing metadata is unknown, not a reason to drop a vacancy. Do not apply.",
+                  "If the supplied URL is actually an index, collect its vacancy cards under their own URLs using extract_jobs or save_jobs_from_data and follow pagination. An index is not a vacancy; do not ask the person for links already on it.",
                   "Use this browser's imported session and the saved vault sign-in or Google sign-in when needed. Attempt permitted sign-in and site checks before asking the person. Never ask for or expose a password the vault can type. If a real attempt fails, hand off on the open page with exactly what happened.",
                 ],
                 targetJobCount: 1,

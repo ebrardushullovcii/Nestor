@@ -67,6 +67,13 @@ export function createSearchResultCache(maxEntries = 24) {
             }
           : job;
       });
+      // An unchanged card index proves the cards, not the bodies behind them.
+      // Let the listing pipeline reread their own pages on every sighting.
+      if (config.inventoryOnly && !config.sourceCatalog)
+        result.jobs = result.jobs.map((job) => ({
+          ...job,
+          listingDetailFetch: null,
+        }));
       return result;
     },
     write(

@@ -526,7 +526,7 @@ test("collects all observed pages without AI, ignoring editorial links and prese
   expect(readPage).toHaveBeenCalledTimes(2);
 });
 
-test("screens titles in one call, retains senior variants and skips saved and rejected cards on repeat", async () => {
+test("screens titles once, rereads saved postings and skips remembered rejected cards", async () => {
   const cards = [
     card("Data Analyst"),
     card("Senior Data Analyst"),
@@ -552,6 +552,7 @@ test("screens titles in one call, retains senior variants and skips saved and re
   expect(first.related.map((card) => card.title)).toEqual([
     "Data Analyst",
     "Senior Data Analyst",
+    "Saved",
   ]);
   expect(first.seen.map((card) => card.verdict)).toEqual(["unrelated"]);
   const again = await screenCards({
@@ -562,8 +563,11 @@ test("screens titles in one call, retains senior variants and skips saved and re
     lookupKnownUrls: () =>
       Promise.resolve(first.related.map((card) => card.url)),
   });
-  expect(again.related).toEqual([]);
-  expect(again.skipped).toBe(3);
+  expect(again.related.map((card) => card.title)).toEqual([
+    "Data Analyst",
+    "Senior Data Analyst",
+  ]);
+  expect(again.skipped).toBe(1);
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 

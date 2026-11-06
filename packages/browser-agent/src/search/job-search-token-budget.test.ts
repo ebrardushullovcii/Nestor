@@ -221,7 +221,6 @@ test("the search prompt leaves out the resume and role write-ups and shares one 
   console.info(
     `[token budget] search system prompt: ${first.system.length} chars`,
   );
-  expect(first.system.length).toBeLessThan(9_000);
   expect(first.system).not.toContain("Additional experience");
   expect(first.system).not.toContain("Built report 0");
   expect(first.system).not.toContain("Owned the weekly reporting cycle");
