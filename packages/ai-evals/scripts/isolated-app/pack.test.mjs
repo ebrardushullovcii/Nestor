@@ -32,6 +32,8 @@ test("packs preserve recorded facts, application linkage and unknowns; omit vaul
       CREATE TABLE application_needs_you(application_id INTEGER,task_id INTEGER); INSERT INTO application_needs_you VALUES(1,2);
       CREATE TABLE needs_you(id INTEGER,kind TEXT,prompt TEXT,ask_reason_json TEXT,resolved_at INTEGER); INSERT INTO needs_you VALUES(2,'question','Certification?','{"reason":"missing fact"}',NULL);
       CREATE TABLE profile_settings(id INTEGER,ai_behavior_browser_permissions_sign_in INTEGER); INSERT INTO profile_settings VALUES(1,0);
+      CREATE TABLE search_sources(source_id TEXT,url TEXT,cards INTEGER,related INTEGER,unrelated INTEGER,seen INTEGER,added INTEGER,failed_reads INTEGER,message TEXT);
+      INSERT INTO search_sources VALUES('acme','https://acme.test',12,3,2,7,3,0,NULL);
       CREATE TABLE password_vault(password TEXT); INSERT INTO password_vault VALUES('DO_NOT_EXPORT');`);
     db.close();
     const trace = path.join(root, "trace");
@@ -158,6 +160,20 @@ test("packs preserve recorded facts, application linkage and unknowns; omit vaul
       ats: "greenhouse",
       state: {},
     });
+    const searchOut = path.join(root, "search");
+    await generatePack({
+      out: searchOut,
+      trace,
+      data,
+      kind: "search",
+      state: {},
+    });
+    const counts = JSON.parse(
+      readFileSync(path.join(searchOut, "search.json"), "utf8"),
+    ).perSource[0];
+    assert.equal(counts.listingsRead, 12);
+    assert.equal(counts.listingsAlreadySeen, 7);
+    assert.equal(counts.listingsScreened, 5);
     assert.equal(generateRound(round), 2);
     assert.match(
       readFileSync(path.join(round, "round.md"), "utf8"),

@@ -1096,11 +1096,11 @@ async function performModelRequestAttempts(
           abortReason,
           durationMs: Date.now() - traceStarted,
         });
-      if (abortReason === "total" || abortReason === "attempt")
+      if (abortReason === "total" || abortReason === "idle")
         traceOurs(
           "packages/ai-providers/src/model-request-transport.ts:performModelRequestAttempts",
           "timed_out",
-          `${String(abortReason)} request deadline`,
+          `${String(abortReason)} request liveness timeout`,
         );
       if (abortReason === "caller" || input.signal?.aborted) {
         outcome = "cancelled";

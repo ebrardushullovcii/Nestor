@@ -821,6 +821,15 @@ export async function runAgentLoop(
           });
         }
 
+        if (
+          outcome.kind === "stop" ||
+          (outcome.kind === "ok" && outcome.status === "refused")
+        )
+          traceOurs(
+            "packages/agent-runtime/src/agent-loop.ts:runAgentLoop/tool",
+            "blocked",
+            outcome.kind === "stop" ? outcome.reason : outcome.content,
+          );
         switch (outcome.kind) {
           case "ok": {
             if (tool.isWait || tool.definition.function.name === "wait")

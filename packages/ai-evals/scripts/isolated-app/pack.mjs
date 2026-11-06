@@ -501,7 +501,10 @@ export async function generatePack(options) {
               e.sourceId === source.source_id,
           )
           .map((e) => e.pagesFetched),
-        listingsRead: source.seen,
+        // `seen` is previously seen, not listings read. Keep both facts.
+        listingsRead: source.cards,
+        listingsScreened: source.related + source.unrelated,
+        listingsAlreadySeen: source.seen,
         listingsSaved: source.added,
         errors: {
           failedReads: source.failed_reads,

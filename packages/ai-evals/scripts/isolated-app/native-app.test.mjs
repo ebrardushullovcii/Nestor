@@ -262,9 +262,9 @@ test("graceful native quit waits for the app's own exit before any signal", asyn
     process.execPath,
     [
       "-e",
-      "process.on('SIGTERM', () => process.exit(143)); setTimeout(() => process.exit(0), 400); setInterval(() => {}, 1000)",
+      "process.on('SIGTERM', () => process.exit(143)); process.stdin.once('data', () => setTimeout(() => process.exit(0), 400)); setInterval(() => {}, 1000)",
     ],
-    { stdio: "ignore" },
+    { stdio: ["pipe", "ignore", "ignore"] },
   );
   t.after(() => child.kill());
   const exited = new Promise((resolve) => child.once("exit", resolve));
@@ -272,7 +272,15 @@ test("graceful native quit waits for the app's own exit before any signal", asyn
   assert.ok(started);
   let quits = 0;
   assert.deepEqual(
-    await stopNativeChild(child, started, async () => quits++, 5000),
+    await stopNativeChild(
+      child,
+      started,
+      async () => {
+        quits++;
+        child.stdin.write("quit\n");
+      },
+      5000,
+    ),
     [],
   );
   assert.equal(quits, 1);
