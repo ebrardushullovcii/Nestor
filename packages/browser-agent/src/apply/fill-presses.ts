@@ -76,7 +76,11 @@ export function fillMayOpen(
       opening.state.fieldWrites === 0 &&
       !opening.state.openedForm &&
       !opening.observation.controls.some(
-        (control) => control.visible && !control.disabled && control.answered,
+        (control) =>
+          control.visible &&
+          !control.disabled &&
+          !control.readOnly &&
+          control.answered,
       ) &&
       opening.observation.links.some(
         (link) =>
@@ -262,7 +266,11 @@ export function fillPressFor(input: {
     state.fieldWrites === 0 &&
     !config.application.continuation &&
     !observation.controls.some(
-      (control) => control.visible && !control.disabled && control.answered,
+      (control) =>
+        control.visible &&
+        !control.disabled &&
+        !control.readOnly &&
+        control.answered,
     )
   )
     return { kind: "open_form", ref };

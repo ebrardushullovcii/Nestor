@@ -219,6 +219,39 @@ test.each(["Apply Manually", "Apply for This Job"])(
   },
 );
 
+test("a prefilled read-only sharing URL does not block the ordinary Apply opener", () => {
+  const raw = page({
+    controls: [
+      field({
+        label: "Link to This Job",
+        readOnly: true,
+        required: false,
+        value: page().url!,
+      }),
+    ],
+    actions: [
+      { index: 0, label: "Apply for This Job", visible: true, disabled: false },
+    ],
+  });
+  expect(
+    fillPressFor({
+      config: config(raw),
+      observation: buildApplyFormObservation(raw, now().toISOString()),
+      ref: "a0",
+      state: createApplyGuardState(),
+    }),
+  ).toMatchObject({ kind: "open_form" });
+  raw.controls[0].readOnly = false;
+  expect(
+    fillPressFor({
+      config: config(raw),
+      observation: buildApplyFormObservation(raw, now().toISOString()),
+      ref: "a0",
+      state: createApplyGuardState(),
+    }),
+  ).toBeNull();
+});
+
 test("a plain cookie dismissal outside the form stays an ordinary press", () => {
   const raw = page({
     bodyText:
