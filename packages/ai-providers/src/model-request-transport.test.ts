@@ -561,7 +561,7 @@ describe("performModelRequest", () => {
       performModelRequest({
         ...baseInput,
         idleTimeoutMs: 30,
-        maxAttempts: 2,
+        // Silence gets one retry even with the higher default attempt limit.
         fetchImpl: alwaysSilent as unknown as typeof fetch,
       }),
     ).rejects.toThrow(/timed out after 0s of silence/);

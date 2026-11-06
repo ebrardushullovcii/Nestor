@@ -664,12 +664,13 @@ describe("ai provider config and fallback behavior", () => {
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(2_001);
       expect(fetchSpy).toHaveBeenCalledTimes(2);
-      await vi.advanceTimersByTimeAsync(268_000);
+      await vi.advanceTimersByTimeAsync(30_000);
 
-      // Each silent read is retried after 30s. Five failed attempts stop
-      // before the unchanged total budget, without an outer retry loop.
+      // Each silent read times out after 30s. Retry once, then report the
+      // section unread without spending the unchanged total budget.
+      expect(settled).toBe(true);
       const error = await outcome;
-      expect(fetchSpy).toHaveBeenCalledTimes(5);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).toContain(
         "could not read your name, contact details and summary",
@@ -678,6 +679,8 @@ describe("ai provider config and fallback behavior", () => {
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining("30s of silence"),
       );
+      await vi.advanceTimersByTimeAsync(238_000);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
     } finally {
       globalThis.fetch = originalFetch;
       errorSpy.mockRestore();
