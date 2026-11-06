@@ -71,12 +71,16 @@ export function traceSafe(value) {
       );
     return Object.fromEntries(
       Object.entries(record)
-        .filter(
-          ([key]) =>
-            !/^(?:continuation|reasoning_content|encrypted_content)$/i.test(
-              key,
-            ),
-        )
+        .filter(([key, val]) => {
+          if (/^(?:reasoning_content|encrypted_content)$/i.test(key))
+            return false;
+          return !(
+            key === "continuation" &&
+            val &&
+            typeof val === "object" &&
+            val.kind === "reasoning_content"
+          );
+        })
         .map(([key, val]) => [
           key,
           (/^(?:authorization|cookies?|set-cookie|password|passwd|access_token|refresh_token|id_token|api_key|apiKey|secret|mfaCode|otp)$/i.test(

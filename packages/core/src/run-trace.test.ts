@@ -8,7 +8,7 @@ test("trace omits credentials, MFA answers and private reasoning but retains the
       model: "deepseek",
       reasoning: { effort: "high" },
       reasoning_content: "PRIVATE",
-      continuation: { text: "PRIVATE" },
+      continuation: { kind: "reasoning_content", text: "PRIVATE" },
       headers: {
         Authorization: "Bearer test-api-secret",
         Cookie: "cookie-secret",
@@ -54,4 +54,11 @@ test("ordinary JSON message formatting and credential tool schemas remain exact"
     },
   };
   expect(traceSafe(tools)).toEqual(tools);
+  const applicationState = {
+    continuation: {
+      url: "https://example.test/step-2",
+      completedFields: ["name"],
+    },
+  };
+  expect(traceSafe(applicationState)).toEqual(applicationState);
 });
