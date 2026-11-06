@@ -612,6 +612,7 @@ interface QuestionMeaning {
   postingCountry: boolean;
 }
 const sharedQuestionReads = new WeakMap<object, Map<string, QuestionMeaning>>();
+let nextClassifierProfileId = 0;
 
 function copyReading(
   reading: ApplyQuestionClassification,
@@ -676,6 +677,8 @@ export function createQuestionClassifier(input: {
   readContext?: () => string | null | Promise<string | null>;
   sources?: () => NonNullable<QuestionReadInput["sources"]>;
 }): QuestionClassifier {
+  const profileId = ++nextClassifierProfileId;
+  const profiledReads = new Map<string, string[]>();
   const shared = input.cacheScope
     ? (sharedQuestionReads.get(input.cacheScope) ??
       new Map<string, QuestionMeaning>())
@@ -820,6 +823,38 @@ export function createQuestionClassifier(input: {
         !pending.has(question.cacheIdentity),
     );
     if (missing.length) {
+      if (process.env.NESTOR_APPLY_PROFILE === "1") {
+        const causes: Record<string, number> = {};
+        for (const question of missing) {
+          const control = controls.find(
+            (control) =>
+              questionClassificationKey(control, controls) ===
+              question.identity,
+          );
+          const key = control?.ref ?? question.identity;
+          const current = JSON.parse(question.cacheIdentity) as string[];
+          const previous = profiledReads.get(key);
+          const changed = previous
+            ? [
+                "question",
+                "instructions",
+                "evidence",
+                "recipientAuthority",
+              ].filter((_, index) => current[index] !== previous[index])
+            : ["newQuestion"];
+          for (const cause of changed) causes[cause] = (causes[cause] ?? 0) + 1;
+          profiledReads.set(key, current);
+        }
+        console.info(
+          "[apply-profile]",
+          JSON.stringify({
+            event: "question_cache_miss",
+            classifier: profileId,
+            count: missing.length,
+            causes,
+          }),
+        );
+      }
       const batch = classifyApplicationQuestions({
         client: input.client,
         questions: missing,
