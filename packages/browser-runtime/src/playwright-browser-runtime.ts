@@ -1929,43 +1929,11 @@ export function createBrowserAgentRuntime(
     const cdpEndpoint =
       (await getDebuggerWebSocketUrl(activeDebugPort)) ??
       `http://127.0.0.1:${activeDebugPort}`;
-    let lastError: unknown = null;
-
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        const browser = attachBrowserLifecycle(
-          await chromium.connectOverCDP(cdpEndpoint, {
-            timeout: 5_000,
-          }),
-        );
-        await restoreBrowserWindowBounds(browser).catch(() => undefined);
-        return browser;
-      } catch (error) {
-        lastError = error;
-
-        if (attempt === 2) {
-          break;
-        }
-
-        await new Promise((resolve) =>
-          setTimeout(resolve, 250 * (attempt + 1)),
-        );
-      }
-    }
-
-    reportSelfLimitHit({
-      limit: "browser_connect_retries",
-      kind: "retry",
-      value: 3,
-      where: "browser-runtime/connectBrowser",
-    });
-    throw lastError instanceof Error
-      ? new Error(
-          `Chrome exposed the debugging endpoint on port ${activeDebugPort}, but CDP attach still failed: ${lastError.message}`,
-        )
-      : new Error(
-          `Chrome exposed the debugging endpoint on port ${activeDebugPort}, but CDP attach still failed.`,
-        );
+    const browser = attachBrowserLifecycle(
+      await chromium.connectOverCDP(cdpEndpoint, { timeout: 5_000 }),
+    );
+    await restoreBrowserWindowBounds(browser).catch(() => undefined);
+    return browser;
   }
 
   async function ensureBrowser(): Promise<Browser> {
@@ -2921,24 +2889,14 @@ export function createBrowserAgentRuntime(
             signal,
             "continuation",
           ));
-        for (let attempt = 0; attempt < 3; attempt += 1) {
+        while (true) {
+          signal?.throwIfAborted();
           if (page.isClosed())
             throw new Error("The prepared application page was closed.");
           const currentUrl = page.url();
           await applicationSitePacing.waitForReady(page, lease, signal);
           if (applicationSiteKey(page.url()) === applicationSiteKey(currentUrl))
             break;
-          if (attempt === 2) {
-            reportSelfLimitHit({
-              limit: "prepared_page_site_retries",
-              kind: "retry",
-              value: 3,
-              where: "browser-runtime/submitPreparedApplication",
-            });
-            throw new Error(
-              "The prepared application page moved while waiting for its site.",
-            );
-          }
         }
         signal?.throwIfAborted();
         const result = await operation();

@@ -96,8 +96,6 @@ function batches<T>(
   return result;
 }
 
-class ListingOutputLimitError extends Error {}
-
 async function ask<Output, Input>(
   model: ListingEngineModel,
   instruction: string,
@@ -107,12 +105,8 @@ async function ask<Output, Input>(
   reasoningTask: BrowserAgentReasoningTask,
   jsonSchema?: { name: string; schema: Record<string, unknown> },
 ): Promise<Output> {
-  const outputLimit = new ListingOutputLimitError(
-    "The AI response reached its output limit. Try this site again to continue.",
-  );
-  // The provider adapter supplies the model maximum. Keep one fresh retry
-  // even at that maximum; never parse or cache a truncated judgment.
-  for (const attempt of [0, 1]) {
+  // Recover provider-truncated responses without dropping the listings.
+  while (true) {
     model.signal?.throwIfAborted();
     let reply: Awaited<ReturnType<LLMClient["chatWithTools"]>>;
     try {
@@ -145,13 +139,11 @@ async function ask<Output, Input>(
         )
       )
         throw error;
-      if (attempt === 0) continue;
-      throw outputLimit;
+      continue;
     }
     if (reply.usage) model.onUsage?.(reply.usage, reasoningTask);
     if (["length", "max_output_tokens"].includes(reply.finishReason ?? "")) {
-      if (attempt === 0) continue;
-      throw outputLimit;
+      continue;
     }
     const raw = (reply.content ?? "")
       .trim()
@@ -159,7 +151,6 @@ async function ask<Output, Input>(
       .replace(/```$/u, "");
     return schema.parse(JSON.parse(raw));
   }
-  throw outputLimit;
 }
 
 export function roleGoalsKey(goals: RoleScreenGoals): string {
@@ -1222,9 +1213,9 @@ export async function fitJobs(
           fitResponseSchema(),
         ).catch((error: unknown) => {
           input.signal?.throwIfAborted();
-          if (error instanceof ListingOutputLimitError) throw error;
-          for (const job of batch)
-            repairIssues.set(job.id, ["unusable_response_json_or_request"]);
+          if (!(error instanceof SyntaxError) && !(error instanceof z.ZodError))
+            throw error;
+          for (const job of batch) repairIssues.set(job.id, [error.message]);
           return null;
         });
         if (!answer) return batch;
@@ -1401,29 +1392,20 @@ export async function fitJobs(
             repairIssues.set(job.id, ["missing_invalid_or_duplicate_judgment"]);
         return batch.filter((job) => !judged.has(job.id));
       };
-      const missing = await judge(batch);
-      // Preserve valid judgments. An omitted job has no fit to reuse; retry only that job,
-      // in smaller groups, once. The runner leaves any remaining omissions unscored.
-      const unresolved = (
-        await mapConcurrent(
-          batches(
-            missing,
-            Math.min(8, Math.max(1, Math.floor(batch.length / 2))),
-          ),
-          1,
-          judge,
-        )
-      ).flat();
-      if (unresolved.length)
-        throw new Error(
-          `The AI could not finish fit scores for ${unresolved.length} jobs. Try fit again.`,
-          {
-            cause: unresolved.map((job) => ({
-              id: job.id,
-              issues: repairIssues.get(job.id),
-            })),
-          },
-        );
+      let missing = await judge(batch);
+      while (missing.length) {
+        input.signal?.throwIfAborted();
+        missing = (
+          await mapConcurrent(
+            batches(
+              missing,
+              Math.min(8, Math.max(1, Math.floor(batch.length / 2))),
+            ),
+            1,
+            judge,
+          )
+        ).flat();
+      }
     },
   );
   return output;

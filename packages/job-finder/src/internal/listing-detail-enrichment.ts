@@ -54,7 +54,7 @@ export interface ListingHtmlFetchResult {
   status: number;
   html: string;
   finalUrl: string;
-  /** Server-requested pause after a 429, already parsed and bounded. */
+  /** Server-requested pause after a 429, already parsed. */
   retryAfterMs?: number;
 }
 
@@ -112,7 +112,7 @@ export interface ListingDetailEnrichmentSummary {
 }
 
 export interface EnrichSavedJobListingDetailsInput {
-  /** The preparation and application stages of one pass share its retry limits. */
+  /** The preparation and application stages share the site-requested pause. */
   rateLimitState?: ListingReadRateLimitState;
   onProgress?: (completed: number, total: number) => void;
   /** Buffered reads are applied only when this pass selects the job. */
@@ -137,7 +137,7 @@ export interface EnrichSavedJobListingDetailsInput {
   now?: () => string;
   signal?: AbortSignal;
   concurrency?: number;
-  /** Never read more than this many pages in one call. */
+  /** @deprecated Ignored. Every selected listing is read. */
   maxJobs?: number;
 }
 
@@ -155,16 +155,12 @@ export interface PreparedListingRead {
 export interface ListingReadRateLimitState {
   pauseUntilMs: number;
   retryAfterAtMs: number;
-  retriesLeft: number;
-  deferRemaining: boolean;
 }
 
 export function createListingReadRateLimitState(): ListingReadRateLimitState {
   return {
     pauseUntilMs: 0,
     retryAfterAtMs: 0,
-    retriesLeft: RATE_LIMIT_RETRIES_PER_PASS,
-    deferRemaining: false,
   };
 }
 
@@ -184,14 +180,8 @@ export interface EnrichSavedJobListingDetailsResult {
 
 const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_RATE_LIMIT_PAUSE_MS = 1_000;
-const MAX_DEFERRED_RATE_LIMIT_MS = 24 * 60 * 60 * 1_000;
-/** Each rate-limited page is asked again this many times after the pause. */
-const RATE_LIMIT_RETRIES_PER_JOB = 2;
-/** And the whole pass never asks again more often than this. */
-const RATE_LIMIT_RETRIES_PER_PASS = 40;
 /** Exported so the run log can say how many of the candidates this pass reads. */
 export const LISTING_DETAIL_READS_PER_RUN = Infinity;
-const DEFAULT_MAX_JOBS = LISTING_DETAIL_READS_PER_RUN;
 const RETRY_AFTER_SUCCESSFUL_ATTEMPT_MS = 24 * 60 * 60 * 1000;
 const RETRY_AFTER_FAILED_ATTEMPT_MS = 60 * 60 * 1000;
 const MAX_RESPONSE_CHARACTERS = 1_500_000;
@@ -208,84 +198,101 @@ const BROWSER_LIKE_HEADERS = {
 /** Plain-HTTP page reader used outside tests. */
 export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
   return async (url, options) => {
-    const idle = createConnectionIdleTimeout(60_000);
-    const signal = options.signal
-      ? AbortSignal.any([options.signal, idle.signal])
-      : idle.signal;
-    try {
-      const response = await fetch(url, {
-        headers: BROWSER_LIKE_HEADERS,
-        redirect: "follow",
-        signal,
-      });
-      idle.progress();
-      let text = "";
-      const reader = response.body?.getReader();
-      if (reader) {
-        const cancel = () => {
-          void reader.cancel().catch(() => undefined);
-        };
-        signal.addEventListener("abort", cancel, { once: true });
-        if (signal.aborted) cancel();
-        let bytesRead = 0;
-        const decoder = new TextDecoder();
-        try {
-          while (true) {
-            signal.throwIfAborted();
-            const { done, value } = await reader.read();
-            if (done) {
-              text += decoder.decode();
-              break;
-            }
-            idle.progress();
-            const accepted = value.subarray(0, MAX_RESPONSE_BYTES - bytesRead);
-            bytesRead += accepted.byteLength;
-            text += decoder.decode(accepted, { stream: true });
-            if (
-              bytesRead >= MAX_RESPONSE_BYTES ||
-              text.length >= MAX_RESPONSE_CHARACTERS
-            ) {
-              reportSelfLimitHit({
-                limit: "listing_response_bytes",
-                kind: "input",
-                value: MAX_RESPONSE_BYTES,
-                where: "job-finder/createDefaultListingHtmlFetcher",
-              });
-              await reader.cancel();
-              break;
-            }
-          }
-        } catch (error) {
-          await reader.cancel(error).catch(() => undefined);
-          throw error;
-        } finally {
-          signal.removeEventListener("abort", cancel);
-          reader.releaseLock();
-        }
-      }
-      signal.throwIfAborted();
-      return {
-        status: response.status,
-        html:
-          text.length > MAX_RESPONSE_CHARACTERS
-            ? selfLimitSlice(
-                text,
+    while (true) {
+      options.signal.throwIfAborted();
+      const idle = createConnectionIdleTimeout(60_000);
+      const signal = options.signal
+        ? AbortSignal.any([options.signal, idle.signal])
+        : idle.signal;
+      try {
+        const response = await fetch(url, {
+          headers: BROWSER_LIKE_HEADERS,
+          redirect: "follow",
+          signal,
+        });
+        idle.progress();
+        let text = "";
+        const reader = response.body?.getReader();
+        if (reader) {
+          const cancel = () => {
+            void reader.cancel().catch(() => undefined);
+          };
+          signal.addEventListener("abort", cancel, { once: true });
+          if (signal.aborted) cancel();
+          let bytesRead = 0;
+          const decoder = new TextDecoder();
+          try {
+            while (true) {
+              signal.throwIfAborted();
+              const { done, value } = await reader.read();
+              if (done) {
+                text += decoder.decode();
+                break;
+              }
+              idle.progress();
+              const accepted = value.subarray(
                 0,
-                MAX_RESPONSE_CHARACTERS,
-                "packages/job-finder/src/internal/listing-detail-enrichment.ts:262",
-              )
-            : text,
-        finalUrl: response.url || url,
-        ...(response.status === 429
-          ? {
-              retryAfterMs: parseRetryAfterMs(
-                response.headers.get("retry-after"),
-              ),
+                MAX_RESPONSE_BYTES - bytesRead,
+              );
+              bytesRead += accepted.byteLength;
+              text += decoder.decode(accepted, { stream: true });
+              if (
+                bytesRead >= MAX_RESPONSE_BYTES ||
+                text.length >= MAX_RESPONSE_CHARACTERS
+              ) {
+                reportSelfLimitHit({
+                  limit: "listing_response_bytes",
+                  kind: "input",
+                  value: MAX_RESPONSE_BYTES,
+                  where: "job-finder/createDefaultListingHtmlFetcher",
+                });
+                await reader.cancel();
+                break;
+              }
             }
-          : {}),
-      };
-    } finally {
-      idle.cleanup();
+          } catch (error) {
+            await reader.cancel(error).catch(() => undefined);
+            throw error;
+          } finally {
+            signal.removeEventListener("abort", cancel);
+            reader.releaseLock();
+          }
+        }
+        signal.throwIfAborted();
+        return {
+          status: response.status,
+          html:
+            text.length > MAX_RESPONSE_CHARACTERS
+              ? selfLimitSlice(
+                  text,
+                  0,
+                  MAX_RESPONSE_CHARACTERS,
+                  "packages/job-finder/src/internal/listing-detail-enrichment.ts:262",
+                )
+              : text,
+          finalUrl: response.url || url,
+          ...(response.status === 429
+            ? {
+                retryAfterMs: parseRetryAfterMs(
+                  response.headers.get("retry-after"),
+                ),
+              }
+            : {}),
+        };
+      } catch (error) {
+        options.signal.throwIfAborted();
+        if (
+          !(error instanceof TypeError) &&
+          !(error instanceof Error && error.name === "AbortError")
+        )
+          throw error;
+        await waitForRateLimitPause(
+          DEFAULT_RATE_LIMIT_PAUSE_MS,
+          options.signal,
+        );
+      } finally {
+        idle.cleanup();
+      }
     }
   };
 }
@@ -301,10 +308,7 @@ function parseRetryAfterMs(value: string | null): number {
   if (!Number.isFinite(requestedMs)) {
     return DEFAULT_RATE_LIMIT_PAUSE_MS;
   }
-  return Math.min(
-    MAX_DEFERRED_RATE_LIMIT_MS,
-    Math.max(0, Math.round(requestedMs)),
-  );
+  return Math.max(0, Math.round(requestedMs));
 }
 
 async function waitForRateLimitPause(
@@ -505,7 +509,10 @@ export async function readListingDetail(input: {
   });
   if (!posting || !posting.description.trim() || posting.needsRenderedPage) {
     if (input.readRenderedPage) {
-      const rendered = await input.readRenderedPage(input.url, input.signal ? { signal: input.signal } : {});
+      const rendered = await input.readRenderedPage(
+        input.url,
+        input.signal ? { signal: input.signal } : {},
+      );
       return readListingDetail({
         html: rendered.html,
         url: rendered.finalUrl,
@@ -766,7 +773,6 @@ export async function enrichSavedJobListingDetails(
   const now = input.now ?? (() => new Date().toISOString());
   const startedAtMs = Date.now();
   const concurrency = Math.max(1, input.concurrency ?? DEFAULT_CONCURRENCY);
-  const maxJobs = input.maxJobs ?? DEFAULT_MAX_JOBS;
 
   const summary: ListingDetailEnrichmentSummary = {
     attempted: 0,
@@ -783,16 +789,9 @@ export async function enrichSavedJobListingDetails(
   let providerAccessError: unknown;
   const rateLimit = input.rateLimitState ?? createListingReadRateLimitState();
   const registerRateLimit = (response: ListingHtmlFetchResult): number => {
-    if ((response.retryAfterMs ?? 0) > MAX_DEFERRED_RATE_LIMIT_MS)
-      reportSelfLimitHit({
-        limit: "listing_retry_after",
-        kind: "timeout",
-        value: MAX_DEFERRED_RATE_LIMIT_MS,
-        where: "job-finder/registerRateLimit",
-      });
-    const pauseMs = Math.min(
-      MAX_DEFERRED_RATE_LIMIT_MS,
-      Math.max(0, response.retryAfterMs ?? DEFAULT_RATE_LIMIT_PAUSE_MS),
+    const pauseMs = Math.max(
+      0,
+      response.retryAfterMs ?? DEFAULT_RATE_LIMIT_PAUSE_MS,
     );
     rateLimit.pauseUntilMs = Math.max(
       rateLimit.pauseUntilMs,
@@ -806,13 +805,12 @@ export async function enrichSavedJobListingDetails(
     return pauseMs;
   };
   const waitForSharedRateLimit = async (): Promise<boolean> => {
-    while (!rateLimit.deferRemaining) {
+    while (true) {
       input.signal?.throwIfAborted();
       const delayMs = rateLimit.pauseUntilMs - Date.now();
       if (delayMs <= 0) return true;
       await waitForRateLimitPause(delayMs, input.signal);
     }
-    return false;
   };
   const queue = input.jobs.filter((job) => {
     const needs = input.rereadComplete
@@ -826,12 +824,7 @@ export async function enrichSavedJobListingDetails(
     }
     return needs;
   });
-  const capped = selfLimitSlice(
-    queue,
-    0,
-    maxJobs,
-    "packages/job-finder/src/internal/listing-detail-enrichment.ts:848",
-  );
+  const capped = queue;
   if (capped.length > concurrency)
     reportSelfLimitHit({
       limit: "listing_read_concurrency",
@@ -844,11 +837,8 @@ export async function enrichSavedJobListingDetails(
   let completed = 0;
   let cursor = 0;
   const worker = async (): Promise<void> => {
-    while (cursor < (input.nextJob ? maxJobs : capped.length)) {
-      if (
-        input.signal?.aborted ||
-        (rateLimit.deferRemaining && !input.readAhead)
-      ) {
+    while (input.nextJob || cursor < capped.length) {
+      if (input.signal?.aborted) {
         return;
       }
       const position = cursor;
@@ -916,43 +906,21 @@ export async function enrichSavedJobListingDetails(
           await applyRead(prepared);
           continue;
         }
-        if (rateLimit.deferRemaining) continue;
         if (!(await waitForSharedRateLimit())) return;
         summary.attempted += 1;
         attemptedAt = now();
         let response = await input.fetchHtml(job.canonicalUrl, {
           signal: input.signal ?? new AbortController().signal,
         });
-        // A short rate limit is waited out and the page asked again, a
-        // bounded number of times per page and per pass, all sharing one
-        // pause so the site sees one polite reader. A long one defers the
-        // rest of the queue to the next search.
-        let retriesForJob = 0;
-        while (response.status === 429) {
+        // Server pauses are shared; retryable failures keep their place until
+        // success or Stop, without a per-listing or per-pass attempt count.
+        while (
+          response.status === 408 ||
+          response.status === 429 ||
+          response.status >= 500
+        ) {
           registerRateLimit(response);
-          if (
-            retriesForJob >= RATE_LIMIT_RETRIES_PER_JOB ||
-            rateLimit.retriesLeft <= 0 ||
-            !(await waitForSharedRateLimit())
-          ) {
-            if (retriesForJob >= RATE_LIMIT_RETRIES_PER_JOB)
-              reportSelfLimitHit({
-                limit: "listing_retries_per_job",
-                kind: "retry",
-                value: RATE_LIMIT_RETRIES_PER_JOB,
-                where: "job-finder/enrichSavedJobListingDetails",
-              });
-            if (rateLimit.retriesLeft <= 0)
-              reportSelfLimitHit({
-                limit: "listing_retries_per_pass",
-                kind: "retry",
-                value: RATE_LIMIT_RETRIES_PER_PASS,
-                where: "job-finder/enrichSavedJobListingDetails",
-              });
-            break;
-          }
-          retriesForJob += 1;
-          rateLimit.retriesLeft -= 1;
+          await waitForSharedRateLimit();
           response = await input.fetchHtml(job.canonicalUrl, {
             signal: input.signal ?? new AbortController().signal,
           });
@@ -1050,7 +1018,10 @@ export async function enrichSavedJobListingDetails(
   await Promise.all(
     Array.from(
       {
-        length: Math.min(concurrency, input.nextJob ? maxJobs : capped.length),
+        length: Math.min(
+          concurrency,
+          input.nextJob ? concurrency : capped.length,
+        ),
       },
       () => worker(),
     ),

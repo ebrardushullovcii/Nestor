@@ -2,7 +2,6 @@ import type { ListingCard, SourceInventory } from "@nestor/contracts";
 import type { Page } from "playwright";
 import type { ApplyPageHands } from "../apply/types";
 import { readInventoryHtml } from "./listing-html";
-import { reportSelfLimitHit } from "@nestor/core";
 
 /** The same observed pagination labels used by the HTTP inventory reader. */
 export const moreListingsLabel = (label: string): boolean =>
@@ -17,7 +16,6 @@ export async function collectRenderedInventory(input: {
   page: Pick<Page, "content" | "url">;
   hands: ApplyPageHands;
   source: { id: string; label: string };
-  maxPages: number;
   signal?: AbortSignal;
   allowUrl(url: string): boolean;
   onPage(cards: ListingCard[]): Promise<void>;
@@ -36,7 +34,7 @@ export async function collectRenderedInventory(input: {
         " Saved listings are kept; Continue unfinished sites checks remaining results.",
     ],
   });
-  for (; pagesRead < input.maxPages; ) {
+  while (true) {
     input.signal?.throwIfAborted();
     const observation = await input.hands.observe();
     const url = input.page.url();
@@ -73,7 +71,7 @@ export async function collectRenderedInventory(input: {
         inventory.cards.map(({ url, text }) => [url, text]),
       );
       let changed = false;
-      for (let waits = 0; waits < 20; waits++) {
+      while (true) {
         input.signal?.throwIfAborted();
         const next = readInventoryHtml(
           await input.page.content(),
@@ -92,17 +90,20 @@ export async function collectRenderedInventory(input: {
           changed = true;
           break;
         }
+        const waitingForBatch =
+          view.loading ||
+          view.actions.some(
+            (action) =>
+              action.visible &&
+              action.disabled &&
+              moreListingsLabel(action.label),
+          );
+        if (!waitingForBatch) break;
         await input.hands.wait(500);
       }
       if (!changed) {
-        reportSelfLimitHit({
-          limit: "rendered_batch_waits",
-          kind: "retry",
-          value: 20,
-          where: "browser-agent/collectRenderedInventory",
-        });
         return partial(
-          "Nestor's wait for the next batch ended before new cards appeared.",
+          "The site showed no new cards after the remaining-results control was clicked.",
         );
       }
       continue;
@@ -125,11 +126,4 @@ export async function collectRenderedInventory(input: {
       ],
     };
   }
-  reportSelfLimitHit({
-    limit: "rendered_pages",
-    kind: "pages",
-    value: input.maxPages,
-    where: "browser-agent/collectRenderedInventory",
-  });
-  return partial("Nestor reached its bounded browser batch limit.");
 }

@@ -136,8 +136,6 @@ export function buildExtractionSelectionContext(
 
 // Runaway protection only: productive searches routinely need hundreds of turns.
 /** How long one search turn may wait for the model before it is asked again. */
-const DEFAULT_MAX_STEPS = 10_000;
-const DEFAULT_NO_PROGRESS_STEP_LIMIT = 120;
 
 function jobKey(
   job: Pick<JobPosting, "canonicalUrl" | "sourceJobId" | "source">,
@@ -367,7 +365,6 @@ export async function runJobSearchAgent(
       page: input.page,
       hands,
       source: { id: config.source, label: siteLabel },
-      maxPages: config.maxSteps,
       ...(input.signal ? { signal: input.signal } : {}),
       allowUrl: (url) => isAllowedUrl(url, config.navigationPolicy).valid,
       onPage: async (cards) => {
@@ -604,7 +601,6 @@ export async function runJobSearchAgent(
   let initialIndex: ApplyFormObservation | null = null;
   let initialIndexFingerprint: string | null = null;
   let steps = 0;
-  let lastProgressStep = 0;
   const emit = (currentAction: string, message: string): void => {
     input.onProgress?.({
       currentUrl:
@@ -1411,11 +1407,8 @@ export async function runJobSearchAgent(
                 pageContentRevision > contentBefore ||
                 readContentRevision > readsBefore ||
                 decisionRevision > decisionsBefore;
-              if (madeProgress) {
-                lastProgressStep = context.step;
-              }
-              // Repeating the same evidence still stalls. An empty or fully
-              // rejected page does not end a search that is reaching new content.
+              // Progress feeds activity reporting; the model decides whether
+              // repeating this evidence is useful.
               return { ...outcome, progress: madeProgress };
             },
           }),
@@ -1436,23 +1429,6 @@ export async function runJobSearchAgent(
     // Keep action history and observations intact; recover context at the
     // provider boundary if the selected model reaches its context limit.
     staleToolResultKeepRecent: Number.POSITIVE_INFINITY,
-    ceilings: {
-      maxSteps: Number.POSITIVE_INFINITY,
-      // A working stream may keep thinking. The shared loop retries a silent
-      // connection once; transient service failures retain their own retries.
-
-      noProgressStepLimit: Number.POSITIVE_INFINITY,
-      browserFailureLimit: Number.POSITIVE_INFINITY,
-    },
-    describeStall: () =>
-      [
-        pageTools.state.observation?.url
-          ? `The page is still ${pageTools.state.observation.url}.`
-          : null,
-        `${savedCount()} saved so far.`,
-      ]
-        .filter((line): line is string => line !== null)
-        .join(" "),
     onStep: ({ step, note }) => {
       steps = step;
       emit("thinking", describeStepForPerson(note));
@@ -1461,32 +1437,6 @@ export async function runJobSearchAgent(
     now,
   });
 
-  if (loop.ending === "ceiling")
-    reportSelfLimitHit({
-      limit: "search_steps",
-      kind: "steps",
-      value: Math.max(config.maxSteps, DEFAULT_MAX_STEPS),
-      where: "browser-agent/runJobSearchAgent",
-    });
-  if (loop.ending === "stalled")
-    reportSelfLimitHit({
-      limit: "search_no_progress",
-      kind: "steps",
-      value:
-        config.runControl?.noProgressStepLimit ??
-        DEFAULT_NO_PROGRESS_STEP_LIMIT,
-      where: "browser-agent/runJobSearchAgent",
-    });
-  if (loop.ending === "browser_failed")
-    reportSelfLimitHit({
-      limit: "search_browser_failures",
-      kind: "retry",
-      value: 3,
-      where: "browser-agent/runJobSearchAgent",
-    });
-  if (!isSourceCheck && loop.ending === "stalled") {
-    loop.reason = `Stopped: no new page content or listings in the last ${loop.steps - lastProgressStep} steps.`;
-  }
   emit("finish", loop.reason);
   const result = buildResult(loop);
   const completeIndex =

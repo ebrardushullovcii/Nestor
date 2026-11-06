@@ -102,13 +102,14 @@ describe("runConversationTurn", () => {
     expect(result.modelCalls).toBe(91);
   });
 
-  it("stops repeated identical tool batches without imposing a total call ceiling", async () => {
+  it("repeated identical tool batches continue until the model replies", async () => {
     const result = await runConversationTurn({
-      model: scripted(
-        Array.from({ length: 20 }, (_, index) => ({
+      model: scripted([
+        ...Array.from({ length: 130 }, (_, index) => ({
           toolCalls: [call(`repeat_${index}`, "read")],
         })),
-      ),
+        { content: "Done after checking" },
+      ]),
       tools: [
         tool("read", () =>
           Promise.resolve({ kind: "ok", content: "No change" }),
@@ -116,49 +117,126 @@ describe("runConversationTurn", () => {
       ],
       assembleMessages: (turn) => Promise.resolve([...turn]),
     });
-    expect(result.ending).toBe("model_failed");
-    expect(result.error).toBeInstanceOf(Error);
-    if (result.error instanceof Error)
-      expect(result.error.message).toContain("without progress");
+    expect(result.ending).toBe("replied");
+    expect(result.modelCalls).toBe(131);
+    expect(result.reply).toBe("Done after checking");
   });
 
   it("retries an empty model response and never reports it as a completed action", async () => {
-    const model = scripted([{}, { content: "Nothing has changed; there is no queue left to pause." }]);
-    const result = await runConversationTurn({ model, tools: [], assembleMessages: async turn => [...turn] });
+    const model = scripted([
+      {},
+      { content: "Nothing has changed; there is no queue left to pause." },
+    ]);
+    const result = await runConversationTurn({
+      model,
+      tools: [],
+      assembleMessages: async (turn) => [...turn],
+    });
     expect(result.modelCalls).toBe(2);
     expect(result.reply).toContain("Nothing has changed");
-    expect(model.seen[1]?.some(message => message.role === "user" && message.content.includes("no text or executable tool call"))).toBe(true);
+    expect(
+      model.seen[1]?.some(
+        (message) =>
+          message.role === "user" &&
+          message.content.includes("no text or executable tool call"),
+      ),
+    ).toBe(true);
   });
 
-  it("reports repeated empty responses as a model failure", async () => {
-    const result = await runConversationTurn({ model: scripted([{}, {}]), tools: [], assembleMessages: async turn => [...turn] });
-    expect(result.ending).toBe("model_failed");
-    expect(result.reply).toBeNull();
+  it("repeated empty responses continue until a usable reply", async () => {
+    const result = await runConversationTurn({
+      model: scripted([{}, {}, {}, {}, { content: "Done" }]),
+      tools: [],
+      assembleMessages: async (turn) => [...turn],
+    });
+    expect(result.ending).toBe("replied");
+    expect(result.modelCalls).toBe(5);
   });
+
   it("can reply from a verified tool receipt without another model call and retains its facts", async () => {
     const model = scripted([{ toolCalls: [call("one", "edit")] }]);
     const events: ConversationTurnEvent[] = [];
-    const result = await runConversationTurn({ model, assembleMessages: async (turn) => [{ role: "user", content: "Change my headline" }, ...turn], tools: [tool("edit", async () => ({ kind: "finish", finish: { reason: "Headline saved.", output: "Headline saved. receipt=r1", stuck: false, needsPerson: false, data: {} } }))], onEvent: (event) => { events.push(event); } });
+    const result = await runConversationTurn({
+      model,
+      assembleMessages: async (turn) => [
+        { role: "user", content: "Change my headline" },
+        ...turn,
+      ],
+      tools: [
+        tool("edit", async () => ({
+          kind: "finish",
+          finish: {
+            reason: "Headline saved.",
+            output: "Headline saved. receipt=r1",
+            stuck: false,
+            needsPerson: false,
+            data: {},
+          },
+        })),
+      ],
+      onEvent: (event) => {
+        events.push(event);
+      },
+    });
     expect(result.modelCalls).toBe(1);
     expect(result.reply).toBe("Headline saved.");
-    expect(result.turnMessages).toContainEqual({ role: "tool", toolCallId: "one", content: "Headline saved. receipt=r1" });
-    expect(result.turnMessages.at(-1)).toEqual({ role: "assistant", content: "Headline saved." });
-    expect(events).toContainEqual(expect.objectContaining({ type: "tool_finished", outcome: "done" }));
+    expect(result.turnMessages).toContainEqual({
+      role: "tool",
+      toolCallId: "one",
+      content: "Headline saved. receipt=r1",
+    });
+    expect(result.turnMessages.at(-1)).toEqual({
+      role: "assistant",
+      content: "Headline saved.",
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: "tool_finished", outcome: "done" }),
+    );
   });
 
-  it.each([false, true])("never completes early or hides an earlier failed call (failed=%s)", async (failed) => {
-    let secondRan = false;
-    const model = scripted([{ toolCalls: [call("one", "first"), call("two", "second")] }, { content: "Both results checked." }]);
-    const receipt = { kind: "finish" as const, finish: { reason: "Saved.", stuck: false, needsPerson: false, data: {} } };
-    const result = await runConversationTurn({ model, assembleMessages: async (turn) => [{ role: "user", content: "Do both" }, ...turn], tools: [
-      tool("first", async () => failed ? { kind: "ok", status: "failed", content: "Could not save" } : receipt),
-      tool("second", async () => { secondRan = true; return failed ? receipt : { kind: "ok", content: "Second saved" }; }),
-    ] });
-    expect(secondRan).toBe(true);
-    expect(result.modelCalls).toBe(2);
-    expect(result.reply).toBe("Both results checked.");
-    expect(result.turnMessages.filter((message) => message.role === "tool")).toHaveLength(2);
-  });
+  it.each([false, true])(
+    "never completes early or hides an earlier failed call (failed=%s)",
+    async (failed) => {
+      let secondRan = false;
+      const model = scripted([
+        { toolCalls: [call("one", "first"), call("two", "second")] },
+        { content: "Both results checked." },
+      ]);
+      const receipt = {
+        kind: "finish" as const,
+        finish: {
+          reason: "Saved.",
+          stuck: false,
+          needsPerson: false,
+          data: {},
+        },
+      };
+      const result = await runConversationTurn({
+        model,
+        assembleMessages: async (turn) => [
+          { role: "user", content: "Do both" },
+          ...turn,
+        ],
+        tools: [
+          tool("first", async () =>
+            failed
+              ? { kind: "ok", status: "failed", content: "Could not save" }
+              : receipt,
+          ),
+          tool("second", async () => {
+            secondRan = true;
+            return failed ? receipt : { kind: "ok", content: "Second saved" };
+          }),
+        ],
+      });
+      expect(secondRan).toBe(true);
+      expect(result.modelCalls).toBe(2);
+      expect(result.reply).toBe("Both results checked.");
+      expect(
+        result.turnMessages.filter((message) => message.role === "tool"),
+      ).toHaveLength(2);
+    },
+  );
 
   it("refreshes the offered catalog after a tool loads more capabilities", async () => {
     let loaded = false;

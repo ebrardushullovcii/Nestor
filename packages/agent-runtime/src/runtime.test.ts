@@ -498,35 +498,11 @@ describe("agent task runtime", () => {
       ],
       validate: () => [],
       buildContext: () => ({}),
-      noProgressLimit: 1,
     });
 
     expect(executed).toBe(false);
     expect(result.receipt.stopReason).toBe("safety_boundary");
     expect(result.receipt.toolReceipts[0]?.failureKind).toBe("safety_boundary");
-  });
-
-  test("stops on its provider-call cost guard without pretending it completed", async () => {
-    const result = await runAgentTask({
-      taskId: "task_cost_guard",
-      capability: "bounded_task",
-      systemPrompt: "Use a tool.",
-      state: {},
-      initialDraft: {},
-      model: {
-        chat() {
-          return Promise.resolve({ content: "still thinking" });
-        },
-      },
-      tools: [],
-      validate: () => [],
-      buildContext: () => ({}),
-      providerCallBudget: 1,
-      noProgressLimit: 5,
-    });
-
-    expect(result.receipt.providerCalls).toBe(1);
-    expect(result.receipt.stopReason).toBe("cost_budget");
   });
 
   test("keeps the assistant tool-call message when the recent tail contains many tool results", async () => {
@@ -807,6 +783,53 @@ test("Stop during provider backoff returns a cancelled receipt without retrying"
     controller.abort();
     expect((await pending).receipt.stopReason).toBe("cancelled");
     expect(chat).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("retryable task provider failures continue beyond three attempts until success", async () => {
+  vi.useFakeTimers();
+  try {
+    let attempts = 0;
+    const pending = runAgentTask({
+      taskId: "retry-until-success",
+      capability: "synthetic",
+      systemPrompt: "Finish",
+      state: {},
+      initialDraft: {},
+      model: {
+        chat: () =>
+          ++attempts <= 6
+            ? Promise.reject(new Error("Network reset"))
+            : Promise.resolve({
+                toolCalls: [
+                  {
+                    id: "finish",
+                    type: "function",
+                    function: { name: "finish_task", arguments: "{}" },
+                  },
+                ],
+              }),
+      },
+      tools: [
+        {
+          name: "finish_task",
+          description: "Finish",
+          inputSchema: z.object({}),
+          parameters: { type: "object" },
+          permission: "read",
+          execute: () => ({ summary: "Done", finish: true }),
+        },
+      ],
+      validate: () => [],
+      buildContext: () => ({}),
+    });
+    await vi.runAllTimersAsync();
+    const result = await pending;
+    expect(result.receipt.stopReason).toBe("completed");
+    expect(result.receipt.providerCalls).toBe(7);
     expect(vi.getTimerCount()).toBe(0);
   } finally {
     vi.useRealTimers();

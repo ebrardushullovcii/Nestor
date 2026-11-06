@@ -5,7 +5,6 @@ import type { JobDiscoveryTarget } from "@nestor/contracts";
 import { createSourceInstructionArtifact } from "../test-fixtures";
 import {
   deriveSourceDebugStartingUrls,
-  getSourceDebugMaxSteps,
   resolveSourceDebugPhases,
 } from "./workspace-source-debug-helpers";
 
@@ -286,25 +285,5 @@ describe("deriveSourceDebugStartingUrls", () => {
         instructionArtifact,
       }),
     ).toEqual(["site_structure_mapping", "replay_verification"]);
-  });
-});
-
-describe("getSourceDebugMaxSteps", () => {
-  test("reduces non-auth phase budgets when reusable route context already exists", () => {
-    expect(
-      getSourceDebugMaxSteps("search_filter_probe", {
-        hasLearnedRouteHints: true,
-        hasPriorPhaseSummary: true,
-        hasExistingInstructionArtifact: true,
-      }),
-    ).toBe(10);
-
-    expect(
-      getSourceDebugMaxSteps("access_auth_probe", {
-        hasLearnedRouteHints: true,
-        hasPriorPhaseSummary: true,
-        hasExistingInstructionArtifact: true,
-      }),
-    ).toBe(16);
   });
 });

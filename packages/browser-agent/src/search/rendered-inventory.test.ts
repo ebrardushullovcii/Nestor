@@ -64,7 +64,7 @@ test.each(["append", "replace"] as const)(
     const result = await collectRenderedInventory({
       ...input,
       source: { id: "s", label: "Example" },
-      maxPages: 8,
+
       allowUrl: () => true,
       onPage: (cards) => {
         saved.push(cards.map((c) => Number(c.url.split("/").at(-1))));
@@ -82,13 +82,13 @@ test("a failed next-batch wait keeps early cards and an honest continuation", as
   const result = await collectRenderedInventory({
     ...setup("append", true),
     source: { id: "s", label: "Example" },
-    maxPages: 8,
+
     allowUrl: () => true,
     onPage: () => Promise.resolve(),
   });
   expect(result?.complete).toBe(false);
   expect(result?.cards).toHaveLength(1);
-  expect(result?.notes.join(" ")).toContain("Nestor's wait");
+  expect(result?.notes.join(" ")).toContain("no new cards");
   expect(result?.notes.join(" ")).toContain("Continue unfinished sites");
 });
 
@@ -122,7 +122,7 @@ test("a temporarily disabled loading button is not completion evidence", async (
   const result = await collectRenderedInventory({
     ...input,
     source: { id: "s", label: "Example" },
-    maxPages: 8,
+
     allowUrl: () => true,
     onPage: () => Promise.resolve(),
   });
@@ -142,7 +142,7 @@ test("cancellation after a saved batch preserves the callback rather than transc
       ...setup("append"),
       signal: controller.signal,
       source: { id: "s", label: "Example" },
-      maxPages: 8,
+
       allowUrl: () => true,
       onPage: saved,
     }),

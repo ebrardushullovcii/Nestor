@@ -174,11 +174,11 @@ test.each(["length", "max_output_tokens", "transport"])(
   },
 );
 
-test("repeated output truncation fails after one retry without executing partial tools", async () => {
+test("repeated output truncation recovers without executing partial tools", async () => {
   const execute = vi.fn();
   const chatWithTools = vi
     .fn<ConversationModel["chatWithTools"]>()
-    .mockResolvedValue({
+    .mockResolvedValueOnce({
       content: "Partial",
       finishReason: "length",
       toolCalls: [
@@ -188,7 +188,9 @@ test("repeated output truncation fails after one retry without executing partial
           function: { name: "save", arguments: "{}" },
         },
       ],
-    });
+    })
+    .mockResolvedValueOnce({ finishReason: "length", content: "Still partial" })
+    .mockResolvedValueOnce({ content: "Complete" });
   const result = await runConversationTurn({
     model: { chatWithTools },
     tools: [
@@ -207,8 +209,8 @@ test("repeated output truncation fails after one retry without executing partial
     ],
     assembleMessages: () => Promise.resolve([]),
   });
-  expect(result.ending).toBe("model_failed");
-  expect(chatWithTools).toHaveBeenCalledTimes(2);
+  expect(result.ending).toBe("replied");
+  expect(chatWithTools).toHaveBeenCalledTimes(3);
   expect(execute).not.toHaveBeenCalled();
 });
 

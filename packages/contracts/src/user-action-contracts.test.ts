@@ -176,12 +176,12 @@ describe("unified user action request contracts", () => {
       targetId: null,
     });
   });
-  it("rejects inconsistent lifecycle and correlation data", () => {
+  it("retains attempt history and rejects inconsistent lifecycle and correlation data", () => {
     expect(
       UserActionRequestSchema.safeParse(
         createDiscoveryRequest({ attemptCount: 4, maxAttempts: 3 }),
       ).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       UserActionRequestSchema.safeParse(
         createDiscoveryRequest({ state: "resolved" }),

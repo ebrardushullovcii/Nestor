@@ -22,13 +22,19 @@ interface ScriptedReply {
 
 function createScriptedToolClient(
   replies: ScriptedReply[],
+  stop?: AbortController,
 ): AgentCapableJobFinderAiClient {
   const deterministic = createDeterministicJobFinderAiClient();
   let index = 0;
   return {
     ...deterministic,
     chatWithTools() {
-      return Promise.resolve(replies[index++] ?? { toolCalls: [] });
+      const reply = replies[index++];
+      if (!reply) {
+        if (!stop) throw new Error("Scripted model has no reply left");
+        stop.abort();
+      }
+      return Promise.resolve(reply ?? { toolCalls: [] });
     },
   };
 }
@@ -783,21 +789,28 @@ describe("propose_profile_operations model-tool harness", () => {
   });
 
   test("fails safe when every proposal is invalid: no group ever lands", async () => {
+    const stop = new AbortController();
     const invalidPropose = proposeCall("invalid", [
       { operation: "replace_identity_fields" },
     ]);
-    const client = createScriptedToolClient([
-      { toolCalls: [invalidPropose] },
-      { toolCalls: [invalidPropose] },
-      { toolCalls: [invalidPropose] },
-      { toolCalls: [invalidPropose] },
-      { toolCalls: [invalidPropose] },
-      { toolCalls: [invalidPropose] },
-    ]);
+    const client = createScriptedToolClient(
+      [
+        { toolCalls: [invalidPropose] },
+        { toolCalls: [invalidPropose] },
+        { toolCalls: [invalidPropose] },
+        { toolCalls: [invalidPropose] },
+        { toolCalls: [invalidPropose] },
+        { toolCalls: [invalidPropose] },
+      ],
+      stop,
+    );
 
     const reply = await runProfileCopilotAgentTask({
       client,
-      request: createCopilotRequest("Update my headline."),
+      request: {
+        ...createCopilotRequest("Update my headline."),
+        signal: stop.signal,
+      },
     });
 
     expect(reply.executionReceipt?.stopReason).not.toBe("completed");

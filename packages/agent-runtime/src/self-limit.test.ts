@@ -8,17 +8,24 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
-const base = (): AgentTaskRunOptions<object, object> => ({
-  taskId: "synthetic",
-  capability: "test",
-  systemPrompt: "test",
-  state: {},
-  initialDraft: {},
-  model: { chat: () => Promise.resolve({ content: "thinking" }) },
-  tools: [],
-  validate: () => [],
-  buildContext: () => ({}),
-});
+const base = (): AgentTaskRunOptions<object, object> => {
+  const controller = new AbortController();
+  return {
+    signal: controller.signal,
+    onProgress: (progress) => {
+      if (progress.phase !== "thinking") controller.abort();
+    },
+    taskId: "synthetic",
+    capability: "test",
+    systemPrompt: "test",
+    state: {},
+    initialDraft: {},
+    model: { chat: () => Promise.resolve({ content: "thinking" }) },
+    tools: [],
+    validate: () => [],
+    buildContext: () => ({}),
+  };
+};
 function events(log: ReturnType<typeof vi.spyOn>) {
   return log.mock.calls.flatMap(([line]) =>
     typeof line === "string" && line.startsWith("[self_limit_hit] ")
@@ -26,39 +33,13 @@ function events(log: ReturnType<typeof vi.spyOn>) {
       : [],
   );
 }
-test.each([
-  ["provider_calls", { providerCallBudget: 1 }],
-  ["no_progress", { noProgressLimit: 1 }],
-  ["emergency_ceiling", { emergencyCeiling: 4, noProgressLimit: 100 }],
-] as const)("reports the reached %s boundary", async (limit, options) => {
-  const log = vi.spyOn(console, "warn").mockImplementation(() => {});
-  await runAgentTask({ ...base(), ...options });
-  expect(events(log).some((hit) => hit.limit === limit)).toBe(true);
-});
-test("reports exhausted transient provider retries", async () => {
-  vi.useFakeTimers();
-  const log = vi.spyOn(console, "warn").mockImplementation(() => {});
-  const pending = runAgentTask({
-    ...base(),
-    model: {
-      chat: () => {
-        return Promise.reject(Error("network disconnected"));
-      },
-    },
-  }).catch((error: unknown) => error);
-  await vi.advanceTimersByTimeAsync(10000);
-  expect(await pending).toBeInstanceOf(Error);
-  expect(events(log).some((hit) => hit.limit === "provider_retries")).toBe(
-    true,
-  );
-});
 test.each([false, true])(
   "only reports a validator bound the model was not given (advertised=%s)",
   async (advertised) => {
     const log = vi.spyOn(console, "warn").mockImplementation(() => {});
     await runAgentTask({
       ...base(),
-      noProgressLimit: 1,
+
       model: {
         chat: () =>
           Promise.resolve({
@@ -177,7 +158,7 @@ test.each([
     const log = vi.spyOn(console, "warn").mockImplementation(() => {});
     await runAgentTask({
       ...base(),
-      noProgressLimit: 1,
+
       model: {
         chat: () =>
           Promise.resolve({
@@ -209,7 +190,7 @@ test.each([
   },
 );
 
-test("task history and result-read clamps report at their real boundaries", async () => {
+test("task keeps its full action history beyond the former task ceilings", async () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
   const store = new AgentTaskResultStore();
   const result = store.put({
@@ -222,6 +203,7 @@ test("task history and result-read clamps report at their real boundaries", asyn
   let turn = 0;
   const resultOfTask = await runAgentTask({
     ...base(),
+    onProgress: () => {},
     model: {
       chat: () =>
         Promise.resolve({
@@ -230,7 +212,7 @@ test("task history and result-read clamps report at their real boundaries", asyn
               id: `turn${++turn}`,
               type: "function",
               function: {
-                name: turn >= 12 ? "finish_task" : "read",
+                name: turn >= 130 ? "finish_task" : "read",
                 arguments: "{}",
               },
             },
@@ -244,7 +226,7 @@ test("task history and result-read clamps report at their real boundaries", asyn
         permission: "read",
         parameters: { type: "object" },
         inputSchema: z.object({}),
-        execute: () => ({ summary: "Read", progressMade: true }),
+        execute: () => ({ summary: "Read", progressMade: false }),
       },
       {
         name: "finish_task",
@@ -262,5 +244,5 @@ test("task history and result-read clamps report at their real boundaries", asyn
   );
   expect(
     events(log).some((hit) => hit.where === "agent-runtime/recent_messages"),
-  ).toBe(true);
+  ).toBe(false);
 });

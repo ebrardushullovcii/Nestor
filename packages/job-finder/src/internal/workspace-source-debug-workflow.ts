@@ -588,12 +588,6 @@ export async function runSourceDebugWorkflow(
         let lastProgressUrl: string | null = null;
         const phasePrimaryStartingUrl =
           phaseStartingUrls[0] ?? normalizedTarget.startingUrl;
-        // No per-phase step quota. The agent is told the goal and decides
-        // when it is done; a stall (nothing new after repeated tries, even
-        // after being asked to change approach) or the agent saying it is
-        // stuck ends the phase. The step and time figures below are safety
-        // ceilings far above what any honest phase needs, not budgets.
-        const phaseMaxSteps = SOURCE_DEBUG_PHASE_STEP_CEILING;
         const debugResult = await ctx.browserRuntime.runAgentDiscovery?.(
           adapterKind,
           {
@@ -613,10 +607,7 @@ export async function runSourceDebugWorkflow(
               locations: searchPreferences.locations,
             },
             targetJobCount: getSourceDebugTargetJobCount(phase),
-            maxSteps: phaseMaxSteps,
-            runControl: {
-              noProgressStepLimit: SOURCE_DEBUG_STALL_STEP_WINDOW,
-            },
+            maxSteps: Infinity,
             startingUrls: phaseStartingUrls,
             siteLabel: `${normalizedTarget.label} ${formatStatusLabel(phase)}`,
             navigationHostnames: [targetUrl.hostname],
@@ -1303,14 +1294,6 @@ function describeSourceCheckPhaseActivity(phase: SourceDebugPhase): string {
       return "checking the site";
   }
 }
-
-/**
- * Safety ceilings for one check phase. They are not budgets: a phase ends
- * when the agent finishes, says it is stuck, or stalls (nothing new for
- * SOURCE_DEBUG_STALL_STEP_WINDOW steps, twice: once to warn, once to stop).
- */
-const SOURCE_DEBUG_PHASE_STEP_CEILING = 60;
-const SOURCE_DEBUG_STALL_STEP_WINDOW = 6;
 
 /**
  * The agent's own wording for a stop ("the phase timed out before the worker

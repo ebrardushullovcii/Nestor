@@ -401,56 +401,6 @@ export function resolveSourceDebugPhases(_input: {
   return ["site_structure_mapping", "replay_verification"];
 }
 
-export function getSourceDebugMaxSteps(
-  phase: SourceDebugPhase,
-  input?: {
-    hasLearnedRouteHints?: boolean;
-    hasPriorPhaseSummary?: boolean;
-    hasExistingInstructionArtifact?: boolean;
-  },
-): number {
-  const baseStepsByPhase: Record<SourceDebugPhase, number> = {
-    access_auth_probe: 16,
-    site_structure_mapping: 15,
-    search_filter_probe: 18,
-    job_detail_validation: 18,
-    apply_path_validation: 18,
-    replay_verification: 18,
-  };
-  const minimumStepsByPhase: Record<SourceDebugPhase, number> = {
-    access_auth_probe: 16,
-    site_structure_mapping: 10,
-    search_filter_probe: 10,
-    job_detail_validation: 12,
-    apply_path_validation: 12,
-    replay_verification: 10,
-  };
-
-  const totalReduction =
-    (phase !== "access_auth_probe" && input?.hasLearnedRouteHints
-      ? phase === "search_filter_probe"
-        ? 6
-        : 4
-      : 0) +
-    (phase !== "access_auth_probe" && input?.hasPriorPhaseSummary
-      ? phase === "search_filter_probe"
-        ? 2
-        : 1
-      : 0) +
-    (input?.hasExistingInstructionArtifact && phase === "replay_verification"
-      ? 4
-      : 0) +
-    (input?.hasExistingInstructionArtifact &&
-    (phase === "job_detail_validation" || phase === "apply_path_validation")
-      ? 2
-      : 0);
-  const maxSteps = baseStepsByPhase[phase] - totalReduction;
-
-  // The minimum clamp is load-bearing; if future deltas change, keep the reduction math and
-  // these minimums aligned so phase budgets stay readable and safe.
-  return Math.max(minimumStepsByPhase[phase], maxSteps);
-}
-
 export function shouldFinishSourceDebugEarly(input: {
   attempts: readonly SourceDebugWorkerAttempt[];
   currentPhase: SourceDebugPhase;

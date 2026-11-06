@@ -579,7 +579,7 @@ describe("enrichSavedJobListingDetails", () => {
     expect(result.jobs[0]?.location).toBe("New York, NY, United States");
   });
 
-  it("skips jobs that do not need a read and caps how many it reads", async () => {
+  it("reads every selected job that still needs its listing body", async () => {
     const enriched = cardOnlyJob({
       id: "job_done",
       detailQuality: "detail_enriched",
@@ -612,12 +612,11 @@ describe("enrichSavedJobListingDetails", () => {
       fetchHtml,
       assess,
       now: () => NOW,
-      maxJobs: 1,
     });
 
-    expect(fetchHtml.calls).toEqual([first.canonicalUrl]);
-    expect(result.changedJobIds).toEqual(["job_1"]);
-    expect(result.summary.skipped).toBe(2);
+    expect(fetchHtml.calls).toEqual([first.canonicalUrl, second.canonicalUrl]);
+    expect(result.changedJobIds).toEqual(["job_1", "job_2"]);
+    expect(result.summary.skipped).toBe(1);
     expect(result.jobs.map((job) => job.id)).toEqual([
       "job_done",
       "job_1",

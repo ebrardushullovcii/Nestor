@@ -15,7 +15,6 @@ export const PROFILE_PLACEHOLDER_SUMMARY = PROFILE_SETUP_PLACEHOLDER_SUMMARY;
 // Agent discovery defaults
 export const DEFAULT_ROLE = "software engineer";
 export const DEFAULT_TARGET_JOB_COUNT = 100;
-export const DEFAULT_MAX_STEPS = 60;
 export const DEFAULT_MAX_TARGET_ROLES = 4;
 export const DEFAULT_DISCOVERY_HISTORY_LIMIT = 5;
 export const LEGACY_DEFAULT_TARGET_STARTING_URL =

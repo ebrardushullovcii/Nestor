@@ -1,5 +1,5 @@
 import { createConnectionIdleTimeout } from "@nestor/core";
-import { reportSelfLimitHit, yieldToEventLoop } from "@nestor/core";
+import { yieldToEventLoop } from "@nestor/core";
 import { isDeepStrictEqual } from "node:util";
 import {
   readDiscoveryPreparation,
@@ -1429,12 +1429,10 @@ const PROVIDER_API_TIMEOUT_MS = 30_000;
 /**
  * Waits before asking a provider again after a failure that passes: the
  * connection dropped, or the provider asked to slow down. A computer waking
- * from sleep takes a few seconds to get its network back. A timed-out
- * request is asked once more; a slow feed asked again and again would hold
- * a download slot for minutes.
+ * from sleep takes a few seconds to get its network back. Retryable failures
+ * keep their work until success or Stop.
  */
 const PROVIDER_API_RETRY_DELAYS_MS: readonly number[] = [2_000, 10_000, 30_000];
-const PROVIDER_API_MAX_RETRY_AFTER_MS = 60_000;
 /** Feed jobs converted between turns of the event loop. */
 const PROVIDER_API_JOBS_PER_TURN = 25;
 const SUMMARY_MAX_LENGTH = 280;
@@ -1458,13 +1456,14 @@ function readRetryAfterMs(value: string | null): number | null {
 }
 
 /**
- * Whether asking again could work: a network error, a first timeout, or a
- * provider asking to slow down. A 404, a provider error or a malformed feed
+ * Whether asking again could work: a network error, a silent connection, or a
+ * provider asking to slow down. A permanent refusal or a malformed feed
  * is reported as it is.
  */
-function isPassingProviderFailure(error: unknown, attempt: number): boolean {
-  if (error instanceof ProviderApiStatusError) return error.status === 429;
-  if (isAbortError(error)) return attempt === 0;
+function isPassingProviderFailure(error: unknown): boolean {
+  if (error instanceof ProviderApiStatusError)
+    return error.status === 408 || error.status === 429 || error.status >= 500;
+  if (isAbortError(error)) return true;
   // undici reports every connection failure as a TypeError "fetch failed"
   // with the cause attached.
   return error instanceof TypeError;
@@ -1941,41 +1940,13 @@ export async function collectPublicProviderJobs(input: {
           payload = await requestFeed();
           break;
         } catch (error) {
-          const delay = retryDelaysMs[attempt];
-          if (
-            input.signal?.aborted ||
-            delay === undefined ||
-            !isPassingProviderFailure(error, attempt)
-          ) {
-            if (
-              !input.signal?.aborted &&
-              delay === undefined &&
-              isPassingProviderFailure(error, attempt)
-            )
-              reportSelfLimitHit({
-                limit: "provider_feed_retries",
-                kind: "retry",
-                value: retryDelaysMs.length,
-                where: "job-finder/collectPublicProviderJobs",
-              });
-            throw error;
-          }
+          input.signal?.throwIfAborted();
+          if (!isPassingProviderFailure(error)) throw error;
+          const delay =
+            retryDelaysMs[attempt] ?? retryDelaysMs.at(-1) ?? 30_000;
           const retryAfter =
             error instanceof ProviderApiStatusError ? error.retryAfterMs : null;
-          if ((retryAfter ?? 0) > PROVIDER_API_MAX_RETRY_AFTER_MS)
-            reportSelfLimitHit({
-              limit: "provider_feed_retry_after",
-              kind: "timeout",
-              value: PROVIDER_API_MAX_RETRY_AFTER_MS,
-              where: "job-finder/collectPublicProviderJobs",
-            });
-          await waitBeforeRetry(
-            Math.min(
-              Math.max(delay, retryAfter ?? 0),
-              PROVIDER_API_MAX_RETRY_AFTER_MS,
-            ),
-            input.signal,
-          );
+          await waitBeforeRetry(Math.max(delay, retryAfter ?? 0), input.signal);
         }
       }
 

@@ -942,43 +942,6 @@ describe("ai provider config and fallback behavior", () => {
     }
   });
 
-  test("a run that prepares no edit and never finishes keeps the question for Ask again", async () => {
-    const restoreFetch = mockJsonFetch({
-      choices: [
-        {
-          message: {
-            content: JSON.stringify({
-              content:
-                "Which number should it be? Your resume shows six years of work.",
-              patchGroups: [],
-            }),
-          },
-        },
-      ],
-    });
-
-    try {
-      const client =
-        createJobFinderAiClientFromEnvironment(createEnvironment());
-
-      // No rule-made edit stands in for the model's answer (ADR 0041).
-      await expect(
-        client.reviseCandidateProfile({
-          profile: {
-            ...createProfile(),
-            yearsExperience: 6,
-          },
-          searchPreferences: createPreferences(),
-          context: { surface: "setup", step: "essentials" },
-          relevantReviewItems: [],
-          request: "change my experience",
-        }),
-      ).rejects.toThrow("nothing was changed");
-    } finally {
-      restoreFetch();
-    }
-  });
-
   test("reports the outage for very large profile copilot requests when the primary model call fails", async () => {
     const errorSpy = vi
       .spyOn(console, "error")

@@ -54,24 +54,26 @@ test.each(["length", "max_output_tokens", "transport"])(
   },
 );
 
-test("exhausted output retries report a failure without caching a negative or retrying smaller batches", async () => {
+test("output truncation retries beyond the former limit without caching incomplete negatives", async () => {
   const decisions = new Map<string, boolean>();
-  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>().mockResolvedValue({
-    content: '{"keep":{"0":0}}',
-    finishReason: "length",
-  });
+  let calls = 0;
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(() =>
+    Promise.resolve(
+      ++calls <= 6
+        ? { content: '{"keep":{"0":0}}', finishReason: "length" }
+        : { content: '{"keep":{"0":1}}' },
+    ),
+  );
   const result = await screenCards({
     cards: [card],
     goals,
     decisions,
     client: { chatWithTools },
   });
-  expect(result.related).toEqual([]);
+  expect(result.related).toEqual([card]);
+  expect(result.failed).toEqual([]);
   expect(result.seen).toEqual([]);
-  expect(result.failed.map((failure) => failure.url)).toEqual([card.url]);
-  expect(result.failed[0]?.reason).toMatch(/output.*limit/iu);
-  expect(decisions.size).toBe(0);
-  expect(chatWithTools).toHaveBeenCalledTimes(2);
+  expect(chatWithTools).toHaveBeenCalledTimes(7);
 });
 
 test("an unrelated provider failure is reported without an output-budget retry", async () => {
