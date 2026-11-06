@@ -365,6 +365,10 @@ export async function generatePack(options) {
   const reported = relevant.filter((e) => e.event === "provider_reported");
   const ours = relevant.filter((e) => e.event === "ours");
   const warnings = [];
+  if (relevant.some((e) => e.event === "trace_read_error"))
+    warnings.push(
+      "INCOMPLETE TRACE: at least one recorded line could not be read",
+    );
   if (
     profile.kind === "app_setup" &&
     rows.profile_setup?.[0]?.status !== "completed"

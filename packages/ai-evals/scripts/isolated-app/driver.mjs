@@ -500,7 +500,7 @@ async function shot(
         // Mask credential/code controls in the bitmap; never mutate the live DOM.
         const rects = await w
           .executeJavaScript(
-            `Array.from(document.querySelectorAll('input[type="password"],input[autocomplete="one-time-code"],input[name*="otp" i],input[name*="mfa" i],input[name*="token" i],input[name*="code" i],iframe')).map(e => {const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,vw:innerWidth,vh:innerHeight}})`,
+            `Array.from(document.querySelectorAll('input[type="password"],input[name*="password" i],input[autocomplete*="password" i],input[autocomplete="one-time-code"],input[name*="otp" i],input[name*="mfa" i],input[name*="token" i],input[name="code" i],input[name="passcode" i],iframe')).map(e => {const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,vw:innerWidth,vh:innerHeight}})`,
           )
           .catch(() => []);
         if (rects.length && image && !image.isEmpty()) {

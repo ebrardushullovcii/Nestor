@@ -49,7 +49,7 @@ export async function tracePage(
       .frames()
       .map((frame) =>
         frame.locator(
-          'input[type="password"],input[autocomplete="one-time-code"],input[name*="otp" i],input[name*="mfa" i],input[name*="token" i],input[name*="verification" i],input[name*="code" i]',
+          'input[type="password"],input[name*="password" i],input[autocomplete*="password" i],input[autocomplete="one-time-code"],input[name*="otp" i],input[name*="mfa" i],input[name*="token" i],input[name*="verification" i],input[name="code" i],input[name="passcode" i]',
         ),
       );
     const sensitive = (
