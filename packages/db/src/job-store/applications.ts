@@ -650,7 +650,9 @@ export function createApplicationStore(store: JobStore) {
             ? "submitted"
             : receipt.outcome === "outcome_uncertain"
               ? "uncertain"
-              : "ready";
+              : receipt.browserAction?.reason === "model_observed_outcome"
+                ? "failed"
+                : "ready";
         sql(`UPDATE applications SET state = ?, submitted_at = ?, updated_at = ?,
           submission_outcome_id = ?, submission_outcome_json = ?, error = NULL WHERE id = ?`).run(
           state,
@@ -982,32 +984,42 @@ export function readSavedCountryOptionFallbacks(
   });
 }
 
-/** Trusted authority projection, never sent to a list screen or the model. */
+/** Full saved-answer records for the model, retaining their original context. */
 export function readSavedApplicationAnswers(
   store: JobStore,
-  kinds?: readonly CandidateAnswerKind[],
-  siteOrigin?: string,
+  _kinds?: readonly CandidateAnswerKind[],
+  _siteOrigin?: string,
 ): CandidateReusableAnswer[] {
+  void _kinds;
+  void _siteOrigin;
   const rows = store
     .sql(
-      `SELECT id,kind,label,prompt,answer,country,role_families_json,proof_entry_ids_json,option_fallback_json
-    FROM form_answers WHERE needs_confirmation=0 ${kinds ? "AND kind IN (SELECT value FROM json_each(?))" : ""} ${siteOrigin ? "AND site_origin IN ('', ?)" : ""} ORDER BY id`,
+      `SELECT id,kind,label,prompt,answer,country,site_origin,options_json,updated_at,needs_confirmation,role_families_json,proof_entry_ids_json,option_fallback_json FROM form_answers ORDER BY id`,
     )
-    .all(
-      ...(kinds ? [JSON.stringify(kinds)] : []),
-      ...(siteOrigin ? [siteOrigin] : []),
-    ) as Array<{
+    .all() as Array<{
     id: number;
     kind: CandidateAnswerKind;
     label: string;
     prompt: string;
     answer: string;
     country: string;
+    site_origin: string;
+    options_json: string;
+    updated_at: number;
+    needs_confirmation: number;
     option_fallback_json: string | null;
     role_families_json: string;
     proof_entry_ids_json: string;
   }>;
   return rows.map((row) => ({
+    context: {
+      options: JSON.parse(row.options_json) as string[],
+      siteOrigin: row.site_origin,
+      savedAt: row.updated_at,
+      givenBy: row.needs_confirmation ? "unconfirmed suggestion" : "person",
+      country: row.country,
+    },
+    needsConfirmation: row.needs_confirmation === 1,
     id: `form_answer_${row.id}`,
     kind: row.kind,
     label: row.label || row.prompt,

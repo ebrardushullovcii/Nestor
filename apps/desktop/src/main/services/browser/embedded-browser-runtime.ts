@@ -498,6 +498,52 @@ export function withEmbeddedBrowserActivity(
                       ...formInput.session,
                       prepareBrowserCredentials: (url) =>
                         prepareOwnedCredentials(claimedTabs, url),
+                      listSavedCredentials: async () => {
+                        const raw = await formInput.session.readPage();
+                        const owned = new Set(await claimedTabs());
+                        const tab = browser
+                          .getState()
+                          .tabs.find(
+                            (t) =>
+                              owned.has(t.id) &&
+                              browserDisplayUrl(t.url) ===
+                                browserDisplayUrl(raw.url ?? ""),
+                          );
+                        return tab
+                          ? browser.listAgentCredentials(tab.id)
+                          : {
+                              available: false,
+                              message:
+                                "The owned application tab is unavailable.",
+                              credentials: [],
+                            };
+                      },
+                      fillSavedCredential: async (ref, credentialId) => {
+                        const raw = await formInput.session.readPage();
+                        const control = raw.controls.find(
+                          (c) => (c.ref ?? `c${c.index}`) === ref,
+                        );
+                        if (!control) return false;
+                        const owned = new Set(await claimedTabs());
+                        const tab = browser
+                          .getState()
+                          .tabs.find(
+                            (t) =>
+                              owned.has(t.id) &&
+                              browserDisplayUrl(t.url) ===
+                                browserDisplayUrl(raw.url ?? ""),
+                          );
+                        return tab
+                          ? browser.fillAgentCredential(tab.id, credentialId, {
+                              controlIndex: control.index,
+                              id: control.id,
+                              name: control.name,
+                              ...(control.frame
+                                ? { frame: control.frame }
+                                : {}),
+                            })
+                          : false;
+                      },
                     },
                     onProgress: (progress) =>
                       updateActivity(

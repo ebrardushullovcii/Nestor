@@ -1,3 +1,4 @@
+import { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
 import { readPasswordForms } from "../main/services/browser/password-form";
 import type {
   BrowserPasswordCapture,
@@ -133,12 +134,25 @@ export function installPasswordPage(port: {
     try {
       if (location.origin !== value.origin) return;
       const candidates = passwords();
-      const password =
-        candidates.find((input) => input.autocomplete === "current-password") ??
-        candidates[0];
+      const named = value.target
+        ? document.querySelectorAll(APPLY_CONTROL_SELECTOR)[
+            value.target.controlIndex
+          ]
+        : null;
+      const password = value.target
+        ? named instanceof HTMLInputElement &&
+          named.type === "password" &&
+          named.id === value.target.id &&
+          named.name === value.target.name
+          ? named
+          : undefined
+        : (candidates.find(
+            (input) => input.autocomplete === "current-password",
+          ) ?? candidates[0]);
       if (
         !password ||
         (value.agent &&
+          !value.target &&
           (candidates.length !== 1 || !readPasswordForms()[0]?.login))
       )
         return;
@@ -155,6 +169,7 @@ export function installPasswordPage(port: {
       // entered on the site. Leave that conflict for the person.
       if (
         value.agent &&
+        !value.target &&
         username &&
         !value.username.trim() &&
         (!usernameText ||
@@ -170,7 +185,8 @@ export function installPasswordPage(port: {
         input.dispatchEvent(new Event("input", { bubbles: true }));
         input.dispatchEvent(new Event("change", { bubbles: true }));
       };
-      if (username && usernameText) fill(username, usernameText);
+      if (!value.target && username && usernameText)
+        fill(username, usernameText);
       // A username listener may navigate or replace/change the form action.
       if (
         !password.isConnected ||
@@ -178,7 +194,7 @@ export function installPasswordPage(port: {
         !safeForm(password)
       )
         return;
-      if (value.agent) {
+      if (value.agent && !value.target) {
         const forms = readPasswordForms();
         if (
           forms.length !== 1 ||

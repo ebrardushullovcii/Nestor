@@ -2,7 +2,6 @@ import { withModelProviderProgress } from "@nestor/ai-providers";
 import {
   applicationFacts,
   createApplyPageHands,
-  createMoveReviewer,
   runApplyAgent,
   UNCONFIRMED_STEP_LABEL,
   type ApplyAgentResult,
@@ -104,6 +103,7 @@ export interface AgentApplicationPreparationInput {
   modelLabel?: string | null;
   onProgress?: Parameters<typeof runApplyAgent>[0]["onProgress"];
   submitApplication?: Parameters<typeof runApplyAgent>[0]["submitApplication"];
+  recordSendOutcome?: Parameters<typeof runApplyAgent>[0]["recordSendOutcome"];
   readReusableAnswers?: Parameters<
     typeof runApplyAgent
   >[0]["readReusableAnswers"];
@@ -522,14 +522,6 @@ async function runApplyAgentSafely(
   }
 }
 
-function hostnameOf(url: string): string | null {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return null;
-  }
-}
-
 function originOf(url: string): string | null {
   try {
     const parsed = new URL(url);
@@ -581,11 +573,6 @@ export async function runAgentApplicationPreparation(
 ): Promise<ApplyExecutionResult> {
   const { executionInput, startedAt } = input;
   const now = input.now ?? (() => new Date());
-  const fieldSaveOrigins = [
-    ...(executionInput.intermediateMutationAllowedOrigins ??
-      executionInput.applyAllowedOrigins ??
-      []),
-  ];
 
   const { targetUrl, isContinuation } =
     resolveApplicationPreparationTarget(input);
@@ -595,28 +582,17 @@ export async function runAgentApplicationPreparation(
     ...authority,
     allowedOrigins,
   };
-  let activeEnvelope = input.envelope ?? null;
+  const activeEnvelope = input.envelope ?? null;
   const hands = createApplyPageHands(input.session, now);
-  const moveReviewer = createMoveReviewer({
-    browserPermissions: browserAgentPermissionsOf(executionInput.settings),
-    ...(executionInput.prepareBrowserCredentials
-      ? { prepareBrowserCredentials: executionInput.prepareBrowserCredentials }
-      : {}),
-    llmClient: input.llmClient,
-    goal: isContinuation
-      ? `Continue the ${executionInput.job.title} application at ${executionInput.job.company} on the currently open retained page at ${targetUrl}. Confirm that the open page is still this employer's application. Keep working on that current form; do not return to the listing or reload it. Nothing is sent.`
-      : `Apply for ${executionInput.job.title} at ${executionInput.job.company} on the open page at ${targetUrl}. Confirm that the open page is this employer's application, then fill in the form; nothing is sent.`,
-    homeLabel: input.siteLabel,
-    homeHosts: [hostnameOf(targetUrl) ?? input.siteLabel],
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
-
   const approvedLetterText = await input.letters?.getApprovedText?.(
     executionInput.job.id,
     input.applicationRecordId,
   );
   const outcome = await runApplyAgentSafely(input, {
     hands,
+    ...(input.recordSendOutcome
+      ? { recordSendOutcome: input.recordSendOutcome }
+      : {}),
     ...(input.submitApplication
       ? { submitApplication: input.submitApplication }
       : {}),
@@ -627,7 +603,6 @@ export async function runAgentApplicationPreparation(
       ? { modelMaxOutputTokens: input.modelMaxOutputTokens }
       : {}),
     safety: input.session,
-    modelQuestionClassification: true,
     ...(input.questionReadCacheScope
       ? { questionReadCacheScope: input.questionReadCacheScope }
       : {}),
@@ -719,30 +694,6 @@ export async function runAgentApplicationPreparation(
     writing: AiBehaviorPreferenceSchema.parse(
       executionInput.settings.aiBehavior ?? {},
     ).applying,
-    reviewMove: async (move) => {
-      const review = await moveReviewer(move);
-      if (!review.allowed) return review;
-      let origin: string | null = null;
-      try {
-        origin = new URL(move.url).origin;
-      } catch {
-        origin = null;
-      }
-      if (
-        origin &&
-        !allowedOrigins.includes(origin) &&
-        executionInput.authorizeReviewedApplicationOrigin
-      ) {
-        const widened =
-          await executionInput.authorizeReviewedApplicationOrigin(origin);
-        if (widened) {
-          if (widened !== true) activeEnvelope = widened;
-          allowedOrigins.push(origin);
-          if (!fieldSaveOrigins.includes(origin)) fieldSaveOrigins.push(origin);
-        }
-      }
-      return review;
-    },
     ...(input.letters
       ? {
           letters: createApplicationLetterProvider({
@@ -960,6 +911,7 @@ export function createApplyFormPreparer(input: {
   readReusableAnswers?: AgentApplicationPreparationInput["readReusableAnswers"];
   reusableAnswers?: CandidateReusableAnswer[];
   submitApplication?: AgentApplicationPreparationInput["submitApplication"];
+  recordSendOutcome?: AgentApplicationPreparationInput["recordSendOutcome"];
   initialQuestionContexts?: AgentApplicationPreparationInput["initialQuestionContexts"];
   initialPickerAttempts?: AgentApplicationPreparationInput["initialPickerAttempts"];
   uploadsConfirmedByPerson?: readonly string[];
@@ -1080,6 +1032,9 @@ export function createApplyFormPreparer(input: {
           ...(input.letters ? { letters: input.letters } : {}),
           ...(input.envelope ? { envelope: input.envelope } : {}),
           ...(input.onPrepared ? { onPrepared: input.onPrepared } : {}),
+          ...(input.recordSendOutcome
+            ? { recordSendOutcome: input.recordSendOutcome }
+            : {}),
           ...(input.submitApplication
             ? { submitApplication: input.submitApplication }
             : {}),

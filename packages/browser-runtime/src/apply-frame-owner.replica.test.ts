@@ -111,7 +111,7 @@ test("child-frame reader binds safe owners and disabled state across origins; po
     )!;
     expect(
       await withBrowserPermissions(hands, {}).followLink(provider.ref),
-    ).toMatchObject({ ok: false });
+    ).toMatchObject({ ok: true });
     expect(
       browserStepReadyForAgent(
         observed,

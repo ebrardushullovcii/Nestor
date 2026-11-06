@@ -278,3 +278,30 @@ it.each(["email", "section-signin email"])(
     );
   },
 );
+
+it("privately fills the exact model-selected password field without classifying the page or changing its username", () => {
+  const { fill, value, port } = setup(
+    '<h1>Choose another way</h1><form><input name="username" value="selected@example.test"><input id="password" name="pass" type="password" autocomplete="current-password"><button>Continue</button></form>',
+  );
+  expect(readPasswordForms()[0]?.login).toBe(false);
+  fill({
+    ...value,
+    agent: true,
+    target: { controlIndex: 1, id: "password", name: "pass" },
+  });
+  expect(port.filled).toHaveBeenLastCalledWith("opaque", true);
+  expect(document.querySelector<HTMLInputElement>("#password")?.value).toBe(
+    "synthetic-secret",
+  );
+  expect(
+    document.querySelector<HTMLInputElement>('[name="username"]')?.value,
+  ).toBe("selected@example.test");
+  document.querySelector<HTMLInputElement>("#password")!.value = "";
+  fill({
+    ...value,
+    agent: true,
+    target: { controlIndex: 0, id: "password", name: "pass" },
+  });
+  expect(port.filled).toHaveBeenLastCalledWith("opaque", false);
+  expect(document.querySelector<HTMLInputElement>("#password")?.value).toBe("");
+});

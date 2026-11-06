@@ -949,7 +949,7 @@ describe("reading the choices of lists the page draws itself", () => {
     await page.close();
   });
 
-  test("toggle labels cannot bypass the typed answer path through generic clicks", async () => {
+  test("generic clicks on visible toggle labels and controls execute directly", async () => {
     const page = await browser.newPage();
     await page.setContent(`
       <label for="consent">I consent to a background check</label>
@@ -961,12 +961,12 @@ describe("reading the choices of lists the page draws itself", () => {
       (item) => item.tagName === "label",
     );
     if (!label) throw new Error("Expected a clickable checkbox label");
+    let expected = true;
     for (const ref of [`e${label.index}`, "c0"]) {
       const outcome = await mechanics.clickElement(ref);
-      expect(outcome.ok).toBe(false);
-      if (outcome.ok) throw new Error("A generic click changed the answer");
-      expect(outcome.error).toContain("set_checkbox");
-      expect(await page.locator("#consent").isChecked()).toBe(false);
+      expect(outcome.ok).toBe(true);
+      expect(await page.locator("#consent").isChecked()).toBe(expected);
+      expected = !expected;
     }
     await expect(mechanics.setToggle("c0", true)).resolves.toMatchObject({
       ok: true,

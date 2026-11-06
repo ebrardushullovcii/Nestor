@@ -1001,10 +1001,7 @@ export function createApplicationAuthorityRepositoryMethods(
 
           if (
             previousOutcome === null ||
-            previousOutcome.outcome !== "outcome_uncertain" ||
-            idempotency.status !== "outcome_uncertain" ||
             idempotency.outcomeId !== previousOutcome.id ||
-            idempotency.outcome !== "outcome_uncertain" ||
             idempotency.revision !== resolution.expectedIdempotencyRevision ||
             alreadyResolved !== null
           ) {
@@ -1046,7 +1043,8 @@ export function createApplicationAuthorityRepositoryMethods(
             ...idempotency,
             status: "resolved",
             revision: idempotency.revision + 1,
-            updatedAt: resolution.outcome.verifiedAt,
+            updatedAt:
+              resolution.outcome.verifiedAt ?? resolution.outcome.attemptedAt,
             outcomeId: resolution.outcome.id,
             outcome: resolution.outcome.outcome,
           });

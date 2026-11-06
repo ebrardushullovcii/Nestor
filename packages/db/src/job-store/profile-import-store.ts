@@ -11,9 +11,7 @@ import {
   type ResumeDocumentBundle,
   type ResumeImportFieldCandidate,
 } from "@nestor/contracts";
-import type {
-  JobFinderRepository,
-} from "../repository-types";
+import type { JobFinderRepository } from "../repository-types";
 import type { JobStore } from "./job-store";
 import type { ProfileStore } from "./profile-store";
 import type { PreferencesStore } from "./preferences-store";
@@ -246,7 +244,9 @@ export function createProfileImportStore(
             if (
               !answers.get({ key: answer.key, scope: answer.scope }) &&
               (!answer.kind ||
-                readSavedApplicationAnswers(store, [answer.kind]).length === 0)
+                !readSavedApplicationAnswers(store).some(
+                  (saved) => saved.kind === answer.kind,
+                ))
             )
               answers.upsert(answer);
           }

@@ -2495,7 +2495,7 @@ describe("reading pages for less", () => {
   });
 });
 
-test("a search attempts the saved vault account before reporting a sign-in handoff, without exposing its password", async () => {
+test("search does not replay vault credentials before a model decision or expose passwords", async () => {
   const pages = {
     current: rawPage({
       url: "https://jobs.example.test/login",
@@ -2567,7 +2567,7 @@ test("a search attempts the saved vault account before reporting a sign-in hando
     }),
     llmClient: {
       chatWithTools: async (...args) => {
-        expect(prepare).toHaveBeenCalled();
+        expect(prepare).not.toHaveBeenCalled();
         request = JSON.stringify(args[0]);
         return client.chatWithTools(...args);
       },

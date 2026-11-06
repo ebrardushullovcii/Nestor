@@ -14,6 +14,7 @@ import {
   BrowserPasswordFormsSchema,
   browserAgentPermissionsOf,
   type BrowserPasswordPrompt,
+  type BrowserPasswordFieldTarget,
   type BrowserPasswordsList,
 } from "@nestor/contracts";
 import { createBrowserPasswordRepository } from "@nestor/db";
@@ -264,13 +265,21 @@ export class BrowserPasswords {
     tabId: string,
     credentialId: string,
     agent = false,
+    target?: BrowserPasswordFieldTarget,
   ): Promise<boolean> {
     const page = this.page(tabId);
     const saved = this.vault()
       .list()
       .find((row) => row.id === credentialId);
-    if (!page || !saved || (agent && !this.agentSignInAllowed())) return false;
+    if (!page || !saved || (agent && !target && !this.agentSignInAllowed()))
+      return false;
     for (const frame of page.contents.mainFrame.framesInSubtree) {
+      if (
+        target?.frame &&
+        (new URL(frame.url).origin !== target.frame.origin ||
+          new URL(frame.url).pathname !== target.frame.pathname)
+      )
+        continue;
       if (
         !passwordOriginsMatch(
           page.contents.getURL(),
@@ -280,28 +289,32 @@ export class BrowserPasswords {
         )
       )
         continue;
-      let forms: ReturnType<typeof BrowserPasswordFormsSchema.parse>;
-      try {
-        forms = BrowserPasswordFormsSchema.parse(
-          await frame.executeJavaScript(`(${readPasswordForms.toString()})()`),
-        );
-      } catch {
-        continue;
-      }
-      if (
-        !forms.length ||
-        (agent && (forms.length !== 1 || !forms[0]?.login)) ||
-        forms.some(
-          (form) =>
-            !passwordOriginsMatch(
-              page.contents.getURL(),
-              frame.url,
-              form.action,
-              saved.origin,
+      if (!target) {
+        let forms: ReturnType<typeof BrowserPasswordFormsSchema.parse>;
+        try {
+          forms = BrowserPasswordFormsSchema.parse(
+            await frame.executeJavaScript(
+              `(${readPasswordForms.toString()})()`,
             ),
+          );
+        } catch {
+          continue;
+        }
+        if (
+          !forms.length ||
+          (agent && !target && (forms.length !== 1 || !forms[0]?.login)) ||
+          forms.some(
+            (form) =>
+              !passwordOriginsMatch(
+                page.contents.getURL(),
+                frame.url,
+                form.action,
+                saved.origin,
+              ),
+          )
         )
-      )
-        continue;
+          continue;
+      }
       // Recheck after awaiting the frame. The isolated preload checks once more
       // synchronously before writing; secret values never enter an evaluated script.
       if (
@@ -313,6 +326,7 @@ export class BrowserPasswords {
           saved.origin,
         ) ||
         (agent &&
+          !target &&
           (!this.agentSignInAllowed() ||
             this.vault().list(saved.origin).length !== 1))
       )
@@ -343,6 +357,7 @@ export class BrowserPasswords {
             requestId,
             ...value,
             agent,
+            ...(target ? { target } : {}),
             ...(fallbackUsername ? { fallbackUsername } : {}),
           });
         } catch {

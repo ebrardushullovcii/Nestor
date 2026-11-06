@@ -93,15 +93,17 @@ test.skipIf(!existsSync(executablePath))(
             requests.push(JSON.stringify(messages));
             const action =
               ++turn === 1
-                ? { name: "click", args: { ref: "a0" } }
+                ? { name: "fill_saved_credentials", args: {} }
                 : turn === 2
-                  ? { name: "extract_jobs", args: { pageType: "job_detail" } }
-                  : {
-                      name: "finish",
-                      args: {
-                        reason: "Signed in and read the complete vacancy.",
-                      },
-                    };
+                  ? { name: "click", args: { ref: "a0" } }
+                  : turn === 3
+                    ? { name: "extract_jobs", args: { pageType: "job_detail" } }
+                    : {
+                        name: "finish",
+                        args: {
+                          reason: "Signed in and read the complete vacancy.",
+                        },
+                      };
             return Promise.resolve({
               toolCalls: [
                 {

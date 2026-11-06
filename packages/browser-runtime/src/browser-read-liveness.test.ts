@@ -12,13 +12,28 @@ function page() {
   }) as unknown as Page & EventEmitter;
 }
 
-test("navigation during a read is an observation error, with the page retained", async () => {
-  const browserPage = page();
-  const result = withBrowserReadLiveness(browserPage, never);
-  const rejection = expect(result).rejects.toThrow("observe again");
-  browserPage.emit("framenavigated", browserPage.mainFrame?.());
-  await rejection;
-  expect(browserPage.listenerCount("response")).toBe(0);
+test("navigation during a post-action read returns the new document and destination", async () => {
+  const browserPage = Object.assign(page(), {
+    url: () => "https://employer.example.test/application",
+    mainFrame: () => frame,
+    waitForLoadState: () => Promise.resolve(),
+  });
+  const frame = {};
+  let attempts = 0;
+  const result = withBrowserReadLiveness(browserPage, () =>
+    ++attempts === 1
+      ? never()
+      : Promise.resolve({ bodyText: "Application form" }),
+  );
+  await Promise.resolve();
+  browserPage.emit("framenavigated", frame);
+  await expect(result).resolves.toMatchObject({
+    bodyText: "Application form",
+    navigationNote:
+      "The page navigated to https://employer.example.test/application.",
+  });
+  expect(attempts).toBe(2);
+  expect(browserPage.listenerCount("framenavigated")).toBe(0);
 });
 
 test("a page read that never settles returns on actual browser connection silence", async () => {

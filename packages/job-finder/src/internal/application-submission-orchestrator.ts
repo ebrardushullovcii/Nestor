@@ -39,6 +39,7 @@ export type SyntheticSubmissionAuthorityRepository = Pick<
   | "getSubmissionOutcomeRecord"
   | "authorizeAndArmSubmissionAttempt"
   | "commitSubmissionOutcome"
+  | "resolveSubmissionOutcome"
   | "recoverArmedSubmissionAttempts"
 >;
 

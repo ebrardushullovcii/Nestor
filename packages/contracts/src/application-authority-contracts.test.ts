@@ -1194,7 +1194,7 @@ describe("submission outcome contracts", () => {
     expect(record.retry.eligible).toBe(false);
   });
 
-  it("requires an explicit, evidenced operator resolution without enabling retry", () => {
+  it("appends model or person outcomes with a fresh receipt identity", () => {
     const resolution = SubmissionOutcomeResolutionInputSchema.parse({
       expectedOutcomeId: "outcome_uncertain_1",
       expectedIdempotencyRevision: 3,
@@ -1220,7 +1220,7 @@ describe("submission outcome contracts", () => {
           retry: { eligible: true, blockReason: null },
         },
       }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       SubmissionOutcomeResolutionInputSchema.safeParse({
         ...resolution,

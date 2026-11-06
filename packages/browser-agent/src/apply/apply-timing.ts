@@ -186,7 +186,9 @@ export function createApplyTiming(now: () => Date) {
     }),
     model: (client: LLMClient): LLMClient => ({
       chatWithTools: async (messages, tools, options) => {
-        const loop = options?.parallelToolCalls === true;
+        const loop =
+          options?.parallelToolCalls === true ||
+          tools.some((tool) => tool.function.name === "finish");
         const kind = tools.some(
           (tool) => tool.function.name === "report_question_kinds",
         )

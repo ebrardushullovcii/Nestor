@@ -30,7 +30,6 @@ import {
 import type { Browser, Page } from "playwright";
 import {
   DesktopBrowserStateSchema,
-  readApplicationSubmissionConfirmationEvidence,
   EMBEDDED_BROWSER_MAX_WORKING_TABS,
   EMBEDDED_BROWSER_MAX_TOTAL_TABS,
   resolveBrowserAddress,
@@ -39,6 +38,7 @@ import {
   type DesktopBrowserCommand,
   type DesktopBrowserSnapshot,
   type RawApplyPage,
+  type BrowserPasswordFieldTarget,
   type DesktopBrowserViewport,
   type WaitingFormMemory,
 } from "@nestor/contracts";
@@ -152,6 +152,16 @@ export class EmbeddedBrowser {
   /** Main-only: settings and exact form/origin binding are checked on each use. */
   prepareAgentCredentials(tabId: string): Promise<boolean> {
     return this.passwords().prepareAgentCredentials(tabId);
+  }
+  listAgentCredentials(tabId: string) {
+    return this.passwords().list(tabId);
+  }
+  fillAgentCredential(
+    tabId: string,
+    credentialId: string,
+    target: BrowserPasswordFieldTarget,
+  ): Promise<boolean> {
+    return this.passwords().autofill(tabId, credentialId, true, target);
   }
   private window: BrowserWindow | null = null;
   private backstage: BrowserWindow | null = null;
@@ -1200,7 +1210,7 @@ export class EmbeddedBrowser {
             if (element.shadowRoot) collect(element.shadowRoot);
         };
         collect(document);
-        return (${collectApplyDocumentSnapshot.toString()})(elements, ${JSON.stringify(APPLY_PAGE_SELECTORS)},true,${readApplicationSubmissionConfirmationEvidence.toString()});
+        return (${collectApplyDocumentSnapshot.toString()})(elements, ${JSON.stringify(APPLY_PAGE_SELECTORS)},true);
       })()`,
       context?.frameTreeNodeId,
     );

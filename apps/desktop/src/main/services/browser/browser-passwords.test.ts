@@ -282,3 +282,42 @@ it("never combines profile email with a named login, multiple accounts, registra
   expect(await manager.autofill("tab", vault.list()[0]!.id, true)).toBe(false);
   expect(frame.send).not.toHaveBeenCalled();
 });
+
+it("fills a model-selected account and password field among multiple saved logins without semantic login vetoes", async () => {
+  const { manager, vault, capture, frame, permit } = setup();
+  vault.save(capture);
+  const chosen = vault.save({
+    ...capture,
+    username: "selected@example.test",
+    password: "synthetic-selected-secret",
+  });
+  permit(false);
+  frame.executeJavaScript.mockResolvedValue([
+    { action: capture.action, login: false },
+  ]);
+  const id = manager
+    .list("tab")
+    .credentials.find((c) => c.username === "selected@example.test")!.id;
+  expect(JSON.stringify(manager.list("tab"))).not.toContain(
+    "synthetic-selected-secret",
+  );
+  expect(
+    await manager.autofill("tab", id, true, {
+      controlIndex: 2,
+      id: "password",
+      name: "pass",
+    }),
+  ).toBe(true);
+  expect(frame.executeJavaScript).not.toHaveBeenCalled();
+  expect(frame.send).toHaveBeenCalledWith(
+    "browser-password:fill",
+    expect.objectContaining({
+      username: "selected@example.test",
+      target: { controlIndex: 2, id: "password", name: "pass" },
+    }),
+  );
+  expect(JSON.stringify(frame.executeJavaScript.mock.calls)).not.toContain(
+    "synthetic-selected-secret",
+  );
+  void chosen;
+});
