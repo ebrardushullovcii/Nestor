@@ -7,7 +7,6 @@ import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { runApplyAgent } from "./apply-agent";
 import { reportedSecurityChallenge } from "./blockers";
-import { classifyAnswerPermission } from "./answer-source-catalog";
 import { fillPressFor } from "./fill-presses";
 import { buildApplyFormObservation } from "./page-hands";
 import {
@@ -15,7 +14,6 @@ import {
   createApplyGuardState,
   executeApplyProposal,
 } from "./policy-executor";
-import { questionPrompt } from "./question-text";
 import type { ApplyAgentConfig } from "./types";
 
 const now = () => new Date("2026-11-06T00:00:00Z");
@@ -404,172 +402,6 @@ test("a five-option ARIA radio field produces one question with all five options
   );
   expect(new Set(pending.map((q) => q.id)).size).toBe(1);
   expect(pending[0].prompt).toBe(question);
-});
-
-test("the React Yes/No group has one target and uses the independent fact check", async () => {
-  const question =
-    "Do you have at least 1 year of experience building responsive web applications using modern JavaScript frameworks (e.g., React, Vue, or Angular)?";
-  const raw = page({ controls: radios(question, ["YES", "NO"]) });
-  const input = config(raw),
-    observation = await input.hands.observe(),
-    control = observation.controls[0];
-  const checkWrittenAnswer = vi.fn(() =>
-    Promise.resolve({
-      supported: true,
-      reason: "The recorded summary says twelve years building React.",
-    }),
-  );
-  const outcome = await executeApplyProposal(
-    { tool: "set_checkbox", ref: control.ref, checked: true },
-    observation.signature,
-    {
-      config: input,
-      now,
-      guardState: createApplyGuardState(),
-      checkWrittenAnswer,
-      classifyQuestions: () =>
-        Promise.resolve(
-          new Map([
-            [
-              questionPrompt(control),
-              {
-                asksAboutPay: false,
-                declarationKind: null,
-                answerTags: {
-                  kind: "other",
-                  sourceId: "profile.summary",
-                  country: null,
-                },
-              },
-            ],
-          ]),
-        ),
-    },
-  );
-  expect(outcome.kind).toBe("filled");
-  expect(checkWrittenAnswer).toHaveBeenCalledOnce();
-  expect(raw.controls[0].checked).toBe(true);
-  expect(raw.controls[1].checked).toBe(false);
-});
-
-test("a yes/no residence answer reaches the whole-question check instead of a country literal veto", () => {
-  const raw = page({
-    controls: [
-      field({
-        tagName: "select",
-        label: "Is your current place of residence in Germany?* (required)",
-        options: ["Yes", "No"],
-      }),
-    ],
-  });
-  const input = config(raw),
-    observation = buildApplyFormObservation(raw, now().toISOString()),
-    control = observation.controls[0];
-  expect(
-    classifyAnswerPermission({
-      control,
-      controls: observation.controls,
-      sources: input.sources,
-      tags: {
-        kind: "residence_country",
-        sourceId: "profile.currentCountry",
-        country: null,
-      },
-      answer: "Yes",
-      pageInstructions: "",
-    }),
-  ).toMatchObject({ kind: "inference", evidencePolicy: "factual_inference" });
-});
-
-test.each([
-  ["Yes", true],
-  ["No", false],
-] as const)(
-  "residence proposal %s still requires independent support before a write",
-  async (answer, supported) => {
-    const raw = page({
-      controls: [
-        field({
-          tagName: "select",
-          label: "Is your current place of residence in Germany?",
-          options: ["Yes", "No"],
-        }),
-      ],
-    });
-    const input = config(raw),
-      observation = await input.hands.observe(),
-      control = observation.controls[0];
-    const checkWrittenAnswer = vi.fn(() =>
-      Promise.resolve({
-        supported,
-        reason: supported
-          ? "The applicant lives in Germany."
-          : "The applicant lives in Germany, so No contradicts the recorded country.",
-      }),
-    );
-    const choose = vi.spyOn(input.hands, "chooseOption");
-    const outcome = await executeApplyProposal(
-      { tool: "select", ref: control.ref, option: answer },
-      observation.signature,
-      {
-        config: input,
-        now,
-        guardState: createApplyGuardState(),
-        checkWrittenAnswer,
-        classifyQuestions: () =>
-          Promise.resolve(
-            new Map([
-              [
-                questionPrompt(control),
-                {
-                  asksAboutPay: false,
-                  declarationKind: null,
-                  answerTags: {
-                    kind: "residence_country",
-                    country: null,
-                    sourceId: "profile.currentCountry",
-                  },
-                },
-              ],
-            ]),
-          ),
-      },
-    );
-    expect(checkWrittenAnswer).toHaveBeenCalledOnce();
-    expect(outcome.kind).toBe(supported ? "filled" : "suggestion");
-    expect(choose).toHaveBeenCalledTimes(supported ? 1 : 0);
-  },
-);
-
-test("work permission through citizenship OR a permit is checked as a whole legal question", () => {
-  const raw = page({
-    controls: [
-      field({
-        tagName: "select",
-        label:
-          "Are you currently eligible to work at the job's location either via EU citizenship or visa/work permit?*",
-        options: ["Yes", "No"],
-      }),
-    ],
-  });
-  const input = config(raw),
-    observation = buildApplyFormObservation(raw, now().toISOString()),
-    control = observation.controls[0];
-  expect(
-    classifyAnswerPermission({
-      control,
-      controls: observation.controls,
-      sources: input.sources,
-      tags: {
-        kind: "work_auth",
-        sourceId: "profile.workEligibility.authorizedWorkCountries.0",
-        country: "DE",
-        hasAdditionalConditions: false,
-      },
-      answer: "Yes",
-      pageInstructions: "",
-    }),
-  ).toMatchObject({ kind: "inference", evidencePolicy: "eligibility" });
 });
 
 test("a visible verification slider becomes an access handoff", () => {
@@ -1085,31 +917,4 @@ test("a native tab opens a panel without becoming a write or a final Send", asyn
   );
   expect(submit.kind).toBe("refused");
   expect(click).toHaveBeenCalledOnce();
-});
-
-test("a long-text LinkedIn URL request can check the recorded URL without treating it as prose", () => {
-  const raw = page({
-    controls: [
-      field({
-        tagName: "textarea",
-        label:
-          "If you have a LinkedIn profile, please provide the URL below (if you don't have a LinkedIn profile, put N/A)",
-      }),
-    ],
-  });
-  const input = config(raw);
-  input.sources.profile.linkedinUrl =
-    "https://www.linkedin.com/in/jamie-example-test";
-  const observation = buildApplyFormObservation(raw, now().toISOString()),
-    control = observation.controls[0];
-  expect(
-    classifyAnswerPermission({
-      control,
-      controls: observation.controls,
-      sources: input.sources,
-      tags: { kind: "other", sourceId: "profile.linkedinUrl", country: null },
-      answer: input.sources.profile.linkedinUrl,
-      pageInstructions: "",
-    }),
-  ).toMatchObject({ kind: "inference", evidencePolicy: "factual_inference" });
 });

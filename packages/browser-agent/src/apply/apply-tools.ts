@@ -3,7 +3,7 @@ import type { ApplyProposal } from "./types";
 const STORED_FACT_PARAMETER = {
   type: "string",
   description:
-    "For an unchanged stored value: its exact id from the stored-fact catalog. Values that differ still need an answer check. Eligibility always needs its question and hiring context checked.",
+    "Optional provenance: the id from the stored-fact catalog that informed this answer. You may format, calculate, combine and write answers without an exact source binding.",
 };
 
 /**
@@ -16,9 +16,8 @@ const STORED_FACT_PARAMETER = {
  * which button is the Apply button, because every time it has tried, it has
  * been wrong about some site a person could have used without thinking.
  *
- * The deliberate exceptions are safety, and they are small: the answer to a
- * question comes from the person's own facts rather than the model's
- * imagination, and sending an application goes through a separate check.
+ * Answers are the application model's decisions, based on the complete
+ * applicant record and settings. The host records writes and send outcomes.
  */
 
 export const APPLY_TOOL_NAMES = [
@@ -154,7 +153,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
       function: {
         name: "type",
         description:
-          "Type into one field. To fill several fields at once, use fill_fields. An answer about the person must come from their facts; Job Finder checks it before it is typed.",
+          "Type into one field. To fill several fields at once, use fill_fields. Compose the answer from the complete applicant facts and settings; Job Finder executes and records your decision.",
         parameters: {
           type: "object",
           properties: {
@@ -501,7 +500,7 @@ export const FILL_FIELDS_TOOL_DEFINITION: ApplyToolDefinition = {
   function: {
     name: "fill_fields",
     description:
-      "Complete the visible step in one call, from the first step onward: fill all answerable fields, attach the requested available documents with upload, then include thenContinue for Continue or Next when no required answer is missing. Entries use the exact single-tool arguments for type, select, set_checkbox, upload or click through the same executor, permissions and send checks. Independent stored-fact fills may run before answers waiting for a check; clicks, uploads and writes to the same field or choice group retain their order. Click may dismiss a cookie banner or add a required history row on this step; use handles already observed and read the returned page for newly revealed handles. Choose a radio with set_checkbox on its option's ref. A refusal, pause, navigation, changed step or newly revealed question after a field write stops the rest and names entries not attempted. Ordinary upload buttons changing or a chore click revealing a row on this same page do not stop planned entries. Omit thenContinue when a question needs the person; fill everything else, then finish once. Never use this tool to send. Validation errors or an unchanged step are reported with one fresh page observation.",
+      "Complete the visible step in one call, from the first step onward: fill all answerable fields, attach the requested available documents with upload, then include thenContinue for Continue or Next when no required answer is missing. Entries use the exact single-tool arguments for type, select, set_checkbox, upload or click through the same executor. Fields execute in the supplied order; clicks, uploads and writes to the same field or choice group retain their order. Click may dismiss a cookie banner or add a required history row on this step; use handles already observed and read the returned page for newly revealed handles. Choose a radio with set_checkbox on its option's ref. A refusal, pause, navigation, changed step or newly revealed question after a field write stops the rest and names entries not attempted. Ordinary upload buttons changing or a chore click revealing a row on this same page do not stop planned entries. Omit thenContinue when a question needs the person; fill everything else, then finish once. Never use this tool to send. Validation errors or an unchanged step are reported with one fresh page observation.",
     parameters: {
       type: "object",
       properties: {
@@ -542,7 +541,7 @@ export const FILL_FIELDS_TOOL_DEFINITION: ApplyToolDefinition = {
               documentId: {
                 type: "string",
                 description:
-                  "For upload: an id from the available document list, or letter for an observed cover-letter field. Job Finder writes and checks a missing permitted letter locally; put that upload after the other fields so its writing can overlap their fills.",
+                  "For upload: an id from the available document list, or letter for an observed cover-letter field. Job Finder writes a missing permitted letter locally; put that upload after the other fields so its writing can overlap their fills.",
               },
               reason: {
                 type: "string",

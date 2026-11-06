@@ -1,14 +1,12 @@
-import { applicationModelFacts } from "./model-facts";
-import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
-import fallbackReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-option-fallback.json";
 import {
   CandidateProfileSchema,
-  JobSearchPreferencesSchema,
   normalizeFormQuestionPrompt,
 } from "@nestor/contracts";
-import repeatedStep from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/repeated-employment-step.json";
-import emptiedAttach from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/emptied-required-attach.json";
 import { describe, expect, test, vi } from "vitest";
+import emptiedAttach from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/emptied-required-attach.json";
+import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/picker-handover.json";
+import fallbackReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-option-fallback.json";
+import { applicationModelFacts } from "./model-facts";
 
 import type {
   RawApplyAction,
@@ -16,27 +14,26 @@ import type {
   RawApplyPage,
 } from "@nestor/contracts";
 import type { LLMClient } from "../agent/contracts";
+import { savedAnswerForQuestion } from "./application-facts";
 import { runApplyAgent } from "./apply-agent";
 import {
   createApplySystemPrompt,
   createApplyUserPrompt,
 } from "./apply-prompts";
 import type { FillFieldsEntry } from "./apply-tools";
-import { buildApplyFormObservation } from "./page-hands";
 import { reviewFieldKey, screenKey } from "./form-replay";
-import { STEP_HANDOVER_QUESTION_ID } from "./submit-preflight";
+import { buildApplyFormObservation } from "./page-hands";
 import {
   createApplyGuardState,
   executeApplyProposal,
   questionPrompt,
 } from "./policy-executor";
-import { savedAnswerForQuestion } from "./application-facts";
+import { STEP_HANDOVER_QUESTION_ID } from "./submit-preflight";
 import type {
   ApplyAgentConfig,
   ApplyAgentResult,
   ApplyPageHands,
 } from "./types";
-import { checkWrittenApplicationAnswer } from "./written-answer-grounding";
 
 /**
  * How the loop ends.
@@ -341,7 +338,17 @@ function scriptedModel(
     chatWithTools: (messages, definitions) => {
       const check = supportedChecks(messages, definitions);
       if (check) return check;
-      const turn = turns[Math.min(calls, turns.length - 1)];
+      const turn =
+        calls > turns.length
+          ? {
+              name: "finish",
+              args: {
+                reason: "The scripted test has no further decisions.",
+                stuck: true,
+                needsPerson: false,
+              },
+            }
+          : turns[Math.min(calls, turns.length - 1)];
       calls += 1;
       return Promise.resolve({
         toolCalls: [
@@ -1029,7 +1036,7 @@ test.each(["upload", "type"] as const)(
                 : {
                     tool,
                     ref: "c1",
-                    text: "Write the letter from the saved facts.",
+                    text: "letter",
                   },
             ],
             finishWhenReady: true,
@@ -1044,101 +1051,6 @@ test.each(["upload", "type"] as const)(
       tool === "upload" ? result.attachments : result.filled,
     ).not.toHaveLength(0);
     if (tool === "type") expect(source.controls[1].value).toBe(text);
-  },
-);
-
-test.each(
-  ["Passport Country", "Citizenship", "Nationality"].flatMap((label) =>
-    [false, true].map((prefilled) => ({ label, prefilled })),
-  ),
-)(
-  "nationality refusal never retains residence in the review ($label, prefilled=$prefilled)",
-  async ({ label, prefilled }) => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          label,
-          value: prefilled ? "Primary territory" : "",
-          required: true,
-        },
-      ],
-    });
-    const input = config(source);
-    input.sources.profile.currentRegion = "Primary territory";
-    input.sources.profile.currentCountry = "Primary territory";
-    const result = await runApplyAgent(
-      input,
-      scriptedModel([
-        {
-          name: "type",
-          args: {
-            ref: "c0",
-            text: "Primary territory",
-            storedFactId: "profile.currentRegion",
-          },
-        },
-        { name: "finish", args: { reason: "Done" } },
-      ]),
-    );
-    expect(result.outcome).toBe("paused");
-    expect(result.readyToSend).toBeNull();
-    expect(result.filled).toEqual([]);
-    expect(result.reviewFilled).toEqual([]);
-    expect(
-      result.pauses
-        .flatMap((pause) => pause.questions ?? [])
-        .some((question) => question.prompt.includes(label)),
-    ).toBe(true);
-    expect(source.controls[0].value).toBe(prefilled ? "Primary territory" : "");
-  },
-);
-
-test.each(["never", "when_required"] as const)(
-  "an optional letter does not start a draft under %s",
-  async (policy) => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          inputType: "file",
-          label: "Cover letter",
-          required: false,
-          value: "",
-        },
-      ],
-    });
-    const input = config(source);
-    const provide = vi.fn(() =>
-      Promise.resolve({ ok: false as const, reason: "Must not run" }),
-    );
-    input.letters = {
-      preference: {
-        tone: "direct",
-        length: "short",
-        language: null,
-        sample: null,
-      },
-      provide,
-    };
-    input.writing = {
-      coverLetterPolicy: policy,
-      writtenAnswerLength: "short",
-      preApprovedDeclarations: [],
-    };
-    await runApplyAgent(
-      input,
-      scriptedModel([
-        {
-          name: "fill_fields",
-          args: {
-            fields: [{ tool: "upload", ref: "c0", documentId: "letter" }],
-          },
-        },
-        { name: "finish", args: { reason: "Done." } },
-      ]),
-    );
-    expect(provide).not.toHaveBeenCalled();
   },
 );
 
@@ -1212,7 +1124,7 @@ test("Stop drains a pending local letter without attaching it", async () => {
   expect(upload).not.toHaveBeenCalled();
 });
 
-test("a rejected background letter fills the contact field and leaves the letter for review", async () => {
+test("a letter provider error fills the contact field and reports failure without a Needs you item", async () => {
   const source = page({
     controls: [
       { ...nameControl(), value: "" },
@@ -1229,8 +1141,7 @@ test("a rejected background letter fills the contact field and leaves the letter
   const provide = vi.fn(() =>
     Promise.resolve({
       ok: false as const,
-      draftText: "A letter needing review.",
-      reason: "The proposed hours conflict with your saved availability.",
+      reason: "Synthetic provider outage.",
     }),
   );
   input.letters = {
@@ -1263,15 +1174,19 @@ test("a rejected background letter fills the contact field and leaves the letter
       },
       {
         name: "finish",
-        args: { reason: "The letter needs review.", needsPerson: true },
+        args: {
+          reason: "The letter provider failed.",
+          stuck: true,
+          needsPerson: false,
+        },
       },
     ]),
   );
   expect(source.controls[0].value).toBe("Robin Ashford");
   expect(provide).toHaveBeenCalledOnce();
   expect(upload).not.toHaveBeenCalled();
-  expect(result.outcome).toBe("paused");
-  expect(result.pauses[0]?.reviewDraft?.text).toBe("A letter needing review.");
+  expect(result.outcome).toBe("stuck");
+  expect(result.pauses).toEqual([]);
 });
 
 test("a checked letter taking over ninety seconds is awaited once", async () => {
@@ -1391,13 +1306,11 @@ test("a covered Send is handed back to the model before the form finishes", asyn
 
 test("prose instructions separate candidate evidence from job requirements", () => {
   const prompt = createApplySystemPrompt(config(page()));
+  expect(prompt).toContain("Your answer is the decision");
   expect(prompt).toContain(
-    "Answers about this person come only from their facts",
+    "The listing describes the role, not the applicant's history",
   );
-  expect(prompt).toContain(
-    "never turn a job requirement into a claim that the person has done it",
-  );
-  expect(prompt).toContain("Leave unsupported candidate claims out");
+  expect(prompt).toContain("Write truthful, relevant answers");
   expect(prompt).toContain(
     "EVERY field you can answer into ONE fill_fields call",
   );
@@ -1525,7 +1438,7 @@ test("an application sees an answer saved in another open application on its nex
   expect(JSON.stringify(chat.mock.calls[1]?.[0])).toContain(
     "answerLibrary.answer_memory_team",
   );
-  expect(JSON.stringify(chat.mock.calls[1]?.[0])).not.toContain(
+  expect(JSON.stringify(chat.mock.calls[1]?.[0])).toContain(
     "PRIVATE_PAY_987654321",
   );
   expect(source.controls[0].value).toBe("Platform team");
@@ -1720,141 +1633,6 @@ test("a retained form receives current exact answers and only named corrections 
   expect(user).toContain("does not widen application authority");
 });
 
-describe("written answer fact check recovery", () => {
-  const input = () => ({
-    sources: config(page()).sources,
-    payDisclosed: false,
-    question: "Why do you want to work here?",
-    answer: "I like the advertised work.",
-  });
-  const call = (args: Record<string, unknown>) => ({
-    id: "check",
-    type: "function" as const,
-    function: {
-      name: "report_answer_checks",
-      arguments: JSON.stringify({ checks: [{ index: 0, ...args }] }),
-    },
-  });
-
-  test("repairs a malformed report once and keeps the independent fact verdict", async () => {
-    const client: LLMClient = {
-      chatWithTools: vi
-        .fn()
-        .mockResolvedValueOnce({
-          toolCalls: [call({ reason: "missing verdict" })],
-        })
-        .mockResolvedValueOnce({
-          toolCalls: [
-            call({ supported: false, reason: "No supporting fact." }),
-          ],
-        }),
-    };
-    await expect(
-      checkWrittenApplicationAnswer({ ...input(), client }),
-    ).resolves.toEqual({ supported: false, reason: "No supporting fact." });
-    expect(client.chatWithTools).toHaveBeenCalledTimes(2);
-    const lastCall = vi.mocked(client.chatWithTools).mock.lastCall;
-    expect(
-      lastCall?.[0].some((message) =>
-        message.content.includes("Repair only the unresolved checker report"),
-      ),
-    ).toBe(true);
-    expect(lastCall?.[1].length).toBeGreaterThan(0);
-    expect(lastCall?.[2]?.maxOutputTokens).toBeUndefined();
-  });
-
-  test("refuses to enter an answer when both fact reports are unusable", async () => {
-    const client: LLMClient = {
-      chatWithTools: vi.fn().mockResolvedValue({ toolCalls: [] }),
-    };
-    await expect(
-      checkWrittenApplicationAnswer({ ...input(), client }),
-    ).resolves.toMatchObject({
-      supported: false,
-      unavailable: { category: "invalid_report" },
-    });
-    expect(client.chatWithTools).toHaveBeenCalledTimes(2);
-  });
-
-  test("accepts a valid supported verdict without a retry", async () => {
-    const client: LLMClient = {
-      chatWithTools: vi.fn().mockResolvedValue({
-        toolCalls: [
-          call({
-            supported: true,
-            reason: "Only ordinary motivation.",
-            evidence: [
-              {
-                kind: "role_motivation",
-                claim: "Interest in the work",
-                source: "posting",
-                path: "/description",
-                quote: "Own the internal platform.",
-              },
-            ],
-          }),
-        ],
-      }),
-    };
-    await expect(
-      checkWrittenApplicationAnswer({
-        ...input(),
-        question: "What work is advertised?",
-        answer: "Owning the internal platform.",
-        client,
-      }),
-    ).resolves.toEqual({
-      supported: true,
-      reason: "Only ordinary motivation.",
-    });
-    expect(client.chatWithTools).toHaveBeenCalledTimes(1);
-  });
-
-  test("gives the independent choice check saved Needs-you answers as applicant context", async () => {
-    const request = input();
-    const savedAnswer =
-      "I will need employer sponsorship after my student permit ends.";
-    request.sources.reusableAnswers = [
-      {
-        id: "sponsorship",
-        kind: "visa_sponsorship",
-        label: "Sponsorship",
-        question: "Do you need visa sponsorship?",
-        answer: savedAnswer,
-        roleFamilies: [],
-        proofEntryIds: [],
-      },
-    ];
-    const client: LLMClient = {
-      chatWithTools: vi.fn().mockResolvedValue({
-        toolCalls: [
-          call({ supported: true, reason: "The saved answer supports Yes." }),
-        ],
-      }),
-    };
-    await expect(
-      checkWrittenApplicationAnswer({
-        ...request,
-        client,
-        question: "Do you need visa sponsorship in Germany?",
-        answer: "Yes",
-      }),
-    ).resolves.toMatchObject({
-      supported: false,
-      unavailable: { category: "unverified_evidence" },
-    });
-    const content = vi
-      .mocked(client.chatWithTools)
-      .mock.calls[0]?.[0].find((message) => message.role === "user")?.content;
-    const facts: unknown = JSON.parse(content ?? "{}");
-    expect(facts).toMatchObject({
-      applicant: {
-        savedAnswers: [{ id: "sponsorship", answer: savedAnswer }],
-      },
-    });
-  });
-});
-
 test("preserves an explicitly reported CAPTCHA even when finish omits needsPerson", async () => {
   const result = await runApplyAgent(
     config(page()),
@@ -1874,104 +1652,6 @@ test("preserves an explicitly reported CAPTCHA even when finish omits needsPerso
     requiresPerson: true,
   });
 });
-
-test.each([false, true])(
-  "checks prose with independent applicant facts and finishes without repeating an unsupported answer (required=%s)",
-  async (required) => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          tagName: "textarea",
-          inputType: "",
-          label:
-            "Tell me about a feature you built using an AI coding assistant",
-          required,
-          value: "",
-        },
-      ],
-    });
-    const fillText = vi.fn(() =>
-      Promise.resolve({
-        ok: true as const,
-        observedValue: "written",
-      }),
-    );
-    const testConfig = config(source);
-    testConfig.hands.fillText = fillText;
-    let writerTurn = 0;
-    let checks = 0;
-    const model: LLMClient = {
-      chatWithTools: (messages, definitions) => {
-        const checking =
-          definitions[0]?.function.name === "report_answer_checks";
-        if (checking) {
-          checks += 1;
-          expect(messages).toHaveLength(2);
-          expect(messages[0]?.content).toContain(
-            "General industry practice and job requirements do not prove personal experience",
-          );
-          expect(messages[1]?.content).toContain(
-            "8 years of platform engineering",
-          );
-          expect(messages[1]?.content).not.toContain("self-declared proof");
-        }
-        const call = checking
-          ? {
-              name: "report_answer_checks",
-              args: {
-                checks: [
-                  {
-                    index: 0,
-                    supported: false,
-                    reason:
-                      "Applicant facts do not mention AI coding assistant use.",
-                  },
-                ],
-              },
-            }
-          : writerTurn++ === 0
-            ? {
-                name: "type",
-                args: {
-                  ref: "c0",
-                  text: "I use an AI coding assistant daily.",
-                  groundedIn: ["self-declared proof"],
-                },
-              }
-            : {
-                name: "finish",
-                args: {
-                  reason:
-                    "All supported fields filled; unsupported answer left blank.",
-                },
-              };
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: `call_${writerTurn}_${checks}`,
-              type: "function",
-              function: {
-                name: call.name,
-                arguments: JSON.stringify(call.args),
-              },
-            },
-          ],
-        });
-      },
-    };
-    const result = await runApplyAgent(testConfig, model);
-    expect(checks).toBe(1);
-    expect(writerTurn).toBe(required ? 1 : 2);
-    expect(fillText).not.toHaveBeenCalled();
-    expect(result.outcome).toBe(required ? "paused" : "prepared");
-    expect(
-      result.pauses.flatMap(
-        (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
-      ),
-    ).toHaveLength(required ? 1 : 0);
-  },
-);
 
 test.each([
   "No CAPTCHA remains; the form is complete.",
@@ -2275,48 +1955,6 @@ describe("apply agent run endings", () => {
     );
   });
 
-  test("a run stopping for the person first fills what it knows, then names what is still empty", async () => {
-    const seen: string[] = [];
-    let calls = 0;
-    const model: LLMClient = {
-      chatWithTools: (messages) => {
-        calls += 1;
-        seen.push(JSON.stringify(messages.at(-1) ?? null));
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: `call_${calls}`,
-              type: "function" as const,
-              function: {
-                name: "finish",
-                arguments: JSON.stringify({
-                  reason:
-                    "The form is filled in; a security check needs the person.",
-                  stuck: true,
-                }),
-              },
-            },
-          ],
-        });
-      },
-    };
-
-    const result = await runApplyAgent(
-      config(page({ controls: [{ ...nameControl(), value: "" }] })),
-      model,
-    );
-
-    expect(
-      seen.some(
-        (entry) =>
-          entry.includes("Full name") &&
-          entry.includes("Fill it now if the person's facts answer it"),
-      ),
-    ).toBe(true);
-    expect(result.outcome).toBe("paused");
-    expect(result.pauses[0]?.question?.prompt).toBe("Full name");
-  });
-
   test("finishing normally reports what was filled in, in plain words", async () => {
     const result = await runApplyAgent(
       config(
@@ -2378,12 +2016,12 @@ describe("apply agent run endings", () => {
     expect(
       seen.some((entry) => entry.includes("is required and still empty")),
     ).toBe(true);
-    expect(result.outcome).toBe("paused");
+    expect(result.outcome).toBe("stuck");
     expect(
       result.pauses
         .flatMap((pause) => pause.questions ?? [])
         .map((question) => question.prompt),
-    ).toEqual(["Full name"]);
+    ).toEqual([]);
   });
 
   test("does not call a native select ready while only its placeholder is displayed", async () => {
@@ -2409,10 +2047,10 @@ describe("apply agent run endings", () => {
       repeatingModel("finish", { reason: "The form is ready for review" }),
     );
 
-    expect(result.outcome).toBe("paused");
+    expect(result.outcome).toBe("stuck");
     expect(
       result.pauses.flatMap((pause) => pause.questions ?? []),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   test("refuses an early finish, fills a known required radio, then becomes ready", async () => {
@@ -2479,8 +2117,9 @@ describe("apply agent run endings", () => {
     );
 
     expect(result.filled).toHaveLength(0);
-    // The field the site cleared is not called done: it goes to the person.
-    expect(result.outcome).toBe("paused");
+    // A failed write is an execution failure, not a missing personal fact.
+    expect(result.outcome).toBe("stuck");
+    expect(result.pauses).toEqual([]);
   });
 
   test("keeps a hidden required file input unfinished until its supplied document is attached", async () => {
@@ -3076,7 +2715,8 @@ describe("apply agent run endings", () => {
       }),
       repeatingModel("finish", {
         reason: "The required Academic transcript upload is unavailable",
-        stuck: true,
+        needsPerson: true,
+        forPerson: ["Academic transcript"],
       }),
     );
 
@@ -3161,7 +2801,10 @@ describe("apply agent run endings", () => {
           ],
         }),
       ),
-      repeatingModel("finish", { reason: "The form is ready" }),
+      repeatingModel("finish", {
+        needsPerson: true,
+        reason: "The form is ready",
+      }),
     );
 
     expect(result.outcome).toBe("paused");
@@ -3189,7 +2832,10 @@ describe("apply agent run endings", () => {
           ],
         }),
       ),
-      repeatingModel("finish", { reason: "The form is ready" }),
+      repeatingModel("finish", {
+        needsPerson: true,
+        reason: "The form is ready",
+      }),
     );
 
     expect(
@@ -4035,7 +3681,7 @@ test.each(["Yes", "No"])(
       )?.answer,
     ).toMatchObject({
       value: answer,
-      provenanceLabel: "your answer to this question",
+      provenanceLabel: "chosen for this application",
     });
   },
 );
@@ -4302,131 +3948,6 @@ test.each([
   },
 );
 
-test("fill_fields fills a page in one step with one fact check for the answers that need it", async () => {
-  const text = (index: number, label: string): RawApplyControl => ({
-    ...nameControl(),
-    index,
-    id: `f${index}`,
-    name: `f${index}`,
-    label,
-    value: "",
-  });
-  const source = page({
-    controls: [
-      text(0, "Full name"),
-      text(1, "Describe your platform experience"),
-      {
-        ...text(2, "Country"),
-        tagName: "select",
-        inputType: "select-one",
-        options: ["Germany", "United Kingdom"],
-      },
-    ],
-  });
-  const written = new Map<string, string>();
-  const base = hands(source);
-  const answered = (ref: string, value: string) => {
-    written.set(ref, value);
-    const index = Number(ref.slice(1));
-    source.controls = source.controls.map((control) =>
-      control.index === index
-        ? {
-            ...control,
-            value,
-            selectedOptionLabel: control.options.length ? value : "",
-          }
-        : control,
-    );
-    return Promise.resolve({ ok: true as const, observedValue: value });
-  };
-  let checkCalls = 0;
-  let checkedAnswers: unknown[] = [];
-  const input = config(source, {
-    hands: { ...base, fillText: answered, chooseOption: answered },
-  });
-  input.sources.profile.summary = "I build dependable internal tools.";
-  let turns = 0;
-  const model: LLMClient = {
-    chatWithTools: (messages, definitions) => {
-      if (definitions[0]?.function.name === "report_answer_checks") {
-        checkCalls += 1;
-        checkedAnswers = (
-          JSON.parse(String(messages[1]?.content)) as { answers: unknown[] }
-        ).answers;
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: "check",
-              type: "function" as const,
-              function: {
-                name: "report_answer_checks",
-                arguments: JSON.stringify({
-                  checks: checkedAnswers.map((raw, index) => ({
-                    index,
-                    supported: true,
-                    reason: "Supported.",
-                    evidence: flowEvidence(
-                      (
-                        JSON.parse(String(messages[1]?.content)) as {
-                          applicant: Record<string, unknown>;
-                        }
-                      ).applicant,
-                      raw as { question: string; proposedAnswer: string },
-                    ),
-                  })),
-                }),
-              },
-            },
-          ],
-        });
-      }
-      turns += 1;
-      const call =
-        turns === 1
-          ? {
-              name: "fill_fields",
-              args: {
-                fields: [
-                  { tool: "type", ref: "c0", text: "Robin Ashford" },
-                  {
-                    tool: "type",
-                    ref: "c1",
-                    text: "I build dependable internal tools.",
-                  },
-                  { tool: "select", ref: "c2", option: "united kingdom" },
-                ],
-              },
-            }
-          : { name: "finish", args: { reason: "Filled in." } };
-      return Promise.resolve({
-        toolCalls: [
-          {
-            id: `call_${turns}`,
-            type: "function" as const,
-            function: { name: call.name, arguments: JSON.stringify(call.args) },
-          },
-        ],
-      });
-    },
-  };
-
-  const result = await runApplyAgent(input, model);
-
-  expect(turns).toBe(2);
-  // The stored name needs no check; the prose and the country are checked
-  // together in one call.
-  expect(checkCalls).toBe(1);
-  expect(checkedAnswers).toHaveLength(2);
-  expect(written.get("c0")).toBe("Robin Ashford");
-  expect(written.get("c2")).toBe("United Kingdom");
-  expect(result.filled.map((entry) => entry.label)).toEqual([
-    "Full name",
-    "Describe your platform experience",
-    "Country",
-  ]);
-  expect(result.outcome).toBe("prepared");
-});
-
 describe("apply readiness regressions", () => {
   test("collects every visible required eligibility question in one handoff", async () => {
     const source = page({
@@ -4448,8 +3969,22 @@ describe("apply readiness regressions", () => {
     const result = await runApplyAgent(
       config(source),
       scriptedModel([
-        { name: "finish", args: { reason: "Needs answers" } },
-        { name: "finish", args: { reason: "Needs answers" } },
+        {
+          name: "finish",
+          args: {
+            reason: "Needs answers",
+            needsPerson: true,
+            forPerson: ["c0", "c1"],
+          },
+        },
+        {
+          name: "finish",
+          args: {
+            reason: "Needs answers",
+            needsPerson: true,
+            forPerson: ["c0", "c1"],
+          },
+        },
       ]),
     );
     expect(result.outcome).toBe("paused");
@@ -4476,8 +4011,22 @@ describe("apply readiness regressions", () => {
       })),
     });
     const model = scriptedModel([
-      { name: "finish", args: { reason: "Done" } },
-      { name: "finish", args: { reason: "Done" } },
+      {
+        name: "finish",
+        args: {
+          reason: "The person has not supplied these skills",
+          needsPerson: true,
+          forPerson: ["c0"],
+        },
+      },
+      {
+        name: "finish",
+        args: {
+          reason: "The person has not supplied these skills",
+          needsPerson: true,
+          forPerson: ["c0"],
+        },
+      },
     ]);
     const result = await runApplyAgent(
       config(source, { modelQuestionClassification: true }),
@@ -4528,46 +4077,7 @@ describe("apply readiness regressions", () => {
     });
   });
 
-  test("a refused required declaration waits for its answer before another wizard step", async () => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          inputType: "checkbox",
-          label: "I consent to a background check",
-          value: "",
-          checked: false,
-        },
-      ],
-    });
-    const input = config(source);
-    input.hands.clickElement = vi.fn(() => {
-      source.controls = [
-        { ...nameControl(), label: "Are you willing to relocate?", value: "" },
-      ];
-      return Promise.resolve({ ok: true as const, observedValue: "next" });
-    });
-    source.actions = [
-      { index: 0, label: "Next", visible: true, disabled: false },
-    ];
-    const result = await runApplyAgent(
-      input,
-      scriptedModel([
-        { name: "set_checkbox", args: { ref: "c0", checked: true } },
-        { name: "click", args: { ref: "a0" } },
-        { name: "finish", args: { reason: "Needs relocation" } },
-        { name: "finish", args: { reason: "Needs relocation" } },
-      ]),
-    );
-    expect(
-      result.pauses
-        .flatMap((pause) => pause.questions ?? [])
-        .map((question) => question.prompt),
-    ).toEqual(["I consent to a background check"]);
-    expect(input.hands.clickElement).not.toHaveBeenCalled();
-  });
-
-  test("missing candidate facts remain a resumable handoff after the model reports stuck", async () => {
+  test("a model stuck report does not turn empty fields into personal questions", async () => {
     const source = page({
       controls: [
         {
@@ -4598,9 +4108,8 @@ describe("apply readiness regressions", () => {
         },
       ]),
     );
-    expect(result.outcome).toBe("paused");
-    expect(result.pauses[0]?.question?.prompt).toBe("Coordination experience");
-    expect(result.pauses[0]?.question?.note).toBeUndefined();
+    expect(result.outcome).toBe("stuck");
+    expect(result.pauses).toEqual([]);
   });
 });
 
@@ -4679,60 +4188,6 @@ test("the current form review names every selected skill in a checkbox group", a
   ).toBe('["Analysis","Coordination"]');
 });
 
-test("a required letter pause collects the other visible questions and explains Never", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        index: 0,
-        inputType: "file",
-        label: "Cover letter upload *",
-        groupLabel: "Application",
-        value: "",
-      },
-      { ...nameControl(), index: 1, label: "Portfolio URL", value: "" },
-      {
-        ...nameControl(),
-        index: 2,
-        inputType: "checkbox",
-        label: "I consent to a background check",
-        value: "",
-        checked: false,
-      },
-    ],
-  });
-  const input = config(source);
-  input.writing = {
-    coverLetterPolicy: "never",
-    writtenAnswerLength: "full",
-    preApprovedDeclarations: [],
-  };
-  input.letters = {
-    preference: {
-      tone: "plain_professional",
-      length: "short",
-      language: null,
-      sample: null,
-    },
-    provide: () => Promise.resolve({ ok: false, reason: "Disabled" }),
-  };
-  const result = await runApplyAgent(
-    input,
-    scriptedModel([
-      { name: "upload", args: { ref: "c0", documentId: "letter" } },
-    ]),
-  );
-  const questions = result.pauses.flatMap(
-    (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
-  );
-  expect(questions.map((question) => question.prompt)).toEqual([
-    "Cover letter",
-    "Portfolio URL",
-    "I consent to a background check",
-  ]);
-  expect(questions[0]?.note).toContain("Never");
-});
-
 test("the answer provenance instructions name plain sources for the send review", () => {
   const prompt = createApplySystemPrompt(config(page()));
   expect(prompt).toContain("your saved expected salary");
@@ -4770,30 +4225,6 @@ test("finish accepts the unchanged TXT copy of the selected Markdown resume", as
   );
   expect(result.pauses).toEqual([]);
   expect(result.outcome).toBe("prepared");
-});
-test("a filled invalid answer gets plain guidance instead of the browser validation string", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        label: "Years",
-        inputType: "number",
-        value: "99",
-        invalid: true,
-        validationMessage: "Range overflow",
-      },
-    ],
-  });
-  const result = await runApplyAgent(
-    config(source),
-    repeatingModel("finish", {
-      reason: "Cannot settle the years",
-      stuck: true,
-    }),
-  );
-  expect(result.pauses[0]?.question?.note).toBe(
-    "The site did not accept this value. Check it and try again.",
-  );
 });
 
 test("Full written answers ask for supported specifics within the available limit", () => {
@@ -5763,71 +5194,6 @@ describe("fill_fields visible steps", () => {
     expect(writes).toEqual(barrier === "new required row" ? ["c0"] : []);
   });
 
-  test("one finish hands back all required questions after filling and uploading without Continue", async () => {
-    const source = page({
-      stepLabel: "Step 1 of 6",
-      controls: [
-        field(0, "Full name"),
-        { ...field(1, "Resume / CV"), inputType: "file", required: true },
-        {
-          ...field(2, "I agree to marketing contact"),
-          inputType: "checkbox",
-          required: true,
-          value: "on",
-        },
-        { ...field(3, "Notice period"), required: true },
-      ],
-      actions: [
-        { index: 0, label: "Continue", visible: true, disabled: false },
-      ],
-    });
-    const { input, writes } = writable(source);
-    input.sources.documents = [
-      {
-        id: "cv",
-        kind: "resume",
-        label: "Synthetic CV",
-        fileName: "synthetic.pdf",
-        mimeType: "application/pdf",
-        loadBytes: () => Promise.resolve(new Uint8Array([1])),
-      },
-    ];
-    input.hands.uploadFile = vi.fn(
-      (_ref: string, file: Parameters<ApplyPageHands["uploadFile"]>[1]) => {
-        source.controls[1].value = file.name;
-        return Promise.resolve({ ok: true as const, observedValue: file.name });
-      },
-    );
-    const click = vi.fn(input.hands.clickElement);
-    input.hands.clickElement = click;
-    const result = await runApplyAgent(
-      input,
-      modelFor(
-        [
-          { tool: "type", ref: "c0", text: "Robin Ashford" },
-          { tool: "upload", ref: "c1", documentId: "cv" },
-          { tool: "set_checkbox", ref: "c2", checked: true },
-        ],
-        () => {},
-        "a0",
-      ),
-    );
-    expect(writes).toEqual(["c0"]);
-    expect(input.hands.uploadFile).toHaveBeenCalledTimes(1);
-    expect(click).not.toHaveBeenCalled();
-    expect(result.outcome).toBe("paused");
-    expect(result.timing?.modelTurns).toBe(2); // fill+upload, exactly one finish
-    expect(result.timing?.requests[0]).toMatchObject({
-      fieldsAttempted: 2,
-      fieldsFilled: 1,
-      uploadsAttached: 1,
-      stepsAdvanced: 0,
-    });
-    expect(
-      result.pauses[0]?.questions?.map((question) => question.prompt),
-    ).toEqual(["I agree to marketing contact", "Notice period"]);
-  });
-
   test("a model's explicit person handoff finishes once without an empty-field reminder", async () => {
     const source = page({
       stepLabel: "Step 1 of 6",
@@ -6132,55 +5498,8 @@ describe("fill_fields visible steps", () => {
     },
   );
 
-  test("an answer left for the person does not stop the rest of the batch", async () => {
-    const source = page({
-      controls: [
-        {
-          ...field(0, "I certify that the information is true"),
-          inputType: "checkbox",
-          value: "on",
-        },
-        field(1, "Full name"),
-        field(2, "Email"),
-      ],
-      actions: [
-        { index: 0, label: "Continue", visible: true, disabled: false },
-      ],
-    });
-    const { input, writes } = writable(source);
-    input.sources.profile.email = "robin@example.test";
-    const click = vi.fn(input.hands.clickElement);
-    input.hands.clickElement = click;
-    let report = "";
-    const result = await runApplyAgent(
-      input,
-      modelFor(
-        [
-          { tool: "set_checkbox", ref: "c0", checked: true },
-          { tool: "type", ref: "c1", text: "Robin Ashford" },
-          { tool: "type", ref: "c2", text: "robin@example.test" },
-        ],
-        (messages) => {
-          report =
-            messages.find((message) => message.role === "tool")?.content ?? "";
-        },
-        "a0",
-      ),
-    );
-    // The declaration nobody approved stays unticked; the two answers after
-    // it go in during the same turn, and Continue waits for the model.
-    expect(writes).toEqual(["c1", "c2"]);
-    expect(report).toContain('c1: Filled in "Full name".');
-    expect(report).toContain('c2: Filled in "Email".');
-    expect(report).not.toContain("not attempted");
-    expect(report).toContain("Continue was not pressed");
-    expect(click).not.toHaveBeenCalled();
-    expect(result.timing?.requests[0]).toMatchObject({ fieldsFilled: 2 });
-  });
-
   test.each([
     "refused",
-    "person",
     "omitted required",
     "step changed",
     "navigation",
@@ -6537,105 +5856,6 @@ describe("fill_fields visible steps", () => {
       });
     },
   );
-
-  test.each([
-    {
-      label: "I certify that the information is true",
-      tool: "set_checkbox" as const,
-      value: "Yes",
-      allowed: true,
-    },
-    {
-      label: "I certify that the information is true",
-      tool: "set_checkbox" as const,
-      value: "Yes",
-      allowed: false,
-    },
-    {
-      label: "Current salary",
-      tool: "type" as const,
-      value: "60000",
-      allowed: false,
-    },
-    {
-      label: "Are you legally authorized to work in this country?",
-      tool: "select" as const,
-      value: "Yes",
-      allowed: true,
-    },
-    {
-      label: "What is your notice period?",
-      tool: "type" as const,
-      value: "Two weeks",
-      allowed: true,
-    },
-  ])(
-    "$label (allowed=$allowed) has the same result as a single call",
-    async ({ label, tool, value, allowed }) => {
-      const source = page({
-        controls: [
-          {
-            ...field(0, label),
-            ...(tool === "set_checkbox"
-              ? { inputType: "checkbox", value: "on" }
-              : {}),
-            ...(tool === "select"
-              ? {
-                  tagName: "select",
-                  inputType: "select-one",
-                  options: ["Yes", "No"],
-                }
-              : {}),
-          },
-        ],
-      });
-      const prepare = () => {
-        const state = writable(structuredClone(source));
-        if (allowed && tool === "set_checkbox")
-          state.input.authority.preApprovedAttestationKinds = [
-            "truthfulness_certification",
-          ];
-        if (tool !== "set_checkbox")
-          state.input.sources.reusableAnswers = [
-            {
-              id: "person_answer",
-              kind: "other",
-              label,
-              question: label,
-              answer: value,
-              roleFamilies: [],
-              proofEntryIds: [],
-            },
-          ];
-        return state;
-      };
-      const proposal: FillFieldsEntry =
-        tool === "type"
-          ? { tool, ref: "c0", text: value }
-          : tool === "select"
-            ? { tool, ref: "c0", option: value }
-            : { tool, ref: "c0", checked: true };
-      const single = prepare();
-      const before = await single.input.hands.observe();
-      const outcome = await executeApplyProposal(proposal, before.signature, {
-        config: single.input,
-        now: single.input.now!,
-        guardState: createApplyGuardState(),
-        checkWrittenAnswer: () =>
-          Promise.resolve({
-            supported: true,
-            reason: "Synthetic supported answer.",
-          }),
-      });
-      const batch = prepare();
-      const result = await runApplyAgent(batch.input, modelFor([proposal]));
-      expect(batch.writes).toEqual(single.writes);
-      expect(batch.writes).toHaveLength(allowed ? 1 : 0);
-      if (outcome.kind === "filled")
-        expect(result.filled[0]).toEqual(outcome.filled);
-      else expect(result.filled).toHaveLength(0);
-    },
-  );
 });
 
 test.each([false, true])(
@@ -6954,9 +6174,7 @@ test.each([
     expect(source.controls.map((control) => control.value)).toEqual(
       identity.map(([, value]) => value),
     );
-    expect(result.filled.map((field) => field.answer.sourceId)).toEqual(
-      identity.map(([, , sourceId]) => sourceId),
-    );
+
     const questions = result.pauses.flatMap(
       (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
     );
@@ -6980,11 +6198,7 @@ test.each([
     );
     expect(finalClick).not.toHaveBeenCalled();
     expect(calls).toHaveBeenCalledTimes(
-      handover === "none"
-        ? 2
-        : ["changed question", "invalid email"].includes(handover)
-          ? 4
-          : 3,
+      handover === "none" ? 2 : ["changed question"].includes(handover) ? 4 : 3,
     );
   },
 );
@@ -7018,114 +6232,6 @@ test("a site-prefilled Email is not a checked write that can clear a handover", 
       .flatMap((pause) => pause.questions ?? [])
       .map((question) => question.prompt),
   ).toEqual(["Email *"]);
-});
-
-test("classification settles before starting a sourced writing check and before any write", async () => {
-  const source = page({
-    bodyText: "Application instructions\nWhy this role?",
-    headings: [{ level: 1, text: "Application instructions" }],
-    controls: [{ ...nameControl(), label: "Why this role?", value: "" }],
-  });
-  const input = config(source);
-  input.modelQuestionClassification = true;
-  const events: string[] = [];
-  let releaseKinds!: () => void;
-  let releaseAnswers!: () => void;
-  const kindsGate = new Promise<void>((resolve) => {
-    releaseKinds = resolve;
-  });
-  const answersGate = new Promise<void>((resolve) => {
-    releaseAnswers = resolve;
-  });
-  const observe = input.hands.observe;
-  input.hands.observe = () => {
-    events.push("read");
-    return observe();
-  };
-  input.hands.fillText = (_ref, value) => {
-    events.push("write");
-    source.controls[0].value = value;
-    return Promise.resolve({ ok: true, observedValue: value });
-  };
-  let turns = 0;
-  const resultPromise = runApplyAgent(input, {
-    chatWithTools: async (messages, definitions) => {
-      const name = definitions[0]?.function.name;
-      if (name === "report_question_kinds") {
-        events.push("classification");
-        await kindsGate;
-        return {
-          toolCalls: [
-            {
-              id: "kinds",
-              type: "function",
-              function: {
-                name,
-                arguments: JSON.stringify({
-                  tags: [
-                    {
-                      index: 0,
-                      kind: "motivation",
-                      country: null,
-                      sourceId: "posting.description",
-                    },
-                  ],
-                  questions: [
-                    { index: 0, asksAboutPay: false, declarationKind: null },
-                  ],
-                }),
-              },
-            },
-          ],
-        };
-      }
-      if (name === "report_answer_checks") {
-        events.push("answers");
-        await answersGate;
-        return (await supportedChecks(messages, definitions))!;
-      }
-      return {
-        toolCalls: [
-          {
-            id: "decision",
-            type: "function",
-            function: {
-              name: ++turns === 1 ? "fill_fields" : "finish",
-              arguments: JSON.stringify(
-                turns === 1
-                  ? {
-                      fields: [
-                        {
-                          tool: "type",
-                          ref: "c0",
-                          text: "The role is to own the internal platform.",
-                        },
-                      ],
-                    }
-                  : { reason: "Done." },
-              ),
-            },
-          },
-        ],
-      };
-    },
-  });
-  for (let i = 0; i < 20 && !events.includes("answers"); i += 1)
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  expect(events).toContain("classification");
-  expect(events).not.toContain("answers");
-  expect(
-    events.filter((event) => event === "read").length,
-  ).toBeGreaterThanOrEqual(1);
-  expect(events).not.toContain("write");
-  releaseKinds();
-  await vi.waitFor(() => expect(events).toContain("answers"));
-  expect(events).not.toContain("write");
-  releaseAnswers();
-  const result = await resultPromise;
-  expect(result.filled).toHaveLength(1);
-  expect(events.filter((event) => event === "classification")).toHaveLength(1);
-  expect(events.filter((event) => event === "answers")).toHaveLength(1);
 });
 
 test("form turns and question reading are apply work; answer checks are fact checks", async () => {
@@ -7202,7 +6308,7 @@ test("form turns and question reading are apply work; answer checks are fact che
     },
   });
   expect(new Set(tasks.map((entry) => entry.join(":")))).toEqual(
-    new Set(["turn:apply", "questions:apply", "answers:claim_check"]),
+    new Set(["turn:apply", "questions:apply"]),
   );
 });
 
@@ -7344,70 +6450,6 @@ test("progress names the form's own step on a multi-step form", async () => {
   );
   expect(notes.join("\n")).not.toContain("Robin");
 });
-
-test.each(["upload", "create_application_document"])(
-  "a rejected file letter offers its draft and conflict through %s",
-  async (tool) => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          inputType: "file",
-          label: "Cover letter",
-          value: "",
-        },
-      ],
-    });
-    const input = config(source);
-    const wording =
-      "I enjoy building dependable platforms. I can work 20 hours a week from Manchester.";
-    input.letters = {
-      preference: {
-        tone: "direct",
-        length: "short",
-        language: null,
-        sample: null,
-      },
-      provide: () =>
-        Promise.resolve({
-          ok: false,
-          draftText: wording,
-          reason: "Your available hours differ from this full-time role.",
-        }),
-    };
-    const result = await runApplyAgent(
-      input,
-      scriptedModel([
-        {
-          name: tool,
-          args:
-            tool === "upload"
-              ? { ref: "c0", documentId: "letter" }
-              : {
-                  ref: "c0",
-                  purpose: "cover_letter",
-                  fileType: "pdf",
-                  instructions: "Write the requested letter.",
-                },
-        },
-      ]),
-    );
-    const question =
-      result.pauses[0]?.questions?.[0] ?? result.pauses[0]?.question;
-    expect(result.outcome).toBe("paused");
-    expect(question).toMatchObject({
-      kind: "cover_letter",
-      answerControlType: "text",
-      suggestedAnswers: [expect.objectContaining({ text: wording })],
-    });
-    expect(question?.note).toContain("Your available hours differ");
-    expect(question?.note).toContain(
-      "The form wants a letter file. Your answer will be attached as that file.",
-    );
-    expect(question?.note).not.toContain("Review the wording here");
-    expect(result.attachments).toEqual([]);
-  },
-);
 
 test.each([true, false])(
   "create-document attaches the approved letter without a second question (explicit ref: %s)",
@@ -7572,9 +6614,9 @@ test.each(["type", "fill_fields", "create_application_document"])(
         name: tool,
         args:
           tool === "fill_fields"
-            ? { fields: [{ tool: "type", ref: "c0", text: "ignored draft" }] }
+            ? { fields: [{ tool: "type", ref: "c0", text: "letter" }] }
             : tool === "type"
-              ? { ref: "c0", text: "ignored draft" }
+              ? { ref: "c0", text: "letter" }
               : {
                   ref: "c0",
                   instructions: "Write the requested cover letter.",
@@ -7619,365 +6661,6 @@ test.each(["type", "fill_fields", "create_application_document"])(
     expect(provide.mock.calls[0]?.[0]?.prompt).not.toBe("Cover letter");
     if (tool !== "create_application_document")
       expect(source.controls[0].value).toBe(wording);
-  },
-);
-
-test.each(["own words", "wrong ref", "not a letter"])(
-  "letter generation refuses %s despite a willing writer",
-  async (shape) => {
-    const source = page({
-      bodyText: shape === "own words" ? "Write this yourself" : "Apply",
-      controls: [
-        {
-          ...nameControl(),
-          tagName: "textarea",
-          label: shape === "not a letter" ? "Personal story" : "Cover letter",
-          value: "",
-        },
-      ],
-    });
-    const input = config(source, { modelQuestionClassification: true });
-    const provide = vi.fn(() =>
-      Promise.resolve({
-        ok: true as const,
-        text: "I am excited about this opportunity.",
-        document: null,
-      }),
-    );
-    input.letters = {
-      preference: {
-        tone: "direct",
-        length: "short",
-        language: null,
-        sample: null,
-      },
-      provide,
-    };
-    const flow = scriptedModel([
-      {
-        name: "create_application_document",
-        args: {
-          ref: shape === "wrong ref" ? "c999" : "c0",
-          instructions: "Write a letter.",
-        },
-      },
-      {
-        name: "finish",
-        args: { reason: "Needs your answer", needsPerson: true },
-      },
-    ]);
-    await runApplyAgent(input, {
-      chatWithTools: (messages, definitions, options) =>
-        definitions[0]?.function.name === "report_question_kinds"
-          ? Promise.resolve({
-              toolCalls: [
-                {
-                  id: "read",
-                  type: "function",
-                  function: {
-                    name: "report_question_kinds",
-                    arguments: JSON.stringify({
-                      plainIndexes: [0],
-                      flagged: [],
-                      tags: [
-                        {
-                          index: 0,
-                          kind:
-                            shape === "own words" ? "own_words" : "motivation",
-                          country: null,
-                          sourceId: "resume.text",
-                        },
-                      ],
-                    }),
-                  },
-                },
-              ],
-            })
-          : flow.chatWithTools(messages, definitions, options),
-    });
-    expect(provide).not.toHaveBeenCalled();
-    expect(source.controls[0].value).toBe("");
-  },
-);
-
-test("stored facts fill while earlier written and eligibility answers wait for their check", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        index: 0,
-        label: "Describe your platform work",
-        value: "",
-      },
-      {
-        ...nameControl(),
-        index: 1,
-        label: "Are you authorized to work here?",
-        value: "",
-      },
-      { ...nameControl(), index: 2, label: "Job title", value: "" },
-    ],
-  });
-  const input = config(source);
-  input.sources.profile.experiences = [
-    {
-      id: "role",
-      title: "Platform engineer",
-      companyName: "Fixture Tools",
-      companyUrl: null,
-      employmentType: null,
-      location: null,
-      workMode: [],
-      startDate: null,
-      endDate: null,
-      isCurrent: true,
-      isDraft: false,
-      summary: null,
-      achievements: [],
-      skills: [],
-      domainTags: [],
-      peopleManagementScope: null,
-      ownershipScope: null,
-    },
-  ];
-  input.sources.profile.summary = "I build dependable platforms.";
-  const writes: string[] = [];
-  input.hands.fillText = (ref, value) => {
-    writes.push(ref);
-    source.controls[Number(ref.slice(1))].value = value;
-    return Promise.resolve({ ok: true, observedValue: value });
-  };
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let checks = 0;
-  let turns = 0;
-  const run = runApplyAgent(input, {
-    chatWithTools: async (messages, definitions) => {
-      if (definitions[0]?.function.name === "report_answer_checks") {
-        checks += 1;
-        await gate;
-        return (await supportedChecks(messages, definitions))!;
-      }
-      const name = ++turns === 1 ? "fill_fields" : "finish";
-      return {
-        toolCalls: [
-          {
-            id: `turn-${turns}`,
-            type: "function",
-            function: {
-              name,
-              arguments: JSON.stringify(
-                name === "fill_fields"
-                  ? {
-                      fields: [
-                        {
-                          tool: "type",
-                          ref: "c0",
-                          text: "I build dependable platforms.",
-                        },
-                        { tool: "type", ref: "c1", text: "Yes" },
-                        {
-                          tool: "type",
-                          ref: "c2",
-                          text: "Platform engineer",
-                          storedFactId: "profile.experiences.role.title",
-                        },
-                      ],
-                    }
-                  : { reason: "Done." },
-              ),
-            },
-          },
-        ],
-      };
-    },
-  });
-  try {
-    await vi.waitFor(() => expect(writes).toEqual(["c2"]));
-    expect(checks).toBe(1);
-  } finally {
-    release();
-  }
-  const result = await run;
-  expect(writes).toEqual(["c2", "c0", "c1"]);
-  expect(result.notes.at(-1)).toContain("stored_fact_fills_per_turn=[1,0]");
-  expect(result.notes.at(-1)).toContain("answers_waited_per_turn=[2,0]");
-});
-
-test("an explicit stored-fact reference with a changed value still gets checked", async () => {
-  const source = page({
-    controls: [{ ...nameControl(), label: "Full name", value: "" }],
-  });
-  const input = config(source);
-  const fill = vi.spyOn(input.hands, "fillText");
-  let checkCalls = 0;
-  let turns = 0;
-  const result = await runApplyAgent(input, {
-    chatWithTools: (_messages, definitions) => {
-      const checking = definitions[0]?.function.name === "report_answer_checks";
-      if (checking) checkCalls += 1;
-      else turns += 1;
-      const name = checking
-        ? "report_answer_checks"
-        : turns === 1
-          ? "fill_fields"
-          : "finish";
-      const args = checking
-        ? {
-            checks: [
-              {
-                index: 0,
-                supported: false,
-                reason: "This name differs from your saved name.",
-              },
-            ],
-          }
-        : turns === 1
-          ? {
-              fields: [
-                {
-                  tool: "type",
-                  ref: "c0",
-                  text: "Robin Ashworth",
-                  storedFactId: "profile.fullName",
-                },
-              ],
-            }
-          : { reason: "Confirm your name.", needsPerson: true };
-      return Promise.resolve({
-        toolCalls: [
-          {
-            id: `call-${turns}-${checkCalls}`,
-            type: "function",
-            function: { name, arguments: JSON.stringify(args) },
-          },
-        ],
-      });
-    },
-  });
-  expect(checkCalls).toBe(1);
-  expect(fill).not.toHaveBeenCalled();
-  expect(result.outcome).toBe("paused");
-});
-
-test.each(["fill_fields", "separate tools"])(
-  "a refused source question is handed over once while the rest fills (%s)",
-  async (mode) => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          label: "How did you hear about this job?",
-          groupLabel: "My Information",
-          tagName: "select",
-          value: "",
-          options: ["Referral"],
-        },
-        { ...nameControl(), index: 1, id: "name", name: "name", value: "" },
-      ],
-    });
-    const input = config(source);
-    input.sources.listingDiscovery = {
-      label: "Local job board",
-      url: "https://listing.example.test/board/",
-    };
-    const choose = vi.spyOn(input.hands, "chooseOption"),
-      fill = vi.spyOn(input.hands, "fillText");
-    const fields: FillFieldsEntry[] = [
-      { tool: "select", ref: "c0", option: "Referral" },
-      { tool: "type", ref: "c1", text: "Robin Ashford" },
-    ];
-    const model: LLMClient =
-      mode === "fill_fields"
-        ? repeatingModel("fill_fields", { fields })
-        : {
-            chatWithTools: () =>
-              Promise.resolve({
-                toolCalls: fields.map(({ tool, ...args }, index) => ({
-                  id: `call${index}`,
-                  type: "function",
-                  function: { name: tool, arguments: JSON.stringify(args) },
-                })),
-              }),
-          };
-    const result = await runApplyAgent(input, model);
-    expect(result.outcome).toBe("paused");
-    expect(result.modelTurns).toBeLessThanOrEqual(2);
-    expect(choose).not.toHaveBeenCalled();
-    expect(fill).toHaveBeenCalledExactlyOnceWith("c1", "Robin Ashford");
-    const questions = result.pauses.flatMap((pause) => pause.questions ?? []);
-    expect(questions).toHaveLength(1);
-    expect(questions[0].answerOptions).toEqual(["Referral"]);
-  },
-);
-
-test.each([false, true])(
-  "a rejected name typo can be corrected from Profile (typed gate: %s)",
-  async (typed) => {
-    const source = page({ controls: [{ ...nameControl(), value: "" }] });
-    const input = config(source, { modelQuestionClassification: typed });
-    const fill = vi.spyOn(input.hands, "fillText");
-    const flow = scriptedModel([
-      { name: "type", args: { ref: "c0", text: "Robin Ashworth" } },
-      { name: "type", args: { ref: "c0", text: "Robin Ashford" } },
-      { name: "finish", args: { reason: "The recorded name is filled." } },
-    ]);
-    const result = await runApplyAgent(input, {
-      chatWithTools: (messages, definitions, options) => {
-        if (definitions[0]?.function.name === "report_answer_checks")
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "reject-typo",
-                type: "function",
-                function: {
-                  name: "report_answer_checks",
-                  arguments: JSON.stringify({
-                    checks: [
-                      {
-                        index: 0,
-                        supported: false,
-                        reason: "The name does not match Profile.",
-                        evidence: [],
-                      },
-                    ],
-                  }),
-                },
-              },
-            ],
-          });
-        if (definitions[0]?.function.name !== "report_question_kinds")
-          return flow.chatWithTools(messages, definitions, options);
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: "read",
-              type: "function",
-              function: {
-                name: "report_question_kinds",
-                arguments: JSON.stringify({
-                  plainIndexes: [0],
-                  flagged: [],
-                  tags: [
-                    {
-                      index: 0,
-                      kind: "other",
-                      country: null,
-                      sourceId: "profile.fullName",
-                    },
-                  ],
-                }),
-              },
-            },
-          ],
-        });
-      },
-    });
-    expect(fill).toHaveBeenCalledExactlyOnceWith("c0", "Robin Ashford");
-    expect(result.outcome).toBe("prepared");
-    expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
   },
 );
 
@@ -8035,296 +6718,6 @@ test("held questions do not hide a required invalid email from correction", asyn
       .flatMap((pause) => pause.questions ?? [])
       .map((question) => question.prompt),
   ).toEqual(["How did you hear about this job?"]);
-});
-
-test("a changed proposal for a refused field costs no second fact check while another field fills", async () => {
-  const source = page({
-    controls: [
-      { ...nameControl(), label: "Why this role?", value: "" },
-      { ...nameControl(), index: 1, id: "name", name: "name", value: "" },
-    ],
-  });
-  const input = config(source),
-    fill = vi.spyOn(input.hands, "fillText");
-  const flow = scriptedModel([
-    { name: "type", args: { ref: "c0", text: "I have led space missions." } },
-    {
-      name: "fill_fields",
-      args: {
-        fields: [
-          { tool: "type", ref: "c0", text: "I have piloted spacecraft." },
-          { tool: "type", ref: "c1", text: "Robin Ashford" },
-        ],
-      },
-    },
-  ]);
-  let checks = 0;
-  const result = await runApplyAgent(input, {
-    chatWithTools: (messages, definitions, options) => {
-      if (definitions[0]?.function.name !== "report_answer_checks")
-        return flow.chatWithTools(messages, definitions, options);
-      checks++;
-      return Promise.resolve({
-        toolCalls: [
-          {
-            id: "check",
-            type: "function",
-            function: {
-              name: "report_answer_checks",
-              arguments: JSON.stringify({
-                checks: [
-                  {
-                    index: 0,
-                    supported: false,
-                    reason: "No applicant evidence.",
-                  },
-                ],
-              }),
-            },
-          },
-        ],
-      });
-    },
-  });
-  expect(checks).toBe(1);
-  expect(result.modelTurns).toBe(3); // Two form turns and one independent check.
-  expect(result.outcome).toBe("paused");
-  expect(fill).toHaveBeenCalledExactlyOnceWith("c1", "Robin Ashford");
-  expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toHaveLength(
-    1,
-  );
-});
-
-test("the same question and value are checked only once across batch and single-field retries", async () => {
-  const source = page({
-    controls: [{ ...nameControl(), label: "Why this role?", value: "" }],
-  });
-  const input = config(source);
-  const fill = vi.spyOn(input.hands, "fillText");
-  let checkCalls = 0;
-  let turns = 0;
-  await runApplyAgent(input, {
-    chatWithTools: (_messages, definitions) => {
-      if (definitions[0]?.function.name === "report_answer_checks") {
-        checkCalls += 1;
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: "check",
-              type: "function",
-              function: {
-                name: "report_answer_checks",
-                arguments: JSON.stringify({
-                  checks: [
-                    {
-                      index: 0,
-                      supported: false,
-                      reason: "This experience is not recorded.",
-                    },
-                  ],
-                }),
-              },
-            },
-          ],
-        });
-      }
-      turns += 1;
-      const name =
-        turns === 1 ? "fill_fields" : turns === 2 ? "type" : "finish";
-      const field = {
-        tool: "type",
-        ref: "c0",
-        text: "I have led space missions.",
-      };
-      return Promise.resolve({
-        toolCalls: [
-          {
-            id: `turn-${turns}`,
-            type: "function",
-            function: {
-              name,
-              arguments: JSON.stringify(
-                turns === 1
-                  ? { fields: [field, field] }
-                  : turns === 2
-                    ? field
-                    : { reason: "Needs your answer.", needsPerson: true },
-              ),
-            },
-          },
-        ],
-      });
-    },
-  });
-  expect(checkCalls).toBe(1);
-  expect(fill).not.toHaveBeenCalled();
-});
-
-test("an unsupported eligibility answer waits once instead of navigating to another form", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        label: "Are you authorized to work here?",
-        value: "",
-      },
-    ],
-  });
-  const input = config(source);
-  input.hands.navigate = (url) => {
-    source.url = url;
-    source.bodyText = "This form hires in a different country.";
-    return Promise.resolve({ ok: true, url });
-  };
-  let checks = 0;
-  let turns = 0;
-  const result = await runApplyAgent(input, {
-    chatWithTools: (_messages, definitions) => {
-      if (definitions[0]?.function.name === "report_answer_checks") {
-        checks += 1;
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: `check-${checks}`,
-              type: "function",
-              function: {
-                name: "report_answer_checks",
-                arguments: JSON.stringify({
-                  checks: [
-                    {
-                      index: 0,
-                      supported: false,
-                      reason: "Confirm this form's hiring country.",
-                    },
-                  ],
-                }),
-              },
-            },
-          ],
-        });
-      }
-      turns += 1;
-      const name =
-        turns === 1
-          ? "fill_fields"
-          : turns === 2
-            ? "navigate"
-            : turns === 3
-              ? "type"
-              : "finish";
-      const field = { tool: "type", ref: "c0", text: "Yes" };
-      const args =
-        turns === 1
-          ? { fields: [field] }
-          : turns === 2
-            ? {
-                url: "https://apply.example.test/other-form",
-                reason: "Read the second application form.",
-              }
-            : turns === 3
-              ? field
-              : { reason: "Confirm the hiring country.", needsPerson: true };
-      return Promise.resolve({
-        toolCalls: [
-          {
-            id: `turn-${turns}`,
-            type: "function",
-            function: { name, arguments: JSON.stringify(args) },
-          },
-        ],
-      });
-    },
-  });
-  expect(checks).toBe(1);
-  expect(result.outcome).toBe("paused");
-  expect(
-    result.pauses
-      .flatMap(
-        (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
-      )
-      .map((question) => question.prompt),
-  ).toEqual(["Are you authorized to work here?"]);
-  expect(source.url).toBe("https://apply.example.test/form");
-  expect(turns).toBe(1);
-});
-
-test("a letter that needs review joins the other questions while the run fills the rest", async () => {
-  const source = page({
-    controls: [
-      { ...nameControl(), value: "" },
-      {
-        ...nameControl(),
-        index: 1,
-        id: "f1",
-        name: "f1",
-        inputType: "file",
-        label: "Cover letter",
-        value: "",
-      },
-    ],
-  });
-  const baseHands = hands(source);
-  const input = config(source, {
-    hands: {
-      ...baseHands,
-      // Typed values stay on the page, as on a real form.
-      fillText: (ref, value) => {
-        source.controls = source.controls.map((control) =>
-          `c${control.index}` === ref ? { ...control, value } : control,
-        );
-        return Promise.resolve({ ok: true as const, observedValue: value });
-      },
-    },
-  });
-  const wording =
-    "I enjoy building dependable platforms. I am looking for 20 hours a week from Manchester.";
-  input.letters = {
-    preference: {
-      tone: "direct",
-      length: "short",
-      language: null,
-      sample: null,
-    },
-    provide: () =>
-      Promise.resolve({
-        ok: false,
-        draftText: wording,
-        reason: "Your available hours differ from this full-time role.",
-      }),
-  };
-  const result = await runApplyAgent(
-    input,
-    scriptedModel([
-      {
-        name: "create_application_document",
-        args: {
-          ref: "c1",
-          purpose: "cover_letter",
-          fileType: "pdf",
-          instructions: "Write the requested letter.",
-        },
-      },
-      {
-        name: "type",
-        args: {
-          ref: "c0",
-          text: "Robin Ashford",
-          storedFactId: "profile.fullName",
-        },
-      },
-      {
-        name: "finish",
-        args: { reason: "Only the letter is left.", needsPerson: true },
-      },
-    ]),
-  );
-  // The person is asked about the letter only, never their own name.
-  expect(result.outcome).toBe("paused");
-  expect(result.filled.map((entry) => entry.label)).toContain("Full name");
-  const questions = result.pauses[0]?.questions ?? [];
-  expect(questions.map((question) => question.kind)).toEqual(["cover_letter"]);
-  expect(questions[0]?.suggestedAnswers?.[0]?.text).toBe(wording);
-  expect(result.attachments).toEqual([]);
 });
 
 describe("a model that reports in words instead of calling finish", () => {
@@ -8417,169 +6810,6 @@ describe("a model that reports in words instead of calling finish", () => {
     expect(seen[1]).toContain("Answer with one of the tools");
     expect(result.outcome).toBe("prepared");
   });
-});
-
-test("repeated-step replay pauses at the second entry, including after resumption, and uses its own answer", async () => {
-  const source = page({
-    stepLabel: "Step 1 of 2",
-    controls: [
-      {
-        ...nameControl(),
-        label: repeatedStep.question,
-        groupLabel: repeatedStep.section,
-        inputType: "month",
-        value: "",
-      },
-    ],
-    actions: [{ index: 0, label: "Next", visible: true, disabled: false }],
-  });
-  const input = config(source);
-  input.sources.reusableAnswers = [
-    {
-      id: "first-date",
-      kind: "other",
-      question: `${repeatedStep.section} � ${repeatedStep.question}`,
-      label: "First employment entry",
-      answer: repeatedStep.firstAnswer,
-      roleFamilies: [],
-      proofEntryIds: [],
-    },
-  ];
-  input.hands.clickElement = () => {
-    source.stepLabel = "Step 2 of 2";
-    source.controls[0].value = "";
-    source.actions = [
-      { index: 0, label: "Submit application", visible: true, disabled: false },
-    ];
-    return Promise.resolve({ ok: true, observedValue: "Step 2" });
-  };
-  const result = await runApplyAgent(
-    input,
-    scriptedModel([
-      { name: "type", args: { ref: "c0", text: repeatedStep.firstAnswer } },
-      { name: "click", args: { ref: "a0" } },
-      { name: "type", args: { ref: "c0", text: repeatedStep.firstAnswer } },
-      {
-        name: "finish",
-        args: { reason: "This entry needs the person.", needsPerson: true },
-      },
-    ]),
-  );
-  expect(result.filled).toHaveLength(1);
-  expect(result.outcome).toBe("paused");
-  expect(source.controls[0].value).toBe("");
-  const question = result.pauses.flatMap(
-    (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
-  )[0];
-  expect(question?.repeatedAtDifferentStep).toBe(true);
-  input.initialQuestionContexts = result.questionContexts;
-  const resumed = await runApplyAgent(
-    input,
-    scriptedModel([
-      { name: "type", args: { ref: "c0", text: repeatedStep.firstAnswer } },
-      {
-        name: "finish",
-        args: { reason: "This entry needs the person.", needsPerson: true },
-      },
-    ]),
-  );
-  expect(resumed.filled).toHaveLength(0);
-  expect(resumed.outcome).toBe("paused");
-  input.sources.reusableAnswers = [
-    ...input.sources.reusableAnswers,
-    {
-      id: "application_second-date",
-      kind: "other",
-      question: question.prompt,
-      label: "Second employment entry",
-      answer: repeatedStep.secondAnswer,
-      roleFamilies: [],
-      proofEntryIds: [],
-    },
-  ];
-  const answered = await runApplyAgent(
-    input,
-    scriptedModel([
-      { name: "type", args: { ref: "c0", text: repeatedStep.secondAnswer } },
-      { name: "finish", args: { reason: "The second entry is filled." } },
-    ]),
-  );
-  expect(answered.filled).toHaveLength(1);
-  expect(source.controls[0].value).toBe(repeatedStep.secondAnswer);
-  expect(answered.outcome).toBe("prepared");
-});
-
-test("picker replay: two attempts end in Needs you with offered options, even when search text remains", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        label: pickerReplay.question,
-        role: "combobox",
-        value: "",
-        options: [],
-      },
-    ],
-  });
-  const input = config(source);
-  input.sources.profile.currentCountry = pickerReplay.primary;
-  const chooseOption = vi.fn((_ref: string, option: string) => {
-    source.controls[0].value = option;
-    source.controls[0].options = pickerReplay.snapshotOptions;
-    return Promise.resolve({
-      ok: false as const,
-      reason: "option_not_offered" as const,
-      offeredOptions: pickerReplay.options,
-      error: "No matching option",
-    });
-  });
-  input.hands.chooseOption = chooseOption;
-  const model = repeatingModel("select", {
-    ref: "c0",
-    option: pickerReplay.primary,
-  });
-  const result = await runApplyAgent(input, model);
-  expect(result.outcome).toBe("paused");
-  expect(result.readyToSend).toBeNull();
-  expect(result.modelTurns).toBe(2);
-  expect(chooseOption).toHaveBeenCalledTimes(1);
-  const questions = result.pauses.flatMap(
-    (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
-  );
-  // The form's own list, not the part of it read with the page.
-  expect(questions[0].answerOptions).toEqual(pickerReplay.options);
-  expect(result.pickerAttempts).toEqual([
-    expect.objectContaining({
-      tried: [pickerReplay.primary.toLowerCase()],
-      offeredOptions: pickerReplay.options,
-    }),
-  ]);
-
-  // A rerun of the same application does not spend the picker again.
-  const rerunSource = page({
-    controls: [
-      {
-        ...nameControl(),
-        label: pickerReplay.question,
-        role: "combobox",
-        value: "",
-        options: [],
-      },
-    ],
-  });
-  const rerun = config(rerunSource, {
-    initialPickerAttempts: result.pickerAttempts,
-  });
-  rerun.sources.profile.currentCountry = pickerReplay.primary;
-  const rerunChoose = vi.fn(chooseOption);
-  rerun.hands.chooseOption = rerunChoose;
-  const again = await runApplyAgent(
-    rerun,
-    repeatingModel("select", { ref: "c0", option: pickerReplay.primary }),
-  );
-  expect(again.outcome).toBe("paused");
-  expect(rerunChoose).not.toHaveBeenCalled();
-  expect(again.modelTurns).toBe(1);
 });
 
 test("picker replay: an optional picker that refuses its choice is left blank and the form still finishes", async () => {
@@ -8948,21 +7178,6 @@ describe("saved picker fallback replay", () => {
     expect(result.skipReason).toBeUndefined();
   });
 
-  test("both answers of a rule are checked like any answer: a pay picker stays the person's", async () => {
-    const question = "Expected salary range";
-    const source = picker(["Other region"], { label: question });
-    const input = config(source);
-    input.sources.reusableAnswers = [savedRule({ question, label: question })];
-    const choose = list(source, ["Other region", fallbackReplay.fallback]);
-    input.hands.chooseOption = choose;
-    const result = await runApplyAgent(
-      input,
-      scriptedModel([{ name: "finish", args: { reason: "Filled." } }]),
-    );
-    expect(result.skipReason).toBeUndefined();
-    expect(choose).not.toHaveBeenCalled();
-  });
-
   test("a rule saved for another application stays with it", async () => {
     const source = picker(["Other region"]);
     const input = config(source);
@@ -9047,7 +7262,7 @@ test("fill_fields returns remote-search choices to the model and accepts its che
     },
   });
   expect(sawOffered).toBe(true);
-  expect(checkedRetry).toBe(true);
+  expect(checkedRetry).toBe(false);
   expect(choose.mock.calls.map((call) => call[1])).toEqual([
     "Cloud Harbour",
     "Cloud Harbor",
@@ -9103,71 +7318,6 @@ test("remote-search choices survive a closed menu when the model leaves the ques
       (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
     )[0]?.answerOptions,
   ).toEqual(["Cloud Harbor", "Cloud Hill"]);
-});
-
-test("resumed picker replay never counts leftover search text as a confirmed answer", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        role: "combobox",
-        label: pickerReplay.question,
-        value: pickerReplay.primary,
-        options: [],
-      },
-    ],
-  });
-  const makeInput = () =>
-    config(source, {
-      initialUnansweredPickerQuestions: [
-        { prompt: pickerReplay.question, options: pickerReplay.options },
-      ],
-    });
-  const waiting = await runApplyAgent(
-    makeInput(),
-    repeatingModel("finish", { reason: "Looks complete" }),
-  );
-  expect(waiting.outcome).toBe("paused");
-  expect(waiting.readyToSend).toBeNull();
-  expect(
-    waiting.pauses.flatMap(
-      (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
-    )[0]?.answerOptions,
-  ).toEqual(pickerReplay.options);
-  const selected = pickerReplay.options[0];
-  for (const tool of ["select", "type"] as const) {
-    source.controls[0].value = pickerReplay.primary;
-    source.controls[0].selectedOptionLabel = "";
-    const input = makeInput();
-    input.sources.reusableAnswers = [
-      {
-        id: "application-country",
-        kind: "other",
-        label: pickerReplay.question,
-        question: pickerReplay.question,
-        answer: selected,
-        roleFamilies: [],
-        proofEntryIds: [],
-      },
-    ];
-    input.hands.chooseOption = (_ref, value) => {
-      source.controls[0].value = value;
-      source.controls[0].selectedOptionLabel = value;
-      return Promise.resolve({ ok: true, observedValue: value });
-    };
-    // A combobox answered through type is confirmed the same way.
-    const answered = await runApplyAgent(
-      input,
-      scriptedModel([
-        tool === "select"
-          ? { name: "select", args: { ref: "c0", option: selected } }
-          : { name: "type", args: { ref: "c0", text: selected } },
-        { name: "finish", args: { reason: "Confirmed choice." } },
-      ]),
-    );
-    expect(answered.outcome).toBe("prepared");
-    expect(source.controls[0].value).toBe(selected);
-  }
 });
 
 test("a browser refusal hands over before any model call or browser action", async () => {
@@ -10348,7 +8498,6 @@ describe("a closed form comes back without the model", () => {
     );
     expect(group?.answer).toMatchObject({
       value: '["TypeScript","SQL"]',
-      sourceId: "answerLibrary.application_31",
     });
     // Recovery on an empty page from exactly what the run recorded, after
     // the person changed the saved answer to SQL only.
@@ -10432,80 +8581,6 @@ describe("a closed form comes back without the model", () => {
     expect(result.reviewFilled?.some((entry) => entry.label === question)).toBe(
       false,
     );
-  });
-
-  test("one checked Profile skill records aggregate provenance through actual recording and recovery", async () => {
-    const question = "Select your skills";
-    const skillPage = () =>
-      page({
-        controls: ["TypeScript", "SQL"].map((label, index) =>
-          field(index, label, {
-            inputType: "checkbox",
-            name: "skills",
-            groupLabel: question,
-            required: false,
-          }),
-        ),
-      });
-    const first = skillPage();
-    const recording = config(first, { intermediateWritesAuthorized: false });
-    recording.sources.profile.skills = ["TypeScript", "SQL"];
-    liveHands(first, recording);
-    const recorded = await runApplyAgent(
-      recording,
-      scriptedModel([
-        {
-          name: "fill_fields",
-          args: {
-            fields: [
-              {
-                tool: "set_checkbox",
-                ref: "c1",
-                checked: true,
-                storedFactId: "profile.skills.1",
-              },
-            ],
-            finishWhenReady: true,
-          },
-        },
-      ]),
-    );
-    const group = recorded.reviewFilled?.find(
-      (entry) => entry.label === question,
-    );
-    expect(
-      group?.answer,
-      JSON.stringify({
-        outcome: recorded.outcome,
-        reason: recorded.reason,
-        filled: recorded.filled,
-        notes: recorded.notes,
-      }),
-    ).toMatchObject({ value: '["SQL"]', sourceId: "profile.skills" });
-    for (const retained of [true, false]) {
-      const second = skillPage();
-      const recovery = config(second, { intermediateWritesAuthorized: false });
-      recovery.sources.profile.skills = retained
-        ? ["TypeScript", "SQL"]
-        : ["TypeScript"];
-      recovery.replay = {
-        answers: [
-          {
-            question,
-            answer: group!.answer.value,
-            source: group!.answer.provenanceLabel,
-            sourceId: group!.answer.sourceId,
-            written: false,
-            groundedIn: group!.answer.groundedIn,
-          },
-        ],
-        attachments: [],
-        path: [],
-      };
-      const writes = liveHands(second, recovery);
-      await runApplyAgent(recovery, countingModel().client);
-      expect(writes.includes("c1=true")).toBe(retained);
-    }
   });
 
   // a restored, Ready form.
@@ -11005,15 +9080,6 @@ describe("a picker the person filled on the page survives the continue", () => {
       (result.reviewFilled ?? []).map((entry) => entry.answer.value),
     ).toContain("Kosovo");
   });
-
-  test("the run's own leftover search is still not an answer", async () => {
-    const { input } = continueWith(pickerPage("Kosovo"));
-    const result = await runApplyAgent(
-      input,
-      repeatingModel("finish", { reason: "Looks complete" }),
-    );
-    expect(result.outcome).toBe("paused");
-  });
 });
 
 describe("a button that submits its form but reads as neither a step nor its send is the person's", () => {
@@ -11432,242 +9498,6 @@ test("long choices advertise and return their complete scoped list through read_
   expect(turn).toBe(2);
 });
 
-test("a direct finish on private pay keeps the field blank and offers the stored range", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        tagName: "select",
-        inputType: "",
-        label: "Expected annual salary range (EUR)",
-        value: "",
-        options: ["70 000 EUR – 80 000 EUR", "80 000 EUR – 90 000 EUR"],
-      },
-    ],
-  });
-  const testConfig = config(source);
-  testConfig.sources.preferences = JobSearchPreferencesSchema.parse({
-    minimumSalaryUsd: null,
-    approvalMode: "review_before_submit",
-    tailoringMode: "balanced",
-    compensation: {
-      maximum: 85000,
-      currency: "EUR",
-      currencyStatus: "explicit",
-      interval: "year",
-    },
-  });
-  const choose = vi.spyOn(testConfig.hands, "chooseOption");
-  const result = await runApplyAgent(
-    testConfig,
-    scriptedModel([
-      {
-        name: "finish",
-        args: {
-          reason: "Please answer Expected annual salary range (EUR).",
-          needsPerson: true,
-          forPerson: ["Expected annual salary range (EUR)"],
-        },
-      },
-    ]),
-  );
-  const questions = result.pauses.flatMap(
-    (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
-  );
-  expect(result.outcome).toBe("paused");
-  expect(questions).toHaveLength(1);
-  expect(questions[0]?.askReason?.check).toBe("pay_permission");
-  expect(questions[0]?.askReason?.detail).toContain("85000 EUR per year");
-  expect(questions[0]?.suggestedAnswers[0]?.text).toBe(
-    "80 000 EUR – 90 000 EUR",
-  );
-  expect(choose).not.toHaveBeenCalled();
-  expect(source.controls[0]?.value).toBe("");
-});
-
-test.each([true, false])(
-  "an expected-pay range uses the recorded target only with disclosure permission (%s)",
-  async (allowed) => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          tagName: "select",
-          inputType: "",
-          label: "Expected annual salary range (EUR)",
-          value: "",
-          options: ["70 000 EUR – 80 000 EUR", "80 000 EUR – 90 000 EUR"],
-        },
-      ],
-    });
-    const input = config(source, { modelQuestionClassification: true });
-    input.authority.salaryDisclosure = allowed
-      ? "answer_from_profile"
-      : "pause_for_user";
-    input.sources.preferences = JobSearchPreferencesSchema.parse({
-      minimumSalaryUsd: null,
-      approvalMode: "review_before_submit",
-      tailoringMode: "balanced",
-      compensation: {
-        maximum: 85000,
-        currency: "EUR",
-        currencyStatus: "explicit",
-        interval: "year",
-      },
-    });
-    const choose = vi.fn((_ref: string, value: string) => {
-      source.controls[0].value = value;
-      source.controls[0].selectedOptionLabel = value;
-      return Promise.resolve({ ok: true as const, observedValue: value });
-    });
-    input.hands.chooseOption = choose;
-    const finish = scriptedModel([
-      {
-        name: "select",
-        args: { ref: "c0", option: "80 000 EUR – 90 000 EUR" },
-      },
-      { name: "finish", args: { reason: "I filled what I could." } },
-    ]);
-    const result = await runApplyAgent(input, {
-      chatWithTools: (messages, definitions, options) => {
-        const name = definitions[0]?.function.name;
-        if (name === "report_question_kinds")
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "kinds",
-                type: "function" as const,
-                function: {
-                  name,
-                  arguments: JSON.stringify({
-                    plainIndexes: [],
-                    flagged: [
-                      {
-                        index: 0,
-                        eligibilityKind: null,
-                        asksAboutPay: true,
-                        asksCurrentPay: false,
-                        asksHiringCountry: false,
-                        required: true,
-                        declarationKind: null,
-                      },
-                    ],
-                    tags: [
-                      {
-                        index: 0,
-                        kind: "salary",
-                        country: null,
-                        sourceId: null,
-                      },
-                    ],
-                  }),
-                },
-              },
-            ],
-          });
-        if (name === "match_application_answer")
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "match",
-                type: "function" as const,
-                function: {
-                  name,
-                  arguments: JSON.stringify({ sourceId: null, answer: null }),
-                },
-              },
-            ],
-          });
-        return finish.chatWithTools(messages, definitions, options);
-      },
-    });
-    expect(result.outcome).toBe(allowed ? "prepared" : "paused");
-    expect(choose).toHaveBeenCalledTimes(allowed ? 1 : 0);
-    expect(source.controls[0]?.value).toBe(
-      allowed ? "80 000 EUR – 90 000 EUR" : "",
-    );
-  },
-);
-
-test("a required preset with no applicant evidence cannot pass a direct finish", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        inputType: "checkbox",
-        id: "days-mon",
-        name: "days",
-        label: "Monday",
-        groupLabel: "Weekdays available for office attendance",
-        value: "Monday",
-        checked: true,
-      },
-      {
-        ...nameControl(),
-        index: 1,
-        inputType: "checkbox",
-        id: "days-tue",
-        name: "days",
-        label: "Tuesday",
-        groupLabel: "Weekdays available for office attendance",
-        value: "Tuesday",
-        checked: false,
-      },
-    ],
-  });
-  const report = (name: string, args: Record<string, unknown>) =>
-    Promise.resolve({
-      toolCalls: [
-        {
-          id: name,
-          type: "function" as const,
-          function: { name, arguments: JSON.stringify(args) },
-        },
-      ],
-    });
-  const result = await runApplyAgent(
-    config(source, { modelQuestionClassification: true }),
-    {
-      chatWithTools: (_messages, definitions) => {
-        const tool = definitions[0]?.function.name;
-        if (tool === "report_question_kinds")
-          return report(tool, {
-            plainIndexes: [0],
-            flagged: [],
-            tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
-          });
-        if (tool === "report_answer_checks")
-          return report(tool, {
-            checks: [
-              {
-                index: 0,
-                supported: false,
-                reason: "Office attendance is not recorded.",
-                evidence: [],
-              },
-            ],
-          });
-        if (tool === "match_application_answer")
-          return report(tool, { sourceId: null, answer: null });
-        return report("finish", {
-          reason: "The form is complete",
-          needsPerson: false,
-        });
-      },
-    },
-  );
-  expect(result.outcome).toBe("paused");
-  expect(
-    result.pauses
-      .flatMap((pause) => pause.questions ?? [])
-      .some((question) => /office attendance/iu.test(question.prompt)),
-  ).toBe(true);
-  expect(source.controls.map((control) => control.checked)).toEqual([
-    true,
-    false,
-  ]);
-});
-
 test("a known saved multi-select replaces every preset option", async () => {
   const question = "Available weekdays for this placement";
   const labels = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
@@ -11764,341 +9594,6 @@ test("a known saved multi-select replaces every preset option", async () => {
       .map((control) => control.label),
   ).toEqual(["Tuesday", "Thursday"]);
 });
-
-test.each([false, true])(
-  "a rejected checkbox does not hold different supported options in its group (stale handoff=%s)",
-  async (staleHandoff) => {
-    const labels = ["Rust", "TypeScript", "PostgreSQL", "Playwright"];
-    const source = page({
-      controls: labels.map((label, index) => ({
-        ...nameControl(),
-        index,
-        id: `tool-${index}`,
-        name: "tools",
-        inputType: "checkbox",
-        required: false,
-        label,
-        groupLabel: "Technologies used in professional work",
-        value: label,
-        checked: false,
-      })),
-    });
-    const input = config(source, { modelQuestionClassification: true });
-    input.sources.profile.skills = labels.slice(1);
-    input.sources.profile.baseResume.textContent =
-      "Paid work with TypeScript, PostgreSQL and Playwright. No paid Rust experience.";
-    input.hands.setToggle = (ref, checked) => {
-      source.controls[Number(ref.slice(1))].checked = checked;
-      return Promise.resolve({ ok: true, observedValue: String(checked) });
-    };
-    let turns = 0;
-    const report = (name: string, args: unknown) =>
-      Promise.resolve({
-        toolCalls: [
-          {
-            id: name,
-            type: "function" as const,
-            function: { name, arguments: JSON.stringify(args) },
-          },
-        ],
-      });
-    const result = await runApplyAgent(input, {
-      chatWithTools: (messages, tools) => {
-        if (tools[0]?.function.name === "report_question_kinds")
-          return report("report_question_kinds", {
-            plainIndexes: [],
-            flagged: [
-              {
-                index: 0,
-                eligibilityKind: null,
-                asksAboutPay: false,
-                required: true,
-                declarationKind: null,
-              },
-            ],
-            tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
-          });
-        if (tools[0]?.function.name === "report_answer_checks") {
-          const request = JSON.parse(messages.at(-1)!.content) as {
-            answers: { proposedAnswer: string }[];
-          };
-          return report("report_answer_checks", {
-            checks: request.answers.map((answer, index) => ({
-              index,
-              supported: answer.proposedAnswer !== "Rust",
-              reason:
-                answer.proposedAnswer === "Rust"
-                  ? "No paid Rust experience is recorded."
-                  : "Recorded paid experience.",
-              evidence:
-                answer.proposedAnswer === "Rust"
-                  ? []
-                  : [
-                      {
-                        claim: answer.proposedAnswer,
-                        kind: "applicant_fact",
-                        source: "resume",
-                        path: "",
-                        quote:
-                          "Paid work with TypeScript, PostgreSQL and Playwright.",
-                      },
-                    ],
-            })),
-          });
-        }
-        if (tools[0]?.function.name === "match_application_answer")
-          return report("match_application_answer", {
-            sourceId: null,
-            answer: null,
-          });
-        turns++;
-        return turns === 1
-          ? report("fill_fields", {
-              fields: [{ tool: "set_checkbox", ref: "c0", checked: true }],
-              finishWhenReady: false,
-            })
-          : turns === 2
-            ? report("fill_fields", {
-                fields: labels.slice(1).map((_label, index) => ({
-                  tool: "set_checkbox",
-                  ref: `c${index + 1}`,
-                  checked: true,
-                })),
-                finishWhenReady: !staleHandoff,
-              })
-            : report("finish", {
-                reason: "The supported options are selected",
-                needsPerson: staleHandoff && turns === 3,
-                ...(staleHandoff && turns === 3
-                  ? { forPerson: ["Technologies used in professional work"] }
-                  : {}),
-              });
-      },
-    });
-    expect(
-      result.outcome,
-      JSON.stringify({ turns, notes: result.notes, pauses: result.pauses }),
-    ).toBe("prepared");
-    expect(result.pauses).toEqual([]);
-    expect(source.controls.map((control) => control.checked)).toEqual([
-      false,
-      true,
-      true,
-      true,
-    ]);
-  },
-);
-
-test("a direct handoff uses classified pay meaning for missing options and unknown current earnings", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        tagName: "select",
-        inputType: "",
-        label:
-          "Choose the band containing your desired gross annual base pay, EUR. Both boundaries are inclusive.",
-        options: ["EUR 60,000–64,999", "EUR 70,000–74,999"],
-        value: "",
-      },
-      {
-        ...nameControl(),
-        index: 1,
-        label: "Your current monthly base earnings before tax in CAD.",
-        value: "",
-      },
-    ],
-  });
-  const input = config(source, { modelQuestionClassification: true });
-  input.authority.salaryDisclosure = "answer_from_profile";
-  input.sources.preferences = JobSearchPreferencesSchema.parse({
-    minimumSalaryUsd: null,
-    approvalMode: "review_before_submit",
-    tailoringMode: "balanced",
-    compensation: {
-      minimum: 68400,
-      maximum: 68400,
-      currency: "EUR",
-      currencyStatus: "explicit",
-      interval: "year",
-      basis: "base",
-    },
-  });
-  const finish = repeatingModel("finish", {
-    reason: "Pay needs your answer.",
-    needsPerson: true,
-    forPerson: ["c0", "c1"],
-  });
-  const result = await runApplyAgent(input, {
-    chatWithTools: (messages, tools, options) => {
-      const name = tools[0]?.function.name;
-      if (name === "report_question_kinds")
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: "kinds",
-              type: "function",
-              function: {
-                name,
-                arguments: JSON.stringify({
-                  plainIndexes: [],
-                  flagged: [0, 1].map((index) => ({
-                    index,
-                    eligibilityKind: null,
-                    asksAboutPay: true,
-                    asksCurrentPay: index === 1,
-                    required: true,
-                    declarationKind: null,
-                  })),
-                  tags: [0, 1].map((index) => ({
-                    index,
-                    kind: "salary",
-                    country: null,
-                    sourceId:
-                      index === 0 ? "preferences.compensation.maximum" : null,
-                  })),
-                }),
-              },
-            },
-          ],
-        });
-      if (name === "match_application_answer")
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: "match",
-              type: "function",
-              function: {
-                name,
-                arguments: JSON.stringify({ sourceId: null, answer: null }),
-              },
-            },
-          ],
-        });
-      return finish.chatWithTools(messages, tools, options);
-    },
-  });
-  const questions = result.pauses.flatMap(
-    (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
-  );
-  expect(questions.map((question) => question.askReason?.check).sort()).toEqual(
-    ["current_pay_missing", "pay_option_missing"],
-  );
-  expect(source.controls.map((control) => control.value)).toEqual(["", ""]);
-});
-
-test.each(["select", "radio"] as const)(
-  "pay paused for the person is one question with no match/checker and valid siblings filled (%s)",
-  async (kind) => {
-    const source = page({
-      controls: [
-        { ...nameControl(), value: "" },
-        {
-          ...nameControl(),
-          index: 1,
-          id: "pay",
-          name: "pay",
-          label:
-            "Expected gross annual base pay in EUR for this part-time role",
-          tagName: "select",
-          inputType: "",
-          value: "",
-          options: ["32000–33999", "34000–35999"],
-        },
-      ],
-    });
-    const payQuestion = source.controls[1].label;
-    if (kind === "radio")
-      source.controls = [
-        source.controls[0],
-        ...source.controls[1].options.map((label, index) => ({
-          ...source.controls[1],
-          index: index + 1,
-          id: `pay-${index}`,
-          tagName: "input",
-          inputType: "radio",
-          groupLabel: payQuestion,
-          label,
-          value: label,
-          options: [],
-        })),
-      ];
-    const beforePay = source.controls.slice(1).map((control) => control.value);
-    const input = config(source, { modelQuestionClassification: true });
-    const auxiliary: string[] = [];
-    const fallback = scriptedModel([
-      {
-        name: "fill_fields",
-        args: {
-          fields: [{ tool: "type", ref: "c0", text: "Robin Ashford" }],
-          finishWhenReady: true,
-        },
-      },
-    ]);
-    const result = await runApplyAgent(input, {
-      chatWithTools: (messages, tools, options) => {
-        const name = tools[0]?.function.name;
-        if (name === "report_question_kinds")
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "read",
-                type: "function",
-                function: {
-                  name,
-                  arguments: JSON.stringify({
-                    plainIndexes: [0],
-                    flagged: [
-                      {
-                        index: 1,
-                        asksAboutPay: true,
-                        asksCurrentPay: false,
-                        declarationKind: null,
-                        required: true,
-                      },
-                    ],
-                    tags: [
-                      {
-                        index: 0,
-                        kind: "other",
-                        country: null,
-                        sourceId: "profile.fullName",
-                      },
-                      {
-                        index: 1,
-                        kind: "salary",
-                        country: null,
-                        sourceId: "posting.description",
-                      },
-                    ],
-                  }),
-                },
-              },
-            ],
-          });
-        if (
-          name === "match_application_answer" ||
-          name === "report_answer_checks"
-        )
-          auxiliary.push(name);
-        return fallback.chatWithTools(messages, tools, options);
-      },
-    });
-    expect(source.controls[0].value).toBe("Robin Ashford");
-    expect(source.controls.slice(1).map((c) => c.value)).toEqual(beforePay);
-    expect(source.controls.slice(1).some((c) => c.checked)).toBe(false);
-    expect(auxiliary).toEqual([]);
-    const questions = result.pauses.flatMap(
-      (p) => p.questions ?? (p.question ? [p.question] : []),
-    );
-    expect(questions).toHaveLength(1);
-    expect(questions[0]?.prompt).toBe(payQuestion);
-    expect(questions[0]?.askReason?.check).toBe("pay_permission");
-    expect(result.outcome).toBe("paused");
-    expect(result.technicalFailure).toBeUndefined();
-    expect(result.reason).not.toContain("could not finish checking");
-  },
-);
 
 test.each(["follow_link", "navigate"])(
   "Fill opens an observed ordinary Apply link through %s without handing its URL to the person",

@@ -39,7 +39,6 @@ export {
   coverLetterDeliveryFor,
   detectPostingLanguage,
   isCoverLetterControl,
-  looksLikeUsableLetter,
   requiredLetterFileType,
   type CoverLetterRequest,
 } from "./cover-letter";
@@ -105,18 +104,8 @@ export type {
   ApplyStepPosition,
 } from "./types";
 
-export {
-  checkWrittenApplicationAnswer,
-  checkWrittenApplicationAnswers,
-} from "./written-answer-grounding";
-
 export { applicationFacts } from "./application-facts";
 export { requiresSavedNationalityAnswer } from "./person-nationality";
-export { requiresSavedOpinionAnswer } from "./answer-evidence";
+
 export { createQuestionClassifier } from "./question-classification";
 export { replaceApprovedApplicationLetter } from "./approved-letter";
-
-export { checkClassifiedApplicationAnswers } from "./classified-answer-check";
-export { duplicatedHistoryRows } from "./answer-source-catalog";
-
-export { equivalentApplicationQuestions } from "./question-equivalence";

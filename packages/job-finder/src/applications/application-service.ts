@@ -1,26 +1,11 @@
-import { intendedAccountEmail } from "@nestor/contracts";
-import { browserAgentPermissionsOf } from "@nestor/contracts";
-import { createHash } from "node:crypto";
+import type { JobFinderAiClient } from "@nestor/ai-providers";
 import { createModelUsageRecorder } from "@nestor/ai-providers";
-import { accumulateApplyUsage } from "./apply-usage";
-import { readFile } from "node:fs/promises";
-import { basename } from "node:path";
 import {
-  loadOriginalResumeBytes,
-  renderApplicationResume,
-  renderReadyJobResume,
-  approvedJobResumeIdentity,
-  loadApprovedJobResumeBytes,
-} from "./resume-artifacts";
-import {
-  buildApplyFormObservation,
   browserStepReadyForAgent,
+  buildApplyFormObservation,
   canContinueApplicationAfterAccess,
-  checkClassifiedApplicationAnswers,
-  equivalentApplicationQuestions,
-  duplicatedHistoryRows,
-  inferQuestionKind,
   fileUploadProblems,
+  inferQuestionKind,
   questionPrompt,
   STEP_HANDOVER_QUESTION_ID,
   UPLOAD_REPAIR_QUESTION_ID,
@@ -35,32 +20,33 @@ import {
 import {
   AiBehaviorPreferenceSchema,
   ApplicationResumeArtifactSchema,
+  applicationSubmissionConfirmationMessages,
   ApplyExecutionResultSchema,
-  ApplyStepReceiptSchema,
-  SubmissionOutcomeRecordSchema,
-  UPLOAD_ATTACHED_ANSWER,
+  browserAgentPermissionsOf,
+  intendedAccountEmail,
+  isActiveApplicationAuthorityEnvelope,
   isUploadRepairPrompt,
+  jobSiteTarget,
   normalizeFormQuestionPrompt,
   submissionConfirmationSummary,
-  applicationSubmissionConfirmationMessages,
-  isActiveApplicationAuthorityEnvelope,
+  SubmissionOutcomeRecordSchema,
+  UPLOAD_ATTACHED_ANSWER,
   type ApplicationAuthorityEnvelope,
-  type ApplicationRow,
+  type ApplicationAutomationMode,
   type ApplicationResumeArtifact,
   type ApplicationReviewCard,
+  type ApplicationRow,
   type ApplyExecutionResult,
-  type RawApplyPage,
+  type CandidateAnswerKind,
   type CandidateProfile,
   type CandidateReusableAnswer,
-  type CandidateAnswerKind,
-  type JobFinderSettings,
-  type SubmissionOutcomeRecord,
-  type JobSearchPreferences,
   type JobDetail,
+  type JobFinderSettings,
+  type JobSearchPreferences,
   type NeedsYouKind,
-  type ApplicationAutomationMode,
+  type RawApplyPage,
   type SourceInstructionArtifact,
-  jobSiteTarget,
+  type SubmissionOutcomeRecord,
 } from "@nestor/contracts";
 import {
   readSavedApplicationAnswers,
@@ -72,47 +58,57 @@ import {
   type JobStore,
   type SendGuards,
 } from "@nestor/db/job-store";
-import type { JobFinderAiClient } from "@nestor/ai-providers";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
+import { accumulateApplyUsage } from "./apply-usage";
+import {
+  approvedJobResumeIdentity,
+  loadApprovedJobResumeBytes,
+  loadOriginalResumeBytes,
+  renderApplicationResume,
+  renderReadyJobResume,
+} from "./resume-artifacts";
 
 import {
+  buildApplyLetterDependencies,
   createApplyFormPreparer,
   mergeApplyReviewCards,
-  buildApplyLetterDependencies,
-  toApplyLlmClient,
 } from "../internal/agent-application-preparation";
 import {
-  withApplicationAuthorityGate,
   resolveApplicationAuthoritySuccessorId,
+  withApplicationAuthorityGate,
 } from "../internal/application-authority-gate";
-import { authorizeReviewedApplicationOrigin } from "../internal/apply-authority-resolution";
 import { runApplicationSubmissionRuntime } from "../internal/application-submission-runtime";
+import { authorizeReviewedApplicationOrigin } from "../internal/apply-authority-resolution";
 import {
   submitPreparedApplication,
   type SubmitPreparedApplicationRepository,
 } from "../internal/apply-submission-handoff";
-import type { JobFinderDocumentManager } from "../internal/workspace-service-contracts";
-import { toResumeJob } from "../resumes/write-resume";
+import { uniqueStrings } from "../internal/shared";
+import { resolveApplicationAttachmentsForExecution } from "../internal/workspace-application-attachments";
 import {
-  describeFormQuestion,
-  resolveListingCountry,
-  type FormQuestion,
-  eligibilityQuestionContext,
-  legacyEligibilityDraft,
-  pageAnswerSuggestion,
-  toKnownFormAnswer,
-} from "./questions";
+  buildInstructionGuidance,
+  resolveActiveSourceInstructionArtifact,
+} from "../internal/workspace-helpers";
+import type {
+  CandidateAssetResolver,
+  JobFinderDocumentManager,
+} from "../internal/workspace-service-contracts";
+import { toResumeJob } from "../resumes/write-resume";
 import {
   applicationAnswerDependencies,
   applicationAnswersUnchanged,
   profileFactsDigest,
 } from "./answer-dependencies";
-import { resolveApplicationAttachmentsForExecution } from "../internal/workspace-application-attachments";
-import type { CandidateAssetResolver } from "../internal/workspace-service-contracts";
 import {
-  buildInstructionGuidance,
-  resolveActiveSourceInstructionArtifact,
-} from "../internal/workspace-helpers";
-import { uniqueStrings } from "../internal/shared";
+  describeFormQuestion,
+  eligibilityQuestionContext,
+  legacyEligibilityDraft,
+  resolveListingCountry,
+  toKnownFormAnswer,
+  type FormQuestion,
+} from "./questions";
 
 /** A country-free legacy legal answer has no jurisdiction to apply elsewhere. */
 function generalSavedAnswer(answer: CandidateReusableAnswer): boolean {
@@ -1336,8 +1332,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               answer.key === known.key && answer.answer === currentAnswer,
           );
       if (
-        ((repeated && currentAnswer != null) ||
-          (alreadyRead && question.askReason?.kind !== "source_rejected")) &&
+        ((repeated && currentAnswer != null) || alreadyRead) &&
         !refusedWrite &&
         question.id !== STEP_HANDOVER_QUESTION_ID &&
         question.id !== UPLOAD_REPAIR_QUESTION_ID
@@ -1490,12 +1485,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         deps.authorityRepository,
         signal,
         async () => {
-          const {
-            settings,
-            profile,
-            searchPreferences,
-            sourceInstructionArtifacts = [],
-          } = await deps.readInputs();
+          const { profile } = await deps.readInputs();
           if (
             !current(row) ||
             (!personClicked && (await modeFor(row)) !== "autonomous_submit")
@@ -1532,323 +1522,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             )
               void wake();
             return;
-          }
-          // One Profile job or school filling two history rows is wrong data
-          // wherever those rows sit, including earlier hidden steps the
-          // review card never read (council D2). It is never sent.
-          const history = await browser
-            .readApplicationPageBinding?.("target_site", identity.resultId)
-            .catch(() => null);
-          const repeatedRecords = history
-            ? duplicatedHistoryRows(
-                buildApplyFormObservation(history, new Date().toISOString())
-                  .controls,
-                {
-                  profile,
-                  resumeText: profile.baseResume.textContent,
-                  reusableAnswers: [],
-                  documents: [],
-                  posting: {
-                    title: job.title,
-                    company: job.company,
-                    location: job.location,
-                    resolvedCountry: resolveListingCountry(job.location),
-                    description: job.description ?? "",
-                  },
-                },
-              )
-            : [];
-          if (repeatedRecords.length)
-            return leaveForPerson(
-              row,
-              `Not sent: ${[...new Set(repeatedRecords)].map((label) => `"${label}"`).join(" and ")} hold the same entry from your Profile. Check the history entries on the form before sending.`,
-            );
-          // A Ready row may predate a grounding fix. Re-ground generated
-          // answers from current Profile/resume/scoped answers before arming
-          // either automatic sending or the person's sidebar Send instruction.
-          const card = applications.getWork(row.id)?.reviewCard;
-          const written = [...(card?.answers ?? [])];
-          if (
-            card?.letter &&
-            !card.letter.groundedIn.includes(
-              "your letter for this application",
-            ) &&
-            !written.some((answer) => answer.answer === card.letter!.text)
-          )
-            written.push({
-              question: card.letter.fields?.[0] ?? "Cover letter",
-              answer: card.letter.text,
-              source: "Written for this application",
-              written: true,
-              groundedIn: card.letter.groundedIn,
-            });
-          if (written.length) {
-            const form = await browser
-              .readApplicationPageBinding?.("target_site", identity.resultId)
-              .catch(() => null);
-            const formObservation = form
-              ? buildApplyFormObservation(form, new Date().toISOString())
-              : null;
-            const formControls = formObservation?.controls ?? [];
-            const suggestions = written.map((answer) =>
-              pageAnswerSuggestion(answer.question, formControls),
-            );
-            const questions = written.map((answer, index) => ({
-              prompt: answer.question,
-              kind: inferQuestionKind({
-                label: answer.question,
-                groupLabel: "",
-                placeholder: "",
-                kind: "text",
-              }),
-              answerControlType:
-                suggestions[index]?.control?.answerControlType ??
-                (/^(?:yes|no)$/iu.test(answer.answer)
-                  ? ("boolean" as const)
-                  : ("text" as const)),
-              answerOptions: suggestions[index]?.control?.options ?? [],
-              ...(suggestions[index]?.control?.inputConstraints
-                ? {
-                    inputConstraints:
-                      suggestions[index].control.inputConstraints,
-                  }
-                : {}),
-            }));
-            const queries = questions.map((question, index) => {
-              const query = {
-                ...describeFormQuestion(question, job, profile),
-                prompt: question.prompt,
-              };
-              // Hidden prior-step controls no longer expose their options.
-              // Their reconstructed key must not lose the person's own answer.
-              // The dependency keys and values were checked live above, in this
-              // application, with unchanged Profile facts. Bind only the same
-              // whole question, kind and value, and never a repeated entry.
-              const used = proof?.form.filter(
-                (entry) =>
-                  entry.kind === question.kind &&
-                  entry.answer === written[index]?.answer &&
-                  normalizeFormQuestionPrompt(entry.prompt) ===
-                    normalizeFormQuestionPrompt(question.prompt),
-              );
-              return !suggestions[index]?.control &&
-                ["work_authorization", "visa_sponsorship"].includes(
-                  question.kind,
-                ) &&
-                written.filter(
-                  (answer) =>
-                    normalizeFormQuestionPrompt(answer.question) ===
-                    normalizeFormQuestionPrompt(question.prompt),
-                ).length === 1 &&
-                used?.length === 1
-                ? { ...query, key: used[0]!.key, reusePrompt: false }
-                : query;
-            });
-            const saved = applications.needsYou
-              .answersForQuestions(row.id, queries, origin)
-              .map((answer) =>
-                toKnownFormAnswer(
-                  answer,
-                  questions[
-                    queries.findIndex((query) => query.key === answer.key)
-                  ]!,
-                  job.location,
-                  row.id,
-                ),
-              );
-            const client = toApplyLlmClient(deps.aiClient);
-            const checks =
-              client && form
-                ? await checkClassifiedApplicationAnswers({
-                    client,
-                    browserPermissions: browserAgentPermissionsOf(
-                      (await deps.readInputs()).settings,
-                    ),
-                    application: {
-                      jobId: String(job.id),
-                      applicationId: identity.resultId,
-                      resultId: identity.resultId,
-                      applicationRecordId: identity.applicationRecordId,
-                      startingUrl: form.url ?? job.applyUrl ?? job.url,
-                      instructions: instructionsFor(
-                        job,
-                        sourceInstructionArtifacts,
-                      ),
-                    },
-                    questionReadCacheScope: deps.aiClient,
-                    approvedAttestations: AiBehaviorPreferenceSchema.parse(
-                      settings.aiBehavior ?? {},
-                    ).applying.preApprovedDeclarations,
-                    formControls,
-                    sources: {
-                      preferences: searchPreferences,
-                      listingDiscovery: listingDiscovery(job),
-                      profile,
-                      resumeText: profile.baseResume.textContent,
-                      reusableAnswers: [
-                        ...new Map(
-                          [
-                            ...readSavedApplicationAnswers(
-                              jobs,
-                              undefined,
-                              origin,
-                            ).filter(generalSavedAnswer),
-                            ...saved,
-                          ].map((answer) => [answer.id, answer]),
-                        ).values(),
-                      ],
-                      documents: [],
-                      posting: {
-                        title: job.title,
-                        company: job.company,
-                        location: job.location,
-                        resolvedCountry: resolveListingCountry(job.location),
-                        description: job.description ?? "",
-                      },
-                    },
-                    answers: written,
-                    // Council D1: an earlier step binds only through this
-                    // attempt's own receipts and the review page's rows.
-                    stepReceipts: ApplyStepReceiptSchema.array()
-                      .catch([])
-                      .parse(
-                        applications.getWork(row.id)?.execution.stepReceipts ??
-                          [],
-                      ),
-                    ...(formObservation?.summaryRows
-                      ? { summaryRows: formObservation.summaryRows }
-                      : {}),
-                    ...(formObservation
-                      ? {
-                          sendPage: {
-                            origin: formObservation.origin,
-                            stepIndex: formObservation.step.index,
-                            stepTotal: formObservation.step.total,
-                          },
-                        }
-                      : {}),
-                    formContext: {
-                      pageText: form?.bodyText ?? "",
-                      fields: [],
-                    },
-                    payDisclosed:
-                      settings.salaryDisclosure === "answer_from_profile",
-                    signal,
-                  }).catch(() => null)
-                : null;
-            const unchecked =
-              !checks || checks.some((check) => check.unavailable);
-            const rejected = questions.flatMap((question, index) =>
-              checks?.[index]?.supported || checks?.[index]?.unavailable
-                ? []
-                : [{ question, index }],
-            );
-            if (unchecked && rejected.length === 0) {
-              applications.failBeforeSubmission(
-                row.id,
-                row.attempt,
-                "Nestor could not finish checking this application before sending. Nothing was sent. Your page and answers are kept. Try again to continue.",
-              );
-              return;
-            }
-            // An earlier step Nestor could not check on this review page holds
-            // the whole send: nothing is discarded and nothing new is asked.
-            const unbound = checks?.filter((check) => check.priorStep) ?? [];
-            if (unbound.length)
-              return leaveForPerson(
-                row,
-                unbound.some((check) => check.priorStep === "no_receipt")
-                  ? "Not sent: an earlier step was continued on the site by you, so Nestor cannot check its answers before sending. The filled form is ready for your review; your answers are kept."
-                  : "Not sent: Nestor could not check the answers from earlier steps against this review page. The filled form is ready for your review; your answers are kept.",
-              );
-            if (rejected.length) {
-              const repeatedAnswer = rejected.find(
-                ({ index }) =>
-                  applications.needsYou.answersForQuestions(
-                    row.id,
-                    [queries[index]!],
-                    origin,
-                  ).length > 0,
-              );
-              if (repeatedAnswer)
-                // The row is still running here, so a bare refusal would not
-                // land. Keep the filled form and say why it was not sent.
-                return leaveForPerson(
-                  row,
-                  `Not sent: your saved answer to "${repeatedAnswer.question.prompt}" could not be verified before sending (${checks?.[repeatedAnswer.index]?.reason ?? "the answer check was unavailable"}). The filled form is ready for your review; your answers are kept.`,
-                );
-              applications.discardReviewAnswers(
-                row.id,
-                row.attempt,
-                rejected.map(({ question }) => question.prompt),
-                card?.letter?.text,
-              );
-              // The new question supersedes the ungrounded generated value.
-              // Do not immediately consume the same unusable saved answer.
-              for (const { question, index } of rejected) {
-                const control = suggestions[index]?.control;
-                const known = describeFormQuestion(
-                  control
-                    ? {
-                        ...question,
-                        answerControlType: control.answerControlType,
-                        answerOptions: control.options,
-                        inputConstraints: control.inputConstraints,
-                      }
-                    : question,
-                  job,
-                  profile,
-                );
-                const requested = applications.needsYou.request(
-                  {
-                    applicationId: row.id,
-                    attempt: row.attempt,
-                    fieldKey: known.key,
-                    kind: "question",
-                    key: known.key,
-                    scope: {},
-                    askReason: {
-                      kind: "source_rejected",
-                      check: "send_answer_grounding",
-                      detail: (
-                        checks?.[index]?.reason ??
-                        "The send-time answer check could not verify this value."
-                      ).slice(0, 4000),
-                    },
-                    prompt: question.prompt,
-                    input: known.input,
-                    options: known.options,
-                    reusePrompt: known.reusePrompt,
-                  },
-                  { reuseAnswers: false },
-                );
-                const suggestion = suggestions[index]?.answer;
-                if (
-                  requested.status === "needs_you" &&
-                  suggestion &&
-                  !applications.needsYou.details(requested.task.id)?.draft &&
-                  (known.input !== "boolean" ||
-                    ["Yes", "No"].includes(suggestion)) &&
-                  (known.input !== "choice" ||
-                    known.options.includes(suggestion)) &&
-                  known.input !== "multi_choice" &&
-                  (known.input !== "number" ||
-                    Number.isFinite(Number(suggestion)))
-                )
-                  applications.needsYou.saveDraft({
-                    id: requested.task.id,
-                    answer: suggestion,
-                    remember: true,
-                    revision: 0,
-                  });
-              }
-              // Refill from the person's answer after this task resolves;
-              // a retained, already-answered control must not keep the old
-              // unsupported value merely because the site says it is filled.
-              await closePage(row.id, row.attempt);
-              waiting.set(row.id, row.attempt);
-              return;
-            }
           }
           const activeEnvelopes =
             await deps.authorityRepository.listApplicationAuthorityEnvelopes({
@@ -2519,93 +2192,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     }
   }
 
-  let lastQuestionReuseSnapshot = "";
-  let unavailableQuestionReuseSnapshot = "";
-  const reconcileEquivalentQuestions = async (): Promise<void> => {
-    const client = toApplyLlmClient(deps.aiClient);
-    if (!client) return;
-    const candidates = applications.needsYou.questionReuseCandidates();
-    const snapshot = JSON.stringify(candidates);
-    if (
-      !candidates.length ||
-      snapshot === lastQuestionReuseSnapshot ||
-      snapshot === unavailableQuestionReuseSnapshot
-    )
-      return;
-    const pairs = candidates.flatMap(({ task, answers }) =>
-      answers.map((saved) => ({
-        id: `${task.id}:${saved.id}`,
-        saved: {
-          question: saved.prompt,
-          answer: saved.answer,
-          options: saved.options,
-        },
-        waiting: { question: task.prompt, options: task.options },
-      })),
-    );
-    const equivalent = new Map<string, string>();
-    let comparisonUnavailable = false;
-    for (let offset = 0; offset < pairs.length && !stopped; offset += 20) {
-      const checked = await equivalentApplicationQuestions({
-        client,
-        pairs: pairs.slice(offset, offset + 20),
-      }).catch(() => {
-        comparisonUnavailable = true;
-        return new Map<string, string>();
-      });
-      for (const [id, answer] of checked) equivalent.set(id, answer);
-    }
-    if (stopped) return;
-    // The reader already made its bounded retry. An unavailable report is
-    // not a negative decision and must not become a timer-driven retry loop.
-    // Changed questions or sources supply a fresh snapshot to check.
-    if (comparisonUnavailable) {
-      unavailableQuestionReuseSnapshot = snapshot;
-      return;
-    }
-    unavailableQuestionReuseSnapshot = "";
-    lastQuestionReuseSnapshot = snapshot;
-    const matches = candidates.flatMap((candidate) => {
-      const answers = candidate.answers.filter((answer) =>
-        equivalent.has(`${candidate.task.id}:${answer.id}`),
-      );
-      // Conflicting sources and two meanings within one application stay open.
-      if (
-        !answers.length ||
-        new Set(
-          answers.map((answer) =>
-            equivalent.get(`${candidate.task.id}:${answer.id}`),
-          ),
-        ).size !== 1
-      )
-        return [];
-      if (
-        candidate.applications.some((id) =>
-          candidates.some(
-            (other) =>
-              other.task.id !== candidate.task.id &&
-              other.applications.includes(id) &&
-              other.answers.some(
-                (answer) =>
-                  answers.some((saved) => saved.id === answer.id) &&
-                  equivalent.has(`${other.task.id}:${answer.id}`),
-              ),
-          ),
-        )
-      )
-        return [];
-      return [
-        {
-          taskId: candidate.task.id,
-          answerId: answers[0]!.id,
-          answer: equivalent.get(`${candidate.task.id}:${answers[0]!.id}`)!,
-        },
-      ];
-    });
-    if (matches.length)
-      applications.needsYou.resolveQuestionReuse({ snapshot, matches });
-  };
-
   function wake(): void {
     if (stopped) return;
     if (pumping) {
@@ -2613,7 +2199,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return;
     }
     pumping = (async () => {
-      await reconcileEquivalentQuestions();
       while (!stopped && active.size < capacity() && !(await deps.isPaused())) {
         const row = applications.claimNext();
         if (!row) break;

@@ -1,15 +1,12 @@
-import type { ApplyFormPathStep } from "@nestor/contracts";
+import type {
+  ApplicationAttestationKind,
+  ApplyFormPathStep,
+} from "@nestor/contracts";
+import { savedAnswerForQuestion } from "./application-facts";
+import { addedHistoryKind } from "./history-row-policy";
+import { choiceAnswerValues, matchOption } from "./option-match";
 import { questionPrompt } from "./policy-executor";
 import { holdsAnswer } from "./submit-preflight";
-import { choiceAnswerValues, matchOption } from "./option-match";
-import { addedHistoryKind } from "./history-row-policy";
-import { savedAnswerForQuestion } from "./application-facts";
-import {
-  answerSourceCatalog,
-  knownLiteralField,
-  literalValueMatches,
-} from "./answer-source-catalog";
-import type { ApplicationAttestationKind } from "@nestor/contracts";
 import type {
   ApplyAnswer,
   ApplyAnswerSources,
@@ -156,11 +153,6 @@ export function replayStillCurrent(input: {
   return (answer, control) => {
     const id = answer.sourceId ?? "";
     const unchanged = { value: answer.answer, changed: false };
-    const declaration = /^authority\.attestation\.(.+)$/u.exec(id)?.[1];
-    if (declaration)
-      return input.approvedAttestations.some((kind) => kind === declaration)
-        ? unchanged
-        : null;
     if (id.startsWith("answerLibrary.")) {
       const saved = input.sources.reusableAnswers.find(
         (entry) => `answerLibrary.${entry.id}` === id,
@@ -169,34 +161,6 @@ export function replayStillCurrent(input: {
       return saved.answer === answer.answer
         ? unchanged
         : { value: saved.answer, changed: true };
-    }
-    // A selection made from the recorded skills list: every option still
-    // has to be a recorded skill, or the group is decided afresh.
-    if (id === "profile.skills") {
-      const skills = answerSourceCatalog(input.sources)
-        .filter((row) => /^profile\.skills\.\d+$/u.test(row.id))
-        .map((row) => row.value);
-      const chosen = choiceAnswerValues(answer.answer, skills);
-      return chosen?.length ? unchanged : null;
-    }
-    // A field that takes the Profile value verbatim (a name, an email) must
-    // still hold the current value. Answers derived from a fact (Yes from an
-    // authorized country) are re-checked against Profile at Send instead.
-    if (/^profile\.[^#]+$/u.test(id)) {
-      const fact = answerSourceCatalog(input.sources).find(
-        (row) => row.id === id,
-      );
-      if (fact && !knownLiteralField(fact, control)) return unchanged;
-      return fact &&
-        literalValueMatches(
-          fact,
-          control,
-          answer.answer,
-          input.controls,
-          input.sources,
-        )
-        ? unchanged
-        : null;
     }
     // An answer the earlier run only observed on the page grants nothing by
     // itself: the person's current saved answer to this question wins.

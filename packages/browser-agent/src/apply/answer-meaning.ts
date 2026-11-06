@@ -1,14 +1,6 @@
+import type { ApplyStepReceiptField } from "@nestor/contracts";
 import { createHash } from "node:crypto";
-import type {
-  ApplicationAttestationKind,
-  ApplyStepReceiptField,
-} from "@nestor/contracts";
-import {
-  applicationFacts,
-  plainAnswerCheckFacts,
-  serializeApplicationData,
-  isAnswerFromThisApplication,
-} from "./application-facts";
+import { isAnswerFromThisApplication } from "./application-facts";
 import { questionPrompt } from "./question-text";
 import type {
   ApplyAgentConfig,
@@ -28,25 +20,6 @@ function canonical(value: unknown): string {
 }
 export const meaningHash = (value: unknown): string =>
   createHash("sha256").update(canonical(value)).digest("hex");
-
-/** Current applicant facts, conditions, task instructions and disclosure/consent authority. */
-export function meaningSourcesHash(
-  sources: ApplyAnswerSources,
-  payDisclosed: boolean,
-  approvedAttestations: readonly ApplicationAttestationKind[] = [],
-): string {
-  return meaningHash({
-    applicant: JSON.parse(
-      serializeApplicationData(
-        plainAnswerCheckFacts(applicationFacts(sources, { payDisclosed })),
-      ),
-    ) as unknown,
-    resume: sources.resumeText ?? sources.profile.baseResume.textContent,
-    posting: sources.posting,
-    approvedAttestations,
-    payDisclosed,
-  });
-}
 
 /** No DOM ref or current value: those change during a verified write. */
 export function meaningTargetHash(

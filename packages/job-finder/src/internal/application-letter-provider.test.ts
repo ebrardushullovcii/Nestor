@@ -4,10 +4,7 @@ import {
 } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  ApplicationLetterGroundingError,
-  createApplicationLetterProvider,
-} from "./application-letter-provider";
+import { createApplicationLetterProvider } from "./application-letter-provider";
 
 /**
  * One application, one letter.
@@ -295,34 +292,6 @@ describe("the saved letter preference", () => {
   });
 });
 
-test("an unsupported letter is handed back with its reason and is never rendered", async () => {
-  const renderLetter = vi.fn();
-  const letterProvider = provider({
-    writeLetter: () => {
-      return Promise.reject(
-        new ApplicationLetterGroundingError(
-          "The claimed result is not in your profile or resume.",
-          "Draft needing review",
-        ),
-      );
-    },
-    renderLetter,
-  });
-  expect(
-    await letterProvider.provide({
-      ...REQUEST,
-      delivery: "file",
-      fileType: "pdf",
-    }),
-  ).toEqual({
-    ok: false,
-    reason:
-      "The letter needs your review: The claimed result is not in your profile or resume.",
-    draftText: "Draft needing review",
-  });
-  expect(renderLetter).not.toHaveBeenCalled();
-});
-
 test("renders the person's approved letter word for word without writing or checking it again", async () => {
   const writeLetter = vi
     .fn()
@@ -355,30 +324,4 @@ test("renders the person's approved letter word for word without writing or chec
   );
   // Named as the person's letter, not "v1" of this run.
   expect(result.document.label).toBe("Cover letter you approved");
-});
-
-test("an unavailable letter check keeps its draft as a technical outcome", async () => {
-  const letters = provider({
-    writeLetter: () =>
-      Promise.reject(
-        new ApplicationLetterGroundingError(
-          "Nestor could not finish checking this letter. Try again.",
-          "Synthetic retained draft.",
-          true,
-        ),
-      ),
-  });
-  const result = await letters.provide({
-    ...REQUEST,
-    delivery: "text",
-    fileType: null,
-  });
-  expect(result).toMatchObject({
-    ok: false,
-    checkingUnavailable: true,
-    draftText: "Synthetic retained draft.",
-  });
-  expect(!result.ok && result.reason).not.toMatch(
-    /needs your review|supply|confirm/i,
-  );
 });

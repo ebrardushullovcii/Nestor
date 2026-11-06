@@ -258,7 +258,7 @@ test("a closed two-step form comes back step by step, with no model call", async
   expect(third.writes).toEqual([]);
 }, 60_000);
 
-test("a closed Needs-you form comes back with its open question still the person's, with no model call", async () => {
+test("a closed Needs-you form returns its unresolved question to the model", async () => {
   const replay: FormReplay = {
     answers: [answer("First Name", "Alex"), answer("Last Name", "Vanguard")],
     attachments: [],
@@ -279,16 +279,16 @@ test("a closed Needs-you form comes back with its open question still the person
     return page;
   };
   const sent = posts().length;
-  // The attempt before asked the person for their email; it is still open.
+  // A previous handoff is context: the model reconsiders the unresolved field.
   const restored = await run(await open(), replay, ["Email *"]);
-  expect(restored.turns).toBe(0);
+  expect(restored.turns).toBeGreaterThan(0);
   expect(restored.writes).toEqual(["Alex", "Vanguard"]);
-  expect(restored.result.outcome).toBe("paused");
+  expect(restored.result.outcome).toBe("stuck");
   expect(
     restored.result.pauses.flatMap((pause) =>
       (pause.questions ?? []).map((question) => question.prompt),
     ),
-  ).toEqual([expect.stringMatching(/^Email/u)]);
+  ).toEqual([]);
 
   // A field nobody asked about means the page differs: the model reads it.
   const differs = await run(await open(), replay);

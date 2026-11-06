@@ -218,57 +218,9 @@ function askedFor(result: Awaited<ReturnType<typeof runApplyAgent>>) {
   );
 }
 
-test("stalled reads of other questions do not hand stored name and email to the person", async () => {
-  const { raw, input } = setup();
-  const { model, reads } = client([SALARY, CODING]);
-  const result = await runApplyAgent(input, model);
-  // Whole page, three groups, then each remaining question on its own.
-  expect(reads.map((group) => group.length)).toEqual([
-    5,
-    2,
-    2,
-    ...Array<number>(10).fill(1),
-  ]);
-  expect(raw.controls.map((control) => control.value)).toEqual([
-    "Jamie",
-    "Rivers",
-    "jamie@example.test",
-    "",
-    "",
-  ]);
-  // Council D6: a partial outage fills what it can read, then ends as
-  // Nestor's retained technical failure; it never asks per-field questions.
-  expect(askedFor(result).size).toBe(0);
-  expect(result.outcome).toBe("stuck");
-  expect(result.readyToSend).toBeNull();
-  expect(result.technicalFailure).toEqual({
-    code: "question_classification_unavailable",
-    retryable: true,
-    pageDisposition: "retain",
-  });
-});
-
 // Council D3 (2026-11-03): a reading outage is Nestor's problem, not a
 // question for a fact Profile holds. An exact applicant-identity binding
 // fills without a reading; an unread pay question still does not.
-test("an unread first-name question fills from its exact Profile fact; unread pay is not written", async () => {
-  const { raw, input } = setup();
-  const { model } = client([FIRST, SALARY]);
-  const result = await runApplyAgent(input, model);
-  expect(raw.controls.slice(0, 4).map((control) => control.value)).toEqual([
-    "Jamie",
-    "Rivers",
-    "jamie@example.test",
-    "",
-  ]);
-  // Unread pay remains technical. The separately readable, genuinely missing
-  // personal preference survives instead of being discarded with that fault.
-  expect([...askedFor(result).keys()]).toEqual([CODING]);
-  expect(result.outcome).toBe("paused");
-  expect(result.technicalFailure?.code).toBe(
-    "question_classification_unavailable",
-  );
-});
 
 test("a page with no readable question discards the overlapping decision before any write", async () => {
   const { raw, input } = setup();
