@@ -33,7 +33,7 @@ const request = {
   body: { messages: [] },
   apiMode: "chat_completions" as const,
   totalTimeoutMs: 2000,
-  maxAttempts: 2,
+
   retryBaseDelayMs: 0,
   retryMaxDelayMs: 0,
 };
@@ -100,7 +100,6 @@ const client = () =>
     apiKey: "SECRET_KEY_SENTINEL",
     model: "synthetic-reasoner",
     apiMode: "responses",
-    maxAttempts: 1,
   });
 const tools = [
   {
@@ -176,7 +175,7 @@ test("a truncated Chat answer still collects the later usage chunk, then refuses
     scope.run(() =>
       performModelRequest({
         ...request,
-        maxAttempts: 1,
+
         fetchImpl: () =>
           Promise.resolve(
             sse(
@@ -337,7 +336,7 @@ test("malformed output cannot discard a valid usage object", async () => {
       performModelRequest({
         ...request,
         apiMode: "responses",
-        maxAttempts: 1,
+
         fetchImpl: () =>
           Promise.resolve(
             json({ status: "completed", output: "malformed", usage: numbers }),

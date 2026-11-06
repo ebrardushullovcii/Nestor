@@ -46,7 +46,7 @@ export const OpenAiCompatibleBrowserVisualProviderOptionsSchema = z.object({
   reasoningEffort: z.enum(modelReasoningEfforts).optional(),
   requestTimeoutMs: z.number().int().min(1_000).optional(),
   idleTimeoutMs: z.number().int().min(1_000).optional(),
-  maxAttempts: z.number().int().min(1).max(10).optional(),
+
   streaming: z.boolean().optional(),
   retryBaseDelayMs: z.number().int().min(0).optional(),
 });
@@ -607,7 +607,7 @@ export function createOpenAiCompatibleBrowserVisualAnalysisProvider(
         apiMode,
         totalTimeoutMs: timeoutMs,
         idleTimeoutMs: validatedOptions.idleTimeoutMs,
-        maxAttempts: validatedOptions.maxAttempts,
+
         streaming: validatedOptions.streaming,
         retryBaseDelayMs: validatedOptions.retryBaseDelayMs,
       });
@@ -775,7 +775,7 @@ export function createBrowserVisualAnalysisProviderFromEnvironment(
       env.NESTOR_BROWSER_VISION_TIMEOUT_MS,
     ),
     idleTimeoutMs: parseConfiguredNumber(env.NESTOR_AI_IDLE_TIMEOUT_MS),
-    maxAttempts: parseConfiguredPositiveInteger(env.NESTOR_AI_MAX_ATTEMPTS),
+
     streaming: parseConfiguredBoolean(env.NESTOR_AI_STREAMING),
     retryBaseDelayMs: parseConfiguredPositiveInteger(
       env.NESTOR_AI_RETRY_BASE_DELAY_MS,

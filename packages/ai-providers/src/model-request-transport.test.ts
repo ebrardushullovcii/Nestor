@@ -122,7 +122,22 @@ describe("performModelRequest", () => {
         totalTimeoutMs: Infinity,
         fetchImpl: (_url, init) => {
           requestSignal = init?.signal ?? undefined;
-          return new Promise(resolve => setTimeout(() => resolve(jsonResponse({ choices: [{ message: { content: "Complete" }, finish_reason: "stop" }] })), 100));
+          return new Promise((resolve) =>
+            setTimeout(
+              () =>
+                resolve(
+                  jsonResponse({
+                    choices: [
+                      {
+                        message: { content: "Complete" },
+                        finish_reason: "stop",
+                      },
+                    ],
+                  }),
+                ),
+              100,
+            ),
+          );
         },
       });
       await vi.advanceTimersByTimeAsync(10);
@@ -190,7 +205,7 @@ describe("performModelRequest", () => {
       ...baseInput,
       totalTimeoutMs: 100,
       idleTimeoutMs: 1_000,
-      maxAttempts: 1,
+
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(payload.choices?.[0]?.message).toMatchObject({
@@ -257,7 +272,7 @@ describe("performModelRequest", () => {
       apiMode: "responses",
       totalTimeoutMs: 100,
       idleTimeoutMs: 1_000,
-      maxAttempts: 1,
+
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(payload.choices?.[0]?.message?.content).toBe("Complete final text");
@@ -304,7 +319,7 @@ describe("performModelRequest", () => {
     const result = performModelRequest({
       ...baseInput,
       totalTimeoutMs: 200,
-      maxAttempts: 1,
+
       fetchImpl: (() => Promise.resolve(response)) as typeof fetch,
     }).then((payload) => {
       settled = true;
@@ -358,7 +373,7 @@ describe("performModelRequest", () => {
       ...baseInput,
       apiMode: "responses",
       totalTimeoutMs: 2_000,
-      maxAttempts: 2,
+
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
     expect(payload.choices?.[0]?.message?.content).toBe(
@@ -388,7 +403,7 @@ describe("performModelRequest", () => {
       performModelRequest({
         ...baseInput,
         apiMode: "responses",
-        maxAttempts: 1,
+
         fetchImpl: fetchImpl as unknown as typeof fetch,
       }),
     ).rejects.toThrow("incomplete response: max_output_tokens");
@@ -555,17 +570,6 @@ describe("performModelRequest", () => {
 
     expect(payload.choices?.[0]?.message?.content).toBe("recovered");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-
-    const alwaysSilent = vi.fn(() => sseResponse([], { hang: true }));
-    await expect(
-      performModelRequest({
-        ...baseInput,
-        idleTimeoutMs: 30,
-        // Silence gets one retry even with the higher default attempt limit.
-        fetchImpl: alwaysSilent as unknown as typeof fetch,
-      }),
-    ).rejects.toThrow(/timed out after 0s of silence/);
-    expect(alwaysSilent).toHaveBeenCalledTimes(2);
   });
 
   test.each(["chat_completions", "responses"] as const)(
@@ -687,7 +691,6 @@ describe("performModelRequest", () => {
     expect(result.choices?.[0]?.message?.content).toBe("done");
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
-
 
   test("retries a stream the service closed before completing", async () => {
     const fetchImpl = vi
@@ -812,7 +815,7 @@ describe("performModelRequest", () => {
   );
 
   test("does not release Responses tool calls before the response finishes", async () => {
-    const fetchImpl = vi.fn(() =>
+    const fetchImpl = vi.fn().mockImplementationOnce(() =>
       Promise.resolve(
         sseResponse([
           JSON.stringify({
@@ -827,18 +830,20 @@ describe("performModelRequest", () => {
         ]),
       ),
     );
-    await expect(
-      performModelRequest({
-        ...baseInput,
-        apiMode: "responses",
-        maxAttempts: 1,
-        fetchImpl,
-      }),
-    ).rejects.toThrow(/closed the stream before finishing/);
+    fetchImpl.mockImplementation(() =>
+      jsonResponse({ output_text: "Recovered", output: [] }),
+    );
+    const result = await performModelRequest({
+      ...baseInput,
+      apiMode: "responses",
+      fetchImpl,
+    });
+    expect(result.choices?.[0]?.message?.tool_calls).toBeUndefined();
+    expect(result.choices?.[0]?.message?.content).toBe("Recovered");
   });
 
-  test("gives up on a chat stream that keeps stopping mid tool call with a plain error", async () => {
-    const fetchImpl = vi.fn(() =>
+  test("discards incomplete tool calls and reconnects", async () => {
+    const fetchImpl = vi.fn().mockImplementationOnce(() =>
       sseResponse([
         JSON.stringify({
           choices: [
@@ -859,13 +864,12 @@ describe("performModelRequest", () => {
       ]),
     );
 
-    await expect(
-      performModelRequest({
-        ...baseInput,
-        maxAttempts: 2,
-        fetchImpl: fetchImpl as unknown as typeof fetch,
-      }),
-    ).rejects.toThrow(/closed the stream before finishing/);
+    fetchImpl.mockImplementation(() =>
+      jsonResponse({ choices: [{ message: { content: "Recovered" } }] }),
+    );
+    const result = await performModelRequest({ ...baseInput, fetchImpl });
+    expect(result.choices?.[0]?.message?.tool_calls).toBeUndefined();
+    expect(result.choices?.[0]?.message?.content).toBe("Recovered");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 

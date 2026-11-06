@@ -38,6 +38,7 @@ type PreviousResume = {
   afterMoveId: number;
 };
 type StageStamp = { stage: JobStage; stage_at: number };
+const providerWaits = new WeakMap<JobStore, Set<number>>();
 
 const iso = (ms: number | null) =>
   ms === null ? null : new Date(ms).toISOString();
@@ -86,6 +87,7 @@ export interface ResumeStore {
   /** Keeps a finished write, unless the job left Shortlisted meanwhile. */
   finishWriting(jobId: number, draft: ResumeDraft | null): boolean;
   failWriting(jobId: number, error: string): void;
+  setProviderWaiting(jobId: number, waiting: boolean): void;
   /**
    * Puts a stopped write back in the queue: one job's, or with no id every
    * write a closed app left behind.
@@ -128,6 +130,12 @@ export interface ResumeStore {
 
 export function createResumeStore(store: JobStore): ResumeStore {
   const { sql } = store;
+  let waiting = providerWaits.get(store);
+  if (!waiting) {
+    waiting = new Set();
+    providerWaits.set(store, waiting);
+  }
+  const providerWaiting = waiting;
   const read = (jobId: number) =>
     sql(
       `SELECT r.*, f.sha256 AS pdf_sha256 FROM resumes r LEFT JOIN resume_pdf_assets f ON f.job_id = r.job_id AND f.path = r.pdf_path AND f.approved_at = r.approved_at WHERE r.job_id = ?`,
@@ -233,6 +241,9 @@ export function createResumeStore(store: JobStore): ResumeStore {
             state: row.state,
             approvedAt: iso(row.approved_at),
             error: row.error,
+            ...(row.state === "writing" && providerWaiting.has(row.job_id)
+              ? { providerWaiting: true }
+              : {}),
           },
         ]),
       );
@@ -275,7 +286,14 @@ export function createResumeStore(store: JobStore): ResumeStore {
 
     get(jobId) {
       const row = read(jobId);
-      return row ? toStoredResume(row) : null;
+      return row
+        ? {
+            ...toStoredResume(row),
+            ...(row.state === "writing" && providerWaiting.has(jobId)
+              ? { providerWaiting: true }
+              : {}),
+          }
+        : null;
     },
 
     startWriting(jobId, level) {
@@ -307,6 +325,13 @@ export function createResumeStore(store: JobStore): ResumeStore {
         changed(jobId);
         return true;
       });
+    },
+
+    setProviderWaiting(jobId, waiting) {
+      const before = providerWaiting.has(jobId);
+      if (waiting) providerWaiting.add(jobId);
+      else providerWaiting.delete(jobId);
+      if (before !== waiting) changed(jobId);
     },
 
     failWriting(jobId, error) {

@@ -180,7 +180,11 @@ describe("normalized stream events", () => {
       onStreamEvent: (event) => events.push(event),
     });
     expect(payload.choices?.[0]?.message?.content).toBe("whole");
-    expect(events.map((event) => event.type)).toEqual([
+    expect(
+      events
+        .filter((event) => event.type !== "provider_wait")
+        .map((event) => event.type),
+    ).toEqual([
       "attempt_started",
       "text_delta",
       "attempt_started",

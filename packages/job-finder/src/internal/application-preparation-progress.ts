@@ -5,6 +5,8 @@
  * details belong in the final review card, not in a progress banner or log.
  */
 export function describeApplicationPreparationProgress(note: string): string {
+  if (note.includes("waiting for the AI provider"))
+    return "Waiting for the AI provider";
   // The run names the form's own step ("form step 2 of 5: ...") so a long
   // form shows how far along it is. Only the two numbers are kept.
   const onStep = /^form step (\d{1,3}) of (\d{1,3}): ([\s\S]*)$/u.exec(note);

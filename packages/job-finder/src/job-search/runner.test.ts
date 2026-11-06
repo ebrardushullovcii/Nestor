@@ -20,11 +20,97 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { JobSearchEngine } from "./engine";
 import { createJobSearchRunner } from "./runner";
 import { createFitQueue } from "./fit-queue";
+import { screenCards as screenListingCards } from "@nestor/browser-agent";
+import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
+import { setImmediate as yieldTurn } from "node:timers/promises";
 import type { JobSearchContext, JobSearchRunner } from "./types";
 
 const stores: JobStore[] = [];
 const runners: JobSearchRunner[] = [];
 const now = "2026-10-25T08:00:00Z";
+
+test("a search keeps a capacity-limited listing screen running, reports its wait, and reads it after recovery", async () => {
+  vi.useFakeTimers();
+  const { runner, engine, context, store } = setup();
+  context.sources = context.sources.slice(0, 1);
+  engine.collectSource.mockImplementation(({ target }) =>
+    Promise.resolve({
+      cards: [card(target.id, "Infrastructure Builder")],
+      pagesRead: 1,
+      complete: true,
+      notes: [],
+    }),
+  );
+  const request = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                "[prefill_cap_refused] the cell is at capacity; retry shortly (after 30 s)",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+    )
+    .mockImplementation(
+      () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: { content: '{"keep":{"0":1}}' },
+                finish_reason: "stop",
+              },
+            ],
+          }),
+          { headers: { "content-type": "application/json" } },
+        ),
+    );
+  vi.stubGlobal("fetch", request);
+  const client = createOpenAiCompatibleJobFinderAiClient({
+    baseUrl: "https://model.example/v1",
+    apiKey: "synthetic",
+    model: "synthetic",
+  });
+  engine.screenCards.mockImplementation((input) =>
+    screenListingCards({
+      client: { chatWithTools: client.chatWithTools.bind(client) },
+      cards: input.cards,
+      signal: input.signal,
+      goals: {
+        targetRoles: ["Backend Engineer"],
+        relatedRoles: [],
+        strategy: "wide_net",
+      },
+      ...(input.onRelated ? { onRelated: input.onRelated } : {}),
+    }),
+  );
+  try {
+    await runner.start({ postedWithin: "any" });
+    // The runner yields through node:timers/promises before starting its work.
+    await yieldTurn();
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(request).toHaveBeenCalledOnce();
+    expect(runner.status().search?.state).toBe("running");
+    expect(runner.status().progress?.providerWaiting).toBe(true);
+    expect(engine.readListings).not.toHaveBeenCalled();
+    expect(
+      runner.status().sources.every((source) => source.state !== "failed"),
+    ).toBe(true);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await finished(runner);
+    expect(result.search?.state).toBe("done");
+    expect(result.progress?.failed).toBe(0);
+    expect(store.listJobs({ stage: "found" }).rows).toHaveLength(1);
+    expect(engine.readListings).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  }
+});
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {

@@ -150,9 +150,6 @@ function buildRoute(input: {
       input.env.NESTOR_AI_IDLE_TIMEOUT_MS,
       1_000,
     ),
-    maxAttempts: parseConfiguredPositiveInteger(
-      input.env.NESTOR_AI_MAX_ATTEMPTS,
-    ),
     streaming: parseConfiguredBoolean(input.env.NESTOR_AI_STREAMING),
   });
   return {

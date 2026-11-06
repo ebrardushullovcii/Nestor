@@ -314,31 +314,15 @@ async function readWithLiveness<T>(
   }) => Promise<T>,
   parent?: AbortSignal,
 ): Promise<T> {
-  for (const attempt of [0, 1]) {
+  for (;;) {
     try {
       return await runModelTurn(read, { signal: parent });
     } catch (error) {
       parent?.throwIfAborted();
-      if (
-        error instanceof ModelTurnTimeoutError &&
-        error.kind === "idle" &&
-        attempt > 0
-      )
-        reportSelfLimitHit({
-          limit: "page_reader_retries",
-          kind: "retry",
-          value: 2,
-          where: "browser-agent/readWithLiveness",
-        });
-      if (
-        !(error instanceof ModelTurnTimeoutError) ||
-        error.kind !== "idle" ||
-        attempt > 0
-      )
+      if (!(error instanceof ModelTurnTimeoutError) || error.kind !== "idle")
         throw error;
     }
   }
-  throw new Error("The page reader stopped responding.");
 }
 
 /** A posting's own page, read whole: its links first, then its text. */
@@ -1615,7 +1599,7 @@ export async function runJobSearchAgent(
       maxSteps: Math.max(config.maxSteps, DEFAULT_MAX_STEPS),
       // A working stream may keep thinking. The shared loop retries a silent
       // connection once; transient service failures retain their own retries.
-      modelTurnTimeoutRetries: 2,
+
       noProgressStepLimit:
         config.runControl?.noProgressStepLimit ??
         DEFAULT_NO_PROGRESS_STEP_LIMIT,

@@ -46,12 +46,16 @@ the gateway after a 20-second gap without a completion event.
   removed. Explicit operator timeout settings still apply, with no default.
 - Network errors, idle timeouts, incomplete streams and HTTP 408/409/425/429/5xx
   reconnect with exponential backoff (1s doubling to 20s, jitter and
-  `Retry-After`). Caller cancellation and 4xx validation errors do not retry.
+  `Retry-After`). Under ADR 0079 these reconnects have no attempt budget, including
+  repeated idle connections. Provider capacity refusals in successful HTTP error
+  bodies also retry. Provider-requested waits are not capped; calls on the same
+  endpoint, credentials and model share their cooldown. Caller cancellation,
+  exhausted quota, rejected credentials and 4xx validation errors do not retry.
 - A gateway that ignores `stream: true` and answers with JSON is still read.
 - Timeouts keep the "Model request timed out after Ns" wording the provenance
   and studio copy already key on; an idle timeout says "of silence".
 - Operators can tune `NESTOR_AI_IDLE_TIMEOUT_MS`,
-  `NESTOR_AI_MAX_ATTEMPTS`, `NESTOR_AI_STREAMING`, and
+  `NESTOR_AI_STREAMING`, and
   `NESTOR_AI_RETRY_BASE_DELAY_MS`; `NESTOR_AI_TIMEOUT_MS` and the
   resume-specific timeout are optional operator deadlines with no default.
 
@@ -59,8 +63,9 @@ the gateway after a 20-second gap without a completion event.
 
 - Slow generations finish instead of being cut; dead connections are noticed
   within the idle window and retried automatically, including mid-generation.
-- A failed connection is reported after reconnect fails; useful progress is
-  never abandoned because an application work clock expired.
+- A failed connection reconnects until it succeeds or the person stops it.
+  Waiting for the provider is visible progress, and enclosing idle detection
+  does not mistake an intentional provider wait for a dead connection.
 - Reasoning summaries add a small token cost on the Responses route.
 - Live Assistant keeps its own transport for now; moving it onto the shared
   one is a follow-up.

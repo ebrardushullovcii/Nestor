@@ -258,7 +258,6 @@ export function createOpenAiCompatibleJobFinderAiClient(
   const instanceConversationKey = createInstanceConversationKey();
   const resilience: ModelRequestResilienceOptions = {
     idleTimeoutMs: validatedOptions?.idleTimeoutMs,
-    maxAttempts: validatedOptions?.maxAttempts,
     streaming: validatedOptions?.streaming,
     retryBaseDelayMs: validatedOptions?.retryBaseDelayMs,
   };
@@ -860,7 +859,6 @@ export function createOpenAiCompatibleJobFinderAiClient(
             if (event.type === "attempt_started")
               options?.onRequestAttempt?.({
                 attempt: event.attempt,
-                maxAttempts: event.maxAttempts,
               });
           },
         });
@@ -1143,7 +1141,6 @@ export function createJobFinderAiClientFromEnvironment(
   // Liveness and retry knobs shared by every model route (see ADR 0020).
   const parsedResilience = {
     idleTimeoutMs: parseConfiguredTimeoutMs(env.NESTOR_AI_IDLE_TIMEOUT_MS),
-    maxAttempts: parseConfiguredPositiveInteger(env.NESTOR_AI_MAX_ATTEMPTS),
     streaming: parseConfiguredBoolean(env.NESTOR_AI_STREAMING),
     retryBaseDelayMs: parseConfiguredPositiveInteger(
       env.NESTOR_AI_RETRY_BASE_DELAY_MS,

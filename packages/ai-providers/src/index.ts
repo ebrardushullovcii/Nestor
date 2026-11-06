@@ -27,3 +27,4 @@ export type { ModelReasoningTask } from "./openai-compatible-transport";
 export { buildResumeSkillContextFilter } from "./resume-skill-context";
 export { createModelUsageRecorder } from "./model-usage-scope";
 export { modelConversationKeys } from "./model-request-identity";
+export { withModelProviderProgress } from "./model-request-events";

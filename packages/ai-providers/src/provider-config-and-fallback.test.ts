@@ -66,7 +66,7 @@ function createFastPathResumeBundle(): ResumeDocumentBundle {
 describe("ai provider config and fallback behavior", () => {
   test("surfaces non-json provider errors without raw response details", async () => {
     const restoreFetch = mockTextFetch("<html>Bad Gateway</html>", {
-      status: 502,
+      status: 400,
       headers: { "Content-Type": "text/html" },
     });
 
@@ -76,8 +76,6 @@ describe("ai provider config and fallback behavior", () => {
         baseUrl: "https://example.com/v1",
         model: "test-model",
         label: "AI resume agent",
-        // A 502 is retried in production; one attempt keeps this test fast.
-        maxAttempts: 1,
       });
 
       await expect(
@@ -88,7 +86,7 @@ describe("ai provider config and fallback behavior", () => {
           job: createJobPosting(),
           resumeText: "Resume text",
         }),
-      ).rejects.toThrow("Model request failed with status 502");
+      ).rejects.toThrow("Model request failed with status 400");
     } finally {
       restoreFetch();
     }
@@ -614,77 +612,6 @@ describe("ai provider config and fallback behavior", () => {
       expect(bodies[1]).toContain("read_resume_document");
     } finally {
       globalThis.fetch = originalFetch;
-    }
-  });
-
-  test("bounds default remote core-stage latency and reports the section unread instead of guessing", async () => {
-    vi.useFakeTimers();
-    const originalFetch = globalThis.fetch;
-    const errorSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
-    const fetchSpy = vi.fn(
-      (_input: string | URL | Request, init?: RequestInit) =>
-        new Promise<Response>((_resolve, reject) => {
-          const signal = init?.signal;
-          signal?.addEventListener(
-            "abort",
-            () => {
-              reject(
-                new DOMException("This operation was aborted", "AbortError"),
-              );
-            },
-            { once: true },
-          );
-        }),
-    );
-    globalThis.fetch = fetchSpy as typeof fetch;
-
-    try {
-      const client =
-        createJobFinderAiClientFromEnvironment(createEnvironment());
-      let settled = false;
-      const resultPromise = client
-        .extractResumeImportStage({
-          stage: "identity_summary",
-          existingProfile: createProfile(),
-          existingSearchPreferences: createPreferences(),
-          documentBundle: createFastPathResumeBundle(),
-        })
-        .finally(() => {
-          settled = true;
-        });
-      const outcome = resultPromise.then(
-        () => null,
-        (error: unknown) => error,
-      );
-
-      await vi.advanceTimersByTimeAsync(29_999);
-      expect(settled).toBe(false);
-      expect(fetchSpy).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(2_001);
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-      await vi.advanceTimersByTimeAsync(30_000);
-
-      // Each silent read times out after 30s. Retry once, then report the
-      // section unread without spending the unchanged total budget.
-      expect(settled).toBe(true);
-      const error = await outcome;
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-      expect(error).toBeInstanceOf(Error);
-      expect((error as Error).message).toContain(
-        "could not read your name, contact details and summary",
-      );
-      expect((error as Error).message).toContain("Nothing was guessed");
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("30s of silence"),
-      );
-      await vi.advanceTimersByTimeAsync(238_000);
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-    } finally {
-      globalThis.fetch = originalFetch;
-      errorSpy.mockRestore();
-      vi.useRealTimers();
     }
   });
 

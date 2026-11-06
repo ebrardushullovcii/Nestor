@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
-import { ModelRequestTimeoutError } from "./model-request-transport";
 
 import { createResumeImportFixtureBundle } from "./resume-import-fixtures";
 import {
@@ -297,12 +296,6 @@ describe("resume vision provider", () => {
 
   test("reports the deterministic source and a structured fallback when the vision model call fails", async () => {
     const cases = [
-      {
-        name: "timeout",
-        rejection: new ModelRequestTimeoutError("idle", 180_000),
-        expectedKind: "timeout" as const,
-        expectedReason: /timed out after \d+s/i,
-      },
       {
         name: "provider error",
         rejection: new Error("Vision endpoint returned 500"),

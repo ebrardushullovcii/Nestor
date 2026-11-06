@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 test.each(["429", "timeout"] as const)(
-  "does not multiply Profile Assistant transport retries after %s",
+  "an explicit operator timeout ends Profile Assistant reconnects after %s",
   async (failure) => {
     vi.useFakeTimers();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -58,7 +58,6 @@ test.each(["429", "timeout"] as const)(
     vi.stubGlobal("fetch", fetchMock);
     const client = createJobFinderAiClientFromEnvironment(
       createEnvironment({
-        NESTOR_AI_MAX_ATTEMPTS: "3",
         NESTOR_AI_TIMEOUT_MS: "5000",
         NESTOR_AI_IDLE_TIMEOUT_MS: "1000",
         NESTOR_AI_RETRY_BASE_DELAY_MS: "1",
@@ -76,7 +75,9 @@ test.each(["429", "timeout"] as const)(
       fallbackUsed: true,
       stopReason: "permanent_failure",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(failure === "timeout" ? 2 : 3);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(
+      failure === "timeout" ? 2 : 5,
+    );
   },
 );
 
@@ -200,7 +201,6 @@ test.each(["search_results", "job_detail"] as const)(
       baseUrl: "https://example.test/v1",
       model: "configured-model",
       requestTimeoutMs: 1000,
-      maxAttempts: 1,
     });
     const result = client.extractJobsFromPage({ ...extraction, pageType });
     const rejection = expect(result).rejects.toThrow(

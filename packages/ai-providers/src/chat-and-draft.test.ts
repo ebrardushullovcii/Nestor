@@ -1891,7 +1891,6 @@ test("reasoning continuation is bound to the endpoint, model and API route over 
     model: "same-alias",
     label: "Synthetic route",
     streaming: false,
-    maxAttempts: 1,
   };
   const client = createOpenAiCompatibleJobFinderAiClient(options);
   const messages: AgentMessage[] = [

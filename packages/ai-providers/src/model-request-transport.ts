@@ -21,7 +21,7 @@ import type { ModelTurnStreamEvent } from "@nestor/agent-runtime";
  * - Retries with capped exponential backoff and `Retry-After` support for
  *   the failures that are worth retrying: network errors, idle timeouts,
  *   incomplete streams, 408/409/425/429 and 5xx. Never for 4xx validation
- *   errors, never after a caller abort, never past the total budget.
+ *   errors, never after a caller abort. An explicit operator deadline still applies.
  * - The result is the same normalized Chat Completions payload the rest of
  *   the package already reads, so callers do not care whether the bytes came
  *   as one JSON body or as server-sent events. A gateway that ignores
@@ -38,21 +38,28 @@ import {
 import type { ModelRequestUsage } from "@nestor/contracts";
 import { createModelRequestUsage } from "./model-request-usage";
 import {
+  recordModelRequestEvent,
+  finishModelRequestProgress,
+} from "./model-request-events";
+import {
   recordModelRequestAttempt,
   recordModelRequestUsage,
 } from "./model-usage-scope";
 
 export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 180_000;
-export const DEFAULT_MODEL_MAX_ATTEMPTS = 5;
 export const DEFAULT_MODEL_RETRY_BASE_DELAY_MS = 1_000;
 export const DEFAULT_MODEL_RETRY_MAX_DELAY_MS = 20_000;
 
 const RETRYABLE_HTTP_STATUSES: ReadonlySet<number> = new Set([
-  408, 409, 425, 429, 500, 502, 503, 504,
+  408, 409, 425, 429,
 ]);
 
 const TRANSIENT_MESSAGE_PATTERN =
-  /rate.?limit|overload|temporar|too many requests|try again|econnreset|econnrefused|etimedout|enotfound|eai_again|epipe|socket hang up|network|fetch failed|terminated|premature|502|503|504/i;
+  /rate.?limit|overload|temporar|too many requests|try again|prefill_cap_refused|at capacity|econnreset|econnrefused|etimedout|enotfound|eai_again|epipe|socket hang up|network|fetch failed|terminated|premature|502|503|504/i;
+
+// These are account refusals, not a busy provider. Keep the provider's message.
+const ACCOUNT_REFUSAL_PATTERN =
+  /insufficient[_ ]quota|(?:plan|monthly quota|account quota|allowance|credits|balance).{0,80}(?:exhausted|used up|insufficient)|(?:exhausted|used up).{0,80}(?:plan|allowance|credits)|quota.{0,80}next month|credit balance is too low/i;
 
 export type ModelRequestRetryReason =
   | "network"
@@ -62,7 +69,8 @@ export type ModelRequestRetryReason =
   | "transient_message";
 
 export type ModelRequestEvent =
-  | { type: "attempt_started"; attempt: number; maxAttempts: number }
+  | { type: "attempt_started"; attempt: number }
+  | { type: "waiting"; delayMs: number }
   | {
       type: "retry_scheduled";
       attempt: number;
@@ -82,8 +90,6 @@ export type ModelStreamEvent = ModelTurnStreamEvent;
 export interface ModelRequestResilienceOptions {
   /** Longest gap without model progress before an attempt is presumed dead. */
   idleTimeoutMs?: number | undefined;
-  /** Attempts across the whole request, including the first. */
-  maxAttempts?: number | undefined;
   /** Send `stream: true` and read server-sent events. Default true. */
   streaming?: boolean | undefined;
   retryBaseDelayMs?: number | undefined;
@@ -168,6 +174,11 @@ function readErrorMessage(payload: unknown): string | null {
     return error.trim();
   }
   if (isRecord(error) && typeof error.message === "string" && error.message) {
+    if (
+      error.code === "insufficient_quota" ||
+      error.type === "insufficient_quota"
+    )
+      return `[insufficient_quota] ${error.message}`;
     return error.message;
   }
   return null;
@@ -224,7 +235,11 @@ function isNetworkError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
   }
-  if (error.name === "TypeError" || error.name === "FetchError") {
+  if (
+    error.name === "FetchError" ||
+    (error.name === "TypeError" &&
+      /fetch|network|load failed|terminated/i.test(error.message))
+  ) {
     return true;
   }
   const cause = (error as { cause?: unknown }).cause;
@@ -242,13 +257,31 @@ export function computeRetryDelayMs(input: {
   random?: () => number;
 }): number {
   const random = input.random ?? Math.random;
+  if (input.retryAfterMs != null) return Math.max(0, input.retryAfterMs);
   const exponential = Math.min(
     input.maxDelayMs,
-    input.baseDelayMs * 2 ** input.attempt,
+    input.baseDelayMs === 0 ? 0 : input.baseDelayMs * 2 ** input.attempt,
   );
   const jitter = Math.floor(random() * Math.min(250, input.baseDelayMs));
-  const suggested = input.retryAfterMs ?? 0;
-  return Math.max(exponential + jitter, Math.min(suggested, input.maxDelayMs));
+  return Math.min(input.maxDelayMs, exponential + jitter);
+}
+
+/** Some gateways give their delay only in the error body. */
+function advisedDelayMs(message: string): number | null {
+  const match =
+    /(?:retry(?: shortly)?\s*\(?\s*(?:after|in)|try again in)\s*(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|seconds?|minutes?|m)\b/i.exec(
+      message,
+    );
+  if (!match) return null;
+  const unit = match[2]!.toLowerCase();
+  return (
+    Number(match[1]) *
+    (unit.startsWith("ms") || unit.startsWith("millisecond")
+      ? 1
+      : unit.startsWith("m")
+        ? 60_000
+        : 1_000)
+  );
 }
 
 async function sleepWithAbort(
@@ -757,14 +790,19 @@ async function readTextWithActivity(
 function classifyRetry(
   error: unknown,
 ): { reason: ModelRequestRetryReason; retryAfterMs: number | null } | null {
+  if (error instanceof Error && ACCOUNT_REFUSAL_PATTERN.test(error.message))
+    return null;
   if (error instanceof ModelRequestTimeoutError) {
     return error.kind === "idle"
       ? { reason: "idle_timeout", retryAfterMs: null }
       : null;
   }
   if (error instanceof ModelRequestHttpError) {
-    return RETRYABLE_HTTP_STATUSES.has(error.status)
-      ? { reason: "http_status", retryAfterMs: error.retryAfterMs }
+    return RETRYABLE_HTTP_STATUSES.has(error.status) || error.status >= 500
+      ? {
+          reason: "http_status",
+          retryAfterMs: error.retryAfterMs ?? advisedDelayMs(error.message),
+        }
       : null;
   }
   if (error instanceof ModelStreamIncompleteError) {
@@ -778,7 +816,10 @@ function classifyRetry(
     error.name !== "AbortError" &&
     TRANSIENT_MESSAGE_PATTERN.test(error.message)
   ) {
-    return { reason: "transient_message", retryAfterMs: null };
+    return {
+      reason: "transient_message",
+      retryAfterMs: advisedDelayMs(error.message),
+    };
   }
   return null;
 }
@@ -803,6 +844,17 @@ type CredentialRejections = Map<
 // Per fetch implementation: the app has one; a test's own fetch mock starts
 // with nothing remembered.
 let rejectedCredentials = new WeakMap<typeof fetch, CredentialRejections>();
+// One provider route's cooldown is shared by apply, search, fit and documents.
+// In-flight calls finish; new attempts observe the latest provider wait moment.
+const routeCooldowns = new WeakMap<typeof fetch, Map<string, number>>();
+function cooldownsFor(fetchImpl: typeof fetch): Map<string, number> {
+  let cooldowns = routeCooldowns.get(fetchImpl);
+  if (!cooldowns) {
+    cooldowns = new Map();
+    routeCooldowns.set(fetchImpl, cooldowns);
+  }
+  return cooldowns;
+}
 function rejectionsFor(fetchImpl: typeof fetch): CredentialRejections {
   let rejections = rejectedCredentials.get(fetchImpl);
   if (!rejections) {
@@ -863,6 +915,8 @@ export async function performModelRequest(
       });
     }
     throw error;
+  } finally {
+    finishModelRequestProgress(input);
   }
 }
 
@@ -871,10 +925,6 @@ async function performModelRequestAttempts(
 ): Promise<ChatCompletionsPayload> {
   const fetchImpl = input.fetchImpl ?? fetch;
   const idleTimeoutMs = input.idleTimeoutMs ?? DEFAULT_MODEL_IDLE_TIMEOUT_MS;
-  const maxAttempts = Math.max(
-    1,
-    input.maxAttempts ?? DEFAULT_MODEL_MAX_ATTEMPTS,
-  );
   const streaming = input.streaming ?? true;
   const baseDelayMs =
     input.retryBaseDelayMs ?? DEFAULT_MODEL_RETRY_BASE_DELAY_MS;
@@ -899,22 +949,47 @@ async function performModelRequestAttempts(
     ...input.headers,
     ...(streaming ? { Accept: "text/event-stream, application/json" } : {}),
   };
+  const cooldowns = cooldownsFor(fetchImpl);
+  const route = JSON.stringify([
+    input.url,
+    credentialKey(input.url, input.headers),
+    input.body.model,
+  ]);
+  const emit = (event: ModelRequestEvent) => {
+    input.onEvent?.(event);
+    recordModelRequestEvent(event, input);
+  };
 
-  let lastError: unknown = null;
-  let idleRetries = 0;
+  let retryAt = 0;
 
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+  for (let attempt = 0; ; attempt += 1) {
     if (input.signal?.aborted) {
       throw createAbortError();
     }
+    // Recheck after each wait: another in-flight response can extend the pause.
+    let waitMs: number;
+    while (
+      (waitMs = Math.max(retryAt, cooldowns.get(route) ?? 0) - Date.now()) > 0
+    ) {
+      if (Date.now() >= deadline)
+        throw new ModelRequestTimeoutError("total", input.totalTimeoutMs!);
+      emit({ type: "waiting", delayMs: waitMs });
+      // Waiting is an intentional lack of network activity, not a silent stream.
+      // Keep enclosing tool waits alive too, including nested question checks.
+      input.onStreamEvent?.({ type: "provider_wait", delayMs: waitMs });
+      await sleepWithAbort(
+        Math.min(waitMs, 1_000, deadline - Date.now()),
+        input.signal,
+      );
+    }
+    if ((cooldowns.get(route) ?? Infinity) <= Date.now())
+      cooldowns.delete(route);
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
-      throw lastError
-        ? toError(lastError)
-        : new ModelRequestTimeoutError("total", input.totalTimeoutMs!);
+      throw new ModelRequestTimeoutError("total", input.totalTimeoutMs!);
     }
 
-    input.onEvent?.({ type: "attempt_started", attempt, maxAttempts });
+    emit({ type: "attempt_started", attempt });
     recordModelRequestAttempt();
     input.onStreamEvent?.({ type: "attempt_started", attempt });
     const usage = createModelRequestUsage(input, attempt);
@@ -1113,7 +1188,6 @@ async function performModelRequestAttempts(
           : abortReason === "idle"
             ? new ModelRequestTimeoutError("idle", idleTimeoutMs)
             : error;
-      lastError = normalized;
       failureKind =
         normalized instanceof ModelRequestHttpError
           ? "http_status"
@@ -1125,14 +1199,8 @@ async function performModelRequestAttempts(
                 ? "network"
                 : "other";
 
-      if (
-        normalized instanceof ModelRequestTimeoutError &&
-        normalized.kind === "idle" &&
-        idleRetries++ >= 1
-      )
-        throw normalized;
       const retry = classifyRetry(normalized);
-      if (!retry || attempt === maxAttempts - 1) {
+      if (!retry) {
         throw toError(normalized);
       }
       const delayMs = computeRetryDelayMs({
@@ -1141,18 +1209,20 @@ async function performModelRequestAttempts(
         maxDelayMs,
         retryAfterMs: retry.retryAfterMs,
       });
-      // Do not start a retry that cannot possibly finish inside the budget.
-      if (Date.now() + delayMs + 1_000 >= deadline) {
-        throw toError(normalized);
+      retryAt = Date.now() + delayMs;
+      if (
+        retry.reason === "http_status" ||
+        retry.reason === "transient_message"
+      ) {
+        cooldowns.set(route, Math.max(cooldowns.get(route) ?? 0, retryAt));
       }
-      input.onEvent?.({
+      emit({
         type: "retry_scheduled",
         attempt,
         delayMs,
         reason: retry.reason,
         detail: describeError(normalized),
       });
-      await sleepWithAbort(delayMs, input.signal);
     } finally {
       clearTimeout(totalTimer);
       if (idleTimer) {
@@ -1178,10 +1248,6 @@ async function performModelRequestAttempts(
       }
     }
   }
-
-  throw lastError
-    ? toError(lastError)
-    : new Error("Model request exhausted its retries.");
 }
 
 export function parseConfiguredBoolean(

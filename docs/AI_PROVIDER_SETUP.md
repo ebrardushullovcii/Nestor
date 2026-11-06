@@ -233,11 +233,15 @@ browser vision) goes through one transport
   `NESTOR_AI_ASSISTANT_TIMEOUT_MS`, `NESTOR_RESUME_VISION_TIMEOUT_MS` and
   `NESTOR_BROWSER_VISION_TIMEOUT_MS` still apply when explicitly set.
   Stop cancels the request, including during reconnect backoff.
-- Retries (`NESTOR_AI_MAX_ATTEMPTS`, default 5) cover network errors, idle
+- Retries continue until success or Stop for network errors, idle
   timeouts, streams the gateway closed before completing, and HTTP
   408/409/425/429/5xx, with backoff from `NESTOR_AI_RETRY_BASE_DELAY_MS`
-  (default 1s) doubling to 20s and honouring `Retry-After`. Validation errors
-  (4xx) and user cancellations are never retried.
+  (default 1s) doubling to 20s. A provider's `Retry-After` or advised delay in
+  its capacity error body is waited in full, even when longer than 20s.
+  Calls sharing the same endpoint, credentials and model share the cooldown.
+  The screen says "Waiting for the AI provider" during this wait. Validation
+  errors (4xx), rejected credentials and exhausted account quota fail immediately
+  with the provider's message. `NESTOR_AI_MAX_ATTEMPTS` no longer limits work.
 - `NESTOR_AI_STREAMING=0` sends plain JSON requests; use it only for a
   gateway that rejects `stream: true`, since it removes the liveness signal.
 

@@ -1,5 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { createOpenAiCompatibleJobFinderAiClient, modelOutputLimit } from "@nestor/ai-providers";
+import {
+  createOpenAiCompatibleJobFinderAiClient,
+  modelOutputLimit,
+} from "@nestor/ai-providers";
 import { fitJobs } from "@nestor/browser-agent";
 import { JobDetailSchema } from "@nestor/contracts";
 import { searchPersonas } from "./personas";
@@ -115,7 +118,7 @@ test.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
       model: "muse-spark-1.3-contributor",
       apiMode: "responses",
       streaming: false,
-      maxAttempts: 1,
+
       taskReasoningEfforts: { fit_batch: effort },
     });
     const result = await fitJobs({
@@ -126,7 +129,8 @@ test.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
     });
     expect(result.map(({ id }) => id)).toEqual(jobs.map(({ id }) => id));
     expect(bodies.map((body) => body.max_output_tokens)).toEqual([
-      modelOutputLimit("muse-spark-1.3-contributor"), modelOutputLimit("muse-spark-1.3-contributor"),
+      modelOutputLimit("muse-spark-1.3-contributor"),
+      modelOutputLimit("muse-spark-1.3-contributor"),
     ]);
     expect(bodies.every((body) => body.reasoning?.effort === effort)).toBe(
       true,

@@ -5,6 +5,7 @@ import {
   getAiProviderAccessFailure,
   isAiProviderRateLimited,
   isAiServiceBusy,
+  withModelProviderProgress,
 } from "@nestor/ai-providers";
 import {
   hasProfileSetupPlaceholderValue,
@@ -246,7 +247,10 @@ export function createResumeService(deps: ResumeServiceDeps) {
       return;
     const controller = new AbortController();
     running.set(jobId, controller);
-    void write(jobId, controller);
+    void withModelProviderProgress(
+      (waiting) => resumes.setProviderWaiting(jobId, waiting),
+      () => write(jobId, controller),
+    );
   }
 
   function pump(immediateId?: number) {

@@ -16,8 +16,8 @@ test("opt-in model profiling reports purpose, retries and tokens without prompt 
     await timing
       .model({
         chatWithTools: (_messages, _tools, options) => {
-          options?.onRequestAttempt?.({ attempt: 0, maxAttempts: 2 });
-          options?.onRequestAttempt?.({ attempt: 1, maxAttempts: 2 });
+          options?.onRequestAttempt?.({ attempt: 0 });
+          options?.onRequestAttempt?.({ attempt: 1 });
           ms += 20;
           return Promise.resolve({
             content: "PRIVATE_RESPONSE",
@@ -95,7 +95,7 @@ test("a rejected classification keeps usage reported before the client threw", a
   const timing = createApplyTiming(() => new Date(0));
   const client = timing.model({
     chatWithTools: (_messages, _tools, options) => {
-      options?.onRequestAttempt?.({ attempt: 0, maxAttempts: 1 });
+      options?.onRequestAttempt?.({ attempt: 0 });
       options?.onRequestUsage?.(requestUsage({ outcome: "failed" }));
       return Promise.reject(new Error("Incomplete response"));
     },
@@ -115,7 +115,7 @@ test("retry events separate estimated tokens and never add the final reply's usa
   const timing = createApplyTiming(() => new Date(0));
   const client = timing.model({
     chatWithTools: (_messages, _tools, options) => {
-      options?.onRequestAttempt?.({ attempt: 0, maxAttempts: 2 });
+      options?.onRequestAttempt?.({ attempt: 0 });
       options?.onRequestUsage?.(
         requestUsage({
           outcome: "failed",
@@ -131,7 +131,7 @@ test("retry events separate estimated tokens and never add the final reply's usa
           },
         }),
       );
-      options?.onRequestAttempt?.({ attempt: 1, maxAttempts: 2 });
+      options?.onRequestAttempt?.({ attempt: 1 });
       options?.onRequestUsage?.(requestUsage({ attempt: 1 }));
       return Promise.resolve({ usage: requestUsage() });
     },
@@ -285,8 +285,8 @@ test("provider retries count as additional calls with unknown tokens until the p
   const timing = createApplyTiming(() => new Date(0));
   const model = timing.model({
     chatWithTools: (_messages, _tools, options) => {
-      options?.onRequestAttempt?.({ attempt: 0, maxAttempts: 2 });
-      options?.onRequestAttempt?.({ attempt: 1, maxAttempts: 2 });
+      options?.onRequestAttempt?.({ attempt: 0 });
+      options?.onRequestAttempt?.({ attempt: 1 });
       return Promise.resolve({
         usage: {
           inputTokens: 100,

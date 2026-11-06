@@ -347,8 +347,6 @@ export const OpenAiCompatibleJobFinderAiClientOptionsSchema = z.object({
   resumeExtractionTimeoutMs: z.number().int().min(1_000).optional(),
   /** Longest silence tolerated on a streamed request before it is retried. */
   idleTimeoutMs: z.number().int().min(1_000).optional(),
-  /** Attempts per logical request, including the first. */
-  maxAttempts: z.number().int().min(1).max(10).optional(),
   /** Stream responses (server-sent events) for liveness. Default true. */
   streaming: z.boolean().optional(),
   retryBaseDelayMs: z.number().int().min(0).optional(),

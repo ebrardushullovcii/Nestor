@@ -38,7 +38,6 @@ export interface ModelRequestUsage extends ModelTokenUsage {
 }
 export interface ModelRequestAttempt {
   attempt: number;
-  maxAttempts: number;
 }
 
 export const ModelUsageTotalsSchema = ModelTokenUsageSchema.extend({

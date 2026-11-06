@@ -298,8 +298,18 @@ describe("runAgentLoop", () => {
   });
 
   test("a browser failure uses its generous failure allowance instead of a shorter no-progress window", async () => {
-    const dead = tool("observe", () => Promise.reject(new Error("The tab was closed")), { failureKind: "browser", describeError: () => "The tab was closed" });
-    const result = await runAgentLoop({ messages: opening, model: scripted([[call("observe")]]), tools: [dead], subjectLabel: "the site", ceilings: { noProgressStepLimit: 3 } });
+    const dead = tool(
+      "observe",
+      () => Promise.reject(new Error("The tab was closed")),
+      { failureKind: "browser", describeError: () => "The tab was closed" },
+    );
+    const result = await runAgentLoop({
+      messages: opening,
+      model: scripted([[call("observe")]]),
+      tools: [dead],
+      subjectLabel: "the site",
+      ceilings: { noProgressStepLimit: 3 },
+    });
     expect(result.ending).toBe("browser_failed");
     expect(result.steps).toBe(30);
     expect(result.reason).toContain("tab was closed");
@@ -370,58 +380,14 @@ describe("runAgentLoop", () => {
       },
       tools: [countedFinish],
       subjectLabel: "the site",
-      ceilings: { modelIdleTimeoutMs: 10, modelTurnTimeoutRetries: 1 },
+      ceilings: { modelIdleTimeoutMs: 10 },
     });
 
     expect(result.ending).toBe("finished");
     expect(calls).toBe(2);
     expect(toolCalls).toBe(1);
     expect(result.turnNotes.join("\n")).toContain(
-      "retrying the silent AI connection once",
-    );
-  });
-
-  test("shares the bounded no-response retry with a typed transient HTTP failure", async () => {
-    let calls = 0;
-    let toolCalls = 0;
-    const countedFinish = tool("finish", () => {
-      toolCalls += 1;
-      return Promise.resolve({
-        kind: "finish",
-        finish: {
-          reason: "Recovered",
-          stuck: false,
-          needsPerson: false,
-          data: {},
-        },
-      });
-    });
-    const transientError = Object.assign(new Error("Service unavailable"), {
-      name: "ModelRequestHttpError",
-      status: 503,
-    });
-    const result = await runAgentLoop({
-      messages: opening,
-      model: {
-        chatWithTools: () => {
-          calls += 1;
-          return calls === 1
-            ? Promise.reject(transientError)
-            : Promise.resolve({
-                toolCalls: [call("finish", { reason: "Recovered" })],
-              });
-        },
-      },
-      tools: [countedFinish],
-      subjectLabel: "the site",
-      ceilings: { modelTurnTimeoutRetries: 1 },
-    });
-
-    expect(result.ending).toBe("finished");
-    expect(calls).toBe(2);
-    expect(toolCalls).toBe(1);
-    expect(result.turnNotes.join("\n")).toContain(
-      "retrying the same assistant turn after a temporary service failure",
+      "waiting for the AI provider; reconnecting the silent connection",
     );
   });
 
@@ -451,34 +417,10 @@ describe("runAgentLoop", () => {
         },
         tools: [finishTool],
         subjectLabel: "the site",
-        ceilings: { modelTurnTimeoutRetries: 1 },
+        ceilings: {},
       }),
     ).rejects.toBe(error);
     expect(calls).toBe(1);
-  });
-
-  test("stops after the bounded transient HTTP retry is exhausted", async () => {
-    let calls = 0;
-    const error = Object.assign(new Error("Service unavailable"), {
-      name: "ModelRequestHttpError",
-      status: 500,
-    });
-
-    await expect(
-      runAgentLoop({
-        messages: opening,
-        model: {
-          chatWithTools: () => {
-            calls += 1;
-            return Promise.reject(error);
-          },
-        },
-        tools: [finishTool],
-        subjectLabel: "the site",
-        ceilings: { modelTurnTimeoutRetries: 1 },
-      }),
-    ).rejects.toBe(error);
-    expect(calls).toBe(2);
   });
 
   test("a person stopping an unanswered turn never triggers its retry", async () => {
@@ -499,7 +441,7 @@ describe("runAgentLoop", () => {
       },
       tools: [finishTool],
       subjectLabel: "the site",
-      ceilings: { modelTurnTimeoutRetries: 1 },
+      ceilings: {},
       signal: controller.signal,
     });
     await started;

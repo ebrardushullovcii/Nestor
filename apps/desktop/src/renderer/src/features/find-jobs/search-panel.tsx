@@ -77,6 +77,12 @@ function runningLine(status: JobSearchStatus): {
   percent: number | null;
 } {
   const search = status.search!;
+  if (status.progress?.providerWaiting)
+    return {
+      text: "Waiting for the AI provider",
+      detail: "Search and fit will continue when the provider is ready.",
+      percent: null,
+    };
   const checkingFit =
     search.sourcesTotal > 0 && search.sourcesDone === search.sourcesTotal;
   const needsYou = status.progress?.needsYou ?? 0;
@@ -438,7 +444,9 @@ export function SearchStatus(props: {
         </p>
       ) : !running && fitting ? (
         <p role="status" className="min-w-0 flex-1 text-(length:--text-small)">
-          {`Checking fit for ${plural(remaining, "saved job")}…`}
+          {props.status.progress?.providerWaiting
+            ? "Waiting for the AI provider"
+            : `Checking fit for ${plural(remaining, "saved job")}…`}
         </p>
       ) : progress ? (
         <FitText

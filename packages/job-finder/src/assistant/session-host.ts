@@ -1077,9 +1077,21 @@ export class AssistantSessionHost {
         return;
       }
       case "stream": {
-        if (event.event.type === "attempt_started") {
+        if (event.event.type === "provider_wait") {
+          await this.setActivity(live, {
+            label: "Waiting for the AI provider",
+            toolName: null,
+            startedAt: live.turn.startedAt,
+          });
+        } else if (event.event.type === "attempt_started") {
           live.attempt += 1;
           live.draftText = "";
+          if (live.activity?.label === "Waiting for the AI provider")
+            await this.setActivity(live, {
+              label: "Reading your message",
+              toolName: null,
+              startedAt: live.turn.startedAt,
+            });
         } else if (event.event.type === "text_delta") {
           live.draftText += event.event.text;
           const now = Date.now();
