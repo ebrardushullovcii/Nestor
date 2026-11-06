@@ -886,6 +886,7 @@ export async function runApplyAgent(
       subjectLabel: input.siteLabel,
       parallelToolCalls: false,
       staleToolResultChars: null,
+      retainCompactedHistory: true,
       compactionMaxChars: Math.floor(
         (input.modelContextWindowTokens ?? 64000) * 3.6 * 0.8,
       ),

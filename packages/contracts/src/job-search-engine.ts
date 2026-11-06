@@ -43,7 +43,7 @@ export type ReadDiscoveryPostingPage = (
     /** Read-only JSON search query from a provider adapter, never a form submission. */
     jsonQuery?: Record<string, unknown>;
   },
-) => Promise<{ html: string; finalUrl: string }>;
+) => Promise<{ html: string; finalUrl: string; visibleText?: string }>;
 
 /** A reader can retry an authenticated page in the person's browser context. */
 export class DiscoveryPageReadError extends Error {

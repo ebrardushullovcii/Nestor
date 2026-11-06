@@ -7,6 +7,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   createTokenCalibrator,
+  createContextParts,
   estimateJsonTokens,
   estimateTokens,
   runConversationTurn,
@@ -251,6 +252,10 @@ export class AssistantSessionHost {
   private watchCheckInFlight: Promise<void> | null = null;
   private readonly handles = new Map<string, AssistantHandleStore>();
   private readonly calibrators = new Map<string, TokenCalibrator>();
+  private readonly contextParts = new Map<
+    string,
+    ReturnType<typeof createContextParts>
+  >();
   private readonly profileReadDone = new Set<string>();
   private generationCounter = 0;
   private watchTimer: ReturnType<typeof setInterval> | null = null;
@@ -411,6 +416,7 @@ export class AssistantSessionHost {
     }
     await this.repository.deleteConversation(conversationId);
     this.handles.delete(conversationId);
+    this.contextParts.delete(conversationId);
     this.options.publish({
       conversationId,
       sequence: Number.MAX_SAFE_INTEGER,
@@ -738,11 +744,21 @@ export class AssistantSessionHost {
     let lastEstimate = 0;
     let recoverEmptyReply = false;
     let model = handle.createModel(conversationId);
+    const contextParts =
+      this.contextParts.get(conversationId) ?? createContextParts();
+    this.contextParts.set(conversationId, contextParts);
 
     this.startStallWatch(live);
     let result: Awaited<ReturnType<typeof runConversationTurn>>;
     try {
       result = await runConversationTurn({
+        contextParts,
+        contextMaxChars: Math.floor(
+          (this.options.budgetOverrideTokens ??
+            (handle.capabilities.contextWindowTokens -
+              handle.capabilities.reservedOutputTokens) *
+              0.8) * 3.6,
+        ),
         model: {
           chatWithTools: async (messages, schemas, callOptions) => {
             const response = await model.chatWithTools(
@@ -809,6 +825,7 @@ export class AssistantSessionHost {
             now: contextTime,
           });
           const messages = await assembleModelInput({
+            losslessContextParts: true,
             repository: this.repository,
             conversationId,
             activeTurnId: live.turn.id,

@@ -27,6 +27,91 @@ const input = {
   retryBaseDelayMs: 1,
 };
 
+test("a gateway Input too long 400 is recovered with exact readable parts by the agent runtime", async () => {
+  const requests: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((_url: unknown, init?: RequestInit) => {
+      if (typeof init?.body !== "string")
+        throw Error("Expected a JSON request body");
+      requests.push(init.body);
+      return Promise.resolve(
+        requests.length === 1
+          ? json(
+              {
+                error: {
+                  type: "invalid_request_error",
+                  message:
+                    "Upstream request failed: [invalid_request_error] Input too long: model limit 1048576 tokens, requested 1603421 tokens.",
+                },
+              },
+              400,
+            )
+          : json({
+              choices: [
+                {
+                  message: {
+                    tool_calls: [
+                      {
+                        id: "finish-once",
+                        type: "function",
+                        function: { name: "finish", arguments: "{}" },
+                      },
+                    ],
+                  },
+                  finish_reason: "tool_calls",
+                },
+              ],
+            }),
+      );
+    }),
+  );
+  const client = createOpenAiCompatibleJobFinderAiClient({
+    baseUrl: "https://model.example/v1",
+    model: "synthetic",
+    apiKey: "synthetic",
+  });
+  const execute = vi.fn(() =>
+    Promise.resolve({
+      kind: "finish" as const,
+      finish: {
+        reason: "Complete",
+        stuck: false,
+        needsPerson: false,
+        data: {},
+      },
+    }),
+  );
+  const text =
+    "Visible synthetic page fact. ".repeat(3000) + "Last visible fact.";
+  const result = await runAgentLoop({
+    model: { chatWithTools: client.chatWithTools.bind(client) },
+    messages: [{ role: "user", content: text }],
+    subjectLabel: "synthetic page",
+    compactionMaxChars: 1_000_000,
+    tools: [
+      {
+        definition: {
+          type: "function",
+          function: {
+            name: "finish",
+            description: "Finish",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+        execute,
+      },
+    ],
+  });
+  expect(result.ending).toBe("finished");
+  expect(requests).toHaveLength(2);
+  expect(requests[0]).toContain("Last visible fact.");
+  expect(requests[1]).toContain("Exact content in ordered parts");
+  expect(requests[1]).toContain("read_context_part");
+  expect(requests[1]!.length).toBeLessThan(requests[0]!.length);
+  expect(execute).toHaveBeenCalledOnce();
+});
+
 test("ten consecutive 429s respect Retry-After and finish on the eleventh call", async () => {
   const moments: number[] = [];
   const fetchImpl = vi.fn(async () => {

@@ -36,6 +36,7 @@ import type {
 import { describeBrowserError, isPageReplacedError } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
 import { readPageLinkedText } from "./page-linked-text";
+import { isVisibleFrame, readVisibleText } from "./visible-page-text";
 import { readPageMessages } from "./page-messages";
 import {
   readClosedShadowControls,
@@ -309,6 +310,7 @@ async function includeChildFrameContent(
 
 async function readApplyFrame(frame: Frame, frameIndex: number) {
   try {
+    if (!(await isVisibleFrame(frame))) return null;
     const owner = () => {
       try {
         const url = new URL(frame.url());
@@ -344,7 +346,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             const clone = element.cloneNode(true) as Element;
             clone
               .querySelectorAll(
-                "input, textarea, select, svg, [role='option'], [role='listbox']",
+                "input, textarea, select, svg, script, style, noscript, template, [role='option'], [role='listbox']",
               )
               .forEach((control) => control.remove());
             return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -575,7 +577,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
           const shownText = (element: HTMLElement): string => {
             const clone = element.cloneNode(true) as HTMLElement;
             for (const hidden of clone.querySelectorAll(
-              "svg, [aria-hidden='true'], script, style, template",
+              "svg, [aria-hidden='true'], script, style, noscript, template",
             ))
               hidden.remove();
             return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -738,7 +740,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 // ("SVGs not supported by this browser.").
                 (role === "checkbox" || role === "radio"
                   ? shownText(html)
-                  : html.textContent) ??
+                  : shownText(html)) ??
                 "",
               checked:
                 input?.checked ??
@@ -906,10 +908,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             ];
           });
         }),
-      frame
-        .locator("body")
-        .innerText({ timeout: 0 })
-        .catch(() => ""),
+      readVisibleText(frame.locator("body")).catch(() => ""),
       frame
         .locator("[role='alert'], [aria-live='assertive']")
         .evaluateAll((elements) => {
@@ -1330,9 +1329,25 @@ export function collectApplyDocumentSnapshot(
   };
   const renderedText = (root: ParentNode): string => {
     const parts: string[] = [];
-    for (const node of root.childNodes) {
+    const rootStyle = root instanceof Element ? getComputedStyle(root) : null;
+    if (
+      rootStyle &&
+      (rootStyle.display === "none" ||
+        rootStyle.contentVisibility === "hidden" ||
+        Number(rootStyle.opacity || "1") === 0)
+    )
+      return "";
+    const assigned =
+      root instanceof HTMLSlotElement
+        ? root.assignedNodes({ flatten: true })
+        : [];
+    for (const node of assigned.length ? assigned : root.childNodes) {
       if (node instanceof Text) {
-        parts.push(node.textContent ?? "");
+        if (
+          !rootStyle ||
+          !["hidden", "collapse"].includes(rootStyle.visibility)
+        )
+          parts.push(node.textContent ?? "");
         continue;
       }
       if (
@@ -1343,7 +1358,7 @@ export function collectApplyDocumentSnapshot(
       const style = getComputedStyle(node);
       if (
         style.display === "none" ||
-        ["hidden", "collapse"].includes(style.visibility) ||
+        style.contentVisibility === "hidden" ||
         Number(style.opacity || "1") === 0 ||
         (style.display !== "contents" && !node.getClientRects().length)
       )
@@ -1353,8 +1368,7 @@ export function collectApplyDocumentSnapshot(
         style.display,
       );
       if (block) parts.push("\n");
-      parts.push(renderedText(node));
-      if (node.shadowRoot) parts.push(renderedText(node.shadowRoot));
+      parts.push(renderedText(node.shadowRoot ?? node));
       if (block) parts.push("\n");
     }
     return parts.join(" ");
@@ -1491,7 +1505,7 @@ export function collectApplyDocumentSnapshot(
       const clone = element.cloneNode(true) as Element;
       clone
         .querySelectorAll(
-          "input, textarea, select, svg, [role='option'], [role='listbox']",
+          "input, textarea, select, svg, script, style, noscript, template, [role='option'], [role='listbox']",
         )
         .forEach((control) => control.remove());
       return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -1821,7 +1835,7 @@ export function collectApplyDocumentSnapshot(
     const shownText = (element: HTMLElement): string => {
       const clone = element.cloneNode(true) as HTMLElement;
       for (const hidden of clone.querySelectorAll(
-        "svg, [aria-hidden='true'], script, style, template",
+        "svg, [aria-hidden='true'], script, style, noscript, template",
       ))
         hidden.remove();
       return (clone.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -1930,7 +1944,7 @@ export function collectApplyDocumentSnapshot(
           // its option at most, never an icon's fallback.
           (role === "checkbox" || role === "radio"
             ? shownText(html)
-            : html.textContent) ??
+            : shownText(html)) ??
           "",
         checked:
           input?.checked ?? element.getAttribute("aria-checked") === "true",
@@ -2113,7 +2127,14 @@ export function collectApplyDocumentSnapshot(
         }))(matching(selectors.clickables)),
     [],
   );
-  const bodyText = renderedText(document.body ?? document);
+  const bodyStyle = document.body ? getComputedStyle(document.body) : null;
+  const bodyText =
+    bodyStyle &&
+    (bodyStyle.display === "none" ||
+      bodyStyle.contentVisibility === "hidden" ||
+      Number(bodyStyle.opacity || "1") === 0)
+      ? ""
+      : renderedText(document.body ?? document);
   return {
     controls,
     actions,
@@ -2920,7 +2941,7 @@ export function createPlaywrightApplyPageMechanics(
     },
     readText: async (ref) => {
       if (!ref) {
-        return page.locator("body").innerText({ timeout: 0 });
+        return (await readRawApplyPage(page)).bodyText;
       }
       const locator =
         controlLocator(page, ref) ??
@@ -2930,7 +2951,7 @@ export function createPlaywrightApplyPageMechanics(
       if (!locator) {
         return "";
       }
-      return locator.innerText({ timeout: 0 });
+      return readVisibleText(locator);
     },
   });
 }

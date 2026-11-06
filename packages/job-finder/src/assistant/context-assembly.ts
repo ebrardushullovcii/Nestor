@@ -198,6 +198,8 @@ function fallbackDraft(
 }
 
 export interface AssembleOptions {
+  /** The runtime represents exact observations/history in readable parts. */
+  losslessContextParts?: boolean;
   repository: AssistantRepository;
   conversationId: string;
   activeTurnId?: string;
@@ -388,6 +390,18 @@ export async function assembleModelInput(
       options.recoverEmptyReply ?? false,
     );
   let turnMessages = options.turnMessages;
+  if (options.losslessContextParts) {
+    // The runtime owns the route-sized view. Keep canonical tool results exact
+    // here, including a single observation larger than the provider window.
+    return compose(
+      options.systemPrompt,
+      checkpoint,
+      tail,
+      turnMessages,
+      pinnedForMeasure,
+      options.currentContext,
+    );
+  }
   const measure = () =>
     options.calibrator.adjust(
       estimateTokens(

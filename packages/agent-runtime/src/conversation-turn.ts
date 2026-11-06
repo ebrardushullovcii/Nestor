@@ -2,6 +2,11 @@ import { traceEvent, withTraceScope } from "@nestor/core/run-trace";
 import { isAgentRunAborted } from "./cancellation";
 import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 import {
+  createContextParts,
+  isModelInputLimit,
+  type ContextParts,
+} from "./context-parts";
+import {
   ModelOutputLimitError,
   isModelOutputLimit,
 } from "./model-output-error";
@@ -105,6 +110,10 @@ export interface ConversationTurnCeilings {
 }
 
 export interface RunConversationTurnOptions extends RuntimeObservers {
+  /** Reuse per conversation so exact part handles survive later user turns. */
+  contextParts?: ContextParts;
+  /** Available message representation size after reserving provider output. */
+  contextMaxChars?: number;
   model: ConversationModel;
   tools: ConversationTool[];
   /** Optional lazy catalog; execution still uses the host's validated registry. */
@@ -230,8 +239,16 @@ function addUsage(
 export async function runConversationTurn(
   options: RunConversationTurnOptions,
 ): Promise<ConversationTurnResult> {
+  const contextParts = options.contextParts ?? createContextParts();
+  const partTool: ConversationTool = {
+    ...contextParts.tool,
+    label: () => "Reading exact context",
+  };
   const toolsByName = new Map(
-    options.tools.map((tool) => [tool.definition.function.name, tool]),
+    [...options.tools, partTool].map((tool) => [
+      tool.definition.function.name,
+      tool,
+    ]),
   );
   const turnMessages: AgentLoopMessage[] = [];
   const usage = emptyUsage();
@@ -279,22 +296,31 @@ export async function runConversationTurn(
     await readSteering();
 
     let messages = await options.assembleMessages(turnMessages);
-    const definitions = (
-      options.getToolDefinitions?.() ??
-      options.tools.map((tool) => tool.definition)
-    ).map(withStatusArgument);
+    const definitions = [
+      contextParts.tool.definition,
+      ...(options.getToolDefinitions?.() ??
+        options.tools.map((tool) => tool.definition)),
+    ].map(withStatusArgument);
+    const requestChars = Math.max(
+      1,
+      (options.contextMaxChars ?? 180_000) - JSON.stringify(definitions).length,
+    );
     modelCalls += 1;
     const call = modelCalls;
     await emit({ type: "model_call_started", call });
     let response: Awaited<ReturnType<ConversationModel["chatWithTools"]>>;
     for (;;) {
+      const modelMessages = contextParts.prepare(messages, requestChars);
       try {
         response = await runModelTurn(
           (turnOptions) =>
-            observeModel(options, { messages, tools: definitions }, () =>
-              options.model.chatWithTools(messages, definitions, {
-                ...turnOptions,
-              }),
+            observeModel(
+              options,
+              { messages: modelMessages, tools: definitions },
+              () =>
+                options.model.chatWithTools(modelMessages, definitions, {
+                  ...turnOptions,
+                }),
             ),
           {
             signal: options.signal,
@@ -313,6 +339,18 @@ export async function runConversationTurn(
         break;
       } catch (error) {
         if (options.signal?.aborted) return result("aborted");
+        if (isModelInputLimit(error)) {
+          contextParts.recover(
+            Math.min(requestChars, JSON.stringify(modelMessages).length),
+          );
+          if (
+            JSON.stringify(contextParts.prepare(messages, requestChars)) !==
+            JSON.stringify(modelMessages)
+          ) {
+            modelCalls += 1;
+            continue;
+          }
+        }
         if (isModelOutputLimit(error)) {
           {
             turnMessages.push({

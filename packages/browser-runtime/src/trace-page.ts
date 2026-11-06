@@ -1,4 +1,5 @@
 import type { Page } from "playwright";
+import { readVisibleText } from "./visible-page-text";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
@@ -88,7 +89,7 @@ async function capturePageTrace(
               mask: masks,
             });
     const shot = traceArtifact("shots", image, "png");
-    const visibleText = await page.locator("body").innerText();
+    const visibleText = await readVisibleText(page.locator("body"));
     traceEvent("page_snapshot", {
       ...(applicationKey ? { applicationKey } : {}),
       action,

@@ -2,6 +2,7 @@ import { traceEvent } from "@nestor/core/run-trace";
 import { createConnectionIdleTimeout } from "@nestor/core";
 import { DiscoveryPageReadError } from "@nestor/contracts";
 import type { BrowserContext, Page } from "playwright";
+import { readPageLinkedText } from "./page-linked-text";
 
 /** Capture a page in its own tab. Readiness and further interaction belong to the caller. */
 export async function readRenderedPageHtml(
@@ -12,7 +13,7 @@ export async function readRenderedPageHtml(
     onPage?: (page: Page) => void | Promise<void>;
     ready?: (html: string) => boolean;
   } = {},
-): Promise<{ html: string; finalUrl: string }> {
+): Promise<{ html: string; finalUrl: string; visibleText: string }> {
   const address = new URL(url);
   if (
     !["http:", "https:"].includes(address.protocol) ||
@@ -54,7 +55,11 @@ export async function readRenderedPageHtml(
     });
     if (response && response.status() >= 400)
       throw new DiscoveryPageReadError(response.status());
-    return { html: await page.content(), finalUrl: page.url() };
+    return {
+      html: await page.content(),
+      finalUrl: page.url(),
+      visibleText: await readPageLinkedText(page),
+    };
   } catch (error) {
     signal.throwIfAborted();
     throw error;

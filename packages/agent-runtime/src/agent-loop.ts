@@ -2,6 +2,7 @@ import { traceOurs, traceEvent, withTraceScope } from "@nestor/core/run-trace";
 import { isAgentRunAborted } from "./cancellation";
 import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 import { createContextHistory } from "./context-history";
+import { createContextParts, isModelInputLimit } from "./context-parts";
 /**
  * The one loop every Job Finder agent runs on.
  *
@@ -394,9 +395,11 @@ export async function runAgentLoop(
   const contextHistory = options.retainCompactedHistory
     ? createContextHistory(compactionMaxChars)
     : null;
+  const contextParts = createContextParts();
   const tools = [
     ...options.tools,
     ...(contextHistory ? [contextHistory.tool] : []),
+    contextParts.tool,
   ];
   const toolsByName = new Map(
     tools.map((tool) => [tool.definition.function.name, tool]),
@@ -478,18 +481,23 @@ export async function runAgentLoop(
     let providerWaiting = false;
     while (true) {
       const modelStartedAt = now().getTime();
+      const requestChars = Math.max(
+        1,
+        compactionMaxChars - JSON.stringify(definitions).length,
+      );
+      const modelMessages = contextParts.prepare(messages, requestChars);
       try {
         response = await runModelTurn(
           (turnOptions) =>
             observeModel(
               options,
               {
-                messages,
+                messages: modelMessages,
                 tools: definitions,
                 parallelToolCalls: options.parallelToolCalls,
               },
               () =>
-                options.model.chatWithTools(messages, definitions, {
+                options.model.chatWithTools(modelMessages, definitions, {
                   ...turnOptions,
                   ...(options.parallelToolCalls === undefined
                     ? {}
@@ -517,6 +525,18 @@ export async function runAgentLoop(
             "aborted",
             `Job Finder stopped work on ${options.subjectLabel} before it was finished.`,
           );
+        }
+        if (isModelInputLimit(error)) {
+          contextParts.recover(
+            Math.min(requestChars, JSON.stringify(modelMessages).length),
+          );
+          const recovered = contextParts.prepare(messages, requestChars);
+          if (JSON.stringify(recovered) !== JSON.stringify(modelMessages)) {
+            await note(
+              "the provider input window was exceeded; resending exact content in readable parts; no actions repeated",
+            );
+            continue;
+          }
         }
         if (error instanceof ModelTurnTimeoutError && error.kind === "idle") {
           messages.push({

@@ -64,6 +64,11 @@ test("rendered snapshots do not wait for semantic readiness on a continually cha
       Promise.resolve("<main>Changing animation, no recognized cards</main>"),
     ),
     url: () => "https://example.test",
+    locator: () => ({
+      evaluate: () =>
+        Promise.resolve("Changing animation, no recognized cards"),
+    }),
+    frames: () => [],
     close,
     on: vi.fn(),
     off: vi.fn(),
@@ -92,6 +97,8 @@ test("active navigation can continue past 20 seconds with connection progress", 
   const page = {
     goto,
     content: () => Promise.resolve("Complete"),
+    locator: () => ({ evaluate: () => Promise.resolve("Complete") }),
+    frames: () => [],
     url: () => "https://example.test",
     close,
     on: (name: string, listener: () => void) => listeners.set(name, listener),
@@ -112,7 +119,11 @@ test("active navigation can continue past 20 seconds with connection progress", 
     timeout: 0,
   });
   finish();
-  expect(await pending).toEqual({ html: "Complete", finalUrl: page.url() });
+  expect(await pending).toEqual({
+    html: "Complete",
+    finalUrl: page.url(),
+    visibleText: "Complete",
+  });
   expect(close).toHaveBeenCalledOnce();
 });
 test("a silent native picker reports idle instead of inventing an absent option", async () => {

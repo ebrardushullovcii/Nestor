@@ -1253,7 +1253,7 @@ describe("assistant session host", () => {
     expect(await repository.listGrants(conversation.id)).toEqual([]);
   });
 
-  it("keeps working after forced compaction, and the summary keeps the person's words", async () => {
+  it("keeps working through context parts and retains the person's exact words", async () => {
     const fixedSnapshot = await createProfileServiceHarness().service.read();
     const fixedPromptTokens = estimateTokens([
       {
@@ -1278,11 +1278,12 @@ describe("assistant session host", () => {
       toolSchemaTokens,
       marginTokens: 4_000,
     });
-    // Leave room for a checkpoint and this turn's context above the fixed
-    // prompt, while keeping the history budget small enough to compact.
+    // Force a route-sized view while keeping canonical history exact.
     const smallBudget = fixedPromptTokens + 2_400;
     expect(productionBudget).toBeGreaterThan(smallBudget * 4);
-    const { host, repository } = setup({ budgetOverrideTokens: smallBudget });
+    const { host, repository, harness } = setup({
+      budgetOverrideTokens: smallBudget,
+    });
     const { conversationId } = await sendAndWait(
       host,
       "Change my headline to Compaction check one",
@@ -1296,14 +1297,11 @@ describe("assistant session host", () => {
       );
     }
     const checkpoint = await repository.getLatestCheckpoint(conversationId);
-    expect(checkpoint).not.toBeNull();
-    expect(checkpoint!.version).toBeGreaterThanOrEqual(1);
-    // The summary keeps what the person asked for, in their words.
-    expect(
-      checkpoint!.activeInstructions.some((entry) =>
-        /headline/iu.test(entry.text),
-      ),
-    ).toBe(true);
+    expect(checkpoint).toBeNull();
+    const transcript = await repository.listTranscript(conversationId);
+    expect(JSON.stringify(transcript)).toContain(
+      "Change my headline to Compaction check one",
+    );
     const view = await host.readConversation({ conversationId });
     expect(
       view.messages.some((message) =>
@@ -1311,11 +1309,14 @@ describe("assistant session host", () => {
           (part) => part.type === "notice" && part.kind === "compacted",
         ),
       ),
-    ).toBe(true);
+    ).toBe(false);
     const compactedText = reply(view.messages).parts.find(
       (part) => part.type === "text",
     );
-    expect(compactedText?.type === "text" ? compactedText.text : "").toContain(
+    expect(compactedText?.type === "text" ? compactedText.text : "").not.toBe(
+      "",
+    );
+    expect((await harness.service.read()).profile.headline).toBe(
       "Compaction check one",
     );
 
@@ -1341,6 +1342,7 @@ describe("assistant session host", () => {
     expect(pinned).toMatch(/1\. .*\[job_generating\]/u);
     expect(pinned).toMatch(/2\. .*\[job_ready\]/u);
     const assembled = await assembleModelInput({
+      losslessContextParts: true,
       repository,
       conversationId,
       systemPrompt: "system",
@@ -1355,13 +1357,12 @@ describe("assistant session host", () => {
       createId: (prefix) => `${prefix}_x`,
       pinnedAfterSummary: () => Promise.resolve(pinned),
     });
-    const summaryMessage = assembled.find(
-      (message) =>
-        message.role === "user" &&
-        message.content.startsWith("[Summary of the earlier part"),
+    expect(assembled.map((message) => message.content).join("\n")).toContain(
+      "2. ",
     );
-    expect(summaryMessage?.content).toContain("2. ");
-    expect(summaryMessage?.content).toContain("[job_ready]");
+    expect(assembled.map((message) => message.content).join("\n")).toContain(
+      "[job_ready]",
+    );
   });
 
   it("marks a turn interrupted after a restart and keeps the conversation", async () => {
