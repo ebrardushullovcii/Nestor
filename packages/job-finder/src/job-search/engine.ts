@@ -4,6 +4,7 @@ import {
 } from "@nestor/ai-providers";
 import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { withTraceScope } from "@nestor/core/run-trace";
 import {
   collectSource,
   screenCards,
@@ -405,39 +406,52 @@ export function createListingSearchEngine(deps: {
           const browserPermissions = context.readBrowserPermissions
             ? await context.readBrowserPermissions()
             : context.browserPermissions;
-          const discovery = await deps.browserRuntime.runAgentDiscovery(
-            "target_site",
+          const discovery = await withTraceScope(
             {
-              ...(browserPermissions ? { browserPermissions } : {}),
-              ...(context.readBrowserPermissions
-                ? { readBrowserPermissions: context.readBrowserPermissions }
-                : {}),
-              ...(context.readIntendedAccountEmail
-                ? { readIntendedAccountEmail: context.readIntendedAccountEmail }
-                : {}),
-              dedicatedPage: true,
-              retainAllFound: true,
-              userProfile: context.profile,
-              searchPreferences: toJobSearchGoals(context.searchPreferences),
-              startingUrls: [card.url],
-              searchRequest: {
-                intent:
-                  "Read this supplied vacancy in full and keep its complete text. This is a listing read, not a fit decision; do not reject it for preferences or expected fit.",
-                breadth: "wide",
-                freshness: "any",
-                sourceIds: [card.sourceId],
-              },
-              navigationHostnames: [new URL(card.url).hostname],
-              siteLabel: card.sourceLabel,
-              siteInstructions: [
-                "Read the supplied vacancy in full, including every requirement and the application link. This is a full listing read, not a fit decision: retain this vacancy regardless of its expected fit. Preserve its complete text in description. Missing metadata is unknown, not a reason to drop a vacancy. Do not apply.",
-                "Use this browser's imported session and the saved vault sign-in or Google sign-in when needed. Attempt permitted sign-in and site checks before asking the person. Never ask for or expose a password the vault can type. If a real attempt fails, hand off on the open page with exactly what happened.",
-              ],
-              targetJobCount: 1,
-              maxSteps: Number.MAX_SAFE_INTEGER,
-              signal: input.signal,
-              aiClient: deps.aiClient,
+              sourceId: card.sourceId,
+              sourceUrl: undefined,
+              listingUrl: card.url,
             },
+            () =>
+              deps.browserRuntime.runAgentDiscovery!("target_site", {
+                ...(browserPermissions ? { browserPermissions } : {}),
+                ...(context.readBrowserPermissions
+                  ? { readBrowserPermissions: context.readBrowserPermissions }
+                  : {}),
+                ...(context.readIntendedAccountEmail
+                  ? {
+                      readIntendedAccountEmail:
+                        context.readIntendedAccountEmail,
+                    }
+                  : {}),
+                dedicatedPage: true,
+                requestedListing: {
+                  url: card.url,
+                  title: card.title,
+                  text: card.text,
+                },
+                retainAllFound: true,
+                userProfile: context.profile,
+                searchPreferences: toJobSearchGoals(context.searchPreferences),
+                startingUrls: [card.url],
+                searchRequest: {
+                  intent:
+                    "Read this supplied vacancy in full and keep its complete text. This is a listing read, not a fit decision; do not reject it for preferences or expected fit.",
+                  breadth: "wide",
+                  freshness: "any",
+                  sourceIds: [card.sourceId],
+                },
+                navigationHostnames: [new URL(card.url).hostname],
+                siteLabel: card.sourceLabel,
+                siteInstructions: [
+                  "Read the supplied vacancy in full, including every requirement and the application link. This is a full listing read, not a fit decision: retain this vacancy regardless of its expected fit. Preserve its complete text in description. Missing metadata is unknown, not a reason to drop a vacancy. Do not apply.",
+                  "Use this browser's imported session and the saved vault sign-in or Google sign-in when needed. Attempt permitted sign-in and site checks before asking the person. Never ask for or expose a password the vault can type. If a real attempt fails, hand off on the open page with exactly what happened.",
+                ],
+                targetJobCount: 1,
+                maxSteps: Number.MAX_SAFE_INTEGER,
+                signal: input.signal,
+                aiClient: deps.aiClient,
+              }),
           );
           for (const job of discovery.jobs)
             result.jobs.push({
@@ -445,6 +459,8 @@ export function createListingSearchEngine(deps: {
               company: job.company,
               location: job.location,
               workModes: job.workMode,
+              // The model gets the requested identity and the landed page;
+              // its canonical URL can resolve an observed login redirect.
               url: job.canonicalUrl,
               applyUrl: job.applicationUrl ?? null,
               sourceId: card.sourceId,

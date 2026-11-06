@@ -48,9 +48,7 @@ test("host queues report the active total and per-host boundaries and keep queue
 });
 test("an HTTP refusal keeps its site status for browser continuation instead of spending a retry budget", async () => {
   const request = vi.fn<typeof fetch>(() =>
-    Promise.resolve(
-      new Response("busy", { status: 429, headers: { "retry-after": "0" } }),
-    ),
+    Promise.resolve(new Response("busy", { status: 429 })),
   );
   await expect(
     createHttpPageReader({ fetch: request })("https://example.test/job", {}),

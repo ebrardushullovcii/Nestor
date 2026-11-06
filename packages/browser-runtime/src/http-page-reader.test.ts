@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { createHttpPageReader } from "./http-page-reader";
 
-test("preserves server refusals for browser continuation and reads only with GET", async () => {
+test("waits for Retry-After and reads only with GET", async () => {
   const request = vi
     .fn<typeof fetch>()
     .mockResolvedValueOnce(
@@ -12,9 +12,6 @@ test("preserves server refusals for browser continuation and reads only with GET
     )
     .mockResolvedValueOnce(new Response("<main>Listing</main>"));
   const reader = createHttpPageReader({ fetch: request });
-  await expect(reader("https://example.test/jobs", {})).rejects.toMatchObject({
-    status: 429,
-  });
   expect(await reader("https://example.test/jobs", {})).toEqual({
     html: "<main>Listing</main>",
     finalUrl: "https://example.test/jobs",
@@ -37,6 +34,35 @@ test("an aborted read makes no request", async () => {
   ).rejects.toThrow();
   expect(request).not.toHaveBeenCalled();
 });
+
+test.each([429, 503])(
+  "HTTP %s Retry-After waits without occupying an active host slot",
+  async (status) => {
+    vi.useFakeTimers();
+    try {
+      const request = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          new Response("wait", { status, headers: { "retry-after": "120" } }),
+        )
+        .mockImplementation(() =>
+          Promise.resolve(new Response("complete listing")),
+        );
+      const read = createHttpPageReader({ fetch: request });
+      const waiting = read("https://busy.example/job", {});
+      await vi.advanceTimersByTimeAsync(1);
+      expect(request).toHaveBeenCalledOnce();
+      expect(await read("https://healthy.example/job", {})).toMatchObject({
+        html: "complete listing",
+      });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(await waiting).toMatchObject({ html: "complete listing" });
+      expect(request).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
 
 test("provider search queries use JSON without navigation, credentials or redirects", async () => {
   const request = vi
@@ -115,11 +141,8 @@ test("Stop interrupts a server-requested queue pause", async () => {
       ),
     );
     const read = createHttpPageReader({ fetch: request });
-    await expect(read("https://example.test/jobs", {})).rejects.toMatchObject({
-      status: 429,
-    });
     const stopped = expect(
-      read("https://example.test/next", { signal: controller.signal }),
+      read("https://example.test/jobs", { signal: controller.signal }),
     ).rejects.toThrow();
     await vi.advanceTimersByTimeAsync(1);
     controller.abort();

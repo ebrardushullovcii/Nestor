@@ -54,6 +54,8 @@ export interface AgentPromptContext {
 }
 
 export interface AgentConfig extends BrowserPermissionPolicy {
+  /** Identity of the one listing being read, rather than a source search. */
+  requestedListing?: { url: string; title: string; text: string };
   inventoryOnly?: boolean;
   lookupKnownUrls?: KnownJobUrlLookup;
   /** No person-specified result cap; retain every suitable posting found. */

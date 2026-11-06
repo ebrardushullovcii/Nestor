@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { fitLocationKinds } from "./fit-work-location";
+const fitLocationKinds = [
+  "onsite",
+  "hybrid",
+  "country_remote",
+  "broader_remote",
+  "offered_list",
+  "unknown",
+] as const;
 
 const roleStates = [
   "strong",

@@ -3667,6 +3667,9 @@ export function createBrowserAgentRuntime(
 
       const agentConfig: AgentConfig = {
         source,
+        ...(agentOptions.requestedListing
+          ? { requestedListing: agentOptions.requestedListing }
+          : {}),
         ...(agentOptions.browserPermissions
           ? { browserPermissions: agentOptions.browserPermissions }
           : {}),
@@ -3885,7 +3888,10 @@ export function createBrowserAgentRuntime(
                 : null;
             })
             .catch(() => null);
-          if (warmStatus === 404 || warmStatus === 410) {
+          if (
+            !agentOptions.requestedListing &&
+            (warmStatus === 404 || warmStatus === 410)
+          ) {
             throw new Error(
               `Starting page returned HTTP ${warmStatus}: ${navigationTarget}`,
             );
@@ -3908,7 +3914,10 @@ export function createBrowserAgentRuntime(
                 throw error;
               });
             const status = response?.status() ?? null;
-            if (status === 404 || status === 410) {
+            if (
+              !agentOptions.requestedListing &&
+              (status === 404 || status === 410)
+            ) {
               throw new Error(
                 `Starting page returned HTTP ${status}: ${navigationTarget}`,
               );

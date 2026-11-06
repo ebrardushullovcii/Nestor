@@ -9,6 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import type * as childProcess from "node:child_process";
+import type * as timersPromises from "node:timers/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1668,80 +1669,108 @@ describe("playwright browser runtime", () => {
     }
   });
 
-  test("runAgentDiscovery stops at a missing starting page instead of wandering to another board route", async () => {
-    const userDataDir = await mkdtemp(
-      join(tmpdir(), "nestor-browser-runtime-agent-missing-start-"),
-    );
-
-    try {
-      const chromeExecutablePath = join(userDataDir, "chrome.exe");
-      await writeFile(chromeExecutablePath, "", "utf8");
-      const debugPort = await reserveFreePort();
-      const launchedChromeProcess = createMockChildProcess({ pid: 54647 });
-      const jobExtractor = vi.fn().mockResolvedValue([]);
-      let pageUrl = "about:blank";
-      const page = {
-        bringToFront: vi.fn().mockResolvedValue(undefined),
-        close: vi.fn().mockResolvedValue(undefined),
-        goto: vi.fn((url: string) => {
-          pageUrl = url;
-          return Promise.resolve({ status: () => 404 });
-        }),
-        isClosed: () => false,
-        url: () => pageUrl,
-      };
-      const fakeContext = {
-        newPage: vi.fn().mockResolvedValue(page),
-        pages: () => [page],
-      };
-      const fakeBrowser = {
-        close: vi.fn(),
-        contexts: () => [fakeContext],
-        isConnected: () => true,
-        once: vi.fn(() => fakeBrowser),
-      };
-
-      vi.stubGlobal(
-        "fetch",
-        vi.fn().mockResolvedValue({
-          ok: true,
-          json: () => Promise.resolve({}),
-        } as Response),
+  test.each([false, true])(
+    "a missing source fails; a missing listing reaches the model (listingRead=%s)",
+    async (listingRead) => {
+      const userDataDir = await mkdtemp(
+        join(tmpdir(), "nestor-browser-runtime-agent-missing-start-"),
       );
-      execFileMock.mockImplementation((...args: unknown[]) => {
-        maybeInvokeExecFileCallback(args);
+      const readListing = vi.fn().mockResolvedValue({
+        jobs: [],
+        steps: 1,
+        transcriptMessageCount: 1,
+        incomplete: false,
       });
-      spawnMock.mockReturnValue(launchedChromeProcess);
-      connectOverCDPMock.mockResolvedValue(fakeBrowser);
+      if (listingRead)
+        vi.doMock("@nestor/browser-agent", async (importOriginal) => ({
+          ...(await importOriginal<typeof browserAgent>()),
+          runJobSearchAgent: readListing,
+        }));
 
-      const { createBrowserAgentRuntime } =
-        await import("./playwright-browser-runtime");
-      const runtime = createBrowserAgentRuntime({
-        userDataDir,
-        chromeExecutablePath,
-        debugPort,
-        jobExtractor,
-      });
+      try {
+        const chromeExecutablePath = join(userDataDir, "chrome.exe");
+        await writeFile(chromeExecutablePath, "", "utf8");
+        const debugPort = await reserveFreePort();
+        const launchedChromeProcess = createMockChildProcess({ pid: 54647 });
+        const jobExtractor = vi.fn().mockResolvedValue([]);
+        let pageUrl = "about:blank";
+        const page = {
+          bringToFront: vi.fn().mockResolvedValue(undefined),
+          close: vi.fn().mockResolvedValue(undefined),
+          goto: vi.fn((url: string) => {
+            pageUrl = url;
+            return Promise.resolve({ status: () => 404 });
+          }),
+          isClosed: () => false,
+          url: () => pageUrl,
+        };
+        const fakeContext = {
+          newPage: vi.fn().mockResolvedValue(page),
+          pages: () => [page],
+        };
+        const fakeBrowser = {
+          close: vi.fn(),
+          contexts: () => [fakeContext],
+          isConnected: () => true,
+          once: vi.fn(() => fakeBrowser),
+        };
 
-      const result = await runtime.runAgentDiscovery!("target_site", {
-        maxSteps: 1,
-        targetJobCount: 1,
-        userProfile: createTestProfile(),
-        searchPreferences: { targetRoles: [], locations: [] },
-        startingUrls: ["https://example.com/not-found"],
-        navigationHostnames: ["example.com"],
-        siteLabel: "Missing Jobs",
-        dedicatedPage: true,
-      });
+        vi.stubGlobal(
+          "fetch",
+          vi.fn().mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve({}),
+          } as Response),
+        );
+        execFileMock.mockImplementation((...args: unknown[]) => {
+          maybeInvokeExecFileCallback(args);
+        });
+        spawnMock.mockReturnValue(launchedChromeProcess);
+        connectOverCDPMock.mockResolvedValue(fakeBrowser);
 
-      expect(result.jobs).toEqual([]);
-      expect(result.warning).toContain("Starting page returned HTTP 404");
-      expect(jobExtractor).not.toHaveBeenCalled();
-      expect(page.close).toHaveBeenCalledOnce();
-    } finally {
-      await rm(userDataDir, { recursive: true, force: true });
-    }
-  });
+        const { createBrowserAgentRuntime } =
+          await import("./playwright-browser-runtime");
+        const runtime = createBrowserAgentRuntime({
+          userDataDir,
+          chromeExecutablePath,
+          debugPort,
+          jobExtractor,
+        });
+
+        const result = await runtime.runAgentDiscovery!("target_site", {
+          maxSteps: 1,
+          targetJobCount: 1,
+          userProfile: createTestProfile(),
+          searchPreferences: { targetRoles: [], locations: [] },
+          startingUrls: ["https://example.com/not-found"],
+          navigationHostnames: ["example.com"],
+          siteLabel: "Missing Jobs",
+          dedicatedPage: true,
+          ...(listingRead
+            ? {
+                requestedListing: {
+                  url: "https://example.com/not-found",
+                  title: "Requested vacancy",
+                  text: "Original card",
+                },
+              }
+            : {}),
+        });
+
+        expect(result.jobs).toEqual([]);
+        if (listingRead) {
+          expect(readListing).toHaveBeenCalledOnce();
+          expect(result.warning).toBeNull();
+        } else
+          expect(result.warning).toContain("Starting page returned HTTP 404");
+        expect(jobExtractor).not.toHaveBeenCalled();
+        expect(page.close).toHaveBeenCalledOnce();
+      } finally {
+        vi.doUnmock("@nestor/browser-agent");
+        await rm(userDataDir, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("runAgentDiscovery keeps a dedicated page the agent parked for the person open", async () => {
     const userDataDir = await mkdtemp(
@@ -4503,9 +4532,16 @@ describe("managed context active service worker gate", () => {
 });
 
 test("CDP attach recovers transient failures while its endpoint remains live", async () => {
-  const { attachToLiveDebugger } = await import("./playwright-browser-runtime");
-  vi.useFakeTimers();
+  // The runtime uses node:timers/promises; Vitest's global fake timers do
+  // not advance those waits. Stub that seam rather than waiting 11.75 s.
+  vi.resetModules();
+  vi.doMock("node:timers/promises", async (importOriginal) => ({
+    ...(await importOriginal<typeof timersPromises>()),
+    setTimeout: vi.fn(() => Promise.resolve()),
+  }));
   try {
+    const { attachToLiveDebugger } =
+      await import("./playwright-browser-runtime");
     let failures = 6;
     const attach = vi.fn(() =>
       --failures >= 0
@@ -4518,12 +4554,12 @@ test("CDP attach recovers transient failures while its endpoint remains live", a
       endpointReady,
       signal: new AbortController().signal,
     });
-    await vi.runAllTimersAsync();
     expect(await pending).toBe("connected");
     expect(attach).toHaveBeenCalledTimes(7);
     expect(endpointReady).toHaveBeenCalledTimes(6);
   } finally {
-    vi.useRealTimers();
+    vi.doUnmock("node:timers/promises");
+    vi.resetModules();
   }
 });
 

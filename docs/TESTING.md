@@ -79,7 +79,7 @@ For every live run, record the requested model and effort separately from the mo
 
 ## Fit judging
 
-- The model judges fit (ADR 0041); there is no rule scorer to calibrate. Tests fake the fit model and check its verdict, with caps for confirmed conflicts. Unknown permission, unpublished/incomparable pay and uncertain terms retain explicit caveats without blanket below-Good caps; a fit label grants no application permission. Check both model ordering and surviving hard-pay/location negatives. `LISTING_FIT_SCORER_VERSION` retires indexed listing fits; `MATCH_ASSESSMENT_SCORER_VERSION` covers legacy assessments. Stored verdicts remain visible while relevant profile, goals or listing changes are judged again.
+- The model judges fit (ADR 0079); tests fake the fit model and verify its score, reason and dimension verdicts reach the store and screen unchanged, including when pay, location or requirements conflict. These facts and the person's settings go to the model; code does not rescore or replace its explanation. `LISTING_FIT_SCORER_VERSION` retires indexed listing fits; `MATCH_ASSESSMENT_SCORER_VERSION` covers legacy assessments. Stored verdicts remain visible while relevant profile, goals or listing changes are judged again.
 
 ## Benchmarks
 

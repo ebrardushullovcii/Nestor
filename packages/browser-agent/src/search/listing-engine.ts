@@ -41,7 +41,6 @@ import {
 import { blockedByCheck } from "./bot-check";
 import { collectPublicFeed } from "./public-board-feed";
 import { readAtsListing } from "./ats-public-feed";
-import { assessFitWorkLocation } from "./fit-work-location";
 import { buildListingFitPerson } from "./listing-fit-person";
 import { fitSchema, fitResponseSchema } from "./listing-fit-response";
 import { fitCountryCodes } from "./fit-country-codes";
@@ -354,7 +353,7 @@ async function collectSourceObserved(
       if (recovered.complete)
         fallback = {
           ...recovered,
-          notes: [...fallback.notes, ...recovered.notes],
+          notes: recovered.notes,
         };
     }
     for (const card of fallback.cards) cards.set(card.url, card);
@@ -366,24 +365,7 @@ async function collectSourceObserved(
       ...(!cards.size && fallback.emptyConfirmed
         ? { emptyConfirmed: true }
         : {}),
-      notes: [
-        ...(fallback.complete
-          ? needsAccess
-            ? ["Browser access was verified after the initial access check."]
-            : []
-          : notes),
-        ...fallback.notes,
-        ...(!fallback.complete
-          ? [
-              "Browser inventory coverage is not confirmed. Saved listings are kept; continue this site to check remaining results.",
-            ]
-          : []),
-        ...(cards.size || fallback.complete
-          ? []
-          : [
-              "No listings were read; coverage could not be confirmed. Open the site or check its jobs-board URL.",
-            ]),
-      ],
+      notes: fallback.notes,
       ...(fallback.needsYou ? { needsYou: true } : {}),
     };
   }
@@ -623,7 +605,18 @@ export async function screenCards(
               bodies.push(card.listingText);
               continue;
             }
-            const readPage = input.readPage;
+            const sourceReadPage = input.readPage;
+            const readPage = sourceReadPage
+              ? (((url, options) =>
+                  withTraceScope(
+                    {
+                      sourceId: card.sourceId,
+                      sourceUrl: undefined,
+                      listingUrl: card.url,
+                    },
+                    () => sourceReadPage(url, options),
+                  )) as ListingSearchReader["readPage"])
+              : undefined;
             if (!readPage)
               throw new Error("The full listing could not be read.");
             const render = () =>
@@ -730,22 +723,6 @@ export async function screenCards(
   };
 }
 
-function sharedPassages() {
-  const passages: string[] = [],
-    indices = new Map<string, number>();
-  const encode = (text: string) =>
-    text.split(/\n\s*\n/u).map((paragraph) => {
-      let id = indices.get(paragraph);
-      if (id === undefined) {
-        id = passages.length;
-        passages.push(paragraph);
-        indices.set(paragraph, id);
-      }
-      return id;
-    });
-  return { passages, encode };
-}
-
 const fieldsSchema = z.object({
   id: z.number().int().nonnegative(),
   title: z.string(),
@@ -756,6 +733,8 @@ const fieldsSchema = z.object({
   employmentType: z.string().nullable(),
   seniority: z.string().nullable(),
   salaryText: z.string().nullable(),
+  canonicalUrl: z.string().url().optional(),
+  applyUrl: z.string().url().nullable().optional(),
   closed: z.boolean().default(false),
   isListing: z.boolean().optional(),
 });
@@ -769,192 +748,109 @@ export async function readListings(
     },
 ): Promise<ReadListingResult> {
   const failures: ReadListingResult["failures"] = [];
-  const sameCards = new Map<string, ListingCard[]>();
-  for (const card of input.cards) {
-    const key = fingerprint([card.title, card.text]);
-    const group = sameCards.get(key) ?? [];
-    group.push(card);
-    sameCards.set(key, group);
-  }
-  const site = (card: ListingCard) => {
-    const url = new URL(card.url);
-    return `${url.host}/${url.pathname.split("/").filter(Boolean)[0] ?? ""}`;
-  };
-  // Identical cards can share a body across sites. Two same-site openings never
-  // share a read merely because their cards look alike (the store uses this boundary too).
-  const groups = [...sameCards.values()].flatMap((group) =>
-    new Set(group.map(site)).size === group.length &&
-    new Set(group.map((card) => card.sourceId)).size === group.length
-      ? [group]
-      : group.map((card) => [card]),
-  );
-  const reads = await mapConcurrent(groups, 6, async (group) => {
-    const [first] = group;
-    if (!first) return null;
-    let card = first;
-    let needsYou = false;
-    try {
-      let page: { html: string; finalUrl: string } | null = null;
-      let lastError: unknown;
-      let authenticatedCard: ListingCard | null = null;
-      for (const original of group) {
-        let candidate = original;
+  // Every URL owns its read, even when another source printed the same card.
+  const reads = await mapConcurrent(input.cards, 6, (original) =>
+    withTraceScope(
+      {
+        sourceId: original.sourceId,
+        sourceUrl: undefined,
+        listingUrl: original.url,
+      },
+      async () => {
+        let card = original;
         try {
-          if (input.lane !== "browser" && !candidate.listingText)
-            candidate = (await readAtsListing(input, candidate)) ?? candidate;
-          const alternative =
-            (input.lane === "browser" ? undefined : candidate.listingPage) ??
-            (candidate.listingText
-              ? { html: "", finalUrl: candidate.url }
-              : await input.readPage(candidate.url, {
+          if (input.lane !== "browser" && !card.listingText)
+            card = (await readAtsListing(input, card)) ?? card;
+          let page =
+            (input.lane === "browser" ? undefined : card.listingPage) ??
+            (card.listingText
+              ? { html: "", finalUrl: card.url }
+              : await input.readPage(card.url, {
                   signal: input.signal,
                   rendered: input.lane === "browser",
-                  ...(input.lane === "browser"
-                    ? {
-                        ready: (html: string) => {
-                          const body = readListingHtml(html, candidate.title);
-                          return (
-                            body.detailHeading &&
-                            body.text.length > candidate.title.length + 80
-                          );
-                        },
-                      }
-                    : {}),
                 }));
-          if (!page || !blockedByCheck(alternative.html)) {
-            card = candidate;
-            page = alternative;
+          let body = card.listingText
+            ? {
+                text: card.listingText,
+                html: "",
+                detailHeading: true,
+                renderSuggested: false,
+              }
+            : readListingHtml(page.html, card.title);
+          if (body.renderSuggested && !body.text) {
+            if (input.lane !== "browser")
+              throw new Error("This listing needs a browser read.");
+            page = await input.readPage(card.url, {
+              signal: input.signal,
+              rendered: true,
+              ready: (html) =>
+                !blockedByCheck(html) &&
+                readListingHtml(html, card.title).detailHeading,
+            });
+            body = readListingHtml(page.html, card.title);
           }
-          if (!blockedByCheck(alternative.html)) break;
+          const structured = extractListingDetailFromHtml({
+            html: page.html,
+            url: page.finalUrl,
+            expectedTitle: card.title,
+          });
+          const publishedOnly = !body.text && Boolean(structured?.description);
+          if (publishedOnly && structured?.description) {
+            body.text = structured.description;
+            body.detailHeading = true;
+          }
+          if (!body.text)
+            throw new Error("The page did not contain readable listing text.");
+          return { card, page, body, structured, publishedOnly };
         } catch (error) {
           input.signal?.throwIfAborted();
-          lastError = error;
-          if (
-            error instanceof DiscoveryPageReadError &&
-            [401, 403].includes(error.status)
-          )
-            authenticatedCard = candidate;
+          failures.push({
+            url: original.url,
+            reason: error instanceof Error ? error.message : String(error),
+            ...(input.lane !== "browser" ? { requiresBrowser: true } : {}),
+          });
+          return null;
         }
-      }
-      if (!page && authenticatedCard && input.lane === "browser") {
-        needsYou = true;
-        card = authenticatedCard;
-        page = await input.readPage(card.url, {
-          signal: input.signal,
-          rendered: true,
-          ready: (html) => !blockedByCheck(html),
-        });
-      }
-      if (!page)
-        throw lastError instanceof Error
-          ? lastError
-          : new Error("The listing could not be read.");
-      if (blockedByCheck(page.html) && input.lane === "browser")
-        page = await input.readPage(card.url, {
-          signal: input.signal,
-          rendered: true,
-          ready: (html) => !blockedByCheck(html),
-        });
-      let body = card.listingText
-        ? {
-            text: card.listingText,
-            html: "",
-            detailHeading: true,
-            renderSuggested: false,
-          }
-        : readListingHtml(page.html, card.title);
-      if (body.renderSuggested && !body.text && input.lane !== "browser")
-        throw new Error("This listing needs a browser read.");
-      if (body.renderSuggested && input.lane === "browser" && !body.text) {
-        page = await input.readPage(card.url, {
-          signal: input.signal,
-          rendered: true,
-          ready: (html) =>
-            !blockedByCheck(html) &&
-            readListingHtml(html, card.title).detailHeading,
-        });
-        body = readListingHtml(page.html, card.title);
-      }
-      const structured = extractListingDetailFromHtml({
-        html: page.html,
-        url: page.finalUrl,
-        expectedTitle: card.title,
-      });
-      const publishedOnly = !body.text && Boolean(structured?.description);
-      if (publishedOnly && structured?.description) {
-        body.text = structured.description;
-        body.detailHeading = true;
-      }
-      if (!body.text)
-        throw new Error("The page did not contain readable listing text.");
-      return {
-        card,
-        aliases: group.filter(
-          (alias) => alias.url !== card.url || alias.sourceId !== card.sourceId,
-        ),
-        page,
-        body,
-        structured,
-        publishedOnly,
-        needsYou:
-          needsYou || (!body.detailHeading && listingSignInRequired(page.html)),
-      };
-    } catch (error) {
-      input.signal?.throwIfAborted();
-      for (const card of group)
-        failures.push({
-          url: card.url,
-          reason: error instanceof Error ? error.message : String(error),
-          ...(input.lane === "browser"
-            ? needsYou
-              ? { needsYou: true }
-              : {}
-            : { requiresBrowser: true }),
-        });
-      return null;
-    }
-  });
+      },
+    ),
+  );
   const good = reads.filter((read) => read !== null),
     jobs: FoundJob[] = [];
   type Read = (typeof good)[number];
   type Fields = z.infer<typeof fieldsSchema>;
   const append = (read: Read, fields: Omit<Fields, "id">): void => {
-    const { closed, isListing, ...facts } = fields;
+    const { closed, isListing, canonicalUrl, applyUrl, ...facts } = fields;
     if (isListing === false) return;
     const hiddenReason = closed
       ? "Closed: this vacancy is no longer accepting applications."
       : null;
-    for (const sighting of [read.card, ...read.aliases])
-      jobs.push({
-        ...facts,
-        ...(hiddenReason ? { hiddenReason } : {}),
-        sourceJobId:
-          sighting === read.card
-            ? (fields.sourceJobId ?? sighting.sourceJobId ?? null)
-            : (sighting.sourceJobId ?? null),
-        url: sighting.url,
-        applyUrl:
-          sighting === read.card
-            ? (read.card.providerFacts?.applyUrl ??
-              findApplyLinkInHtml(read.page.html, read.page.finalUrl))
-            : null,
-        sourceId: sighting.sourceId,
-        sourceLabel: sighting.sourceLabel,
-        postedAt:
-          read.card.providerFacts?.postedAt ??
-          read.structured?.postedAt ??
-          read.card.postedAt ??
-          null,
-        description: read.body.text,
-        facts: {
-          fullListingRead:
-            !read.publishedOnly || !read.structured?.descriptionLikelyTruncated,
-        },
-        summary: null,
-        salaryMin: null,
-        salaryMax: null,
-        salaryCurrency: null,
-      });
+    jobs.push({
+      ...facts,
+      ...(hiddenReason ? { hiddenReason } : {}),
+      sourceJobId: fields.sourceJobId ?? read.card.sourceJobId ?? null,
+      url: canonicalUrl ?? read.card.url,
+      applyUrl:
+        applyUrl !== undefined
+          ? applyUrl
+          : (read.card.providerFacts?.applyUrl ??
+            findApplyLinkInHtml(read.page.html, read.page.finalUrl)),
+      sourceId: read.card.sourceId,
+      sourceLabel: read.card.sourceLabel,
+      postedAt:
+        read.card.providerFacts?.postedAt ??
+        read.structured?.postedAt ??
+        read.card.postedAt ??
+        null,
+      description: read.body.text,
+      facts: {
+        fullListingRead:
+          !read.publishedOnly || !read.structured?.descriptionLikelyTruncated,
+      },
+      summary: null,
+      salaryMin: null,
+      salaryMax: null,
+      salaryCurrency: null,
+    });
   };
   const uncertain: Read[] = [];
   for (const read of good) {
@@ -969,82 +865,23 @@ export async function readListings(
       });
       continue;
     }
-    const company = read.structured?.company || read.card.companyHint;
-    // The vacancy's own published address outranks a list-card hint.
-    const location =
-      read.structured?.location ||
-      read.card.locationHint?.split("·")[0]?.trim();
-    const name = company?.trim().toLowerCase();
-    const conflictingEmployer =
-      read.structured?.company &&
-      read.card.companyHint &&
-      read.structured.company.trim().toLowerCase() !==
-        read.card.companyHint.trim().toLowerCase();
-    const employerCorroborated =
-      name &&
-      (read.publishedOnly ||
-        read.body.text.split("\n").some((line) => {
-          const field = line.trim().toLowerCase();
-          return (
-            field === name ||
-            field.startsWith(`${name} ·`) ||
-            field.startsWith(`${name} |`)
-          );
-        }));
-    if (
-      !company ||
-      !employerCorroborated ||
-      conflictingEmployer ||
-      !location ||
-      !read.body.detailHeading
-    ) {
-      uncertain.push(read);
-      continue;
-    }
-    const cardFacts = [
-      read.card.text,
-      ...(read.structured?.workModeHints ?? []),
-    ]
-      .join(" ")
-      .toLowerCase();
-    const workModes: Fields["workModes"] = /\bremote\b/iu.test(cardFacts)
-      ? ["remote"]
-      : /\bhybrid\b/iu.test(cardFacts)
-        ? ["hybrid"]
-        : /\bon[ -]?site\b/iu.test(cardFacts)
-          ? ["onsite"]
-          : [];
-    append(read, {
-      title: read.structured?.title || read.card.title,
-      company,
-      location,
-      workModes,
-      sourceJobId: read.card.sourceJobId ?? null,
-      employmentType:
-        read.structured?.employmentType ||
-        read.card.text.match(
-          /\b(?:full[ -]time|part[ -]time|contract|temporary|internship)\b/iu,
-        )?.[0] ||
-        null,
-      closed: false,
-      seniority: read.structured?.seniority ?? null,
-      salaryText: read.structured?.salaryText ?? null,
-    });
+    // The model sees the landed page even when card hints or JSON-LD look
+    // complete. Those facts cannot establish that the posting is still open.
+    uncertain.push(read);
   }
   const readMetadata = async (batch: Read[]): Promise<void> => {
-    const { passages, encode } = sharedPassages();
     const answer = await ask(
       input,
-      'Read listing metadata faithfully from the complete page text and published facts. Each listing references the shared passages array by index, in order. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"closed":boolean,"isListing":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Do not assess fit or summarize the body.',
+      'Read listing metadata faithfully from the complete page text and published facts. Each listing carries its own requested URL, landed URL and complete body; never use another listing as its evidence. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A redirect is evidence about the requested listing, not a new listing identity. When the landed board says the requested vacancy is closed, return that requested vacancy with closed=true, not another board posting. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"canonicalUrl":"real listing URL","applyUrl":string|null,"closed":boolean,"isListing":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Keep the real listing URL through login redirects. A login page is not an application link: when a link carries its listing destination, return that actual canonicalUrl; use applyUrl=null if no real application link was observed. Do not assess fit or summarize the body.',
       {
-        passages,
         listings: batch.map((read, id) => ({
           id,
           title: read.card.title,
           url: read.card.url,
+          finalUrl: read.page.finalUrl,
           card: read.card.text,
           pageText: listingPageText(read.page.html),
-          passages: encode(read.body.text),
+          description: read.body.text,
           published: read.structured
             ? {
                 title: read.structured.title,
@@ -1058,21 +895,24 @@ export async function readListings(
             : null,
         })),
       },
-      z.object({ jobs: z.array(fieldsSchema) }),
+      z.object({ jobs: z.array(z.unknown()) }),
       Math.max(2000, batch.length * 220),
       "page_read",
     );
-    const byId = new Map(answer.jobs.map((job) => [job.id, job]));
-    if (
-      byId.size !== batch.length ||
-      answer.jobs.length !== batch.length ||
-      answer.jobs.some((job) => !batch[job.id])
-    )
-      throw new Error(
-        "Metadata response did not cover each listing exactly once.",
-      );
+    const rows = answer.jobs.map((job) => fieldsSchema.safeParse(job));
     for (const [id, read] of batch.entries()) {
-      const fields = byId.get(id)!;
+      const matching = rows.filter((row) => row.success && row.data.id === id);
+      const row = matching[0];
+      const fields = matching.length === 1 && row?.success ? row.data : null;
+      if (!fields) {
+        failures.push({
+          url: read.card.url,
+          reason:
+            "Metadata response did not return this listing exactly once with valid fields.",
+          ...(input.lane !== "browser" ? { requiresBrowser: true } : {}),
+        });
+        continue;
+      }
       if (fields.isListing === false) {
         failures.push({
           url: read.card.url,
@@ -1091,6 +931,8 @@ export async function readListings(
         employmentType: fields.employmentType,
         seniority: fields.seniority,
         salaryText: fields.salaryText,
+        ...(fields.canonicalUrl ? { canonicalUrl: fields.canonicalUrl } : {}),
+        ...(fields.applyUrl !== undefined ? { applyUrl: fields.applyUrl } : {}),
         closed: fields.closed,
       });
     }
@@ -1098,7 +940,24 @@ export async function readListings(
   await mapConcurrent(
     batches(uncertain, 32, (read) => read.body.text.length, 40000),
     3,
-    (batch) => readMetadata(batch),
+    async (batch) => {
+      try {
+        await readMetadata(batch);
+      } catch (error) {
+        input.signal?.throwIfAborted();
+        // Other batches and their completed jobs survive this response failure.
+        const completed = new Set(
+          jobs.map((job) => `${job.sourceId}\n${job.url}`),
+        );
+        for (const read of batch)
+          if (!completed.has(`${read.card.sourceId}\n${read.card.url}`))
+            failures.push({
+              url: read.card.url,
+              reason: error instanceof Error ? error.message : String(error),
+              ...(input.lane !== "browser" ? { requiresBrowser: true } : {}),
+            });
+      }
+    },
   );
   return { jobs, failures };
 }
@@ -1181,8 +1040,6 @@ export async function fitJobs(
   const output: JobFitUpdate[] = [];
   const repairIssues = new Map<number, string[]>();
   const payFloor = input.goals.compensation;
-  const normalizePayQuote = (text: string) =>
-    text.normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
   const payInstruction =
     payFloor?.minimum != null
       ? "Read published pay separately for EACH listing before scoring. Return pay:{minimum:number|null,maximum:number|null,currency:ISO-code|null,interval:hour|day|week|month|year|null,basis:base|total_ote|null,quote:verbatim own-listing pay passage}. A fixed amount supplies both bounds. Ordinary wages/salary are base; distinguish OTE. Keep absent bounds/currency/interval/basis null; never infer currency conversion, working hours, or another listing's pay. Copy the whole pay range and its interval in quote; use an empty quote when no pay passage exists. Non-pay mandatory requirements belong in h; pay is checked separately from these published numbers. A range reaching the inclusive floor is not a below-floor offer. Missing or incomparable pay is uncertainty, not a known low offer. "
@@ -1246,41 +1103,15 @@ export async function fitJobs(
           const job = rowId.success
             ? batch.find((job) => job.id === rowId.data.id)
             : undefined;
-          const pay = parsed.success ? parsed.data.pay : undefined;
-          const payEvidence =
-            !pay ||
-            (pay.minimum === null && pay.maximum === null) ||
-            (pay.quote.trim().length > 0 &&
-              job &&
-              normalizePayQuote(
-                [job.salaryText, job.description].filter(Boolean).join("\n"),
-              ).includes(normalizePayQuote(pay.quote)) &&
-              (pay.minimum === null ||
-                pay.maximum === null ||
-                pay.minimum <= pay.maximum));
-          const valid =
-            parsed.success &&
-            (!(input.goals.compensation?.minimum != null) ||
-              (parsed.data.h !== undefined &&
-                pay !== undefined &&
-                payEvidence)) &&
-            ids.has(String(parsed.data.id));
-          if (job && !valid)
-            repairIssues.set(job.id, [
-              ...(parsed.success
-                ? []
-                : parsed.error.issues.map(
-                    (issue) =>
-                      `invalid_field:${issue.path.join(".")}:${issue.code}`,
-                  )),
-              ...(parsed.success && parsed.data.h === undefined
-                ? ["missing_hard_requirements"]
-                : []),
-              ...(pay === undefined ? ["missing_pay"] : []),
-              ...(!payEvidence
-                ? ["pay_quote_not_verbatim_or_bounds_reversed"]
-                : []),
-            ]);
+          const valid = parsed.success && ids.has(String(parsed.data.id));
+          if (job && !parsed.success)
+            repairIssues.set(
+              job.id,
+              parsed.error.issues.map(
+                (issue) =>
+                  `invalid_field:${issue.path.join(".")}:${issue.code}`,
+              ),
+            );
           return valid && parsed.success ? [parsed.data] : [];
         });
         const counts = new Map<number, number>();
@@ -1294,65 +1125,12 @@ export async function fitJobs(
         const fits = rows
           .filter((fit) => counts.get(fit.id) === 1)
           .map((fit) => {
-            const { status: eligibility, reason: eligibilityReason } =
-              assessFitWorkLocation(
-                profile,
-                batch.find((job) => job.id === fit.id)!,
-                fit.e,
-                input.countryOptionFallbacks,
-              );
-            const pay = fit.pay;
-            const comparablePay =
-              payFloor?.minimum != null &&
-              pay &&
-              pay.currency?.toUpperCase() === payFloor.currency &&
-              pay.interval === payFloor.interval &&
-              pay.basis === (payFloor.basis ?? "base");
-            const belowFloor =
-              comparablePay &&
-              pay.maximum !== null &&
-              pay.maximum < payFloor.minimum!;
-            const unknownPay =
-              payFloor?.minimum != null &&
-              (!comparablePay ||
-                (pay.maximum === null &&
-                  (pay.minimum === null || pay.minimum < payFloor.minimum)));
-            const payReason = belowFloor
-              ? `Published ${pay.currency} ${pay.maximum}/${pay.interval} is below your ${payFloor.minimum}/${payFloor.interval} minimum.`
-              : unknownPay
-                ? "Pay cannot yet be compared with your saved minimum."
-                : null;
-            const hardLimited = belowFloor || fit.h?.[0] === "conflict";
-            const cap =
-              eligibility === "blocked"
-                ? JOB_FIT_BANDS.stretch - 1
-                : hardLimited
-                  ? JOB_FIT_BANDS.good - 1
-                  : fit.p[0] === "conflict"
-                    ? JOB_FIT_BANDS.strong - 1
-                    : 100;
-            const uncertainty = [
-              ...(eligibility === "review"
-                ? [`Location or eligibility needs review: ${eligibilityReason}`]
-                : []),
-              ...(unknownPay && payReason ? [payReason] : []),
-              ...(fit.h?.[0] === "unknown"
-                ? [`Requirement not confirmed: ${fit.h[1]}`]
-                : []),
-              ...(fit.p[0] === "unknown" ? [fit.p[1]] : []),
-            ];
-            const conflictReason =
-              eligibility === "blocked"
-                ? eligibilityReason
-                : hardLimited
-                  ? (payReason ?? fit.h![1])
-                  : fit.p[1];
+            const eligibility = fit.e[0];
             return {
               id: fit.id,
               ...(eligibility !== "compatible" ||
-              hardLimited ||
-              fit.p[0] === "conflict" ||
-              (fit.r[0] !== "strong" && fit.s < JOB_FIT_BANDS.good)
+              fit.h?.[0] === "conflict" ||
+              fit.p[0] === "conflict"
                 ? {
                     limit: {
                       kind:
@@ -1360,44 +1138,22 @@ export async function fitJobs(
                           ? ("eligibility" as const)
                           : eligibility === "review"
                             ? ("eligibility_unconfirmed" as const)
-                            : hardLimited || fit.p[0] === "conflict"
-                              ? ("preferences" as const)
-                              : ("role" as const),
-                      countries:
-                        eligibility === "compatible"
-                          ? []
-                          : [...fitCountryCodes(fit.e[3])].sort(),
+                            : ("preferences" as const),
+                      countries: [...fitCountryCodes(fit.e[3])].sort(),
                     },
                   }
                 : {}),
-              score: Math.min(fit.s, cap),
-              summary:
-                fit.s > cap
-                  ? conflictReason
-                  : [fit.why, ...uncertainty].join(" "),
-              // A short comparison cannot hide an unresolved condition or
-              // describe a different reason after a confirmed-conflict cap.
-              ...(fit.s <= cap &&
-              !uncertainty.length &&
-              shortFitReason(fit.w, fit.why)
+              score: fit.s,
+              summary: fit.why,
+              ...(shortFitReason(fit.w, fit.why)
                 ? { short: shortFitReason(fit.w, fit.why)! }
                 : {}),
               reasons: [],
               gaps: [],
               role: { assessment: fit.r[0], explanation: fit.r[1] },
               preferences: {
-                assessment:
-                  eligibility === "blocked" || hardLimited
-                    ? "conflict"
-                    : fit.p[0] === "conflict"
-                      ? "conflict"
-                      : uncertainty.length
-                        ? "unknown"
-                        : fit.p[0],
-                explanation:
-                  eligibility === "blocked" || hardLimited
-                    ? conflictReason
-                    : [fit.p[1], ...uncertainty].join(" "),
+                assessment: fit.p[0],
+                explanation: fit.p[1],
               },
               coverage: { assessment: fit.c[0], explanation: fit.c[1] },
               scoredAt: new Date().toISOString(),

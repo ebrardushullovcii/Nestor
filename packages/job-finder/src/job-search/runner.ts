@@ -262,7 +262,8 @@ export function createJobSearchRunner(
       )
         return;
       source.counted = true;
-      if (!settledState(source.row.state)) source.row.state = "done";
+      if (!settledState(source.row.state))
+        source.row.state = source.row.failedReads ? "partial" : "done";
       // Inventory alone is not proof of access: the selected details must
       // also have finished, without an access or read failure.
       if (
@@ -276,7 +277,8 @@ export function createJobSearchRunner(
         (source.row.failedReads
           ? ` ${source.row.failedReads} listing reads need attention.`
           : "") +
-        (source.notes.length ? ` ${source.notes.join(" ")}` : "");
+        (source.notes.length ? ` ${source.notes.join(" ")}` : "") +
+        (source.readFailures.length ? ` ${source.readFailures.join(" ")}` : "");
       write(source);
       update(run, { sourcesDone: 1 });
       source.urls.clear();
@@ -363,7 +365,6 @@ export function createJobSearchRunner(
       settled: markDone,
       count: (increments) => update(run, increments),
       needsAccess,
-      failed: failedSource,
       browser: browserTask,
     });
     const collect = async (
@@ -438,7 +439,9 @@ export function createJobSearchRunner(
         source.accessBlocked = inventory.complete
           ? false
           : source.accessBlocked || Boolean(inventory.accessBlocked);
-        source.notes = [...new Set([...source.notes, ...inventory.notes])];
+        // This is the current collection outcome, replacing the earlier HTTP
+        // attempt when browser navigation recovered the source.
+        source.notes = inventory.notes;
         source.row.lane = inventory.lane ?? lane;
         if (lane === "http" && inventory.requiresBrowser) {
           browserTask(source, async (browserSignal) => {
@@ -450,7 +453,7 @@ export function createJobSearchRunner(
         if (inventory.needsYou)
           needsAccess(
             source,
-            "Open this site and finish sign-in or verification, then Retry.",
+            `${source.target.label}: ${inventory.notes.join(" ") || "The site's sign-in or verification attempt still needs you on the open page."}`,
           );
         else if (!inventory.complete)
           failedSource(

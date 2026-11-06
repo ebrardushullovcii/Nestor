@@ -35,6 +35,159 @@ const card = (title: string, id = title): ListingCard => ({
   sourceLabel: source.label,
 });
 
+function metadataClient(
+  company = "Real Employer",
+  location = "Remote, Worldwide",
+  workModes: string[] = ["remote"],
+) {
+  return {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
+      const data = JSON.parse(String(messages[1].content)) as {
+        listings: { id: number; title: string }[];
+      };
+      return Promise.resolve({
+        content: JSON.stringify({
+          jobs: data.listings.map(({ id, title }) => ({
+            id,
+            title,
+            company,
+            location,
+            workModes,
+            sourceJobId: null,
+            employmentType: null,
+            seniority: null,
+            salaryText: null,
+            closed: false,
+          })),
+        }),
+      });
+    }),
+  };
+}
+
+test("the model sees a closed listing's landed board and keeps the requested identity as closed", async () => {
+  const requested = card("Backend Engineer");
+  const finalUrl = "https://employer.example/board";
+  const client = {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
+      const data = JSON.parse(String(messages[1].content)) as {
+        listings: { url: string; finalUrl: string; pageText: string }[];
+      };
+      expect(data.listings[0]).toMatchObject({ url: requested.url, finalUrl });
+      expect(data.listings[0].pageText).toContain(
+        "The job you are looking for is no longer open",
+      );
+      return Promise.resolve({
+        content: JSON.stringify({
+          jobs: [
+            {
+              id: 0,
+              title: requested.title,
+              company: "Employer",
+              location: "",
+              workModes: [],
+              sourceJobId: null,
+              employmentType: null,
+              seniority: null,
+              salaryText: null,
+              closed: true,
+              isListing: true,
+            },
+          ],
+        }),
+      });
+    }),
+  };
+  const result = await readListings({
+    cards: [requested],
+    client,
+    readPage: () =>
+      Promise.resolve({
+        finalUrl,
+        html: '<main><h1>Open jobs</h1><p>The job you are looking for is no longer open</p><a href="/other">Another vacancy</a></main>',
+      }),
+  });
+  expect(result.jobs).toHaveLength(1);
+  expect(result.jobs[0]).toMatchObject({
+    url: requested.url,
+    hiddenReason: "Closed: this vacancy is no longer accepting applications.",
+  });
+});
+
+test("the model can keep a login link's real listing destination without storing the login wall as its URL", async () => {
+  const listingUrl = "https://board.example/job/123";
+  const login = `https://board.example/auth/login?destination=${encodeURIComponent("/job/123")}`;
+  const client = metadataClient();
+  client.chatWithTools.mockResolvedValueOnce({
+    content: JSON.stringify({
+      jobs: [
+        {
+          id: 0,
+          title: "Backend Engineer",
+          company: "Employer",
+          location: "Europe",
+          workModes: [],
+          sourceJobId: null,
+          employmentType: null,
+          seniority: null,
+          salaryText: null,
+          canonicalUrl: listingUrl,
+          applyUrl: null,
+        },
+      ],
+    }),
+  });
+  const result = await readListings({
+    cards: [{ ...card("Backend Engineer"), url: login }],
+    client,
+    readPage: () =>
+      Promise.resolve({
+        html: "<main><h1>Backend Engineer</h1><p>Employer's complete vacancy text.</p></main>",
+        finalUrl: login,
+      }),
+  });
+  expect(result.jobs[0]).toMatchObject({ url: listingUrl, applyUrl: null });
+});
+
+test("one malformed metadata row never loses a complete sibling listing", async () => {
+  const client = metadataClient();
+  client.chatWithTools.mockResolvedValueOnce({
+    content: JSON.stringify({
+      jobs: [
+        {
+          id: 0,
+          title: "Backend Engineer",
+          company: "Employer",
+          location: "Europe",
+          workModes: [],
+          sourceJobId: null,
+          employmentType: null,
+          seniority: null,
+          salaryText: null,
+        },
+        { id: 1, title: 123 },
+      ],
+    }),
+  });
+  const cards = [
+    card("Backend Engineer", "one"),
+    card("Platform Engineer", "two"),
+  ];
+  const result = await readListings({
+    cards,
+    client,
+    readPage: (url) =>
+      Promise.resolve({
+        html: "<main><h1>Engineer</h1><p>Full listing duties and requirements.</p></main>",
+        finalUrl: url,
+      }),
+  });
+  expect(result.jobs.map((job) => job.url)).toEqual([cards[0].url]);
+  expect(result.failures).toMatchObject([
+    { url: cards[1].url, requiresBrowser: true },
+  ]);
+});
+
 test("an unusual title is judged with full duties once and its page is reused", async () => {
   const cards = [card("Trend Steward"), card("Metrics Caretaker")];
   const pages = new Map(
@@ -510,61 +663,31 @@ test("provider endpoints are reusable across boards and never claimed from looka
   ).toBeNull();
 });
 
-test("identical cross-site cards share one full read, preserving each site's identity and the real employer", async () => {
-  const first = {
-    ...card("Backend Engineer"),
-    companyHint: "Real Employer",
-    locationHint: "Remote, Worldwide",
-    sourceJobId: "7",
-  };
+test("identical cards on different sources retain each URL's own full read and application link", async () => {
+  const first = { ...card("Backend Engineer"), sourceJobId: "7" };
   const alias = {
     ...first,
-    url: "https://other.example/vacancies/abc",
     sourceId: "other",
+    url: "https://other.example/jobs/abc",
     sourceJobId: "abc",
   };
-  const readPage = vi.fn(() =>
+  const readPage = vi.fn((url: string) =>
     Promise.resolve({
-      finalUrl: first.url,
-      html: `<main><h1>Backend Engineer</h1><p>Real Employer · Remote, Worldwide</p><h2>Requirements</h2><p>${"Build production APIs with SQL. ".repeat(10)}</p><a href="/apply/7">Apply now</a></main>`,
+      finalUrl: url,
+      html: `<main><h1>Backend Engineer</h1><p>Real Employer</p><p>Complete duties unique to ${url}</p><a href="/apply">Apply now</a></main>`,
     }),
   );
-  const client = {
-    chatWithTools: vi.fn(() =>
-      Promise.reject(
-        new Error("Published corroborated facts need no model read"),
-      ),
-    ),
-  };
   const result = await readListings({
     cards: [first, alias],
     readPage,
-    client,
+    client: metadataClient(),
   });
   expect(result.failures).toEqual([]);
-  expect(readPage).toHaveBeenCalledTimes(1);
-  expect(client.chatWithTools).not.toHaveBeenCalled();
-  expect(
-    result.jobs.map((job) => [job.company, job.sourceJobId, job.applyUrl]),
-  ).toEqual([
-    ["Real Employer", "7", "https://board.example/apply/7"],
-    ["Real Employer", "abc", null],
-  ]);
-  expect(result.jobs[1]?.description).toBe(result.jobs[0]?.description);
-  readPage.mockClear();
-  await readListings({
-    cards: [
-      first,
-      {
-        ...first,
-        url: "https://board.example/another-opening",
-        sourceJobId: "8",
-      },
-    ],
-    readPage,
-    client,
-  });
   expect(readPage).toHaveBeenCalledTimes(2);
+  for (const job of result.jobs) {
+    expect(job.description).toContain(`unique to ${job.url}`);
+    expect(job.applyUrl).toBe(new URL("/apply", job.url).href);
+  }
 });
 
 test("an authenticated listing is deferred to the browser lane after HTTP refuses it", async () => {
@@ -581,11 +704,7 @@ test("an authenticated listing is deferred to the browser lane after HTTP refuse
         })
       : Promise.reject(new DiscoveryPageReadError(401)),
   );
-  const client = {
-    chatWithTools: vi.fn(() =>
-      Promise.reject(new Error("No model transcription needed")),
-    ),
-  };
+  const client = metadataClient();
   const http = await readListings({
     cards: [listing],
     readPage,
@@ -607,7 +726,7 @@ test("an authenticated listing is deferred to the browser lane after HTTP refuse
   expect(
     readPage.mock.calls.map(([, options]) => options.rendered ?? false),
   ).toEqual([false, true]);
-  expect(client.chatWithTools).not.toHaveBeenCalled();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
 test("judges merged unscored jobs once, retaining low scores and all three explanations", async () => {
@@ -864,7 +983,7 @@ test("a source can be an unlinked single vacancy; its complete page is reused fo
   );
   expect(readPage).toHaveBeenCalledTimes(1);
   expect(fallback).not.toHaveBeenCalled();
-  expect(client.chatWithTools).not.toHaveBeenCalled();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
   expect(detail.jobs[0]).toMatchObject({
     company: "Real Employer",
     location: "Remote",
@@ -1205,9 +1324,7 @@ test("single vacancies also preserve explicitly labelled employer and location a
     '<header>ATS brand</header><main><article><h1>Backend Engineer</h1><p class="company">Hiring Employer</p><p class="job-location">Berlin · Hybrid</p><h2>Responsibilities</h2><p>Build reliable production APIs and maintain scalable data services with a cross-functional engineering team.</p><a href="/apply">Apply</a></article></main>';
   const readPage = vi.fn(() => Promise.resolve({ html, finalUrl: source.url }));
   const inventory = await collectSource({ source, readPage });
-  const client = {
-    chatWithTools: vi.fn(() => Promise.reject(Error("No AI metadata needed"))),
-  };
+  const client = metadataClient("Hiring Employer", "Berlin", ["hybrid"]);
   const detail = await readListings({
     cards: inventory.cards,
     readPage,
@@ -1220,7 +1337,7 @@ test("single vacancies also preserve explicitly labelled employer and location a
     location: "Berlin",
     workModes: ["hybrid"],
   });
-  expect(client.chatWithTools).not.toHaveBeenCalled();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
   expect(readPage).toHaveBeenCalledTimes(1);
 });
 
@@ -1326,11 +1443,7 @@ test("unlabelled paragraphs after a card title are not location evidence", () =>
 test("a vacancy's published address overrides an incorrect card location hint", async () => {
   const title = "Junior Data Analyst";
   const html = `<script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title, description: "Build SQL and Python dashboards with the analytics team in Berlin.", hiringOrganization: { name: "Example Analytics" }, jobLocation: { address: { addressLocality: "Berlin", addressCountry: "DE" } } })}</script><main><h1>${title}</h1><p>Example Analytics</p><p>Berlin, Germany</p><p>Build SQL and Python dashboards with the analytics team in Berlin.</p></main>`;
-  const client = {
-    chatWithTools: vi.fn(() =>
-      Promise.reject(Error("Published facts need no model call")),
-    ),
-  };
+  const client = metadataClient("Example Analytics", "Berlin, Germany");
   const result = await readListings({
     cards: [{ ...card(title), locationHint: "Example Analytics" }],
     readPage: (url) => Promise.resolve({ html, finalUrl: url }),
@@ -1342,7 +1455,7 @@ test("a vacancy's published address overrides an incorrect card location hint", 
     company: "Example Analytics",
     location: "Berlin, Germany",
   });
-  expect(client.chatWithTools).not.toHaveBeenCalled();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
 test("an employer-before-title card keeps its separate location without structured data", async () => {
@@ -1353,11 +1466,7 @@ test("an employer-before-title card keeps its separate location without structur
     companyHint: "Example Analytics",
     locationHint: "Berlin, Germany",
   });
-  const client = {
-    chatWithTools: vi.fn(() =>
-      Promise.reject(Error("Corroborated facts need no model call")),
-    ),
-  };
+  const client = metadataClient("Example Analytics", "Berlin, Germany");
   const detail =
     "<main><h1>Junior Data Analyst</h1><p>Example Analytics</p><p>Berlin, Germany</p><p>Build SQL and Python dashboards with the analytics team.</p></main>";
   const result = await readListings({
@@ -1366,7 +1475,7 @@ test("an employer-before-title card keeps its separate location without structur
     client,
   });
   expect(result.jobs[0]?.location).toBe("Berlin, Germany");
-  expect(client.chatWithTools).not.toHaveBeenCalled();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
 test.each([401, 403])(

@@ -37,7 +37,6 @@ export function createSearchPipeline(input: {
     alreadySaved?: number;
   }): void;
   needsAccess(source: SourceWork, reason: string): void;
-  failed(source: SourceWork, reason: string): void;
   browser(
     source: SourceWork,
     work: (signal: AbortSignal) => Promise<void>,
@@ -130,15 +129,12 @@ export function createSearchPipeline(input: {
         const failure = failures.get(card.url);
         if (failure) {
           source.row.failedReads++;
-          if (!failure.needsYou)
-            input.failed(
-              source,
-              `Some listings could not be read: ${failure.reason}`,
-            );
+          // A listing's failure says nothing about the rest of its source.
+          source.readFailures.push(`${card.url}: ${failure.reason}`);
           if (failure.needsYou)
             input.needsAccess(
               source,
-              "Open this site to finish sign-in or verification, then Retry.",
+              `${source.target.label} (${card.url}): ${failure.reason}`,
             );
         }
       }
@@ -161,13 +157,15 @@ export function createSearchPipeline(input: {
       const emitted = new Set<string>();
       let reading = Promise.resolve();
       const readRelated = async (relatedCards: readonly ListingCard[]) => {
-        const result = await deps.engine
-          .readListings({
-            cards: relatedCards,
-            context,
-            signal,
-            lane: "http",
-          })
+        const result = await Promise.resolve()
+          .then(() =>
+            deps.engine.readListings({
+              cards: relatedCards,
+              context,
+              signal,
+              lane: "http",
+            }),
+          )
           .catch((error: unknown): ReadListingResult => {
             signal.throwIfAborted();
             const reason =
@@ -177,6 +175,7 @@ export function createSearchPipeline(input: {
               failures: relatedCards.map((card) => ({
                 url: card.url,
                 reason,
+                requiresBrowser: true,
               })),
             };
           });
@@ -291,10 +290,9 @@ export function createSearchPipeline(input: {
         }
       }
       for (const [id, reason] of failedSources)
-        input.failed(
-          sources.get(id)!,
-          `Some listings could not be screened: ${reason}`,
-        );
+        sources
+          .get(id)!
+          .readFailures.push(`Some listings could not be screened: ${reason}`);
       for (const id of touched) {
         const source = sources.get(id)!;
         if (!source.counted && !settledState(source.row.state))

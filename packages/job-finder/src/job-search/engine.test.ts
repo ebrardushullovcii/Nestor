@@ -97,12 +97,24 @@ test("passes remote location policy into fit and retains the model's changed sco
         context: { ...context, remoteCountsAsAnyLocation },
         signal: new AbortController().signal,
       });
-    expect((await judge(true))[0]?.score).toBe(92);
+    const modelFit = await judge(true);
+    expect(modelFit[0]?.score).toBe(92);
     expect((await judge(false))[0]).toMatchObject({
       score: 45,
       preferences: { assessment: "conflict" },
     });
     expect(chatWithTools).toHaveBeenCalledTimes(2);
+    store.setFit(modelFit);
+    const visible = store.listJobs({ stage: "found", sort: "best_fit" })
+      .rows[0];
+    expect(visible).toMatchObject({
+      fitScore: 92,
+      fitSummary: "Matching remote work.",
+    });
+    expect(store.getJob(id!)?.fit).toMatchObject({
+      score: 92,
+      summary: "Matching remote work.",
+    });
     expect(
       chatWithTools.mock.calls.map((call) => call[2]?.conversationKey),
     ).toEqual([
@@ -206,6 +218,11 @@ test.each([999, 403, 429])(
       expect(runAgentDiscovery.mock.calls[0]?.[1]).toMatchObject({
         browserPermissions: context.browserPermissions,
         dedicatedPage: true,
+      });
+      expect(runAgentDiscovery.mock.calls[1]?.[1].requestedListing).toEqual({
+        url: browser.cards[0]!.url,
+        title: browser.cards[0]!.title,
+        text: browser.cards[0]!.text,
       });
     } finally {
       request.mockRestore();

@@ -14,6 +14,7 @@ export interface SourceWork {
   accessBlocked: boolean;
   counted: boolean;
   notes: string[];
+  readFailures: string[];
   completeAccess?: () => void;
 }
 /** A site's outcome is settled: later work on it must not mark it searching or done. */
@@ -41,6 +42,7 @@ export function sourceWork(
     accessBlocked: false,
     counted: false,
     notes: [],
+    readFailures: [],
     row: {
       sourceId: target.id,
       label: target.label,
