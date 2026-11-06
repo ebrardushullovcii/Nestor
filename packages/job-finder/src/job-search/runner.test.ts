@@ -98,7 +98,7 @@ test("a search keeps a capacity-limited listing screen running, reports its wait
     expect(runner.status().progress?.providerWaiting).toBe(true);
     expect(engine.readListings).not.toHaveBeenCalled();
     expect(
-      runner.status().sources.every((source) => source.failedReads === 0),
+      runner.status().sources.every((source) => source.state !== "failed"),
     ).toBe(true);
     await vi.advanceTimersByTimeAsync(2_000);
     const result = await finished(runner);

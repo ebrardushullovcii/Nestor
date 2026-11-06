@@ -29,7 +29,7 @@ const input = {
 
 test("ten consecutive 429s respect Retry-After and finish on the eleventh call", async () => {
   const moments: number[] = [];
-  const fetchImpl = vi.fn(() => {
+  const fetchImpl = vi.fn(async () => {
     moments.push(Date.now());
     return Promise.resolve(
       moments.length <= 10
@@ -117,15 +117,17 @@ test("a request quota that resets shortly is a provider wait; insufficient accou
   await vi.advanceTimersByTimeAsync(30_000);
   expect((await pending).choices?.[0]?.message?.content).toBe("Complete");
   const rejected = vi.fn(() =>
-    json(
-      {
-        error: {
-          code: "insufficient_quota",
-          message:
-            "You exceeded your current quota, check your plan and billing details.",
+    Promise.resolve(
+      json(
+        {
+          error: {
+            code: "insufficient_quota",
+            message:
+              "You exceeded your current quota, check your plan and billing details.",
+          },
         },
-      },
-      429,
+        429,
+      ),
     ),
   );
   await expect(
@@ -138,11 +140,13 @@ test("a silent stream reconnects more than once and then completes", async () =>
   const cancelled = vi.fn();
   let calls = 0;
   const fetchImpl = vi.fn(() =>
-    ++calls <= 3
-      ? new Response(new ReadableStream({ cancel: cancelled }), {
-          headers: { "content-type": "text/event-stream" },
-        })
-      : complete(),
+    Promise.resolve(
+      ++calls <= 3
+        ? new Response(new ReadableStream({ cancel: cancelled }), {
+            headers: { "content-type": "text/event-stream" },
+          })
+        : complete(),
+    ),
   );
   const pending = performModelRequest({
     ...input,
@@ -160,7 +164,9 @@ test("a silent stream reconnects more than once and then completes", async () =>
 test("Stop cancels a provider wait immediately and clears its progress", async () => {
   const controller = new AbortController();
   const fetchImpl = vi.fn(() =>
-    json({ error: "slow down" }, 429, { "Retry-After": "3600" }),
+    Promise.resolve(
+      json({ error: "slow down" }, 429, { "Retry-After": "3600" }),
+    ),
   );
   const progress = vi.fn();
   const pending = withModelProviderProgress(progress, () =>
@@ -184,7 +190,9 @@ test.each([
 ] as const)(
   "%i permanent account/request error fails immediately: %s",
   async (status, message) => {
-    const fetchImpl = vi.fn(() => json({ error: { message } }, status));
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(json({ error: { message } }, status)),
+    );
     await expect(performModelRequest({ ...input, fetchImpl })).rejects.toThrow(
       message,
     );
@@ -196,7 +204,7 @@ test.each([
 test("concurrent and newly arriving calls share an extended route cooldown; other routes proceed", async () => {
   let second!: (response: Response) => void;
   const times: number[] = [];
-  const fetchImpl = vi.fn(() => {
+  const fetchImpl = vi.fn(async () => {
     times.push(Date.now());
     if (times.length === 1)
       return Promise.resolve(
@@ -238,24 +246,26 @@ test("an apply model turn stays running through ten 429s and finishes once, with
   vi.stubGlobal(
     "fetch",
     vi.fn(() =>
-      ++calls <= 10
-        ? json({ error: "slow down" }, 429, { "Retry-After": "30" })
-        : json({
-            choices: [
-              {
-                message: {
-                  tool_calls: [
-                    {
-                      id: "finish-once",
-                      type: "function",
-                      function: { name: "finish", arguments: "{}" },
-                    },
-                  ],
+      Promise.resolve(
+        ++calls <= 10
+          ? json({ error: "slow down" }, 429, { "Retry-After": "30" })
+          : json({
+              choices: [
+                {
+                  message: {
+                    tool_calls: [
+                      {
+                        id: "finish-once",
+                        type: "function",
+                        function: { name: "finish", arguments: "{}" },
+                      },
+                    ],
+                  },
+                  finish_reason: "tool_calls",
                 },
-                finish_reason: "tool_calls",
-              },
-            ],
-          }),
+              ],
+            }),
+      ),
     ),
   );
   const client = createOpenAiCompatibleJobFinderAiClient({
@@ -263,7 +273,7 @@ test("an apply model turn stays running through ten 429s and finishes once, with
     model: "synthetic",
     apiKey: "synthetic",
   });
-  const execute = vi.fn(() =>
+  const execute = vi.fn(async () =>
     Promise.resolve({
       kind: "finish" as const,
       finish: {
