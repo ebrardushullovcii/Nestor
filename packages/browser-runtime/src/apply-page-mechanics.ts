@@ -1,5 +1,6 @@
 import { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
 import { readPressability } from "./element-state";
+import { watchPagePress } from "./page-press-facts";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { withNavigationLiveness } from "./browser-navigation";
 import { tracePageHands, tracePage } from "./trace-page";
@@ -2848,24 +2849,34 @@ export function createPlaywrightApplyPageMechanics(
       }
     },
     clickElement: async (ref): Promise<ApplyWriteResult> => {
-      if (/^s\d+$/u.test(ref)) return clickClosedShadowControl(page, ref);
-      const locator =
-        actionLocator(page, ref) ??
-        linkLocator(page, ref) ??
-        clickableLocator(page, ref) ??
-        controlLocator(page, ref);
-      if (!locator) {
-        return { ok: false, error: `There is nothing called ${ref} here.` };
-      }
+      const press = watchPagePress(page);
+      let result: ApplyWriteResult;
       try {
-        await clickAndSettle(page, locator);
-        return { ok: true, observedValue: "clicked" };
+        if (/^s\d+$/u.test(ref)) {
+          result = await clickClosedShadowControl(page, ref);
+        } else {
+          const locator =
+            actionLocator(page, ref) ??
+            linkLocator(page, ref) ??
+            clickableLocator(page, ref) ??
+            controlLocator(page, ref);
+          if (!locator)
+            result = {
+              ok: false,
+              error: `There is nothing called ${ref} here.`,
+            };
+          else {
+            await clickAndSettle(page, locator);
+            result = { ok: true, observedValue: "clicked" };
+          }
+        }
       } catch (error) {
-        return {
+        result = {
           ok: false,
           error: describeWriteFailure(error, "That would not respond."),
         };
       }
+      return { ...result, clickFacts: press.finish() };
     },
     scroll: async (direction): Promise<ApplyWriteResult> => {
       try {

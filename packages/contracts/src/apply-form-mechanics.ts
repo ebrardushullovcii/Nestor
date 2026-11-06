@@ -1,4 +1,5 @@
 import type { BrowserPasswordsList } from "./browser-passwords";
+import type { SubmissionActionRequest } from "./application-authority";
 /**
  * The raw shape of an application form, before any product meaning.
  *
@@ -302,7 +303,15 @@ export interface ApplicationFormActionHandoff {
   formMethod: "POST";
 }
 
-export type ApplyWriteResult =
+/** Descriptive facts from an ordinary press; these never imply a send. */
+export interface ApplyClickFacts {
+  pageBefore: { origin: string | null; safePath: string | null };
+  pageAfter: { origin: string | null; safePath: string | null };
+  urlChanged: boolean;
+  requestsAfterClick: SubmissionActionRequest[];
+}
+
+export type ApplyWriteResult = (
   | { ok: true; observedValue: string }
   | {
       ok: false;
@@ -310,7 +319,8 @@ export type ApplyWriteResult =
       /** `binding_changed`: refused before anything was pressed. */
       reason?: "option_not_offered" | "binding_changed";
       offeredOptions?: string[];
-    };
+    }
+) & { clickFacts?: ApplyClickFacts };
 
 /** Where following a link left the browser. */
 export type ApplyNavigationResult =

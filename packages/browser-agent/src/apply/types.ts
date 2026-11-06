@@ -653,7 +653,6 @@ export interface ApplyAgentConfig extends BrowserPermissionPolicy {
     actionRef: string;
     actionLabel: string;
     callId?: string;
-    possibleSend?: boolean;
   }) => Promise<{
     sendCallId?: string;
     outcome: "submitted" | "outcome_uncertain" | "not_submitted" | null;

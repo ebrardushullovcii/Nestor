@@ -842,9 +842,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     };
     let sentDuringPreparation: SubmissionOutcomeRecord | null = null;
     const preparationSends = new Map<string, SubmissionOutcomeRecord>();
-    const retainSend = (receipt: SubmissionOutcomeRecord, notSent = false) => {
-      if (notSent) preparationSends.delete(receipt.idempotencyKey);
-      else preparationSends.set(receipt.idempotencyKey, receipt);
+    const retainSend = (receipt: SubmissionOutcomeRecord) => {
+      preparationSends.set(receipt.idempotencyKey, receipt);
       sentDuringPreparation =
         [...preparationSends.values()].find(
           (item) => item.outcome === "submitted",
@@ -1030,10 +1029,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               ...(receipt ? { sendCallId: receipt.idempotencyKey } : {}),
               outcome: receipt?.outcome ?? null,
               content: receipt
-                ? `Send ledger: sendCallId=${receipt.idempotencyKey}, ${receipt.attemptedAt}, ${receipt.outcome}. Browser action: ${receipt.browserAction?.reason ?? "unknown"}. ${receipt.browserAction?.detail ?? ""} Requests after the click: ${JSON.stringify(receipt.browserAction?.requestsAfterClick ?? [])}. Inspect the current page, then call record_send_outcome with that sendCallId and your observed outcome. ${receipt.outcome === "outcome_uncertain" ? "This send call was not replayed. Check the site's applied list or confirmation before deciding whether to send again." : receipt.outcome === "submitted" ? "The employer confirmed receipt." : "The site did not confirm a send. Inspect the page and decide the next action."}` +
-                  (decision.possibleSend
-                    ? " This ordinary click was recorded as a possible send. If it did not send an application, record not_sent, or settle ordinary clicks together with finish.sendOutcome not_sent and page evidence."
-                    : "")
+                ? `Send ledger: sendCallId=${receipt.idempotencyKey}, ${receipt.attemptedAt}, ${receipt.outcome}. Browser action: ${receipt.browserAction?.reason ?? "unknown"}. ${receipt.browserAction?.detail ?? ""} Requests after the click: ${JSON.stringify(receipt.browserAction?.requestsAfterClick ?? [])}. Inspect the current page, then call record_send_outcome with that sendCallId and your observed outcome. ${receipt.outcome === "outcome_uncertain" ? "This send call was not replayed. Check the site's applied list or confirmation before deciding whether to send again." : receipt.outcome === "submitted" ? "The employer confirmed receipt." : "The site did not confirm a send. Inspect the page and decide the next action."}`
                 : "detail" in sent
                   ? sent.detail
                   : "The send did not execute; observe again.",
@@ -1055,12 +1051,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 )
               : null;
             if (!ledger) {
-              if (decision.outcome === "not_sent")
-                return {
-                  recorded: true,
-                  content:
-                    "The model reports no send; no prior send intent exists.",
-                };
               const recorded = await recordReportedSend({
                 repository: deps.authorityRepository,
                 lineage: {
@@ -1112,8 +1102,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               outcome:
                 decision.outcome === "confirmed"
                   ? "submitted"
-                  : decision.outcome === "failed" ||
-                      decision.outcome === "not_sent"
+                  : decision.outcome === "failed"
                     ? "not_submitted"
                     : "outcome_uncertain",
               verifiedAt: decision.outcome === "uncertain" ? null : at,
@@ -1135,8 +1124,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 blockReason:
                   decision.outcome === "confirmed"
                     ? "submission_confirmed"
-                    : decision.outcome === "failed" ||
-                        decision.outcome === "not_sent"
+                    : decision.outcome === "failed"
                       ? "policy_decision"
                       : "outcome_uncertain",
               },
@@ -1159,7 +1147,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 recorded: false,
                 content: `The ledger update returned ${recorded.status}; read its current state before deciding again.`,
               };
-            retainSend(receipt, decision.outcome === "not_sent");
+            retainSend(receipt);
             return {
               recorded: true,
               content: `Recorded ${decision.outcome}: ${decision.evidence}. This call ID remains consumed and will never be replayed.`,

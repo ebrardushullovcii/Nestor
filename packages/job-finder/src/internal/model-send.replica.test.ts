@@ -19,6 +19,7 @@ import {
   runApplicationSubmissionRuntime,
   type ApplicationSubmissionRuntimeInput,
 } from "./application-submission-runtime";
+import { recordReportedSend } from "./record-reported-send";
 
 const profile = CandidateProfileSchema.parse({
   id: "synthetic",
@@ -81,7 +82,7 @@ test.each([
   { trace: false, tool: "click", shape: "slotted" },
   { trace: false, tool: "fill_fields", shape: "slotted" },
 ])(
-  "$tool on a $shape control is accepted once and recorded before/after (trace $trace)",
+  "$tool on a $shape control is accepted once and its model-reported send is recorded (trace $trace)",
   async ({ trace, tool, shape }) => {
     vi.stubEnv(
       "NESTOR_RUN_TRACE_DIR",
@@ -156,9 +157,21 @@ test.each([
         )
           accepted++;
       });
+      await page.evaluate(() => {
+        const details = document.createElement("button");
+        details.type = "button";
+        details.textContent = "Show details";
+        details.onclick = () => {
+          document.body.dataset.detailsOpened = "true";
+        };
+        document.body.prepend(details);
+      });
       const mechanics = createPlaywrightApplyPageMechanics(page);
       const hands = createApplyPageHands(mechanics);
       const observation = await hands.observe();
+      const details = observation.actions.find(
+        (action) => action.label === "Show details",
+      )!;
       const action = [...observation.actions, ...observation.clickables].find(
         (action) =>
           action.label === "Submit" ||
@@ -168,12 +181,20 @@ test.each([
       if (shape !== "native" && shape !== "frame")
         expect(action.label).toBe("Submit");
       let input: ApplicationSubmissionRuntimeInput | null = null;
+      let reportInput: Parameters<typeof recordReportedSend>[0] | null = null;
       const submit = vi.fn(
         async (decision: {
           actionRef: string;
           actionLabel: string;
           callId?: string;
         }) => {
+          expect(
+            await page.locator("body").getAttribute("data-details-opened"),
+          ).toBe("true");
+          expect(await repository.listSubmissionArmedMarkers()).toHaveLength(0);
+          expect(await repository.listSubmissionOutcomeRecords()).toHaveLength(
+            0,
+          );
           input = {
             repository,
             source: "target_site",
@@ -227,6 +248,37 @@ test.each([
           hands,
           submitApplication: submit,
           recordSendOutcome: async (decision) => {
+            if (tool !== "submit_application") {
+              expect(accepted).toBe(1);
+              expect(
+                await repository.listSubmissionArmedMarkers(),
+              ).toHaveLength(0);
+              expect(
+                await repository.listSubmissionOutcomeRecords(),
+              ).toHaveLength(0);
+              reportInput = {
+                repository,
+                lineage: {
+                  runId: "run",
+                  jobId: "job",
+                  resultId: "result",
+                  applicationRecordId: "application",
+                  campaignId: null,
+                },
+                envelope: null,
+                mode: "autonomous_submit",
+                resumeBytes: resume,
+                decision: { ...decision, pageUrl: page.url() },
+                now: new Date().toISOString(),
+              };
+              const recorded = await recordReportedSend(reportInput);
+              expect(recorded.status).toBe("submitted");
+              return {
+                recorded: true,
+                content:
+                  "Recorded model report without a prior intent; no browser action issued.",
+              };
+            }
             const key = await repository.getSubmissionIdempotencyRecord(
               decision.sendCallId,
             );
@@ -292,36 +344,48 @@ test.each([
           },
         },
         {
-          chatWithTools: () => {
+          chatWithTools: (request) => {
+            if (turn === 1 && tool !== "submit_application") {
+              const returned = JSON.stringify(request);
+              expect(returned).toContain("requestsAfterClick");
+              expect(returned).toContain("POST");
+              expect(returned).toContain("pageAfter");
+            }
+            turn++;
+            const sendTurn = turn - (tool === "submit_application" ? 1 : 0);
             const decision =
-              ++turn === 1
-                ? {
-                    name: tool,
-                    args:
-                      tool === "fill_fields"
-                        ? { fields: [{ tool: "click", ref: action.ref }] }
-                        : { ref: action.ref },
-                  }
-                : turn === 2
+              sendTurn === 0
+                ? { name: "click", args: { ref: details.ref } }
+                : sendTurn === 1
                   ? {
-                      name: "record_send_outcome",
-                      args: {
-                        sendCallId:
-                          tool === "fill_fields"
-                            ? "provider-send-1:0"
-                            : "provider-send-1",
-                        outcome: "confirmed",
-                        evidence: "Your application has been received",
-                      },
+                      name: tool,
+                      args:
+                        tool === "fill_fields"
+                          ? { fields: [{ tool: "click", ref: action.ref }] }
+                          : { ref: action.ref },
                     }
-                  : {
-                      name: "finish",
-                      args: { reason: "The replica received the application." },
-                    };
+                  : sendTurn === 2
+                    ? {
+                        name: "record_send_outcome",
+                        args: {
+                          sendCallId:
+                            tool === "fill_fields"
+                              ? "provider-send-1:0"
+                              : "provider-send-1",
+                          outcome: "confirmed",
+                          evidence: "Your application has been received",
+                        },
+                      }
+                    : {
+                        name: "finish",
+                        args: {
+                          reason: "The replica received the application.",
+                        },
+                      };
             return Promise.resolve({
               toolCalls: [
                 {
-                  id: turn === 1 ? "provider-send-1" : `provider-${turn}`,
+                  id: sendTurn === 1 ? "provider-send-1" : `provider-${turn}`,
                   type: "function" as const,
                   function: {
                     name: decision.name,
@@ -334,29 +398,51 @@ test.each([
         },
       );
       expect(result.outcome).toBe("submitted");
-      expect(submit).toHaveBeenCalledTimes(1);
+      expect(submit).toHaveBeenCalledTimes(
+        tool === "submit_application" ? 1 : 0,
+      );
       expect(accepted).toBe(1);
-      expect(await repository.listSubmissionOutcomeRecords()).toEqual([
-        expect.objectContaining({ outcome: "outcome_uncertain" }),
-        expect.objectContaining({ outcome: "submitted" }),
-      ]);
+      expect(await repository.listSubmissionArmedMarkers()).toHaveLength(1);
+      expect(await repository.listSubmissionOutcomeRecords()).toEqual(
+        tool === "submit_application"
+          ? [
+              expect.objectContaining({ outcome: "outcome_uncertain" }),
+              expect.objectContaining({ outcome: "submitted" }),
+            ]
+          : [expect.objectContaining({ outcome: "submitted" })],
+      );
+      if (tool !== "submit_application")
+        expect(
+          (await repository.listSubmissionOutcomeRecords())[0]?.browserAction,
+        ).toMatchObject({
+          reason: "model_reported_send_without_prior_intent",
+          actionIssued: false,
+        });
       expect((await hands.observe()).bodyTextExcerpt).toContain(
         "Your application has been received",
       );
       // Reconnect/retry with the same call uses the recorded outcome even after
       // replacing the browser adapter with one that cannot observe or click.
-      const replay = {
-        ...input!,
-        browserRuntime: {
-          observeApplicationForm: () =>
-            Promise.reject(Error("No replay observation")),
-          executeExactlyOneFinalAction: () =>
-            Promise.reject(Error("No replay click")),
-        },
-      };
-      expect((await runApplicationSubmissionRuntime(replay)).status).toBe(
-        "submitted",
-      );
+      if (tool === "submit_application") {
+        const replay = {
+          ...input!,
+          browserRuntime: {
+            observeApplicationForm: () =>
+              Promise.reject(Error("No replay observation")),
+            executeExactlyOneFinalAction: () =>
+              Promise.reject(Error("No replay click")),
+          },
+        };
+        expect((await runApplicationSubmissionRuntime(replay)).status).toBe(
+          "submitted",
+        );
+      } else {
+        expect((await recordReportedSend(reportInput!)).status).toBe(
+          "submitted",
+        );
+        expect(await repository.listSubmissionArmedMarkers()).toHaveLength(1);
+        expect(await repository.listSubmissionOutcomeRecords()).toHaveLength(1);
+      }
       expect(accepted).toBe(1);
     } finally {
       await context.close();
@@ -371,8 +457,19 @@ test.each(["prepare_only", "confirm_before_submit"] as const)(
   async (mode) => {
     const context = await browser.newContext();
     const page = await context.newPage();
+    const store = openJobStore(":memory:");
+    const repository = createSendGuards(store);
     try {
       await page.goto(`${base}/employer-a/apply/1`);
+      await page.evaluate(() => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Show details";
+        button.onclick = () => {
+          document.body.dataset.detailsOpened = "true";
+        };
+        document.body.prepend(button);
+      });
       let sends = 0;
       page.on("request", (request) => {
         if (request.method() === "POST") sends++;
@@ -382,13 +479,21 @@ test.each(["prepare_only", "confirm_before_submit"] as const)(
       );
       let turn = 0;
       const submit = vi.fn(() => Promise.reject(Error("Fill must not send")));
-      const nameControl = (await hands.observe()).controls.find(
+      const report = vi.fn(() =>
+        Promise.reject(Error("Fill must not report a send")),
+      );
+      const observed = await hands.observe();
+      const details = observed.actions.find(
+        (action) => action.label === "Show details",
+      )!;
+      const nameControl = observed.controls.find(
         (control) => control.kind === "text" && /name/iu.test(control.label),
       )!;
-      await runApplyAgent(
+      const result = await runApplyAgent(
         {
           hands,
           submitApplication: submit,
+          recordSendOutcome: report,
           authority: {
             mode,
             submitAuthorized: false,
@@ -429,12 +534,14 @@ test.each(["prepare_only", "confirm_before_submit"] as const)(
                       turn === 1
                         ? {
                             fields: [
+                              { tool: "click", ref: details.ref },
                               {
                                 tool: "type",
                                 ref: nameControl.ref,
                                 text: "Alex Synthetic",
                               },
                             ],
+                            finishWhenReady: true,
                           }
                         : {
                             reason:
@@ -449,12 +556,22 @@ test.each(["prepare_only", "confirm_before_submit"] as const)(
         },
       );
       expect(submit).not.toHaveBeenCalled();
+      expect(report).not.toHaveBeenCalled();
+      expect(result.outcome).toBe(
+        mode === "confirm_before_submit" ? "awaiting_your_review" : "prepared",
+      );
+      expect(
+        await page.locator("body").getAttribute("data-details-opened"),
+      ).toBe("true");
+      expect(await repository.listSubmissionArmedMarkers()).toHaveLength(0);
+      expect(await repository.listSubmissionOutcomeRecords()).toHaveLength(0);
       expect(sends).toBe(0);
       expect(await page.locator("[name=name]").inputValue()).toBe(
         "Alex Synthetic",
       );
     } finally {
       await context.close();
+      store.close();
     }
   },
   30_000,

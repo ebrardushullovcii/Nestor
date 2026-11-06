@@ -119,13 +119,11 @@ export async function runApplyAgent(
   let page: ApplyFormObservation | null = null;
   let sendOutcome: "submitted" | "failed" | "uncertain" | null = null;
   const sendDecisions = new Map<string, "submitted" | "failed" | "uncertain">();
-  const possibleSends = new Set<string>();
   const updateSendOutcome = (
     id: string,
-    outcome: "confirmed" | "failed" | "uncertain" | "not_sent",
+    outcome: "confirmed" | "failed" | "uncertain",
   ) => {
-    if (outcome === "not_sent") sendDecisions.delete(id);
-    else sendDecisions.set(id, outcome === "confirmed" ? "submitted" : outcome);
+    sendDecisions.set(id, outcome === "confirmed" ? "submitted" : outcome);
     sendOutcome = [...sendDecisions.values()].includes("submitted")
       ? "submitted"
       : ([...sendDecisions.values()].at(-1) ?? null);
@@ -360,23 +358,17 @@ export async function runApplyAgent(
     report: ApplyFinishSendOutcome,
     callId: string,
   ): Promise<string | null> => {
-    const ids =
-      report.outcome === "not_sent"
-        ? [...possibleSends]
-        : [[...sendDecisions.keys()].at(-1) ?? callId];
-    for (const sendCallId of ids) {
-      if (!config.recordSendOutcome)
-        return "The send ledger is unavailable in this run.";
-      const result = await config.recordSendOutcome({
-        ...report,
-        sendCallId,
-        pageUrl: page?.url ?? null,
-      });
-      if (!result.recorded) return result.content;
-      possibleSends.delete(sendCallId);
-      updateSendOutcome(sendCallId, report.outcome);
-      note(result.content);
-    }
+    const sendCallId = [...sendDecisions.keys()].at(-1) ?? callId;
+    if (!config.recordSendOutcome)
+      return "The send ledger is unavailable in this run.";
+    const result = await config.recordSendOutcome({
+      ...report,
+      sendCallId,
+      pageUrl: page?.url ?? null,
+    });
+    if (!result.recorded) return result.content;
+    updateSendOutcome(sendCallId, report.outcome);
+    note(result.content);
     return null;
   };
   const runProposal = async (
@@ -388,37 +380,6 @@ export async function runApplyAgent(
     if (proposal.tool === "finish" && proposal.sendOutcome) {
       const error = await reportFinishedSend(proposal.sendOutcome, callId);
       if (error) return { kind: "ok", status: "failed", content: error };
-    }
-    if (proposal.tool === "click" && config.submitApplication) {
-      const control = [
-        ...before.actions,
-        ...before.clickables,
-        ...before.links,
-        ...before.controls,
-      ].find((entry) => entry.ref === proposal.ref);
-      const receipt = await config.submitApplication({
-        actionRef: proposal.ref,
-        actionLabel: control?.label || proposal.ref,
-        callId,
-        possibleSend: true,
-      });
-      if (receipt.outcome) {
-        const sendCallId = receipt.sendCallId ?? callId;
-        possibleSends.add(sendCallId);
-        updateSendOutcome(sendCallId, "uncertain");
-      }
-      note(receipt.content);
-      await readPage();
-      if (
-        before.url !== page?.url ||
-        JSON.stringify(before.step) !== JSON.stringify(page?.step)
-      )
-        receipts.advance(before, now().toISOString());
-      return {
-        kind: "ok",
-        content: `${receipt.content}\n\n${page ? describeObservation(page) : "Page unavailable."}`,
-        progress: true,
-      };
     }
     if ("ref" in proposal && proposal.ref) receipts.wrote(before, proposal.ref);
     const outcome = await executeApplyProposal(proposal, before.signature, {
@@ -818,14 +779,14 @@ export async function runApplyAgent(
       function: {
         name: "record_send_outcome",
         description:
-          "Record the result of any press, including click. Decide from the current page and observed requests: confirmed, failed or uncertain for a send; not_sent when the press did not send an application. Quote the page evidence. This never sends or retries anything.",
+          "Record a send you observed, including one made by click or another tool without a prior intent. Use its send call ID, or the original tool call ID when no send intent exists. Choose confirmed, failed or uncertain and quote the page evidence. This never sends or retries anything.",
         parameters: {
           type: "object",
           properties: {
             sendCallId: { type: "string" },
             outcome: {
               type: "string",
-              enum: ["confirmed", "failed", "uncertain", "not_sent"],
+              enum: ["confirmed", "failed", "uncertain"],
             },
             evidence: { type: "string" },
           },
@@ -856,7 +817,6 @@ export async function runApplyAgent(
         pageUrl: page?.url ?? null,
       });
       if (result.recorded) {
-        possibleSends.delete(parsed.data.sendCallId);
         updateSendOutcome(parsed.data.sendCallId, parsed.data.outcome);
       }
       return {

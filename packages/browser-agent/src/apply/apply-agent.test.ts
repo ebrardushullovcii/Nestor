@@ -324,7 +324,7 @@ test("an empty required eligibility field and an optional portfolio never create
   expect(result.outcome).toBe("prepared");
   expect(write).not.toHaveBeenCalled();
 });
-test("only the model's named finish items reach Needs you with native options and binding", async () => {
+test("an ordinary click leaves the model's named Needs you items intact", async () => {
   const source = page({
     controls: [
       { ...nameControl(), value: "", label: "Passport country" },
@@ -332,8 +332,13 @@ test("only the model's named finish items reach Needs you with native options an
     ],
   });
   const result = await runApplyAgent(
-    config(source),
+    config(source, {
+      submitApplication: () =>
+        Promise.reject(Error("An ordinary click must not enter the send path")),
+      recordSendOutcome: () => Promise.reject(Error("No send was reported")),
+    }),
     model([
+      { name: "click", args: { ref: "a0" } },
       {
         name: "finish",
         args: {
@@ -812,6 +817,7 @@ test.each(["confirmed", "failed", "uncertain"] as const)(
     const result = await runApplyAgent(
       input,
       model([
+        { name: "click", id: "unledgered-press", args: { ref: "a0" } },
         {
           name: "finish",
           id: "reported-finish",
@@ -836,54 +842,73 @@ test.each(["confirmed", "failed", "uncertain"] as const)(
   },
 );
 
-test("ordinary clicks retain uncertainty until the model settles them as not sent", async () => {
-  const input = config(page());
-  input.submitApplication = vi.fn(() =>
-    Promise.resolve({
-      sendCallId: "model_send_application_press-one",
-      outcome: "outcome_uncertain" as const,
-      content: "sendCallId=press-one",
-    }),
-  );
-  input.recordSendOutcome = vi.fn(() =>
-    Promise.resolve({
-      recorded: true,
-      content: "This press opened another form step; no application was sent.",
-    }),
-  );
-  const result = await runApplyAgent(
-    input,
-    model([
-      { name: "click", id: "press-one", args: { ref: "a0" } },
-      {
-        name: "finish",
-        args: {
-          reason: "Filled without sending",
-          sendOutcome: {
-            outcome: "not_sent",
-            evidence: "Form still open; no application was sent.",
+test.each([
+  "prepare_only",
+  "confirm_before_submit",
+  "autonomous_submit",
+] as const)(
+  "ordinary clicks execute directly without send records in %s",
+  async (mode) => {
+    const input = config(page());
+    input.authority.mode = mode;
+    input.submitApplication = vi.fn(() =>
+      Promise.reject(Error("A click must not enter the send path")),
+    );
+    input.recordSendOutcome = vi.fn(() =>
+      Promise.reject(Error("An ordinary click must not record a send")),
+    );
+    input.hands.clickElement = vi.fn(() =>
+      Promise.resolve({
+        ok: true as const,
+        observedValue: "clicked",
+        clickFacts: {
+          pageBefore: {
+            origin: "https://apply.example.test",
+            safePath: "/form",
           },
+          pageAfter: {
+            origin: "https://apply.example.test",
+            safePath: "/next",
+          },
+          urlChanged: true,
+          requestsAfterClick: [
+            {
+              method: "GET",
+              host: "apply.example.test",
+              path: "/next",
+              status: 200,
+              failure: null,
+              finalSubmit: false,
+            },
+          ],
         },
-      },
-    ]),
-  );
-  expect(result.outcome).toBe("prepared");
-  expect(input.recordSendOutcome).toHaveBeenCalledWith(
-    expect.objectContaining({
-      sendCallId: "model_send_application_press-one",
-      outcome: "not_sent",
-    }),
-  );
-});
-test("finishWhenReady never invents a not-sent report for a batched press", async () => {
+      }),
+    );
+    const client = model([
+      { name: "click", id: "press-one", args: { ref: "a0" } },
+      done,
+    ]);
+    const result = await runApplyAgent(input, client);
+    expect(result.outcome).toBe(
+      mode === "confirm_before_submit" ? "awaiting_your_review" : "prepared",
+    );
+    expect(input.hands.clickElement).toHaveBeenCalledExactlyOnceWith("a0");
+    expect(input.submitApplication).not.toHaveBeenCalled();
+    expect(input.recordSendOutcome).not.toHaveBeenCalled();
+    const returned = JSON.stringify(
+      vi.mocked(client.chatWithTools).mock.calls[1]?.[0],
+    );
+    expect(returned).toContain("Press facts");
+    expect(returned).toContain("urlChanged");
+    expect(returned).toContain("requestsAfterClick");
+  },
+);
+test("finishWhenReady after batched clicks stays prepared without send records", async () => {
   const input = config(page());
   input.submitApplication = vi.fn(() =>
-    Promise.resolve({
-      sendCallId: "possible-send",
-      outcome: "outcome_uncertain" as const,
-      content: "The click was issued; inspect its page and requests.",
-    }),
+    Promise.reject(Error("A batched click must not enter the send path")),
   );
+  input.hands.clickElement = vi.fn(input.hands.clickElement);
   input.recordSendOutcome = vi.fn(() =>
     Promise.resolve({ recorded: true, content: "Recorded" }),
   );
@@ -897,7 +922,9 @@ test("finishWhenReady never invents a not-sent report for a batched press", asyn
       },
     ]),
   );
-  expect(result.outcome).toBe("uncertain");
+  expect(result.outcome).toBe("prepared");
+  expect(input.hands.clickElement).toHaveBeenCalledExactlyOnceWith("a0");
+  expect(input.submitApplication).not.toHaveBeenCalled();
   expect(input.recordSendOutcome).not.toHaveBeenCalled();
 });
 

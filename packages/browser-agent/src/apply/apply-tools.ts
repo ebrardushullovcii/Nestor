@@ -305,11 +305,11 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
             sendOutcome: {
               type: "object",
               description:
-                "Report any send, including one made by click or another tool. confirmed, failed or uncertain records your evidence even if no send intent exists. not_sent means none of your ordinary presses sent an application; it settles their possible-send ledger entries. Never describe a send only in reason.",
+                "Report any send, including one made by click or another tool. confirmed, failed or uncertain records your evidence even if no send intent exists. Never describe a send only in reason.",
               properties: {
                 outcome: {
                   type: "string",
-                  enum: ["confirmed", "failed", "uncertain", "not_sent"],
+                  enum: ["confirmed", "failed", "uncertain"],
                 },
                 evidence: { type: "string" },
               },
