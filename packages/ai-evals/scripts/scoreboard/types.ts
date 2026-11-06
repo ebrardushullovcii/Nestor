@@ -65,6 +65,8 @@ export interface Question {
   text: string;
   answerKey: string;
   country: string;
+  /** Linked job locations; older saved runs may lack this metadata. */
+  locations?: string[];
   instance: string;
   firstSeenAt: string;
   profileAnswers: boolean;

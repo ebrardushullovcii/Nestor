@@ -120,14 +120,38 @@ export function genuineQuestion(
   );
 }
 
+const normalize = (value: string) =>
+  value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
 export function markDuplicates(questions: Question[]) {
   const seen = new Set<string>();
   return questions.map((q) => {
-    const normalized = q.text
-      .toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, " ")
-      .trim();
-    const key = `${q.instance}|${q.kind}|${q.country.toLowerCase()}|${normalized}`;
+    let scope = normalize(q.country);
+    // Eligibility means the hiring country. Different unresolved locations
+    // must not be merged just because both pages say "this country".
+    if (
+      !scope &&
+      q.kind === "question" &&
+      /authori[sz]|right.to.work|legally.*work|eligible.*work|sponsor|visa|relocat/i.test(
+        q.text,
+      ) &&
+      q.locations
+    ) {
+      const locations = [
+        ...new Set(q.locations.map(normalize).filter(Boolean)),
+      ].sort();
+      scope = locations.length
+        ? `location:${JSON.stringify(locations)}`
+        : `application:${q.applicationIds
+            .slice()
+            .sort((a, b) => a - b)
+            .join(",")}`;
+    }
+    const key = `${q.instance}|${q.kind}|${scope}|${normalize(q.text)}`;
     const duplicate = seen.has(key);
     seen.add(key);
     return { ...q, duplicate };
@@ -218,14 +242,14 @@ export function markdown(run: Run) {
     "",
     "## Every Needs you question",
     "",
-    "| Scenario instance / ID | Kind | Question | Profile answers it | Repeated |",
-    "| --- | --- | --- | --- | --- |",
+    "| Scenario instance / ID | Kind | Question | Country / job locations | Profile answers it | Repeated |",
+    "| --- | --- | --- | --- | --- | --- |",
   );
   for (const q of questions)
     lines.push(
-      `| ${cell(q.instance)} / ${q.id} | ${cell(q.kind)} | ${cell(q.text)} | ${cell(q.profileFact ?? "No known answer")} | ${q.duplicate ? "Yes" : "No"} |`,
+      `| ${cell(q.instance)} / ${q.id} | ${cell(q.kind)} | ${cell(q.text)} | ${cell(q.country || q.locations?.join("; ") || "Unknown")} | ${cell(q.profileFact ?? "No known answer")} | ${q.duplicate ? "Yes" : "No"} |`,
     );
-  if (!questions.length) lines.push("| — | — | None observed | — | — |");
+  if (!questions.length) lines.push("| — | — | None observed | — | — | — |");
   if (run.cleanup)
     lines.push(
       "",

@@ -91,8 +91,12 @@ export class App {
   capture() {
     const needs = this.read<Need>("SELECT * FROM needs_you ORDER BY id");
     for (const need of needs) {
-      const links = this.read<{ application_id: number; job_id: number }>(
-        "SELECT n.application_id,a.job_id FROM application_needs_you n JOIN applications a ON a.id=n.application_id WHERE n.task_id=?",
+      const links = this.read<{
+        application_id: number;
+        job_id: number;
+        location: string;
+      }>(
+        "SELECT n.application_id,a.job_id,j.location FROM application_needs_you n JOIN applications a ON a.id=n.application_id JOIN jobs j ON j.id=a.job_id WHERE n.task_id=?",
         need.id,
       );
       if (
@@ -107,7 +111,13 @@ export class App {
       )
         continue;
       const key = `${need.id}:${need.prompt}`;
-      if (this.observed.has(key)) continue;
+      const locations = [...new Set(links.map((link) => link.location))];
+      const previous = this.observed.get(key);
+      if (previous) {
+        previous.applicationIds = links.map((link) => link.application_id);
+        previous.locations = locations;
+        continue;
+      }
       const fact =
         need.kind === "question"
           ? profileAnswer(need.prompt, need.answer_key, need.country)
@@ -118,6 +128,7 @@ export class App {
         text: need.prompt,
         answerKey: need.answer_key,
         country: need.country,
+        locations,
         instance: path.basename(path.dirname(this.ctx.evidenceDir)),
         firstSeenAt: new Date().toISOString(),
         profileAnswers: fact !== null,

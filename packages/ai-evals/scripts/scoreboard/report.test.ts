@@ -207,3 +207,69 @@ test("standard allows genuine decisions once, but rejects known facts, step hand
   ])
     assert.equal(genuineQuestion(q), false);
 });
+
+test("eligibility repeats share a resolved country or the same unresolved location, never different locations", () => {
+  const q: Question = {
+    id: 1,
+    kind: "question",
+    text: "Are you legally authorized to work in this country?",
+    answerKey: "question:first",
+    country: "",
+    locations: ["Remote, Worldwide"],
+    instance: "batch",
+    firstSeenAt: "2026-11-06T00:00:00Z",
+    profileAnswers: false,
+    profileFact: null,
+    duplicate: false,
+    applicationIds: [3],
+  };
+  assert.deepEqual(
+    markDuplicates([
+      q,
+      {
+        ...q,
+        id: 2,
+        answerKey: "question:second",
+        locations: ["Remote, Europe"],
+        applicationIds: [4],
+      },
+      { ...q, id: 3, locations: [" remote,  WORLDWIDE "], applicationIds: [5] },
+    ]).map((q) => q.duplicate),
+    [false, false, true],
+  );
+  assert.deepEqual(
+    markDuplicates([
+      { ...q, country: "Germany", locations: ["Berlin, Germany"] },
+      {
+        ...q,
+        id: 2,
+        country: "Germany",
+        locations: ["Hamburg, Germany"],
+        applicationIds: [4],
+      },
+    ]).map((q) => q.duplicate),
+    [false, true],
+  );
+  assert.deepEqual(
+    markDuplicates([
+      { ...q, locations: [] },
+      { ...q, id: 2, locations: [], applicationIds: [4] },
+      { ...q, id: 3, locations: [] },
+    ]).map((q) => q.duplicate),
+    [false, false, true],
+  );
+  assert.deepEqual(
+    markDuplicates([
+      { ...q, kind: "sign_in", text: "Sign in first" },
+      {
+        ...q,
+        id: 2,
+        kind: "sign_in",
+        text: "Sign in first",
+        locations: ["Remote, Europe"],
+      },
+    ]).map((q) => q.duplicate),
+    [false, true],
+    "ordinary sign-in repeats do not depend on the job location",
+  );
+});
