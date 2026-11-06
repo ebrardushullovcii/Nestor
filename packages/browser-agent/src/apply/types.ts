@@ -560,7 +560,7 @@ export interface ApplyAgentResult {
    * The button that sends this application, once the form is complete and the
    * checks passed. Null whenever the application is not ready to go.
    */
-  readyToSend: { actionRef: string; actionLabel: string } | null;
+  readyToSend: { actionRef: string; actionLabel: string; callId?: string } | null;
 }
 
 /**

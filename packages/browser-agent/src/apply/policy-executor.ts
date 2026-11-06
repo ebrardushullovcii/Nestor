@@ -1628,43 +1628,6 @@ async function executeApplyProposalObserved(
     };
   }
 
-  // Validate attachment selection before leaving a form step. An earlier
-  // attempt may still hold a different resume on this retained page.
-  if (proposal.tool === "click" || proposal.tool === "submit_application") {
-    const action =
-      "ref" in proposal
-        ? observation.actions.find(
-            (candidate) => candidate.ref === proposal.ref,
-          )
-        : null;
-    if (
-      proposal.tool !== "click" ||
-      action?.kind === "advance" ||
-      action?.kind === "final"
-    ) {
-      const resume = config.sources.documents.find(
-        (document) => document.kind === "resume",
-      );
-      const staleUpload = observation.controls.find(
-        (control) =>
-          control.kind === "file" &&
-          control.questionKind === "resume" &&
-          control.answered &&
-          resume &&
-          resumeFormFileNames(resume.fileName).every((name) =>
-            fileFieldHoldsOtherFile(control.value, name),
-          ),
-      );
-      if (staleUpload && resume) {
-        return {
-          kind: "refused",
-          reason: `"${questionPrompt(staleUpload)}" still contains ${staleUpload.value.split(/[\\/]/u).at(-1)}. The selected resume is ${resume.fileName}.`,
-          observation,
-        };
-      }
-    }
-  }
-
   switch (proposal.tool) {
     case "click": {
       const submits = observation.actions.find(
@@ -1773,14 +1736,8 @@ async function executeApplyProposalObserved(
                 candidate.ref === proposal.ref && candidate.kind === "final",
             );
       if (finalAction) {
-        const preflight = runSubmitPreflight({
-          observation,
-          proposedActionRef: proposal.ref,
-          authority: config.authority,
-        });
-        if (!preflight.ok) {
-          return { kind: "refused", reason: preflight.reason, observation };
-        }
+        if (config.authority.mode === "prepare_only")
+          return { kind: "refused", reason: "This run is Fill in for me: leave the send to the person.", observation };
         // Models sometimes choose the generic click tool for the visible send
         // button. Treat that as the same intent as submit_application so the
         // irreversible action still belongs to the separately authorized
@@ -2799,17 +2756,13 @@ async function executeApplyProposalObserved(
     }
 
     case "submit_application": {
-      const preflight = runSubmitPreflight({
-        observation,
-        proposedActionRef: proposal.ref,
-        authority: config.authority,
-      });
-      if (!preflight.ok) {
-        return { kind: "refused", reason: preflight.reason, observation };
-      }
+      if (config.authority.mode === "prepare_only")
+        return { kind: "refused", reason: "This run is Fill in for me: leave the send to the person.", observation };
       const action = observation.actions.find(
         (candidate) => candidate.ref === proposal.ref,
       );
+      if (!action)
+        return { kind: "refused", reason: "That control is stale or missing; observe again.", observation };
       // Nothing is pressed here. Sending an application is one irreversible
       // act that has to be recorded as it happens, so it belongs to the
       // submission path rather than to this loop.

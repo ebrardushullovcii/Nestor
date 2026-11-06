@@ -123,6 +123,8 @@ export interface ApplySubmissionFacts {
   now: string;
   /** The person pressed Send on an "Ask before sending" application. */
   confirmedByPerson?: boolean;
+  finalAction?: { actionRef: string; actionLabel: string };
+  callId?: string;
   signal?: AbortSignal;
 }
 
@@ -168,6 +170,7 @@ export async function sendPreparedApplication(
     authorityEnvelopeId: facts.envelope.id,
     authorityRevision: facts.envelope.revision,
     preflightId: facts.preflightId,
+    ...(facts.finalAction ? { finalAction: facts.finalAction } : {}),
     idempotencyKey: facts.idempotencyKey,
     ...(personConfirmation ? { personConfirmation } : {}),
     lineage: facts.lineage,
@@ -474,6 +477,8 @@ export async function submitPreparedApplication(input: {
   loadResumeBytes: () => Promise<Uint8Array>;
   now: string;
   confirmedByPerson?: boolean;
+  finalAction?: { actionRef: string; actionLabel: string };
+  callId?: string;
   signal?: AbortSignal;
   runSubmission: (
     runtimeInput: ApplicationSubmissionRuntimeInput,
@@ -511,6 +516,8 @@ export async function submitPreparedApplication(input: {
             }
           : {}),
       }),
+      ...(input.finalAction ? { finalAction: input.finalAction } : {}),
+      ...(input.callId ? { idempotencyKey: `model_send_${input.lineage.applicationRecordId}_${input.callId}`, preflightId: `intent_${input.lineage.applicationRecordId}_${input.callId}` } : {}),
       now: input.now,
       ...(input.confirmedByPerson ? { confirmedByPerson: true } : {}),
       ...(input.signal ? { signal: input.signal } : {}),

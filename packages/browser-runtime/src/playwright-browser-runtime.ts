@@ -1,4 +1,5 @@
 import { withNavigationLiveness } from "./browser-navigation";
+import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { withTraceScope } from "@nestor/core/run-trace";
 import {
   bindTracePage,
@@ -297,71 +298,6 @@ function assertRetainedApplicationPageOrigin(
     throw new Error(
       "The exact prepared application page left the allowed application origins. Prepare the application again before continuing.",
     );
-  }
-}
-
-function assertNoActiveServiceWorkerControlsApplicationOrigin(input: {
-  context: BrowserContext;
-  targetUrl: string;
-}): void {
-  if (typeof input.context.serviceWorkers !== "function") {
-    throw new ActiveServiceWorkerBlockError({
-      reason: "service_worker_inspection_unavailable",
-      targetUrl: input.targetUrl,
-      detail: `Active service workers could not be inspected on the managed browser context before opening ${input.targetUrl}. Reset the dedicated browser profile from Safeguards, then finish this application manually.`,
-    });
-  }
-
-  let activeWorkers;
-  try {
-    activeWorkers = input.context.serviceWorkers();
-  } catch (error) {
-    throw new ActiveServiceWorkerBlockError({
-      reason: "service_worker_inspection_unavailable",
-      targetUrl: input.targetUrl,
-      detail: `Active service workers could not be inspected on the managed browser context before opening ${input.targetUrl}: ${
-        error instanceof Error ? error.message : "unknown inspection error"
-      }. Reset the dedicated browser profile from Safeguards, then finish this application manually.`,
-    });
-  }
-
-  const targetOrigin = parseHttpOrigin(input.targetUrl);
-  if (!targetOrigin) {
-    throw new ActiveServiceWorkerBlockError({
-      reason: "service_worker_origin_unresolved",
-      targetUrl: input.targetUrl,
-      detail: `The application origin for ${input.targetUrl} could not be safely determined while active browser service workers exist. Reset the dedicated browser profile from Safeguards, then finish this application manually.`,
-    });
-  }
-
-  const controllingWorkerUrls: string[] = [];
-  const unresolvedWorkerUrls: string[] = [];
-  for (const worker of activeWorkers) {
-    const workerUrl = worker.url();
-    const workerOrigin = parseHttpOrigin(workerUrl);
-    if (!workerOrigin) {
-      unresolvedWorkerUrls.push(workerUrl);
-    } else if (workerOrigin === targetOrigin) {
-      controllingWorkerUrls.push(workerUrl);
-    }
-  }
-
-  if (controllingWorkerUrls.length > 0) {
-    throw new ActiveServiceWorkerBlockError({
-      reason: "active_service_worker_controlling_application_origin",
-      targetUrl: input.targetUrl,
-      detail: `An active service worker (${controllingWorkerUrls.join(", ")}) can control the application origin ${targetOrigin}. Close or reset the dedicated browser profile so the worker stops, then finish this application manually; automated preparation stays stopped.`,
-      serviceWorkerUrls: controllingWorkerUrls,
-    });
-  }
-
-  if (unresolvedWorkerUrls.length > 0) {
-    throw new ActiveServiceWorkerBlockError({
-      reason: "service_worker_origin_unresolved",
-      targetUrl: input.targetUrl,
-      detail: `An active service worker (${unresolvedWorkerUrls.join(", ")}) has an origin that cannot be safely determined relative to ${targetOrigin}. Reset the dedicated browser profile from Safeguards, then finish this application manually.`,
-      serviceWorkerUrls: unresolvedWorkerUrls,
-    });
   }
 }
 
@@ -3290,10 +3226,6 @@ export function createBrowserAgentRuntime(
             try {
               const context = await getContext();
               const pagesBeforeRun = new Set(context.pages());
-              assertNoActiveServiceWorkerControlsApplicationOrigin({
-                context,
-                targetUrl,
-              });
               const runSentinel = createApplicationRunServiceWorkerSentinel({
                 context,
                 targetUrl,
@@ -3477,6 +3409,7 @@ export function createBrowserAgentRuntime(
                             options?.signal,
                           ),
                         options?.signal,
+                        read => withBrowserReadLiveness(prepared.page, read, options?.signal),
                       );
                     if (input.prepareTaskLocalCredentials) {
                       await input.prepareTaskLocalCredentials({

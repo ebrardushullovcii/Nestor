@@ -820,23 +820,6 @@ export function createApplicationAuthorityRepositoryMethods(
 
       return structuredClone(
         store.mutate((state): SubmissionAttemptArmResult => {
-          const authority =
-            state.applicationAuthorityEnvelopes.find(
-              (value) => value.id === preflight.authorityEnvelopeId,
-            ) ?? null;
-          if (!authority) {
-            return armFailure("missing", "authority_missing", null);
-          }
-          if (!isActiveApplicationAuthorityEnvelope(authority, input.now)) {
-            return armFailure("blocked", "authority_inactive", null);
-          }
-          if (authority.mode !== input.mode) {
-            return armFailure("blocked", "authority_mode_mismatch", null);
-          }
-          if (authority.revision !== preflight.authorityRevision) {
-            return armFailure("stale", "authority_revision_mismatch", null);
-          }
-
           const persistedPreflightById =
             state.submissionPreflights.find(
               (value) => value.id === preflight.id,
@@ -853,14 +836,6 @@ export function createApplicationAuthorityRepositoryMethods(
             !matchesExactPreflight(preflight, persistedPreflightById)
           ) {
             return armFailure("blocked", "preflight_mismatch", null);
-          }
-
-          const currentPreflightValidation = validateCurrentAuthorityPreflight(
-            authority,
-            persistedPreflightById,
-          );
-          if (currentPreflightValidation !== null) {
-            return armFailure("blocked", currentPreflightValidation, null);
           }
 
           const idempotency =
@@ -901,75 +876,7 @@ export function createApplicationAuthorityRepositoryMethods(
               );
             }
 
-            if (input.mode === "autonomous_submit") {
-              if (
-                input.executionGrantId !== null ||
-                state.submissionExecutionGrants.some(
-                  (value) => value.preflightId === preflight.id,
-                )
-              ) {
-                return armFailure(
-                  "blocked",
-                  "unexpected_execution_grant",
-                  idempotency,
-                  existingMarker,
-                );
-              }
-              return {
-                status: "duplicate",
-                idempotency,
-                marker: existingMarker,
-                executionGrant: null,
-              };
-            }
-
-            if (input.executionGrantId === null) {
-              return armFailure(
-                "blocked",
-                "execution_grant_required",
-                idempotency,
-                existingMarker,
-              );
-            }
-            const duplicateGrant =
-              state.submissionExecutionGrants.find(
-                (value) => value.id === input.executionGrantId,
-              ) ?? null;
-            if (!duplicateGrant) {
-              return armFailure(
-                "missing",
-                "execution_grant_missing",
-                idempotency,
-                existingMarker,
-              );
-            }
-            if (
-              !matchesPreflightLineage(preflight, duplicateGrant) ||
-              duplicateGrant.preflightId !== preflight.id
-            ) {
-              return armFailure(
-                "blocked",
-                "execution_grant_mismatch",
-                idempotency,
-                existingMarker,
-                duplicateGrant,
-              );
-            }
-            if (duplicateGrant.status !== "consumed") {
-              return armFailure(
-                "blocked",
-                "execution_grant_not_active",
-                idempotency,
-                existingMarker,
-                duplicateGrant,
-              );
-            }
-            return {
-              status: "duplicate",
-              idempotency,
-              marker: existingMarker,
-              executionGrant: duplicateGrant,
-            };
+            return { status: "duplicate", idempotency, marker: existingMarker, executionGrant: null };
           }
 
           if (existingMarker) {
@@ -1006,80 +913,6 @@ export function createApplicationAuthorityRepositoryMethods(
             return armFailure("blocked", "marker_conflict", idempotency);
           }
 
-          let consumedGrant: SubmissionExecutionGrant | null = null;
-          if (input.mode === "autonomous_submit") {
-            if (
-              input.executionGrantId !== null ||
-              state.submissionExecutionGrants.some(
-                (value) => value.preflightId === preflight.id,
-              )
-            ) {
-              return armFailure(
-                "blocked",
-                "unexpected_execution_grant",
-                idempotency,
-              );
-            }
-          } else {
-            if (input.executionGrantId === null) {
-              return armFailure(
-                "blocked",
-                "execution_grant_required",
-                idempotency,
-              );
-            }
-            const grant =
-              state.submissionExecutionGrants.find(
-                (value) => value.id === input.executionGrantId,
-              ) ?? null;
-            if (!grant) {
-              return armFailure(
-                "missing",
-                "execution_grant_missing",
-                idempotency,
-              );
-            }
-            if (
-              grant.preflightId !== preflight.id ||
-              !matchesPreflightLineage(preflight, grant)
-            ) {
-              return armFailure(
-                "blocked",
-                "execution_grant_mismatch",
-                idempotency,
-                null,
-                grant,
-              );
-            }
-            if (grant.status !== "active") {
-              return armFailure(
-                "blocked",
-                Date.parse(grant.expiresAt) <= Date.parse(input.now)
-                  ? "execution_grant_expired"
-                  : "execution_grant_not_active",
-                idempotency,
-                null,
-                grant,
-              );
-            }
-            if (
-              !isActiveSubmissionExecutionGrant(grant, input.now, preflight)
-            ) {
-              return armFailure(
-                "blocked",
-                "execution_grant_expired",
-                idempotency,
-                null,
-                grant,
-              );
-            }
-            consumedGrant = SubmissionExecutionGrantSchema.parse({
-              ...grant,
-              status: "consumed",
-              consumedAt: marker.armedAt,
-            });
-          }
-
           const armedIdempotency = SubmissionIdempotencyRecordSchema.parse({
             ...idempotency,
             status: "armed",
@@ -1087,16 +920,13 @@ export function createApplicationAuthorityRepositoryMethods(
             updatedAt: marker.armedAt,
             armedAt: marker.armedAt,
           });
-          if (consumedGrant) {
-            replaceById(state.submissionExecutionGrants, consumedGrant);
-          }
           replaceById(state.submissionIdempotencyRecords, armedIdempotency);
           state.submissionArmedMarkers.push(marker);
           return {
             status: "armed",
             idempotency: armedIdempotency,
             marker,
-            executionGrant: consumedGrant,
+            executionGrant: null,
           };
         }),
       );

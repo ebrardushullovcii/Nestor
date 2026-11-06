@@ -1,5 +1,4 @@
 import type { SendGuards } from "@nestor/db/job-store";
-import { SubmissionExecutionGrantSchema } from "@nestor/contracts";
 import {
   SubmissionArmedMarkerSchema,
   SubmissionOutcomeRecordSchema,
@@ -16,13 +15,11 @@ import {
   type SubmissionPreflightRecord,
 } from "@nestor/contracts";
 
-import {
-  evaluateApplicationSubmissionPolicy,
-  type AuthorizedApplicationSubmission,
-  type BlockedApplicationSubmission,
-  type CurrentApplicationSubmissionPolicyFacts,
-  type SubmissionIdempotencyState,
-  type SubmissionPolicyBlockReason,
+import type {
+  AuthorizedApplicationSubmission,
+  BlockedApplicationSubmission,
+  CurrentApplicationSubmissionPolicyFacts,
+  SubmissionPolicyBlockReason,
 } from "./application-submission-policy";
 
 /**
@@ -182,26 +179,6 @@ export type SyntheticSubmissionOrchestrationResult =
   | SyntheticSubmissionUncertainResult
   | SyntheticSubmissionRecoveryNeededResult;
 
-interface DurableSubmissionState {
-  envelope: Awaited<
-    ReturnType<
-      SyntheticSubmissionAuthorityRepository["getApplicationAuthorityEnvelope"]
-    >
-  >;
-  preflight: Awaited<
-    ReturnType<
-      SyntheticSubmissionAuthorityRepository["getSubmissionPreflightRecord"]
-    >
-  >;
-  idempotency: Awaited<
-    ReturnType<
-      SyntheticSubmissionAuthorityRepository["getSubmissionIdempotencyRecord"]
-    >
-  >;
-  executionGrant: SubmissionExecutionGrant | null;
-  executionGrants: readonly SubmissionExecutionGrant[];
-}
-
 const submissionTransitionTails = new WeakMap<
   object,
   Map<string, Promise<void>>
@@ -256,145 +233,6 @@ function blockedResult(input: {
     preflight: input.preflight ?? null,
     idempotency: input.idempotency ?? null,
     executionGrant: input.executionGrant ?? null,
-  };
-}
-
-function samePreflight(
-  left: SubmissionPreflightRecord,
-  right: SubmissionPreflightRecord,
-): boolean {
-  return (
-    left.id === right.id &&
-    left.idempotencyKey === right.idempotencyKey &&
-    left.runId === right.runId &&
-    left.jobId === right.jobId &&
-    left.resultId === right.resultId &&
-    left.applicationRecordId === right.applicationRecordId &&
-    left.campaignId === right.campaignId &&
-    left.origin === right.origin &&
-    left.authorityEnvelopeId === right.authorityEnvelopeId &&
-    left.authorityRevision === right.authorityRevision &&
-    left.decisionPolicy?.version === right.decisionPolicy?.version &&
-    left.decisionPolicy?.revision === right.decisionPolicy?.revision &&
-    left.decisionPolicy?.digest === right.decisionPolicy?.digest &&
-    left.formObservation.id === right.formObservation.id &&
-    left.formObservation.revision === right.formObservation.revision &&
-    left.formObservation.digest === right.formObservation.digest &&
-    left.resumeSha256 === right.resumeSha256 &&
-    left.answers.revision === right.answers.revision &&
-    left.answers.digest === right.answers.digest &&
-    left.finalControl.signature === right.finalControl.signature &&
-    left.finalControl.ref === right.finalControl.ref &&
-    left.remainingRunCapacityBefore === right.remainingRunCapacityBefore &&
-    left.createdAt === right.createdAt
-  );
-}
-
-function sameIdempotencyLineage(
-  idempotency: SubmissionIdempotencyRecord,
-  preflight: SubmissionPreflightRecord,
-): boolean {
-  return (
-    idempotency.idempotencyKey === preflight.idempotencyKey &&
-    idempotency.preflightId === preflight.id &&
-    idempotency.authorityEnvelopeId === preflight.authorityEnvelopeId &&
-    idempotency.authorityRevision === preflight.authorityRevision &&
-    idempotency.runId === preflight.runId &&
-    idempotency.jobId === preflight.jobId &&
-    idempotency.resultId === preflight.resultId &&
-    idempotency.applicationRecordId === preflight.applicationRecordId
-  );
-}
-
-function toPolicyIdempotencyState(
-  idempotency: SubmissionIdempotencyRecord,
-): SubmissionIdempotencyState {
-  switch (idempotency.status) {
-    case "available":
-      return "unused";
-    case "outcome_uncertain":
-      return "outcome_uncertain";
-    case "armed":
-    case "resolved":
-    case "revoked":
-      // A resolved, revoked, or unexpectedly armed key is never reusable.
-      return "executed";
-  }
-}
-
-function isSyntheticSubmissionExecutorResult(
-  value: unknown,
-): value is SyntheticSubmissionExecutorResult {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-
-  const outcome = (value as { outcome?: unknown }).outcome;
-  return (
-    outcome === "submitted" ||
-    outcome === "not_submitted" ||
-    outcome === "outcome_uncertain"
-  );
-}
-
-async function readDurableSubmissionState(
-  input: RunSyntheticApplicationSubmissionInput,
-  preflightId: string,
-): Promise<DurableSubmissionState> {
-  const [envelope, preflight, idempotency, executionGrants, executionGrant] =
-    await Promise.all([
-      input.repository.getApplicationAuthorityEnvelope(
-        input.preflight.authorityEnvelopeId,
-      ),
-      input.repository.getSubmissionPreflightRecord(preflightId),
-      input.repository.getSubmissionIdempotencyRecord(
-        input.preflight.idempotencyKey,
-      ),
-      input.repository.listSubmissionExecutionGrants({ preflightId }),
-      input.executionGrantId
-        ? input.repository.getSubmissionExecutionGrant(input.executionGrantId)
-        : Promise.resolve(null),
-    ]);
-
-  return { envelope, preflight, idempotency, executionGrant, executionGrants };
-}
-
-function policyInput(
-  input: RunSyntheticApplicationSubmissionInput,
-  state: DurableSubmissionState,
-  preflight: SubmissionPreflightRecord,
-  idempotency: SubmissionIdempotencyState,
-  executionGrant: SubmissionExecutionGrant | null,
-) {
-  if (!state.envelope) {
-    return null;
-  }
-
-  // Autonomous authority must reject even a durable grant that was not
-  // supplied by the caller. The repository list reread makes this symmetric
-  // with the transaction-current arm operation.
-  const currentExecutionGrant =
-    executionGrant ??
-    (input.savedMode === "autonomous_submit"
-      ? (state.executionGrants[0] ?? null)
-      : null);
-
-  return {
-    now: input.now,
-    savedMode: input.savedMode,
-    envelope: state.envelope,
-    preflight,
-    jobId: input.jobId,
-    campaignId: input.campaignId,
-    origin: input.observation.origin,
-    formObservation: input.observation.formObservation,
-    resumeSha256: input.observation.resumeSha256,
-    answers: input.observation.answers,
-    finalControl: input.observation.finalControl,
-    remainingRunCapacity: input.observation.remainingRunCapacity,
-    idempotency,
-    executionGrant: currentExecutionGrant,
-    currentPolicyFacts: input.observation.currentPolicyFacts,
   };
 }
 
@@ -624,447 +462,36 @@ function resultFromOutcome(
  * not called by the production application routes; it is the typed seam for a
  * later browser-runtime executor and local acceptance fixtures only.
  */
-export async function runSyntheticApplicationSubmission(
-  input: RunSyntheticApplicationSubmissionInput,
-): Promise<SyntheticSubmissionOrchestrationResult> {
-  return withSubmissionTransition(
-    input.repository,
-    input.preflight.idempotencyKey,
-    async () => {
-      const committedPreflight =
-        await input.repository.commitSubmissionPreflight(input.preflight);
-      if (committedPreflight.status === "conflict") {
-        return blockedResult({
-          reason: "preflight_conflict",
-          detail:
-            "The idempotency key already belongs to a different immutable preflight; no synthetic action was attempted.",
-          preflight: committedPreflight.current,
-        });
-      }
-
-      const preflight = committedPreflight.preflight;
-      // Issue the person's grant now that the preflight it binds to exists.
-      let confirmedGrantId: string | null = null;
-      if (
-        input.personConfirmation &&
-        input.savedMode === "confirm_before_submit"
-      ) {
-        const committedGrant =
-          await input.repository.commitSubmissionExecutionGrant(
-            SubmissionExecutionGrantSchema.parse({
-              id: `grant_${preflight.id}`,
-              preflightId: preflight.id,
-              idempotencyKey: preflight.idempotencyKey,
-              runId: preflight.runId,
-              jobId: preflight.jobId,
-              resultId: preflight.resultId,
-              applicationRecordId: preflight.applicationRecordId,
-              authorityEnvelopeId: preflight.authorityEnvelopeId,
-              authorityRevision: preflight.authorityRevision,
-              mode: "confirm_before_submit",
-              status: "active",
-              grantedBy: "user",
-              grantedAt: input.personConfirmation.grantedAt,
-              expiresAt: input.personConfirmation.expiresAt,
-              revokedAt: null,
-              consumedAt: null,
-            }),
-          );
-        if (
-          committedGrant.status === "created" ||
-          committedGrant.status === "duplicate"
-        ) {
-          confirmedGrantId = committedGrant.grant.id;
-        }
-      }
-      if (confirmedGrantId) {
-        input = { ...input, executionGrantId: confirmedGrantId };
-      }
-      let durable = await readDurableSubmissionState(input, preflight.id);
-
-      if (!durable.preflight) {
-        return blockedResult({
-          reason: "preflight_missing",
-          detail:
-            "The committed preflight could not be reread; no action was attempted.",
-        });
-      }
-      if (!samePreflight(durable.preflight, preflight)) {
-        return blockedResult({
-          reason: "preflight_changed",
-          detail:
-            "The durable preflight changed after commit; no action was attempted.",
-          preflight: durable.preflight,
-          idempotency: durable.idempotency,
-          executionGrant: durable.executionGrant,
-        });
-      }
-      if (!durable.idempotency) {
-        return blockedResult({
-          reason: "idempotency_missing",
-          detail:
-            "The preflight has no durable idempotency record; no action was attempted.",
-          preflight,
-          executionGrant: durable.executionGrant,
-        });
-      }
-      if (!sameIdempotencyLineage(durable.idempotency, preflight)) {
-        return blockedResult({
-          reason: "idempotency_lineage_mismatch",
-          detail:
-            "The durable idempotency record does not bind the exact preflight lineage; no action was attempted.",
-          preflight,
-          idempotency: durable.idempotency,
-          executionGrant: durable.executionGrant,
-        });
-      }
-      if (!durable.envelope) {
-        return blockedResult({
-          reason: "authority_missing",
-          detail:
-            "The authority envelope for this preflight could not be reread; no action was attempted.",
-          preflight,
-          idempotency: durable.idempotency,
-          executionGrant: durable.executionGrant,
-        });
-      }
-
-      // An armed key means the previous process may have crossed the action
-      // boundary. Recover it before policy evaluation; never treat armed as
-      // available and never retry it automatically.
-      if (durable.idempotency.status === "armed") {
-        const recovery = await recoverOutcomeByPreflight(
-          input.repository,
-          preflight,
-          input.now,
-        );
-        if (recovery.status === "recovery_needed") {
-          return recoveryNeededResult({
-            idempotency: durable.idempotency,
-            executionGrant: durable.executionGrant,
-            detail: recovery.detail,
-          });
-        }
-        durable = await readDurableSubmissionState(input, preflight.id);
-      }
-
-      if (!durable.preflight || !durable.idempotency || !durable.envelope) {
-        return blockedResult({
-          reason: "immediate_recheck_failed",
-          detail:
-            "Durable authority state disappeared during the immediate recheck; no action was attempted.",
-          preflight: durable.preflight,
-          idempotency: durable.idempotency,
-          executionGrant: durable.executionGrant,
-        });
-      }
-
-      const initialPolicyInput = policyInput(
-        input,
-        durable,
-        durable.preflight,
-        toPolicyIdempotencyState(durable.idempotency),
-        durable.executionGrant,
-      );
-      if (!initialPolicyInput) {
-        return blockedResult({
-          reason: "authority_missing",
-          detail:
-            "No current authority envelope is available; no action was attempted.",
-          preflight: durable.preflight,
-          idempotency: durable.idempotency,
-          executionGrant: durable.executionGrant,
-        });
-      }
-
-      const initialDecision =
-        evaluateApplicationSubmissionPolicy(initialPolicyInput);
-      if (initialDecision.status === "blocked") {
-        return blockedResult({
-          reason: initialDecision.reason,
-          detail: initialDecision.detail,
-          decision: initialDecision,
-          preflight: durable.preflight,
-          idempotency: durable.idempotency,
-          executionGrant: durable.executionGrant,
-        });
-      }
-
-      // Read all durable authority state a second time immediately before the
-      // grant/arm transitions. This catches envelope revocation, a changed
-      // preflight, or a competing use of the idempotency key.
-      durable = await readDurableSubmissionState(input, preflight.id);
-      if (
-        !durable.preflight ||
-        !durable.idempotency ||
-        !durable.envelope ||
-        !samePreflight(durable.preflight, preflight) ||
-        !sameIdempotencyLineage(durable.idempotency, preflight)
-      ) {
-        return blockedResult({
-          reason: "immediate_recheck_failed",
-          detail:
-            "Durable authority state no longer matches the exact preflight lineage; no action was attempted.",
-          preflight: durable.preflight,
-          idempotency: durable.idempotency,
-          executionGrant: durable.executionGrant,
-        });
-      }
-
-      const secondPolicyInput = policyInput(
-        input,
-        durable,
-        durable.preflight,
-        toPolicyIdempotencyState(durable.idempotency),
-        durable.executionGrant,
-      );
-      if (!secondPolicyInput) {
-        return blockedResult({
-          reason: "authority_missing",
-          detail:
-            "The authority envelope disappeared during the immediate recheck; no action was attempted.",
-          preflight: durable.preflight,
-          idempotency: durable.idempotency,
-          executionGrant: durable.executionGrant,
-        });
-      }
-      const secondDecision =
-        evaluateApplicationSubmissionPolicy(secondPolicyInput);
-      if (secondDecision.status === "blocked") {
-        return blockedResult({
-          reason: secondDecision.reason,
-          detail: secondDecision.detail,
-          decision: secondDecision,
-          preflight: durable.preflight,
-          idempotency: durable.idempotency,
-          executionGrant: durable.executionGrant,
-        });
-      }
-
-      const authorization = secondDecision;
-      const grantBeforeArm = durable.executionGrant;
-      if (authorization.mode === "confirm_before_submit") {
-        if (!grantBeforeArm) {
-          return blockedResult({
-            reason: "execution_grant_missing",
-            detail:
-              "The confirm-before-submit attempt has no current durable execution grant; no action was attempted.",
-            preflight: durable.preflight,
-            idempotency: durable.idempotency,
-          });
-        }
-      }
-
-      let armed;
-      try {
-        armed = await input.repository.authorizeAndArmSubmissionAttempt({
-          preflight: durable.preflight,
-          expectedIdempotencyRevision: durable.idempotency.revision,
-          mode: authorization.mode,
-          marker: buildArmedMarker(durable.preflight, input.now),
-          executionGrantId:
-            authorization.mode === "confirm_before_submit"
-              ? (grantBeforeArm?.id ?? null)
-              : null,
-          now: input.now,
-        });
-      } catch {
-        const recovery = await recoverOutcomeByPreflight(
-          input.repository,
-          durable.preflight,
-          input.now,
-        );
-        if (recovery.status === "recovery_needed") {
-          return recoveryNeededResult({
-            authorization,
-            executionGrant: grantBeforeArm,
-            idempotency: durable.idempotency,
-            detail: recovery.detail,
-          });
-        }
-        if (recovery.outcome) {
-          return resultFromOutcome(
-            recovery.outcome,
-            authorization,
-            grantBeforeArm,
-            "post_arm_recheck_failed",
-          );
-        }
-        return recoveryNeededResult({
-          authorization,
-          executionGrant: grantBeforeArm,
-          idempotency: durable.idempotency,
-          detail:
-            "The compound authorize-and-arm transition failed ambiguously; recovery is required and no synthetic action was attempted.",
-        });
-      }
-
-      if (armed.status !== "armed") {
-        let detail: string;
-        if ("reason" in armed) {
-          detail = `The compound authorize-and-arm transition was rejected (${armed.reason}); no synthetic action was attempted.`;
-        } else {
-          detail =
-            "The compound authorize-and-arm transition found an existing armed marker; no synthetic action was attempted.";
-        }
-        return blockedResult({
-          reason: "arm_rejected",
-          detail,
-          preflight: durable.preflight,
-          idempotency: armed.idempotency,
-          executionGrant: armed.executionGrant,
-        });
-      }
-
-      const armedExecutionGrant = armed.executionGrant;
-
-      // Re-read after the armed boundary. A changed envelope or lineage now
-      // resolves the armed attempt to uncertainty rather than allowing action.
-      const armedState = await readDurableSubmissionState(input, preflight.id);
-      const armedPolicyInput =
-        armedState.preflight && armedState.idempotency && armedState.envelope
-          ? policyInput(
-              input,
-              armedState,
-              armedState.preflight,
-              "unused",
-              grantBeforeArm,
-            )
-          : null;
-      const armedDecision = armedPolicyInput
-        ? evaluateApplicationSubmissionPolicy(armedPolicyInput)
-        : null;
-      const armedStateMatches = Boolean(
-        armedState.preflight &&
-        armedState.idempotency &&
-        armedState.envelope &&
-        samePreflight(armedState.preflight, preflight) &&
-        sameIdempotencyLineage(armedState.idempotency, preflight) &&
-        armedState.idempotency.status === "armed" &&
-        armedState.idempotency.revision === armed.idempotency.revision &&
-        armedState.envelope.id === authorization.authorityEnvelopeId &&
-        armedState.envelope.revision === authorization.authorityRevision &&
-        (authorization.mode === "autonomous_submit" ||
-          (armedExecutionGrant?.status === "consumed" &&
-            armedState.executionGrant?.id === armedExecutionGrant.id &&
-            armedState.executionGrant.status === "consumed")) &&
-        armedDecision?.status === "authorized",
-      );
-      if (!armedStateMatches) {
-        const recovery = await recoverOutcomeByPreflight(
-          input.repository,
-          preflight,
-          input.now,
-        );
-        if (recovery.status === "recovery_needed") {
-          return recoveryNeededResult({
-            authorization,
-            executionGrant: armedExecutionGrant,
-            idempotency: armedState.idempotency,
-            detail: recovery.detail,
-          });
-        }
-        if (recovery.outcome) {
-          return resultFromOutcome(
-            recovery.outcome,
-            authorization,
-            armedExecutionGrant,
-            "post_arm_recheck_failed",
-          );
-        }
-        return blockedResult({
-          reason: "immediate_recheck_failed",
-          detail:
-            "The armed attempt failed its immediate authority recheck; no synthetic action was attempted.",
-          preflight: armedState.preflight,
-          idempotency: armedState.idempotency,
-          executionGrant: armedExecutionGrant,
-        });
-      }
-
-      let executorResult: SyntheticSubmissionExecutorResult;
-      let failureCause: "executor_error" | "invalid_executor_result" | null =
-        null;
-      try {
-        const rawExecutorResult: unknown = await input.executor.execute({
-          authorization,
-          preflight,
-          now: input.now,
-        });
-        if (!isSyntheticSubmissionExecutorResult(rawExecutorResult)) {
-          executorResult = { outcome: "outcome_uncertain" };
-          failureCause = "invalid_executor_result";
-        } else {
-          executorResult = rawExecutorResult;
-        }
-      } catch {
-        executorResult = { outcome: "outcome_uncertain" };
-        failureCause = "executor_error";
-      }
-
-      let outcome: SubmissionOutcomeRecord;
-      try {
-        outcome = buildOutcome(
-          preflight,
-          authorization,
-          input.now,
-          executorResult,
-        );
-      } catch {
-        outcome = buildUncertainOutcome(preflight, authorization, input.now);
-        failureCause = "invalid_executor_result";
-      }
-
-      let committed;
-      try {
-        committed = await input.repository.commitSubmissionOutcome({
-          outcome,
-          expectedIdempotencyRevision: armed.idempotency.revision,
-        });
-      } catch {
-        committed = null;
-      }
-
-      if (
-        committed &&
-        (committed.status === "recorded" || committed.status === "duplicate")
-      ) {
-        return resultFromOutcome(
-          committed.outcome,
-          authorization,
-          armedExecutionGrant,
-          committed.outcome.outcome === "outcome_uncertain"
-            ? (failureCause ?? "executor_reported_uncertain")
-            : null,
-        );
-      }
-
-      // The executor has crossed the armed boundary. If outcome persistence
-      // fails, recover the key to durable uncertainty before returning.
-      const recovery = await recoverOutcomeByPreflight(
-        input.repository,
-        preflight,
-        input.now,
-      );
-      if (recovery.status === "recovery_needed") {
-        return recoveryNeededResult({
-          authorization,
-          executionGrant: armedExecutionGrant,
-          idempotency: armed.idempotency,
-          detail: recovery.detail,
-        });
-      }
-      return resultFromOutcome(
-        recovery.outcome,
-        authorization,
-        armedExecutionGrant,
-        "outcome_commit_failed",
-      );
-    },
-  );
+export async function runSyntheticApplicationSubmission(input: RunSyntheticApplicationSubmissionInput): Promise<SyntheticSubmissionOrchestrationResult> {
+  return withSubmissionTransition(input.repository, input.preflight.idempotencyKey, async () => {
+    if (input.savedMode === "prepare_only") return blockedResult({reason:"prepare_only",detail:"This run is Fill in for me: leave the send to the person."});
+    const authorization: AuthorizedApplicationSubmission = {status:"authorized", mode:input.savedMode, preflightId:input.preflight.id, idempotencyKey:input.preflight.idempotencyKey, runId:input.preflight.runId, jobId:input.preflight.jobId, resultId:input.preflight.resultId, applicationRecordId:input.preflight.applicationRecordId, authorityEnvelopeId:input.preflight.authorityEnvelopeId, authorityRevision:input.preflight.authorityRevision};
+    const previous=await input.repository.getSubmissionIdempotencyRecord(input.preflight.idempotencyKey);
+    if(previous && previous.status !== "available") {
+      const existing=previous.outcomeId ? await input.repository.getSubmissionOutcomeRecord(previous.outcomeId) : null;
+      if(existing) return resultFromOutcome(existing,authorization,null);
+      const recovery=await recoverOutcomeByPreflight(input.repository,input.preflight,input.now);
+      if(recovery.status==="recovered")return resultFromOutcome(recovery.outcome,authorization,null);
+      return recoveryNeededResult({authorization,idempotency:previous,detail:recovery.detail});
+    }
+    const commit=await input.repository.commitSubmissionPreflight(input.preflight);
+    if(commit.status==="conflict")return blockedResult({reason:"preflight_conflict",detail:"The send call ID is already recorded with different data. Read its ledger outcome; it was not replayed."});
+    const preflight=commit.preflight;
+    const marker=buildArmedMarker(preflight,input.now);
+    const armed=await input.repository.authorizeAndArmSubmissionAttempt({preflight,marker,expectedIdempotencyRevision:commit.idempotency.revision,mode:input.savedMode,executionGrantId:null,now:input.now});
+    if(armed.status!=="armed") {
+      const recovery=await recoverOutcomeByPreflight(input.repository,preflight,input.now);
+      if(recovery.status==="recovered")return resultFromOutcome(recovery.outcome,authorization,null);
+      return recoveryNeededResult({authorization,detail:recovery.detail});
+    }
+    let outcome: SubmissionOutcomeRecord;
+    try { outcome=buildOutcome(preflight,authorization,input.now,await input.executor.execute({authorization,preflight,now:input.now})); }
+    catch { outcome=buildUncertainOutcome(preflight,authorization,input.now); }
+    const recorded=await input.repository.commitSubmissionOutcome({outcome,expectedIdempotencyRevision:armed.idempotency.revision});
+    if(recorded.status==="recorded"||recorded.status==="duplicate")return resultFromOutcome(recorded.outcome,authorization,null);
+    return recoveryNeededResult({authorization,outcome,detail:"The send intent is durable but its outcome could not be saved. Do not replay this call; check the site first."});
+  });
 }
-
-/** Explicit startup/restart hook for a local synthetic authority harness. */
 export function recoverSyntheticApplicationSubmissions(
   repository: SyntheticSubmissionAuthorityRepository,
   now: string,

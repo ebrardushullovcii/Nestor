@@ -35,7 +35,18 @@ export function bindTracePage(
 }
 
 /** Captures the supplied Page, never a last/active tab chosen by URL. */
-export async function tracePage(
+export function tracePage(
+  page: Page,
+  action: string,
+  bytes?: Uint8Array,
+): Promise<void> {
+  // Recording must never hold the browser action or its result. In particular,
+  // a navigating page or a stalled native capture must not stop the model.
+  void capturePageTrace(page, action, bytes).catch(() => undefined);
+  return Promise.resolve();
+}
+
+async function capturePageTrace(
   page: Page,
   action: string,
   bytes?: Uint8Array,

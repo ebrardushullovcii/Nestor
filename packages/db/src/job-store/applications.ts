@@ -560,11 +560,7 @@ export function createApplicationStore(store: JobStore) {
       return store.transaction(() => {
         const row =
           sql(`UPDATE applications SET state = 'submitting', updated_at = ?
-          WHERE id = ? AND attempt = ? AND state IN ('running', 'ready')
-            AND NOT EXISTS (
-            SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
-            WHERE n.application_id = applications.id AND t.kind = 'question'
-              AND t.input = 'file' AND t.resolved_at IS NULL) RETURNING job_id`).get(
+          WHERE id = ? AND attempt = ? AND state IN ('running', 'ready') RETURNING job_id`).get(
             Date.now(),
             id,
             attempt,
