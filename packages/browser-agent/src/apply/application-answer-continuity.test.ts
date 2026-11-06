@@ -1,14 +1,11 @@
-import { questionPrompt } from "./question-text";
-import { expect, test, vi } from "vitest";
 import {
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
 } from "@nestor/contracts";
-import type { LLMClient } from "../agent/contracts";
+import { expect, test } from "vitest";
 import { applicationFacts, savedAnswerForQuestion } from "./application-facts";
-import { classifyAnswerPermission } from "./answer-source-catalog";
 import { expectedPayHandoff, expectedPaySuggestion } from "./expected-pay";
-import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
+import { questionPrompt } from "./question-text";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 const sources = (): ApplyAnswerSources => ({
   profile: CandidateProfileSchema.parse({
@@ -53,31 +50,6 @@ const control = (label: string): ApplyFormControl => ({
   attestationKind: null,
   answered: false,
 });
-function report(evidence: unknown[]): LLMClient {
-  return {
-    chatWithTools: vi.fn().mockResolvedValue({
-      toolCalls: [
-        {
-          id: "check",
-          type: "function",
-          function: {
-            name: "report_answer_checks",
-            arguments: JSON.stringify({
-              checks: [
-                {
-                  index: 0,
-                  supported: true,
-                  reason: "The saved answer addresses the whole question.",
-                  evidence,
-                },
-              ],
-            }),
-          },
-        },
-      ],
-    }),
-  };
-}
 
 test("unconfirmed currency defaults are not applicant facts", () => {
   const src = sources();
@@ -98,225 +70,6 @@ test("unconfirmed currency defaults are not applicant facts", () => {
     salaryCurrency: null,
     compensation: { currency: null, currencyStatus: "needs_clarification" },
   });
-});
-
-test("task notes reach the independent checker with verifiable quote paths", async () => {
-  const src = sources();
-  src.taskInstructions = [
-    "Analysis experience is 22 completed non-overlapping years.",
-  ];
-  const client = report([
-    {
-      claim: "22",
-      kind: "applicant_fact",
-      source: "applicant",
-      path: "/taskGuidance/0",
-      quote: src.taskInstructions[0],
-    },
-  ]);
-  expect(
-    await checkWrittenApplicationAnswers({
-      client,
-      sources: src,
-      payDisclosed: false,
-      answers: [
-        {
-          question: "Years of analysis experience",
-          answer: "22",
-          evidencePolicy: "factual_inference",
-        },
-      ],
-    }),
-  ).toMatchObject([{ supported: true }]);
-  src.taskInstructions = [];
-  await expect(
-    checkWrittenApplicationAnswers({
-      client,
-      sources: src,
-      payDisclosed: false,
-      answers: [
-        {
-          question: "Years of analysis experience",
-          answer: "22",
-          evidencePolicy: "factual_inference",
-        },
-      ],
-    }),
-  ).resolves.toMatchObject([
-    { supported: false, unavailable: { category: "unverified_evidence" } },
-  ]);
-});
-
-test("saved answer wording changes require an independent whole-question check", async () => {
-  const src = sources();
-  src.reusableAnswers = [
-    {
-      id: "consent",
-      kind: "other",
-      label: "Accuracy",
-      question: "I certify the supplied information is accurate",
-      answer: "Yes",
-      roleFamilies: [],
-      proofEntryIds: [],
-    },
-  ];
-  const field = {
-    ...control("I confirm the accuracy of the details supplied above"),
-    kind: "checkbox" as const,
-    answerControlType: "boolean" as const,
-    attestationKind: "truthfulness_certification" as const,
-  };
-  const decision = classifyAnswerPermission({
-    control: field,
-    controls: [field],
-    sources: src,
-    tags: {
-      kind: "other",
-      country: null,
-      sourceId: "answerLibrary.consent",
-      declarationPurpose: "acknowledgement",
-    },
-    answer: "Yes",
-    pageInstructions: "",
-    approvedAttestations: [],
-  });
-  expect(decision).toMatchObject({
-    kind: "writing",
-    evidencePolicy: "saved_answer",
-  });
-  const good = {
-    claim: "Yes",
-    kind: "applicant_fact",
-    source: "applicant",
-    path: "/savedAnswers/0/answer",
-    quote: "Yes",
-  };
-  for (const evidence of [
-    [
-      good,
-      {
-        ...good,
-        path: "/savedAnswers/0/question",
-        quote: src.reusableAnswers[0].question,
-      },
-    ],
-    [{ ...good, path: "/yearsExperience", quote: "23" }],
-  ]) {
-    const pending = checkWrittenApplicationAnswers({
-      client: report(evidence),
-      sources: src,
-      payDisclosed: false,
-      answers: [
-        {
-          question: field.label,
-          answer: "Yes",
-          evidencePolicy: "saved_answer",
-        },
-      ],
-    });
-    if (evidence[0] === good) expect((await pending)[0]?.supported).toBe(true);
-    else
-      await expect(pending).resolves.toMatchObject([
-        {
-          supported: false,
-          unavailable: {
-            category: "unverified_evidence",
-          },
-        },
-      ]);
-  }
-});
-
-test("a current conditional answer can be rechecked, but another jurisdiction cannot borrow it", () => {
-  const src = sources();
-  src.reusableAnswers = [
-    {
-      id: "application_local",
-      kind: "work_authorization",
-      label: "UK authorization",
-      question:
-        "May you work in the UK for this role until your permit expires?",
-      answer: "Yes",
-      roleFamilies: [],
-      proofEntryIds: [],
-      applicationScope: {
-        applicationRecordId: "application_1",
-        resultId: null,
-        location: "United Kingdom",
-      },
-    },
-  ];
-  for (const place of ["United Kingdom", "United States"]) {
-    const field = {
-      ...control(
-        `Are you allowed to take this role in the ${place} until your current permission expires?`,
-      ),
-      questionKind: "work_authorization" as const,
-    };
-    const result = classifyAnswerPermission({
-      control: field,
-      controls: [field],
-      sources: src,
-      tags: {
-        kind: "work_auth",
-        country: place === "United Kingdom" ? "GB" : "US",
-        sourceId: "answerLibrary.application_local",
-        hasAdditionalConditions: true,
-      },
-      answer: "Yes",
-      pageInstructions: "",
-      application: {
-        jobId: "1",
-        applicationId: "attempt2",
-        applicationRecordId: "application_1",
-        startingUrl: "https://replica.test/apply",
-      },
-    });
-    expect(result.kind).toBe(
-      place === "United Kingdom" ? "writing" : "needs_you",
-    );
-  }
-});
-
-test("approved acknowledgements do not depend on the reader choosing an empty source", () => {
-  const src = sources();
-  const field = {
-    ...control("I confirm the supplied details are accurate"),
-    kind: "checkbox" as const,
-    attestationKind: "truthfulness_certification" as const,
-  };
-  expect(
-    classifyAnswerPermission({
-      control: field,
-      controls: [field],
-      sources: src,
-      tags: {
-        kind: "other",
-        country: null,
-        sourceId: "resume.text",
-        declarationPurpose: "acknowledgement",
-      },
-      answer: "Yes",
-      pageInstructions: "",
-      approvedAttestations: ["truthfulness_certification"],
-    }),
-  ).toMatchObject({ kind: "literal", source: { purpose: "authority" } });
-  expect(
-    classifyAnswerPermission({
-      control: field,
-      controls: [field],
-      sources: src,
-      tags: {
-        kind: "other",
-        country: null,
-        sourceId: "resume.text",
-        declarationPurpose: "personal_fact",
-      },
-      answer: "Yes",
-      pageInstructions: "",
-      approvedAttestations: ["truthfulness_certification"],
-    }),
-  ).toMatchObject({ kind: "needs_you" });
 });
 
 test("pay suggestions retain the recorded amount, currency and period", () => {
@@ -376,77 +129,6 @@ test("an explicit compensation currency replaces an unconfirmed legacy currency 
   ).toBe("EUR");
 });
 
-test("approved acknowledgements retain semantic category and reject an added personal claim", () => {
-  const src = sources();
-  const field = {
-    ...control("These entries faithfully represent the supplied background"),
-    kind: "checkbox" as const,
-    answerControlType: "boolean" as const,
-    attestationKind: "truthfulness_certification" as const,
-  };
-  const input = {
-    control: field,
-    controls: [field],
-    sources: src,
-    answer: "Yes",
-    pageInstructions: "",
-    tags: {
-      kind: "other" as const,
-      country: null,
-      sourceId: null,
-      declarationPurpose: "acknowledgement" as const,
-    },
-  };
-  expect(
-    classifyAnswerPermission({
-      ...input,
-      approvedAttestations: ["truthfulness_certification"],
-    }).kind,
-  ).toBe("literal");
-  expect(
-    classifyAnswerPermission({ ...input, approvedAttestations: [] }).kind,
-  ).toBe("needs_you");
-  expect(
-    classifyAnswerPermission({
-      ...input,
-      approvedAttestations: ["truthfulness_certification"],
-      tags: { ...input.tags, declarationPurpose: "personal_fact" },
-    }).kind,
-  ).toBe("needs_you");
-});
-
-test("conditional Profile permission reaches a checked comparison, never a literal Yes", () => {
-  const src = sources();
-  src.profile.workEligibility.limitedWorkPermissions = [
-    {
-      country: "Germany",
-      conditions: "No more than 20 hours weekly until August 2027",
-      requiresFutureSponsorship: true,
-    },
-  ];
-  const field = {
-    ...control(
-      "Does your current German permission cover 16 hours weekly through April 2027?",
-    ),
-    questionKind: "work_authorization" as const,
-  };
-  expect(
-    classifyAnswerPermission({
-      control: field,
-      controls: [field],
-      sources: src,
-      answer: "Yes",
-      pageInstructions: "",
-      tags: {
-        kind: "work_auth",
-        country: "DE",
-        sourceId: "profile.workEligibility.limitedWorkPermissions.0",
-        hasAdditionalConditions: true,
-      },
-    }),
-  ).toEqual({ kind: "inference", source: null, evidencePolicy: "eligibility" });
-});
-
 test("gross expected pay offers the exact compatible band while a missing band and current pay remain distinct", () => {
   const src = sources();
   src.preferences = JobSearchPreferencesSchema.parse({
@@ -486,45 +168,6 @@ test("gross expected pay offers the exact compatible band while a missing band a
       src,
     ),
   ).toBeNull();
-});
-
-test("a resume quote binds the one plaintext document while an invented quote still fails", async () => {
-  const src = sources();
-  src.resumeText = "Paid work with TypeScript. No paid Rust experience.";
-  const evidence = [
-    {
-      claim: "TypeScript",
-      source: "resume",
-      path: "/experiences/0/summary",
-      quote: "Paid work with TypeScript.",
-      kind: "applicant_fact",
-    },
-  ];
-  const check = () =>
-    checkWrittenApplicationAnswers({
-      client: report(evidence),
-      sources: src,
-      payDisclosed: false,
-      answers: [
-        {
-          question: "Which technology have you used professionally?",
-          answer: "TypeScript",
-          evidencePolicy: "factual_inference",
-        },
-      ],
-    });
-  expect((await check())[0]?.supported).toBe(false);
-  evidence[0].path = "";
-  expect((await check())[0]?.supported).toBe(true);
-  evidence[0].quote = "Paid work with Ruby.";
-  await expect(check()).resolves.toMatchObject([
-    {
-      supported: false,
-      unavailable: {
-        category: "unverified_evidence",
-      },
-    },
-  ]);
 });
 
 test("question identity preserves an outer subject and a condition supplied only as a hint", () => {

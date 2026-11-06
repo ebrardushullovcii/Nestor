@@ -1,9 +1,5 @@
-import { selfLimitSlice } from "@nestor/core";
 import { withModelProviderProgress } from "@nestor/ai-providers";
-import { browserAgentPermissionsOf } from "@nestor/contracts";
-import { resolveListingCountry } from "../applications/questions";
 import {
-  checkWrittenApplicationAnswer,
   applicationFacts,
   createApplyPageHands,
   createMoveReviewer,
@@ -19,16 +15,13 @@ import {
   loadVerifiedResumeBytes,
   type ExecuteApplicationFlowInput,
 } from "@nestor/browser-runtime";
-
-/** The application facts, without the callback that is about to use them. */
-export type ApplyPreparationInput = Omit<
-  ExecuteApplicationFlowInput,
-  "prepareApplicationForm"
->;
-import {
-  ApplicationLetterGroundingError,
-  createApplicationLetterProvider,
-} from "./application-letter-provider";
+import { browserAgentPermissionsOf } from "@nestor/contracts";
+import { selfLimitSlice } from "@nestor/core";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { resolveListingCountry } from "../applications/questions";
+import type { ApplicationLetterDependencies } from "./application-letter-provider";
+import { createApplicationLetterProvider } from "./application-letter-provider";
 import {
   decideApplySubmissionHandoff,
   type ApplySubmissionHandoff,
@@ -37,31 +30,34 @@ import type {
   JobFinderDocumentManager,
   RenderedLetterArtifact,
 } from "./workspace-service-contracts";
-import type { ApplicationLetterDependencies } from "./application-letter-provider";
-import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 
-import {
-  type ApplyAgentTiming,
-  AiBehaviorPreferenceSchema,
-  ApplicationReviewCardSchema,
-  CoverLetterPreferenceSchema,
-} from "@nestor/contracts";
+/** The application facts, without the callback that is about to use them. */
+export type ApplyPreparationInput = Omit<
+  ExecuteApplicationFlowInput,
+  "prepareApplicationForm"
+>;
+
 import type {
-  ApplicationAuthorityEnvelope,
-  ApplyPageSession,
   ApplicationAttemptBlocker,
   ApplicationAttemptCheckpoint,
   ApplicationAttemptExternalWriteEvidence,
   ApplicationAttemptQuestion,
+  ApplicationAuthorityEnvelope,
+  ApplicationReviewCard,
   ApplyExecutionModelUse,
   ApplyExecutionResult,
-  ApplicationReviewCard,
+  ApplyPageSession,
   CandidateProfile,
   CandidateReusableAnswer,
   JobFinderSettings,
   JobSearchPreferences,
   SavedJob,
+} from "@nestor/contracts";
+import {
+  AiBehaviorPreferenceSchema,
+  ApplicationReviewCardSchema,
+  CoverLetterPreferenceSchema,
+  type ApplyAgentTiming,
 } from "@nestor/contracts";
 /**
  * Runs one application through the agent loop and reports it the way the rest
@@ -1235,23 +1231,12 @@ export function buildApplyLetterDependencies(input: {
                   },
                   { payDisclosed: false },
                 ),
-                resume:
-                  selfLimitSlice(
-                    input.profile.baseResume.textContent?.trim(),
-                    0,
-                    8_000,
-                    "packages/job-finder/src/internal/agent-application-preparation.ts:1194",
-                  ) ?? null,
+                resume: input.profile.baseResume.textContent?.trim() ?? null,
                 postingContextOnly: {
                   title: input.job.title,
                   company: input.job.company,
                   location: input.job.location,
-                  description: selfLimitSlice(
-                    input.job.description,
-                    0,
-                    6_000,
-                    "packages/job-finder/src/internal/agent-application-preparation.ts:1204",
-                  ),
+                  description: input.job.description,
                 },
               }),
               "Grounded application context:",
@@ -1265,49 +1250,6 @@ export function buildApplyLetterDependencies(input: {
       );
       const text = reply.content?.trim();
       if (!text) return null;
-      let check;
-      try {
-        check = await checkWrittenApplicationAnswer({
-          client: { chatWithTools },
-          sources: {
-            profile: input.profile,
-            preferences: input.searchPreferences,
-            resumeText:
-              selfLimitSlice(
-                input.profile.baseResume.textContent?.trim(),
-                0,
-                8_000,
-                "packages/job-finder/src/internal/agent-application-preparation.ts:1231",
-              ) ?? null,
-            posting: input.job,
-            reusableAnswers: input.reusableAnswers ?? [],
-            documents: [],
-          },
-          payDisclosed: false,
-          question: `Check this ${purpose.replace(/_/gu, " ")} for ${input.job.title} at ${input.job.company}. Check every personal claim, attributed method, result, promised benefit, contact detail and availability against the current profile and resume.`,
-          answer: text,
-          ...(signal ? { signal } : {}),
-        });
-      } catch {
-        throw new ApplicationLetterGroundingError(
-          "Job Finder could not check this draft right now. Review it yourself or try again.",
-          text,
-        );
-      }
-      if (check.unavailable)
-        throw new ApplicationLetterGroundingError(
-          "Nestor could not finish checking this letter. Nothing was attached. Try again to continue.",
-          text,
-          true,
-        );
-      // The check usually asks for the review itself; ask only once.
-      if (!check.supported)
-        throw new ApplicationLetterGroundingError(
-          /\breview\b/iu.test(check.reason)
-            ? check.reason
-            : `${check.reason} Review and agree the wording for this application before approving it.`,
-          check.reviewWording ?? text,
-        );
       return text;
     },
     ...(renderLetterArtifact

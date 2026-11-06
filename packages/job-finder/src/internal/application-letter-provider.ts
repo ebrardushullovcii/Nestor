@@ -58,19 +58,6 @@ export interface ApplicationLetterDependencies {
   signal?: AbortSignal;
 }
 
-export class ApplicationLetterGroundingError extends Error {
-  constructor(
-    reason: string,
-    readonly draftText: string,
-    readonly checkingUnavailable = false,
-  ) {
-    super(
-      checkingUnavailable ? reason : `The letter needs your review: ${reason}`,
-    );
-    this.name = "ApplicationLetterGroundingError";
-  }
-}
-
 export function createApplicationLetterProvider(
   dependencies: ApplicationLetterDependencies,
 ): ApplyLetterProvider {
@@ -112,17 +99,7 @@ export function createApplicationLetterProvider(
               ...(signal ? { signal } : {}),
             }));
           signal?.throwIfAborted();
-        } catch (error) {
-          if (error instanceof ApplicationLetterGroundingError) {
-            return {
-              ok: false,
-              reason: error.message,
-              draftText: error.draftText,
-              ...(error.checkingUnavailable
-                ? { checkingUnavailable: true }
-                : {}),
-            };
-          }
+        } catch {
           return {
             ok: false,
             reason:

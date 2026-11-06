@@ -3,11 +3,10 @@ import { describe, expect, test } from "vitest";
 
 import {
   buildCoverLetterRequest,
-  coverLetterPolicyAllows,
   coverLetterDeliveryFor,
+  coverLetterPolicyAllows,
   detectPostingLanguage,
   isCoverLetterControl,
-  looksLikeUsableLetter,
   requiredLetterFileType,
 } from "./cover-letter";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
@@ -181,14 +180,6 @@ describe("the letter one application sends", () => {
       "never turn a job requirement into a claim that the person has done it",
     );
   });
-
-  test("a letter with a gap where a person should have typed is refused", () => {
-    const body = "Dear hiring team, ".padEnd(260, "I have built platforms. ");
-    expect(looksLikeUsableLetter(body)).toBe(true);
-    expect(looksLikeUsableLetter(`${body} [Your name here]`)).toBe(false);
-    expect(looksLikeUsableLetter(`${body} {{company}}`)).toBe(false);
-    expect(looksLikeUsableLetter("Too short.")).toBe(false);
-  });
 });
 
 test("letter request supplies current date and role dates, and asks for posting-specific examples", () => {
@@ -278,7 +269,7 @@ test("letter input makes accepted contacts and role constraints authoritative", 
   expect(request.groundedIn.join("\n")).not.toContain("rejected@example.test");
 });
 
-test("review evidence has single stops and the letter prompt excludes pay and trims the resume", () => {
+test("review evidence has single stops and the letter receives complete facts", () => {
   const applicant = sources("Build tools").profile;
   applicant.proofBank = CandidateProfileSchema.parse({
     ...applicant,
@@ -317,9 +308,8 @@ test("review evidence has single stops and the letter prompt excludes pay and tr
       sample: null,
     },
   });
-  expect(request.prompt).not.toMatch(
-    /PRIVATE_PAY_SENTINEL|PRIVATE_HISTORY_SENTINEL|RESUME_TAIL_SENTINEL/,
-  );
+  expect(request.prompt).toContain("PRIVATE_HISTORY_SENTINEL");
+  expect(request.prompt).toContain("RESUME_TAIL_SENTINEL");
   expect(request.prompt).toContain("Do not ask the employer to accommodate");
   expect(request.groundedIn.join(" ")).not.toContain("..");
 });

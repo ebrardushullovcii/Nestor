@@ -1,39 +1,37 @@
-import type { BrowserPermissionPolicy } from "../browser-permission-policy";
-import type { FormReplay } from "./form-replay";
 import type {
-  ApplyAgentTiming,
-  ApplyFrameOwner,
-  ApplyFormPathStep,
-  ApplyPickerAttempt,
-  ApplyStepReceipt,
-  RawApplySummaryRow,
-  StoredApplyPickerAttempt,
-} from "@nestor/contracts";
-import type {
-  ApplicationAttemptQuestion,
-  ApplicationAttemptCheckpoint,
-  ApplyAnswerTags,
-  ApplyBlockedAttempt,
-  CoverLetterPreference,
   AiApplyingBehavior,
-  ApplyNavigationResult,
-  ApplyRawPageHands,
-  ApplyServiceWorkerFinding,
-  ApplyWriteResult,
-  ApplyUploadFile,
+  ApplicationAttemptCheckpoint,
+  ApplicationAttemptQuestion,
   ApplicationAttestationKind,
   ApplicationAutomationMode,
   ApplicationQuestionControlType,
   ApplicationQuestionKind,
   ApplicationSalaryDisclosureRule,
-  CandidateProfile,
+  ApplyAgentTiming,
+  ApplyAnswerTags,
+  ApplyBlockedAttempt,
+  ApplyFormPathStep,
+  ApplyFrameOwner,
+  ApplyNavigationResult,
+  ApplyPickerAttempt,
+  ApplyRawPageHands,
+  ApplyServiceWorkerFinding,
+  ApplyStepReceipt,
+  ApplyUploadFile,
+  ApplyWriteResult,
   CandidateAssetKind,
+  CandidateProfile,
   CandidateReusableAnswer,
+  CoverLetterPreference,
   JobSearchPreferences,
+  RawApplyPage,
+  RawApplySummaryRow,
   RawApplyUpload,
   RawApplyUploadOutcome,
-  RawApplyPage,
+  StoredApplyPickerAttempt,
 } from "@nestor/contracts";
+import type { BrowserPermissionPolicy } from "../browser-permission-policy";
+import type { FormReplay } from "./form-replay";
 
 /**
  * Shapes for the agent that fills in an employer's application form.
@@ -452,8 +450,6 @@ export interface ApplyLetterProvider {
     | {
         ok: false;
         reason: string;
-        draftText?: string;
-        checkingUnavailable?: boolean;
       }
   >;
 }

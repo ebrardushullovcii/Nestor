@@ -1,12 +1,11 @@
-import meanings from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-question-meanings.json";
 import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test } from "vitest";
+import meanings from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-question-meanings.json";
 import {
+  relevantSavedAnswers,
   savedAnswerForQuestion,
   serializeApplicationData,
-  storedFactFor,
   storedFacts,
-  relevantSavedAnswers,
 } from "./application-facts";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
 
@@ -21,15 +20,12 @@ test("saved-answer model context keeps every confirmed answer and brings exact v
     proofEntryIds: [],
   }));
   const selected = relevantSavedAnswers(
-    [
-      ...answers,
-      { ...answers[0], id: "unconfirmed", needsConfirmation: true },
-    ],
+    [...answers, { ...answers[0], id: "unconfirmed", needsConfirmation: true }],
     ["Question 199"],
   );
   expect(selected[0]?.id).toBe("saved_199");
-  expect(selected).toHaveLength(answers.length);
-  expect(selected.some((answer) => answer.id === "unconfirmed")).toBe(false);
+  expect(selected).toHaveLength(answers.length + 1);
+  expect(selected.some((answer) => answer.id === "unconfirmed")).toBe(true);
 });
 
 test.each(meanings.cases)(
@@ -196,48 +192,6 @@ const control: ApplyFormControl = {
 };
 
 // Exact equality is mechanics; the model still chooses which fact answers a question.
-test.each([
-  ["profile.firstName", "Li"],
-  ["profile.lastName", "Wu"],
-  ["profile.skills.0", "Go"],
-  ["profile.experiences.role.companyName", "Fixture Tools"],
-  ["profile.experiences.role.startDate", "2024-03"],
-  ["profile.education.school.schoolName", "Fixture University"],
-])(
-  "exact fact %s is usable without a model answer check",
-  (storedFactId, value) => {
-    expect(
-      storedFactFor({
-        sources,
-        payDisclosed: true,
-        control,
-        value,
-        storedFactId,
-      })?.sourceId,
-    ).toBe(storedFactId);
-  },
-);
-
-test.each([
-  ["profile.phone", "12025550123"],
-  ["profile.firstName", "LI"],
-  ["profile.experiences.role.startDate", "2024-03-01"],
-  ["profile.education.school.degree", "Bachelor of Science"],
-  ["missing", "Fixture Tools"],
-])(
-  "changed or mismatched fact %s falls back to checking",
-  (storedFactId, value) => {
-    expect(
-      storedFactFor({
-        sources,
-        payDisclosed: true,
-        control,
-        value,
-        storedFactId,
-      }),
-    ).toBeNull();
-  },
-);
 
 test("draft records, pending answers and private pay are absent from the catalog", () => {
   const facts = storedFacts(sources, { payDisclosed: false });
@@ -248,88 +202,4 @@ test("draft records, pending answers and private pay are absent from the catalog
   expect(
     facts.some((fact) => fact.sourceId.includes("workAuthorization")),
   ).toBe(false);
-});
-
-test.each(["work_authorization", "visa_sponsorship"] as const)(
-  "eligibility %s still needs its question and hiring context checked",
-  (questionKind) => {
-    expect(
-      storedFactFor({
-        sources,
-        payDisclosed: true,
-        control: { ...control, questionKind },
-        value: "Yes",
-        storedFactId: "answerLibrary.confirmed",
-      }),
-    ).toBeNull();
-  },
-);
-
-test("expected pay is never a direct fact for current-pay questions", () => {
-  expect(
-    storedFactFor({
-      sources,
-      payDisclosed: true,
-      control: { ...control, asksCurrentPay: true },
-      value: "45000",
-      storedFactId: "answerLibrary.pay",
-    }),
-  ).toBeNull();
-});
-
-test("residence cannot bypass the hiring-country check", () => {
-  const profile = { ...sources.profile, currentCountry: "United States" };
-  expect(
-    storedFactFor({
-      sources: { ...sources, profile },
-      payDisclosed: true,
-      control: { ...control, asksHiringCountry: true },
-      value: "United States",
-      storedFactId: "profile.currentCountry",
-    }),
-  ).toBeNull();
-});
-
-test.each([
-  ["profile.yearsExperience", "3", control],
-  ["answerLibrary.confirmed", "Yes", control],
-  ["answerLibrary.pay", "45000", control],
-])(
-  "a short value from %s needs a check when it is not this question's own answer",
-  (storedFactId, value, target) => {
-    expect(
-      storedFactFor({
-        sources,
-        payDisclosed: true,
-        control: target,
-        value,
-        storedFactId,
-      }),
-    ).toBeNull();
-  },
-);
-
-test("a saved short answer skips the check on its own question, saved pay on a pay question", () => {
-  expect(
-    storedFactFor({
-      sources,
-      payDisclosed: true,
-      control: { ...control, label: "Can you attend?" },
-      value: "Yes",
-      storedFactId: "answerLibrary.confirmed",
-    })?.sourceId,
-  ).toBe("answerLibrary.confirmed");
-  expect(
-    storedFactFor({
-      sources,
-      payDisclosed: true,
-      control: {
-        ...control,
-        label: "Expected salary",
-        questionKind: "salary_expectation",
-      },
-      value: "45000",
-      storedFactId: "answerLibrary.pay",
-    })?.sourceId,
-  ).toBe("answerLibrary.pay");
 });

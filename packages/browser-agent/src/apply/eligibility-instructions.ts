@@ -1,4 +1,4 @@
-/** Shared by the form writer and independent answer check. */
+/** Instructions supplied to the application model. */
 export const APPLICATION_ELIGIBILITY_INSTRUCTIONS = [
   "Use current structured Profile eligibility before asking. It takes precedence over older resume or freeform answers; country-specific permit conditions take precedence over general flags.",
   "Use the person's explicit work-country decision for this application, then the country established by the form or posting, including an unambiguous city or Remote, <country>. Do not ask for a country the job already establishes. Headquarters, citizenship or residence alone do not establish the work country.",

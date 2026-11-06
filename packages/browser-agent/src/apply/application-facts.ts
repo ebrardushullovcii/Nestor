@@ -1,26 +1,14 @@
-import { questionLabel, questionPrompt } from "./question-text";
 import {
   normalizeFormQuestionPrompt,
   preserveTechnologyTokens,
   savedQuestionMatches,
   type CandidateReusableAnswer,
 } from "@nestor/contracts";
+import { questionLabel, questionPrompt } from "./question-text";
 
-import { normalizeSignal } from "./control-classification";
-import {
-  asksGithubUsername,
-  formatGithubAnswer,
-  githubUsername,
-  fieldNamesAnotherPerson,
-} from "./github-username";
-import { requiresSavedNationalityAnswer } from "./person-nationality";
-import {
-  formatProfileUrlAnswer,
-  fullProfileUrl,
-  isProfileUrlSource,
-  wantsProfileUrl,
-} from "./profile-url";
 import { currentCountryTimezone } from "./current-timezone";
+import { fieldNamesAnotherPerson, githubUsername } from "./github-username";
+import { requiresSavedNationalityAnswer } from "./person-nationality";
 import { phoneCallingCode, phoneCountryPicker } from "./phone-answer";
 import type {
   ApplyAnswer,
@@ -67,21 +55,6 @@ export function isExplicitResidenceCountryControl(
   );
 }
 
-// An answer explicitly supplied for this application is separate from permission
-// to infer pay from the Profile. The reader scopes reused answers to their question.
-function usableSavedAnswer(
-  answer: CandidateReusableAnswer,
-  payDisclosed: boolean,
-) {
-  return (
-    !answer.needsConfirmation &&
-    (payDisclosed ||
-      answer.kind !== "salary_expectation" ||
-      !!answer.applicationScope?.applicationRecordId ||
-      !!answer.applicationScope?.resultId)
-  );
-}
-
 /** Empty strings and lists carry no evidence; preserve explicit unknown, No and zero. */
 export function serializeApplicationData(
   value: Record<string, unknown> | readonly unknown[],
@@ -116,9 +89,7 @@ export function relevantSavedAnswers(
       question.split(" ").filter((word) => words.has(word)).length
     );
   };
-  return [...answers]
-    .filter((answer) => !answer.needsConfirmation)
-    .sort((left, right) => score(right) - score(left));
+  return [...answers].sort((left, right) => score(right) - score(left));
 }
 
 /**
@@ -133,7 +104,11 @@ export function applicationFacts(
   options: { payDisclosed: boolean },
 ) {
   const profile = sources.profile;
+  const { baseResume, ...profileFacts } = profile;
   return {
+    ...profileFacts,
+    baseResumeText: baseResume.textContent,
+    payDisclosure: options.payDisclosed,
     listingDiscovery: sources.listingDiscovery,
     name: {
       full: profile.fullName,
@@ -166,25 +141,7 @@ export function applicationFacts(
     targetRoles: profile.targetRoles,
     preferredLocations: profile.locations,
     taskGuidance: sources.taskInstructions,
-    preferences: sources.preferences
-      ? {
-          ...sources.preferences,
-          salaryCurrency:
-            sources.preferences.compensation.currencyStatus === "explicit"
-              ? sources.preferences.compensation.currency
-              : null,
-          ...(sources.preferences.compensation.currencyStatus ===
-          "needs_clarification"
-            ? {
-                salaryCurrency: null,
-                compensation: {
-                  ...sources.preferences.compensation,
-                  currency: null,
-                },
-              }
-            : {}),
-        }
-      : undefined,
+    preferences: sources.preferences,
     yearsExperience: profile.yearsExperience,
     workEligibility: profile.workEligibility,
     ...(profile.workEligibility.limitedWorkPermissions?.length
@@ -193,14 +150,14 @@ export function applicationFacts(
             "Limited permissions establish present authorization only within their country and stated conditions. requiresFutureSponsorship describes future work, not a blanket answer for this application. Compare the job type, hours and dates; leave unresolved authorization and sponsorship questions for the person. Reusable answers cannot override permit conditions.",
         }
       : {}),
-    savedAnswers: relevantSavedAnswers(sources.reusableAnswers)
-      .filter((saved) => usableSavedAnswer(saved, options.payDisclosed))
-      .map((saved) => ({
+    savedAnswers: relevantSavedAnswers(sources.reusableAnswers).map(
+      (saved) => ({
         id: saved.id,
         kind: saved.kind,
         label: saved.label,
         question: saved.question,
         answer: saved.answer,
+        needsConfirmation: saved.needsConfirmation,
         // Native execution binding is host metadata, not a new applicant fact.
         // Fill and Send see the same scope even when only Fill has that marker.
         applicationScope: saved.applicationScope
@@ -214,49 +171,16 @@ export function applicationFacts(
             }
           : undefined,
         optionFallback: saved.optionFallback,
-      })),
+      }),
+    ),
     spokenLanguages: profile.spokenLanguages,
     skills: profile.skills,
     skillGroups: profile.skillGroups,
     proofBank: profile.proofBank,
-    experiences: profile.experiences.filter((entry) => entry.isDraft !== true),
-    education: profile.education.filter((entry) => entry.isDraft !== true),
+    experiences: profile.experiences,
+    education: profile.education,
     certifications: profile.certifications,
     projects: profile.projects,
-  };
-}
-
-/** Plain labels for the independent answer check's person-facing notes. */
-export function plainAnswerCheckFacts(
-  facts: ReturnType<typeof applicationFacts>,
-) {
-  const eligibility = facts.workEligibility;
-  const yesNo = (value: boolean | null) =>
-    value === null ? "Not known" : value ? "Yes" : "No";
-  return {
-    ...facts,
-    workEligibility: {
-      "Countries where you can work": eligibility.authorizedWorkCountries,
-      "Limited work permissions": (
-        eligibility.limitedWorkPermissions ?? []
-      ).map((permit) => ({
-        Country: permit.country,
-        Conditions: permit.conditions,
-        "Will need sponsorship later": yesNo(permit.requiresFutureSponsorship),
-      })),
-      "Need visa sponsorship": yesNo(eligibility.requiresVisaSponsorship),
-      "Willing to relocate": yesNo(eligibility.willingToRelocate),
-      "Preferred places to relocate": eligibility.preferredRelocationRegions,
-      "Willing to travel": yesNo(eligibility.willingToTravel),
-      "Can work remotely": yesNo(eligibility.remoteEligible),
-      "Notice period in days": eligibility.noticePeriodDays,
-      "Available start date": eligibility.availableStartDate,
-      "Security clearance": eligibility.securityClearance,
-    },
-    eligibilityInterpretation: facts.eligibilityInterpretation?.replace(
-      "requiresFutureSponsorship",
-      "Will need sponsorship later",
-    ),
   };
 }
 
@@ -267,27 +191,11 @@ interface StoredFact {
   provenanceLabel: string;
 }
 
-const YES_NO = new Set(["yes", "no", "y", "n", "true", "false"]);
-
-/**
- * Whether a value is distinctive enough that typing it can only mean that
- * fact: an email address, a phone number, a link, a name, a saved sentence.
- * "Yes", "No" and short numbers could answer anything, so implicit matching
- * checks them with their question. An explicit fact reference can establish
- * exact identity for these values without interpreting the question.
- */
-function isDistinctive(value: string): boolean {
-  const normalized = normalizeSignal(value);
-  if (normalized.length < 3 || YES_NO.has(normalized)) return false;
-  if (/^\d+$/u.test(normalized.replace(/\s+/gu, "")))
-    return normalized.replace(/\s+/gu, "").length >= 7;
-  return true;
-}
-
 export function storedFacts(
   sources: ApplyAnswerSources,
   options: { payDisclosed: boolean },
 ): StoredFact[] {
+  void options;
   const profile = sources.profile;
   const facts: StoredFact[] = [];
   const add = (
@@ -409,7 +317,7 @@ export function storedFacts(
   }
   for (const saved of sources.reusableAnswers.filter(
     (entry) =>
-      usableSavedAnswer(entry, options.payDisclosed) &&
+      !entry.needsConfirmation &&
       entry.kind !== "work_authorization" &&
       entry.kind !== "visa_sponsorship",
   )) {
@@ -421,86 +329,6 @@ export function storedFacts(
     );
   }
   return facts;
-}
-
-/**
- * The stored fact a proposed value is, word for word, when it is one. Such a
- * value goes in as that fact without a fact check; anything else is checked.
- */
-export function storedFactFor(input: {
-  sources: ApplyAnswerSources;
-  payDisclosed: boolean;
-  control: ApplyFormControl;
-  value: string;
-  storedFactId?: string | undefined;
-}): ApplyAnswer | null {
-  if (
-    requiresSavedNationalityAnswer(
-      `${input.control.groupLabel} ${input.control.label} ${input.control.placeholder}`,
-    )
-  )
-    return null;
-  const wantsUsername = asksGithubUsername(input.control);
-  const wanted = formatGithubAnswer(input.control, input.value).trim();
-  const factId =
-    wantsUsername &&
-    input.storedFactId &&
-    (input.storedFactId === "profile.githubUrl" ||
-      input.storedFactId.startsWith("profile.links.")) &&
-    !input.storedFactId.endsWith("#username")
-      ? `${input.storedFactId}#username`
-      : input.storedFactId;
-  if (!wanted || (!input.storedFactId && !isDistinctive(input.value)))
-    return null;
-  // Eligibility and current pay need their question and context checked.
-  if (
-    input.control.questionKind === "work_authorization" ||
-    input.control.questionKind === "visa_sponsorship" ||
-    input.control.asksCurrentPay === true ||
-    input.control.asksHiringCountry === true
-  ) {
-    return null;
-  }
-  const fact = storedFacts(input.sources, {
-    payDisclosed: input.payDisclosed,
-  }).find(
-    (candidate) =>
-      (!factId || candidate.sourceId === factId) &&
-      (!PROFILE_TEXT_FIELD_LABELS[candidate.sourceId] ||
-        (applicantContactGroup(input.control) &&
-          !fieldNamesAnotherPerson(input.control) &&
-          PROFILE_TEXT_FIELD_LABELS[candidate.sourceId]?.includes(
-            normalizeFormQuestionPrompt(input.control.label),
-          ))) &&
-      (!isProfileUrlSource(candidate.sourceId) ||
-        !wantsProfileUrl(input.control) ||
-        fullProfileUrl(candidate.value) !== null) &&
-      formatProfileUrlAnswer(
-        input.control,
-        candidate.value,
-        candidate.sourceId,
-      ) === formatProfileUrlAnswer(input.control, wanted, candidate.sourceId) &&
-      // A bare username is no answer to a field that asks for the address.
-      (wantsUsername || !candidate.sourceId.endsWith("#username")),
-  );
-  if (!fact) return null;
-  // A short value such as Yes, No or a number answers whatever it is put
-  // against: a saved answer skips the check only on its own question, saved
-  // pay only on a pay question, and total years of experience never.
-  if (
-    !isDistinctive(input.value) &&
-    !shortFactFitsControl(fact.sourceId, input.control, input.sources)
-  ) {
-    return null;
-  }
-  return {
-    value: formatProfileUrlAnswer(input.control, wanted, fact.sourceId),
-    kind: input.control.questionKind,
-    sourceKind: fact.sourceKind,
-    sourceId: fact.sourceId,
-    provenanceLabel: fact.provenanceLabel,
-    groundedIn: [fact.provenanceLabel],
-  };
 }
 
 /**
@@ -629,19 +457,4 @@ export function isAnswerFromThisApplication(
     (application.applicationRecordId &&
       scope.applicationRecordId === application.applicationRecordId),
   );
-}
-
-function shortFactFitsControl(
-  sourceId: string,
-  control: ApplyFormControl,
-  sources: ApplyAnswerSources,
-): boolean {
-  // Total years of experience is not the years asked about a given skill.
-  if (sourceId === "profile.yearsExperience") return false;
-  // Saved short answers belong to their own question.
-  if (sourceId.startsWith("answerLibrary.")) {
-    const saved = savedAnswerForQuestion(control, sources.reusableAnswers);
-    return saved !== null && sourceId === `answerLibrary.${saved.id}`;
-  }
-  return true;
 }

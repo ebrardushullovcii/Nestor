@@ -7,8 +7,8 @@ import {
 import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { runApplyAgent } from "./apply-agent";
-import { buildApplyFormObservation } from "./page-hands";
 import { manualEntryPressFor } from "./fill-presses";
+import { buildApplyFormObservation } from "./page-hands";
 import type { ApplyAgentConfig, ApplyPageHands } from "./types";
 
 function field(index: number, label: string): RawApplyControl {
@@ -168,58 +168,6 @@ function client(
   };
 }
 
-test("a document handoff fills known name and email fields before asking only for the missing file", async () => {
-  const { raw, input } = setup([
-    { ...field(0, "Resume / CV"), inputType: "file", accept: ".docx" },
-    field(1, "First Name"),
-    field(2, "Last Name"),
-    { ...field(3, "Email"), inputType: "email" },
-  ]);
-  input.sources.documents = [
-    {
-      id: "cv",
-      kind: "resume",
-      label: "Synthetic CV",
-      fileName: "synthetic.pdf",
-      mimeType: "application/pdf",
-      loadBytes: () => Promise.resolve(new Uint8Array([1])),
-    },
-  ];
-  const result = await runApplyAgent(
-    input,
-    client([
-      { name: "upload", args: { ref: "c0", documentId: "cv" } },
-      {
-        name: "fill_fields",
-        args: {
-          fields: [
-            { tool: "type", ref: "c1", text: "Jamie" },
-            { tool: "type", ref: "c2", text: "Rivers" },
-            { tool: "type", ref: "c3", text: "jamie@example.test" },
-          ],
-        },
-      },
-      {
-        name: "finish",
-        args: { reason: "Only the file needs the person.", needsPerson: true },
-      },
-    ]),
-  );
-  expect(raw.controls.slice(1).map((entry) => entry.value)).toEqual([
-    "Jamie",
-    "Rivers",
-    "jamie@example.test",
-  ]);
-  expect(
-    result.pauses
-      .flatMap(
-        (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
-      )
-      .map((q) => q.prompt),
-  ).toEqual(["Resume / CV"]);
-  expect(input.hands.clickAction).not.toHaveBeenCalled();
-});
-
 test.each([false, true])(
   "manual entry remains fillable after a refused city picker (earlier refusal: %s)",
   async (earlierRefusal) => {
@@ -320,45 +268,6 @@ test.each([false, true])(
     expect(input.hands.clickAction).not.toHaveBeenCalled();
   },
 );
-
-test("reopening an earlier handoff rechecks known identity instead of asking it again", async () => {
-  const { raw, input } = setup([
-    field(0, "First Name"),
-    field(1, "Last Name"),
-    { ...field(2, "Email"), inputType: "email" },
-  ]);
-  input.replay = { answers: [], attachments: [], path: [], formUrl: raw.url! };
-  input.initialUnansweredPickerQuestions = raw.controls.map((control) => ({
-    prompt: control.label,
-    options: [],
-  }));
-  const result = await runApplyAgent(
-    input,
-    client([
-      {
-        name: "fill_fields",
-        args: {
-          fields: [
-            { tool: "type", ref: "c0", text: "Jamie" },
-            { tool: "type", ref: "c1", text: "Rivers" },
-            { tool: "type", ref: "c2", text: "jamie@example.test" },
-          ],
-        },
-      },
-      {
-        name: "finish",
-        args: { reason: "The form is complete.", needsPerson: false },
-      },
-    ]),
-  );
-  expect(raw.controls.map((control) => control.value)).toEqual([
-    "Jamie",
-    "Rivers",
-    "jamie@example.test",
-  ]);
-  expect(result.pauses).toEqual([]);
-  expect(input.hands.clickAction).not.toHaveBeenCalled();
-});
 
 test("manual-entry wording never authorizes a submit or a control outside the form", () => {
   const { raw } = setup([field(0, "City")]);

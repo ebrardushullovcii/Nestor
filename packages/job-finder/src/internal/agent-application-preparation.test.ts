@@ -2,28 +2,28 @@ import type { LLMClient } from "@nestor/browser-agent";
 import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
 import * as browserAgent from "@nestor/browser-agent";
 import {
-  ApplicationAuthorityEnvelopeSchema,
   AiBehaviorPreferenceSchema,
+  ApplicationAuthorityEnvelopeSchema,
   ApplicationReviewCardSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
 } from "@nestor/contracts";
 import { createHash } from "node:crypto";
 
-import type { ApplySubmissionHandoff } from "./apply-submission-handoff";
+import type { ExecuteApplicationFlowInput } from "@nestor/browser-runtime";
 import type { ApplyPageSession, RawApplyPage } from "@nestor/contracts";
 import { CandidateProfileSchema, SavedJobSchema } from "@nestor/contracts";
-import type { ExecuteApplicationFlowInput } from "@nestor/browser-runtime";
 import { describe, expect, test, vi } from "vitest";
+import type { ApplySubmissionHandoff } from "./apply-submission-handoff";
 
 import {
+  applyingConversationKey,
   buildApplyReviewCard,
-  mergeApplyReviewCards,
   createApplyFormPreparer as createProductionApplyFormPreparer,
+  mergeApplyReviewCards,
   resolveApplicationDocumentMimeType,
   resolveApplicationPreparationTarget,
   resolveApplySiteLabel,
   runAgentApplicationPreparation as runProductionApplicationPreparation,
-  applyingConversationKey,
   toApplyDocuments,
   toApplyLlmClient,
 } from "./agent-application-preparation";
@@ -1381,7 +1381,10 @@ describe("questions and failures reaching the record", () => {
       chatWithTools: () => {
         calls += 1;
         const name = "finish";
-        const args = { reason: "Nothing left to fill in" };
+        const args = {
+          reason: "The requested personal facts are missing.",
+          needsPerson: true,
+        };
         return Promise.resolve({
           toolCalls: [
             {
@@ -1592,11 +1595,12 @@ describe("a real application form reaching the record", () => {
     let calls = 0;
     return {
       chatWithTools: () => {
-        const name = calls < count ? "answer_control" : "finish";
-        const args =
-          calls < count
-            ? { ref: `c${calls}`, freeTextAnswer: "Because the work matters." }
-            : { reason: "Nothing left to fill in" };
+        const name = "finish";
+        const args = {
+          reason: "These personal facts are missing.",
+          needsPerson: true,
+          forPerson: Array.from({ length: count }, (_, index) => `c${index}`),
+        };
         calls += 1;
         return Promise.resolve({
           toolCalls: [
@@ -1872,51 +1876,6 @@ test("a required cover letter with Never is a named file handoff", async () => {
   expect(result.blocker?.userActionKind).toBe("manual_upload");
   expect(result.detail).toContain("settings");
   expect(result.nextActionLabel).toBe("Add the required cover letter");
-});
-
-test("a required cover letter and text questions share an answerable handoff", async () => {
-  const page = rawPage("Application");
-  page.controls = [
-    {
-      ...page.controls[0]!,
-      inputType: "file",
-      label: "Cover letter",
-      required: true,
-      value: "",
-    },
-  ];
-  page.controls.push({
-    ...page.controls[0]!,
-    index: 1,
-    inputType: "text",
-    label: "Portfolio URL",
-    required: true,
-    value: "",
-  });
-  const input = executionInput();
-  input.settings.aiBehavior = AiBehaviorPreferenceSchema.parse({
-    applying: { coverLetterPolicy: "never" },
-  });
-  const result = await runAgentApplicationPreparation({
-    session: { ...session(), readPage: () => Promise.resolve(page) },
-    executionInput: input,
-    llmClient: modelThatFinishes(),
-    startedAt: "2026-09-14T10:00:00.000Z",
-    siteLabel: "the careers site",
-  });
-  expect(result.state).toBe("paused");
-  expect(result.questions[0]).toMatchObject({
-    prompt: "Cover letter",
-    answerControlType: "file",
-  });
-  expect(result.blocker?.userActionKind).toBeNull();
-  expect(result.questions.map((question) => question.prompt)).toContain(
-    "Portfolio URL",
-  );
-  expect(result.detail).toContain("settings");
-  expect(result.nextActionLabel).toBe(
-    "Add the required files and answer the remaining questions",
-  );
 });
 
 test("a refreshed review drops an answer and attachment cleared on the live form", () => {
@@ -2283,7 +2242,7 @@ test.each(["file", "text"] as const)(
                 fields: [
                   delivery === "file"
                     ? { tool: "upload", ref: "c0", documentId: "letter" }
-                    : { tool: "type", ref: "c0", text: "Model rewrite" },
+                    : { tool: "type", ref: "c0", text: "letter" },
                 ],
               }
             : { reason: "Send application not pressed per fill-only mode" };
@@ -2579,8 +2538,8 @@ test.each([false, true])(
       answers: [
         expect.objectContaining({
           answer: "Yes",
-          source: "your matching saved answer or profile fact",
-          sourceId: "answerLibrary.saved_declaration",
+          source: "chosen for this application",
+          sourceId: "chosen.c0",
         }),
       ],
     });

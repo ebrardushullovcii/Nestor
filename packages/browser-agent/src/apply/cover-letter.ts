@@ -1,8 +1,8 @@
-import { applicationFacts } from "./application-facts";
 import type {
   CandidateProfile,
   CoverLetterPreference,
 } from "@nestor/contracts";
+import { applicationFacts } from "./application-facts";
 
 import { normalizeSignal } from "./control-classification";
 import type { ApplyAnswerSources, ApplyFormControl } from "./types";
@@ -196,10 +196,10 @@ export function buildCoverLetterRequest(input: {
       ? "- A letter the person wrote themselves is included below as an example of how they sound. Match the voice, not the content."
       : null,
     "",
-    `Posting:\n${sources.posting.description.slice(0, 6_000)}`,
+    `Posting:\n${sources.posting.description}`,
     "",
     resumeText
-      ? `Resume going out with this application:\n${resumeText.trim().slice(0, 8_000)}`
+      ? `Resume going out with this application:\n${resumeText.trim()}`
       : null,
     "",
     `Today: ${input.today ?? new Date().toISOString().slice(0, 10)}`,
@@ -208,7 +208,7 @@ export function buildCoverLetterRequest(input: {
       ? `Saved work and location preferences:\n${JSON.stringify(sources.preferences)}`
       : null,
     preference.sample
-      ? `\nTheir own letter, for voice only:\n${preference.sample.slice(0, 4_000)}`
+      ? `\nTheir own letter, for voice only:\n${preference.sample}`
       : null,
     "",
     "Return only the letter text.",
@@ -217,16 +217,4 @@ export function buildCoverLetterRequest(input: {
     .join("\n");
 
   return { prompt, groundedIn, language };
-}
-
-/** Rejects text that would embarrass the person if it went out as written. */
-export function looksLikeUsableLetter(text: string): boolean {
-  const trimmed = text.trim();
-  if (trimmed.length < 200) {
-    return false;
-  }
-  // Anything a template would have left behind for a person to fill in.
-  return !/\[[^\]]{2,40}\]|\{\{|<insert|xxxx|lorem ipsum|your name here/iu.test(
-    trimmed,
-  );
 }

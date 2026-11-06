@@ -3,6 +3,8 @@ import { CandidateAssetKindSchema } from "./candidate-assets";
 
 /** Evidence for opening an answer task, preserved across attempts and restarts. */
 export const ApplicationQuestionAskReasonSchema = z.object({
+  // source_rejected is retained for stored attempts from before ADR 0079.
+  // Application answers are now the model's decision, without a code verdict.
   kind: z.enum(["no_source", "source_rejected", "page_refused"]),
   check: z.string().min(1).optional(),
   detail: z.string().min(1).max(4000),
