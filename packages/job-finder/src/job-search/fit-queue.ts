@@ -31,7 +31,6 @@ export function createFitQueue(
   const pending: number[] = [];
   const seen = new Set<number>();
   const inFlight = new Set<number>();
-  const retried = new Set<number>();
   const active = new Set<Promise<void>>();
   const cutoff =
     !settings || settings.postedWithin === "any"
@@ -39,10 +38,7 @@ export function createFitQueue(
       : Date.now() - (settings.postedWithin === "week" ? 7 : 30) * 86_400_000;
   let scored = 0,
     judging = 0,
-    drainers = 0,
-    // A batch with no answers (usually the provider's rate limit) halves the
-    // requests in flight; each answered batch adds one back, up to the limit.
-    ceiling = limit;
+    drainers = 0;
   let deferred = false;
   let partialTimer: ReturnType<typeof setTimeout> | null = null;
   const clearTimer = () => {
@@ -51,7 +47,8 @@ export function createFitQueue(
   };
   signal.addEventListener("abort", clearTimer, { once: true });
   const liveContext = async () => {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    while (true) {
+      signal.throwIfAborted();
       const revision = deps.store.fitRevision();
       const current = await abortable(deps.readContext(), signal);
       if (revision !== deps.store.fitRevision()) continue;
@@ -64,16 +61,6 @@ export function createFitQueue(
           true,
       };
     }
-    reportSelfLimitHit({
-      limit: "fit_context_retries",
-      kind: "retry",
-      value: 3,
-      where: "job-finder/fitQueue/liveContext",
-    });
-    deferred = true;
-    throw new Error(
-      "Your profile is changing; fit will be checked again shortly.",
-    );
   };
   const eligible = (job: JobDetail | null): job is JobDetail =>
     Boolean(
@@ -95,27 +82,6 @@ export function createFitQueue(
     Math.ceil(
       (job.description.length + job.title.length + job.location.length) / 3.5,
     ) + 500;
-
-  /** Unanswered listings get one more try in this pass, at the queue's end. */
-  const retry = (jobs: readonly JobDetail[], nothingAnswered: boolean) => {
-    if (nothingAnswered) ceiling = Math.max(1, Math.ceil(ceiling / 2));
-    const final: JobDetail[] = [];
-    for (const job of jobs) {
-      if (retried.has(job.id)) {
-        reportSelfLimitHit({
-          limit: "unanswered_fit_retries",
-          kind: "retry",
-          value: 1,
-          where: "job-finder/fitQueue/retry",
-        });
-        final.push(job);
-      } else {
-        retried.add(job.id);
-        pending.push(job.id);
-      }
-    }
-    return final;
-  };
 
   const judge = async (jobs: JobDetail[]) => {
     for (const job of jobs) inFlight.add(job.id);
@@ -168,29 +134,18 @@ export function createFitQueue(
         );
       } catch (error) {
         signal.throwIfAborted();
-        if (
-          retry(
-            jobs.filter((job) => !answered.has(job.id)),
-            answered.size === 0,
-          ).length
-        )
-          throw error;
-        return;
+        // Provider transports own recoverable failures. Surface a real request
+        // error; unscored jobs remain durable in the store for continuation.
+        throw error;
       }
       signal.throwIfAborted();
       await persist(updates);
-      if (updates.length && ceiling < limit) ceiling++;
       // Superseded returned judgments are not technical omissions.
       for (const update of updates) answered.add(update.id);
-      // A superseded input is normal background work, not a model failure.
-      if (
-        retry(
-          jobs.filter((job) => !answered.has(job.id)),
-          updates.length === 0,
-        ).length
-      )
-        onError(
-          new Error("Some jobs are still waiting for a current fit score."),
+      const missing = jobs.filter((job) => !answered.has(job.id));
+      if (missing.length)
+        throw new Error(
+          `Fit response omitted job ids: ${missing.map((job) => job.id).join(", ")}. Their listings remain saved and unscored.`,
         );
     } finally {
       for (const job of jobs) inFlight.delete(job.id);
@@ -251,14 +206,14 @@ export function createFitQueue(
       pending.length = 0;
       return;
     }
-    if (pending.length && active.size >= Math.min(limit, ceiling))
+    if (pending.length && active.size >= limit)
       reportSelfLimitHit({
         limit: "fit_concurrency",
         kind: "concurrency",
-        value: Math.min(limit, ceiling),
+        value: limit,
         where: "job-finder/fitQueue/pump",
       });
-    while (active.size < Math.min(limit, ceiling) && pending.length) {
+    while (active.size < limit && pending.length) {
       const jobs = takeBatch(drainers > 0);
       if (!jobs) break;
       const task = judge(jobs)

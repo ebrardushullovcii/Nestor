@@ -44,13 +44,19 @@ function createToolClient(
       function: { name: string; arguments: string };
     }>;
   }>,
+  stop?: AbortController,
 ): AgentCapableJobFinderAiClient {
   const deterministic = createDeterministicJobFinderAiClient();
   let index = 0;
   return {
     ...deterministic,
     chatWithTools() {
-      return Promise.resolve(replies[index++] ?? { toolCalls: [] });
+      const reply = replies[index++];
+      if (!reply) {
+        if (!stop) throw new Error("Scripted model has no reply left");
+        stop.abort();
+      }
+      return Promise.resolve(reply ?? { toolCalls: [] });
     },
   };
 }
@@ -214,19 +220,22 @@ describe("tool-using AI capabilities", () => {
   test.each(["not JSON", "[]", "null", "42"])(
     "an encoded proposal must still be a JSON object (%s)",
     async (proposal) => {
+      const stop = new AbortController();
       const renderPreview = vi.fn(() => cleanPreview());
       const client: AgentCapableJobFinderAiClient = {
         ...createDeterministicJobFinderAiClient(),
-        chatWithTools: () =>
-          Promise.resolve({
+        chatWithTools: () => {
+          stop.abort(new Error("Stopped"));
+          return Promise.resolve({
             toolCalls: [composeCall("invalid_encoded_proposal", { proposal })],
-          }),
+          });
+        },
       };
       await expect(
         runResumeGenerationAgentTask({
           client,
           substantivePrompt: "Write a grounded resume.",
-          request: { ...baseRequest(), renderPreview },
+          request: { ...baseRequest(), renderPreview, signal: stop.signal },
         }),
       ).rejects.toThrow();
       expect(renderPreview).not.toHaveBeenCalled();
@@ -891,69 +900,6 @@ describe("tool-using AI capabilities", () => {
     );
   });
 
-  test("resume generation keeps the last cleanly rendered AI draft when the call budget ends mid-revision", async () => {
-    let renders = 0;
-    let turn = 0;
-    const client: AgentCapableJobFinderAiClient = {
-      ...createDeterministicJobFinderAiClient(),
-      chatWithTools() {
-        turn += 1;
-        const proposal = (revision: number) => ({
-          proposal: {
-            summary: {
-              text: "Builds reliable automation.",
-              evidenceRefs: ["profile:summary"],
-            },
-            revision,
-          },
-        });
-        // The model composes a clean draft and, in the same turn, a revision
-        // the check flags; it keeps revising until the budget ends.
-        return Promise.resolve({
-          toolCalls:
-            turn === 1
-              ? [
-                  composeCall("clean", proposal(1)),
-                  composeCall("revise", proposal(2)),
-                ]
-              : [composeCall(`revise_${turn}`, proposal(turn + 1))],
-        });
-      },
-    };
-
-    const result = await runResumeGenerationAgentTask({
-      client,
-      substantivePrompt: "Aggressive mode substantive resume instructions.",
-      request: {
-        ...baseRequest(),
-        searchPreferences: {
-          ...createPreferences(),
-          tailoringMode: "aggressive",
-        },
-        renderPreview: () =>
-          ++renders === 1 ? cleanPreview() : flaggedPreview(),
-      },
-    });
-
-    expect(result.summary).toContain("Builds reliable automation");
-  });
-
-  test("resume generation rejects an incomplete agent task instead of grading an empty draft", async () => {
-    const client = createToolClient(
-      Array.from({ length: 8 }, () => ({ toolCalls: [] })),
-    );
-
-    await expect(
-      runResumeGenerationAgentTask({
-        client,
-        substantivePrompt: "Balanced mode substantive resume instructions.",
-        request: baseRequest(),
-      }),
-    ).rejects.toThrow(
-      "Resume generation agent stopped before completing (no_progress).",
-    );
-  });
-
   const templateRequest = (
     renderPreview: (input: {
       templateId: string;
@@ -1465,21 +1411,64 @@ describe("tool-using AI capabilities", () => {
     vi.setSystemTime(0);
     try {
       const scripted = createToolClient([
-        { toolCalls: [{ id: "read", type: "function", function: { name: "read_resume_context", arguments: "{}" } }] },
-        { toolCalls: [
-          { id: "reply", type: "function", function: { name: "set_response_content", arguments: JSON.stringify({ content: "The saved wording is supported; no edit is needed." }) } },
-          { id: "finish", type: "function", function: { name: "finish_task", arguments: "{}" } },
-        ] },
+        {
+          toolCalls: [
+            {
+              id: "read",
+              type: "function",
+              function: { name: "read_resume_context", arguments: "{}" },
+            },
+          ],
+        },
+        {
+          toolCalls: [
+            {
+              id: "reply",
+              type: "function",
+              function: {
+                name: "set_response_content",
+                arguments: JSON.stringify({
+                  content: "The saved wording is supported; no edit is needed.",
+                }),
+              },
+            },
+            {
+              id: "finish",
+              type: "function",
+              function: { name: "finish_task", arguments: "{}" },
+            },
+          ],
+        },
       ]);
-      const client: AgentCapableJobFinderAiClient = { ...scripted, chatWithTools: (...args) => {
-        vi.setSystemTime(Date.now() + 200_000);
-        return scripted.chatWithTools(...args);
-      } };
-      const draft = ResumeDraftSchema.parse({ id: "slow_edit", jobId: "job", templateId: "classic_ats", status: "draft", sections: [], createdAt: "2026-11-06T00:00:00.000Z", updatedAt: "2026-11-06T00:00:00.000Z" });
-      const reply = await runResumeEditAgentTask({ client, request: { draft, job: createJobPosting(), request: "Check this wording" } });
+      const client: AgentCapableJobFinderAiClient = {
+        ...scripted,
+        chatWithTools: (...args) => {
+          vi.setSystemTime(Date.now() + 200_000);
+          return scripted.chatWithTools(...args);
+        },
+      };
+      const draft = ResumeDraftSchema.parse({
+        id: "slow_edit",
+        jobId: "job",
+        templateId: "classic_ats",
+        status: "draft",
+        sections: [],
+        createdAt: "2026-11-06T00:00:00.000Z",
+        updatedAt: "2026-11-06T00:00:00.000Z",
+      });
+      const reply = await runResumeEditAgentTask({
+        client,
+        request: {
+          draft,
+          job: createJobPosting(),
+          request: "Check this wording",
+        },
+      });
       expect(reply.executionReceipt?.stopReason).toBe("completed");
       expect(reply.executionReceipt?.providerCalls).toBe(2);
-    } finally { vi.useRealTimers(); }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("Guided Edits lets the model replace section text without manufacturing patch metadata", async () => {
@@ -2011,33 +2000,38 @@ describe("tool-using AI capabilities", () => {
   });
 
   test("Guided Edits keeps the newest changes that passed when a run stops mid-rewording", async () => {
-    const client = createToolClient([
-      {
-        toolCalls: [
-          toolCall("clean", "replace_resume_section_text", {
-            sectionId: "summary",
-            newText: "Frontend engineer who builds React design systems.",
-          }),
-          toolCall("check_clean", "validate_resume_draft"),
-        ],
-      },
-      {
-        toolCalls: [
-          toolCall("flagged", "replace_resume_section_text", {
-            sectionId: "summary",
-            newText: "Frontend engineer who cut costs by 60% with AWS.",
-          }),
-          toolCall("check_flagged", "validate_resume_draft"),
-        ],
-      },
-      ...Array.from({ length: 8 }, (_, index) => ({
-        toolCalls: [toolCall(`read_${index}`, "read_resume_context")],
-      })),
-    ]);
+    const stop = new AbortController();
+    const client = createToolClient(
+      [
+        {
+          toolCalls: [
+            toolCall("clean", "replace_resume_section_text", {
+              sectionId: "summary",
+              newText: "Frontend engineer who builds React design systems.",
+            }),
+            toolCall("check_clean", "validate_resume_draft"),
+          ],
+        },
+        {
+          toolCalls: [
+            toolCall("flagged", "replace_resume_section_text", {
+              sectionId: "summary",
+              newText: "Frontend engineer who cut costs by 60% with AWS.",
+            }),
+            toolCall("check_flagged", "validate_resume_draft"),
+          ],
+        },
+        ...Array.from({ length: 8 }, (_, index) => ({
+          toolCalls: [toolCall(`read_${index}`, "read_resume_context")],
+        })),
+      ],
+      stop,
+    );
 
     const reply = await runResumeEditAgentTask({
       client,
       request: {
+        signal: stop.signal,
         draft: createSummaryDraft(),
         job: createJobPosting(),
         request: "Make the summary fit this job better.",

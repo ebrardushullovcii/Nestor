@@ -64,7 +64,7 @@ test.each(["append", "replace"] as const)(
     const result = await collectRenderedInventory({
       ...input,
       source: { id: "s", label: "Example" },
-      maxPages: 8,
+
       allowUrl: () => true,
       onPage: (cards) => {
         saved.push(cards.map((c) => Number(c.url.split("/").at(-1))));
@@ -82,13 +82,13 @@ test("a failed next-batch wait keeps early cards and an honest continuation", as
   const result = await collectRenderedInventory({
     ...setup("append", true),
     source: { id: "s", label: "Example" },
-    maxPages: 8,
+
     allowUrl: () => true,
     onPage: () => Promise.resolve(),
   });
   expect(result?.complete).toBe(false);
   expect(result?.cards).toHaveLength(1);
-  expect(result?.notes.join(" ")).toContain("Nestor's wait");
+  expect(result?.notes.join(" ")).toContain("no new cards");
   expect(result?.notes.join(" ")).toContain("Continue unfinished sites");
 });
 
@@ -106,7 +106,10 @@ test("a temporarily disabled loading button is not completion evidence", async (
     );
   input.hands.observe = async () => {
     const view = await observe();
-    if (pending) for (const action of view.actions) action.disabled = true;
+    if (pending) {
+      view.loading = true;
+      for (const action of view.actions) action.disabled = true;
+    }
     return view;
   };
   input.hands.clickElement = () => {
@@ -122,7 +125,7 @@ test("a temporarily disabled loading button is not completion evidence", async (
   const result = await collectRenderedInventory({
     ...input,
     source: { id: "s", label: "Example" },
-    maxPages: 8,
+
     allowUrl: () => true,
     onPage: () => Promise.resolve(),
   });
@@ -142,11 +145,38 @@ test("cancellation after a saved batch preserves the callback rather than transc
       ...setup("append"),
       signal: controller.signal,
       source: { id: "s", label: "Example" },
-      maxPages: 8,
+
       allowUrl: () => true,
       onPage: saved,
     }),
   ).rejects.toThrow();
   expect(saved).toHaveBeenCalledOnce();
   expect(saved.mock.calls[0]?.[0]).toHaveLength(1);
+});
+
+test("an unchanged disabled More without a loading indicator returns page facts", async () => {
+  const input = setup("append");
+  const observe = input.hands.observe;
+  let clicked = false;
+  input.hands.clickElement = () => {
+    clicked = true;
+    return Promise.resolve({ ok: true, observedValue: "clicked" });
+  };
+  input.hands.observe = async () => {
+    const view = await observe();
+    if (clicked) for (const action of view.actions) action.disabled = true;
+    return view;
+  };
+  const wait = vi.fn();
+  input.hands.wait = wait;
+  const result = await collectRenderedInventory({
+    ...input,
+    source: { id: "s", label: "Example" },
+    allowUrl: () => true,
+    onPage: () => Promise.resolve(),
+  });
+  expect(result?.complete).toBe(false);
+  expect(result?.cards).toHaveLength(1);
+  expect(result?.notes.join(" ")).toContain("1 listings; More is disabled");
+  expect(wait).not.toHaveBeenCalled();
 });

@@ -498,35 +498,11 @@ describe("agent task runtime", () => {
       ],
       validate: () => [],
       buildContext: () => ({}),
-      noProgressLimit: 1,
     });
 
     expect(executed).toBe(false);
     expect(result.receipt.stopReason).toBe("safety_boundary");
     expect(result.receipt.toolReceipts[0]?.failureKind).toBe("safety_boundary");
-  });
-
-  test("stops on its provider-call cost guard without pretending it completed", async () => {
-    const result = await runAgentTask({
-      taskId: "task_cost_guard",
-      capability: "bounded_task",
-      systemPrompt: "Use a tool.",
-      state: {},
-      initialDraft: {},
-      model: {
-        chat() {
-          return Promise.resolve({ content: "still thinking" });
-        },
-      },
-      tools: [],
-      validate: () => [],
-      buildContext: () => ({}),
-      providerCallBudget: 1,
-      noProgressLimit: 5,
-    });
-
-    expect(result.receipt.providerCalls).toBe(1);
-    expect(result.receipt.stopReason).toBe("cost_budget");
   });
 
   test("keeps the assistant tool-call message when the recent tail contains many tool results", async () => {
@@ -785,13 +761,14 @@ test("Stop interrupts an uncooperative typed-task tool and starts no later step"
   expect(after).not.toHaveBeenCalled();
 });
 
-test("Stop during provider backoff returns a cancelled receipt without retrying", async () => {
-  vi.useFakeTimers();
-  try {
-    const controller = new AbortController();
-    const chat = vi.fn(() => Promise.reject(new Error("Network reset")));
-    const pending = runAgentTask({
-      taskId: "stop-backoff",
+test("a provider request failure returns its cause to the deciding caller without replay", async () => {
+  const error = new Error("Network reset", {
+    cause: new Error("ECONNREFUSED"),
+  });
+  const chat = vi.fn(() => Promise.reject(error));
+  await expect(
+    runAgentTask({
+      taskId: "request-failure",
       capability: "synthetic",
       systemPrompt: "Finish",
       state: {},
@@ -800,15 +777,7 @@ test("Stop during provider backoff returns a cancelled receipt without retrying"
       tools: [],
       validate: () => [],
       buildContext: () => ({}),
-      signal: controller.signal,
-    });
-    await vi.advanceTimersByTimeAsync(1);
-    expect(vi.getTimerCount()).toBe(1);
-    controller.abort();
-    expect((await pending).receipt.stopReason).toBe("cancelled");
-    expect(chat).toHaveBeenCalledOnce();
-    expect(vi.getTimerCount()).toBe(0);
-  } finally {
-    vi.useRealTimers();
-  }
+    }),
+  ).rejects.toBe(error);
+  expect(chat).toHaveBeenCalledOnce();
 });

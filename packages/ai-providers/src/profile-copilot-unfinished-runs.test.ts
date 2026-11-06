@@ -2,10 +2,6 @@ import { describe, expect, test } from "vitest";
 
 import { createJobFinderAiClientFromEnvironment } from "./index";
 import {
-  PROFILE_ASSISTANT_UNFINISHED_MESSAGE,
-  ProfileCopilotUnfinishedError,
-} from "./openai-compatible";
-import {
   createEnvironment,
   createPreferences,
   createProfile,
@@ -72,15 +68,13 @@ function revise(request: string) {
 }
 
 describe("Profile Assistant runs that stop before finishing", () => {
-  test("keeps the cards a run prepared before it stopped", async () => {
+  test("keeps prepared cards through more than the former 120-turn no-progress ceiling", async () => {
     // Live, a run that circled after proposing was thrown away whole and the
     // built-in editor answered with no card.
     const mock = mockToolTurns([
       [addStaffDesigner],
-      [readContext],
-      [readContext],
-      [readContext],
-      [readContext],
+      ...Array.from({ length: 130 }, () => [readContext]),
+      [finish],
     ]);
     try {
       const reply = await revise("Add Staff Designer to my target roles.");
@@ -90,16 +84,16 @@ describe("Profile Assistant runs that stop before finishing", () => {
         operation: "replace_profile_list_fields",
         value: { targetRoles: ["Staff Designer"] },
       });
-      expect(reply.executionReceipt?.stopReason).toBe("no_progress");
+      expect(reply.executionReceipt?.stopReason).toBe("completed");
       expect(reply.executionReceipt?.fallbackUsed).toBe(false);
       // No second run once cards exist.
-      expect(mock.callCount()).toBe(5);
+      expect(mock.callCount()).toBe(132);
     } finally {
       mock.restore();
     }
   });
 
-  test("starts one fresh run when the first stopped with nothing prepared", async () => {
+  test("continues the same run until the model prepares its change and finishes", async () => {
     const mock = mockToolTurns([
       [readContext],
       [readContext],
@@ -115,24 +109,6 @@ describe("Profile Assistant runs that stop before finishing", () => {
       expect(reply.executionReceipt?.fallbackUsed).toBe(false);
       expect(reply.patchGroups).toHaveLength(1);
       expect(mock.callCount()).toBe(6);
-    } finally {
-      mock.restore();
-    }
-  });
-
-  test("fails with a plain sentence instead of a non-answer when neither run nor the built-in editor prepared anything", async () => {
-    const mock = mockToolTurns([[readContext]]);
-    try {
-      const attempt = revise("Tidy up the part we talked about earlier.");
-
-      await expect(attempt).rejects.toBeInstanceOf(
-        ProfileCopilotUnfinishedError,
-      );
-      await expect(attempt).rejects.toThrow(
-        PROFILE_ASSISTANT_UNFINISHED_MESSAGE,
-      );
-      // Two runs of four turns each, never a third.
-      expect(mock.callCount()).toBe(8);
     } finally {
       mock.restore();
     }

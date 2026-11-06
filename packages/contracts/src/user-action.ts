@@ -388,14 +388,6 @@ export const UserActionRequestSchema = z
   })
   .strict()
   .superRefine((request, context) => {
-    if (request.attemptCount > request.maxAttempts) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["attemptCount"],
-        message: "Attempt count cannot exceed max attempts.",
-      });
-    }
-
     if (request.state === "resolved" && request.resolvedAt === null) {
       context.addIssue({
         code: z.ZodIssueCode.custom,

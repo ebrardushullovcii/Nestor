@@ -269,27 +269,9 @@ export async function readWholeList(
       if (found !== null || !scroller) return done(true, found);
       scroller.scrollTop = 0;
       await wait(120);
-      for (let step = 0; step < input.maxSteps; step += 1) {
+      while (true) {
         found = collect();
         if (found !== null) return done(true, found);
-        if (seen.size >= input.maxOptions) {
-          {
-            try {
-              console.debug(
-                "__nestor_self_limit__ " +
-                  JSON.stringify({
-                    limit: "picker_options",
-                    kind: "count",
-                    value: input.maxOptions,
-                    where: "browser-runtime/readWholeList",
-                  }),
-              );
-            } catch {
-              /* A page-owned console cannot change the operation. */
-            }
-          }
-          return done(false, null);
-        }
         const atEnd =
           scroller.scrollTop + scroller.clientHeight >=
           scroller.scrollHeight - 2;
@@ -310,32 +292,20 @@ export async function readWholeList(
             return done(!loading, null);
           }
         }
+        const beforeScroll = scroller.scrollTop;
         scroller.scrollTop += Math.max(scroller.clientHeight * 0.8, 40);
         await wait(120);
-      }
-      {
-        try {
-          console.debug(
-            "__nestor_self_limit__ " +
-              JSON.stringify({
-                limit: "picker_scroll_steps",
-                kind: "steps",
-                value: input.maxSteps,
-                where: "browser-runtime/readWholeList",
-              }),
-          );
-        } catch {
-          /* A page-owned console cannot change the operation. */
+        if (scroller.scrollTop === beforeScroll) {
+          // The requested scroll did not move. Return the observed options
+          // as incomplete so the model can choose another interaction.
+          return done(false, collect());
         }
       }
-      return done(false, null);
     },
     {
       wanted,
       loadingSource: LOADING_ROW.source,
       placeholderSource: PLACEHOLDER.source,
-      maxSteps: 80,
-      maxOptions: 1_500,
     },
   );
 }

@@ -15,9 +15,7 @@ import {
   resolveRouteKindForReuse,
 } from "./workspace-source-intelligence";
 import { setDiscoveryFeedExecutor } from "./discovery-feed-executor";
-import {
-  createSourceInstructionArtifact,
-} from "../test-fixtures";
+import { createSourceInstructionArtifact } from "../test-fixtures";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -575,79 +573,7 @@ describe("collectPublicProviderJobs", () => {
     );
   });
 
-  test("returns a clear timeout warning when the Greenhouse API hangs", async () => {
-    vi.spyOn(AbortSignal, "timeout").mockReturnValue(
-      new AbortController().signal,
-    );
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(
-      new DOMException("Timed out", "AbortError"),
-    );
-
-    const target = createGreenhouseTarget();
-    const intelligence = inferSourceIntelligenceFromTarget({
-      target,
-      currentArtifact: null,
-    });
-
-    const result = await collectPublicProviderJobs({
-      target,
-      artifact: { intelligence },
-      source: "target_site",
-      retryDelaysMs: [0, 0, 0],
-    });
-
-    expect(result.jobs).toEqual([]);
-    expect(result.warning).toBe(
-      "The job board did not answer in time; it is tried again on the next search.",
-    );
-    // A timed-out feed is asked once more, not on every retry.
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-  });
-
-  test("asks again through a dropped connection and keeps the feed", async () => {
-    const target = createGreenhouseTarget();
-    const intelligence = inferSourceIntelligenceFromTarget({
-      target,
-      currentArtifact: null,
-    });
-    const dropped = () =>
-      Promise.reject(
-        new TypeError("fetch failed", { cause: { code: "ECONNRESET" } }),
-      );
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementationOnce(dropped)
-      .mockImplementationOnce(dropped)
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            jobs: [
-              {
-                id: 4401,
-                title: "Platform Engineer",
-                absolute_url: "https://boards.greenhouse.io/acme/jobs/4401",
-                location: { name: "Remote" },
-                content: "<p>Build the platform.</p>",
-              },
-            ],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
-      );
-
-    const result = await collectPublicProviderJobs({
-      target,
-      artifact: { intelligence },
-      source: "target_site",
-      retryDelaysMs: [0, 0, 0],
-    });
-
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
-    expect(result.warning).toBeNull();
-    expect(result.jobs.map((job) => job.sourceJobId)).toEqual(["4401"]);
-  });
-
-  test("names the network failure when the connection never comes back", async () => {
+  test("returns a dropped connection to the deciding lane without holding the source", async () => {
     const target = createGreenhouseTarget();
     const intelligence = inferSourceIntelligenceFromTarget({
       target,
@@ -655,24 +581,19 @@ describe("collectPublicProviderJobs", () => {
     });
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementation(() =>
-        Promise.reject(
-          new TypeError("fetch failed", { cause: { code: "ENOTFOUND" } }),
-        ),
+      .mockRejectedValue(
+        new TypeError("fetch failed", { cause: new Error("ENOTFOUND") }),
       );
 
     const result = await collectPublicProviderJobs({
       target,
       artifact: { intelligence },
       source: "target_site",
-      retryDelaysMs: [0, 0],
     });
 
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(result.warning).toContain("could not be reached");
     expect(result.jobs).toEqual([]);
-    expect(result.warning).toBe(
-      "The job board could not be reached; it is tried again on the next search.",
-    );
   });
 
   test("does not ask a provider again after it answers with an error", async () => {
@@ -689,65 +610,11 @@ describe("collectPublicProviderJobs", () => {
       target,
       artifact: { intelligence },
       source: "target_site",
-      retryDelaysMs: [0, 0, 0],
     });
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(result.warning).toBe(
       "No job list was found at this board's address (HTTP 404). Check the address with Edit.",
-    );
-  });
-
-  test("returns a clear timeout warning when the Lever API hangs", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(
-      new DOMException("Timed out", "AbortError"),
-    );
-
-    const target = createLeverTarget();
-    const intelligence = inferSourceIntelligenceFromTarget({
-      target,
-      currentArtifact: null,
-    });
-
-    const result = await collectPublicProviderJobs({
-      target,
-      artifact: { intelligence },
-      source: "target_site",
-      retryDelaysMs: [0],
-    });
-
-    expect(result.jobs).toEqual([]);
-    expect(result.warning).toBe(
-      "The job board did not answer in time; it is tried again on the next search.",
-    );
-  });
-
-  test("ends a request that stays silent, after one more try", async () => {
-    const target = createGreenhouseTarget();
-    const intelligence = inferSourceIntelligenceFromTarget({
-      target,
-      currentArtifact: null,
-    });
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
-      (_url, init) =>
-        new Promise((_resolve, reject) => {
-          init?.signal?.addEventListener("abort", () =>
-            reject(new DOMException("Aborted", "AbortError")),
-          );
-        }),
-    );
-
-    const result = await collectPublicProviderJobs({
-      target,
-      artifact: { intelligence },
-      source: "target_site",
-      retryDelaysMs: [0, 0],
-      timeoutMs: 30,
-    });
-
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-    expect(result.warning).toBe(
-      "The job board did not answer in time; it is tried again on the next search.",
     );
   });
 
@@ -790,7 +657,7 @@ describe("collectPublicProviderJobs", () => {
       target,
       artifact: { intelligence },
       source: "target_site",
-      retryDelaysMs: [],
+
       timeoutMs: 30,
     });
     // Queue the quiet-time check, then deliver the response before its
@@ -1397,3 +1264,54 @@ describe("collectPublicProviderJobs", () => {
   });
 });
 
+test("public feed honors a server Retry-After beyond sixty seconds then reads the feed", async () => {
+  vi.useFakeTimers();
+  const target = createGreenhouseTarget();
+  const intelligence = inferSourceIntelligenceFromTarget({
+    target,
+    currentArtifact: null,
+  });
+  const fetchSpy = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(
+      new Response("busy", { status: 503, headers: { "retry-after": "120" } }),
+    )
+    .mockResolvedValueOnce(new Response('{"jobs":[]}', { status: 200 }));
+  const pending = collectPublicProviderJobs({
+    target,
+    artifact: { intelligence },
+    source: "target_site",
+  });
+  await vi.advanceTimersByTimeAsync(119999);
+  expect(fetchSpy).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(1);
+  expect((await pending).warning).toBeNull();
+  expect(fetchSpy).toHaveBeenCalledTimes(2);
+});
+
+test("Stop interrupts a public feed server wait", async () => {
+  vi.useFakeTimers();
+  const stop = new AbortController();
+  const target = createGreenhouseTarget();
+  const intelligence = inferSourceIntelligenceFromTarget({
+    target,
+    currentArtifact: null,
+  });
+  const fetchSpy = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(
+      new Response("busy", { status: 429, headers: { "retry-after": "120" } }),
+    );
+  const pending = expect(
+    collectPublicProviderJobs({
+      target,
+      artifact: { intelligence },
+      source: "target_site",
+      signal: stop.signal,
+    }),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  await vi.advanceTimersByTimeAsync(1);
+  stop.abort();
+  await pending;
+  expect(fetchSpy).toHaveBeenCalledOnce();
+});

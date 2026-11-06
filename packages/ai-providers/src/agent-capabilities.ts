@@ -1109,9 +1109,7 @@ export async function runResumeGenerationAgentTask(input: {
       }),
     ...(input.request.signal ? { signal: input.request.signal } : {}),
     // A clean proposal still finishes immediately. Let useful repairs finish.
-    providerCallBudget: Infinity,
-    noProgressLimit: 120,
-    emergencyCeiling: Infinity,
+
     // workingProposal above is the proposal; the replayed call is a note.
     draftShownInContext: true,
   });
@@ -1458,9 +1456,6 @@ export async function runResumeImportStageAgentTask(input: {
         }),
       }),
     ...(input.request.signal ? { signal: input.request.signal } : {}),
-    providerCallBudget: 40,
-    noProgressLimit: 6,
-    emergencyCeiling: 24,
   });
 
   return sanitizeStageCandidates(
@@ -1534,6 +1529,7 @@ export async function runProfileCopilotAgentTask(input: {
   const result = await runAgentTask({
     taskId: `profile_copilot_${Date.now()}`,
     capability: "profile_copilot",
+    ...(input.request.signal ? { signal: input.request.signal } : {}),
     systemPrompt: [
       "You are the Profile Copilot. Work through the typed tools instead of returning a final JSON object.",
       PROFILE_RESUME_APPROACH_VOCABULARY,
@@ -1885,7 +1881,6 @@ export async function runProfileCopilotAgentTask(input: {
           validationIssues,
         }),
       }),
-    noProgressLimit: 4,
   });
 
   return ProfileCopilotReplySchema.parse({
@@ -2226,6 +2221,7 @@ export async function runResumeEditAgentTask(input: {
     };
   };
   const result = await runAgentTask({
+    ...(input.request.signal ? { signal: input.request.signal } : {}),
     taskId: `resume_edit_${Date.now()}`,
     capability: "guided_resume_edits",
     systemPrompt: [
@@ -2743,9 +2739,6 @@ export async function runResumeEditAgentTask(input: {
           validationIssues,
         }),
       }),
-    providerCallBudget: Infinity,
-    emergencyCeiling: Infinity,
-    noProgressLimit: 120,
   });
 
   const keptCleanPatches: ResumeDraftPatch[] | null = lastCleanPatches;

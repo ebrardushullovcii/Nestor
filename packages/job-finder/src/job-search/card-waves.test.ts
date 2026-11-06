@@ -134,3 +134,36 @@ test("source waves are serial and total active work stays bounded", async () => 
   await drained;
   controller.abort();
 });
+
+test("backpressure accepts and drains every card beyond 2000 without dropping work", async () => {
+  const controller = new AbortController();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const received: string[] = [];
+  const waves = createCardWaves(controller.signal, async (cards) => {
+    await gate;
+    received.push(...cards.map((card) => card.url));
+  });
+  const cards = Array.from({ length: 3201 }, (_, i) => ({
+    ...card,
+    url: `https://example.test/job/${i}`,
+  }));
+  try {
+    let accepted = false;
+    const pushing = waves.push(cards).then(() => {
+      accepted = true;
+    });
+    await Promise.resolve();
+    expect(accepted).toBe(false);
+    expect(received).toEqual([]);
+    release();
+    await pushing;
+    await waves.drain();
+    expect(received).toEqual(cards.map((card) => card.url));
+  } finally {
+    release();
+    controller.abort();
+  }
+});

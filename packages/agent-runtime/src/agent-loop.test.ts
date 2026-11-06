@@ -152,29 +152,7 @@ describe("runAgentLoop", () => {
     expect(result.steps).toBe(1);
   });
 
-  test("a stall gets one warning, then the run ends if nothing moves", async () => {
-    const look = tool("look", () =>
-      Promise.resolve({ kind: "ok", content: "same page" }),
-    );
-    const model = scripted([[call("look")]]);
-    const result = await runAgentLoop({
-      messages: opening,
-      model,
-      tools: [look, finishTool],
-      subjectLabel: "the careers site",
-      ceilings: { noProgressStepLimit: 3, maxSteps: 50 },
-    });
-    expect(result.ending).toBe("stalled");
-    expect(result.reason).toContain("nothing new happened");
-    const warnings = result.messages.filter(
-      (message) =>
-        message.role === "user" && message.content.startsWith("Stall check"),
-    );
-    expect(warnings).toHaveLength(1);
-    expect(result.steps).toBeLessThan(10);
-  });
-
-  test("waiting does not consume the no-progress allowance", async () => {
+  test("waiting preserves action history until the model finishes", async () => {
     const wait = {
       ...tool("wait", () =>
         Promise.resolve({ kind: "ok", content: "Page still settling" }),
@@ -189,7 +167,6 @@ describe("runAgentLoop", () => {
       ]),
       tools: [wait, finishTool],
       subjectLabel: "the site",
-      ceilings: { noProgressStepLimit: 3 },
     });
     expect(result.ending).toBe("finished");
     expect(result.turnNotes.some((note) => note.includes("Stall check"))).toBe(
@@ -197,7 +174,7 @@ describe("runAgentLoop", () => {
     );
   });
 
-  test("progress resets the stall window", async () => {
+  test("progress is reported without deciding when the run ends", async () => {
     let calls = 0;
     const work = tool("work", () => {
       calls += 1;
@@ -216,7 +193,6 @@ describe("runAgentLoop", () => {
       model: scripted(turns),
       tools: [work, finishTool],
       subjectLabel: "the site",
-      ceilings: { noProgressStepLimit: 3 },
     });
     expect(result.ending).toBe("finished");
     expect(result.progressSteps).toBe(6);
@@ -269,52 +245,62 @@ describe("runAgentLoop", () => {
     expect(result.turnNotes.join("\n")).toContain("browser failure");
   });
 
-  test("three browser failures in a row end the run in plain words", async () => {
-    const dead = tool(
-      "press",
-      () =>
-        Promise.reject(
-          new Error("The browser tab Job Finder was working in was closed."),
+  test.each([false, true])(
+    "more than 240 unchanged or failed steps continue until the model finishes (browser failure=%s)",
+    async (fails) => {
+      const action = tool(
+        "look",
+        () =>
+          fails
+            ? Promise.reject(new Error("Synthetic browser error"))
+            : Promise.resolve({ kind: "ok", content: "same page" }),
+        {
+          failureKind: "browser",
+          describeError: () => "Synthetic browser error",
+        },
+      );
+      const model = scripted([
+        ...Array.from({ length: 260 }, () => [call("look")]),
+        [call("finish", { reason: "Model chose to finish" })],
+      ]);
+      const result = await runAgentLoop({
+        messages: opening,
+        model,
+        tools: [action, finishTool],
+        subjectLabel: "the site",
+      });
+      expect(result.ending).toBe("finished");
+      expect(result.steps).toBe(261);
+      expect(
+        result.messages.filter((message) => message.role === "tool"),
+      ).toHaveLength(261);
+      expect(result.reason).toBe("Model chose to finish.");
+      expect(
+        result.messages.some((message) =>
+          message.content.includes("Stall check"),
         ),
-      {
-        failureKind: "browser",
-        describeError: (error) =>
-          error instanceof Error
-            ? error.message
-            : "The browser did not respond.",
-      },
-    );
+      ).toBe(false);
+    },
+  );
+
+  test("Stop ends unchanged work after the former no-progress limit", async () => {
+    const controller = new AbortController();
+    let calls = 0;
     const result = await runAgentLoop({
       messages: opening,
-      model: scripted([[call("press")]]),
-      tools: [dead, finishTool],
+      model: scripted([[call("look")]]),
+      tools: [
+        tool("look", () => {
+          if (++calls === 260) controller.abort();
+          return Promise.resolve({ kind: "ok", content: "same page" });
+        }),
+      ],
       subjectLabel: "the site",
-      ceilings: { browserFailureLimit: 3 },
+      signal: controller.signal,
     });
-    expect(result.ending).toBe("browser_failed");
-    expect(result.reason).toContain("stopped responding");
-    expect(result.reason).toContain("was closed");
-    expect(result.steps).toBe(3);
+    expect(result.ending).toBe("aborted");
+    expect(calls).toBe(260);
   });
-
-  test("a browser failure uses its generous failure allowance instead of a shorter no-progress window", async () => {
-    const dead = tool(
-      "observe",
-      () => Promise.reject(new Error("The tab was closed")),
-      { failureKind: "browser", describeError: () => "The tab was closed" },
-    );
-    const result = await runAgentLoop({
-      messages: opening,
-      model: scripted([[call("observe")]]),
-      tools: [dead],
-      subjectLabel: "the site",
-      ceilings: { noProgressStepLimit: 3 },
-    });
-    expect(result.ending).toBe("browser_failed");
-    expect(result.steps).toBe(30);
-    expect(result.reason).toContain("tab was closed");
-  });
-
   test("a safety stop ends the run with the host's reason", async () => {
     const guard = tool("press", () =>
       Promise.resolve({

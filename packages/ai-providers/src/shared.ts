@@ -481,6 +481,7 @@ export interface ResumeProposalCheckResult {
 }
 
 export interface ReviseResumeDraftInput {
+  signal?: AbortSignal;
   draft: ResumeDraft;
   job: JobPosting;
   request: string;
@@ -549,6 +550,7 @@ export interface ReviseCandidateProfileConversationTurn {
 }
 
 export interface ReviseCandidateProfileInput {
+  signal?: AbortSignal;
   profile: CandidateProfile;
   searchPreferences: JobSearchPreferences;
   context: ProfileCopilotContext;

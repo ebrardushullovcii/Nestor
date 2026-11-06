@@ -8,7 +8,6 @@ export {
   classifySourceDebugAttemptOutcome,
   composeSourceDebugInstructions,
   deriveSourceDebugStartingUrls,
-  getSourceDebugMaxSteps,
   getSourceDebugTargetJobCount,
   resolveSourceDebugPhases,
   resolveSourceDebugCompletion,

@@ -99,15 +99,11 @@ export type ConversationTurnEvent =
   | { type: "steering_read"; count: number };
 
 export interface ConversationTurnCeilings {
-  /** Model calls in one turn. Safety only; far above an honest turn. */
-  maxModelCalls?: number;
   maxOutputTokens?: number;
   /** Silence while a tool is running; progress restarts this clock. */
   toolIdleTimeoutMs?: number;
   /** Silence between model stream events, not elapsed reasoning time. */
   modelIdleTimeoutMs?: number;
-  /** Repeated identical tool batches without progress before stopping. */
-  noProgressStepLimit?: number;
 }
 
 export interface RunConversationTurnOptions extends RuntimeObservers {
@@ -163,7 +159,6 @@ export interface ConversationTurnResult {
   error: unknown;
 }
 
-const DEFAULT_MAX_MODEL_CALLS = Infinity;
 const DEFAULT_TOOL_RESULT_LIMIT_CHARS = 16_000;
 const STATUS_ARGUMENT = "status";
 
@@ -242,10 +237,6 @@ function addUsage(
 export async function runConversationTurn(
   options: RunConversationTurnOptions,
 ): Promise<ConversationTurnResult> {
-  const maxModelCalls = Math.max(
-    1,
-    options.ceilings?.maxModelCalls ?? DEFAULT_MAX_MODEL_CALLS,
-  );
   const resultLimit =
     options.toolResultLimitChars ?? DEFAULT_TOOL_RESULT_LIMIT_CHARS;
   const toolsByName = new Map(
@@ -254,10 +245,7 @@ export async function runConversationTurn(
   const turnMessages: AgentLoopMessage[] = [];
   const usage = emptyUsage();
   let modelCalls = 0;
-  let emptyReplies = 0;
   let step = 0;
-  let lastBatch = "";
-  let repeatedBatches = 0;
 
   const emit = async (event: ConversationTurnEvent) => {
     try {
@@ -294,12 +282,12 @@ export async function runConversationTurn(
     return steering.length;
   };
 
-  while (modelCalls < maxModelCalls) {
+  while (true) {
     if (options.signal?.aborted) return result("aborted");
     if (!current()) return result("superseded");
     await readSteering();
 
-    const messages = await options.assembleMessages(turnMessages);
+    let messages = await options.assembleMessages(turnMessages);
     const definitions = (
       options.getToolDefinitions?.() ??
       options.tools.map((tool) => tool.definition)
@@ -308,7 +296,6 @@ export async function runConversationTurn(
     const call = modelCalls;
     await emit({ type: "model_call_started", call });
     let response: Awaited<ReturnType<ConversationModel["chatWithTools"]>>;
-    let outputRetries = 0;
     let outputLimit = options.ceilings?.maxOutputTokens;
     for (;;) {
       try {
@@ -340,15 +327,29 @@ export async function runConversationTurn(
         break;
       } catch (error) {
         if (options.signal?.aborted) return result("aborted");
-        if (isModelOutputLimit(error) && outputRetries++ === 0) {
+        if (isModelOutputLimit(error)) {
           // Existing explicit caps can grow. With no cap the route already
-          // supplies its maximum; retry once without changing any history.
+          // supplies its maximum; recover without dropping the action history.
           if (outputLimit !== undefined) outputLimit *= 2;
+          else {
+            turnMessages.push({
+              role: "user",
+              content:
+                "Your last reply hit this route's maximum output and was discarded. Answer more briefly or split the work into smaller tool calls. No actions from that discarded reply ran.",
+            });
+            messages = await options.assembleMessages(turnMessages);
+          }
           modelCalls += 1;
           await options.onOutputLimitRetry?.();
           continue;
         }
         if (error instanceof ModelTurnTimeoutError && error.kind === "idle") {
+          turnMessages.push({
+            role: "user",
+            content:
+              "The last model connection went idle and was disconnected. No reply or actions were received from it. Continue from the recorded action history.",
+          });
+          messages = await options.assembleMessages(turnMessages);
           modelCalls += 1;
           await emit({
             type: "stream",
@@ -370,12 +371,6 @@ export async function runConversationTurn(
     const toolCalls = response.toolCalls ?? [];
     const content = response.content?.trim() ?? "";
     if (!toolCalls.length && !content) {
-      if (++emptyReplies > 1)
-        return result("model_failed", {
-          error: new Error(
-            "The model returned no reply or executable tool call.",
-          ),
-        });
       await options.onEmptyReply?.({
         finishReason: response.finishReason ?? null,
         usage: response.usage ?? null,
@@ -387,7 +382,6 @@ export async function runConversationTurn(
       });
       continue;
     }
-    emptyReplies = 0;
     if (toolCalls.length === 0) {
       // Conversation mode: plain words are the reply.
       turnMessages.push({
@@ -411,8 +405,6 @@ export async function runConversationTurn(
       await emit({ type: "commentary", text: content });
     }
 
-    const batchStart = turnMessages.length;
-    let madeProgress = false;
     let redirected = false;
     let batchSucceeded = true;
     for (const [index, toolCall] of toolCalls.entries()) {
@@ -591,7 +583,6 @@ export async function runConversationTurn(
           }
           continue;
         }
-        madeProgress ||= outcome.progress === true;
         if (outcome.status === "failed" || outcome.status === "refused")
           batchSucceeded = false;
         let content = outcome.content;
@@ -631,22 +622,5 @@ export async function runConversationTurn(
         );
       }
     }
-    const batch = JSON.stringify({
-      calls: toolCalls.map(({ function: fn }) => fn),
-      results: turnMessages
-        .slice(batchStart)
-        .filter((message) => message.role === "tool")
-        .map((message) => message.content),
-    });
-    repeatedBatches =
-      !madeProgress && batch === lastBatch ? repeatedBatches + 1 : 0;
-    lastBatch = batch;
-    if (repeatedBatches >= (options.ceilings?.noProgressStepLimit ?? 12))
-      return result("model_failed", {
-        error: new Error(
-          "The assistant kept repeating the same step without progress. Try a different approach.",
-        ),
-      });
   }
-  return result("ceiling");
 }

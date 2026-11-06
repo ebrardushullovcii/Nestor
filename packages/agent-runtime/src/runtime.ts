@@ -21,7 +21,7 @@ import {
   type ModelContinuation,
 } from "@nestor/contracts";
 import type { z } from "zod";
-import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
+import { reportSelfLimitHit } from "@nestor/core";
 
 import { AgentTaskResultStore } from "./result-store";
 
@@ -104,10 +104,6 @@ export interface AgentTaskRunOptions<TState, TDraft> extends RuntimeObservers {
     validationIssues: readonly AgentTaskValidationIssue[];
   }) => unknown;
   readonly signal?: AbortSignal;
-  /** A provider-call ceiling used as the deterministic cost guard. */
-  readonly providerCallBudget?: number;
-  readonly noProgressLimit?: number;
-  readonly emergencyCeiling?: number;
   readonly checkpointStore?: AgentTaskCheckpointStore;
   readonly onProgress?: (progress: AgentTaskProgress) => void;
   /**
@@ -128,35 +124,7 @@ export interface AgentTaskRunResult<TDraft> {
   readonly receipt: AgentTaskExecutionReceipt;
 }
 
-/** Keep a bounded recent tail without ever starting on an orphaned tool result.
- * Chat-completions providers reject a `tool` message unless the matching
- * assistant `tool_calls` message is still present immediately before its
- * result group. */
-function takeProtocolSafeRecentMessages(
-  messages: readonly AgentTaskMessage[],
-  limit: number,
-): AgentTaskMessage[] {
-  let start = Math.max(0, messages.length - limit);
-  if (messages[start]?.role === "tool") {
-    for (let index = start - 1; index >= 0; index -= 1) {
-      const candidate = messages[index];
-      if (candidate?.role === "assistant" && candidate.toolCalls?.length) {
-        start = index;
-        break;
-      }
-      if (candidate?.role !== "tool") break;
-    }
-  }
-  return selfLimitSlice(
-    messages,
-    start,
-    undefined,
-    "agent-runtime/recent_messages",
-  );
-}
-
-/** A provider adapter that already owns retries can use this to avoid nesting
- * another three-attempt retry loop while preserving the original message. */
+/** A provider error that cannot recover by retrying the same request. */
 export class AgentTaskNonRetryableProviderError extends Error {
   override readonly name = "AgentTaskNonRetryableProviderError";
 }
@@ -188,28 +156,6 @@ export function classifyAgentTaskFailure(
     return "safety_boundary";
   }
   return error instanceof Error ? "permanent" : "unknown";
-}
-
-function shouldRetry(kind: AgentTaskFailureKind): boolean {
-  return kind === "transient_provider" || kind === "transient_network";
-}
-
-async function waitForBackoff(attempt: number, signal?: AbortSignal) {
-  const delayMs = Math.min(4_000, 300 * 2 ** attempt) + attempt * 37;
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => signal?.removeEventListener("abort", abort);
-    const timer = setTimeout(() => {
-      cleanup();
-      resolve();
-    }, delayMs);
-    const abort = () => {
-      clearTimeout(timer);
-      cleanup();
-      reject(new DOMException("Aborted", "AbortError"));
-    };
-    if (signal?.aborted) abort();
-    else signal?.addEventListener("abort", abort, { once: true });
-  });
 }
 
 function parseToolArguments(
@@ -363,18 +309,14 @@ export async function runAgentTask<TState, TDraft>(
 ): Promise<AgentTaskRunResult<TDraft>> {
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
-  const noProgressLimit = Math.max(1, options.noProgressLimit ?? 4);
-  const providerCallBudget = Math.max(1, options.providerCallBudget ?? 24);
-  const emergencyCeiling = Math.max(4, options.emergencyCeiling ?? 32);
   const results = new AgentTaskResultStore();
   const toolsByName = new Map(options.tools.map((tool) => [tool.name, tool]));
   let draft = options.initialDraft;
   let providerCalls = 0;
   let repairAttempts = 0;
   let revision = 0;
-  let consecutiveNoProgress = 0;
   let validationIssues = [...options.validate(draft)];
-  let stopReason: AgentTaskStopReason = "emergency_ceiling";
+  let stopReason: AgentTaskStopReason = "cancelled";
   const toolReceipts: AgentTaskExecutionReceipt["toolReceipts"][number][] = [];
   const recentMessages: AgentTaskMessage[] = [];
 
@@ -406,32 +348,11 @@ export async function runAgentTask<TState, TDraft>(
     });
   };
 
-  for (let cycle = 0; cycle < emergencyCeiling; cycle += 1) {
+  while (true) {
     if (options.signal?.aborted) {
       stopReason = "cancelled";
       break;
     }
-    if (providerCalls >= providerCallBudget) {
-      reportSelfLimitHit({
-        limit: "provider_calls",
-        kind: "budget",
-        value: providerCallBudget,
-        where: "agent-runtime/runAgentTask",
-      });
-      stopReason = "cost_budget";
-      break;
-    }
-    if (consecutiveNoProgress >= noProgressLimit) {
-      reportSelfLimitHit({
-        limit: "no_progress",
-        kind: "turns",
-        value: noProgressLimit,
-        where: "agent-runtime/runAgentTask",
-      });
-      stopReason = "no_progress";
-      break;
-    }
-
     const context = options.buildContext({
       state: options.state,
       draft,
@@ -449,7 +370,7 @@ export async function runAgentTask<TState, TDraft>(
             instruction:
               "Use the available tools to update the task draft. Validate it, repair any reported issues, then call finish_task. The typed task state below is authoritative; chat history is not.",
           };
-    const recentTail = takeProtocolSafeRecentMessages(recentMessages, 8);
+    const recentTail = recentMessages;
     const messages: AgentTaskMessage[] = [
       { role: "system", content: options.systemPrompt },
       {
@@ -481,17 +402,7 @@ export async function runAgentTask<TState, TDraft>(
 
     emitProgress("thinking", "Working on the next useful change");
     let response: Awaited<ReturnType<AgentTaskModel["chat"]>> | null = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (providerCalls >= providerCallBudget) {
-        reportSelfLimitHit({
-          limit: "provider_calls",
-          kind: "budget",
-          value: providerCallBudget,
-          where: "agent-runtime/runAgentTask/retry",
-        });
-        stopReason = "cost_budget";
-        break;
-      }
+    for (;;) {
       try {
         providerCalls += 1;
         response = await runModelTurn(
@@ -533,31 +444,22 @@ export async function runAgentTask<TState, TDraft>(
           stopReason = "cancelled";
           break;
         }
-        if (error instanceof ModelTurnTimeoutError && attempt === 0) continue;
-        const failureKind = classifyAgentTaskFailure(error, options.signal);
-        if (!shouldRetry(failureKind) || attempt === 2) {
-          if (shouldRetry(failureKind) && attempt === 2)
-            reportSelfLimitHit({
-              limit: "provider_retries",
-              kind: "retry",
-              value: 3,
-              where: "agent-runtime/runAgentTask",
-            });
-          throw error;
+        if (error instanceof ModelTurnTimeoutError) {
+          const fact = {
+            role: "user" as const,
+            content:
+              "The last model connection went idle and was disconnected. No reply or tool calls were received. Continue from the recorded draft and action history.",
+          };
+          messages.push(fact);
+          recentMessages.push(fact);
+          continue;
         }
-        try {
-          await waitForBackoff(attempt, options.signal);
-        } catch (backoffError) {
-          if (!isAgentRunAborted(options.signal)) throw backoffError;
-          stopReason = "cancelled";
-          break;
-        }
+        // Provider adapters own protocol recovery and waits. Return an actual
+        // request failure to the caller instead of replaying it unchanged.
+        throw error;
       }
     }
     if (!response) {
-      if (stopReason !== "cost_budget" && stopReason !== "cancelled") {
-        stopReason = "permanent_failure";
-      }
       break;
     }
     recentMessages.push({
@@ -569,7 +471,6 @@ export async function runAgentTask<TState, TDraft>(
 
     const calls = response.toolCalls ?? [];
     if (calls.length === 0) {
-      consecutiveNoProgress += 1;
       recentMessages.push({
         role: "user",
         content:
@@ -722,20 +623,17 @@ export async function runAgentTask<TState, TDraft>(
     };
 
     const receiptStart = toolReceipts.length;
-    const readProgress = await Promise.all(parallelReads.map(executeCall));
-    const orderedProgress: boolean[] = [];
+    await Promise.all(parallelReads.map(executeCall));
     for (const call of orderedCalls) {
       if (isAgentRunAborted(options.signal)) break;
-      orderedProgress.push(await executeCall(call));
+      await executeCall(call);
     }
     if (isAgentRunAborted(options.signal)) {
       stopReason = "cancelled";
       await saveCheckpoint(emitProgress("cancelled", "Stopped"));
       break;
     }
-    const madeProgress = [...readProgress, ...orderedProgress].some(Boolean);
     validationIssues = [...options.validate(draft)];
-    consecutiveNoProgress = madeProgress ? 0 : consecutiveNoProgress + 1;
     const progress = emitProgress(
       validationIssues.length === 0 ? "ready" : "repairing",
       validationIssues.length === 0
@@ -806,13 +704,6 @@ export async function runAgentTask<TState, TDraft>(
   }
 
   const completedAtMs = Date.now();
-  if (stopReason === "emergency_ceiling")
-    reportSelfLimitHit({
-      limit: "emergency_ceiling",
-      kind: "turns",
-      value: emergencyCeiling,
-      where: "agent-runtime/runAgentTask",
-    });
   return {
     draft,
     receipt: AgentTaskExecutionReceiptSchema.parse({

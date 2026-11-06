@@ -178,17 +178,20 @@ test("borrowed pay evidence leaves only that row retryable and retains a valid s
     job(1, "Remote within Germany. EUR 20 per hour. SQL reporting."),
     job(2, "Remote within Germany. Pay to be discussed. SQL reporting."),
   ];
+  const stop = new AbortController();
+  let calls = 0;
   const client = {
-    chatWithTools: vi.fn(() =>
-      Promise.resolve({
+    chatWithTools: vi.fn(() => {
+      if (++calls === 2) stop.abort(new Error("Stopped"));
+      return Promise.resolve({
         content: JSON.stringify({ fits: [verdict(1, good), verdict(2, good)] }),
-      }),
-    ),
+      });
+    }),
   };
   const onBatch = vi.fn<(fits: Array<{ id: number }>) => void>();
   await expect(
-    fitJobs({ profile, goals, jobs, client, onBatch }),
-  ).rejects.toThrow("could not finish fit scores");
+    fitJobs({ profile, goals, jobs, client, onBatch, signal: stop.signal }),
+  ).rejects.toThrow("Stopped");
   expect(
     onBatch.mock.calls.flatMap(([fits]) =>
       fits.map((f: { id: number }) => f.id),
@@ -253,10 +256,12 @@ test("Chat receives the required pay contract and repairs only the omitted sibli
 
 test("pay repair identifies an ungrounded quote and keeps the grounding gate", async () => {
   const issues: string[][] = [];
+  const stop = new AbortController();
   await expect(
     fitJobs({
       profile,
       goals,
+      signal: stop.signal,
       jobs: [job(1, "Remote within Germany. EUR 27 per hour. SQL reporting.")],
       client: {
         chatWithTools: (messages) => {
@@ -264,7 +269,10 @@ test("pay repair identifies an ungrounded quote and keeps the grounding gate", a
             listings: { id: number }[];
             repair?: { id: number; issues: string[] }[];
           };
-          if (input.repair) issues.push(input.repair[0].issues);
+          if (input.repair) {
+            issues.push(input.repair[0].issues);
+            stop.abort(new Error("Stopped"));
+          }
           return Promise.resolve({
             content: JSON.stringify({
               fits: [
@@ -282,6 +290,90 @@ test("pay repair identifies an ungrounded quote and keeps the grounding gate", a
         },
       },
     }),
-  ).rejects.toThrow("could not finish fit scores");
+  ).rejects.toThrow("Stopped");
   expect(issues).toEqual([["pay_quote_not_verbatim_or_bounds_reversed"]]);
+});
+
+test("truncated fit batches split to single listings without losing a judgment", async () => {
+  const groups: number[][] = [];
+  const pay = {
+    minimum: 27,
+    maximum: 27,
+    currency: "EUR",
+    interval: "hour",
+    basis: "base",
+    quote: "EUR 27 per hour",
+  };
+  const fits = await fitJobs({
+    profile,
+    goals,
+    jobs: [1, 2, 3, 4].map((id) =>
+      job(id, "Remote within Germany. EUR 27 per hour. SQL reporting."),
+    ),
+    client: {
+      chatWithTools: (messages) => {
+        const input = JSON.parse(String(messages[1].content)) as {
+          listings: { id: number }[];
+          repair?: unknown;
+        };
+        const ids = input.listings.map((row) => row.id);
+        groups.push(ids);
+        if (ids.length > 1)
+          return Promise.resolve({
+            content: "partial",
+            finishReason: "length",
+          });
+        expect(input.repair).toBeDefined();
+        return Promise.resolve({
+          content: JSON.stringify({ fits: ids.map((id) => verdict(id, pay)) }),
+        });
+      },
+    },
+  });
+  expect(groups).toEqual([[1, 2, 3, 4], [1, 2], [1], [2], [3, 4], [3], [4]]);
+  expect(fits.map((fit) => fit.id)).toEqual([1, 2, 3, 4]);
+});
+
+test("omitted fit ids get explicit feedback and smaller groups then report a persistent single-job failure", async () => {
+  const groups: number[][] = [];
+  const repairs: unknown[] = [];
+  await expect(
+    fitJobs({
+      profile,
+      goals,
+      jobs: [1, 2, 3, 4].map((id) =>
+        job(id, "Remote within Germany. SQL reporting."),
+      ),
+      client: {
+        chatWithTools: (messages) => {
+          const input = JSON.parse(String(messages[1].content)) as {
+            listings: { id: number }[];
+            repair?: unknown;
+          };
+          groups.push(input.listings.map((row) => row.id));
+          repairs.push(input.repair);
+          return Promise.resolve({ content: '{"fits":[]}' });
+        },
+      },
+    }),
+  ).rejects.toThrow("job 1");
+  expect(groups).toEqual([[1, 2, 3, 4], [1, 2], [1], [2], [3, 4], [3], [4]]);
+  expect(repairs[2]).toEqual([
+    { id: 1, issues: ["missing_invalid_or_duplicate_judgment"] },
+  ]);
+});
+
+test("single-job output truncation returns a real error instead of replaying the request", async () => {
+  const chatWithTools = vi.fn(() =>
+    Promise.resolve({ content: "partial", finishReason: "length" }),
+  );
+  await expect(
+    fitJobs({
+      profile,
+      goals,
+      jobs: [job(1, "SQL reporting")],
+      client: { chatWithTools },
+    }),
+  ).rejects.toThrow();
+  expect(chatWithTools).toHaveBeenCalledOnce();
 });

@@ -87,7 +87,6 @@ describe("openai-compatible chat and draft behavior", () => {
         ],
         assembleMessages: (messages) =>
           Promise.resolve([{ role: "user", content: "hello" }, ...messages]),
-        ceilings: { maxModelCalls: 2 },
       });
       expect(execute).not.toHaveBeenCalled();
       expect(turn.ending).toBe("replied");
@@ -1628,10 +1627,23 @@ describe("openai-compatible chat and draft behavior", () => {
       choices: [
         {
           message: {
-            content: JSON.stringify({
-              content: "No profile edits proposed.",
-              patchGroups: [],
-            }),
+            tool_calls: [
+              {
+                id: "response",
+                type: "function",
+                function: {
+                  name: "set_response_content",
+                  arguments: JSON.stringify({
+                    content: "No profile edits proposed.",
+                  }),
+                },
+              },
+              {
+                id: "finish",
+                type: "function",
+                function: { name: "finish_task", arguments: "{}" },
+              },
+            ],
           },
         },
       ],
@@ -1642,9 +1654,8 @@ describe("openai-compatible chat and draft behavior", () => {
         createJobFinderAiClientFromEnvironment(createEnvironment());
       const request = `change my experience to only 5 years ${"conversation fact ".repeat(5000)}`;
 
-      // The stub never calls a tool, so both runs stop without a change and
-      // the Assistant reports that it could not finish; only the payload the
-      // model received matters here.
+      // The scripted model finishes through its advertised tools; inspect
+      // the effective provider payload.
       await client
         .reviseCandidateProfile({
           profile: {
@@ -1713,10 +1724,23 @@ describe("openai-compatible chat and draft behavior", () => {
       choices: [
         {
           message: {
-            content: JSON.stringify({
-              content: "Large request accepted.",
-              patchGroups: [],
-            }),
+            tool_calls: [
+              {
+                id: "response",
+                type: "function",
+                function: {
+                  name: "set_response_content",
+                  arguments: JSON.stringify({
+                    content: "Large request accepted.",
+                  }),
+                },
+              },
+              {
+                id: "finish",
+                type: "function",
+                function: { name: "finish_task", arguments: "{}" },
+              },
+            ],
           },
         },
       ],
@@ -1772,7 +1796,7 @@ describe("openai-compatible chat and draft behavior", () => {
 
       expect(originalPayloadSize).toBeGreaterThan(1_000_000);
 
-      // The stub never calls a tool; see the test above.
+      // The scripted model finishes through its advertised tools.
       await client
         .reviseCandidateProfile(largePayload)
         .catch((error: unknown) => {

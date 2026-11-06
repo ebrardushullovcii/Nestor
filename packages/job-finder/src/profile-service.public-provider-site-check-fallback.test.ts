@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe("public provider source check fallback", () => {
-  test("runs complete browser coverage when the provider API is unavailable", async () => {
+  test("runs complete browser coverage after a permanent provider API refusal", async () => {
     const seed = createSeed();
     seed.jobSites = [
       {
@@ -34,7 +34,7 @@ describe("public provider source check fallback", () => {
     ];
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: false,
-      status: 503,
+      status: 404,
     } as Response);
     const baseRuntime = createAgentBrowserRuntime(
       [

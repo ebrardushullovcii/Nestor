@@ -10,10 +10,8 @@ import { observeModel, observeTool, type RuntimeObservers } from "./observers";
  *
  * - it hands each tool's answer back, including a browser failure, as a fact
  *   the model can act on rather than as the end of the run
- * - it warns once when nothing has moved for a while, and only ends the run
- *   if nothing moves after that either
- * - it keeps the run inside a time and step ceiling far above what an honest
- *   run needs, so a broken site cannot hold it forever
+ * - it honors Stop and detects silent connections; the model decides when
+ *   attempts have made no progress and what to try next
  * - it trims a long conversation so a run that takes hundreds of steps keeps
  *   fitting, and says what it trimmed
  * - it shortens old tool answers (mostly page views the model has since moved
@@ -126,9 +124,9 @@ export interface AgentLoopToolContext {
 
 export interface AgentLoopTool {
   definition: AgentLoopToolDefinition;
-  /** Waiting for the page does not spend the no-progress allowance. */
+  /** Identifies a wait tool to hosts. */
   isWait?: boolean;
-  /** Only page tools count repeated thrown failures as a dead browser. */
+  /** Page errors use the tool's browser error description. */
   failureKind?: "browser" | "tool";
   /** Converts a page-library exception into safe, plain words for the model. */
   describeError?: (error: unknown) => string;
@@ -140,11 +138,11 @@ export interface AgentLoopTool {
 }
 
 export interface AgentLoopCeilings {
-  /** Safety only. Far above an honest run. */
+  /** @deprecated Ignored. Runs have no step ceiling (ADR 0079). */
   maxSteps?: number;
-  /** Steps without progress before the one stall warning; the same again ends the run. */
+  /** @deprecated Ignored. The model decides whether it is stuck. */
   noProgressStepLimit?: number;
-  /** Browser failures in a row that end the run. */
+  /** @deprecated Ignored. Browser failures go back to the model. */
   browserFailureLimit?: number;
   /** Silence between stream events; each event restarts this clock. */
   modelIdleTimeoutMs?: number;
@@ -167,7 +165,7 @@ export interface AgentLoopOptions extends RuntimeObservers {
     progressSteps: number;
     elapsedMs: number;
   }) => void | Promise<void>;
-  /** Extra lines for the stall warning, such as where the run is. */
+  /** @deprecated Ignored. The model decides when it is stuck. */
   describeStall?: () => string | null;
   /** Rough size at which older turns are trimmed. */
   compactionMaxChars?: number;
@@ -238,9 +236,6 @@ export interface AgentLoopResult {
   };
 }
 
-const DEFAULT_MAX_STEPS = Infinity;
-const DEFAULT_NO_PROGRESS_STEP_LIMIT = 120;
-const DEFAULT_BROWSER_FAILURE_LIMIT = 30;
 const DEFAULT_COMPACTION_MAX_CHARS = 360_000;
 const COMPACTION_KEEP_RECENT = 14;
 const DEFAULT_STALE_TOOL_RESULT_CHARS = 700;
@@ -319,7 +314,7 @@ function compactMessages(
   }
   const summary = [
     "Earlier turns were trimmed to save room. What happened in them, in order:",
-    ...turnNotes.slice(-80).map((note) => `- ${note}`),
+    ...turnNotes.map((note) => `- ${note}`),
     "The most recent turns follow in full.",
   ].join("\n");
   return [
@@ -377,15 +372,6 @@ export async function runAgentLoop(
 ): Promise<AgentLoopResult> {
   const now = options.now ?? (() => new Date());
   const startedAtMs = now().getTime();
-  const maxSteps = Math.max(1, options.ceilings?.maxSteps ?? DEFAULT_MAX_STEPS);
-  const noProgressStepLimit = Math.max(
-    3,
-    options.ceilings?.noProgressStepLimit ?? DEFAULT_NO_PROGRESS_STEP_LIMIT,
-  );
-  const browserFailureLimit = Math.max(
-    1,
-    options.ceilings?.browserFailureLimit ?? DEFAULT_BROWSER_FAILURE_LIMIT,
-  );
   const compactionMaxChars =
     options.compactionMaxChars ?? DEFAULT_COMPACTION_MAX_CHARS;
   const staleToolResultChars =
@@ -413,10 +399,6 @@ export async function runAgentLoop(
 
   let steps = 0;
   let progressSteps = 0;
-  let lastProgressStep = 0;
-  let stallExemptSteps = 0;
-  let stallWarningStep: number | null = null;
-  let consecutiveBrowserFailures = 0;
   let modelMs = 0;
   let toolMs = 0;
   let modelTurns = 0;
@@ -468,12 +450,9 @@ export async function runAgentLoop(
   };
   const markProgress = (): void => {
     progressSteps += 1;
-    lastProgressStep = steps;
-    stallExemptSteps = 0;
-    stallWarningStep = null;
   };
 
-  while (steps < maxSteps) {
+  while (true) {
     if (options.signal?.aborted) {
       return result(
         "aborted",
@@ -486,33 +465,6 @@ export async function runAgentLoop(
       return result("finished", endSentence(hostedFinish.reason), {
         finish: hostedFinish,
       });
-    const stepsWithoutProgress = steps - lastProgressStep - stallExemptSteps;
-    if (
-      stallWarningStep === null &&
-      steps > 0 &&
-      stepsWithoutProgress >= noProgressStepLimit
-    ) {
-      stallWarningStep = stepsWithoutProgress;
-      messages.push({
-        role: "user",
-        content: [
-          `Stall check: the last ${stepsWithoutProgress} steps changed nothing.`,
-          options.describeStall?.() ?? null,
-          "Either try something different now, or call finish and say exactly what is blocking you, in words the person can act on. Do not repeat the same step.",
-        ]
-          .filter((line): line is string => line !== null)
-          .join("\n"),
-      });
-    } else if (
-      stallWarningStep !== null &&
-      stepsWithoutProgress - stallWarningStep >= noProgressStepLimit
-    ) {
-      return result(
-        "stalled",
-        `Job Finder stopped on ${options.subjectLabel} because nothing new happened after several tries, even after changing approach.`,
-      );
-    }
-
     steps += 1;
     await note("asking the assistant what to do next");
     let response: Awaited<ReturnType<AgentLoopModel["chatWithTools"]>>;
@@ -564,6 +516,11 @@ export async function runAgentLoop(
           );
         }
         if (error instanceof ModelTurnTimeoutError && error.kind === "idle") {
+          messages.push({
+            role: "user",
+            content:
+              "The last model connection went idle and was disconnected. No reply or actions were received. Continue from the recorded action history.",
+          });
           await note(
             "waiting for the AI provider; reconnecting the silent connection",
           );
@@ -628,13 +585,6 @@ export async function runAgentLoop(
     });
 
     let ended: AgentLoopResult | null = null;
-    let exemptedThisStep = false;
-    const exemptFromStall = () => {
-      if (!exemptedThisStep) {
-        stallExemptSteps += 1;
-        exemptedThisStep = true;
-      }
-    };
     let batchStopped = false;
     for (const toolCall of toolCalls) {
       const observedToolStart = Date.now();
@@ -705,9 +655,6 @@ export async function runAgentLoop(
               throw new ToolIdleError();
             throw error;
           }
-          if (tool.failureKind === "browser") {
-            consecutiveBrowserFailures = 0;
-          }
         } catch (error) {
           batchStopped = options.afterToolBatch !== undefined;
           if (isAgentRunAborted(options.signal)) {
@@ -723,25 +670,9 @@ export async function runAgentLoop(
             continue;
           }
           if (error instanceof ToolIdleError) {
-            // A hung step is reported as a fact and counted like a dead page:
-            // repeated silence ends the run in plain words instead of a freeze.
-            consecutiveBrowserFailures += 1;
-            exemptFromStall();
             const failure =
               "That step stopped reporting progress and was given up.";
             await note(`${toolCall.function.name} → took too long`);
-            if (consecutiveBrowserFailures >= browserFailureLimit) {
-              ended = result(
-                "browser_failed",
-                `Job Finder stopped on ${options.subjectLabel} because the page kept taking too long to answer. Everything it did so far is kept.`,
-              );
-              messages.push({
-                role: "tool",
-                toolCallId: toolCall.id,
-                content: failure,
-              });
-              continue;
-            }
             messages.push({
               role: "tool",
               toolCallId: toolCall.id,
@@ -750,7 +681,6 @@ export async function runAgentLoop(
             continue;
           }
           if (tool.failureKind !== "browser") {
-            consecutiveBrowserFailures = 0;
             const cause =
               error instanceof Error && error.name === "AbortError"
                 ? endSentence(error.message)
@@ -765,28 +695,12 @@ export async function runAgentLoop(
             });
             continue;
           }
-          // Only a page tool can increment the dead-browser counter. Its own
-          // descriptor removes library internals before the model or person sees it.
-          consecutiveBrowserFailures += 1;
-          exemptFromStall();
           const failure = endSentence(
             error instanceof Error && error.name === "AbortError"
               ? error.message
               : (tool.describeError?.(error) ?? "The browser did not respond."),
           );
           await note(`${toolCall.function.name} → browser failure: ${failure}`);
-          if (consecutiveBrowserFailures >= browserFailureLimit) {
-            ended = result(
-              "browser_failed",
-              `Job Finder stopped on ${options.subjectLabel} because the browser page stopped responding. ${failure} Everything it did so far is kept.`,
-            );
-            messages.push({
-              role: "tool",
-              toolCallId: toolCall.id,
-              content: `That step did not complete: ${failure}`,
-            });
-            continue;
-          }
           messages.push({
             role: "tool",
             toolCallId: toolCall.id,
@@ -813,8 +727,6 @@ export async function runAgentLoop(
           );
         switch (outcome.kind) {
           case "ok": {
-            if (tool.isWait || tool.definition.function.name === "wait")
-              exemptFromStall();
             batchStopped =
               outcome.stopBatch === true ||
               outcome.status === "refused" ||
@@ -940,11 +852,6 @@ export async function runAgentLoop(
       if (context) messages.push({ role: "user", content: context });
     }
   }
-
-  return result(
-    "ceiling",
-    `Job Finder stopped on ${options.subjectLabel} after a very long run without finishing. Everything it did so far is kept.`,
-  );
 }
 
 class ToolIdleError extends Error {
