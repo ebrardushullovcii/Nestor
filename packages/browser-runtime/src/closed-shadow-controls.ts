@@ -1,6 +1,8 @@
 import type { ApplyWriteResult, RawApplyClickable } from "@nestor/contracts";
 import type { CDPSession, Frame, Page } from "playwright";
 import { isVisibleFrame, visiblePageText } from "./visible-page-text";
+import { pressableLabel } from "./pressable-label";
+import { readPressability, readFieldValidation } from "./element-state";
 interface DomNode {
   nodeType: number;
   backendNodeId: number;
@@ -105,13 +107,19 @@ async function inNode<T>(
 export async function readClosedShadowControls(
   page: Page,
   selector: string,
-): Promise<{ clickables: RawApplyClickable[]; bodyText: string }> {
+): Promise<{
+  clickables: RawApplyClickable[];
+  bodyText: string;
+  validationErrors: string[];
+}> {
   // Test doubles and non-Chromium runtimes have no CDP surface.
-  if (!page.context?.()?.newCDPSession) return { clickables: [], bodyText: "" };
+  if (!page.context?.()?.newCDPSession)
+    return { clickables: [], bodyText: "", validationErrors: [] };
   const previous = targets.get(page) ?? new Map<string, Target>();
   const current = new Map(previous);
   const controls: RawApplyClickable[] = [];
   const text: string[] = [];
+  const validationErrors: string[] = [];
   for (const frame of page.frames()) {
     if (!(await isVisibleFrame(frame))) continue;
     let session: CDPSession;
@@ -159,6 +167,22 @@ export async function readClosedShadowControls(
           "index" | "ref"
         > | null>(session, node, describe.toString(), [selector]);
         if (!control) continue;
+        control.label = await inNode<string>(
+          session,
+          node,
+          pressableLabel.toString(),
+        );
+        const interaction = await inNode<ReturnType<typeof readPressability>>(
+          session,
+          node,
+          `function(){return (${readPressability.toString()})(this);}`,
+        );
+        control.disabled ||= interaction.disabled || interaction.inert;
+        const validation = await inNode<ReturnType<typeof readFieldValidation>>(
+          session,
+          node,
+          `function(){return (${readFieldValidation.toString()})(this,${visiblePageText.toString()});}`,
+        );
         const existing = [...previous].find(
           ([, target]) =>
             target.frame === frame &&
@@ -166,6 +190,10 @@ export async function readClosedShadowControls(
             target.document === root.backendNodeId,
         );
         const ref = existing?.[0] ?? `s${nextRef++}`;
+        if (validation.invalid)
+          validationErrors.push(
+            `${ref} ${control.label}: ${validation.validationMessage || "The page marks this control invalid."}`,
+          );
         current.set(ref, { frame, node, document: root.backendNodeId });
         controls.push({
           ...control,
@@ -178,7 +206,11 @@ export async function readClosedShadowControls(
     }
   }
   targets.set(page, current);
-  return { clickables: controls, bodyText: text.join("\n\n") };
+  return {
+    clickables: controls,
+    bodyText: text.join("\n\n"),
+    validationErrors,
+  };
 }
 
 /** Click through Chromium's input router, including out-of-process frames. */
@@ -196,6 +228,14 @@ export async function clickClosedShadowControl(
     const { root } = await session.send("DOM.getDocument", { depth: 0 });
     if (root.backendNodeId !== target.document)
       return { ok: false, error: "Stale control; observe again." };
+    const interaction = await inNode<ReturnType<typeof readPressability>>(
+      session,
+      target.node,
+      `function(){return (${readPressability.toString()})(this);}`,
+    );
+    if (interaction.disabled)
+      return { ok: false, error: "The control is disabled." };
+    if (interaction.inert) return { ok: false, error: "The control is inert." };
     const state = await inNode<{
       connected: boolean;
       disabled: boolean;

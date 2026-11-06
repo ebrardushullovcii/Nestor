@@ -1,6 +1,7 @@
 import type {
   ApplyPersonRequest,
   ApplySendOutcomeDecision,
+  ApplyFinishSendOutcome,
 } from "@nestor/contracts";
 import type {
   AiApplyingBehavior,
@@ -626,6 +627,7 @@ export type ApplyProposal =
   | { tool: "submit_application"; ref: string }
   | {
       tool: "finish";
+      sendOutcome?: ApplyFinishSendOutcome;
       reason: string;
       stuck?: boolean;
       applicationClosed?: boolean;
@@ -652,6 +654,7 @@ export interface ApplyAgentConfig extends BrowserPermissionPolicy {
     actionLabel: string;
     callId?: string;
   }) => Promise<{
+    sendCallId?: string;
     outcome: "submitted" | "outcome_uncertain" | "not_submitted" | null;
     content: string;
   }>;

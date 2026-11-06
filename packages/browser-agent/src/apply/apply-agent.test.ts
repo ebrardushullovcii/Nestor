@@ -324,7 +324,7 @@ test("an empty required eligibility field and an optional portfolio never create
   expect(result.outcome).toBe("prepared");
   expect(write).not.toHaveBeenCalled();
 });
-test("only the model's named finish items reach Needs you with native options and binding", async () => {
+test("an ordinary click leaves the model's named Needs you items intact", async () => {
   const source = page({
     controls: [
       { ...nameControl(), value: "", label: "Passport country" },
@@ -332,8 +332,13 @@ test("only the model's named finish items reach Needs you with native options an
     ],
   });
   const result = await runApplyAgent(
-    config(source),
+    config(source, {
+      submitApplication: () =>
+        Promise.reject(Error("An ordinary click must not enter the send path")),
+      recordSendOutcome: () => Promise.reject(Error("No send was reported")),
+    }),
     model([
+      { name: "click", args: { ref: "a0" } },
       {
         name: "finish",
         args: {
@@ -723,6 +728,65 @@ test("submit returns page and ledger facts, then the model records its observed 
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1]?.[0]),
   ).toContain("POST employer.example.test/api/apply 200");
 });
+test.each([
+  {
+    args: { sendCallId: "send", evidence: "The form stayed open" },
+    missing: "outcome",
+  },
+  {
+    args: { outcome: "uncertain", evidence: "The form stayed open" },
+    missing: "sendCallId",
+  },
+  { args: { sendCallId: "send", outcome: "uncertain" }, missing: "evidence" },
+  {
+    args: {
+      sendCallId: "send",
+      outcome: "unknown",
+      evidence: "The form stayed open",
+    },
+    missing: "outcome",
+  },
+])(
+  "send outcome contract errors name $missing instead of hiding the failure",
+  async ({ args, missing }) => {
+    const input = config(page());
+    input.recordSendOutcome = vi.fn(() =>
+      Promise.resolve({ recorded: true, content: "Recorded" }),
+    );
+    const client = model([{ name: "record_send_outcome", args }, done]);
+    await runApplyAgent(input, client);
+    const returned = JSON.stringify(
+      vi.mocked(client.chatWithTools).mock.calls[1]?.[0],
+    );
+    expect(returned).toContain(`record_send_outcome contract: ${missing}`);
+    expect(input.recordSendOutcome).not.toHaveBeenCalled();
+  },
+);
+
+test("a send ledger exception returns its specific cause to the model", async () => {
+  const input = config(page());
+  input.recordSendOutcome = () =>
+    Promise.reject(Error("Ledger storage unavailable"));
+  const client = model([
+    {
+      name: "record_send_outcome",
+      args: {
+        sendCallId: "send",
+        outcome: "uncertain",
+        evidence: "No request or page change",
+      },
+    },
+    done,
+  ]);
+  const result = await runApplyAgent(input, client);
+  expect(
+    JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1]?.[0]),
+  ).toContain(
+    "The send ledger could not record the outcome: Ledger storage unavailable",
+  );
+  expect(result.pauses).toEqual([]);
+});
+
 test("tool failures return to the model and never create questions", async () => {
   const input = config(page());
   input.hands.uploadFile = () =>
@@ -736,6 +800,134 @@ test("tool failures return to the model and never create questions", async () =>
   );
   expect(result.pauses).toEqual([]);
 });
+
+test.each(["confirmed", "failed", "uncertain"] as const)(
+  "finish records a reported %s send without an earlier send call",
+  async (outcome) => {
+    const input = config(page());
+    input.recordSendOutcome = vi.fn(() =>
+      Promise.resolve({
+        recorded: true,
+        content: "Recorded model report",
+      }),
+    );
+    input.submitApplication = vi.fn(() =>
+      Promise.reject(Error("A report must never send")),
+    );
+    const result = await runApplyAgent(
+      input,
+      model([
+        { name: "click", id: "unledgered-press", args: { ref: "a0" } },
+        {
+          name: "finish",
+          id: "reported-finish",
+          args: {
+            reason: "The site showed the outcome",
+            sendOutcome: { outcome, evidence: "Employer page evidence" },
+          },
+        },
+      ]),
+    );
+    expect(result.outcome).toBe(
+      outcome === "confirmed" ? "submitted" : outcome,
+    );
+    expect(input.submitApplication).not.toHaveBeenCalled();
+    expect(input.recordSendOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sendCallId: "reported-finish",
+        outcome,
+        evidence: "Employer page evidence",
+      }),
+    );
+  },
+);
+
+test.each([
+  "prepare_only",
+  "confirm_before_submit",
+  "autonomous_submit",
+] as const)(
+  "ordinary clicks execute directly without send records in %s",
+  async (mode) => {
+    const input = config(page());
+    input.authority.mode = mode;
+    input.submitApplication = vi.fn(() =>
+      Promise.reject(Error("A click must not enter the send path")),
+    );
+    input.recordSendOutcome = vi.fn(() =>
+      Promise.reject(Error("An ordinary click must not record a send")),
+    );
+    input.hands.clickElement = vi.fn(() =>
+      Promise.resolve({
+        ok: true as const,
+        observedValue: "clicked",
+        clickFacts: {
+          pageBefore: {
+            origin: "https://apply.example.test",
+            safePath: "/form",
+          },
+          pageAfter: {
+            origin: "https://apply.example.test",
+            safePath: "/next",
+          },
+          urlChanged: true,
+          requestsAfterClick: [
+            {
+              method: "GET",
+              host: "apply.example.test",
+              path: "/next",
+              status: 200,
+              failure: null,
+              finalSubmit: false,
+            },
+          ],
+        },
+      }),
+    );
+    const client = model([
+      { name: "click", id: "press-one", args: { ref: "a0" } },
+      done,
+    ]);
+    const result = await runApplyAgent(input, client);
+    expect(result.outcome).toBe(
+      mode === "confirm_before_submit" ? "awaiting_your_review" : "prepared",
+    );
+    expect(input.hands.clickElement).toHaveBeenCalledExactlyOnceWith("a0");
+    expect(input.submitApplication).not.toHaveBeenCalled();
+    expect(input.recordSendOutcome).not.toHaveBeenCalled();
+    const returned = JSON.stringify(
+      vi.mocked(client.chatWithTools).mock.calls[1]?.[0],
+    );
+    expect(returned).toContain("Press facts");
+    expect(returned).toContain("urlChanged");
+    expect(returned).toContain("requestsAfterClick");
+  },
+);
+test("finishWhenReady after batched clicks stays prepared without send records", async () => {
+  const input = config(page());
+  input.submitApplication = vi.fn(() =>
+    Promise.reject(Error("A batched click must not enter the send path")),
+  );
+  input.hands.clickElement = vi.fn(input.hands.clickElement);
+  input.recordSendOutcome = vi.fn(() =>
+    Promise.resolve({ recorded: true, content: "Recorded" }),
+  );
+  const result = await runApplyAgent(
+    input,
+    model([
+      {
+        name: "fill_fields",
+        id: "batch-press",
+        args: { fields: [{ tool: "click", ref: "a0" }], finishWhenReady: true },
+      },
+    ]),
+  );
+  expect(result.outcome).toBe("prepared");
+  expect(input.hands.clickElement).toHaveBeenCalledExactlyOnceWith("a0");
+  expect(input.submitApplication).not.toHaveBeenCalled();
+  expect(input.recordSendOutcome).not.toHaveBeenCalled();
+});
+
 test("Stop prevents the next batch write", async () => {
   const source = page({
     controls: [0, 1].map((index) => ({

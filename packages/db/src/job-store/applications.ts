@@ -639,8 +639,7 @@ export function createApplicationStore(store: JobStore) {
         if (
           receipt.jobId !== String(current.jobId) ||
           receipt.applicationRecordId !== `application_${id}` ||
-          receipt.runId !== `application_run_${id}` ||
-          receipt.resultId !== `application_${id}_attempt_${attempt}`
+          receipt.runId !== `application_run_${id}`
         )
           throw new Error(
             "The submission receipt belongs to another application attempt.",
@@ -650,7 +649,9 @@ export function createApplicationStore(store: JobStore) {
             ? "submitted"
             : receipt.outcome === "outcome_uncertain"
               ? "uncertain"
-              : receipt.browserAction?.reason === "model_observed_outcome"
+              : receipt.browserAction?.reason === "model_observed_outcome" ||
+                  receipt.browserAction?.reason ===
+                    "model_reported_send_without_prior_intent"
                 ? "failed"
                 : "ready";
         sql(`UPDATE applications SET state = ?, submitted_at = ?, updated_at = ?,

@@ -70,6 +70,8 @@ import {
   withApplicationAuthorityGate,
 } from "../internal/application-authority-gate";
 import { runApplicationSubmissionRuntime } from "../internal/application-submission-runtime";
+import { recordReportedSend } from "../internal/record-reported-send";
+import { currentSendOutcomes } from "../internal/current-send-outcomes";
 import { authorizeReviewedApplicationOrigin } from "../internal/apply-authority-resolution";
 import {
   submitPreparedApplication,
@@ -708,10 +710,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       origin,
       savedAnswers,
     );
-    const previousSends =
+    const previousSends = await currentSendOutcomes(
+      deps.authorityRepository,
       await deps.authorityRepository.listSubmissionOutcomeRecords({
         jobId: String(row.jobId),
-      });
+      }),
+    );
     for (const previousSend of previousSends)
       instructions.push(
         `Send ledger: a send to this posting at ${previousSend.attemptedAt} is ${previousSend.outcome}. This is recorded history, not permission to replay it. Check the site's applied list or confirmation before a new send decision.`,
@@ -837,6 +841,16 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       },
     };
     let sentDuringPreparation: SubmissionOutcomeRecord | null = null;
+    const preparationSends = new Map<string, SubmissionOutcomeRecord>();
+    const retainSend = (receipt: SubmissionOutcomeRecord) => {
+      preparationSends.set(receipt.idempotencyKey, receipt);
+      sentDuringPreparation =
+        [...preparationSends.values()].find(
+          (item) => item.outcome === "submitted",
+        ) ??
+        [...preparationSends.values()].at(-1) ??
+        null;
+    };
     let agent: ApplyAgentResult | null = null;
     let review: ApplicationReviewCard | null = null;
     let currentReview: ApplicationReviewCard | null = null;
@@ -1010,11 +1024,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               runSubmission: runApplicationSubmissionRuntime,
             });
             const receipt = "outcome" in sent ? sent.outcome : null;
-            if (receipt) sentDuringPreparation = receipt;
+            if (receipt) retainSend(receipt);
             return {
+              ...(receipt ? { sendCallId: receipt.idempotencyKey } : {}),
               outcome: receipt?.outcome ?? null,
               content: receipt
-                ? `Send ledger: sendCallId=${receipt.idempotencyKey}, ${receipt.attemptedAt}, ${receipt.outcome}. Requests after the click: ${JSON.stringify(receipt.browserAction?.requestsAfterClick ?? [])}. Inspect the current page, then call record_send_outcome with that sendCallId and your observed outcome. ${receipt.outcome === "outcome_uncertain" ? "This send call was not replayed. Check the site's applied list or confirmation before deciding whether to send again." : receipt.outcome === "submitted" ? "The employer confirmed receipt." : "The site did not confirm a send. Inspect the page and decide the next action."}`
+                ? `Send ledger: sendCallId=${receipt.idempotencyKey}, ${receipt.attemptedAt}, ${receipt.outcome}. Browser action: ${receipt.browserAction?.reason ?? "unknown"}. ${receipt.browserAction?.detail ?? ""} Requests after the click: ${JSON.stringify(receipt.browserAction?.requestsAfterClick ?? [])}. Inspect the current page, then call record_send_outcome with that sendCallId and your observed outcome. ${receipt.outcome === "outcome_uncertain" ? "This send call was not replayed. Check the site's applied list or confirmation before deciding whether to send again." : receipt.outcome === "submitted" ? "The employer confirmed receipt." : "The site did not confirm a send. Inspect the page and decide the next action."}`
                 : "detail" in sent
                   ? sent.detail
                   : "The send did not execute; observe again.",
@@ -1022,15 +1037,52 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           },
           recordSendOutcome: async (decision) => {
             signal.throwIfAborted();
+            const reportedKey = `model_report_${identity.applicationRecordId}_${decision.sendCallId}`;
             const ledger =
-              await deps.authorityRepository.getSubmissionIdempotencyRecord(
+              (await deps.authorityRepository.getSubmissionIdempotencyRecord(
                 decision.sendCallId,
-              );
+              )) ??
+              (await deps.authorityRepository.getSubmissionIdempotencyRecord(
+                reportedKey,
+              ));
             const previous = ledger?.outcomeId
               ? await deps.authorityRepository.getSubmissionOutcomeRecord(
                   ledger.outcomeId,
                 )
               : null;
+            if (!ledger) {
+              const recorded = await recordReportedSend({
+                repository: deps.authorityRepository,
+                lineage: {
+                  ...identity,
+                  jobId: String(row.jobId),
+                  campaignId: null,
+                },
+                envelope,
+                mode,
+                resumeBytes: new Uint8Array(await readFile(artifact.filePath)),
+                decision: {
+                  ...decision,
+                  sendCallId: reportedKey,
+                  pageUrl: decision.pageUrl ?? job.url,
+                },
+                now: new Date().toISOString(),
+              });
+              const receipt = "outcome" in recorded ? recorded.outcome : null;
+              if (!receipt)
+                return {
+                  recorded: false,
+                  content:
+                    "detail" in recorded
+                      ? recorded.detail
+                      : "The model report could not be recorded.",
+                };
+              retainSend(receipt);
+              return {
+                recorded: true,
+                content: `Recorded ${decision.outcome}: ${decision.evidence}. No browser action was issued; the original send had no prior intent.`,
+              };
+            }
             if (
               !ledger ||
               !previous ||
@@ -1095,7 +1147,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 recorded: false,
                 content: `The ledger update returned ${recorded.status}; read its current state before deciding again.`,
               };
-            sentDuringPreparation = receipt;
+            retainSend(receipt);
             return {
               recorded: true,
               content: `Recorded ${decision.outcome}: ${decision.evidence}. This call ID remains consumed and will never be replayed.`,

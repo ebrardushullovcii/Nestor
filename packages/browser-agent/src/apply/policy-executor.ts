@@ -559,6 +559,7 @@ export async function executeApplyProposal(
       observation: after,
     };
   }
+  let pressNote = "";
   if (proposal.tool === "wait") await config.hands.wait(proposal.milliseconds);
   else if (proposal.tool === "scroll")
     await config.hands.scroll(proposal.direction);
@@ -571,9 +572,11 @@ export async function executeApplyProposal(
           : proposal.tool === "navigate"
             ? await config.hands.navigate(proposal.url)
             : await config.hands.goBack();
+    if ("clickFacts" in result && result.clickFacts)
+      pressNote = ` Press facts (descriptive only): ${JSON.stringify(result.clickFacts)}.`;
     if (!result.ok)
       return {
-        ...failed(result.error),
+        ...failed(result.error + pressNote),
         observation: await config.hands.observe(),
       };
   }
@@ -589,7 +592,7 @@ export async function executeApplyProposal(
   }
   return {
     kind: "moved",
-    note: `Completed ${proposal.tool}.${tabNote}`,
+    note: `Completed ${proposal.tool}.${tabNote}${pressNote}`,
     observation: after,
     progress: observation.signature !== after.signature,
   };

@@ -1,4 +1,7 @@
-import { ApplyPersonRequestSchema } from "@nestor/contracts";
+import {
+  ApplyPersonRequestSchema,
+  ApplyFinishSendOutcomeSchema,
+} from "@nestor/contracts";
 import type { ApplyProposal } from "./types";
 
 const STORED_FACT_PARAMETER = {
@@ -299,6 +302,20 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
               type: "string",
               description: "Why you are finishing, in one plain sentence.",
             },
+            sendOutcome: {
+              type: "object",
+              description:
+                "Report any send, including one made by click or another tool. confirmed, failed or uncertain records your evidence even if no send intent exists. Never describe a send only in reason.",
+              properties: {
+                outcome: {
+                  type: "string",
+                  enum: ["confirmed", "failed", "uncertain"],
+                },
+                evidence: { type: "string" },
+              },
+              required: ["outcome", "evidence"],
+              additionalProperties: false,
+            },
             stuck: { type: "boolean" },
             applicationClosed: {
               type: "boolean",
@@ -510,6 +527,12 @@ export function parseApplyProposal(
         ? { ok: true, proposal: { tool: "submit_application", ref } }
         : needsRef();
     case "finish": {
+      const reportedSend =
+        args.sendOutcome === undefined
+          ? null
+          : ApplyFinishSendOutcomeSchema.safeParse(args.sendOutcome);
+      if (reportedSend && !reportedSend.success)
+        return { ok: false, error: reportedSend.error.message };
       if (
         args.applicationClosed !== undefined &&
         typeof args.applicationClosed !== "boolean"
@@ -530,6 +553,7 @@ export function parseApplyProposal(
         ok: true,
         proposal: {
           tool: "finish",
+          ...(reportedSend?.success ? { sendOutcome: reportedSend.data } : {}),
           reason,
           stuck: args.stuck === true,
           applicationClosed: args.applicationClosed === true,

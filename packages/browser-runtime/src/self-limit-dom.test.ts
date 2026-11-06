@@ -139,6 +139,7 @@ test.each(["options", "steps"] as const)(
     page.window.eval(
       `Object.defineProperty(HTMLElement.prototype,"scrollHeight",{get(){return 10000}});Object.defineProperty(HTMLElement.prototype,"clientHeight",{get(){return 100}});`,
     );
+    const styles = vi.spyOn(page.window, "getComputedStyle");
     const list = {
       evaluate: (read: (...args: unknown[]) => unknown, input: unknown) =>
         Promise.resolve(
@@ -152,6 +153,11 @@ test.each(["options", "steps"] as const)(
     const result = await pending;
     expect(result.complete).toBe(true);
     expect(result.options).toHaveLength(boundary === "options" ? 1510 : 3);
+    // An unchanged full list must not resolve every row's styles again at
+    // each scroll position. This detects the cost without a wall-clock limit.
+    expect(styles.mock.calls.length).toBeLessThanOrEqual(
+      result.options.length * 4 + 10,
+    );
     expect(
       hits(log).some(
         (hit) =>
@@ -185,3 +191,62 @@ test("a list that refuses scrolling returns its observed choices as incomplete",
     options: ["One choice"],
   });
 });
+
+test.each(["slot_text", "linked_label", "new_shadow"] as const)(
+  "scrolling rereads %s changes instead of returning cached row names",
+  async (change) => {
+    vi.useFakeTimers();
+    const page = dom(
+      '<span id="linked">Before</span><div id="choices" style="overflow-y:auto"><country-row>Before</country-row></div>',
+    );
+    // jsdom lacks CSS.escape; this fixture uses only the plain ASCII ID linked.
+    page.window.eval("window.CSS = { escape: value => value };");
+    page.window.eval(`
+      const list = document.getElementById('choices');
+      const host = list.querySelector('country-row');
+      const change = ${JSON.stringify(change)};
+      if (change !== 'new_shadow') {
+        const root = host.attachShadow({mode:'open'});
+        root.innerHTML = '<div role="option"><slot></slot></div>';
+        if (change === 'linked_label') {
+          root.querySelector('[role=option]').remove();
+          const row = document.createElement('div');
+          row.setAttribute('role','option');
+          row.setAttribute('aria-labelledby','linked');
+          list.append(row);
+        }
+      } else {
+        list.insertAdjacentHTML('afterbegin','<div role="option">Before</div>');
+      }
+      Object.defineProperty(list,'scrollHeight',{get(){return 200}});
+      Object.defineProperty(list,'clientHeight',{get(){return 100}});
+      let top = 0;
+      Object.defineProperty(list,'scrollTop',{
+        get(){return top},
+        set(value){
+          top = value;
+          if (value < 80) return;
+          if (change === 'slot_text') host.textContent = 'Kosovo';
+          if (change === 'linked_label') document.getElementById('linked').textContent = 'Kosovo';
+          if (change === 'new_shadow' && !host.shadowRoot)
+            host.attachShadow({mode:'open'}).innerHTML = '<div role="option">Kosovo</div>';
+        }
+      });
+    `);
+    const list = {
+      evaluate: (read: (...args: unknown[]) => unknown, input: unknown) =>
+        Promise.resolve(
+          page.window.eval(
+            `(${read.toString()})(document.getElementById('choices'),${JSON.stringify(input)})`,
+          ),
+        ),
+    } as unknown as Locator;
+    const pending = readWholeList(list, "kosovo");
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(await pending).toEqual({
+      options: ["Before", "Kosovo"],
+      found: "Kosovo",
+      complete: true,
+    });
+  },
+);

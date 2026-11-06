@@ -1,4 +1,6 @@
 import { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
+import { readPressability } from "./element-state";
+import { watchPagePress } from "./page-press-facts";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { withNavigationLiveness } from "./browser-navigation";
 import { tracePageHands, tracePage } from "./trace-page";
@@ -143,6 +145,7 @@ async function collectRawApplyPage(page: Page): Promise<RawApplyPage> {
     `${APPLY_CONTROL_SELECTOR}, ${APPLY_ACTION_SELECTOR}, ${APPLY_LINK_SELECTOR}, ${APPLY_CLICKABLE_SELECTOR}`,
   );
   raw.clickables.push(...closed.clickables);
+  raw.validationErrors.push(...closed.validationErrors);
   if (closed.bodyText)
     raw.bodyText = [raw.bodyText, closed.bodyText].filter(Boolean).join("\n\n");
   // A dropzone's inner input often says only "Choose a file". Its actual
@@ -2444,7 +2447,9 @@ function describeWriteFailure(error: unknown, fallback: string): string {
 async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
   if ((await locator.count()) === 0)
     throw new Error("Stale control; observe again.");
-  if (!(await locator.isEnabled())) throw new Error("The control is disabled.");
+  const interaction = await locator.evaluate(readPressability);
+  if (interaction.disabled) throw new Error("The control is disabled.");
+  if (interaction.inert) throw new Error("The control is inert.");
   await locator.scrollIntoViewIfNeeded({ timeout: 0 }).catch(() => undefined);
   try {
     await locator.click({ timeout: 0 });
@@ -2844,24 +2849,34 @@ export function createPlaywrightApplyPageMechanics(
       }
     },
     clickElement: async (ref): Promise<ApplyWriteResult> => {
-      if (/^s\d+$/u.test(ref)) return clickClosedShadowControl(page, ref);
-      const locator =
-        actionLocator(page, ref) ??
-        linkLocator(page, ref) ??
-        clickableLocator(page, ref) ??
-        controlLocator(page, ref);
-      if (!locator) {
-        return { ok: false, error: `There is nothing called ${ref} here.` };
-      }
+      const press = watchPagePress(page);
+      let result: ApplyWriteResult;
       try {
-        await clickAndSettle(page, locator);
-        return { ok: true, observedValue: "clicked" };
+        if (/^s\d+$/u.test(ref)) {
+          result = await clickClosedShadowControl(page, ref);
+        } else {
+          const locator =
+            actionLocator(page, ref) ??
+            linkLocator(page, ref) ??
+            clickableLocator(page, ref) ??
+            controlLocator(page, ref);
+          if (!locator)
+            result = {
+              ok: false,
+              error: `There is nothing called ${ref} here.`,
+            };
+          else {
+            await clickAndSettle(page, locator);
+            result = { ok: true, observedValue: "clicked" };
+          }
+        }
       } catch (error) {
-        return {
+        result = {
           ok: false,
           error: describeWriteFailure(error, "That would not respond."),
         };
       }
+      return { ...result, clickFacts: press.finish() };
     },
     scroll: async (direction): Promise<ApplyWriteResult> => {
       try {

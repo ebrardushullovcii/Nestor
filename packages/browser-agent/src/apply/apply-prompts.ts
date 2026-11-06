@@ -97,6 +97,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     "",
     "Pacing: there is no total step or time budget. Keep trying distinct supported options and entry methods while they can make progress. Do not repeat the same failed action on the same unchanged page. Waiting and observing a slow site do not consume attempts. A short form takes a few steps; a listing that leads through a redirect to a five-screen form takes many more, and that is fine. Finish when the form is complete, when only the person can go further, or when you are genuinely stuck — and say which, in your own words, because the person reads exactly what you write. Every reply is a tool call: a reply with only text does nothing and costs the person another turn, so report through finish.",
     "",
+    "Any press that may send an application must use submit_application, on whatever control the page uses: a button, link, custom element, shadow-root control or other observed ref. The model chooses the send control; it need not be marked final by our code. Inspect the page and requests after a press. If another tool sent an application, record it with record_send_outcome using the original tool call ID, or on finish set sendOutcome to {outcome: confirmed|failed|uncertain, evidence: what the page showed}. This records your report even without a prior send intent; never report a completed send only in reason. Ordinary clicks do not create send records. Fill in for me still means leave the final send to the person; all tools stay available.",
     "For Send for me, call submit_application with the observed send control when you decide the form is complete. Its result gives the durable intent/ledger fact and the requests observed after the click. Inspect the returned page and call record_send_outcome with the sendCallId: confirmed with quoted employer-page evidence, failed with its reason, or uncertain. The application state follows your recorded outcome. If it is still loading, wait and observe before deciding. An uncertain intent is a fact to investigate, never permission to replay the same call. Only a new decision may send again. For Fill in for me, leave the final send to the person and call finish. Ordinary site errors and upload messages are evidence for your next decision; attempt a repair with the available tools before asking the person. When you finish, your reason is the report. Say what you saw and where: which page you were on, what you pressed, what happened. 'The Apply button on the job board opens the employer's own careers site, which asks you to sign in before the form' is a report. 'Could not complete' is not. For sign-in, try the vault before handing off a password, including on accounts.google.com. Use list_saved_logins to see every saved account and choose its credentialId; use fill_saved_login with the observed password ref. On a passkey challenge you can choose Try another way and use the saved password. Ask the person only for a secret the vault lacks, an MFA code or a passkey tap that only they can perform, or a step still failing after a real attempt. Hand that step off through finish(forPerson) with an onPage item, such as {onPage: passkey, instructions: Complete the passkey tap on this open page}. Never ask them to type a secret into a saved-answer question.",
   ].join("\n");
 }
@@ -191,8 +192,10 @@ function describeControl(
   }
   if (control.upload)
     parts.push(`upload facts: ${JSON.stringify(control.upload)}`);
-  if (control.invalid && control.validationMessage) {
-    parts.push(`the page says: ${control.validationMessage}`);
+  if (control.invalid) {
+    parts.push(
+      `the page says: ${control.validationMessage || "This control is invalid."}`,
+    );
   }
   if (!control.visible) {
     parts.push("not on screen");
@@ -213,15 +216,9 @@ export function describeObservation(observation: ApplyFormObservation): string {
         : null;
 
   const controls = observation.controls;
-  const actions = observation.actions.filter(
-    (action) => action.visible && action.label.length > 0,
-  );
-  const links = observation.links.filter(
-    (link) => link.visible && link.label.length > 0,
-  );
-  const clickables = observation.clickables.filter(
-    (entry) => entry.visible && entry.label.length > 0,
-  );
+  const actions = observation.actions.filter((action) => action.visible);
+  const links = observation.links.filter((link) => link.visible);
+  const clickables = observation.clickables.filter((entry) => entry.visible);
 
   if (observation.navigationNote)
     observation = {

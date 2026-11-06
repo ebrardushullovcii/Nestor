@@ -59,6 +59,8 @@ const preparation = vi.hoisted(() => ({
   attachedField: "Resume" as string | null,
   readAnswers:
     undefined as ApplicationPreparation.AgentApplicationPreparationInput["readReusableAnswers"],
+  recordSendOutcome:
+    undefined as ApplicationPreparation.AgentApplicationPreparationInput["recordSendOutcome"],
 }));
 
 vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
@@ -69,6 +71,7 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
       input: Parameters<typeof actual.createApplyFormPreparer>[0],
     ) => {
       preparation.readAnswers = input.readReusableAnswers;
+      preparation.recordSendOutcome = input.recordSendOutcome;
       preparation.givenAnswers.push(input.reusableAnswers ?? []);
       preparation.replays.push(input.replay ?? null);
       preparation.activities.push(input.earlierActivity ?? []);
@@ -156,6 +159,95 @@ const ready = () =>
     nextActionLabel: "Open form",
   });
 const cleanups: (() => void | Promise<void>)[] = [];
+
+it.each([
+  { outcome: "confirmed", state: "submitted", recorded: "submitted" },
+  { outcome: "uncertain", state: "uncertain", recorded: "outcome_uncertain" },
+  { outcome: "failed", state: "failed", recorded: "not_submitted" },
+] as const)(
+  "a model report of $outcome without a prior intent records $state instead of Ready",
+  async ({ outcome, state, recorded }) => {
+    const f = await setup(1);
+    const guards = createSendGuards(f.jobs);
+    f.deps.authorityRepository = guards;
+    preparation.notReadyToSend = true;
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } });
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    expect(await guards.listSubmissionArmedMarkers()).toHaveLength(0);
+    const decision = {
+      sendCallId: "finish-reported-send",
+      outcome,
+      evidence: "Employer page: application receipt",
+      pageUrl: "https://replica.test/success",
+    };
+    expect(await preparation.recordSendOutcome!(decision)).toMatchObject({
+      recorded: true,
+    });
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe(state),
+    );
+    const receipt = f.applications.getSubmissionReceipt(
+      f.applications.listApplications().rows[0]!.id,
+    )!;
+    expect(receipt).toMatchObject({
+      outcome: recorded,
+      browserAction: {
+        reason: "model_reported_send_without_prior_intent",
+        actionIssued: false,
+      },
+    });
+    expect(receipt.evidence[0]?.summary).toBe(decision.evidence);
+    expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
+    // Reporting again updates the same consumed call; it never creates another press.
+    expect(await preparation.recordSendOutcome!(decision)).toMatchObject({
+      recorded: true,
+    });
+    expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
+  },
+);
+
+it("the model can reconcile an older recorded send call while a later attempt is open", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  preparation.notReadyToSend = true;
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  await preparation.recordSendOutcome!({
+    sendCallId: "earlier-send",
+    outcome: "failed",
+    evidence: "The form remained open.",
+    pageUrl: "https://replica.test/form",
+  });
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("failed"),
+  );
+  const original = (await guards.listSubmissionOutcomeRecords())[0]!;
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
+  expect(
+    await preparation.recordSendOutcome!({
+      sendCallId: original.idempotencyKey,
+      outcome: "confirmed",
+      evidence: "The employer's applied list contains the application.",
+      pageUrl: "https://replica.test/applied",
+    }),
+  ).toMatchObject({ recorded: true });
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("submitted"),
+  );
+  expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
+  expect(
+    f.applications.getSubmissionReceipt(
+      f.applications.listApplications().rows[0]!.id,
+    ),
+  ).toMatchObject({ resultId: original.resultId, outcome: "submitted" });
+});
 
 it("records a model-reported closed posting as closed instead of failed", async () => {
   const f = await setup(1);
