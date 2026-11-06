@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { Page } from "playwright";
 import { afterEach, expect, test, vi } from "vitest";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
+import { capturePreparedForm } from "./prepared-form-recovery";
 
 afterEach(() => vi.useRealTimers());
 const never = () => new Promise<never>(() => {});
@@ -24,6 +25,20 @@ test("a page read that never settles returns on actual browser connection silenc
   vi.useFakeTimers();
   const browserPage = page();
   const result = withBrowserReadLiveness(browserPage, never);
+  const rejection = expect(result).rejects.toBeDefined();
+  await vi.advanceTimersByTimeAsync(15_001);
+  await rejection;
+  expect(browserPage.listenerCount("response")).toBe(0);
+});
+
+test("a never-settling durable form capture cannot hold application completion", async () => {
+  vi.useFakeTimers();
+  const browserPage = Object.assign(page(), {
+    isClosed: () => false,
+    frames: () => [{}],
+    evaluate: never,
+  });
+  const result = capturePreparedForm(browserPage);
   const rejection = expect(result).rejects.toBeDefined();
   await vi.advanceTimersByTimeAsync(15_001);
   await rejection;

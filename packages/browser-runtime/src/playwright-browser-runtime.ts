@@ -1,5 +1,6 @@
 import { withNavigationLiveness } from "./browser-navigation";
 import { withTraceScope } from "@nestor/core/run-trace";
+import { withBrowserReadLiveness } from "./browser-read-liveness";
 import {
   bindTracePage,
   configureTraceCapture,
@@ -1471,8 +1472,8 @@ export function createBrowserAgentRuntime(
 
   async function readPreparedPageMark(page: Page): Promise<string | null> {
     if (typeof page.evaluate !== "function") return null;
-    return page
-      .evaluate((mark) => {
+    return withBrowserReadLiveness(page, () =>
+      page.evaluate((mark) => {
         const value = (window as unknown as Record<string, unknown>)[mark];
         if (typeof value === "string") return value;
         try {
@@ -1480,8 +1481,8 @@ export function createBrowserAgentRuntime(
         } catch {
           return null;
         }
-      }, PREPARED_PAGE_MARK)
-      .catch(() => null);
+      }, PREPARED_PAGE_MARK),
+    ).catch(() => null);
   }
 
   function bindPreparedApplicationPage(key: string, page: Page): void {
