@@ -1,37 +1,46 @@
 // ADR 0079: ordinary site requests and service workers run normally. Legacy
 // hooks remain for session compatibility; none installs a request fence.
-import {createHash} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
-import {resolve} from 'node:path';
-import type {Page,Locator,Frame,BrowserContext,Request} from 'playwright';
-import {ApplyExecutionResultSchema,type ApplyExecutionResult,type ApplyExecutionModelUse,type ApplicationAttemptBlocker,type ApplicationAttemptCheckpoint,type ApplicationAttemptExternalWriteEvidence,type ApplicationAttemptQuestion,type ApplyBlockedAttempt,type ApplyRequestPermit,type ApplyUploadFile} from '@nestor/contracts';
-import type {IntermediateMutationWindowSnapshot} from './application-intermediate-mutation-policy';
-import type {ExecuteApplicationFlowInput} from './runtime-types';
-export type PrepareOnlyBlockedAttempt=ApplyBlockedAttempt;
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import type { Page, Locator, Frame, BrowserContext, Request } from "playwright";
+import {
+  ApplyExecutionResultSchema,
+  type ApplyExecutionResult,
+  type ApplyExecutionModelUse,
+  type ApplicationAttemptBlocker,
+  type ApplicationAttemptCheckpoint,
+  type ApplicationAttemptExternalWriteEvidence,
+  type ApplicationAttemptQuestion,
+  type ApplyBlockedAttempt,
+  type ApplyRequestPermit,
+  type ApplyUploadFile,
+} from "@nestor/contracts";
+import type { IntermediateMutationWindowSnapshot } from "./application-intermediate-mutation-policy";
+import type { ExecuteApplicationFlowInput } from "./runtime-types";
+export type PrepareOnlyBlockedAttempt = ApplyBlockedAttempt;
 export function onPrepareOnlyUploadPermit(
   page: Page,
   listener: (request: Request, permit: ApplyRequestPermit) => void,
-): void{
-void page;
-void listener;
-
+): void {
+  void page;
+  void listener;
 }
 export function getAttachmentGuardRefusal(
   request: Request,
-): string | undefined{
-void request;
-return undefined;
+): string | undefined {
+  void request;
+  return undefined;
 }
 export function getPrepareOnlyRequestPermit(
   request: Request,
-): ApplyRequestPermit | null{
-void request;
-return null;
+): ApplyRequestPermit | null {
+  void request;
+  return null;
 }
-export function allowPrepareOnlyRunNavigation(page: Page, url: string): void{
-void page;
-void url;
-
+export function allowPrepareOnlyRunNavigation(page: Page, url: string): void {
+  void page;
+  void url;
 }
 export interface PrepareOnlyGuardSnapshot {
   installed: boolean;
@@ -50,41 +59,43 @@ export interface PrepareOnlyRefusal {
   body: "none" | "text" | "form_data" | "opaque";
   at: string;
 }
-export async function armAccountWindowInPage(
+export function armAccountWindowInPage(
   locator: Locator,
   token: string,
   expiresAtMs: number,
-): Promise<void>{
-void locator;
-void token;
-void expiresAtMs;
+): Promise<void> {
+  void locator;
+  void token;
+  void expiresAtMs;
 
+  return Promise.resolve();
 }
-export async function pendingAccountWindowInPage(
+export function pendingAccountWindowInPage(
   locator: Locator,
   token: string,
-): Promise<boolean>{
-void locator;
-void token;
-return true;
+): Promise<boolean> {
+  void locator;
+  void token;
+  return Promise.resolve(true);
 }
-export async function releaseAccountWindowInPage(
+export function releaseAccountWindowInPage(
   locator: Locator,
   token: string,
-): Promise<boolean>{
-void locator;
-void token;
-return true;
+): Promise<boolean> {
+  void locator;
+  void token;
+  return Promise.resolve(true);
 }
-export async function cancelAccountWindowInPage(
+export function cancelAccountWindowInPage(
   locator: Locator,
   token: string,
-): Promise<void>{
-void locator;
-void token;
+): Promise<void> {
+  void locator;
+  void token;
 
+  return Promise.resolve();
 }
-export async function installAccountWindowContainment(
+export function installAccountWindowContainment(
   child: Page,
   input: {
     opener: Page;
@@ -92,64 +103,67 @@ export async function installAccountWindowContainment(
     disclosableValues?: readonly string[];
     canWrite?: () => boolean;
   },
-): Promise<void>{
-void child;
-void input;
+): Promise<void> {
+  void child;
+  void input;
 
+  return Promise.resolve();
 }
-export function readPrepareOnlyIntermediateWriteCount(page: Page): number{
-void page;
-return 0;
+export function readPrepareOnlyIntermediateWriteCount(page: Page): number {
+  void page;
+  return 0;
 }
-export async function drainPrepareOnlyIntermediateWrites(
-  page: Page,
-): Promise<void>{
-void page;
+export function drainPrepareOnlyIntermediateWrites(page: Page): Promise<void> {
+  void page;
 
+  return Promise.resolve();
 }
-export async function openPrepareOnlyAuthorizedFormActionWindow(
+export function openPrepareOnlyAuthorizedFormActionWindow(
   page: Page,
   locator: Locator,
   durationMs: number | null = 20_000,
   expected?: { action: string; method: "POST" },
-): Promise<void>{
-void page;
-void locator;
-void durationMs;
-void expected;
+): Promise<void> {
+  void page;
+  void locator;
+  void durationMs;
+  void expected;
 
+  return Promise.resolve();
 }
-export async function waitForPrepareOnlyAuthorizedFormAction(
+export function waitForPrepareOnlyAuthorizedFormAction(
   page: Page,
   timeoutMs = 3_000,
-): Promise<void>{
-void page;
-void timeoutMs;
+): Promise<void> {
+  void page;
+  void timeoutMs;
 
+  return Promise.resolve();
 }
-export async function closePrepareOnlyAuthorizedFormActionWindow(
+export function closePrepareOnlyAuthorizedFormActionWindow(
   page: Page,
-): Promise<void>{
-void page;
+): Promise<void> {
+  void page;
 
+  return Promise.resolve();
 }
-export function isPrepareOnlyFinalActionWindowOpen(page: Page): boolean | null{
-void page;
-return null;
+export function isPrepareOnlyFinalActionWindowOpen(page: Page): boolean | null {
+  void page;
+  return null;
 }
-export async function openPrepareOnlyFinalActionWindow(
+export function openPrepareOnlyFinalActionWindow(
   page: Page,
   durationMs = 20_000,
-): Promise<void>{
-void page;
-void durationMs;
+): Promise<void> {
+  void page;
+  void durationMs;
 
+  return Promise.resolve();
 }
-export async function closePrepareOnlyFinalActionWindow(
-  page: Page,
-): Promise<void>{
-void page;
+export function closePrepareOnlyFinalActionWindow(page: Page): Promise<void> {
+  void page;
 
+  return Promise.resolve();
 }
 export function installPrepareOnlyMutationGuardInPage(guardInput: {
   intermediateMutationsAuthorized: boolean;
@@ -160,27 +174,22 @@ export function installPrepareOnlyMutationGuardInPage(guardInput: {
   captchaVerificationSignal?: string;
   /** `SITE_BOT_CHECK_PATH`, passed in for the same reason. */
   siteBotCheckPath?: string;
-}): void{
-void guardInput;
-
+}): void {
+  void guardInput;
 }
 export function setPrepareOnlyIntermediateMutationWindowInPage(
   mutationWindow: IntermediateMutationWindowSnapshot | null,
-): void{
-void mutationWindow;
-
+): void {
+  void mutationWindow;
 }
-export function registerPrepareOnlyPreparedValueInPage(value: string): void{
-void value;
-
+export function registerPrepareOnlyPreparedValueInPage(value: string): void {
+  void value;
 }
-export function markPrepareOnlyPickerChoiceInPage(values: string[]): void{
-void values;
-
+export function markPrepareOnlyPickerChoiceInPage(values: string[]): void {
+  void values;
 }
-export function readPrepareOnlyMutationGuardInPage(): PrepareOnlyGuardSnapshot{
-
-return {installed:false,blockedAttempts:[]};
+export function readPrepareOnlyMutationGuardInPage(): PrepareOnlyGuardSnapshot {
+  return { installed: false, blockedAttempts: [] };
 }
 export interface ServiceWorkerRegisterGuardStatus {
   supported: boolean;
@@ -190,13 +199,16 @@ export interface ServiceWorkerRegisterGuardStatus {
   guardStatePresent: boolean;
   blockedRegistrationAttempts: number;
 }
-export function installServiceWorkerRegisterGuardInPage(): void{
-
-
-}
-export function readServiceWorkerRegisterGuardInPage(): ServiceWorkerRegisterGuardStatus{
-
-return {supported:true,prototypeGuardInstalled:false,instanceGuardInstalled:false,integrityVerified:false,guardStatePresent:false,blockedRegistrationAttempts:0};
+export function installServiceWorkerRegisterGuardInPage(): void {}
+export function readServiceWorkerRegisterGuardInPage(): ServiceWorkerRegisterGuardStatus {
+  return {
+    supported: true,
+    prototypeGuardInstalled: false,
+    instanceGuardInstalled: false,
+    integrityVerified: false,
+    guardStatePresent: false,
+    blockedRegistrationAttempts: 0,
+  };
 }
 export interface PageServiceWorkerScanPayload {
   scanned: boolean;
@@ -208,89 +220,98 @@ export interface PageServiceWorkerScanPayload {
     activeUrl: string | null;
   }>;
 }
-export function collectApplicationOriginServiceWorkerStateInPage(): Promise<PageServiceWorkerScanPayload>{
-
-return Promise.resolve({scanned:false,controllerUrl:null,registrations:[]});
+export function collectApplicationOriginServiceWorkerStateInPage(): Promise<PageServiceWorkerScanPayload> {
+  return Promise.resolve({
+    scanned: false,
+    controllerUrl: null,
+    registrations: [],
+  });
 }
-export async function ensurePrepareOnlyMutationGuard(
+export function ensurePrepareOnlyMutationGuard(
   page: Page,
   intermediateMutationsAuthorized: boolean,
   intermediateMutationAllowedOrigins: readonly string[] = [],
   attachmentUploadsAuthorized = false,
-): Promise<PrepareOnlyGuardSnapshot>{
-void page;
-void intermediateMutationsAuthorized;
-void intermediateMutationAllowedOrigins;
-void attachmentUploadsAuthorized;
-return {installed:false,blockedAttempts:[]};
+): Promise<PrepareOnlyGuardSnapshot> {
+  void page;
+  void intermediateMutationsAuthorized;
+  void intermediateMutationAllowedOrigins;
+  void attachmentUploadsAuthorized;
+  return Promise.resolve({ installed: false, blockedAttempts: [] });
 }
-export async function openPrepareOnlyIntermediateMutationWindow(
+export function openPrepareOnlyIntermediateMutationWindow(
   page: Page,
-): Promise<void>{
-void page;
+): Promise<void> {
+  void page;
 
+  return Promise.resolve();
 }
-export async function fencePrepareOnlyLocalPress(page: Page): Promise<void>{
-void page;
+export function fencePrepareOnlyLocalPress(page: Page): Promise<void> {
+  void page;
 
+  return Promise.resolve();
 }
-export async function closePrepareOnlyIntermediateMutationWindow(
+export function closePrepareOnlyIntermediateMutationWindow(
   page: Page,
-): Promise<void>{
-void page;
+): Promise<void> {
+  void page;
 
+  return Promise.resolve();
 }
-export async function openPrepareOnlyAttachmentUploadWindow(
+export function openPrepareOnlyAttachmentUploadWindow(
   page: Page,
   file: ApplyUploadFile,
   field: string | null = null,
-): Promise<void>{
-void page;
-void file;
-void field;
+): Promise<void> {
+  void page;
+  void file;
+  void field;
 
+  return Promise.resolve();
 }
-export async function closePrepareOnlyAttachmentUploadWindow(
+export function closePrepareOnlyAttachmentUploadWindow(
   page: Page,
-): Promise<void>{
-void page;
+): Promise<void> {
+  void page;
 
+  return Promise.resolve();
 }
-export async function registerPrepareOnlyPreparedValue(
+export function registerPrepareOnlyPreparedValue(
   page: Page,
   value: string,
-): Promise<void>{
-void page;
-void value;
+): Promise<void> {
+  void page;
+  void value;
 
+  return Promise.resolve();
 }
-export async function markPrepareOnlyPickerChoice(
+export function markPrepareOnlyPickerChoice(
   page: Page,
   values: readonly string[],
-): Promise<void>{
-void page;
-void values;
+): Promise<void> {
+  void page;
+  void values;
 
+  return Promise.resolve();
 }
-export async function getLatestBlockedPrepareOnlyAttempt(
+export function getLatestBlockedPrepareOnlyAttempt(
   page: Page,
-): Promise<PrepareOnlyBlockedAttempt | null>{
-void page;
-return null;
+): Promise<PrepareOnlyBlockedAttempt | null> {
+  void page;
+  return Promise.resolve(null);
 }
-export async function getBlockedPrepareOnlyAttempts(
+export function getBlockedPrepareOnlyAttempts(
   page: Page,
-): Promise<PrepareOnlyBlockedAttempt[]>{
-void page;
-return [];
+): Promise<PrepareOnlyBlockedAttempt[]> {
+  void page;
+  return Promise.resolve([]);
 }
 export function recordPrepareOnlyRunInterruption(
   page: Page,
   attempt: PrepareOnlyBlockedAttempt,
-): void{
-void page;
-void attempt;
-
+): void {
+  void page;
+  void attempt;
 }
 export type ServiceWorkerSafetyStopReason =
   | "active_service_worker_controlling_application_origin"
@@ -310,15 +331,15 @@ export interface ServiceWorkerSafetyFinding {
   workerUrls: string[];
   detail: string;
 }
-export async function findApplicationOriginServiceWorkerIssue(input: {
+export function findApplicationOriginServiceWorkerIssue(input: {
   context: BrowserContext;
   targetUrl: string;
   page?: Page | null;
   phase: string;
   pendingWorkerEventUrls?: readonly string[];
-}): Promise<ServiceWorkerSafetyFinding | null>{
-void input;
-return null;
+}): Promise<ServiceWorkerSafetyFinding | null> {
+  void input;
+  return Promise.resolve(null);
 }
 export interface ApplicationRunServiceWorkerSentinel {
   check(phase: string): Promise<ServiceWorkerSafetyFinding | null>;
@@ -330,7 +351,7 @@ export interface ApplicationRunServiceWorkerSentinel {
   disarmAccountWindow(): void;
   isDetached(): boolean;
 }
-export async function openPrepareOnlyProviderWriteWindow(
+export function openPrepareOnlyProviderWriteWindow(
   page: Page,
   input: {
     origins: readonly string[];
@@ -338,31 +359,88 @@ export async function openPrepareOnlyProviderWriteWindow(
     active: () => boolean;
     login?: { frame: Frame; formAction: string; token: string };
   },
-): Promise<(() => Promise<void>) & { writes(): number }>{
-void page;
-void input;
-return Object.assign(async()=>{}, {writes:()=>0});
+): Promise<(() => Promise<void>) & { writes(): number }> {
+  void page;
+  void input;
+  return Promise.resolve(
+    Object.assign(() => Promise.resolve(), { writes: () => 0 }),
+  );
 }
-const activeAccountWindows=new WeakMap<Page,Page>();const claimedAccountWindows=new WeakSet<Page>();
-export const registerAccountSurfaceOrigins=(page:Page,origins:readonly string[]):void=>{void page;void origins;};
-export const isClaimedAccountWindow=(page:Page):boolean=>claimedAccountWindows.has(page);
-export const hasActiveAccountWindow=(page:Page):boolean=>{const child=activeAccountWindows.get(page);return !!child&&!child.isClosed();};
-export const ACCOUNT_WINDOW_OPEN_MESSAGE='An account window is open for this application; finish or close it first.';
-export const hasPrepareOnlyPreparedValues=(page:Page):boolean=>{void page;return false;};
-export const PICKER_CHOICE_WINDOW_MS=10000;
-export function createApplicationRunServiceWorkerSentinel(input:{context:BrowserContext;targetUrl:string;now?:()=>Date}):ApplicationRunServiceWorkerSentinel{
-let page:Page|null=null,detached=false;let resolveChild:((page:Page|null)=>void)|null=null;const listeners:(()=>void)[]=[];
-const onPage=(child:Page)=>{void child.opener().then(opener=>{if(!detached&&opener===page&&resolveChild&&page){claimedAccountWindows.add(child);activeAccountWindows.set(page,child);resolveChild(child);resolveChild=null;}}).catch(()=>undefined);};input.context.on('page',onPage);
-return {check:async()=>null,attachPage:next=>{page=next;},pendingWorkerEventCount:()=>0,onDetach:listener=>{listeners.push(listener);},armAccountWindow:()=>new Promise(resolve=>{resolveChild=resolve;}),disarmAccountWindow:()=>{resolveChild?.(null);resolveChild=null;},isDetached:()=>detached,detach:()=>{detached=true;resolveChild?.(null);resolveChild=null;input.context.off('page',onPage);for(const listener of listeners)listener();}};}
+const activeAccountWindows = new WeakMap<Page, Page>();
+const claimedAccountWindows = new WeakSet<Page>();
+export const registerAccountSurfaceOrigins = (
+  page: Page,
+  origins: readonly string[],
+): void => {
+  void page;
+  void origins;
+};
+export const isClaimedAccountWindow = (page: Page): boolean =>
+  claimedAccountWindows.has(page);
+export const hasActiveAccountWindow = (page: Page): boolean => {
+  const child = activeAccountWindows.get(page);
+  return !!child && !child.isClosed();
+};
+export const ACCOUNT_WINDOW_OPEN_MESSAGE =
+  "An account window is open for this application; finish or close it first.";
+export const hasPrepareOnlyPreparedValues = (page: Page): boolean => {
+  void page;
+  return false;
+};
+export const PICKER_CHOICE_WINDOW_MS = 10000;
+export function createApplicationRunServiceWorkerSentinel(input: {
+  context: BrowserContext;
+  targetUrl: string;
+  now?: () => Date;
+}): ApplicationRunServiceWorkerSentinel {
+  let page: Page | null = null,
+    detached = false;
+  let resolveChild: ((page: Page | null) => void) | null = null;
+  const listeners: (() => void)[] = [];
+  const onPage = (child: Page) => {
+    void child
+      .opener()
+      .then((opener) => {
+        if (!detached && opener === page && resolveChild && page) {
+          claimedAccountWindows.add(child);
+          activeAccountWindows.set(page, child);
+          resolveChild(child);
+          resolveChild = null;
+        }
+      })
+      .catch(() => undefined);
+  };
+  input.context.on?.("page", onPage);
+  return {
+    check: () => Promise.resolve(null),
+    attachPage: (next) => {
+      page = next;
+    },
+    pendingWorkerEventCount: () => 0,
+    onDetach: (listener) => {
+      listeners.push(listener);
+    },
+    armAccountWindow: () =>
+      new Promise((resolve) => {
+        resolveChild = resolve;
+      }),
+    disarmAccountWindow: () => {
+      resolveChild?.(null);
+      resolveChild = null;
+    },
+    isDetached: () => detached,
+    detach: () => {
+      detached = true;
+      resolveChild?.(null);
+      resolveChild = null;
+      input.context.off?.("page", onPage);
+      for (const listener of listeners) listener();
+    },
+  };
+}
 export function normalizeFileSystemPath(value: string): string {
   const normalized = resolve(value.trim()).replace(/\\/gu, "/");
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
-}
-
-function describeUnknownError(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message.trim()
-    ? error.message.trim()
-    : fallback;
 }
 
 export async function loadVerifiedResumeBytes(
@@ -534,4 +612,3 @@ export function buildPreparationResult(input: {
       : undefined,
   });
 }
-

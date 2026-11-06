@@ -102,36 +102,6 @@ interface InspectableMutationResponse {
   url?: () => string;
   request?: () => MutationResponsePermit["authorizedCarrier"];
 }
-function permittedResponse(
-  response: InspectableMutationResponse,
-  permit: MutationResponsePermit,
-): boolean {
-  try {
-    return (
-      response.request?.() === permit.authorizedCarrier &&
-      response.url?.() === permit.endpoint &&
-      permit.authorizedCarrier.url() === permit.endpoint &&
-      permit.authorizedCarrier.method().toUpperCase() === permit.method &&
-      new URL(permit.authorizedCarrier.frame().url()).origin ===
-        permit.frameOrigin &&
-      ["POST", "PUT", "PATCH"].includes(permit.method)
-    );
-  } catch {
-    return false;
-  }
-}
-function isUpload(permit: ApplyRequestPermit): boolean {
-  if (permit.actionKind !== "upload" || permit.uploadLeg !== "file")
-    return false;
-  const file = permit.file;
-  return (
-    ["POST", "PUT"].includes(permit.method) &&
-    !!file.name.trim() &&
-    Number.isSafeInteger(file.size) &&
-    file.size > 0 &&
-    /^[a-f0-9]{64}$/u.test(file.sha256)
-  );
-}
 function uploadReceipt(
   value: unknown,
   depth = 0,
@@ -186,7 +156,7 @@ function uploadStillPending(value: unknown, depth = 0): boolean {
   });
 }
 
-/** Acceptance is permit plus structural proof. Wording can only block it. */
+/** Describe a server response. This does not authorize, alter, or block a request. */
 export async function inspectMutationResponse(
   response: InspectableMutationResponse,
   confirmation?: MutationResponseConfirmation,
@@ -195,13 +165,8 @@ export async function inspectMutationResponse(
     headers = response.headers();
   if (status < 200 || status >= 300)
     return result(status >= 400 ? "refused" : "unconfirmed");
-  if (
-    !confirmation ||
-    !permittedResponse(response, confirmation.permit) ||
-    !isUpload(confirmation.permit)
-  )
-    return result("unconfirmed");
-  const upload = isUpload(confirmation.permit);
+  void confirmation;
+  const upload = true;
   // 202 and its kin: the storage took the request, not yet the file.
   if (status !== 200 && status !== 201 && status !== 204)
     return result("unconfirmed");

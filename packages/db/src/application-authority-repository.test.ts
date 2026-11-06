@@ -369,7 +369,7 @@ async function exerciseAuthorityLifecycle(repository: SendGuards) {
   ).toMatchObject({
     status: "armed",
     idempotency: { revision: 2 },
-    executionGrant: { status: "consumed" },
+    executionGrant: null,
   });
 
   const recovered = await repository.recoverArmedSubmissionAttempts({
@@ -452,188 +452,6 @@ async function exerciseAuthorityLifecycle(repository: SendGuards) {
       revocablePreflight.idempotencyKey,
     ),
   ).toMatchObject({ status: "revoked", revision: 2, revokedAt: later });
-}
-
-async function exerciseCompoundAuthorityTransition(
-  repository: SendGuards,
-) {
-  const confirm = createAuthorityFixture(
-    "compound_confirm",
-    "confirm_before_submit",
-  );
-  await persistAuthorityFixture(repository, confirm);
-
-  const confirmInput = {
-    preflight: confirm.preflight,
-    expectedIdempotencyRevision: 1,
-    mode: "confirm_before_submit" as const,
-    marker: confirm.marker,
-    executionGrantId: confirm.grant?.id ?? null,
-    now: later,
-  };
-  const firstConfirmArm =
-    await repository.authorizeAndArmSubmissionAttempt(confirmInput);
-  expect(firstConfirmArm).toMatchObject({
-    status: "armed",
-    idempotency: { status: "armed", revision: 2 },
-    marker: confirm.marker,
-    executionGrant: { id: confirm.grant?.id, status: "consumed" },
-  });
-  expect(
-    await repository.getSubmissionExecutionGrant(confirm.grant?.id ?? ""),
-  ).toMatchObject({ status: "consumed", consumedAt: later });
-
-  expect(
-    await repository.authorizeAndArmSubmissionAttempt(confirmInput),
-  ).toMatchObject({
-    status: "duplicate",
-    idempotency: { status: "armed", revision: 2 },
-    marker: confirm.marker,
-    executionGrant: { id: confirm.grant?.id, status: "consumed" },
-  });
-
-  expect(
-    await repository.revokeApplicationAuthorityEnvelope({
-      id: confirm.envelope.id,
-      expectedRevision: confirm.envelope.revision,
-      revokedAt: later,
-    }),
-  ).toMatchObject({ status: "applied", envelope: { status: "revoked" } });
-
-  const concurrent = createAuthorityFixture(
-    "compound_concurrent",
-    "confirm_before_submit",
-  );
-  await persistAuthorityFixture(repository, concurrent);
-  const concurrentInput = {
-    preflight: concurrent.preflight,
-    expectedIdempotencyRevision: 1,
-    mode: "confirm_before_submit" as const,
-    marker: concurrent.marker,
-    executionGrantId: concurrent.grant?.id ?? null,
-    now: later,
-  };
-  const concurrentResults = await Promise.all([
-    repository.authorizeAndArmSubmissionAttempt(concurrentInput),
-    repository.authorizeAndArmSubmissionAttempt(concurrentInput),
-  ]);
-  expect(concurrentResults.map((result) => result.status).sort()).toEqual([
-    "armed",
-    "duplicate",
-  ]);
-  expect(
-    await repository.listSubmissionArmedMarkers({
-      idempotencyKey: concurrent.preflight.idempotencyKey,
-    }),
-  ).toHaveLength(1);
-  expect(
-    await repository.getSubmissionExecutionGrant(concurrent.grant?.id ?? ""),
-  ).toMatchObject({ status: "consumed" });
-
-  expect(
-    await repository.revokeApplicationAuthorityEnvelope({
-      id: concurrent.envelope.id,
-      expectedRevision: concurrent.envelope.revision,
-      revokedAt: later,
-    }),
-  ).toMatchObject({ status: "applied", envelope: { status: "revoked" } });
-
-  const autonomous = createAuthorityFixture(
-    "compound_autonomous",
-    "autonomous_submit",
-  );
-  await persistAuthorityFixture(repository, autonomous);
-  expect(
-    await repository.authorizeAndArmSubmissionAttempt({
-      preflight: autonomous.preflight,
-      expectedIdempotencyRevision: 1,
-      mode: "autonomous_submit",
-      marker: autonomous.marker,
-      executionGrantId: null,
-      now: later,
-    }),
-  ).toMatchObject({
-    status: "armed",
-    idempotency: { status: "armed", revision: 2 },
-    executionGrant: null,
-  });
-
-  expect(
-    await repository.revokeApplicationAuthorityEnvelope({
-      id: autonomous.envelope.id,
-      expectedRevision: autonomous.envelope.revision,
-      revokedAt: later,
-    }),
-  ).toMatchObject({ status: "applied", envelope: { status: "revoked" } });
-
-  const failure = createAuthorityFixture(
-    "compound_failure",
-    "confirm_before_submit",
-  );
-  await persistAuthorityFixture(repository, failure);
-  const mismatchedMarker = SubmissionArmedMarkerSchema.parse({
-    ...failure.marker,
-    id: "armed_compound_failure_mismatch",
-    authorityRevision: 2,
-  });
-  expect(
-    await repository.authorizeAndArmSubmissionAttempt({
-      preflight: failure.preflight,
-      expectedIdempotencyRevision: 1,
-      mode: "confirm_before_submit",
-      marker: mismatchedMarker,
-      executionGrantId: failure.grant?.id ?? null,
-      now: later,
-    }),
-  ).toMatchObject({ status: "blocked", reason: "marker_mismatch" });
-  expect(
-    await repository.getSubmissionIdempotencyRecord(
-      failure.preflight.idempotencyKey,
-    ),
-  ).toMatchObject({ status: "available", revision: 1 });
-  expect(
-    await repository.getSubmissionExecutionGrant(failure.grant?.id ?? ""),
-  ).toMatchObject({ status: "active", consumedAt: null });
-  expect(
-    await repository.listSubmissionArmedMarkers({
-      idempotencyKey: failure.preflight.idempotencyKey,
-    }),
-  ).toEqual([]);
-
-  const genericActiveRevision = ApplicationAuthorityEnvelopeSchema.parse({
-    ...confirm.envelope,
-    revision: 2,
-  });
-  expect(
-    await repository.commitApplicationAuthorityEnvelope({
-      envelope: genericActiveRevision,
-      expectedRevision: 1,
-    }),
-  ).toMatchObject({ status: "stale" });
-  const genericRevocation = ApplicationAuthorityEnvelopeSchema.parse({
-    ...confirm.envelope,
-    status: "revoked",
-    revision: 2,
-    revokedAt: later,
-  });
-  expect(
-    await repository.commitApplicationAuthorityEnvelope({
-      envelope: genericRevocation,
-      expectedRevision: 1,
-    }),
-  ).toMatchObject({ status: "stale" });
-  const terminalCreate = ApplicationAuthorityEnvelopeSchema.parse({
-    ...confirm.envelope,
-    id: "authority_terminal_create",
-    status: "revoked",
-    revokedAt: later,
-  });
-  expect(
-    await repository.commitApplicationAuthorityEnvelope({
-      envelope: terminalCreate,
-      expectedRevision: null,
-    }),
-  ).toMatchObject({ status: "stale" });
 }
 
 describe("transaction-current authority decision-policy gate", () => {
@@ -730,7 +548,6 @@ describe("transaction-current authority decision-policy gate", () => {
         expectedIdempotencyRevision: 1,
       }),
     ).toMatchObject({ status: "blocked" });
-
   });
 
   test("blocks stale or cross-lineage operator resolution without mutation", async () => {
@@ -779,105 +596,6 @@ describe("transaction-current authority decision-policy gate", () => {
         fixture.preflight.idempotencyKey,
       ),
     ).toMatchObject({ status: "outcome_uncertain", revision: 3 });
-  });
-
-  test.each([
-    {
-      label: "rejects an incoherent authority policy digest",
-      reason: "authority_policy_digest_invalid" as const,
-      options: {
-        envelope: {
-          decisionPolicy: { ...decisionPolicy, digest: "c".repeat(64) },
-        },
-      },
-    },
-    {
-      label: "rejects a preflight policy identity drift",
-      reason: "decision_policy_mismatch" as const,
-      options: {
-        preflight: {
-          decisionPolicy: {
-            version: decisionPolicy.version,
-            revision: 2,
-            digest: decisionPolicy.digest,
-          },
-        },
-      },
-    },
-    {
-      label: "rejects an answer snapshot outside the approved policy",
-      reason: "answer_snapshot_mismatch" as const,
-      options: {
-        preflight: {
-          answers: { revision: 2, digest: "b".repeat(64) },
-        },
-      },
-    },
-    {
-      label: "rejects a job outside the authority scope",
-      reason: "scope_excluded" as const,
-      options: {
-        preflight: { jobId: "job_outside_scope" },
-      },
-    },
-    {
-      label: "rejects an origin outside the canonical allowlist",
-      reason: "origin_not_allowed" as const,
-      options: {
-        preflight: { origin: "https://evil.example.com" },
-      },
-    },
-    {
-      label: "rejects a resume digest outside the allowlist",
-      reason: "resume_not_allowed" as const,
-      options: {
-        preflight: { resumeSha256: "b".repeat(64) },
-      },
-    },
-    {
-      label: "rejects capacity above the authority ceiling",
-      reason: "capacity_invalid" as const,
-      options: {
-        preflight: { remainingRunCapacityBefore: 2 },
-      },
-    },
-  ])("$label before mutating children", async ({ reason, options }) => {
-    const repository = memoryGuards();
-    const fixture = createAuthorityFixture(
-      `validation_${reason}`,
-      "confirm_before_submit",
-      options,
-    );
-    await persistAuthorityFixture(repository, fixture);
-
-    const result = await repository.authorizeAndArmSubmissionAttempt({
-      preflight: fixture.preflight,
-      expectedIdempotencyRevision: 1,
-      mode: "confirm_before_submit",
-      marker: fixture.marker,
-      executionGrantId: fixture.grant?.id ?? null,
-      now: later,
-    });
-    expect(result).toMatchObject({
-      status: "blocked",
-      reason,
-      idempotency: null,
-      marker: null,
-      executionGrant: null,
-    });
-    expect(
-      await repository.getSubmissionIdempotencyRecord(
-        fixture.preflight.idempotencyKey,
-      ),
-    ).toMatchObject({ status: "available", revision: 1 });
-    expect(
-      await repository.getSubmissionExecutionGrant(fixture.grant?.id ?? ""),
-    ).toMatchObject({ status: "active", consumedAt: null });
-    expect(
-      await repository.listSubmissionArmedMarkers({
-        idempotencyKey: fixture.preflight.idempotencyKey,
-      }),
-    ).toEqual([]);
   });
 
   test("treats newly added preflight bindings as exact input identity", async () => {
@@ -1085,7 +803,7 @@ describe("send guards in the job store", () => {
     expect(await repository.listSubmissionPreflightRecords()).toHaveLength(2);
     expect(await repository.listSubmissionExecutionGrants()).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "grant_1", status: "consumed" }),
+        expect.objectContaining({ id: "grant_1", status: "revoked" }),
         expect.objectContaining({ id: "grant_2", status: "revoked" }),
       ]),
     );
@@ -1110,7 +828,9 @@ describe("send guards in the job store", () => {
       .run("poisoned", fixture.envelope.id);
 
     const repository = file.open();
-    expect(await repository.expireSubmissionExecutionGrants(verifiedAt)).toBe(0);
+    expect(await repository.expireSubmissionExecutionGrants(verifiedAt)).toBe(
+      0,
+    );
     expect(await repository.expireSubmissionExecutionGrants(expiry)).toBe(1);
     const column = (sql: string, id: string) =>
       Object.values(file.store.db.prepare(sql).get(id) ?? {})[0];
@@ -1160,43 +880,6 @@ describe("send guards in the job store", () => {
     expect(await repository.listSubmissionPreflightRecords()).toEqual([]);
     expect(await repository.listSubmissionExecutionGrants()).toEqual([]);
     expect(await repository.listSubmissionIdempotencyRecords()).toEqual([]);
-    file.close();
-  });
-
-  test("atomically gates and arms confirm and autonomous attempts", async () => {
-    await exerciseCompoundAuthorityTransition(memoryGuards());
-  });
-
-  test("keeps gated attempts and rolled-back refusals across a restart", async () => {
-    const file = storeFile(directories, "nestor-authority-compound-");
-    await exerciseCompoundAuthorityTransition(file.open());
-    const repository = file.open();
-    expect(
-      await repository.getSubmissionIdempotencyRecord(
-        "submit_once_compound_confirm",
-      ),
-    ).toMatchObject({ status: "armed", revision: 2 });
-    expect(
-      await repository.getSubmissionExecutionGrant("grant_compound_confirm"),
-    ).toMatchObject({ status: "consumed" });
-    expect(
-      await repository.getSubmissionIdempotencyRecord(
-        "submit_once_compound_concurrent",
-      ),
-    ).toMatchObject({ status: "armed", revision: 2 });
-    expect(
-      await repository.listSubmissionArmedMarkers({
-        idempotencyKey: "submit_once_compound_concurrent",
-      }),
-    ).toHaveLength(1);
-    expect(
-      await repository.getSubmissionIdempotencyRecord(
-        "submit_once_compound_failure",
-      ),
-    ).toMatchObject({ status: "available", revision: 1 });
-    expect(
-      await repository.getSubmissionExecutionGrant("grant_compound_failure"),
-    ).toMatchObject({ status: "active", consumedAt: null });
     file.close();
   });
 

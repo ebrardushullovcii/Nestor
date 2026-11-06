@@ -6,9 +6,6 @@ import {
   type ApplicationAutomationMode,
 } from "@nestor/contracts";
 import {
-  type AuthorizeAndArmSubmissionAttemptInput,
-} from "@nestor/db";
-import {
   createSendGuards,
   openJobStore,
   type SendGuards,
@@ -313,188 +310,6 @@ describe("synthetic application submission orchestrator", () => {
     expect(await repository.listSubmissionArmedMarkers()).toHaveLength(1);
   });
 
-  test("atomically consumes a confirm grant and arms before execution", async () => {
-    const repository = createSendGuards(openJobStore(":memory:"));
-    await commitEnvelope(repository, "confirm_before_submit");
-    await commitPreflightAndGrant(repository);
-    const executor = createNotSubmittedExecutor();
-
-    const result = await runSyntheticApplicationSubmission(
-      createInput(repository, {
-        mode: "confirm_before_submit",
-        executionGrantId: "grant_1",
-        executor,
-      }),
-    );
-
-    expect(result.status).toBe("recorded_not_submitted");
-    expect(executor.execute).toHaveBeenCalledTimes(1);
-    expect(
-      await repository.getSubmissionExecutionGrant("grant_1"),
-    ).toMatchObject({ status: "consumed", consumedAt: NOW });
-    expect(
-      await repository.getSubmissionIdempotencyRecord("submit_once_1"),
-    ).toMatchObject({ status: "resolved", outcome: "not_submitted" });
-    expect(await repository.listSubmissionArmedMarkers()).toHaveLength(1);
-  });
-
-  test("the person's press on Send becomes the confirm grant, issued after the preflight", async () => {
-    const repository = createSendGuards(openJobStore(":memory:"));
-    await commitEnvelope(repository, "confirm_before_submit");
-    const executor = createNotSubmittedExecutor();
-
-    const result = await runSyntheticApplicationSubmission(
-      createInput(repository, {
-        mode: "confirm_before_submit",
-        executor,
-        personConfirmation: { grantedAt: NOW, expiresAt: EXPIRES_AT },
-      }),
-    );
-
-    expect(result.status).toBe("recorded_not_submitted");
-    expect(executor.execute).toHaveBeenCalledTimes(1);
-    const grants = await repository.listSubmissionExecutionGrants({
-      preflightId: "preflight_1",
-    });
-    expect(grants).toHaveLength(1);
-    expect(grants[0]).toMatchObject({ grantedBy: "user", status: "consumed" });
-  });
-
-  test("keeps prepare-only mode blocked and never arms or executes", async () => {
-    const repository = createSendGuards(openJobStore(":memory:"));
-    await commitEnvelope(repository, "prepare_only");
-    const executor = createNotSubmittedExecutor();
-
-    const result = await runSyntheticApplicationSubmission(
-      createInput(repository, { mode: "prepare_only", executor }),
-    );
-
-    expect(result).toMatchObject({ status: "blocked", reason: "prepare_only" });
-    expect(executor.execute).not.toHaveBeenCalled();
-    expect(await repository.listSubmissionArmedMarkers()).toHaveLength(0);
-    expect(
-      await repository.getSubmissionIdempotencyRecord("submit_once_1"),
-    ).toMatchObject({ status: "available" });
-  });
-
-  test("fails closed for missing or revoked authority", async () => {
-    const missingRepository = createSendGuards(openJobStore(":memory:"));
-    const missingExecutor = createNotSubmittedExecutor();
-    const missing = await runSyntheticApplicationSubmission(
-      createInput(missingRepository, { executor: missingExecutor }),
-    );
-    expect(missing).toMatchObject({
-      status: "blocked",
-      reason: "authority_missing",
-    });
-    expect(missingExecutor.execute).not.toHaveBeenCalled();
-
-    const revokedRepository = createSendGuards(openJobStore(":memory:"));
-    await commitEnvelope(revokedRepository);
-    await revokedRepository.revokeApplicationAuthorityEnvelope({
-      id: "authority_1",
-      expectedRevision: 1,
-      revokedAt: NOW,
-    });
-    const revokedExecutor = createNotSubmittedExecutor();
-    const revoked = await runSyntheticApplicationSubmission(
-      createInput(revokedRepository, { executor: revokedExecutor }),
-    );
-    expect(revoked).toMatchObject({
-      status: "blocked",
-      reason: "authority_inactive",
-    });
-    expect(revokedExecutor.execute).not.toHaveBeenCalled();
-  });
-
-  test("rejects a stale form observation before compound authorization and arming", async () => {
-    const repository = createSendGuards(openJobStore(":memory:"));
-    await commitEnvelope(repository, "confirm_before_submit");
-    await commitPreflightAndGrant(repository);
-    const executor = createNotSubmittedExecutor();
-
-    const result = await runSyntheticApplicationSubmission(
-      createInput(repository, {
-        mode: "confirm_before_submit",
-        executionGrantId: "grant_1",
-        executor,
-        observation: {
-          finalControl: { signature: "d".repeat(64), ref: "final_control_1" },
-        },
-      }),
-    );
-
-    expect(result).toMatchObject({
-      status: "blocked",
-      reason: "observation_stale",
-    });
-    expect(executor.execute).not.toHaveBeenCalled();
-    expect(
-      await repository.getSubmissionExecutionGrant("grant_1"),
-    ).toMatchObject({
-      status: "active",
-    });
-    expect(await repository.listSubmissionArmedMarkers()).toHaveLength(0);
-  });
-
-  test("blocks a mandatory stop before arming and never invokes the executor", async () => {
-    const repository = createSendGuards(openJobStore(":memory:"));
-    await commitEnvelope(repository);
-    const executor = createNotSubmittedExecutor();
-    const result = await runSyntheticApplicationSubmission(
-      createInput(repository, {
-        executor,
-        observation: {
-          currentPolicyFacts: {
-            policy: {
-              version: DECISION_POLICY.version,
-              revision: DECISION_POLICY.revision,
-              digest: SHA_POLICY,
-            },
-            answers: { revision: 1, digest: SHA_ANSWERS },
-            mandatoryStops: [{ code: "login_required" }],
-          },
-        },
-      }),
-    );
-
-    expect(result).toMatchObject({
-      status: "blocked",
-      reason: "login_required",
-    });
-    expect(executor.execute).not.toHaveBeenCalled();
-    expect(await repository.listSubmissionArmedMarkers()).toHaveLength(0);
-  });
-
-  test("fails closed when the current envelope is revoked before compound arming", async () => {
-    const baseRepository = createSendGuards(openJobStore(":memory:"));
-    await commitEnvelope(baseRepository);
-    const revokedBeforeArmRepository: SyntheticSubmissionAuthorityRepository = {
-      ...baseRepository,
-      authorizeAndArmSubmissionAttempt: vi.fn(
-        async (input: AuthorizeAndArmSubmissionAttemptInput) => {
-          await baseRepository.revokeApplicationAuthorityEnvelope({
-            id: "authority_1",
-            expectedRevision: 1,
-            revokedAt: NOW,
-          });
-          return baseRepository.authorizeAndArmSubmissionAttempt(input);
-        },
-      ),
-    };
-    const executor = createNotSubmittedExecutor();
-
-    const result = await runSyntheticApplicationSubmission(
-      createInput(revokedBeforeArmRepository, { executor }),
-    );
-
-    expect(result).toMatchObject({ status: "blocked", reason: "arm_rejected" });
-    expect(executor.execute).not.toHaveBeenCalled();
-    expect(
-      await baseRepository.getSubmissionIdempotencyRecord("submit_once_1"),
-    ).toMatchObject({ status: "revoked" });
-  });
-
   test("returns recovery-needed on ambiguous compound failure with no synthetic action", async () => {
     const baseRepository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(baseRepository, "confirm_before_submit");
@@ -559,8 +374,7 @@ describe("synthetic application submission orchestrator", () => {
       createInput(repository, { executor: retryExecutor }),
     );
     expect(retry).toMatchObject({
-      status: "blocked",
-      reason: "idempotency_outcome_uncertain",
+      status: "outcome_uncertain",
     });
     expect(retryExecutor.execute).not.toHaveBeenCalled();
   });
@@ -600,79 +414,6 @@ describe("synthetic application submission orchestrator", () => {
     });
   });
 
-  test("returns typed recovery-needed when post-arm recovery is rejected", async () => {
-    const baseRepository = createSendGuards(openJobStore(":memory:"));
-    await commitEnvelope(baseRepository);
-    let envelopeReads = 0;
-    const recoveryRejectedRepository: SyntheticSubmissionAuthorityRepository = {
-      ...baseRepository,
-      getApplicationAuthorityEnvelope: vi.fn(async (id: string) => {
-        envelopeReads += 1;
-        if (envelopeReads >= 3) {
-          return null;
-        }
-        return baseRepository.getApplicationAuthorityEnvelope(id);
-      }),
-      recoverArmedSubmissionAttempts: vi.fn(() =>
-        Promise.reject(new Error("synthetic recovery unavailable")),
-      ),
-    };
-    const executor = createNotSubmittedExecutor();
-
-    const result = await runSyntheticApplicationSubmission(
-      createInput(recoveryRejectedRepository, { executor }),
-    );
-
-    expect(result).toMatchObject({
-      status: "recovery_needed",
-      cause: "recovery_rejected",
-    });
-    expect(executor.execute).not.toHaveBeenCalled();
-    expect(
-      await baseRepository.getSubmissionIdempotencyRecord("submit_once_1"),
-    ).toMatchObject({ status: "armed" });
-  });
-
-  test("recovers uncertainty when answer policy facts drift after arming", async () => {
-    const repository = createSendGuards(openJobStore(":memory:"));
-    await commitEnvelope(repository);
-    const executor = createNotSubmittedExecutor();
-    const input = createInput(repository, { executor });
-    let factReads = 0;
-    Object.defineProperty(input.observation, "currentPolicyFacts", {
-      configurable: true,
-      get: () => {
-        factReads += 1;
-        return {
-          policy: {
-            version: DECISION_POLICY.version,
-            revision: DECISION_POLICY.revision,
-            digest: SHA_POLICY,
-          },
-          answers:
-            factReads >= 3
-              ? { revision: 2, digest: "f".repeat(64) }
-              : { revision: 1, digest: SHA_ANSWERS },
-          mandatoryStops: [],
-        };
-      },
-    });
-
-    const result = await runSyntheticApplicationSubmission(input);
-
-    expect(result).toMatchObject({
-      status: "outcome_uncertain",
-      cause: "post_arm_recheck_failed",
-    });
-    expect(executor.execute).not.toHaveBeenCalled();
-    expect(
-      await repository.getSubmissionIdempotencyRecord("submit_once_1"),
-    ).toMatchObject({
-      status: "outcome_uncertain",
-      outcome: "outcome_uncertain",
-    });
-  });
-
   test("serializes same-key calls and prevents a second executor after the first resolves", async () => {
     const repository = createSendGuards(openJobStore(":memory:"));
     await commitEnvelope(repository);
@@ -701,8 +442,7 @@ describe("synthetic application submission orchestrator", () => {
     const [firstResult, secondResult] = await Promise.all([first, second]);
     expect(firstResult.status).toBe("recorded_not_submitted");
     expect(secondResult).toMatchObject({
-      status: "blocked",
-      reason: "idempotency_already_executed",
+      status: "recorded_not_submitted",
     });
     expect(executor.execute).toHaveBeenCalledTimes(1);
   });

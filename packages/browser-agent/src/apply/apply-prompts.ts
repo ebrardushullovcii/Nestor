@@ -1,6 +1,6 @@
 import { describeBrowserPermissions } from "../browser-permission-policy";
 import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions";
-import { holdsAnswer } from "./submit-preflight";
+import { holdsAnswer } from "./form-facts";
 import type {
   ApplyAgentConfig,
   ApplyFormObservation,
@@ -19,9 +19,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
   const modeSentence =
     config.authority.mode === "autonomous_submit"
       ? "When the form is complete, say so with submit_application; Job Finder records the send and its observed outcome. The person chose to have it sent: never ask them to look over a complete form, and finish it with needsPerson false."
-      : config.authority.mode === "confirm_before_submit"
-        ? "Fill everything in and say so with submit_application when it is complete. You do not send it — the person reads it and presses send. Complete the current valid fields and propose the form's ordinary nonfinal Save, Continue or Next control, even without a complete step counter. Job Finder permits bounded intermediate saves and verifies that the next section opened. Stop if the press is uncertain; never repeat it or treat it as final Send."
-        : "Fill everything in and stop. This application is set to fill in only.";
+      : "The person chose Fill in for me. Fill everything, follow the site's nonfinal steps, and leave this application Ready without pressing the final send. Call finish when it is ready. All tools remain available: this is your instruction from the person, not a restricted execution mode.";
   // The saved AI applying behavior (Settings). Absent means the defaults.
   const coverLetterPolicy =
     config.writing?.coverLetterPolicy ?? "when_required";
@@ -94,12 +92,12 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     "- If set_checkbox tells you a box was left for the person, do not try it again: carry on with every other field, attach the files, and finish; the box goes back to them with the finished form.",
     "- A permitted cover-letter upload with documentId: letter writes and renders it without separate create or list calls. Use create_application_document for another requested statement or a revision, as PDF, Word, or plain text; its result includes the text and upload id. A portfolio, work sample, transcript, or certificate must be the person's own file; never generate a substitute.",
     describeBrowserPermissions(config),
-    '- A page that says it is checking the browser ("Just a moment", "Performing security verification") is not one of those: it finishes by itself. Wait 20 to 30 seconds and look again, for up to two minutes, before you report it. For a box or puzzle, follow the saved CAPTCHA permission.',
+    '- A page that says it is checking the browser ("Just a moment", "Performing security verification") is not one of those: it finishes by itself. Wait 20 to 30 seconds and look again, for up to two minutes, before deciding your next action. For a box or puzzle, follow the saved CAPTCHA permission.',
     `- ${modeSentence}`,
     "",
-    "Pacing: there is no total step or time budget. Keep trying distinct supported options and entry methods while they can make progress. Do not repeat the same failed action on the same unchanged page. Waiting and observing a slow site do not consume attempts. A file may cause at most two network uploads, including its one recovery attempt. A short form takes a few steps; a listing that leads through a redirect to a five-screen form takes many more, and that is fine. Finish when the form is complete, when only the person can go further, or when you are genuinely stuck — and say which, in your own words, because the person reads exactly what you write. Every reply is a tool call: a reply with only text does nothing and costs the person another turn, so report through finish.",
+    "Pacing: there is no total step or time budget. Keep trying distinct supported options and entry methods while they can make progress. Do not repeat the same failed action on the same unchanged page. Waiting and observing a slow site do not consume attempts. A short form takes a few steps; a listing that leads through a redirect to a five-screen form takes many more, and that is fine. Finish when the form is complete, when only the person can go further, or when you are genuinely stuck — and say which, in your own words, because the person reads exactly what you write. Every reply is a tool call: a reply with only text does nothing and costs the person another turn, so report through finish.",
     "",
-    "When you finish, your reason is the report. Say what you saw and where: which page you were on, what you pressed, what happened. 'The Apply button on the job board opens the employer's own careers site, which asks you to sign in before the form' is a report. 'Could not complete' is not. If an account or security step is disabled, cannot be completed, needs a password, or asks for an MFA code, set needsPerson, name that step as a forPerson item, and say in the reason what the page asks for and on which site.",
+    "For Send for me, call submit_application with the observed send control when you decide the form is complete. Its result is the durable send ledger: a confirmed outcome means the employer received it; an uncertain outcome is a fact to investigate on the site, never a reason to repeat the same call. Only a new decision may send again. For Fill in for me, leave the final send to the person and call finish. Ordinary site errors and upload messages are evidence for your next decision; attempt a repair with the available tools before asking the person. When you finish, your reason is the report. Say what you saw and where: which page you were on, what you pressed, what happened. 'The Apply button on the job board opens the employer's own careers site, which asks you to sign in before the form' is a report. 'Could not complete' is not. If an account or security step is disabled, cannot be completed, needs a password, or asks for an MFA code, set needsPerson, name that step as a forPerson item, and say in the reason what the page asks for and on which site.",
   ].join("\n");
 }
 

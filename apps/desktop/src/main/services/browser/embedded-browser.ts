@@ -1538,13 +1538,7 @@ export class EmbeddedBrowser {
   }
 
   assertAutomationSafe(): void {
-    if (
-      Object.keys(this.getSession().serviceWorkers.getAllRunning()).length > 0
-    ) {
-      throw new Error(
-        "A website has a background worker running. Close the browser, then resume activity to start a guarded session.",
-      );
-    }
+    // ADR 0079: normal site service workers do not prevent automation.
   }
 
   private createPage(

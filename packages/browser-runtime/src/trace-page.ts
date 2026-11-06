@@ -109,47 +109,59 @@ export function tracePageHands<T extends object>(page: Page, hands: T): T {
     get(target, key, receiver) {
       const method: unknown = Reflect.get(target, key, receiver);
       if (typeof method !== "function") return method;
-      return async (...args: unknown[]) => {
-        if (key === "uploadFile") {
-          const file = args[1];
-          if (file && typeof file === "object") {
-            const metadata = file as Record<string, unknown>;
-            const filePath = metadata.path ?? metadata.filePath;
-            let sha256: string | null = null;
-            try {
-              if (typeof filePath === "string")
+      return (...args: unknown[]) => {
+        if (key === "uploadFile")
+          setImmediate(() => {
+            const file = args[1];
+            if (file && typeof file === "object") {
+              const metadata = file as Record<string, unknown>;
+              const filePath = metadata.path ?? metadata.filePath;
+              let sha256: string | null = null;
+              try {
+                if (typeof filePath === "string")
+                  sha256 = createHash("sha256")
+                    .update(readFileSync(filePath))
+                    .digest("hex");
+              } catch {
+                /* Report unavailable identity. */
+              }
+              if (metadata.bytes instanceof Uint8Array)
                 sha256 = createHash("sha256")
-                  .update(readFileSync(filePath))
+                  .update(metadata.bytes)
                   .digest("hex");
-            } catch {
-              /* Report unavailable identity. */
+              traceEvent("attachment", {
+                ...(bindings.get(page)
+                  ? { applicationKey: bindings.get(page) }
+                  : {}),
+                file: {
+                  name: metadata.name,
+                  mimeType: metadata.mimeType,
+                  path: filePath,
+                  size:
+                    metadata.bytes instanceof Uint8Array
+                      ? metadata.bytes.byteLength
+                      : null,
+                },
+                sha256,
+              });
             }
-            if (metadata.bytes instanceof Uint8Array)
-              sha256 = createHash("sha256")
-                .update(metadata.bytes)
-                .digest("hex");
-            traceEvent("attachment", {
-              ...(bindings.get(page)
-                ? { applicationKey: bindings.get(page) }
-                : {}),
-              file: {
-                name: metadata.name,
-                mimeType: metadata.mimeType,
-                path: filePath,
-                size:
-                  metadata.bytes instanceof Uint8Array
-                    ? metadata.bytes.byteLength
-                    : null,
-              },
-              sha256,
-            });
-          }
-        }
+          });
         try {
-          const value: unknown = await Reflect.apply(method, target, args);
+          const value: unknown = Reflect.apply(method, target, args);
+          if (
+            value &&
+            typeof value === "object" &&
+            "then" in value &&
+            typeof value.then === "function"
+          )
+            return Promise.resolve(value).finally(() => {
+              void tracePage(page, String(key));
+            });
+          void tracePage(page, String(key));
           return value;
-        } finally {
-          await tracePage(page, String(key));
+        } catch (error) {
+          void tracePage(page, String(key));
+          throw error;
         }
       };
     },

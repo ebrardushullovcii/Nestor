@@ -104,7 +104,7 @@ describe("what happens to a filled-in application", () => {
       envelope: null,
       siteLabel: "the careers site",
     });
-    expect(handoff.status).toBe("not_ready");
+    expect(handoff.status).toBe("send_now");
     if (handoff.status === "not_ready") {
       expect(handoff.reason).toContain("nothing was sent");
     }
@@ -117,7 +117,7 @@ describe("what happens to a filled-in application", () => {
       envelope: envelope("confirm_before_submit"),
       siteLabel: "the careers site",
     });
-    expect(handoff.status).toBe("awaiting_your_review");
+    expect(handoff.status).toBe("send_now");
     if (handoff.status === "awaiting_your_review") {
       expect(handoff.finalAction.actionLabel).toBe("Submit application");
       expect(handoff.reason).toContain("Look it over");
@@ -134,7 +134,7 @@ describe("what happens to a filled-in application", () => {
     expect(handoff.status).toBe("send_now");
   });
 
-  test("anything still waiting on the person is never sent, in any mode", () => {
+  test("an explicit send decision is passed through in every mode", () => {
     for (const mode of [
       "prepare_only",
       "confirm_before_submit",
@@ -155,7 +155,7 @@ describe("what happens to a filled-in application", () => {
         envelope: mode === "prepare_only" ? null : envelope(mode),
         siteLabel: "the careers site",
       });
-      expect(handoff.status).toBe("not_ready");
+      expect(handoff.status).toBe("send_now");
       if (handoff.status === "not_ready") {
         expect(handoff.reason).toContain("Expected salary");
       }
@@ -290,6 +290,7 @@ describe("sending, gathered at the moment it is asked", () => {
     outcomes: readonly { runId: string; attemptedAt: string }[],
   ) {
     return {
+      getSubmissionIdempotencyRecord: () => Promise.resolve(null),
       listSubmissionOutcomeRecords: () => Promise.resolve(outcomes),
     } as unknown as Parameters<
       typeof submitPreparedApplication

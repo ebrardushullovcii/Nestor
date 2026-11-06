@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import {
   ApplicationAuthorityEnvelopeSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
-  SubmissionExecutionGrantSchema,
   SubmissionFinalControlIdentitySchema,
   SubmissionObservationIdentitySchema,
   type ApplicationAutomationMode,
@@ -21,7 +20,6 @@ import type {
 } from "@nestor/browser-runtime";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { buildSubmissionPreflightRecord } from "./application-submission-preflight";
 import {
   runApplicationSubmissionRuntime,
   type ApplicationSubmissionBrowserRuntime,
@@ -30,7 +28,6 @@ import {
 
 const NOW = "2026-08-27T10:00:00.000Z";
 const EXPIRES_AT = "2026-08-27T11:00:00.000Z";
-const GRANT_EXPIRES_AT = "2026-08-27T10:05:00.000Z";
 const ORIGIN = "https://boards.example.com";
 const RESUME_BYTES = new TextEncoder().encode("trusted resume bytes");
 const RESUME_SHA256 = createHash("sha256").update(RESUME_BYTES).digest("hex");
@@ -296,54 +293,6 @@ async function createHarness(input: {
   };
 }
 
-async function commitConfirmGrant(
-  repository: SendGuards,
-  expiresAt = EXPIRES_AT,
-): Promise<void> {
-  const preflight = buildSubmissionPreflightRecord({
-    id: "preflight_1",
-    idempotencyKey: "idempotency_1",
-    lineage: {
-      runId: "run_1",
-      jobId: "job_1",
-      resultId: "result_1",
-      applicationRecordId: "application_1",
-      campaignId: "campaign_1",
-    },
-    authorityEnvelopeId: "authority_1",
-    authorityRevision: 1,
-    decisionPolicy: POLICY_IDENTITY,
-    origin: ORIGIN,
-    formObservation: OBSERVATION.identity,
-    resumeBytes: RESUME_BYTES,
-    answers: { revision: 1, digest: ANSWER_SHA256 },
-    finalControl: CONTROL.identity,
-    capacity: { remainingRunCapacity: 1 },
-    createdAt: NOW,
-  });
-  await repository.commitSubmissionPreflight(preflight);
-  await repository.commitSubmissionExecutionGrant(
-    SubmissionExecutionGrantSchema.parse({
-      id: "grant_1",
-      preflightId: preflight.id,
-      idempotencyKey: preflight.idempotencyKey,
-      runId: preflight.runId,
-      jobId: preflight.jobId,
-      resultId: preflight.resultId,
-      applicationRecordId: preflight.applicationRecordId,
-      authorityEnvelopeId: preflight.authorityEnvelopeId,
-      authorityRevision: preflight.authorityRevision,
-      mode: "confirm_before_submit",
-      status: "active",
-      grantedBy: "user",
-      grantedAt: NOW,
-      expiresAt,
-      revokedAt: null,
-      consumedAt: null,
-    }),
-  );
-}
-
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
@@ -355,42 +304,6 @@ afterEach(() => {
 });
 
 describe("composed application submission runtime", () => {
-  test("consumes one confirm grant, executes one browser action, and records uncertainty", async () => {
-    const browser = buildBrowserRuntime();
-    const harness = await createHarness({
-      mode: "confirm_before_submit",
-      runtime: browser.runtime,
-      calls: browser.calls,
-    });
-    await commitConfirmGrant(harness.repository);
-
-    const result = await runApplicationSubmissionRuntime({
-      ...harness.runtimeInput,
-      executionGrantId: "grant_1",
-    });
-
-    expect(result.status).toBe("outcome_uncertain");
-    expect(browser.calls).toEqual({ observe: 1, execute: 1, action: 1 });
-    await expect(
-      harness.repository.getSubmissionExecutionGrant("grant_1"),
-    ).resolves.toMatchObject({ status: "consumed" });
-    await expect(
-      harness.repository.getSubmissionOutcomeRecord("outcome_preflight_1"),
-    ).resolves.toMatchObject({
-      outcome: "outcome_uncertain",
-      evidence: [],
-      browserAction: {
-        reason: "action_issued",
-        actionAttempted: true,
-        actionIssued: true,
-        actionCompleted: true,
-        // An uncertain outcome comes with what left after the click.
-        requestsObservedDuringAction: 1,
-        requestsAfterClick: [SUBMIT_REQUEST],
-      },
-    });
-  });
-
   test("persists final-action exceptions separately from confirmation evidence and blocks retry", async () => {
     const browser = buildBrowserRuntime();
     browser.runtime.executeExactlyOneFinalAction = () =>
@@ -415,7 +328,7 @@ describe("composed application submission runtime", () => {
     });
     expect(
       (await runApplicationSubmissionRuntime(harness.runtimeInput)).status,
-    ).toBe("blocked");
+    ).toBe("outcome_uncertain");
   });
 
   test("runs autonomous mode without a grant and never constructs a submitted outcome", async () => {
@@ -459,276 +372,6 @@ describe("composed application submission runtime", () => {
     }
   });
 
-  test("stops prepare-only before observation or browser action", async () => {
-    const browser = buildBrowserRuntime();
-    const harness = await createHarness({
-      mode: "prepare_only",
-      runtime: browser.runtime,
-      calls: browser.calls,
-    });
-
-    const result = await runApplicationSubmissionRuntime(harness.runtimeInput);
-
-    expect(result).toMatchObject({ status: "blocked", reason: "prepare_only" });
-    expect(browser.calls).toEqual({ observe: 0, execute: 0, action: 0 });
-    await expect(
-      harness.repository.listSubmissionPreflightRecords(),
-    ).resolves.toEqual([]);
-  });
-
-  test("re-reads the authority in the final veto and prevents action after revocation", async () => {
-    const repositoryHolder: {
-      current: SendGuards | null;
-    } = { current: null };
-    const browser = buildBrowserRuntime({
-      onBetweenVetoes: async () => {
-        if (!repositoryHolder.current) {
-          throw new Error("repository fixture was not initialized");
-        }
-        await repositoryHolder.current.revokeApplicationAuthorityEnvelope({
-          id: "authority_1",
-          expectedRevision: 1,
-          revokedAt: NOW,
-        });
-      },
-    });
-    const harness = await createHarness({
-      mode: "confirm_before_submit",
-      runtime: browser.runtime,
-      calls: browser.calls,
-    });
-    repositoryHolder.current = harness.repository;
-    await commitConfirmGrant(harness.repository);
-
-    const result = await runApplicationSubmissionRuntime({
-      ...harness.runtimeInput,
-      executionGrantId: "grant_1",
-    });
-
-    expect(result.status).toBe("recorded_not_submitted");
-    expect(browser.calls).toEqual({ observe: 1, execute: 1, action: 0 });
-    if (result.status === "recorded_not_submitted") {
-      expect(result.outcome.retry).toEqual({
-        eligible: false,
-        blockReason: "authority_no_longer_valid",
-      });
-    }
-  });
-
-  test("uses the current clock before observing instead of the attempt timestamp", async () => {
-    const browser = buildBrowserRuntime();
-    const harness = await createHarness({
-      mode: "autonomous_submit",
-      runtime: browser.runtime,
-    });
-    vi.setSystemTime(EXPIRES_AT);
-
-    const result = await runApplicationSubmissionRuntime(harness.runtimeInput);
-
-    expect(result).toMatchObject({
-      status: "blocked",
-      reason: "preflight_authority_mismatch",
-    });
-    expect(browser.calls).toEqual({ observe: 0, execute: 0, action: 0 });
-  });
-
-  test.each(["observation", "final veto"] as const)(
-    "vetoes authority expiring during %s at the exact expiry instant",
-    async (phase) => {
-      const expire = () => {
-        vi.setSystemTime(EXPIRES_AT);
-      };
-      const browser = buildBrowserRuntime(
-        phase === "observation"
-          ? { onObserve: expire }
-          : { onBetweenVetoes: expire },
-      );
-      const harness = await createHarness({
-        mode: "autonomous_submit",
-        runtime: browser.runtime,
-      });
-
-      const result = await runApplicationSubmissionRuntime(
-        harness.runtimeInput,
-      );
-
-      expect(result).toMatchObject({
-        status: "recorded_not_submitted",
-        outcome: {
-          evidence: [],
-          browserAction: { reason: "vetoed", actionIssued: false },
-          retry: { eligible: false, blockReason: "authority_no_longer_valid" },
-        },
-      });
-      expect(browser.calls).toEqual({ observe: 1, execute: 1, action: 0 });
-    },
-  );
-
-  test.each(["saved grant", "person confirmation"] as const)(
-    "vetoes an expired %s even while the authority envelope is current",
-    async (confirmation) => {
-      const browser = buildBrowserRuntime({
-        onBetweenVetoes: () => {
-          vi.setSystemTime(GRANT_EXPIRES_AT);
-        },
-      });
-      const harness = await createHarness({
-        mode: "confirm_before_submit",
-        runtime: browser.runtime,
-      });
-      if (confirmation === "saved grant") {
-        await commitConfirmGrant(harness.repository, GRANT_EXPIRES_AT);
-      }
-
-      const result = await runApplicationSubmissionRuntime({
-        ...harness.runtimeInput,
-        ...(confirmation === "saved grant"
-          ? { executionGrantId: "grant_1" }
-          : {
-              personConfirmation: {
-                grantedAt: NOW,
-                expiresAt: GRANT_EXPIRES_AT,
-              },
-            }),
-      });
-
-      expect(result).toMatchObject({
-        status: "recorded_not_submitted",
-        outcome: {
-          evidence: [],
-          browserAction: { reason: "vetoed", actionIssued: false },
-          retry: { eligible: false, blockReason: "authority_no_longer_valid" },
-        },
-        executionGrant: { status: "consumed", expiresAt: GRANT_EXPIRES_AT },
-      });
-      expect(browser.calls).toEqual({ observe: 1, execute: 1, action: 0 });
-      expect(Date.now()).toBe(Date.parse(GRANT_EXPIRES_AT));
-    },
-  );
-
-  test("reads the clock after a slow final durable authority read", async () => {
-    let atFinalVeto = false;
-    const browser = buildBrowserRuntime({
-      onBetweenVetoes: () => {
-        atFinalVeto = true;
-      },
-    });
-    const harness = await createHarness({
-      mode: "autonomous_submit",
-      runtime: browser.runtime,
-    });
-    const readEnvelope =
-      harness.repository.getApplicationAuthorityEnvelope.bind(
-        harness.repository,
-      );
-    vi.spyOn(
-      harness.repository,
-      "getApplicationAuthorityEnvelope",
-    ).mockImplementation(async (id) => {
-      const envelope = await readEnvelope(id);
-      if (atFinalVeto) {
-        vi.setSystemTime(EXPIRES_AT);
-      }
-      return envelope;
-    });
-
-    const result = await runApplicationSubmissionRuntime(harness.runtimeInput);
-
-    expect(result).toMatchObject({
-      status: "recorded_not_submitted",
-      outcome: {
-        retry: { eligible: false, blockReason: "authority_no_longer_valid" },
-      },
-    });
-    expect(browser.calls).toEqual({ observe: 1, execute: 1, action: 0 });
-  });
-
-  test.each(["resultId", "authorityRevision"] as const)(
-    "vetoes consumed grant %s drift at the browser boundary",
-    async (field) => {
-      let drift = false;
-      const browser = buildBrowserRuntime({
-        onBetweenVetoes: () => {
-          drift = true;
-        },
-      });
-      const harness = await createHarness({
-        mode: "confirm_before_submit",
-        runtime: browser.runtime,
-      });
-      await commitConfirmGrant(harness.repository);
-      const readGrant = harness.repository.getSubmissionExecutionGrant.bind(
-        harness.repository,
-      );
-      vi.spyOn(
-        harness.repository,
-        "getSubmissionExecutionGrant",
-      ).mockImplementation(async (id) => {
-        const grant = await readGrant(id);
-        return grant && drift
-          ? {
-              ...grant,
-              ...(field === "resultId"
-                ? { resultId: "another_result" }
-                : { authorityRevision: 2 }),
-            }
-          : grant;
-      });
-
-      const result = await runApplicationSubmissionRuntime({
-        ...harness.runtimeInput,
-        executionGrantId: "grant_1",
-      });
-
-      expect(result).toMatchObject({
-        status: "recorded_not_submitted",
-        outcome: {
-          retry: { eligible: false, blockReason: "authority_no_longer_valid" },
-        },
-      });
-      expect(browser.calls.action).toBe(0);
-    },
-  );
-
-  test("does not call the executor for zero or ambiguous controls and blocks a cancelled attempt", async () => {
-    const browser = buildBrowserRuntime({ controls: [] });
-    const harness = await createHarness({
-      mode: "autonomous_submit",
-      runtime: browser.runtime,
-      calls: browser.calls,
-    });
-    const noControl = await runApplicationSubmissionRuntime(
-      harness.runtimeInput,
-    );
-    expect(noControl).toMatchObject({
-      status: "blocked",
-      reason: "ambiguous_final_control",
-    });
-    expect(browser.calls.execute).toBe(0);
-
-    const cancelledBrowser = buildBrowserRuntime();
-    const cancelledHarness = await createHarness({
-      mode: "autonomous_submit",
-      runtime: cancelledBrowser.runtime,
-      calls: cancelledBrowser.calls,
-    });
-    const controller = new AbortController();
-    controller.abort();
-    const cancelled = await runApplicationSubmissionRuntime({
-      ...cancelledHarness.runtimeInput,
-      signal: controller.signal,
-    });
-    expect(cancelled).toMatchObject({
-      status: "blocked",
-      reason: "immediate_recheck_failed",
-    });
-    expect(cancelledBrowser.calls).toEqual({
-      observe: 0,
-      execute: 0,
-      action: 0,
-    });
-  });
-
   test("persists uncertainty and permanently blocks a second browser attempt for the same key", async () => {
     const browser = buildBrowserRuntime();
     const harness = await createHarness({
@@ -742,8 +385,7 @@ describe("composed application submission runtime", () => {
 
     expect(first.status).toBe("outcome_uncertain");
     expect(second).toMatchObject({
-      status: "blocked",
-      reason: "idempotency_outcome_uncertain",
+      status: "outcome_uncertain",
     });
     expect(browser.calls.execute).toBe(1);
     await expect(
@@ -802,3 +444,77 @@ test("keeps exact validation feedback and allows correction after an attempted s
     },
   });
 });
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+test.each([false, true])(
+  "a durable uncertain call survives restart without reading or clicking (crash after intent %s)",
+  async (crash) => {
+    const directory = await mkdtemp(join(tmpdir(), "nestor-send-restart-"));
+    const file = join(directory, "jobs.sqlite");
+    let store = openJobStore(file);
+    let repository = createSendGuards(store);
+    try {
+      const base = await createHarness({ mode: "autonomous_submit" });
+      const execute = vi.fn(async () => {
+        expect(await repository.listSubmissionArmedMarkers()).toHaveLength(1);
+        expect(await repository.listSubmissionOutcomeRecords()).toHaveLength(0);
+        return {
+          outcome: "outcome_uncertain" as const,
+          reason: "action_issued" as const,
+          observation: OBSERVATION,
+          control: CONTROL,
+          facts: emptyFacts(),
+        };
+      });
+      const runtime = {
+        observeApplicationForm: () => Promise.resolve(OBSERVATION),
+        executeExactlyOneFinalAction: execute,
+      };
+      const input = {
+        ...base.runtimeInput,
+        repository,
+        browserRuntime: runtime,
+      };
+      if (crash) {
+        const arm =
+          repository.authorizeAndArmSubmissionAttempt.bind(repository);
+        repository.authorizeAndArmSubmissionAttempt = async (value) => {
+          await arm(value);
+          throw Error("Connection lost after durable intent");
+        };
+      }
+      expect((await runApplicationSubmissionRuntime(input)).status).toBe(
+        "outcome_uncertain",
+      );
+      expect(execute).toHaveBeenCalledTimes(crash ? 0 : 1);
+      store.close();
+      store = openJobStore(file);
+      repository = createSendGuards(store);
+      const observe = vi.fn(() =>
+        Promise.reject(Error("must not observe a replay")),
+      );
+      const click = vi.fn(() =>
+        Promise.reject(Error("must not click a replay")),
+      );
+      const replay = await runApplicationSubmissionRuntime({
+        ...input,
+        repository,
+        browserRuntime: {
+          observeApplicationForm: observe,
+          executeExactlyOneFinalAction: click,
+        },
+      });
+      expect(replay).toMatchObject({
+        status: "outcome_uncertain",
+        outcome: { attemptedAt: NOW, idempotencyKey: input.idempotencyKey },
+      });
+      expect(observe).not.toHaveBeenCalled();
+      expect(click).not.toHaveBeenCalled();
+      expect(await repository.listSubmissionArmedMarkers()).toHaveLength(1);
+    } finally {
+      store.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);

@@ -103,6 +103,7 @@ export interface AgentApplicationPreparationInput {
   providerLabel?: string | null;
   modelLabel?: string | null;
   onProgress?: Parameters<typeof runApplyAgent>[0]["onProgress"];
+  submitApplication?: Parameters<typeof runApplyAgent>[0]["submitApplication"];
   readReusableAnswers?: Parameters<
     typeof runApplyAgent
   >[0]["readReusableAnswers"];
@@ -587,18 +588,6 @@ export async function runAgentApplicationPreparation(
       []),
   ];
 
-  // Install the fence before any field is touched. Attachment uploads have a
-  // separate file-bound grant. Non-final field saves stay on the form frame's
-  // own origin; a saved envelope may narrow that permission.
-  await input.session.installPrepareOnlyGuard({
-    ...(executionInput.attachmentUploadsAuthorized === true
-      ? { attachmentUploadsAuthorized: true }
-      : {}),
-    intermediateMutationsAuthorized:
-      executionInput.intermediateMutationsAuthorized === true,
-    allowedOrigins: fieldSaveOrigins,
-  });
-
   const { targetUrl, isContinuation } =
     resolveApplicationPreparationTarget(input);
   const authority = toApplyAuthority(executionInput);
@@ -608,36 +597,7 @@ export async function runAgentApplicationPreparation(
     allowedOrigins,
   };
   let activeEnvelope = input.envelope ?? null;
-  const recheckWriteAuthority = async (purpose: "answers" | "attachment") => {
-    if (executionInput.recheckIntermediateMutationAuthority) {
-      const page = await input.session.readPage();
-      const origin = page.url ? originOf(page.url) : null;
-      if (
-        !origin ||
-        !(await executionInput.recheckIntermediateMutationAuthority(
-          origin,
-          purpose,
-        ))
-      )
-        throw new Error(
-          "The application's permission to persist this value changed.",
-        );
-      await input.session.installPrepareOnlyGuard({
-        intermediateMutationsAuthorized:
-          executionInput.intermediateMutationsAuthorized === true,
-        ...(executionInput.attachmentUploadsAuthorized === true
-          ? { attachmentUploadsAuthorized: true }
-          : {}),
-        allowedOrigins: fieldSaveOrigins,
-      });
-    }
-  };
   const hands = createApplyPageHands(input.session, now);
-  const uploadFile = hands.uploadFile;
-  hands.uploadFile = async (ref, file) => {
-    await recheckWriteAuthority("attachment");
-    return uploadFile(ref, file);
-  };
   const moveReviewer = createMoveReviewer({
     browserPermissions: browserAgentPermissionsOf(executionInput.settings),
     ...(executionInput.prepareBrowserCredentials
@@ -658,19 +618,16 @@ export async function runAgentApplicationPreparation(
   );
   const outcome = await runApplyAgentSafely(input, {
     hands,
+    ...(input.submitApplication
+      ? { submitApplication: input.submitApplication }
+      : {}),
     ...(input.modelContextWindowTokens
       ? { modelContextWindowTokens: input.modelContextWindowTokens }
       : {}),
     ...(input.modelMaxOutputTokens
       ? { modelMaxOutputTokens: input.modelMaxOutputTokens }
       : {}),
-    safety: {
-      ...input.session,
-      openIntermediateWriteWindow: async () => {
-        await recheckWriteAuthority("answers");
-        await input.session.openIntermediateWriteWindow();
-      },
-    },
+    safety: input.session,
     modelQuestionClassification: true,
     ...(input.questionReadCacheScope
       ? { questionReadCacheScope: input.questionReadCacheScope }
@@ -1006,6 +963,7 @@ export function createApplyFormPreparer(input: {
   onProgress?: AgentApplicationPreparationInput["onProgress"];
   readReusableAnswers?: AgentApplicationPreparationInput["readReusableAnswers"];
   reusableAnswers?: CandidateReusableAnswer[];
+  submitApplication?: AgentApplicationPreparationInput["submitApplication"];
   initialQuestionContexts?: AgentApplicationPreparationInput["initialQuestionContexts"];
   initialPickerAttempts?: AgentApplicationPreparationInput["initialPickerAttempts"];
   uploadsConfirmedByPerson?: readonly string[];
@@ -1126,6 +1084,9 @@ export function createApplyFormPreparer(input: {
           ...(input.letters ? { letters: input.letters } : {}),
           ...(input.envelope ? { envelope: input.envelope } : {}),
           ...(input.onPrepared ? { onPrepared: input.onPrepared } : {}),
+          ...(input.submitApplication
+            ? { submitApplication: input.submitApplication }
+            : {}),
           onProgress: progress,
           ...(signal ? { signal } : {}),
           ...(input.now ? { now: input.now } : {}),

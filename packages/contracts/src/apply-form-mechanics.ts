@@ -216,7 +216,8 @@ export interface RawApplyPage {
     surface?: "same_tab";
     origin: string;
     pathname: string;
-    actionsLeft: number;
+    /** Legacy observations may contain a remaining count; current mechanics do not impose one. */
+    actionsLeft?: number;
     refusal?: { reason: "second_window"; detail: string };
   };
   url: string | null;

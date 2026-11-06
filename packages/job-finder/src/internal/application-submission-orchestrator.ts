@@ -357,7 +357,10 @@ async function recoverOutcomeByPreflight(
   | { status: "recovery_needed"; detail: string }
 > {
   try {
-    const recovered = await repository.recoverArmedSubmissionAttempts({ now });
+    const recovered = await repository.recoverArmedSubmissionAttempts({
+      now,
+      idempotencyKey: preflight.idempotencyKey,
+    });
     const recoveredForKey = recovered.find(
       (outcome) => outcome.idempotencyKey === preflight.idempotencyKey,
     );
@@ -436,7 +439,7 @@ function resultFromOutcome(
       authorization,
       outcome,
       executionGrant,
-      cause: cause ?? "outcome_commit_failed",
+      cause: cause ?? "executor_reported_uncertain",
     };
   }
 
@@ -458,39 +461,150 @@ function resultFromOutcome(
 }
 
 /**
- * Runs one local synthetic authority attempt. This function is intentionally
- * not called by the production application routes; it is the typed seam for a
- * later browser-runtime executor and local acceptance fixtures only.
+ * Persists a send intent before executing one call. Reconnecting callers get
+ * the durable outcome instead of another execution. Legacy record names remain
+ * readable; authority, grant, and page-readiness checks are superseded by ADR 0079.
  */
-export async function runSyntheticApplicationSubmission(input: RunSyntheticApplicationSubmissionInput): Promise<SyntheticSubmissionOrchestrationResult> {
-  return withSubmissionTransition(input.repository, input.preflight.idempotencyKey, async () => {
-    if (input.savedMode === "prepare_only") return blockedResult({reason:"prepare_only",detail:"This run is Fill in for me: leave the send to the person."});
-    const authorization: AuthorizedApplicationSubmission = {status:"authorized", mode:input.savedMode, preflightId:input.preflight.id, idempotencyKey:input.preflight.idempotencyKey, runId:input.preflight.runId, jobId:input.preflight.jobId, resultId:input.preflight.resultId, applicationRecordId:input.preflight.applicationRecordId, authorityEnvelopeId:input.preflight.authorityEnvelopeId, authorityRevision:input.preflight.authorityRevision};
-    const previous=await input.repository.getSubmissionIdempotencyRecord(input.preflight.idempotencyKey);
-    if(previous && previous.status !== "available") {
-      const existing=previous.outcomeId ? await input.repository.getSubmissionOutcomeRecord(previous.outcomeId) : null;
-      if(existing) return resultFromOutcome(existing,authorization,null);
-      const recovery=await recoverOutcomeByPreflight(input.repository,input.preflight,input.now);
-      if(recovery.status==="recovered")return resultFromOutcome(recovery.outcome,authorization,null);
-      return recoveryNeededResult({authorization,idempotency:previous,detail:recovery.detail});
-    }
-    const commit=await input.repository.commitSubmissionPreflight(input.preflight);
-    if(commit.status==="conflict")return blockedResult({reason:"preflight_conflict",detail:"The send call ID is already recorded with different data. Read its ledger outcome; it was not replayed."});
-    const preflight=commit.preflight;
-    const marker=buildArmedMarker(preflight,input.now);
-    const armed=await input.repository.authorizeAndArmSubmissionAttempt({preflight,marker,expectedIdempotencyRevision:commit.idempotency.revision,mode:input.savedMode,executionGrantId:null,now:input.now});
-    if(armed.status!=="armed") {
-      const recovery=await recoverOutcomeByPreflight(input.repository,preflight,input.now);
-      if(recovery.status==="recovered")return resultFromOutcome(recovery.outcome,authorization,null);
-      return recoveryNeededResult({authorization,detail:recovery.detail});
-    }
-    let outcome: SubmissionOutcomeRecord;
-    try { outcome=buildOutcome(preflight,authorization,input.now,await input.executor.execute({authorization,preflight,now:input.now})); }
-    catch { outcome=buildUncertainOutcome(preflight,authorization,input.now); }
-    const recorded=await input.repository.commitSubmissionOutcome({outcome,expectedIdempotencyRevision:armed.idempotency.revision});
-    if(recorded.status==="recorded"||recorded.status==="duplicate")return resultFromOutcome(recorded.outcome,authorization,null);
-    return recoveryNeededResult({authorization,outcome,detail:"The send intent is durable but its outcome could not be saved. Do not replay this call; check the site first."});
-  });
+export async function runSyntheticApplicationSubmission(
+  input: RunSyntheticApplicationSubmissionInput,
+): Promise<SyntheticSubmissionOrchestrationResult> {
+  return withSubmissionTransition(
+    input.repository,
+    input.preflight.idempotencyKey,
+    async () => {
+      const authorization: AuthorizedApplicationSubmission = {
+        status: "authorized",
+        mode: input.savedMode,
+        preflightId: input.preflight.id,
+        idempotencyKey: input.preflight.idempotencyKey,
+        runId: input.preflight.runId,
+        jobId: input.preflight.jobId,
+        resultId: input.preflight.resultId,
+        applicationRecordId: input.preflight.applicationRecordId,
+        authorityEnvelopeId: input.preflight.authorityEnvelopeId,
+        authorityRevision: input.preflight.authorityRevision,
+      };
+      const previous = await input.repository.getSubmissionIdempotencyRecord(
+        input.preflight.idempotencyKey,
+      );
+      if (previous && previous.status !== "available") {
+        const existing = previous.outcomeId
+          ? await input.repository.getSubmissionOutcomeRecord(
+              previous.outcomeId,
+            )
+          : null;
+        if (existing) return resultFromOutcome(existing, authorization, null);
+        const recovery = await recoverOutcomeByPreflight(
+          input.repository,
+          input.preflight,
+          input.now,
+        );
+        if (recovery.status === "recovered")
+          return resultFromOutcome(recovery.outcome, authorization, null);
+        return recoveryNeededResult({
+          authorization,
+          idempotency: previous,
+          detail: recovery.detail,
+        });
+      }
+      const commit = await input.repository.commitSubmissionPreflight(
+        input.preflight,
+      );
+      if (commit.status === "conflict")
+        return blockedResult({
+          reason: "preflight_conflict",
+          detail:
+            "The send call ID is already recorded with different data. Read its ledger outcome; it was not replayed.",
+        });
+      const preflight = commit.preflight;
+      const marker = buildArmedMarker(preflight, input.now);
+      let armed: Awaited<
+        ReturnType<
+          SyntheticSubmissionAuthorityRepository["authorizeAndArmSubmissionAttempt"]
+        >
+      >;
+      try {
+        armed = await input.repository.authorizeAndArmSubmissionAttempt({
+          preflight,
+          marker,
+          expectedIdempotencyRevision: commit.idempotency.revision,
+          mode: input.savedMode,
+          executionGrantId: null,
+          now: input.now,
+        });
+      } catch {
+        const recovery = await recoverOutcomeByPreflight(
+          input.repository,
+          preflight,
+          input.now,
+        );
+        return recovery.status === "recovered"
+          ? resultFromOutcome(recovery.outcome, authorization, null)
+          : recoveryNeededResult({ authorization, detail: recovery.detail });
+      }
+      if (armed.status !== "armed") {
+        const recovery = await recoverOutcomeByPreflight(
+          input.repository,
+          preflight,
+          input.now,
+        );
+        if (recovery.status === "recovered")
+          return resultFromOutcome(recovery.outcome, authorization, null);
+        return recoveryNeededResult({ authorization, detail: recovery.detail });
+      }
+      let outcome: SubmissionOutcomeRecord;
+      let cause: SyntheticSubmissionUncertainResult["cause"] =
+        "executor_reported_uncertain";
+      try {
+        outcome = buildOutcome(
+          preflight,
+          authorization,
+          input.now,
+          await input.executor.execute({
+            authorization,
+            preflight,
+            now: input.now,
+          }),
+        );
+      } catch {
+        cause = "executor_error";
+        outcome = buildUncertainOutcome(preflight, authorization, input.now);
+      }
+      let recorded: Awaited<
+        ReturnType<
+          SyntheticSubmissionAuthorityRepository["commitSubmissionOutcome"]
+        >
+      >;
+      try {
+        recorded = await input.repository.commitSubmissionOutcome({
+          outcome,
+          expectedIdempotencyRevision: armed.idempotency.revision,
+        });
+      } catch {
+        const recovery = await recoverOutcomeByPreflight(
+          input.repository,
+          preflight,
+          input.now,
+        );
+        return recovery.status === "recovered"
+          ? resultFromOutcome(
+              recovery.outcome,
+              authorization,
+              null,
+              "outcome_commit_failed",
+            )
+          : recoveryNeededResult({ authorization, detail: recovery.detail });
+      }
+      if (recorded.status === "recorded" || recorded.status === "duplicate")
+        return resultFromOutcome(recorded.outcome, authorization, null, cause);
+      return recoveryNeededResult({
+        authorization,
+        outcome,
+        detail:
+          "The send intent is durable but its outcome could not be saved. Do not replay this call; check the site first.",
+      });
+    },
+  );
 }
 export function recoverSyntheticApplicationSubmissions(
   repository: SyntheticSubmissionAuthorityRepository,

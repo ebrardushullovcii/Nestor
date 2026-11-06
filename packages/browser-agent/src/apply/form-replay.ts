@@ -6,7 +6,7 @@ import { savedAnswerForQuestion } from "./application-facts";
 import { addedHistoryKind } from "./history-row-policy";
 import { choiceAnswerValues, matchOption } from "./option-match";
 import { questionPrompt } from "./policy-executor";
-import { holdsAnswer } from "./submit-preflight";
+import { holdsAnswer } from "./form-facts";
 import type {
   ApplyAnswer,
   ApplyAnswerSources,

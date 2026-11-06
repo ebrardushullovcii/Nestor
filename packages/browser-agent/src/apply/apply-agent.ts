@@ -16,6 +16,7 @@ import {
   type ApplyFormPathStep,
 } from "@nestor/contracts";
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { meaningHash, meaningTargetHash } from "./answer-meaning";
 import { answerSourceCatalog } from "./answer-source-catalog";
 import { createApplyProgressGuard } from "./apply-progress";
@@ -82,7 +83,6 @@ import {
   coverLetterPolicyAllows,
   isCoverLetterControl,
 } from "./cover-letter";
-import { fillMayOpen } from "./fill-presses";
 import {
   nextPathStep,
   planReplay,
@@ -107,13 +107,10 @@ import {
   createApplyGuardState,
   executeApplyProposal,
   fileFieldHoldsOtherFile,
-  fillStepPress,
   formSendPause,
   guardStop,
   buildPendingQuestion as makePendingQuestion,
   pickerQuestionKey,
-  pressesFormButtons,
-  pressOnSitePause,
   questionPrompt,
   unrecognizedSubmit,
   type ApplyExecutionOutcome,
@@ -128,17 +125,15 @@ import {
 } from "./question-classification";
 import { createQuestionOccurrences } from "./question-occurrences";
 import {
-  checkFormReadiness,
   fileUploadProblems,
   hasRemainingApplicationStep,
   holdsAnswer,
   retainedForFormSubmission,
-  runSubmitPreflight,
   STEP_HANDOVER_QUESTION_ID,
   unresolvedRequiredControls,
   UPLOAD_REPAIR_QUESTION_ID,
   type FileUploadProblem,
-} from "./submit-preflight";
+} from "./form-facts";
 import type {
   ApplyAgentConfig,
   ApplyAgentResult,
@@ -509,11 +504,6 @@ async function runMeasuredApplyAgent(
    * than the moment the model reached for it.
    */
   let deferredPress: ApplyPause | null = null;
-  const deferPress = (pause: ApplyPause): string => {
-    deferredPress = pause;
-    note(`Left ${pause.question?.prompt ?? "a form button"} for the end.`);
-    return `${pause.blocker?.detail ?? pause.summary} Job Finder hands it to the person when everything else is filled: fill every other field on this page you can answer, then finish.`;
-  };
   /**
    * Reaching for a form button again means the page is done: the run ends
    * with it, the person's questions first (their answers belong on this
@@ -1216,7 +1206,6 @@ async function runMeasuredApplyAgent(
       )
         pendingQuestions.delete(key);
     }
-    readyToSend = null;
     const fileFieldsSeen = new Set<string>();
     for (const control of next.controls) {
       if (control.disabled || (!control.visible && control.kind !== "file"))
@@ -1815,19 +1804,6 @@ async function runMeasuredApplyAgent(
       case "paused":
         // A step press Nestor already made once is not deferred and retried.
         if (outcome.pause.unconfirmedStep) return handOverPress(outcome.pause);
-        // Fill in for me: a form button waits until the rest is filled.
-        if (
-          outcome.pause.question?.id === STEP_HANDOVER_QUESTION_ID &&
-          (!pressesFormButtons(runConfig) || outcome.pause.formSend === true)
-        )
-          return deferredPress
-            ? handOverPress(outcome.pause)
-            : {
-                kind: "ok",
-                status: "refused",
-                stopBatch: false,
-                content: deferPress(outcome.pause),
-              };
         if (
           outcome.pause.reviewDraft &&
           outcome.pause.question?.kind === "cover_letter"
@@ -1867,8 +1843,26 @@ async function runMeasuredApplyAgent(
       case "ready_to_send":
         syncObservation(outcome.observation);
         note("The form is complete and ready to send.");
-        readyToSend = { actionRef: outcome.finalActionRef, actionLabel: outcome.finalActionLabel, ...(currentModelCallId ? { callId: currentModelCallId } : {}) };
-        return { kind: "stop", reason: "The model requested this send.", data: {} };
+        readyToSend = {
+          actionRef: outcome.finalActionRef,
+          actionLabel: outcome.finalActionLabel,
+          ...(modelToolCall.getStore()
+            ? { callId: modelToolCall.getStore()! }
+            : {}),
+        };
+        if (config.submitApplication) {
+          const receipt = await config.submitApplication(readyToSend);
+          note(receipt.content);
+          if (receipt.outcome !== "submitted") {
+            readyToSend = null;
+            return { kind: "ok", content: receipt.content, stopBatch: true };
+          }
+        }
+        return {
+          kind: "stop",
+          reason: "The model requested this send.",
+          data: {},
+        };
       case "finished": {
         let finishNeedsPerson = outcome.needsPerson;
         if (finishNeedsPerson) needsPersonFinishPending = true;
@@ -1882,6 +1876,17 @@ async function runMeasuredApplyAgent(
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();
+        syncObservation(observation);
+        if (!finishNeedsPerson && !outcome.stuck)
+          return {
+            kind: "finish",
+            finish: {
+              reason: outcome.reason,
+              stuck: false,
+              needsPerson: false,
+              data: {},
+            },
+          };
         const reportedChallenge = !securityChallengeSolved(observation)
           ? [outcome.reason, ...forPerson]
               .map(reportedSecurityChallenge)
@@ -2024,7 +2029,6 @@ async function runMeasuredApplyAgent(
             },
           };
         }
-        const observedShape = applyStepShape(observation);
         const classifications = await classifyQuestions?.(
           observation.controls,
           questionReadContext(observation),
@@ -2040,37 +2044,6 @@ async function runMeasuredApplyAgent(
             control.requiredOnPage ??= control.required;
             control.required = true;
           }
-        }
-        // Finishing a filled local step is not finishing the wizard. A
-        // premature Next handoff may now be safe after the remaining fills.
-        const localAdvance =
-          !deferredPress?.formSend &&
-          pendingQuestions.size === 0 &&
-          !outcome.stuck
-            ? observation.actions.find((action) =>
-                fillStepPress(runConfig, observation, action.ref),
-              )
-            : undefined;
-        if (
-          localAdvance &&
-          (outcome.forPerson ?? []).every(
-            (item) =>
-              item === localAdvance.ref ||
-              normalizeSignal(item) === normalizeSignal(localAdvance.label),
-          )
-        ) {
-          const advanced = await runProposal({
-            tool: "click",
-            ref: localAdvance.ref,
-          });
-          if (advanced.kind === "moved") {
-            deferredPress = null;
-            needsPersonFinishPending = false;
-            forPerson = [];
-            return outcomeToLoop(advanced);
-          }
-          if (advanced.kind === "refused") return outcomeToLoop(advanced);
-          if (advanced.kind === "paused") return outcomeToLoop(advanced);
         }
         const namedQuestions = forPerson.length;
         const checkedFields = new Map<string, string>();
@@ -2530,15 +2503,14 @@ async function runMeasuredApplyAgent(
       : undefined;
 
     if (proposal.tool === "upload" && control) {
+      proposal = { ...proposal, method: proposal.method ?? "input" };
       const label = questionPrompt(control);
       const fieldKey = uploadFieldKey(control, current!);
       const tries = uploadTries.get(fieldKey) ?? 0;
       const attempt = tries + 1;
       uploadTries.set(fieldKey, attempt);
       uploadLedger.delete(fieldKey);
-      note(
-        `Attaching to "${label}" using ${proposal.method ?? "input"}.`,
-      );
+      note(`Attaching to "${label}" using ${proposal.method ?? "input"}.`);
     }
     const writeKey = controlWriteKey(proposal);
     if (proposal.tool !== "finish") observationNeeded = true;
@@ -2739,7 +2711,7 @@ async function runMeasuredApplyAgent(
         note(
           `Upload for "${label}" was not confirmed using ${proposal.method ?? "input"}. Rule: attachment gesture failed. ${outcome.reason}`,
         );
-      let after = outcome.observation;
+      const after = outcome.observation;
       if (
         !after.controls.some(
           (entry) =>
@@ -3203,37 +3175,9 @@ async function runMeasuredApplyAgent(
       }
       // A press of the final action inside the batch is the form's finish.
       if (stopOutcome?.kind === "finish") return stopOutcome;
-      const finalPage = pageTools.state.observation;
-      const allObservedFieldsDone =
-        !!finalPage &&
-        finalPage.controls
-          .filter(
-            (control) =>
-              !control.disabled &&
-              !control.readOnly &&
-              (control.visible || control.kind === "file"),
-          )
-          .every(
-            (control) =>
-              control.answered ||
-              (!!control.choiceGroupKey &&
-                finalPage.controls.some(
-                  (sibling) =>
-                    sibling.choiceGroupKey === control.choiceGroupKey &&
-                    sibling.checked,
-                )),
-          );
-      const completedKnownPage =
-        !!classifyQuestions &&
-        wrote &&
-        allObservedFieldsDone &&
-        !!finalPage &&
-        pendingQuestions.size === 0 &&
-        pauses.length === 0 &&
-        checkFormReadiness(finalPage).ok;
       if (
         partialOutageTurns === 0 &&
-        (parsed.finishWhenReady || completedKnownPage) &&
+        parsed.finishWhenReady &&
         !stopped &&
         !leftAnswerForPerson
       ) {
@@ -3416,7 +3360,7 @@ async function runMeasuredApplyAgent(
     config.runControl?.noProgressStepLimit ?? DEFAULT_NO_PROGRESS_STEP_LIMIT,
   );
   const modelCallIds = new Map<string, string[]>();
-  let currentModelCallId: string | undefined;
+  const modelToolCall = new AsyncLocalStorage<string | undefined>();
   const loopClient: LLMClient = {
     chatWithTools: (messages, tools, options) =>
       modelActivity.runModel(options, async () => {
@@ -3527,17 +3471,6 @@ async function runMeasuredApplyAgent(
   // The questions the attempt before left with the person, unanswered.
   // Earlier Needs you items are not evidence about this attempt's upload.
   // Try its selected document again even if the page retained a failed chip.
-  const repairFields = new Set(
-    (config.initialUnansweredPickerQuestions ?? [])
-      .filter((question) =>
-        / — upload (?:failed|not confirmed)$/u.test(question.prompt),
-      )
-      .flatMap((question) =>
-        question.prompt
-          .replace(/ — upload (?:failed|not confirmed)$/u, "")
-          .split(", "),
-      ),
-  );
   const restoreFromReplay = async (): Promise<AgentLoopFinish | null> => {
     const replay = runConfig.replay;
     if (!replay) return null;
@@ -3555,12 +3488,7 @@ async function runMeasuredApplyAgent(
               data: {},
             }
           : null;
-    const safety = runConfig.safety;
     const writeOne = async (write: ReplayWrite): Promise<boolean> => {
-      if (write.kind !== "toggle")
-        await safety?.registerPreparedValue(write.value);
-      if (runConfig.intermediateWritesAuthorized === true)
-        await safety?.openIntermediateWriteWindow().catch(() => undefined);
       const result =
         write.kind === "text"
           ? await runConfig.hands.fillText(write.control.ref, write.value)
@@ -3786,7 +3714,7 @@ async function runMeasuredApplyAgent(
         };
       }
       const next = nextPathStep(after, replay, takenPath);
-      if (next && checkFormReadiness(after, uploadOptions).ok) {
+      if (next) {
         const proposal: ApplyProposal | null =
           next.step.tool === "navigate"
             ? { tool: "navigate", url: next.step.href ?? next.step.label }
@@ -3817,33 +3745,7 @@ async function runMeasuredApplyAgent(
     // An earlier Needs you verdict is history, not an answer veto. Let the
     // model reconsider every unresolved question against the current facts.
     if (open.length) return null;
-    // The screen is complete. A next step stays the person's in Fill in for
-    // me: its button is handed over the way the run hands it over.
-    const advance = current.actions.find(
-      (action) =>
-        action.kind === "advance" && action.visible && !action.disabled,
-    );
-    if (advance && !pressesFormButtons(runConfig) && !deferredPress) {
-      const finish = toFinish(
-        await outcomeToLoop(
-          await runProposal({ tool: "click", ref: advance.ref }),
-          { withPage: false },
-        ),
-      );
-      if (finish) return finish;
-    }
-    // With the step handed over the screen is done; otherwise it must read
-    // as ready.
-    if (!deferredPress && !checkFormReadiness(current, uploadOptions).ok)
-      return null;
-    return toFinish(
-      await outcomeToLoop({
-        kind: "finished",
-        reason: "The form is back as it was left.",
-        stuck: false,
-        needsPerson: false,
-      }),
-    );
+    return null;
   };
   let technicalFailure: ApplyAgentResult["technicalFailure"];
   let partialOutageTurns = 0;
@@ -3892,64 +3794,6 @@ async function runMeasuredApplyAgent(
                       total: control.options.length,
                     }),
                   };
-              }
-            }
-            if (
-              (name === "follow_link" || name === "navigate") &&
-              !pressesFormButtons(config)
-            ) {
-              let args: Record<string, unknown> = {};
-              try {
-                args = JSON.parse(rawArguments || "{}") as Record<
-                  string,
-                  unknown
-                >;
-              } catch {
-                args = {};
-              }
-              const seen = pageTools.state.observation;
-              const link =
-                name === "follow_link"
-                  ? seen?.links.find((entry) => entry.ref === args.ref)
-                  : seen?.links.find((entry) => entry.href === args.url);
-              const href =
-                name === "navigate"
-                  ? typeof args.url === "string"
-                    ? args.url
-                    : ""
-                  : (link?.href ?? "");
-              const accessKind =
-                seen && name === "follow_link" && typeof args.ref === "string"
-                  ? browserInteractionKind(
-                      seen,
-                      args.ref,
-                      await googleIdentityContext(config, config.hands),
-                    )
-                  : null;
-              const browserPermissions =
-                await currentBrowserPermissions(config);
-              const enabledAccessLink =
-                (accessKind === "signIn" ||
-                  accessKind === "createAccounts" ||
-                  accessKind === "googleSignIn") &&
-                browserPermissions[accessKind];
-              if (
-                !enabledAccessLink &&
-                !fillMayOpen(
-                  config,
-                  seen?.url ?? null,
-                  href,
-                  seen ? { observation: seen, state: guardState } : undefined,
-                )
-              ) {
-                const pause = pressOnSitePause(
-                  link?.label && !/^https?:/iu.test(link.label.trim())
-                    ? `"${link.label}"`
-                    : "the link to the next page",
-                  now(),
-                );
-                if (deferredPress) return handOverPress(pause);
-                return { kind: "ok", content: deferPress(pause) };
               }
             }
             if (name === "follow_link" || name === "navigate") {
@@ -4001,32 +3845,37 @@ async function runMeasuredApplyAgent(
       ...domainTools,
     ].map<AgentLoopTool>((tool) => ({
       ...tool,
-      execute: (arguments_, context) => {
-        currentModelCallId = modelCallIds.get(`${tool.definition.function.name}|${arguments_}`)?.shift();
-        if (
-          partialOutageTurns > 0 &&
-          !PARTIAL_OUTAGE_TOOLS.has(tool.definition.function.name)
-        )
-          return Promise.resolve({
-            kind: "ok",
-            status: "refused",
-            content:
-              "The page is not fully readable. Only reads and field writes are allowed.",
-          });
-        const record = progressGuard.start(
-          tool.definition.function.name,
-          arguments_,
-          pageTools.state.observation,
-        );
-        return modelActivity
-          .run(context, () => tool.execute(arguments_, context))
-          .then((outcome) => {
-            const changed = record(pageTools.state.observation);
-            return outcome.kind === "ok"
-              ? { ...outcome, progress: changed }
-              : outcome;
-          });
-      },
+      execute: (arguments_, context) =>
+        modelToolCall.run(
+          modelCallIds
+            .get(`${tool.definition.function.name}|${arguments_}`)
+            ?.shift(),
+          () => {
+            if (
+              partialOutageTurns > 0 &&
+              !PARTIAL_OUTAGE_TOOLS.has(tool.definition.function.name)
+            )
+              return Promise.resolve({
+                kind: "ok",
+                status: "refused",
+                content:
+                  "The page is not fully readable. Only reads and field writes are allowed.",
+              });
+            const record = progressGuard.start(
+              tool.definition.function.name,
+              arguments_,
+              pageTools.state.observation,
+            );
+            return modelActivity
+              .run(context, () => tool.execute(arguments_, context))
+              .then((outcome) => {
+                const changed = record(pageTools.state.observation);
+                return outcome.kind === "ok"
+                  ? { ...outcome, progress: changed }
+                  : outcome;
+              });
+          },
+        ),
     })),
     subjectLabel: config.siteLabel,
     ceilings: {
@@ -4079,7 +3928,7 @@ async function runMeasuredApplyAgent(
       // for a screen that matches it.
       const restored = await restoreFromReplay();
       if (restored) return restored;
-      let current = pageTools.state.observation;
+      const current = pageTools.state.observation;
       if (current?.blocker?.code === "browser_blocked")
         return {
           reason: current.blocker.summary,
@@ -4088,39 +3937,6 @@ async function runMeasuredApplyAgent(
           data: {},
         };
       if (current?.blocker) return null;
-      // Empty optional wizard screens need no answer or model decision.
-      // Re-observe each local advance through the ordinary executor fence.
-      while (
-        current &&
-        pendingQuestions.size === 0 &&
-        !deferredPress?.formSend &&
-        current.controls.every(
-          (control) => !control.visible || control.disabled || control.readOnly,
-        )
-      ) {
-        const emptyStep = current;
-        const advance = emptyStep.actions.find((action) =>
-          fillStepPress(runConfig, emptyStep, action.ref),
-        );
-        if (!advance) break;
-        const outcome = await runProposal({ tool: "click", ref: advance.ref });
-        const reported = await outcomeToLoop(outcome, { withPage: false });
-        if (reported.kind === "finish") return reported.finish;
-        if (reported.kind === "stop")
-          return {
-            reason: reported.reason,
-            needsPerson: true,
-            stuck: false,
-            data: {},
-          };
-        if (outcome.kind !== "moved") break;
-        current = pageTools.state.observation;
-        // The empty screen may have exposed a recorded, answered screen.
-        // Restore it before the model can make a new choice for that field.
-        const restoredAfterAdvance = await restoreFromReplay();
-        if (restoredAfterAdvance) return restoredAfterAdvance;
-        current = pageTools.state.observation;
-      }
       // A saved picker rule is applied as soon as its question is on the
       // page; the picker itself says whether the choices are there.
       for (const control of current?.controls ?? []) {
@@ -4160,22 +3976,6 @@ async function runMeasuredApplyAgent(
     // this step has questions left for the person, or the form has been
     // filled and is ready, those words go through the same finish checks as
     // the finish tool; otherwise the loop reminds the model to use a tool.
-    onReplyWithoutTool: async (content) => {
-      const current = pageTools.state.observation;
-      const done =
-        pendingQuestions.size > 0 ||
-        (current !== null &&
-          filled.length + attachments.length > 0 &&
-          checkFormReadiness(current, uploadOptions).ok);
-      return done
-        ? outcomeToLoop({
-            kind: "finished",
-            reason: content.trim().slice(0, 2_000),
-            stuck: false,
-            needsPerson: pendingQuestions.size > 0,
-          })
-        : null;
-    },
     onHistoryCompacted: () => {
       modelObservation = null;
       const current = pageTools.state.observation;

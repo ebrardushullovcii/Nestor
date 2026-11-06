@@ -548,7 +548,7 @@ describe("ref-bound Google account windows", () => {
     expect(selected).toHaveBeenCalledTimes(1);
   });
 
-  test.each(["exhausted", "second_window", "other_origin", "permission_off"])(
+  test.each(["second_window", "other_origin", "permission_off"])(
     "account child hands off on %s, even with password sign-in enabled",
     async (condition) => {
       const { raw, hands } = setup("signIn");

@@ -212,11 +212,12 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
       function: {
         name: "upload",
         description:
-          "Attach one of the files Job Finder holds for this application to a file field.",
+          "Attach a supplied file. Choose input (default), chooser (the site's file-picker control), or drop (the site's drop zone). Read the result and decide whether to try another method.",
         parameters: {
           type: "object",
           properties: {
             ref: { type: "string" },
+            method: { type: "string", enum: ["input", "chooser", "drop"] },
             documentId: {
               type: "string",
               description: "An id from the file list in your instructions.",
@@ -440,8 +441,27 @@ export function parseApplyProposal(
     case "upload": {
       if (!ref) return needsRef();
       const documentId = asString(args.documentId);
+      const method = args.method;
+      if (
+        method !== undefined &&
+        method !== "input" &&
+        method !== "chooser" &&
+        method !== "drop"
+      )
+        return {
+          ok: false,
+          error: "upload method must be input, chooser or drop.",
+        };
       return documentId
-        ? { ok: true, proposal: { tool: "upload", ref, documentId } }
+        ? {
+            ok: true,
+            proposal: {
+              tool: "upload",
+              ref,
+              documentId,
+              ...(method ? { method } : {}),
+            },
+          }
         : { ok: false, error: "upload needs a documentId." };
     }
     case "scroll": {
@@ -538,6 +558,7 @@ export const FILL_FIELDS_TOOL_DEFINITION: ApplyToolDefinition = {
                 type: "boolean",
                 description: "For set_checkbox: true or false.",
               },
+              method: { type: "string", enum: ["input", "chooser", "drop"] },
               documentId: {
                 type: "string",
                 description:

@@ -7,7 +7,6 @@ export function guardApplicationPreparationSession(
   lease: ApplicationPreparationLease,
   waitForReady: () => Promise<void>,
   signal?: AbortSignal,
-  read?: <T>(work: () => Promise<T>) => Promise<T>,
 ): ApplyPageSession {
   const guard = async <T>(
     work: () => Promise<T>,
@@ -28,7 +27,7 @@ export function guardApplicationPreparationSession(
 
   return {
     ...session,
-    readPage: () => guard(() => read ? read(() => session.readPage()) : session.readPage()),
+    readPage: () => guard(() => session.readPage()),
     fillText: (ref, value) => guard(() => session.fillText(ref, value)),
     chooseOption: (ref, value) => guard(() => session.chooseOption(ref, value)),
     setToggle: (ref, checked) => guard(() => session.setToggle(ref, checked)),

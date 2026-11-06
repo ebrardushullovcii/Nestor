@@ -359,6 +359,10 @@ importers:
       zod-to-json-schema:
         specifier: 3.24.6
         version: 3.24.6(zod@3.25.76)
+    devDependencies:
+      playwright:
+        specifier: ^1.63.0
+        version: 1.63.0
 
   packages/job-list-policy:
     dependencies:

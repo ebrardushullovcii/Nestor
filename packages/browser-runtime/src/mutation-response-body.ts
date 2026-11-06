@@ -38,7 +38,9 @@ export function installMutationResponseBodyObserver(): void {
         files.length ? ["files", files] : ["fields", [...body]],
       );
       if (bodyKey.length > 64_000) return null;
-    } else if (body instanceof Blob) bodyKey = `bytes:${body.size}`;
+    } else if (body instanceof File)
+      bodyKey = JSON.stringify(["files", [["", body.name, body.size]]]);
+    else if (body instanceof Blob) bodyKey = `bytes:${body.size}`;
     else if (body instanceof ArrayBuffer || ArrayBuffer.isView(body))
       bodyKey = `bytes:${body.byteLength}`;
     else return null;

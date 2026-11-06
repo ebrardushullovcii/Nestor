@@ -64,12 +64,10 @@ export {
 export { UNCONFIRMED_STEP_LABEL } from "./local-step-preflight";
 export {
   fileUploadProblems,
-  runSubmitPreflight,
   STEP_HANDOVER_QUESTION_ID,
   UPLOAD_REPAIR_QUESTION_ID,
-  type ApplySubmitPreflightResult,
   type FileUploadProblem,
-} from "./submit-preflight";
+} from "./form-facts";
 export {
   completeTaskLocalSignIn,
   selectObservedSignInAction,

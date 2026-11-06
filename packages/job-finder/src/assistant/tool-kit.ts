@@ -101,6 +101,8 @@ export interface AssistantHandleStore {
 
 /** What one turn offers its tools. Implemented by the session host. */
 export interface AssistantTurnSession {
+  /** Current provider tool call identity; send effects use it durably. */
+  readonly callId?: string | undefined;
   conversationId: string;
   turnId: string;
   /** The person's sidebar message this turn serves; null for continuations. */

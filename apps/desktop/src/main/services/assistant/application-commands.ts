@@ -122,24 +122,13 @@ export function assistantApplicationCommands() {
               "That application no longer exists.",
             );
           const currentMode = await savedMode();
-          const [decision] = decideUnderGrants({
-            grants: await session.grants.list(),
-            jobIds: [String(row.jobId)],
-            action: "send",
-            savedMode:
-              row.mode === "autonomous_submit" &&
-              currentMode === "autonomous_submit"
-                ? "autonomous_submit"
-                : "confirm_before_submit",
-          });
-          if (!decision?.allowed)
-            throw new AssistantToolError(
-              "refused",
-              decision?.reason ?? "Record a send instruction first.",
-            );
           session.assertCurrent();
           await session.releaseBrowserLease?.();
-          const sent = await runApplicationCommand("send_application", target);
+          const sent = await runApplicationCommand("send_application", target, {
+            conversationId: session.conversationId,
+            mode: currentMode,
+            callId: session.callId ?? `${session.turnId}_send_${target.id}`,
+          });
           const details = await runApplicationCommand(
             "get_application_details",
             target,

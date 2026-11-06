@@ -2,13 +2,11 @@ import type {
   ApplicationAutomationMode,
   JobSource,
   SubmissionAnswerSnapshotIdentity,
-  SubmissionExecutionGrant,
   SubmissionFinalControlIdentity,
   SubmissionOutcomeRetryEligibility,
   SubmissionPreflightRecord,
 } from "@nestor/contracts";
 import {
-  isActiveApplicationAuthorityEnvelope,
   describeBrowserError,
   SubmissionFinalControlIdentitySchema,
   SubmissionObservationIdentitySchema,
@@ -178,20 +176,55 @@ export async function runApplicationSubmissionRuntime(
     );
   }
 
-  // Prepare-only is a hard boundary. Do not even observe a final control or
-  // persist a preflight when the saved mode cannot authorize final action.
-  if (input.savedMode === "prepare_only") {
-    return blockedResult(
-      "prepare_only",
-      "Prepare-only automation never authorizes a final browser action.",
+  const previous = await input.repository.getSubmissionIdempotencyRecord(
+    input.idempotencyKey,
+  );
+  if (previous && previous.status !== "available") {
+    const recorded = await input.repository.getSubmissionPreflightRecord(
+      previous.preflightId,
     );
+    if (recorded)
+      return runSyntheticApplicationSubmission({
+        repository: input.repository,
+        preflight: recorded,
+        savedMode: input.savedMode,
+        jobId: recorded.jobId,
+        campaignId: recorded.campaignId,
+        observation: {
+          origin: recorded.origin!,
+          formObservation: recorded.formObservation,
+          resumeSha256: recorded.resumeSha256,
+          answers: recorded.answers,
+          finalControl: recorded.finalControl,
+          remainingRunCapacity: recorded.remainingRunCapacityBefore,
+          currentPolicyFacts: input.currentPolicyFacts,
+        },
+        now: input.now,
+        executor: {
+          execute: () =>
+            Promise.reject(
+              new Error("A recorded send call is never replayed."),
+            ),
+        },
+      });
   }
-
   let observation: ApplicationFormObservation;
   try {
     observation = await input.browserRuntime.observeApplicationForm(
       input.source,
-      { pageBindingKey: input.lineage.resultId, ...(input.finalAction ? { finalActionTargets: [{ ref: input.finalAction.actionRef, label: input.finalAction.actionLabel }] } : {}) },
+      {
+        pageBindingKey: input.lineage.resultId,
+        ...(input.finalAction
+          ? {
+              finalActionTargets: [
+                {
+                  ref: input.finalAction.actionRef,
+                  label: input.finalAction.actionLabel,
+                },
+              ],
+            }
+          : {}),
+      },
     );
   } catch {
     return blockedResult(
@@ -202,7 +235,11 @@ export async function runApplicationSubmissionRuntime(
 
   const pageOrigin = observation.page.origin;
   const control = observation.controls[0];
-  if (!pageOrigin || !control) return blockedResult("immediate_recheck_failed", "That control is stale or missing; observe again.");
+  if (!pageOrigin || !control)
+    return blockedResult(
+      "immediate_recheck_failed",
+      "That control is stale or missing; observe again.",
+    );
 
   let formObservation: ReturnType<
     typeof SubmissionObservationIdentitySchema.parse
@@ -256,6 +293,7 @@ export async function runApplicationSubmissionRuntime(
 
     const actionInput: ExecuteExactlyOneFinalActionInput = {
       pageBindingKey: input.lineage.resultId,
+      callId: input.idempotencyKey,
       expectedObservation: executorInput.preflight.formObservation,
       expectedControl: executorInput.preflight.finalControl,
       expectedPageOrigin: preflightOrigin,

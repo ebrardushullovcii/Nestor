@@ -1,15 +1,15 @@
+import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core";
 import { createHash } from "node:crypto";
 import {
   submissionConfirmationSummary,
-  ApplicationAuthorityOriginSchema,
   SubmissionFinalControlIdentitySchema,
   SubmissionObservationIdentitySchema,
   type SubmissionFinalControlIdentity,
   type SubmissionObservationIdentity,
   type ApplyFinalActionTarget,
 } from "@nestor/contracts";
-import type { Page, Request, Response, Route } from "playwright";
+import type { Page, Request, Response } from "playwright";
 import { actionLocator } from "./apply-page-mechanics";
 import { watchPageSelfLimits } from "./self-limit-page";
 
@@ -21,12 +21,6 @@ import {
 
 import { readPageMessages } from "./page-messages";
 import { mutationResponseSaysError } from "./mutation-response";
-import {
-  hasActiveAccountWindow,
-  closePrepareOnlyFinalActionWindow,
-  isPrepareOnlyFinalActionWindowOpen,
-  openPrepareOnlyFinalActionWindow,
-} from "./playwright-application-flow";
 
 /** Read the site's explicit field feedback; do not infer rejection from page prose. */
 async function readApplicationValidationErrors(page: Page): Promise<string[]> {
@@ -353,6 +347,7 @@ export interface ExecuteExactlyOneFinalActionInput {
     readonly control: ApplicationFinalControl;
   }) => boolean | Promise<boolean>;
   readonly signal?: AbortSignal;
+  readonly callId?: string;
   readonly clickTimeoutMs?: number;
   readonly confirmationTimeoutMs?: number;
 }
@@ -433,14 +428,6 @@ function readSafePageUrl(value: string): ApplicationSafePageUrl {
     };
   } catch {
     return { origin: null, safePath: null };
-  }
-}
-
-function normalizeAllowedOrigin(value: string): string | null {
-  try {
-    return ApplicationAuthorityOriginSchema.parse(value).replace(/\/$/u, "");
-  } catch {
-    return null;
   }
 }
 
@@ -850,17 +837,6 @@ function emptyFacts(
   };
 }
 
-function sameIdentity(
-  left: SubmissionObservationIdentity,
-  right: SubmissionObservationIdentity,
-): boolean {
-  return (
-    left.id === right.id &&
-    left.revision === right.revision &&
-    left.digest === right.digest
-  );
-}
-
 function sameControlIdentity(
   left: SubmissionFinalControlIdentity,
   right: SubmissionFinalControlIdentity,
@@ -985,7 +961,9 @@ export async function observeApplicationForm(
           Number.isInteger(requestedMaxControls)
         ? Math.max(1, Math.min(requestedMaxControls, DEFAULT_MAX_CONTROLS))
         : DEFAULT_MAX_CONTROLS;
-  const raw = await readRawApplicationFormSnapshot(page, maxControls);
+  const raw = await withBrowserReadLiveness(page, () =>
+    readRawApplicationFormSnapshot(page, maxControls),
+  );
   const observation = buildObservation(raw);
   nativeActionBindings.set(
     page,
@@ -1029,18 +1007,52 @@ export async function executeExactlyOneFinalAction(
       });
     }
     let observation: ApplicationFormObservation;
-    try { observation = await observeApplicationForm(page); }
-    catch { return blockedResult({reason: "stale_control", observation: null, facts: initialFacts}); }
-    const control = observation.controls.find(entry => sameControlIdentity(entry.identity, expectedControl));
-    if (!control) return blockedResult({reason: "stale_control", observation, facts: initialFacts});
-    const key = actionKey(expectedObservation, expectedControl);
-    if (hasIssuedAction(page,key)) return blockedResult({reason: "stale_control",observation,control,facts:initialFacts});
-    const allowedOrigins = new Set([observation.page.origin].filter((value):value is string => !!value));
-    const finalObservation = observation, finalControl = control, postVetoControl = control;
+    try {
+      observation = await observeApplicationForm(page);
+    } catch {
+      return blockedResult({
+        reason: "stale_control",
+        observation: null,
+        facts: initialFacts,
+      });
+    }
+    const control = observation.controls.find((entry) =>
+      sameControlIdentity(entry.identity, expectedControl),
+    );
+    if (!control)
+      return blockedResult({
+        reason: "stale_control",
+        observation,
+        facts: initialFacts,
+      });
+    const key = input.callId ?? actionKey(expectedObservation, expectedControl);
+    if (hasIssuedAction(page, key))
+      return blockedResult({
+        reason: "stale_control",
+        observation,
+        control,
+        facts: initialFacts,
+      });
+    const allowedOrigins = new Set(
+      [
+        ...input.allowedOrigins,
+        observation.page.origin,
+        control.action.origin,
+      ].filter((value): value is string => !!value),
+    );
+    const finalObservation = observation,
+      finalControl = control,
+      postVetoControl = control;
     const pageBefore = initialPage;
-    const beforeConfirmation = await readSubmissionPageState(page);
-    const postVetoLocator = page.locator(APPLICATION_FINAL_CONTROL_SELECTOR).nth(control.ordinal);
-    const nativeBinding = nativeActionBindings.get(page)?.get(control.identity.signature);
+    const beforeConfirmation = await withBrowserReadLiveness(page, () =>
+      readSubmissionPageState(page),
+    );
+    const postVetoLocator = page
+      .locator(APPLICATION_FINAL_CONTROL_SELECTOR)
+      .nth(control.ordinal);
+    const nativeBinding = nativeActionBindings
+      .get(page)
+      ?.get(control.identity.signature);
 
     // Consume this page/observation/control tuple before entering Playwright.
     // A timeout or a black-holed request is therefore not retried by a second
@@ -1233,7 +1245,9 @@ export async function executeExactlyOneFinalAction(
       async (): Promise<ConfirmedFinalActionResult | null> => {
         if (finalRequests.size !== 1 || successfulFinalRequests.size !== 1)
           return null;
-        const currentPage = await readSubmissionPageState(page);
+        const currentPage = await withBrowserReadLiveness(page, () =>
+          readSubmissionPageState(page),
+        );
         if (
           (await readApplicationValidationErrors(page)).length > 0 ||
           !employerPageConfirmsSubmission(

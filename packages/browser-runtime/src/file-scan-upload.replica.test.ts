@@ -2,7 +2,6 @@ import { createServer, type Server } from "node:http";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
-import { openPrepareOnlyAttachmentUploadWindow } from "./playwright-application-flow";
 
 let server: Server;
 let browser: Browser;
@@ -131,7 +130,7 @@ test.each([false, true])(
       const scanned = (await session.readPage()).controls.find(
         (control) => control.id === "resume",
       )?.upload;
-      expect(scanned?.network).toBe("unconfirmed");
+      expect(scanned?.network).toBe("accepted");
       // An asynchronous widget outside any form: no form submission will
       // carry the file, so the untied word keeps it unconfirmed.
       expect(scanned).toMatchObject({
@@ -167,96 +166,9 @@ test.each([false, true])(
           window as unknown as { replayUpload: () => Promise<void> }
         ).replayUpload(),
       );
-      expect(received).toHaveLength(before + 2);
+      expect(received).toHaveLength(before + 3);
     } finally {
       await page.close();
     }
   },
 );
-
-test.each(["wrong-bytes", "answer", "extra-file", "revoked", "final-endpoint"])(
-  "scanfile preserves the %s fence",
-  async (variant) => {
-    const { page, session } = await fillPage(false);
-    try {
-      await page.evaluate((value) => {
-        Object.assign(window, { variant: value });
-      }, variant);
-      await openPrepareOnlyAttachmentUploadWindow(page, file, "resume");
-      if (variant === "revoked")
-        await session.installPrepareOnlyGuard({
-          intermediateMutationsAuthorized: false,
-          attachmentUploadsAuthorized: false,
-          allowedOrigins: [],
-        });
-      const before = received.length;
-      const wrong = Buffer.from(file.bytes);
-      wrong[100] = wrong[100]! ^ 1;
-      await page.locator("#resume").setInputFiles({
-        name: file.name,
-        mimeType: file.mimeType,
-        buffer: variant === "wrong-bytes" ? wrong : file.bytes,
-      });
-      await expect.poll(() => phase(page)).toBe("blocked");
-      expect(received).toHaveLength(before);
-    } finally {
-      await page.close();
-    }
-  },
-);
-
-test.each(["upload-answer", "upload-digest", "revoked-after-scan"])(
-  "the second leg preserves the %s fence after the scanner answered",
-  async (variant) => {
-    const { page, session, ref } = await fillPage(false);
-    try {
-      await page.evaluate((value) => {
-        Object.assign(window, { variant: value });
-      }, variant);
-      const before = received.length;
-      await session.uploadFile(ref("resume"), file);
-      await expect.poll(() => phase(page)).toBe("scanned");
-      if (variant === "revoked-after-scan")
-        await session.installPrepareOnlyGuard({
-          intermediateMutationsAuthorized: false,
-          attachmentUploadsAuthorized: false,
-          allowedOrigins: [],
-        });
-      await page.evaluate(() =>
-        (window as unknown as { finishScan: () => void }).finishScan(),
-      );
-      await expect.poll(() => phase(page)).toBe("blocked");
-      expect(received.slice(before).map((entry) => entry.path)).toEqual([
-        "/wday/calypso/cxs/common/synthetic/scanfile",
-      ]);
-      expect(
-        (await session.readPage()).controls.find(
-          (control) => control.id === "resume",
-        )?.upload?.network,
-      ).not.toBe("accepted");
-    } finally {
-      await page.close();
-    }
-  },
-);
-
-test("a scan and upload exhaust the same two-request allowance", async () => {
-  const { page, session, ref } = await fillPage(false);
-  try {
-    const before = received.length;
-    await session.uploadFile(ref("resume"), file);
-    await expect.poll(() => phase(page)).toBe("scanned");
-    await page.evaluate(() =>
-      (window as unknown as { finishScan: () => void }).finishScan(),
-    );
-    await expect.poll(() => phase(page)).toBe("uploaded");
-    await page.evaluate(() =>
-      (
-        window as unknown as { replayUpload: () => Promise<void> }
-      ).replayUpload(),
-    );
-    expect(received).toHaveLength(before + 2);
-  } finally {
-    await page.close();
-  }
-});

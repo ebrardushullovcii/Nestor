@@ -38,7 +38,11 @@ import {
 export async function executeApplicationStoreCommand(
   actionId: string,
   input: unknown,
-  instruction?: { conversationId: string; mode: ApplicationAutomationMode },
+  instruction?: {
+    conversationId: string;
+    mode: ApplicationAutomationMode;
+    callId?: string;
+  },
 ): Promise<unknown> {
   const store = getApplicationStore();
   switch (actionId) {
@@ -110,6 +114,7 @@ export async function executeApplicationStoreCommand(
       noteExplicitUserStart();
       return (await getApplicationService()).sendPrepared(
         ApplicationTargetSchema.parse(input).id,
+        instruction?.callId,
       );
     case "resolve-uncertain-send": {
       const { id, sent } = ResolveUncertainSendInputSchema.parse(input);

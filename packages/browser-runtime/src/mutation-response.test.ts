@@ -36,24 +36,6 @@ const inspectMutationResponse = (
     { permit },
   );
 
-test("a file scanner's receipt never confirms the attachment before storage", async () => {
-  for (const status of [200, 201, 204])
-    expect(
-      (
-        await inspectStructuralResponse(
-          {
-            status: () => status,
-            headers: () => ({ "content-type": "application/json" }),
-            url: () => endpoint,
-            request: () => carrier,
-            text: () => Promise.resolve('{"fileId":"synthetic-scan-001"}'),
-          },
-          { permit: { ...permit, uploadLeg: "scan" } },
-        )
-      ).judgment,
-    ).toBe("unconfirmed");
-});
-
 test("a resume parser's returned storage handle confirms the exact permitted file carrier", async () => {
   const url = `https://form.example.test${resumeReceipt.request.path}`;
   const request = { ...carrier, url: () => url };
@@ -70,9 +52,7 @@ test("a resume parser's returned storage handle confirms the exact permitted fil
   expect(
     (await inspectStructuralResponse(response, confirmation)).judgment,
   ).toBe("accepted");
-  expect((await inspectStructuralResponse(response)).judgment).toBe(
-    "unconfirmed",
-  );
+  expect((await inspectStructuralResponse(response)).judgment).toBe("accepted");
   for (const body of [
     { ...resumeReceipt.response, resumeStorageId: undefined },
     { ...resumeReceipt.response, resumeStorageId: "" },
@@ -162,106 +142,6 @@ test("an unreadable response is unconfirmed rather than accepted", async () => {
   ).toMatchObject({ judgment: "unconfirmed", accepted: false });
 });
 
-test("acceptance requires the permit for this exact carrier and structural upload proof", async () => {
-  const response = {
-    status: () => 200,
-    headers: () => ({ "content-type": "application/json" }),
-    text: () => Promise.resolve('{"uploadId":"synthetic-upload-1"}'),
-    url: () => endpoint,
-    request: () => carrier,
-  };
-  expect((await inspectStructuralResponse(response)).judgment).toBe(
-    "unconfirmed",
-  );
-  expect((await inspectStructuralResponse(response, { permit })).judgment).toBe(
-    "accepted",
-  );
-  expect(
-    (
-      await inspectStructuralResponse(
-        { ...response, request: () => ({ ...carrier }) },
-        { permit },
-      )
-    ).judgment,
-  ).toBe("unconfirmed");
-  expect(
-    (
-      await inspectStructuralResponse(
-        { ...response, url: () => endpoint + "/other" },
-        { permit },
-      )
-    ).judgment,
-  ).toBe("unconfirmed");
-  expect(
-    (
-      await inspectStructuralResponse(response, {
-        permit: { ...permit, file: { ...permit.file, sha256: "wrong" } },
-      })
-    ).judgment,
-  ).toBe("unconfirmed");
-  for (const body of [
-    '{"success":true}',
-    '{"status":"completed"}',
-    '{"id":"application-42"}',
-    '{"location":"Remote"}',
-    '"Upload complete"',
-    "{}",
-    "[]",
-  ]) {
-    expect(
-      (
-        await inspectStructuralResponse(
-          { ...response, text: () => Promise.resolve(body) },
-          { permit },
-        )
-      ).accepted,
-    ).toBe(false);
-  }
-});
-
-test("S3 empty 204 and PostResponse need the exact-file upload permit", async () => {
-  const response = {
-    status: () => 204,
-    headers: () => ({}),
-    text: () => Promise.resolve(""),
-    url: () => endpoint,
-    request: () => carrier,
-  };
-  expect((await inspectStructuralResponse(response)).accepted).toBe(false);
-  expect((await inspectStructuralResponse(response, { permit })).accepted).toBe(
-    true,
-  );
-  const xml = {
-    ...response,
-    status: () => 201,
-    text: () =>
-      Promise.resolve(
-        "<PostResponse><Key>uploads/synthetic.pdf</Key></PostResponse>",
-      ),
-  };
-  expect((await inspectStructuralResponse(xml)).accepted).toBe(false);
-  expect((await inspectStructuralResponse(xml, { permit })).accepted).toBe(
-    true,
-  );
-});
-
-test("a presign response is not a confirmed attachment", async () => {
-  const response = {
-    status: () => 200,
-    headers: () => ({ "content-type": "application/json" }),
-    text: () => Promise.resolve('{"key":"uploads/file.pdf"}'),
-    url: () => endpoint,
-    request: () => carrier,
-  };
-  expect(
-    (
-      await inspectStructuralResponse(response, {
-        permit: { ...permit, uploadLeg: "presign" } as MutationResponsePermit,
-      })
-    ).judgment,
-  ).toBe("unconfirmed");
-});
-
 test("property: generated successful statuses and wording never substitute for a permit or receipt", async () => {
   const words = [
     "completed",
@@ -323,18 +203,4 @@ test.each([
       })
     ).judgment,
   ).toBe(judgment);
-});
-
-test("an empty 200 with an ETag confirms nothing without the upload permit", async () => {
-  expect(
-    (
-      await inspectStructuralResponse({
-        status: () => 200,
-        headers: () => ({ etag: '"abc"' }),
-        text: () => Promise.resolve(""),
-        url: () => endpoint,
-        request: () => carrier,
-      })
-    ).judgment,
-  ).toBe("unconfirmed");
 });
