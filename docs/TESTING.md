@@ -57,10 +57,23 @@ From a built worktree, launch the existing isolated driver with live AI and live
 $env:NESTOR_VERIFY_WORK = 'D:\Projects-Personal\nestor-agent-work'
 $env:NESTOR_VERIFY_LABEL = 'job-finder-live'
 $env:NESTOR_LIVE_APPLY_AUTHORIZED = '1'
-node packages/ai-evals/scripts/isolated-app/cli.mjs up --ai live --net live --reuse-data
+node packages/ai-evals/scripts/isolated-app/cli.mjs up --ai live --net live --live-profile "$env:USERPROFILE\NestorLive\profile" --campaign-dir "$env:NESTOR_VERIFY_WORK\job-finder-finish"
 ```
 
-On the Mac, use the same command with shell environment variables and `NESTOR_VERIFY_WORK=/Users/ebrardushullovci/Projects/nestor-agent-work`. Keep the same label and checkout. Today the driver creates a private temporary data folder on the first launch; `--reuse-data` reopens its recorded folder when it exists. Build the owner's real profile there through guided setup and browser import before a live application; never use a seeded synthetic profile. Until the persistent live profile lands, retain the folder between launches with `node packages/ai-evals/scripts/isolated-app/cli.mjs down --keep-data`, then use `up --ai live --net live --reuse-data` again. The flag reuses data; it does not create or verify a real profile.
+On the Mac:
+
+```sh
+NESTOR_VERIFY_WORK="$HOME/Projects/nestor-agent-work" \
+NESTOR_VERIFY_LABEL=job-finder-live \
+NESTOR_LIVE_APPLY_AUTHORIZED=1 \
+node packages/ai-evals/scripts/isolated-app/cli.mjs up --ai live --net live \
+  --live-profile "$HOME/NestorLive/profile" \
+  --campaign-dir "$HOME/Projects/nestor-agent-work/job-finder-finish"
+```
+
+Keep the same label, checkout and `--live-profile` directory across launches. The authenticated profile must be outside the repository, campaign/trace folders and app data root, and must not contain those folders. Build the owner's real profile through guided setup and browser import before a live application; never use a seeded synthetic profile. `--campaign-dir` identifies the evidence directory and keeps it separate from authenticated profile data.
+
+Without `--live-profile`, the driver creates a private temporary data folder on the first launch. `--reuse-data` reopens that recorded folder when it still exists; retain it with `node packages/ai-evals/scripts/isolated-app/cli.mjs down --keep-data`. Reusing a folder does not create or verify a real profile.
 
 For every live run, record the requested model and effort separately from the model and effort reported by the response (unknown if absent), build commit, profile identity and data-folder path, network mode and every permission setting. Keep live-run evidence outside the repo in the campaign folder, never published; it may contain the owner's data, never passwords, cookies, tokens or MFA codes. The authenticated profile itself stays outside the evidence folder. Synthetic or deterministic runs do not prove live product quality.
 
