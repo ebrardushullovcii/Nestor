@@ -145,8 +145,7 @@ function toApplyAuthority(
       : "prepare_only");
   return {
     mode,
-    // Confirm-first works the form all the way to its send button but is never
-    // itself allowed to press it.
+    // Legacy metadata: mode is supplied as an instruction to the model.
     submitAuthorized: mode === "autonomous_submit" && submitAuthorized,
     // The saved permission's list plus the routine declarations the person
     // allows in Settings (ADR 0027). Without the second, every "I certify"
@@ -659,9 +658,6 @@ export async function runAgentApplicationPreparation(
       : {}),
     intermediateWritesAuthorized:
       executionInput.intermediateMutationsAuthorized === true,
-    // Only Send for me presses the form's own buttons; Fill in for me leaves
-    // them to the person even where the site saves fields as they are filled.
-    pressesFormButtons: executionInput.submitAuthorized === true,
     browserPermissions: browserAgentPermissionsOf(executionInput.settings),
     ...(executionInput.readIntendedAccountEmail
       ? { readIntendedAccountEmail: executionInput.readIntendedAccountEmail }
