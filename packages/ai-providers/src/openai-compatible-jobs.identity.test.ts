@@ -97,8 +97,16 @@ describe("posting URL identity", () => {
       pageType: "job_detail",
       effectiveMaxJobs: 1,
     });
-    expect(prompt).toContain(
-      "Never use an apply, sign-in or share link as canonicalUrl",
+    // Assert each URL's role and the prohibited substitution, without fixing
+    // the surrounding prose or requiring one exact sentence.
+    expect(prompt).toMatch(
+      /\bcanonicalUrl\b[^.]*\b(?:own page|permanent listing)\b/iu,
+    );
+    expect(prompt).toMatch(
+      /\bapplicationUrl\b[^.]*\b(?:apply|application-form|application destination)\b/iu,
+    );
+    expect(prompt).toMatch(
+      /(?:\b(?:never|not)\b[^.]*\bapply\b[^.]*\bcanonicalUrl\b|\bapply\b[^.]*\b(?:never|not)\b[^.]*\bcanonicalUrl\b)/iu,
     );
     const [job] = normalizeExtractedJobs({
       payload: {
