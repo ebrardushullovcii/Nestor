@@ -6,6 +6,7 @@ import {
 import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { runApplyAgent } from "./apply-agent";
+import { reportedSecurityChallenge } from "./blockers";
 import { classifyAnswerPermission } from "./answer-source-catalog";
 import { fillPressFor } from "./fill-presses";
 import { buildApplyFormObservation } from "./page-hands";
@@ -497,6 +498,14 @@ test("a visible verification slider becomes an access handoff", () => {
   expect(
     buildApplyFormObservation(raw, now().toISOString()).blocker,
   ).toMatchObject({ code: "security_challenge", requiresPerson: true });
+});
+
+test("a completed security check is not reported as a slider handoff", () => {
+  expect(
+    reportedSecurityChallenge(
+      "No security check remains; the form is complete.",
+    ),
+  ).toBeNull();
 });
 
 test("hCaptcha named only in forPerson is an access handoff with no typed question", async () => {

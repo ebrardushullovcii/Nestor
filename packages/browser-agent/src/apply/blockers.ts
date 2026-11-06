@@ -55,6 +55,11 @@ const AUTOMATIC_CHECK_SIGNALS = [
   "needs to review the security of your connection",
 ];
 
+const SLIDER_CHALLENGE_SIGNALS = [
+  "slide right to secure your access",
+  "slide to verify",
+  "drag the slider to verify",
+];
 const CHALLENGE_SIGNALS = [
   "verify you are human",
   "verify you are a human",
@@ -63,9 +68,7 @@ const CHALLENGE_SIGNALS = [
   "unusual traffic",
   "complete the challenge",
   "prove you are not a robot",
-  "slide right to secure your access",
-  "slide to verify",
-  "drag the slider to verify",
+  ...SLIDER_CHALLENGE_SIGNALS,
 ];
 
 /** A model may describe a challenge read in a child frame but omit the
@@ -79,7 +82,7 @@ export function reportedSecurityChallenge(reason: string): ApplyBlocker | null {
     "u",
   ).test(text);
   const slider =
-    contains(text, CHALLENGE_SIGNALS) &&
+    contains(text, SLIDER_CHALLENGE_SIGNALS) &&
     /\b(?:complete|finish|solve|slide|drag|verification required)\b/u.test(
       text,
     );
