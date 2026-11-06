@@ -77,10 +77,10 @@ test("key-only product routes all select DeepSeek; search efforts stay independe
   );
   expect(requests.every((r) => r.url.endsWith("/chat/completions"))).toBe(true);
   expect(requests.map((r) => r.reasoning_effort)).toEqual([
-    "none",
-    "none",
     "low",
-    "medium",
+    "low",
+    "low",
+    "low",
     "low",
   ]);
   const override = createJobFinderAiClientFromEnvironment({

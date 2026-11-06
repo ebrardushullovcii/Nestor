@@ -56,7 +56,6 @@ export async function writeResumeLanguage(input: {
     [],
     {
       ...(input.signal ? { signal: input.signal } : {}),
-      maxOutputTokens: 16_000,
       conversationKey: `resume-language:${input.draft.jobId}`,
     },
   );

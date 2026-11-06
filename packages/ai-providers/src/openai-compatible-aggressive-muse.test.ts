@@ -128,8 +128,8 @@ test("Aggressive Muse writing and claim checks use Responses at their task effor
       expect(request.body.messages).toBeUndefined();
     }
     expect(requests.map((request) => request.body.reasoning?.effort)).toEqual([
-      "medium",
-      "medium",
+      "xhigh",
+      "xhigh",
     ]);
   } finally {
     fetchMock.mockRestore();

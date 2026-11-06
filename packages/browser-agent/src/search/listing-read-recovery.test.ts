@@ -24,7 +24,7 @@ const interstitial = `<title>Just a moment...</title><main><h1>Just a moment...<
 const listing = `<main><h1>Interface Engineer</h1><p>Synthetic Employer</p><h2>Responsibilities</h2><p>Build accessible TypeScript interfaces and frontend components with React. Collaborate with designers and engineers on reliable applications.</p></main>`;
 
 test.each(["length", "max_output_tokens", "transport"])(
-  "screening retries output truncation (%s) once with more room",
+  "screening retries output truncation (%s) once at the provider maximum",
   async (kind) => {
     const chatWithTools = vi.fn<LLMClient["chatWithTools"]>();
     if (kind === "transport")
@@ -50,7 +50,7 @@ test.each(["length", "max_output_tokens", "transport"])(
     expect(result.seen).toEqual([]);
     expect(
       chatWithTools.mock.calls.map((call) => call[2]?.maxOutputTokens),
-    ).toEqual([8000, 16000]);
+    ).toEqual([undefined, undefined]);
   },
 );
 
@@ -92,7 +92,7 @@ test("an unrelated provider failure is reported without an output-budget retry",
   expect(chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test("Stop during a truncated model turn prevents the larger retry", async () => {
+test("Stop during a truncated model turn prevents the output retry", async () => {
   const controller = new AbortController();
   const chatWithTools = vi
     .fn<LLMClient["chatWithTools"]>()
@@ -217,6 +217,6 @@ test("listing metadata also retries truncation and accounts for both model turns
   expect(result.jobs[0]?.description).toContain("Build accessible TypeScript");
   expect(
     chatWithTools.mock.calls.map((call) => call[2]?.maxOutputTokens),
-  ).toEqual([8000, 16000]);
+  ).toEqual([undefined, undefined]);
   expect(onUsage).toHaveBeenCalledTimes(2);
 });

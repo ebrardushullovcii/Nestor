@@ -933,9 +933,7 @@ export function toApplyLlmClient(
     chatWithTools?: (
       messages: Parameters<LLMClient["chatWithTools"]>[0],
       tools: Parameters<LLMClient["chatWithTools"]>[1],
-      options?: {
-        signal?: AbortSignal;
-        maxOutputTokens?: number;
+      options?: Parameters<LLMClient["chatWithTools"]>[2] & {
         conversationKey?: string;
       },
     ) => ReturnType<LLMClient["chatWithTools"]>;

@@ -20,6 +20,7 @@ export { RESUME_CLAIM_CHECK_BATCH_SIZE } from "./openai-compatible-resume-claims
 
 export const aiProvidersPackageReady = true;
 export * from "./assistant-model";
+export { modelOutputLimit } from "./model-output-limit";
 export type { ModelStreamEvent } from "./model-request-transport";
 export type { ModelReasoningTask } from "./openai-compatible-transport";
 

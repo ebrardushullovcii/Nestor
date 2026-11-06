@@ -1,5 +1,5 @@
 import type { JobPosting, ModelTokenUsage, ModelRequestAttempt, ModelRequestUsage } from '@nestor/contracts'
-import type { AgentLoopToolDefinition } from '@nestor/agent-runtime'
+import type { AgentLoopToolDefinition, ModelTurnStreamEvent } from '@nestor/agent-runtime'
 import type { AgentMessage, ToolCall } from '../types'
 
 export type AgentExtractorPageType = 'search_results' | 'job_detail'
@@ -23,6 +23,7 @@ export interface LLMClient {
       signal?: AbortSignal
       parallelToolCalls?: boolean
       maxOutputTokens?: number
+      onStreamEvent?: (event: ModelTurnStreamEvent) => void
       reasoningTask?: BrowserAgentReasoningTask
       includeUsage?: boolean
       onRequestAttempt?: (event: ModelRequestAttempt) => void

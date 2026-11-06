@@ -1,4 +1,9 @@
 import {
+  ModelTurnTimeoutError,
+  runModelTurn,
+  type ModelTurnStreamEvent,
+} from "./model-turn";
+import {
   AgentTaskExecutionReceiptSchema,
   AgentTaskProgressSchema,
   AgentTaskToolReceiptSchema,
@@ -32,6 +37,7 @@ export interface AgentTaskModel {
     messages: readonly AgentTaskMessage[];
     tools: readonly Tool[];
     signal?: AbortSignal;
+    onStreamEvent?: (event: ModelTurnStreamEvent) => void;
   }): Promise<{
     content?: string;
     toolCalls?: ToolCall[];
@@ -349,21 +355,11 @@ export async function runAgentTask<TState, TDraft>(
         stopReason = "cost_budget";
         break;
       }
-      let turnTimeout: AbortController | null = null;
       try {
         providerCalls += 1;
-        const turnController = new AbortController();
-        turnTimeout = turnController;
         const remainingMs = Math.max(1, timeBudgetMs - budgetElapsedMs());
-        const turnTimer = setTimeout(
-          () => turnController.abort(),
-          Math.min(modelTurnTimeoutMs, remainingMs),
-        );
-        const turnSignal = options.signal
-          ? AbortSignal.any([options.signal, turnController.signal])
-          : turnController.signal;
-        try {
-          response = await Promise.race([
+        response = await runModelTurn(
+          (turnOptions) =>
             options.model.chat({
               messages,
               tools: options.tools.map((tool) => ({
@@ -374,23 +370,18 @@ export async function runAgentTask<TState, TDraft>(
                   parameters: tool.parameters,
                 },
               })),
-              signal: turnSignal,
+              ...turnOptions,
             }),
-            new Promise<never>((_resolve, reject) => {
-              turnController.signal.addEventListener(
-                "abort",
-                () => reject(new DOMException("Timed out", "AbortError")),
-                { once: true },
-              );
-            }),
-          ]);
-        } finally {
-          clearTimeout(turnTimer);
-        }
+          {
+            signal: options.signal,
+            timeoutMs: Math.min(modelTurnTimeoutMs, remainingMs),
+          },
+        );
         break;
       } catch (error) {
         if (options.signal?.aborted) throw error;
-        if (turnTimeout?.signal.aborted) {
+        if (error instanceof ModelTurnTimeoutError) {
+          if (error.kind === "idle" && attempt === 0) continue;
           emitProgress(
             "timed_out",
             "The assistant did not answer before this turn's time limit",

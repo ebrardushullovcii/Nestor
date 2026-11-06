@@ -174,6 +174,29 @@ describe("runAgentLoop", () => {
     expect(result.steps).toBeLessThan(10);
   });
 
+  test("waiting does not consume the no-progress allowance", async () => {
+    const wait = {
+      ...tool("wait", () =>
+        Promise.resolve({ kind: "ok", content: "Page still settling" }),
+      ),
+      isWait: true,
+    };
+    const result = await runAgentLoop({
+      messages: opening,
+      model: scripted([
+        ...Array.from({ length: 40 }, () => [call("wait")]),
+        [call("finish", { reason: "Ready" })],
+      ]),
+      tools: [wait, finishTool],
+      subjectLabel: "the site",
+      ceilings: { noProgressStepLimit: 3 },
+    });
+    expect(result.ending).toBe("finished");
+    expect(result.turnNotes.some((note) => note.includes("Stall check"))).toBe(
+      false,
+    );
+  });
+
   test("progress resets the stall window", async () => {
     let calls = 0;
     const work = tool("work", () => {
@@ -266,11 +289,20 @@ describe("runAgentLoop", () => {
       model: scripted([[call("press")]]),
       tools: [dead, finishTool],
       subjectLabel: "the site",
+      ceilings: { browserFailureLimit: 3 },
     });
     expect(result.ending).toBe("browser_failed");
     expect(result.reason).toContain("stopped responding");
     expect(result.reason).toContain("was closed");
     expect(result.steps).toBe(3);
+  });
+
+  test("a browser failure uses its generous failure allowance instead of a shorter no-progress window", async () => {
+    const dead = tool("observe", () => Promise.reject(new Error("The tab was closed")), { failureKind: "browser", describeError: () => "The tab was closed" });
+    const result = await runAgentLoop({ messages: opening, model: scripted([[call("observe")]]), tools: [dead], subjectLabel: "the site", ceilings: { noProgressStepLimit: 3 } });
+    expect(result.ending).toBe("browser_failed");
+    expect(result.steps).toBe(30);
+    expect(result.reason).toContain("tab was closed");
   });
 
   test("a safety stop ends the run with the host's reason", async () => {
@@ -362,7 +394,7 @@ describe("runAgentLoop", () => {
       },
       tools: [finishTool],
       subjectLabel: "the site",
-      ceilings: { modelTurnTimeoutMs: 10 },
+      ceilings: { modelTurnTimeoutMs: 10, modelTurnTimeoutRetries: 0 },
       onStep: ({ note }) => {
         updates.push(note);
       },
@@ -539,11 +571,16 @@ describe("runAgentLoop", () => {
   test("a person stopping an unanswered turn never triggers its retry", async () => {
     const controller = new AbortController();
     let calls = 0;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
     const resultPromise = runAgentLoop({
       messages: opening,
       model: {
         chatWithTools: () => {
           calls += 1;
+          markStarted();
           return new Promise(() => undefined);
         },
       },
@@ -552,6 +589,7 @@ describe("runAgentLoop", () => {
       ceilings: { modelTurnTimeoutMs: 100, modelTurnTimeoutRetries: 1 },
       signal: controller.signal,
     });
+    await started;
     controller.abort();
 
     const result = await resultPromise;

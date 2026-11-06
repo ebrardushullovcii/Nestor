@@ -81,97 +81,6 @@ const SOURCE_INSTRUCTION_REVIEW_RESPONSE_SHAPE = {
   } satisfies SourceIntelligenceArtifact,
 } satisfies SourceInstructionReviewOverride;
 
-const MIN_SOURCE_INSTRUCTION_REVIEW_OUTPUT_TOKENS = 512;
-const MAX_SOURCE_INSTRUCTION_REVIEW_OUTPUT_TOKENS = 4_096;
-const SOURCE_INSTRUCTION_REVIEW_TIMEOUT_MS = 60_000;
-
-function buildReviewTimeoutSignal(signal?: AbortSignal): {
-  signal: AbortSignal;
-  cleanup: () => void;
-} {
-  if (
-    typeof AbortSignal !== "undefined" &&
-    typeof AbortSignal.timeout === "function"
-  ) {
-    const timeoutSignal = AbortSignal.timeout(
-      SOURCE_INSTRUCTION_REVIEW_TIMEOUT_MS,
-    );
-
-    if (!signal) {
-      return {
-        signal: timeoutSignal,
-        cleanup: () => undefined,
-      };
-    }
-
-    if (signal.aborted || timeoutSignal.aborted) {
-      const controller = new AbortController();
-      controller.abort();
-      return {
-        signal: controller.signal,
-        cleanup: () => undefined,
-      };
-    }
-
-    const controller = new AbortController();
-    const abort = () => {
-      cleanup();
-      controller.abort();
-    };
-    const cleanup = () => {
-      signal.removeEventListener("abort", abort);
-      timeoutSignal.removeEventListener("abort", abort);
-    };
-
-    signal.addEventListener("abort", abort, { once: true });
-    timeoutSignal.addEventListener("abort", abort, { once: true });
-
-    return {
-      signal: controller.signal,
-      cleanup,
-    };
-  }
-
-  if (!signal) {
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(
-      () => controller.abort(),
-      SOURCE_INSTRUCTION_REVIEW_TIMEOUT_MS,
-    );
-
-    return {
-      signal: controller.signal,
-      cleanup: () => clearTimeout(timeoutHandle),
-    };
-  }
-
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => {
-    cleanup();
-    controller.abort();
-  }, SOURCE_INSTRUCTION_REVIEW_TIMEOUT_MS);
-  const abort = () => {
-    cleanup();
-    controller.abort();
-  };
-  const cleanup = () => {
-    clearTimeout(timeoutHandle);
-    signal.removeEventListener("abort", abort);
-  };
-
-  if (signal.aborted) {
-    cleanup();
-    controller.abort();
-  } else {
-    signal.addEventListener("abort", abort, { once: true });
-  }
-
-  return {
-    signal: controller.signal,
-    cleanup,
-  };
-}
-
 export function buildSourceInstructionFinalReviewPrompt(input: {
   target: JobDiscoveryTarget;
   run: SourceDebugRunRecord;
@@ -284,14 +193,6 @@ export async function reviewSourceInstructionArtifactWithAi(input: {
       modelContextWindowTokens: input.modelContextWindowTokens,
     });
   const chatWithTools = input.aiClient.chatWithTools;
-  const maxOutputTokens = Math.min(
-    MAX_SOURCE_INSTRUCTION_REVIEW_OUTPUT_TOKENS,
-    Math.max(
-      MIN_SOURCE_INSTRUCTION_REVIEW_OUTPUT_TOKENS,
-      effectiveCompactionPolicy.minimumResponseHeadroomTokens,
-    ),
-  );
-
   const compacted = compactSourceInstructionReviewPhaseContexts({
     phaseContexts: input.phaseContexts,
     heuristicInstructionText: JSON.stringify(input.heuristicInstruction),
@@ -309,40 +210,32 @@ export async function reviewSourceInstructionArtifactWithAi(input: {
   }
 
   try {
-    const reviewTimeout = buildReviewTimeoutSignal(input.signal);
-    const response = await (async () => {
-      try {
-        return await chatWithTools(
-          [
-            {
-              role: "system",
-              content:
-                "You are the final organizer for learned source instructions. Review the full sequence of agent-led tests, reconcile conflicts, prefer stronger later evidence, and return strict JSON only.",
-            },
-            {
-              role: "user",
-              content: buildSourceInstructionFinalReviewPrompt({
-                target: input.target,
-                run: input.run,
-                adapterKind: input.adapterKind,
-                verification: input.verification,
-                instructionUnderReview: input.instructionUnderReview,
-                heuristicInstruction: input.heuristicInstruction,
-                phaseContexts: compacted.phaseContexts,
-                handoffCompaction: compacted.handoffCompaction,
-              }),
-            },
-          ],
-          [],
-          {
-            signal: reviewTimeout.signal,
-            maxOutputTokens,
-          },
-        );
-      } finally {
-        reviewTimeout.cleanup();
-      }
-    })();
+    const response = await chatWithTools(
+      [
+        {
+          role: "system",
+          content:
+            "You are the final organizer for learned source instructions. Review the full sequence of agent-led tests, reconcile conflicts, prefer stronger later evidence, and return strict JSON only.",
+        },
+        {
+          role: "user",
+          content: buildSourceInstructionFinalReviewPrompt({
+            target: input.target,
+            run: input.run,
+            adapterKind: input.adapterKind,
+            verification: input.verification,
+            instructionUnderReview: input.instructionUnderReview,
+            heuristicInstruction: input.heuristicInstruction,
+            phaseContexts: compacted.phaseContexts,
+            handoffCompaction: compacted.handoffCompaction,
+          }),
+        },
+      ],
+      [],
+      {
+        ...(input.signal ? { signal: input.signal } : {}),
+      },
+    );
 
     if (!response.content) {
       return null;

@@ -99,6 +99,8 @@ describe("normalized stream events", () => {
       { type: "text_delta", text: "Hel" },
       { type: "text_delta", text: "lo" },
       { type: "tool_call_started", index: 0, name: "read_profile" },
+      { type: "tool_call_delta", index: 0 },
+      { type: "tool_call_delta", index: 0 },
     ]);
     const choice = payload.choices?.[0];
     expect(choice?.message?.content).toBe("Hello");

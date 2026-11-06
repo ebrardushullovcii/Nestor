@@ -207,7 +207,7 @@ export interface AssembleOptions {
   currentContext?: string;
   turnMessages: readonly AgentLoopMessage[];
   contextWindowTokens: number;
-  maxOutputTokens: number;
+  reservedOutputTokens: number;
   toolSchemaTokens: number;
   calibrator: TokenCalibrator;
   /** Separate model call with tools off; null when the route cannot. */
@@ -364,7 +364,7 @@ export async function assembleModelInput(
     options.budgetOverrideTokens ??
     availablePromptTokens({
       contextWindowTokens: options.contextWindowTokens,
-      reservedOutputTokens: options.maxOutputTokens,
+      reservedOutputTokens: options.reservedOutputTokens,
       toolSchemaTokens: options.toolSchemaTokens,
       marginTokens: Math.max(
         4_000,

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
+import { createOpenAiCompatibleJobFinderAiClient, modelOutputLimit } from "@nestor/ai-providers";
 import { fitJobs } from "@nestor/browser-agent";
 import { JobDetailSchema } from "@nestor/contracts";
 import { searchPersonas } from "./personas";
@@ -80,7 +80,7 @@ const content = JSON.stringify({ fits });
 afterEach(() => vi.unstubAllGlobals());
 
 test.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
-  "accepts all 48 realistic Responses fit rows at %s effort after one larger-cap retry",
+  "accepts all 48 realistic Responses fit rows at %s effort after one retry at the model maximum",
   async (effort) => {
     expect(content.length).toBeGreaterThan(35000);
     const bodies: Array<{
@@ -126,7 +126,7 @@ test.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
     });
     expect(result.map(({ id }) => id)).toEqual(jobs.map(({ id }) => id));
     expect(bodies.map((body) => body.max_output_tokens)).toEqual([
-      48000, 96000,
+      modelOutputLimit("muse-spark-1.3-contributor"), modelOutputLimit("muse-spark-1.3-contributor"),
     ]);
     expect(bodies.every((body) => body.reasoning?.effort === effort)).toBe(
       true,

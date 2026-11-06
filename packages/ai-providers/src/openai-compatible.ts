@@ -106,23 +106,21 @@ import {
   modelConversationKeys,
 } from "./model-request-identity";
 
-const DEFAULT_MODEL_TIMEOUT_MS = 300_000;
+const DEFAULT_MODEL_TIMEOUT_MS = Infinity;
 /**
  * A first tailored draft is the largest structured output the product asks
  * for: every section rewritten against a full listing body with evidence
  * references. Sixty seconds cut real drafts off mid-generation on slower
  * models and reported them as failures; the extraction budget fits the work.
  */
-const DEFAULT_RESUME_DRAFT_TIMEOUT_MS = 600_000;
+const DEFAULT_RESUME_DRAFT_TIMEOUT_MS = Infinity;
 /**
  * One tool-calling turn of the Assistant or Copilot. A turn that inspects the
  * draft and proposes a grounded rewrite is a large structured output too; at
  * sixty seconds slower models were cut off mid-turn and the whole request
  * collapsed into the safe fallback.
  */
-const DEFAULT_AGENT_TURN_TIMEOUT_MS = 300_000;
-/** Tool-calling work that names no task thinks briefly; see `agentReasoningEffort`. */
-const DEFAULT_AGENT_TURN_REASONING_EFFORT: ModelReasoningEffort = "low";
+const DEFAULT_AGENT_TURN_TIMEOUT_MS = Infinity;
 const DEFAULT_RESUME_EXTRACTION_TIMEOUT_MS = 600_000;
 const DEFAULT_RESUME_IMPORT_STAGE_TIMEOUT_MS: Record<
   Exclude<ResumeImportExtractionStage, "shared_memory">,
@@ -269,27 +267,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
     if (!task) return agentReasoningEffort;
     const configured = validatedOptions?.taskReasoningEfforts?.[task];
     if (configured) return configured;
-    // These bounded structured judgments need the answer budget, not a long
-    // reasoning transcript. Other roles keep their independent effort.
-    if (
-      validatedOptions?.model === "deepseek-v4.1-flash" &&
-      (task === "fit_batch" || task === "listing_screen")
-    )
-      return "none";
-    // Extraction reads the document into typed fields; unconfigured it
-    // runs low like the other read tasks, not at the agent effort.
-    if (task === "resume_import") return "low";
-    // Muse already has the complete evidence and proposal shape. Keep its
-    // writing effort separate from full listing reads and the agent loop;
-    // the independent claim check and repairs still run at their own effort.
-    if (
-      task === "resume_writer" &&
-      validatedOptions?.model === "muse-spark-1.3-contributor"
-    )
-      return "medium";
-    return task === "resume_writer" || task === "listing_read"
-      ? validatedOptions?.reasoningEffort
-      : agentReasoningEffort;
+    return validatedOptions?.reasoningEffort ?? agentReasoningEffort;
   }
   const status = AgentProviderStatusSchema.parse({
     kind: "openai_compatible",
@@ -305,7 +283,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
       : null,
     reservedHeadroomTokens: null,
     requestTimeoutMs: configuredOptions.success
-      ? (validatedOptions?.requestTimeoutMs ?? DEFAULT_MODEL_TIMEOUT_MS)
+      ? (validatedOptions?.requestTimeoutMs ?? null)
       : null,
     detail: configuredOptions.success
       ? "The configured AI provider handles resume extraction and tailoring. Structured JSON outputs are validated locally before they affect Job Finder state."
@@ -412,6 +390,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
           ? { attemptTimeoutMs: 60_000, idleOnModelProgressOnly: true }
           : {}),
         ...resilience,
+        idleOnModelProgressOnly: true,
         // Resume reads use low effort. Two missed reasoning-summary intervals
         // (normally 4–15s, ADR 0020) mean a stuck read, not useful thinking.
         // Keep the total budget for retries and honour an explicit override.
@@ -934,6 +913,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
           apiMode,
           totalTimeoutMs: timeoutMs,
           ...resilience,
+          idleOnModelProgressOnly: true,
           signal: options?.signal,
           onStreamEvent: options?.onStreamEvent,
           onEvent: (event) => {
@@ -1293,22 +1273,6 @@ export function createJobFinderAiClientFromEnvironment(
       parseModelApiMode(env.NESTOR_AI_API_MODE) ?? DEFAULT_TEXT_MODEL_API_MODE,
   };
   const taskReasoningEfforts = resolveTaskReasoningEffortsFromEnvironment(env);
-  if (primaryRoute.model === "deepseek-v4.1-flash") {
-    if (!parseModelReasoningEffort(env.NESTOR_AI_FIT_REASONING_EFFORT))
-      taskReasoningEfforts.fit_batch = "none";
-    if (
-      !parseModelReasoningEffort(env.NESTOR_AI_LISTING_SCREEN_REASONING_EFFORT)
-    )
-      taskReasoningEfforts.listing_screen = "none";
-  }
-  if (
-    isStableFitRoute(primaryRoute) &&
-    !parseModelReasoningEffort(env.NESTOR_AI_FIT_REASONING_EFFORT)
-  ) {
-    // Repeated and shuffled fit replays were steadier and cheaper at low.
-    // Keep other routes' defaults and explicit operator overrides intact.
-    taskReasoningEfforts.fit_batch = "low";
-  }
   const primaryClient = createOpenAiCompatibleJobFinderAiClient({
     apiKey,
     ...primaryRoute,
@@ -1317,7 +1281,8 @@ export function createJobFinderAiClientFromEnvironment(
       DEFAULT_TEXT_MODEL_REASONING_EFFORT,
     agentReasoningEffort:
       parseModelReasoningEffort(env.NESTOR_AI_AGENT_REASONING_EFFORT) ??
-      DEFAULT_AGENT_TURN_REASONING_EFFORT,
+      parseModelReasoningEffort(env.NESTOR_AI_REASONING_EFFORT) ??
+      DEFAULT_TEXT_MODEL_REASONING_EFFORT,
     taskReasoningEfforts,
     label: "AI resume agent",
     requestTimeoutMs: parsedRequestTimeoutMs,

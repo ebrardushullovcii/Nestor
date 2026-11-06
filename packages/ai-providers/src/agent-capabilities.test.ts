@@ -102,6 +102,38 @@ describe("tool-using AI capabilities", () => {
     resumeText: "Saved base resume text",
   });
 
+  test("resume writing can repair more than three proposals without sharing a deadline with claim checks", async () => {
+    let calls = 0;
+    const renderPreview = vi.fn(
+      (
+        input: NonNullable<CreateResumeDraftInput["renderPreview"]> extends (
+          input: infer T,
+        ) => unknown
+          ? T
+          : never,
+      ) => {
+        expect(input.getRemainingBudgetMs).toBeUndefined();
+        if (++calls < 6)
+          throw new ResumeProposalValidationError("Repair the proposal", [
+            { code: "repair", message: "Try the next correction", path: [] },
+          ]);
+        return cleanPreview();
+      },
+    );
+    const client = createToolClient(
+      Array.from({ length: 6 }, (_, index) => ({
+        toolCalls: [composeCall(`repair_${index}`)],
+      })),
+    );
+    const result = await runResumeGenerationAgentTask({
+      client,
+      substantivePrompt: "Write a resume",
+      request: { ...baseRequest(), renderPreview },
+    });
+    expect(renderPreview).toHaveBeenCalledTimes(6);
+    expect(result).toBeDefined();
+  });
+
   test("a clean proposal is written, rendered and checked in one model call", async () => {
     let calls = 0;
     let offeredTools: string[] = [];
@@ -553,9 +585,9 @@ describe("tool-using AI capabilities", () => {
 
   test.each([
     { previewMs: 100_000, expectedCalls: 2 },
-    { previewMs: 500_000, expectedCalls: 1 },
+    { previewMs: 500_000, expectedCalls: 2 },
   ])(
-    "resume generation excludes PDF queue wait and still counts $previewMs ms of preview work",
+    "resume generation lets useful repairs finish after $previewMs ms of preview work",
     async ({ previewMs, expectedCalls }) => {
       vi.useFakeTimers();
       vi.setSystemTime(0);
@@ -584,8 +616,8 @@ describe("tool-using AI capabilities", () => {
               vi.setSystemTime(Date.now() + 700_000);
               excludedMs += 700_000;
               vi.setSystemTime(Date.now() + previewMs);
-              // The first proposal is refused, so a second call happens only
-              // while the counted time is inside the budget.
+              // The first proposal is refused; slow successful work does not
+              // spend an aggregate deadline that prevents its repair.
               if (++renders === 1)
                 throw new ResumeProposalValidationError(
                   "The synthetic render refused this proposal.",
@@ -595,8 +627,7 @@ describe("tool-using AI capabilities", () => {
             },
           },
         });
-        if (expectedCalls === 2) await expect(run).resolves.toBeTruthy();
-        else await expect(run).rejects.toThrow(/timed out/u);
+        await expect(run).resolves.toBeTruthy();
         expect(calls).toBe(expectedCalls);
       } finally {
         vi.useRealTimers();

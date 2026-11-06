@@ -20,6 +20,12 @@
  * the person is the model's. See ADR 0023.
  */
 
+import {
+  ModelTurnTimeoutError,
+  runModelTurn,
+  type ModelTurnStreamEvent,
+} from "./model-turn";
+
 /**
  * Private model state a route needs back on its later tool turns (for
  * example DeepSeek thinking-mode reasoning). Opaque to the loop; providers
@@ -70,6 +76,7 @@ export interface AgentLoopModel {
       signal?: AbortSignal;
       maxOutputTokens?: number;
       parallelToolCalls?: boolean;
+      onStreamEvent?: (event: ModelTurnStreamEvent) => void;
     },
   ) => Promise<{
     content?: string;
@@ -110,10 +117,14 @@ export type AgentLoopToolOutcome =
 export interface AgentLoopToolContext {
   step: number;
   signal?: AbortSignal;
+  /** Liveness from a long-running tool, including nested model streams. */
+  onProgress?: () => void;
 }
 
 export interface AgentLoopTool {
   definition: AgentLoopToolDefinition;
+  /** Waiting for the page does not spend the no-progress allowance. */
+  isWait?: boolean;
   /** A bounded local task may need longer than an ordinary page operation. */
   timeoutMs?: number | ((rawArguments: string) => number | undefined);
   /** Only page tools count repeated thrown failures as a dead browser. */
@@ -137,6 +148,8 @@ export interface AgentLoopCeilings {
   browserFailureLimit?: number;
   /** One model request may not consume the whole run while the page sits idle. */
   modelTurnTimeoutMs?: number;
+  /** Silence between stream events; each event restarts this clock. */
+  modelIdleTimeoutMs?: number;
   /**
    * Retries a model turn that produced no response or a typed transient HTTP
    * failure and therefore executed no tools. The same messages are reused and
@@ -149,6 +162,7 @@ export interface AgentLoopCeilings {
    * or swallow a stop request.
    */
   toolTimeoutMs?: number;
+  toolIdleTimeoutMs?: number;
 }
 
 export interface AgentLoopOptions {
@@ -215,7 +229,8 @@ export type AgentLoopEnding =
   | "timed_out"
   | "ceiling"
   | "aborted"
-  | "browser_failed";
+  | "browser_failed"
+  | "model_failed";
 
 export interface AgentLoopResult {
   ending: AgentLoopEnding;
@@ -236,12 +251,12 @@ export interface AgentLoopResult {
   };
 }
 
-const DEFAULT_MAX_STEPS = 300;
-const DEFAULT_TIME_BUDGET_MS = 20 * 60_000;
-const DEFAULT_NO_PROGRESS_STEP_LIMIT = 12;
-const DEFAULT_BROWSER_FAILURE_LIMIT = 3;
-const DEFAULT_MODEL_TURN_TIMEOUT_MS = 240_000;
-const DEFAULT_TOOL_TIMEOUT_MS = 90_000;
+const DEFAULT_MAX_STEPS = Infinity;
+const DEFAULT_TIME_BUDGET_MS = Infinity;
+const DEFAULT_NO_PROGRESS_STEP_LIMIT = 120;
+const DEFAULT_BROWSER_FAILURE_LIMIT = 30;
+const DEFAULT_MODEL_TURN_TIMEOUT_MS = Infinity;
+const DEFAULT_TOOL_TIMEOUT_MS = Infinity;
 const DEFAULT_COMPACTION_MAX_CHARS = 360_000;
 const COMPACTION_KEEP_RECENT = 14;
 const DEFAULT_STALE_TOOL_RESULT_CHARS = 700;
@@ -413,7 +428,7 @@ export async function runAgentLoop(
   );
   const modelTurnTimeoutRetries = Math.max(
     0,
-    Math.floor(options.ceilings?.modelTurnTimeoutRetries ?? 0),
+    Math.floor(options.ceilings?.modelTurnTimeoutRetries ?? 1),
   );
   const compactionMaxChars =
     options.compactionMaxChars ?? DEFAULT_COMPACTION_MAX_CHARS;
@@ -443,6 +458,7 @@ export async function runAgentLoop(
   let steps = 0;
   let progressSteps = 0;
   let lastProgressStep = 0;
+  let stallExemptSteps = 0;
   let stallWarningStep: number | null = null;
   let consecutiveBrowserFailures = 0;
   let modelMs = 0;
@@ -489,6 +505,7 @@ export async function runAgentLoop(
   const markProgress = (): void => {
     progressSteps += 1;
     lastProgressStep = steps;
+    stallExemptSteps = 0;
     stallWarningStep = null;
   };
 
@@ -511,13 +528,13 @@ export async function runAgentLoop(
       return result("finished", endSentence(hostedFinish.reason), {
         finish: hostedFinish,
       });
-    const stepsWithoutProgress = steps - lastProgressStep;
+    const stepsWithoutProgress = steps - lastProgressStep - stallExemptSteps;
     if (
       stallWarningStep === null &&
       steps > 0 &&
       stepsWithoutProgress >= noProgressStepLimit
     ) {
-      stallWarningStep = steps;
+      stallWarningStep = stepsWithoutProgress;
       messages.push({
         role: "user",
         content: [
@@ -530,8 +547,7 @@ export async function runAgentLoop(
       });
     } else if (
       stallWarningStep !== null &&
-      lastProgressStep < stallWarningStep &&
-      steps - stallWarningStep >= noProgressStepLimit
+      stepsWithoutProgress - stallWarningStep >= noProgressStepLimit
     ) {
       return result(
         "stalled",
@@ -543,43 +559,27 @@ export async function runAgentLoop(
     await note("asking the assistant what to do next");
     let response: Awaited<ReturnType<AgentLoopModel["chatWithTools"]>>;
     let modelTurnAttempt = 0;
+    let idleRetries = 0;
     while (true) {
       const modelStartedAt = now().getTime();
-      const turnTimeout = new AbortController();
-      const turnTimeoutMs = Math.max(
-        1,
-        Math.min(modelTurnTimeoutMs, timeBudgetMs - elapsed()),
-      );
-      const turnTimer = setTimeout(() => turnTimeout.abort(), turnTimeoutMs);
-      const turnSignal = options.signal
-        ? AbortSignal.any([options.signal, turnTimeout.signal])
-        : turnTimeout.signal;
       try {
-        response = await Promise.race([
-          options.model.chatWithTools(messages, definitions, {
-            signal: turnSignal,
-            ...(options.parallelToolCalls === undefined
-              ? {}
-              : { parallelToolCalls: options.parallelToolCalls }),
-            ...(options.modelMaxOutputTokens
-              ? { maxOutputTokens: options.modelMaxOutputTokens }
-              : {}),
-          }),
-          // The race must end on a stop request too, not only on the turn
-          // timer: a provider that ignores its abort signal would otherwise
-          // hold the loop, and the person's Stop, until the model answered.
-          new Promise<never>((_resolve, reject) => {
-            if (turnSignal.aborted) {
-              reject(new DOMException("Timed out", "AbortError"));
-              return;
-            }
-            turnSignal.addEventListener(
-              "abort",
-              () => reject(new DOMException("Timed out", "AbortError")),
-              { once: true },
-            );
-          }),
-        ]);
+        response = await runModelTurn(
+          (turnOptions) =>
+            options.model.chatWithTools(messages, definitions, {
+              ...turnOptions,
+              ...(options.parallelToolCalls === undefined
+                ? {}
+                : { parallelToolCalls: options.parallelToolCalls }),
+              ...(options.modelMaxOutputTokens
+                ? { maxOutputTokens: options.modelMaxOutputTokens }
+                : {}),
+            }),
+          {
+            signal: options.signal,
+            timeoutMs: Math.min(modelTurnTimeoutMs, timeBudgetMs - elapsed()),
+            idleTimeoutMs: options.ceilings?.modelIdleTimeoutMs,
+          },
+        );
         break;
       } catch (error) {
         if (options.signal?.aborted) {
@@ -588,7 +588,14 @@ export async function runAgentLoop(
             `Job Finder stopped work on ${options.subjectLabel} before it was finished.`,
           );
         }
-        if (turnTimeout.signal.aborted) {
+        if (error instanceof ModelTurnTimeoutError && error.kind === "idle") {
+          if (idleRetries++ === 0 && elapsed() < timeBudgetMs) {
+            await note("retrying the silent AI connection once");
+            continue;
+          }
+          return result("model_failed", error.message);
+        }
+        if (error instanceof ModelTurnTimeoutError) {
           await note(
             "the assistant did not answer before this turn's time limit",
           );
@@ -618,7 +625,6 @@ export async function runAgentLoop(
         }
         throw error;
       } finally {
-        clearTimeout(turnTimer);
         modelMs += now().getTime() - modelStartedAt;
         modelTurns += 1;
       }
@@ -676,6 +682,10 @@ export async function runAgentLoop(
     });
 
     let ended: AgentLoopResult | null = null;
+    let exemptedThisStep = false;
+    const exemptFromStall = () => {
+      if (!exemptedThisStep) { stallExemptSteps += 1; exemptedThisStep = true; }
+    };
     let batchStopped = false;
     for (const toolCall of toolCalls) {
       if (ended || batchStopped) {
@@ -734,14 +744,29 @@ export async function runAgentLoop(
       );
       let outcome: AgentLoopToolOutcome;
       try {
-        outcome = await withToolDeadline(
-          tool.execute(toolCall.function.arguments, {
-            step: steps,
-            ...(options.signal ? { signal: options.signal } : {}),
-          }),
-          deadlineMs,
-          options.signal,
-        );
+        try {
+          outcome = await runModelTurn(
+            (turnOptions) =>
+              tool.execute(toolCall.function.arguments, {
+                step: steps,
+                signal: turnOptions.signal,
+                onProgress: () =>
+                  turnOptions.onStreamEvent({
+                    type: "tool_call_delta",
+                    index: 0,
+                  }),
+              }),
+            {
+              signal: options.signal,
+              timeoutMs: deadlineMs,
+              idleTimeoutMs: options.ceilings?.toolIdleTimeoutMs,
+            },
+          );
+        } catch (error) {
+          if (error instanceof ModelTurnTimeoutError)
+            throw new ToolDeadlineError();
+          throw error;
+        }
         if (tool.failureKind === "browser") {
           consecutiveBrowserFailures = 0;
         }
@@ -764,9 +789,12 @@ export async function runAgentLoop(
         }
         if (error instanceof ToolDeadlineError) {
           // A hung step is reported as a fact and counted like a dead page:
-          // three in a row end the run in plain words instead of a freeze.
+          // repeated silence ends the run in plain words instead of a freeze.
           consecutiveBrowserFailures += 1;
-          const failure = `That step took longer than ${Math.round(deadlineMs / 1000)} seconds and was given up.`;
+          exemptFromStall();
+          const failure = Number.isFinite(deadlineMs)
+            ? `That step took longer than ${Math.round(deadlineMs / 1000)} seconds and was given up.`
+            : "That step stopped reporting progress and was given up.";
           await note(`${toolCall.function.name} → took too long`);
           if (consecutiveBrowserFailures >= browserFailureLimit) {
             ended = result(
@@ -801,6 +829,7 @@ export async function runAgentLoop(
         // Only a page tool can increment the dead-browser counter. Its own
         // descriptor removes library internals before the model or person sees it.
         consecutiveBrowserFailures += 1;
+        exemptFromStall();
         const failure = endSentence(
           tool.describeError?.(error) ?? "The browser did not respond.",
         );
@@ -834,6 +863,7 @@ export async function runAgentLoop(
 
       switch (outcome.kind) {
         case "ok": {
+          if (tool.isWait || tool.definition.function.name === "wait") exemptFromStall();
           batchStopped =
             outcome.stopBatch === true ||
             outcome.status === "refused" ||
@@ -960,34 +990,10 @@ function withToolDeadline<T>(
   timeoutMs: number,
   signal: AbortSignal | undefined,
 ): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-    const finish = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      fn();
-    };
-    const onAbort = () =>
-      finish(() =>
-        reject(new DOMException("The run was stopped.", "AbortError")),
-      );
-    const timer = setTimeout(
-      () => finish(() => reject(new ToolDeadlineError())),
-      timeoutMs,
-    );
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
-    signal?.addEventListener("abort", onAbort, { once: true });
-    work.then(
-      (value) => finish(() => resolve(value)),
-      (error: unknown) =>
-        finish(() =>
-          reject(error instanceof Error ? error : new Error(String(error))),
-        ),
-    );
-  });
+  return runModelTurn(() => work, { signal, timeoutMs }).catch(
+    (error: unknown) => {
+      if (error instanceof ModelTurnTimeoutError) throw new ToolDeadlineError();
+      throw error;
+    },
+  );
 }
