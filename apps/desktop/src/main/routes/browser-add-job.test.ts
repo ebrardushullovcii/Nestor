@@ -33,6 +33,7 @@ vi.mock("../services/job-commands", () => ({
   scoreUnscoredJobs: mocks.score,
 }));
 import { registerBrowserRoutes } from "./browser";
+import { BROWSER_JOB_PAGE_HTML } from "./browser-job-page";
 const handlers = new Map<
   string,
   (event: IpcMainInvokeEvent, input: unknown) => unknown
@@ -68,10 +69,7 @@ it("validates exact-tab IPC, reads that page in main and saves its job to Find j
     company: "Example Studio",
     planName: null,
   });
-  expect(mocks.readTab).toHaveBeenCalledWith(
-    "chosen",
-    "document.documentElement.outerHTML",
-  );
+  expect(mocks.readTab).toHaveBeenCalledWith("chosen", BROWSER_JOB_PAGE_HTML);
   expect(mocks.read).toHaveBeenCalledWith(mocks.aiClient, {
     html: "<main>Designer</main>",
     pageUrl: "https://example.test/job",
