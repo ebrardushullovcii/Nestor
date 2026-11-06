@@ -10,7 +10,7 @@ pnpm search:eval
 pnpm search:eval --live --tape .tmp/new-search-tape.json --out .tmp/new-search-report.json
 ```
 
-The default command replays `fit-quality-tape.json.gz` with all network access
+The default command replays `fit-region-tape.json.gz` with all network access
 disabled. It still executes production collection, screening, full-text reading
 and fit under the **recorded model route**. A changed prompt or input cannot
 reuse an old answer: a missing exact request hash fails the run. Replay ignores
@@ -73,7 +73,7 @@ writes readable JSON reports. The [original baseline](baseline-2026-10-26.md)
 preserves the earlier results. New tapes pin `assessmentDate`, so replay uses the
 same eligibility date rather than silently changing the fit request each day.
 
-The 2026-11-06 fit refresh uses the same frozen listings, personas, labels and
+The 2026-11-06 scorer 8 fit refresh uses the same frozen listings, personas, labels and
 screen/read replies before and after the fit change. The configured route was
 OpenCode Go / Muse Spark Contributor, Responses API, with the default low fit
 effort. Only the 18 fit calls were refreshed. No listing or label was changed.
@@ -104,3 +104,34 @@ the earlier 2026-10 medians used older prompts and route settings. A small
 stratified cohort is not a cost projection for all configured job sources.
 
 Label correction (2026-10-29): the PostHog Product Engineer posting has USA address metadata, but its text does not state an Americas/Europe hiring area. Grafana 6130907004 specifies US/Canada candidates with an EST-time-zone qualification; Chicago is Central and the text does not offer hours overlap as an alternative. It needs clarification for these personas. The label manifest retains that correction. The 2026-11-06 refresh replaces fit replies; the public page recordings and labels remain unchanged.
+
+The scorer 9 region/authorization refresh starts from repository head
+795ac0d25ed453a54abcbc7631bee6723803c25a with the same 59 frozen vacancies,
+labels, personas and assessment date. The Muse Spark Contributor Responses
+route remains configured for low fit effort; its live fit route now requests
+temperature zero. Screening was refreshed with the larger 8,000-character
+profession cards, and metadata reads were refreshed on the same public pages.
+The final tape reuses those exact screen/read replies and refreshes all 18 fit
+calls with the final prompt. No vacancy or label changed.
+
+| Persona       | Scorer 8 recall | Scorer 9 recall | Scorer 8 relevant in top 10 | Scorer 9 relevant in top 10 |
+| ------------- | --------------- | --------------- | --------------------------- | --------------------------- |
+| High-volume   | 22/22           | 22/22           | 9/10                        | 10/10                       |
+| Close-matches | 8/8             | 8/8             | 8/10                        | 8/10                        |
+
+These results hold for screening/fit and collection-inclusive recall; coverage
+honesty remains 10/10. The Europe-labelled Resend Backend Engineer previously
+ranked fifth at 91 for the US-only persona. It now scores 39 with an explicit
+Europe/US location limitation. Separate synthetic eligibility tests cover
+US-only, Europe-only, US-remote and worldwide-remote jobs, the EU-to-US mirror,
+and unknown or conflicting authorization requirements. Matching core duties
+remain distinct from a missing tool/workflow and from a different professional
+practice; eligibility uncertainty is capped after the model's work-fit judgment.
+
+The current artifacts are fit-region-tape.json.gz and fit-region-report.json.gz.
+The scorer 8 fit-quality artifacts remain historical. Exact offline replay
+passes with 42 logical requests (41 unique recordings), zero fresh calls. The
+report's repositoryHead is the base checkout above; these changes were not yet
+committed at capture time. Fit retains complete postings and confirmed profile
+evidence; the unused excerpt-based provider APIs were removed. Ungrounded pay
+quotes now leave pay unknown without discarding an otherwise valid fit.

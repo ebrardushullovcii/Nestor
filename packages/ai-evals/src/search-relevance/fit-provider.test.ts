@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { createOpenAiCompatibleJobFinderAiClient, modelOutputLimit } from "@nestor/ai-providers";
 import { fitJobs } from "@nestor/browser-agent";
-import { JobDetailSchema } from "@nestor/contracts";
+import { CandidateProfileSchema, JobDetailSchema } from "@nestor/contracts";
 import { searchPersonas } from "./personas";
 
 const persona = searchPersonas[1]!;
@@ -47,6 +47,16 @@ const fits = jobs.map(({ id }) => ({
     quote: "Remote worldwide",
     kind: "broader_remote",
     countries: "",
+    publishedLocation: "Remote worldwide",
+    workCountry: "US",
+    residence: {
+      status: "met",
+      reason: "Worldwide remote includes your US location.",
+    },
+    authorization: {
+      status: "not_required",
+      reason: "No specific authorization requirement is published.",
+    },
   },
   r: {
     status: "strong",
@@ -86,6 +96,7 @@ test.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
     const bodies: Array<{
       max_output_tokens: number;
       reasoning: { effort: string };
+      temperature?: number;
     }> = [];
     vi.stubGlobal(
       "fetch",
@@ -131,8 +142,63 @@ test.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
     expect(bodies.every((body) => body.reasoning?.effort === effort)).toBe(
       true,
     );
+    expect(bodies.every((body) => body.temperature === 0)).toBe(true);
   },
 );
+
+test("the live fit path receives every profile record and a requirement in the middle of a long posting", async () => {
+  const profile = CandidateProfileSchema.parse({
+    ...persona.profile,
+    skills: Array.from({ length: 90 }, (_, i) => `Synthetic skill ${i}`),
+    experiences: Array.from({ length: 16 }, (_, i) => ({
+      ...persona.profile.experiences[0],
+      id: `synthetic_role_${i}`,
+    })),
+    projects: Array.from({ length: 20 }, (_, i) => ({
+      id: `synthetic_project_${i}`,
+      name: `Synthetic project ${i}`,
+      summary: "Confirmed project evidence",
+      skills: [],
+    })),
+  });
+  const description = `${"Published introduction. ".repeat(240)} Europe-only residence and current work authorization required. ${"Published duties. ".repeat(240)}`;
+  const seen: string[] = [];
+  await fitJobs({
+    profile,
+    goals: persona.goals,
+    jobs: [{ ...jobs[0]!, description }],
+    client: {
+      chatWithTools: (messages) => {
+        seen.push(String(messages[1]!.content));
+        return Promise.resolve({
+          content: JSON.stringify({
+            fits: [
+              {
+                ...fits[0]!,
+                e: {
+                  ...fits[0]!.e,
+                  status: "review",
+                  residence: {
+                    status: "unknown",
+                    reason: "Your eligibility needs checking.",
+                  },
+                },
+              },
+            ],
+          }),
+        });
+      },
+    },
+  });
+  const request = JSON.parse(seen[0]!) as {
+    person: { skills: string[]; experiences: unknown[]; projects: unknown[] };
+    listings: { description: string }[];
+  };
+  expect(request.person.skills).toEqual(profile.skills);
+  expect(request.person.experiences).toHaveLength(16);
+  expect(request.person.projects).toHaveLength(20);
+  expect(request.listings[0]!.description).toBe(description);
+});
 
 test.each(["length", "max_output_tokens", "transport"])(
   "reports repeated %s truncation after exactly two calls",

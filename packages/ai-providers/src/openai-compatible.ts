@@ -9,7 +9,6 @@ import {
   type ProfileCopilotReply,
 } from "@nestor/contracts";
 import {
-  JobFitAssessmentSchema,
   OpenAiCompatibleJobFinderAiClientOptionsSchema,
   ResumeAssistantReplySchema,
   ResumeProfileExtractionSchema,
@@ -65,18 +64,8 @@ import {
 } from "./model-request-transport";
 import {
   compactOpenAiCompatibleUserPayload,
-  FullFitEvidenceBudgetError,
   type OpenAiCompatibleJsonOperation,
 } from "./openai-compatible-request-compaction";
-import {
-  buildFitEvidenceInstructions,
-  buildFitScoringInstructions,
-  buildJobFitAssessmentPayload,
-  buildJobFitJudgingRequest,
-  buildJobFitJudgingPrompt,
-  buildJobFitJudgingResponseSchema,
-  normalizeJobFitJudgments,
-} from "./openai-compatible-fit";
 import {
   buildResumeClaimCheckPayload,
   buildResumeClaimCheckPrompt,
@@ -330,10 +319,6 @@ export function createOpenAiCompatibleJobFinderAiClient(
         DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS,
       systemPrompt,
       userPayload,
-      // Column names and row positions must survive together. The batch
-      // builder already bounds evidence; generic array trimming would
-      // silently change its meaning when a small context window is used.
-      preserveFullPayload: operation === "judgeJobFits",
     });
 
     if (options?.signal?.aborted) {
@@ -355,13 +340,6 @@ export function createOpenAiCompatibleJobFinderAiClient(
         body: buildModelRequestBody({
           apiMode,
           model: validatedOptions.model,
-          // Muse's Responses route defaults to temperature 1. Fit verdicts
-          // should repeat for the same facts. This route accepts zero even
-          // with reasoning enabled; other model routes may reject it.
-          ...((operation === "judgeJobFits" || operation === "assessJobFit") &&
-          isStableFitRoute({ ...validatedOptions, apiMode })
-            ? { temperature: 0 }
-            : {}),
           reasoningEffort:
             options?.reasoningEffort ?? validatedOptions.reasoningEffort,
           reasoningSummary: resilience.streaming !== false,
@@ -635,76 +613,6 @@ export function createOpenAiCompatibleJobFinderAiClient(
         resumeText: input.resumeText,
       });
     },
-    async assessJobFit(input) {
-      const { signal, background, ...assessmentInput } = input;
-      const payload = await fetchModelJson(
-        "assessJobFit",
-        [
-          "You assess how well a job fits the person whose profile is given.",
-          buildFitEvidenceInstructions(),
-          buildFitScoringInstructions(),
-          "Return JSON only.",
-          "Give 1-3 reasons and up to 3 gaps.",
-          "Keep explanations specific to the provided profile and job.",
-          "Include requirements for every explicit language and level, enrollment or availability window, education, portfolio, experience, and named tool in the full listing. Compare each with the profile; absence is missing or unknown, never support. A conflict needs explicit contradictory evidence. Use assessmentDate for availability windows.",
-          "Each requirement has id, category (skill, experience, seniority, location, work_mode, work_authorization, domain), label, importance (required, preferred, inferred), status (supported, partial, missing, unknown, conflict), jobEvidence (quote from the listing), resumeEvidence (array of {sourceKind: profile_skill, experience, project, or profile; sourceId: string or null; label; detail}), and explanation. Use skill for languages and tools, experience for education, enrollment, availability and portfolio. Keep required country restrictions separate from remote work mode.",
-          'Also return your verdict: recommendation (strong_fit, apply_with_original, review_before_applying, or skip); role ("exact" when it is the kind of work the person is looking for, "adjacent" for related work they could credibly do, "conflict" for a different occupation or a level far from theirs, "unknown"); roleExplanation (one plain sentence to the person); preferences ("aligned", "mixed", "conflict", "unknown", or "not_configured" against the saved goals for place, work mode, level, employment type and pay); preferencesExplanation (one sentence); and locationReach ("in_area", "remote_preferred", "outside_area", or "unknown"); listingClosed (true only when the listing itself says it is closed, filled or no longer accepting applications) with listingClosedEvidence quoting those words. Your score and recommendation stand as the assessment; nothing recomputes them.',
-        ].join(" "),
-        buildJobFitAssessmentPayload(assessmentInput),
-        {
-          conversationKey: modelConversationKeys.listingReading(input.profile),
-          ...(signal ? { signal } : {}),
-          reasoningEffort: reasoningEffortFor(
-            background ? "fit_batch" : "listing_read",
-          ),
-        },
-      );
-      return JobFitAssessmentSchema.parse(payload);
-    },
-    async judgeJobFits(input) {
-      const { signal, ...rest } = input;
-      if (rest.jobs.length === 0) {
-        return [];
-      }
-      // Short request-local ids avoid repeating opaque workspace ids in both
-      // directions. Only ids in this batch can be mapped back to a saved job.
-      const jobs = rest.jobs.map((job, index) => ({
-        ...job,
-        jobId: String(index),
-      }));
-      const structured =
-        validatedOptions !== null &&
-        isStableFitRoute({
-          ...validatedOptions,
-          apiMode: validatedOptions.apiMode ?? "chat_completions",
-        });
-      const payload = await fetchModelJson(
-        "judgeJobFits",
-        buildJobFitJudgingPrompt(structured),
-        buildJobFitJudgingRequest({ ...rest, jobs }),
-        {
-          conversationKey: modelConversationKeys.fitJudging(input.profile),
-          ...(signal ? { signal } : {}),
-          reasoningEffort: reasoningEffortFor("fit_batch"),
-          ...(structured
-            ? {
-                jsonSchema: buildJobFitJudgingResponseSchema(
-                  jobs.map((job) => job.jobId),
-                ),
-              }
-            : {}),
-        },
-      );
-      const jobIds = new Map(
-        jobs.map((job, index) => [job.jobId, rest.jobs[index]!.jobId]),
-      );
-      return normalizeJobFitJudgments(payload, new Set(jobIds.keys())).map(
-        (judgment) => ({
-          ...judgment,
-          jobId: jobIds.get(judgment.jobId)!,
-        }),
-      );
-    },
     async checkResumeClaims(input) {
       const { signal, timeoutMs, ...rest } = input;
       if (rest.claims.length === 0) {
@@ -857,6 +765,10 @@ export function createOpenAiCompatibleJobFinderAiClient(
             apiMode,
             model: validatedOptions.model,
             reasoningEffort: reasoningEffortFor(options?.reasoningTask),
+            ...(options?.reasoningTask === "fit_batch" &&
+            isStableFitRoute({ ...validatedOptions, apiMode })
+              ? { temperature: 0 }
+              : {}),
             ...(options?.reasoningTask === "listing_screen" &&
             validatedOptions.model === "mimo-v2.6-flash" &&
             isOpenCodeBaseUrl(validatedOptions.baseUrl)
@@ -1638,21 +1550,6 @@ export function createJobFinderAiClientFromEnvironment(
         throw resumeWritingFailed(error);
       }
     },
-    async assessJobFit(input) {
-      try {
-        return await primaryClient.assessJobFit(input);
-      } catch (error) {
-        if (
-          input.signal?.aborted ||
-          error instanceof FullFitEvidenceBudgetError
-        ) {
-          throw error;
-        }
-        // No verdict stands in: the job stays as it was and says so.
-        logFallbackError("assessJobFit", error);
-        return null;
-      }
-    },
     // A failed check leaves the lines unchecked for the person to look at;
     // no rule stands in for the model's verdict (ADR 0041).
     checkResumeClaims(input) {
@@ -1663,22 +1560,6 @@ export function createJobFinderAiClientFromEnvironment(
       return claimClient.checkResumeClaims
         ? claimClient.checkResumeClaims(input)
         : Promise.resolve([]);
-    },
-    async judgeJobFits(input) {
-      if (!primaryClient.judgeJobFits) {
-        return [];
-      }
-      try {
-        return await primaryClient.judgeJobFits(input);
-      } catch (error) {
-        if (input.signal?.aborted) {
-          throw error;
-        }
-        // No rule-made verdict stands in: the jobs stay unjudged and the
-        // next pass asks again.
-        logFallbackError("judgeJobFits", error);
-        return [];
-      }
     },
     async extractJobsFromPage(input) {
       try {

@@ -1,4 +1,4 @@
-import { PERSON_FACING_VOICE_INSTRUCTION } from "./openai-compatible-fit";
+import { PERSON_FACING_VOICE_INSTRUCTION } from "./person-facing-voice";
 import type { ResumeClaimCheckInput, ResumeClaimCheckResult } from "./shared";
 
 /**

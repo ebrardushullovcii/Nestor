@@ -114,9 +114,6 @@ export function createDeterministicJobFinderAiClient(
         generationProvenance,
       });
     },
-    assessJobFit() {
-      return Promise.resolve(null);
-    },
     extractJobsFromPage(input) {
       if (input.signal?.aborted) {
         return Promise.reject(new DOMException("Aborted", "AbortError"));

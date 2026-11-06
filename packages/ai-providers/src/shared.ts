@@ -4,7 +4,6 @@ import {
   type ModelRequestUsage,
   AssetGenerationReasonSchema,
   ResumeLanguageTranslationSchema,
-  JobRequirementAssessmentSchema,
   type AiProfileAssistantBehavior,
   type AgentProviderStatus,
   type AgentTaskValidationIssue,
@@ -26,14 +25,10 @@ import {
   candidateLinkKindValues,
   type CandidateProfile,
   type FitRecommendation,
-  FitRecommendationSchema,
   type JobFinderSettings,
   type JobPosting,
-  MatchLocationReachSchema,
   type MatchLocationReach,
-  PreferenceAlignmentStateSchema,
   type PreferenceAlignmentState,
-  RoleSuitabilityStateSchema,
   type RoleSuitabilityState,
   type JobSearchPreferences,
   type ResumeApproach,
@@ -287,29 +282,6 @@ export const TailoredResumeDraftSchema = z.object({
 });
 
 export type TailoredResumeDraft = z.infer<typeof TailoredResumeDraftSchema>;
-
-export const JobFitAssessmentSchema = z.object({
-  requirements: z.array(JobRequirementAssessmentSchema).max(40).optional(),
-  score: z.number().int().min(0).max(100),
-  reasons: z.array(NonEmptyStringSchema).default([]),
-  gaps: z.array(NonEmptyStringSchema).default([]),
-  // The model's verdict on the same terms as a search's batch judging. Older
-  // replies and fakes without a recommendation remain review-only.
-  recommendation: FitRecommendationSchema.optional().catch(undefined),
-  role: RoleSuitabilityStateSchema.optional().catch(undefined),
-  roleExplanation: NonEmptyStringSchema.max(320).optional().catch(undefined),
-  preferences: PreferenceAlignmentStateSchema.optional().catch(undefined),
-  preferencesExplanation: NonEmptyStringSchema.max(320)
-    .optional()
-    .catch(undefined),
-  locationReach: MatchLocationReachSchema.optional().catch(undefined),
-  listingClosed: z.boolean().optional().catch(undefined),
-  listingClosedEvidence: NonEmptyStringSchema.max(240)
-    .optional()
-    .catch(undefined),
-});
-
-export type JobFitAssessment = z.infer<typeof JobFitAssessmentSchema>;
 
 export const OpenAiCompatibleJobFinderAiClientOptionsSchema = z.object({
   apiKey: NonEmptyStringSchema,
@@ -610,20 +582,6 @@ export const PROFILE_RESUME_APPROACH_VOCABULARY = [
   "When resumeApproach is original_resume and the person asks to change the resume itself (its wording, length, layout or what it shows), say in one sentence that Original sends their imported file unchanged, and propose set_resume_approach conservative so Job Finder writes a resume they can edit. When the request also implies a profile change, put both in one propose_profile_operations call so a single Apply & save does both.",
 ].join(" ");
 
-export interface AssessJobFitInput {
-  signal?: AbortSignal;
-  /**
-   * A re-read nobody is waiting on (a search refreshing an older full read)
-   * runs at the fit-check effort; one the person asked for keeps the main
-   * effort.
-   */
-  background?: boolean;
-  assessmentDate?: string;
-  profile: CandidateProfile;
-  searchPreferences: JobSearchPreferences;
-  job: JobPosting;
-}
-
 /** One job's verdict from batch fit judging (ADR 0041). */
 export interface JobFitJudgmentResult {
   jobId: string;
@@ -640,15 +598,6 @@ export interface JobFitJudgmentResult {
   summary?: string | null;
   listingClosed: boolean;
   listingClosedEvidence: string | null;
-}
-
-export interface JudgeJobFitsInput {
-  signal?: AbortSignal;
-  assessmentDate: string;
-  profile: CandidateProfile;
-  searchPreferences: JobSearchPreferences;
-  /** At most one batch; callers split larger sets. */
-  jobs: ReadonlyArray<{ jobId: string; posting: JobPosting }>;
 }
 
 /** Resume lines the model checks against the candidate's evidence. */
@@ -752,12 +701,6 @@ export interface JobFinderAiClient {
     input: ReviseCandidateProfileInput,
   ): Promise<ProfileCopilotReply>;
   tailorResume(input: TailorResumeInput): Promise<TailoredResumeDraft>;
-  assessJobFit(input: AssessJobFitInput): Promise<JobFitAssessment | null>;
-  /**
-   * Judges many jobs in one call. Absent on clients without a model; an
-   * empty answer leaves those jobs unjudged.
-   */
-  judgeJobFits?(input: JudgeJobFitsInput): Promise<JobFitJudgmentResult[]>;
   /**
    * Checks resume lines against the candidate's evidence, many per call.
    * Absent on clients without a model; unchecked lines go to the person.

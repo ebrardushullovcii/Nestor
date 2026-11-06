@@ -5,6 +5,7 @@ import {
 } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
+import type { FitWorkPermissionEvidence } from "./fit-work-location";
 import { fitJobs } from "./listing-engine";
 
 const profile = CandidateProfileSchema.parse({
@@ -27,6 +28,19 @@ const profile = CandidateProfileSchema.parse({
     uploadedAt: "2026-10-27T00:00:00Z",
   },
 });
+// Explicit model judgments; the country is where this synthetic person works.
+const permission: FitWorkPermissionEvidence = {
+  publishedLocation: "Remote, Worldwide",
+  workCountry: "XK",
+  residence: [
+    "met",
+    "Your Kosovo work location is included in the published scope.",
+  ],
+  authorization: [
+    "not_required",
+    "This remote listing states no specific authorization requirement.",
+  ],
+};
 const job = JobDetailSchema.parse({
   id: 1,
   stage: "found",
@@ -94,7 +108,13 @@ test.each(["conflict", "met", "unknown"] as const)(
                   r: ["strong", "Software duties"],
                   p: ["conflict", "Below the saved minimum"],
                   c: ["strong", "Experience"],
-                  e: ["compatible", "Worldwide", "broader_remote", ""],
+                  e: [
+                    "compatible",
+                    "Worldwide",
+                    "broader_remote",
+                    "",
+                    { ...permission, publishedLocation: "Remote worldwide" },
+                  ],
                   h: [hard, "Pay compared with the explicit hourly minimum"],
                   pay: {
                     minimum: 19,
@@ -118,7 +138,7 @@ test.each(["conflict", "met", "unknown"] as const)(
 test.each([
   ["20 hours per week", "compatible", 92],
   ["40 hours per week", "blocked", 39],
-  ["Hours to be agreed", "review", 92],
+  ["Hours to be agreed", "review", 64],
 ] as const)(
   "conditional permission follows the model's reading of %s",
   async (hours, status, expected) => {
@@ -166,7 +186,21 @@ test.each([
                   r: ["strong", "Exact work"],
                   p: ["aligned", "Hours"],
                   c: ["strong", "Skills"],
-                  e: [status, hours, "onsite", "DE"],
+                  e: [
+                    status,
+                    hours,
+                    "onsite",
+                    "DE",
+                    {
+                      publishedLocation: "Berlin, Germany",
+                      workCountry: "DE",
+                      residence: ["met", "You work in Berlin."],
+                      authorization: [
+                        "met",
+                        "The stated hours meet your saved permit conditions.",
+                      ],
+                    },
+                  ],
                 },
               ],
             }),
@@ -187,7 +221,7 @@ test.each([
 
 test.each([
   ["US-only residence contradicts your country", "blocked", 99, 39],
-  ["Required work authorization is not known", "review", 99, 99],
+  ["Required work authorization is not known", "review", 99, 64],
   ["Worldwide remote includes your country", "compatible", 99, 99],
   ["Europe hiring includes your country", "compatible", 90, 90],
   ["EU-only hiring excludes your country", "blocked", 90, 39],
@@ -210,6 +244,7 @@ test.each([
                 status === "compatible" ? "Worldwide remote" : reason,
                 status === "compatible" ? "broader_remote" : "unknown",
                 status === "blocked" ? "US" : "",
+                permission,
               ],
             },
           ],
@@ -238,7 +273,7 @@ test.each([
       explanation: reason,
     });
   }
-  if (score > expected) expect(fit?.summary).toBe(reason);
+  if (score > expected) expect(fit?.summary).toContain(reason);
 });
 
 test("fit gets explicit residence and saved country-list rules, without changing work permission", async () => {
@@ -263,6 +298,7 @@ test("fit gets explicit residence and saved country-list rules, without changing
               "Albania, Serbia and Montenegro",
               "offered_list",
               "AL,RS,ME",
+              { ...permission, publishedLocation: "Remote" },
             ],
           },
         ],
@@ -307,7 +343,7 @@ test("fit gets explicit residence and saved country-list rules, without changing
   );
 });
 
-test("a response with no eligibility verdict retains its score with visible uncertainty", async () => {
+test("a response with no eligibility verdict is capped with visible uncertainty", async () => {
   const [fit] = await fitJobs({
     profile,
     jobs: [job],
@@ -330,7 +366,7 @@ test("a response with no eligibility verdict retains its score with visible unce
         }),
     },
   });
-  expect(fit?.score).toBe(99);
+  expect(fit?.score).toBe(64);
   expect(fit?.summary).toContain("Location or eligibility needs review");
   expect(fit?.preferences?.assessment).toBe("unknown");
 });
@@ -372,15 +408,29 @@ test.each([
                   r: ["strong", "Requested work"],
                   p: ["aligned", "Germany"],
                   c: ["strong", "Direct evidence"],
-                  e: [status, "Synthetic Lab · Germany", "onsite", "DE"],
+                  e: [
+                    status,
+                    "Synthetic Lab · Germany",
+                    "onsite",
+                    "DE",
+                    {
+                      publishedLocation: "Germany",
+                      workCountry: "DE",
+                      residence: ["met", "You live in Germany."],
+                      authorization: [
+                        "met",
+                        "Your saved German permission covers this role.",
+                      ],
+                    },
+                  ],
                 },
               ],
             }),
           }),
       },
     });
-    expect(fit?.score).toBe(87);
-    expect(fit?.summary).toContain("Direct TypeScript experience");
+    expect(fit?.score).toBe(review ? 64 : 87);
+    if (!review) expect(fit?.summary).toContain("Direct TypeScript experience");
     expect(fit?.summary.includes("needs review")).toBe(review);
     expect(fit?.summary).not.toContain(
       "Work permission or hiring scope is unconfirmed",
@@ -423,7 +473,13 @@ test.each([
                 r: ["strong", "Exact requested work"],
                 p: ["aligned", "European remote includes non-EU countries"],
                 c: ["strong", "Direct evidence"],
-                e: ["compatible", quote, "broader_remote", ""],
+                e: [
+                  "compatible",
+                  quote,
+                  "broader_remote",
+                  "",
+                  { ...permission, publishedLocation: "Remote, Europe" },
+                ],
               },
             ],
           }),
@@ -443,7 +499,7 @@ test.each([
     description: "Build production software.",
     quote: "United States",
     kind: "unknown",
-    score: 99,
+    score: 64,
     assessment: "unknown",
   },
   {
@@ -452,7 +508,7 @@ test.each([
       "A hybrid work model of 3 days in the office. Relocation assistance is available.",
     quote: "hybrid work model of 3 days in the office",
     kind: "hybrid",
-    score: 99,
+    score: 64,
     assessment: "unknown",
   },
 ])(
@@ -516,7 +572,21 @@ test("regional authorization stays with the model rather than an ISO country loo
                 r: ["strong", "Relevant work"],
                 p: ["aligned", "EU authorization covers this job"],
                 c: ["strong", "Direct evidence"],
-                e: ["compatible", "Work onsite in Berlin", "onsite", "DE"],
+                e: [
+                  "compatible",
+                  "Work onsite in Berlin",
+                  "onsite",
+                  "DE",
+                  {
+                    publishedLocation: "Berlin, Germany",
+                    workCountry: "DE",
+                    residence: ["met", "You live in Berlin."],
+                    authorization: [
+                      "met",
+                      "Your saved EU authorization includes Germany.",
+                    ],
+                  },
+                ],
               },
             ],
           }),
@@ -543,7 +613,13 @@ test("different fit batches retain the exact context prefix and response schema"
             r: ["strong", "Direct work"],
             p: ["aligned", "Remote"],
             c: ["strong", "Evidence"],
-            e: ["compatible", "Worldwide remote", "broader_remote", ""],
+            e: [
+              "compatible",
+              "Worldwide remote",
+              "broader_remote",
+              "",
+              permission,
+            ],
           })),
         }),
       });
@@ -604,7 +680,13 @@ test("a stable schema still rejects a verdict for a job outside the batch", asyn
                 r: ["strong", "Work"],
                 p: ["aligned", "Remote"],
                 c: ["strong", "Evidence"],
-                e: ["compatible", "Worldwide", "broader_remote", ""],
+                e: [
+                  "compatible",
+                  "Worldwide",
+                  "broader_remote",
+                  "",
+                  permission,
+                ],
               },
             ],
           }),
@@ -634,7 +716,7 @@ test("keeps the model's short reason beside its own reason, whole and capped", a
               r: ["related", "Backend-leaning role"],
               p: ["aligned", "Remote work"],
               c: ["strong", "Direct evidence"],
-              e: [e, "Worldwide remote", "broader_remote", ""],
+              e: [e, "Worldwide remote", "broader_remote", "", permission],
             },
           ],
         }),
@@ -674,6 +756,10 @@ test("keeps the model's short reason beside its own reason, whole and capped", a
   expect(
     (await fit(answer("Less frontend than you want", "blocked", 90)))?.short,
   ).toBeUndefined();
+  const blockedLow = await fit(answer("Excellent match", "blocked", 20));
+  expect(blockedLow?.score).toBe(20);
+  expect(blockedLow?.short).toBeUndefined();
+  expect(blockedLow?.summary).not.toContain("Fewer frontend duties");
   // The comparison and the reason's material caveat, when both fit.
   const caveat =
     "Good overlap on product UI; asks for some Go you have not listed.";
@@ -722,7 +808,13 @@ test("unknown terms preserve relative model scores and explanations; a confirmed
               r: ["strong", "Requested work"],
               p: ["aligned", "Remote work"],
               c: ["strong", "Direct evidence"],
-              e: ["compatible", "Worldwide remote", "broader_remote", ""],
+              e: [
+                "compatible",
+                "Worldwide remote",
+                "broader_remote",
+                "",
+                { ...permission, publishedLocation: "Remote worldwide" },
+              ],
               h: [
                 hard,
                 hard === "unknown"

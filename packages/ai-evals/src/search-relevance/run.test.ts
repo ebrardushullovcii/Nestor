@@ -113,7 +113,7 @@ describe("manual search relevance eval measurements", () => {
       gunzipSync(
         await readFile(
           new URL(
-            "../../fixtures/search-relevance/fit-quality-tape.json.gz",
+            "../../fixtures/search-relevance/fit-region-tape.json.gz",
             import.meta.url,
           ),
         ),

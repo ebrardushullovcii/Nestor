@@ -4,12 +4,7 @@ import {
   DEFAULT_OPENCODE_GO_BASE_URL,
   type ModelReasoningTask,
 } from "./openai-compatible-transport";
-import {
-  createEnvironment,
-  createJobPosting,
-  createPreferences,
-  createProfile,
-} from "./test-fixtures";
+import { createEnvironment } from "./test-fixtures";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -258,18 +253,17 @@ test("every task inherits the main effort unless explicitly overridden", async (
     pageType: "search_results",
     maxJobs: 5,
   });
-  await client.judgeJobFits!({
-    assessmentDate: "2026-10-21",
-    profile: createProfile(),
-    searchPreferences: createPreferences(),
-    jobs: [{ jobId: "job_1", posting: createJobPosting() }],
-  });
+  await client.chatWithTools!(
+    [{ role: "user", content: "Synthetic full listing fit" }],
+    [],
+    { reasoningTask: "fit_batch" },
+  );
   await client.checkResumeClaims!(claimInput);
-  await client.assessJobFit({
-    profile: createProfile(),
-    searchPreferences: createPreferences(),
-    job: createJobPosting(),
-  });
+  await client.chatWithTools!(
+    [{ role: "user", content: "Synthetic full listing fit" }],
+    [],
+    { reasoningTask: "listing_read" },
+  );
 
   expect(requests.map((request) => request.effort)).toEqual(
     Array(9).fill("high"),
@@ -335,18 +329,17 @@ test("every task effort can be overridden by its own variable", async () => {
     pageType: "search_results",
     maxJobs: 5,
   });
-  await client.judgeJobFits!({
-    assessmentDate: "2026-10-21",
-    profile: createProfile(),
-    searchPreferences: createPreferences(),
-    jobs: [{ jobId: "job_1", posting: createJobPosting() }],
-  });
+  await client.chatWithTools!(
+    [{ role: "user", content: "Synthetic full listing fit" }],
+    [],
+    { reasoningTask: "fit_batch" },
+  );
   await client.checkResumeClaims!(claimInput);
-  await client.assessJobFit({
-    profile: createProfile(),
-    searchPreferences: createPreferences(),
-    job: createJobPosting(),
-  });
+  await client.chatWithTools!(
+    [{ role: "user", content: "Synthetic full listing fit" }],
+    [],
+    { reasoningTask: "listing_read" },
+  );
   expect(requests.map((request) => request.effort)).toEqual([
     "medium",
     "medium",
@@ -378,13 +371,17 @@ test("a full listing read nobody waits on runs at the fit-check effort", async (
   const client = createJobFinderAiClientFromEnvironment(
     createEnvironment(ownerEnvironment),
   );
-  const input = {
-    profile: createProfile(),
-    searchPreferences: createPreferences(),
-    job: createJobPosting(),
-  };
-  await client.assessJobFit({ ...input, background: true });
-  await client.assessJobFit(input);
+
+  await client.chatWithTools!(
+    [{ role: "user", content: "Synthetic full listing fit" }],
+    [],
+    { reasoningTask: "fit_batch" },
+  );
+  await client.chatWithTools!(
+    [{ role: "user", content: "Synthetic full listing fit" }],
+    [],
+    { reasoningTask: "listing_read" },
+  );
   expect(requests.map((request) => request.effort)).toEqual([
     "high", // background work follows the same choice
     "high", // the person pressed "Judge fit"

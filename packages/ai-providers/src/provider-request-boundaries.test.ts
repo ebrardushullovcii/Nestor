@@ -7,7 +7,6 @@ import {
   createEnvironment,
   createProfile,
   createPreferences,
-  createJobPosting,
 } from "./test-fixtures";
 
 const extraction = {
@@ -141,12 +140,18 @@ test.each(["responses", "chat_completions"] as const)(
       [{ role: "user", content: "Synthetic test" }],
       [],
     );
-    const assessment = await client.assessJobFit({
-      profile: createProfile(),
-      searchPreferences: createPreferences(),
-      job: createJobPosting(),
-    });
-    expect(assessment?.requirements?.[0]).toMatchObject({
+    const assessment = await client.chatWithTools!(
+      [{ role: "user", content: "Synthetic full listing fit" }],
+      [],
+      { reasoningTask: "listing_read" },
+    );
+    expect(
+      (
+        JSON.parse(assessment.content ?? "{}") as {
+          requirements: { label: string; status: string }[];
+        }
+      ).requirements[0],
+    ).toMatchObject({
       label: "German B2",
       status: "missing",
     });
@@ -217,33 +222,15 @@ test("fit assessment cancellation does not call the fallback model", async () =>
   vi.stubGlobal("fetch", fetchMock);
   const client = createJobFinderAiClientFromEnvironment(createEnvironment());
   const controller = new AbortController();
-  const result = client.assessJobFit({
-    profile: createProfile(),
-    searchPreferences: createPreferences(),
-    job: createJobPosting(),
-    signal: controller.signal,
-  });
+  const result = client.chatWithTools!(
+    [{ role: "user", content: "Synthetic full listing fit" }],
+    [],
+    { reasoningTask: "listing_read", signal: controller.signal },
+  );
   const rejection = expect(result).rejects.toMatchObject({
     name: "AbortError",
   });
   controller.abort();
   await rejection;
   expect(fetchMock).toHaveBeenCalledTimes(1);
-});
-
-test("an oversized full read reports its input limit through the configured client without sending an excerpt", async () => {
-  const fetchMock = vi.fn();
-  vi.stubGlobal("fetch", fetchMock);
-  const client = createJobFinderAiClientFromEnvironment(createEnvironment());
-  await expect(
-    client.assessJobFit({
-      profile: createProfile(),
-      searchPreferences: createPreferences(),
-      job: {
-        ...createJobPosting(),
-        description: "Full listing evidence ".repeat(100000),
-      },
-    }),
-  ).rejects.toThrow("exceed the model's input limit");
-  expect(fetchMock).not.toHaveBeenCalled();
 });

@@ -55,7 +55,19 @@ const verdict = (id: number, pay: unknown) => ({
   p: ["mixed", "Pay differs"],
   c: ["strong", "Direct evidence"],
   h: ["met", "Other requirements met"],
-  e: ["compatible", "Remote within Germany", "country_remote", "DE"],
+  e: {
+    status: "compatible",
+    quote: "Remote within Germany",
+    kind: "country_remote",
+    countries: "DE",
+    publishedLocation: "Germany",
+    workCountry: "DE",
+    residence: { status: "met", reason: "Your country is included." },
+    authorization: {
+      status: "met",
+      reason: "Your German authorization covers this role.",
+    },
+  },
   pay,
 });
 const goals = {
@@ -165,7 +177,7 @@ test.each([
   },
 );
 
-test("borrowed pay evidence leaves only that row retryable and retains a valid sibling", async () => {
+test("borrowed pay evidence makes only that row's pay unknown and retains a valid sibling", async () => {
   const good = {
     minimum: 20,
     maximum: 20,
@@ -186,15 +198,15 @@ test("borrowed pay evidence leaves only that row retryable and retains a valid s
     ),
   };
   const onBatch = vi.fn<(fits: Array<{ id: number }>) => void>();
-  await expect(
-    fitJobs({ profile, goals, jobs, client, onBatch }),
-  ).rejects.toThrow("could not finish fit scores");
+  const fits = await fitJobs({ profile, goals, jobs, client, onBatch });
+  expect(fits.map((fit) => fit.score)).toEqual([64, 94]);
+  expect(fits[1].summary).toContain("Pay cannot yet be compared");
   expect(
     onBatch.mock.calls.flatMap(([fits]) =>
       fits.map((f: { id: number }) => f.id),
     ),
-  ).toEqual([1]);
-  expect(client.chatWithTools.mock.calls.length).toBeGreaterThan(1);
+  ).toEqual([1, 2]);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
 test("Chat receives the required pay contract and repairs only the omitted sibling", async () => {
@@ -251,37 +263,84 @@ test("Chat receives the required pay contract and repairs only the omitted sibli
   expect(fits.map((row) => row.id)).toEqual([1, 2]);
 });
 
-test("pay repair identifies an ungrounded quote and keeps the grounding gate", async () => {
-  const issues: string[][] = [];
-  await expect(
-    fitJobs({
+test.each(["EUR 27/hour", "GBP 27 per hour", '""'])(
+  "an ungrounded pay quote keeps the work judgment with unknown pay: %s",
+  async (quote) => {
+    const client = {
+      chatWithTools: vi.fn(() =>
+        Promise.resolve({
+          content: JSON.stringify({
+            fits: [
+              verdict(1, {
+                minimum: 27,
+                maximum: 27,
+                currency: "EUR",
+                interval: "hour",
+                basis: "base",
+                quote,
+              }),
+            ],
+          }),
+        }),
+      ),
+    };
+    const [fit] = await fitJobs({
       profile,
       goals,
       jobs: [job(1, "Remote within Germany. EUR 27 per hour. SQL reporting.")],
+      client,
+    });
+    expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+    expect(fit?.score).toBe(94);
+    expect(fit?.summary).toContain("Pay cannot yet be compared");
+    expect(fit?.short).toBeUndefined();
+  },
+);
+
+test.each([
+  ["EUR 23,000–EUR 23,500 per year", '"€23000-€23500 per year"', "EUR"],
+  ["€23.000 — €23.500 per year", "EUR23,000 - EUR23,500 per year", "EUR"],
+  [
+    "“EUR 23 000 – EUR 23 500 per year”",
+    "'EUR 23000 - EUR 23500 per year'",
+    "EUR",
+  ],
+  ["US$23,000–US$23,500 per year", "$23000-$23500 per year", "USD"],
+  ["«€23’000–€23’500 per year»", "„EUR 23000-EUR 23500 per year‟", "EUR"],
+])(
+  "typographic pay quotes retain a known below-floor cap: %s",
+  async (published, quote, currency) => {
+    const [fit] = await fitJobs({
+      profile,
+      goals: {
+        ...goals,
+        compensation: {
+          ...goals.compensation,
+          minimum: 24000,
+          interval: "year",
+          currency,
+        },
+      },
+      jobs: [job(1, `Remote within Germany. ${published}. SQL reporting.`)],
       client: {
-        chatWithTools: (messages) => {
-          const input = JSON.parse(String(messages[1].content)) as {
-            listings: { id: number }[];
-            repair?: { id: number; issues: string[] }[];
-          };
-          if (input.repair) issues.push(input.repair[0].issues);
-          return Promise.resolve({
+        chatWithTools: () =>
+          Promise.resolve({
             content: JSON.stringify({
               fits: [
                 verdict(1, {
-                  minimum: 27,
-                  maximum: 27,
-                  currency: "EUR",
-                  interval: "hour",
+                  minimum: 23000,
+                  maximum: 23500,
+                  currency,
+                  interval: "year",
                   basis: "base",
-                  quote: "EUR 27/hour",
+                  quote,
                 }),
               ],
             }),
-          });
-        },
+          }),
       },
-    }),
-  ).rejects.toThrow("could not finish fit scores");
-  expect(issues).toEqual([["pay_quote_not_verbatim_or_bounds_reversed"]]);
-});
+    });
+    expect(fit?.score).toBe(64);
+    expect(fit?.summary).toContain("below your 24000/year minimum");
+  },
+);
