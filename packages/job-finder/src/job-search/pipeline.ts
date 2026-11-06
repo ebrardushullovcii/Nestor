@@ -143,7 +143,9 @@ export function createSearchPipeline(input: {
   };
   const waves = createCardWaves(
     signal,
-    async (cards) => {
+    async (incomingCards) => {
+      const { cards, refreshUrls } =
+        deps.store.prepareListingCards(incomingCards);
       const touched = new Set(cards.map((card) => card.sourceId));
       for (const id of touched) {
         const source = sources.get(id)!;
@@ -256,6 +258,7 @@ export function createSearchPipeline(input: {
         settings,
         signal,
         knownUrls: (urls) => deps.store.findKnownUrls(urls),
+        refreshUrls,
         seenCards: (cards, key) => deps.store.lookupSeenCards(cards, key),
       });
       signal.throwIfAborted();

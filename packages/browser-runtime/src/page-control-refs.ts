@@ -152,3 +152,15 @@ export function controlRefFrame(
 export function hasBoundControlRefs(page: Page): boolean {
   return bindings.has(page);
 }
+
+/** Join a linked-text card to the same observed handle used by click. */
+export function pageClickReferences(page: Page): Record<string, string> {
+  return Object.fromEntries(
+    [...(bindings.get(page)?.refs ?? [])]
+      .filter(
+        ([, binding]) =>
+          binding.kind === "e" || binding.kind === "a" || binding.kind === "l",
+      )
+      .map(([ref, binding]) => [binding.nodeRef, ref]),
+  );
+}

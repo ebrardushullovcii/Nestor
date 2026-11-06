@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   extractListingDetailFromHtml,
   listingPageLinks,
-  findApplyLinkInHtml,
   htmlToPlainText,
   listingPageText,
 } from "./listing-detail-extraction";
@@ -162,35 +161,6 @@ describe("htmlToPlainText", () => {
         "<div><p>One</p><script>bad()</script><ul><li>A</li><li>B &amp; C</li></ul><p>Two<br>lines</p></div>",
       ),
     ).toBe("One\n\n• A\n\n• B & C\n\nTwo\nlines");
-  });
-});
-
-describe("the apply link on a listing page", () => {
-  it("reads a plain apply link so a run starts on the form", () => {
-    expect(
-      findApplyLinkInHtml(
-        `<html><body><main><h1>Events Manager</h1><a class="btn" href="/apply/11124457">Apply now</a></main></body></html>`,
-        "https://board.example.test/job/events-manager",
-      ),
-    ).toBe("https://board.example.test/apply/11124457");
-  });
-
-  it("reads an apply link that leads to the employer's own site", () => {
-    expect(
-      findApplyLinkInHtml(
-        `<html><body><main><h1>Events Manager</h1><a href="https://employer.example.test/careers/apply">Apply on company site</a></main></body></html>`,
-        "https://board.example.test/job/events-manager",
-      ),
-    ).toBe("https://employer.example.test/careers/apply");
-  });
-
-  it("leaves a page with no apply link alone", () => {
-    expect(
-      findApplyLinkInHtml(
-        `<html><body><main><h1>Events Manager</h1><a href="/jobs">Similar jobs</a><a href="/help">How to apply</a></main></body></html>`,
-        "https://board.example.test/job/events-manager",
-      ),
-    ).toBeNull();
   });
 });
 

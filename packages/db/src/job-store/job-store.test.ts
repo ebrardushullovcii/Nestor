@@ -55,6 +55,56 @@ afterEach(() => {
 });
 
 describe("job store", () => {
+  it("repairs a crossed saved row on its own full reread, clears obsolete facts and apply keys, and keeps its stage", () => {
+    const store = open();
+    const wrongApply = "https://board.example.test/blog/applying";
+    const [id] = store.saveFoundJobs({
+      searchId: "old",
+      jobs: [
+        found(1, {
+          title: "Interface Engineer",
+          company: "First Employer",
+          location: "Wrong country",
+          description: "Second employer's unrelated duties",
+          applyUrl: wrongApply,
+          salaryText: "Wrong salary",
+          seniority: "Wrong seniority",
+          facts: { fullListingRead: true },
+        }),
+      ],
+    }).added;
+    store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
+    store.setFit([
+      { id: id!, score: 33, summary: "Wrong residency", reasons: [], gaps: [] },
+    ]);
+    const corrected = found(1, {
+      title: "Interface Engineer",
+      company: "First Employer",
+      location: "Remote, Worldwide",
+      description: "First employer's complete duties",
+      applyUrl: "https://employer.example.test/forms/one",
+      facts: { fullListingRead: true },
+    });
+    const saved = store.saveFoundJobs({ searchId: "new", jobs: [corrected] });
+    expect(saved.merged).toEqual([id]);
+    expect(saved.added).toEqual([]);
+    expect(store.getJob(id!)).toMatchObject({
+      stage: "shortlisted",
+      location: corrected.location,
+      description: corrected.description,
+      applyUrl: corrected.applyUrl,
+      salaryText: null,
+      seniority: null,
+      fitStale: true,
+    });
+    expect(store.findKnownUrls([wrongApply])).toEqual([]);
+    store.saveFoundJobs({
+      searchId: "newer",
+      jobs: [{ ...corrected, applyUrl: null }],
+    });
+    expect(store.getJob(id!)?.applyUrl).toBeNull();
+    expect(store.getJob(id!)?.sightings[0]?.applyUrl).toBeNull();
+  });
   it("keeps complete posting provenance through merges and never replaces its body with a longer card", () => {
     const store = open();
     const { added } = store.saveFoundJobs({

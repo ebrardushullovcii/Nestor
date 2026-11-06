@@ -139,7 +139,7 @@ export function writeFoundJobs(
     `INSERT INTO job_sightings (job_id, url, site, source_id, source_label, apply_url, seen_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (job_id, url) DO UPDATE SET seen_at = excluded.seen_at,
-       apply_url = coalesce(excluded.apply_url, apply_url)`,
+       apply_url = CASE WHEN ? THEN excluded.apply_url ELSE coalesce(excluded.apply_url, apply_url) END`,
   );
   const insertJob = sql(
     `INSERT INTO jobs (stage, stage_at, stage_note, title, company, location, work_modes,
@@ -160,22 +160,27 @@ export function writeFoundJobs(
        source_count = (SELECT count(DISTINCT site) FROM job_sightings WHERE job_id = ?)
      WHERE id = ?`,
   );
+  const rebindListing = sql(
+    `UPDATE jobs SET title=?, company=?, location=?, work_modes=?, salary_text=?, apply_url=? WHERE id=?`,
+  );
+  const oldListing = sql("SELECT url, apply_url FROM jobs WHERE id=?");
   const refreshDetails = sql(
     `UPDATE job_details SET
        description = CASE WHEN ? THEN ?
          WHEN coalesce(json_extract(facts_json, '$.fullListingRead'), 0) = 0 AND length(?) > length(description) THEN ?
          ELSE description END,
        facts_json = CASE WHEN ? THEN json_patch(facts_json, ?) ELSE facts_json END,
-       summary = coalesce(summary, ?),
-       seniority = coalesce(seniority, ?),
-       employment_type = coalesce(employment_type, ?),
-       salary_min = coalesce(salary_min, ?),
-       salary_max = coalesce(salary_max, ?),
-       salary_currency = coalesce(salary_currency, ?)
+       summary = CASE WHEN ? THEN ? ELSE coalesce(summary, ?) END,
+       seniority = CASE WHEN ? THEN ? ELSE coalesce(seniority, ?) END,
+       employment_type = CASE WHEN ? THEN ? ELSE coalesce(employment_type, ?) END,
+       salary_min = CASE WHEN ? THEN ? ELSE coalesce(salary_min, ?) END,
+       salary_max = CASE WHEN ? THEN ? ELSE coalesce(salary_max, ?) END,
+       salary_currency = CASE WHEN ? THEN ? ELSE coalesce(salary_currency, ?) END
      WHERE job_id = ?`,
   );
 
   for (const job of jobs) {
+    const fullRead = job.facts?.fullListingRead === true ? 1 : 0;
     const keys = keysOf(job);
     let match: KeyMatch | undefined;
     for (const key of keys.strong) {
@@ -240,10 +245,49 @@ export function writeFoundJobs(
       job.sourceLabel,
       job.applyUrl,
       now,
+      fullRead,
     );
     for (const key of keys.strong) addKey.run(key, id);
     if (keys.facts) addKey.run(keys.facts, id);
     if (match) {
+      if (fullRead) {
+        const previous = oldListing.get(id) as {
+          url: string;
+          apply_url: string | null;
+        };
+        if (
+          previous.apply_url &&
+          normalizeUrl(previous.apply_url) !==
+            normalizeUrl(job.applyUrl ?? job.url)
+        ) {
+          // An obsolete application link must not keep binding other postings
+          // to this row after its own page corrected it.
+          const obsoleteKey = `url:${normalizeUrl(previous.apply_url)}`;
+          sql(
+            "UPDATE job_sightings SET apply_url=NULL WHERE job_id=? AND apply_url=? AND url<>?",
+          ).run(id, previous.apply_url, job.url);
+          if (
+            obsoleteKey !== `url:${normalizeUrl(previous.url)}` &&
+            obsoleteKey !== `url:${normalizeUrl(job.url)}`
+          )
+            sql("DELETE FROM job_keys WHERE job_id=? AND key=?").run(
+              id,
+              obsoleteKey,
+            );
+        }
+        rebindListing.run(
+          job.title,
+          job.company,
+          job.location,
+          workModes,
+          job.salaryText,
+          job.applyUrl,
+          id,
+        );
+        sql(
+          "DELETE FROM job_keys WHERE job_id=? AND key LIKE 'facts:%' AND key IS NOT ?",
+        ).run(id, keys.facts);
+      }
       refreshJob.run(
         now,
         job.salaryText,
@@ -254,18 +298,20 @@ export function writeFoundJobs(
         id,
       );
       refreshDetails.run(
-        job.facts?.fullListingRead === true ? 1 : 0,
+        fullRead,
         job.description,
         job.description,
         job.description,
-        job.facts?.fullListingRead === true ? 1 : 0,
+        fullRead,
         JSON.stringify(job.facts ?? {}),
-        job.summary,
-        job.seniority,
-        job.employmentType,
-        job.salaryMin,
-        job.salaryMax,
-        job.salaryCurrency,
+        ...[
+          job.summary,
+          job.seniority,
+          job.employmentType,
+          job.salaryMin,
+          job.salaryMax,
+          job.salaryCurrency,
+        ].flatMap((value) => [fullRead, value, value]),
         id,
       );
       merged.add(id);

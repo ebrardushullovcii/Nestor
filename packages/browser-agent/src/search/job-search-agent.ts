@@ -108,7 +108,7 @@ export function buildExtractionSelectionContext(
   if (config.requestedListing)
     return JSON.stringify({
       purpose:
-        "Read only the requested vacancy. Keep its identity through redirects; report a closed vacancy as closed. Other jobs on a landed board are not this vacancy. Do not assess fit.",
+        "Read the requested vacancy. Keep its identity through redirects; report a closed vacancy as closed. If the supplied address is actually an index, collect its genuine vacancy cards under their own URLs instead; do not save the index as a vacancy. Do not assess fit.",
       requestedListing: config.requestedListing,
       sourceInstructions: config.promptContext.siteInstructions ?? [],
     });
@@ -511,11 +511,17 @@ export async function runJobSearchAgent(
   const pageTools = createPageTools(
     {
       ...hands,
+      readText: (ref) =>
+        !ref && hands.readLinkedText
+          ? hands.readLinkedText()
+          : hands.readText(ref),
       observe: async () => {
         let observation = await hands.observe();
         observation = {
           ...observation,
-          bodyTextExcerpt: await hands.readText(),
+          bodyTextExcerpt: hands.readLinkedText
+            ? await hands.readLinkedText()
+            : await hands.readText(),
         };
         // A page that has not drawn yet (an app shell still fetching its
         // list) is looked at again after a moment, rather than spending a
@@ -529,7 +535,9 @@ export async function runJobSearchAgent(
           observation = await hands.observe();
           observation = {
             ...observation,
-            bodyTextExcerpt: await hands.readText(),
+            bodyTextExcerpt: hands.readLinkedText
+              ? await hands.readLinkedText()
+              : await hands.readText(),
           };
         }
         observationRevision += 1;
@@ -1264,6 +1272,17 @@ export async function runJobSearchAgent(
               type: "boolean",
               description: "true when you could not make progress.",
             },
+            coverageComplete: {
+              type: "boolean",
+              description:
+                "Your coverage judgment: false when relevant result pages, cards or API pages remain unread. Finishing a run does not mean exhausting its source.",
+            },
+            remainingWork: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Your account of unread pages, cards, queries or API cursors, including their observed addresses or identifiers. Empty when nothing remains in the requested scope.",
+            },
             needsPerson: {
               type: "boolean",
               description:
@@ -1796,7 +1815,11 @@ ${part.text}`),
       loop.ending === "finished" &&
       finish &&
       !finish.stuck &&
-      !finish.needsPerson;
+      !finish.needsPerson &&
+      finish.data.coverageComplete !== false;
+    const remainingWork = asStringList(finish?.data.remainingWork);
+    if (remainingWork.length)
+      notes.push(`Work left by the model: ${remainingWork.join("; ")}`);
     const unfinishedReads =
       pendingPageReads.size > 0 &&
       (isSourceCheck ||

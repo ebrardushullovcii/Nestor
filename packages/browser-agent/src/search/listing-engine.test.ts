@@ -43,11 +43,15 @@ function metadataClient(
   return {
     chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
       const data = JSON.parse(String(messages[1].content)) as {
-        listings: { id: number; title: string }[];
+        listings: {
+          id: number;
+          title: string;
+          links: { label: string; url: string }[];
+        }[];
       };
       return Promise.resolve({
         content: JSON.stringify({
-          jobs: data.listings.map(({ id, title }) => ({
+          jobs: data.listings.map(({ id, title, links }) => ({
             id,
             title,
             company,
@@ -58,6 +62,10 @@ function metadataClient(
             seniority: null,
             salaryText: null,
             closed: false,
+            applyUrl:
+              links.find(
+                (link) => link.label === "Apply now" || link.label === "Apply",
+              )?.url ?? null,
           })),
         }),
       });
@@ -526,7 +534,7 @@ test("collects all observed pages without AI, ignoring editorial links and prese
   expect(readPage).toHaveBeenCalledTimes(2);
 });
 
-test("screens titles in one call, retains senior variants and skips saved and rejected cards on repeat", async () => {
+test("screens titles once, refreshes only named saved postings and skips unchanged saved cards", async () => {
   const cards = [
     card("Data Analyst"),
     card("Senior Data Analyst"),
@@ -548,10 +556,12 @@ test("screens titles in one call, retains senior variants and skips saved and re
     cards,
     goals,
     lookupKnownUrls: () => Promise.resolve([cards[3].url]),
+    refreshUrls: [cards[3].url],
   });
   expect(first.related.map((card) => card.title)).toEqual([
     "Data Analyst",
     "Senior Data Analyst",
+    "Saved",
   ]);
   expect(first.seen.map((card) => card.verdict)).toEqual(["unrelated"]);
   const again = await screenCards({
@@ -694,6 +704,54 @@ test("identical cards on different sources retain each URL's own full read and a
     expect(job.applyUrl).toBe(new URL("/apply", job.url).href);
   }
 });
+
+test.each([undefined, null, "https://employer.example/forms/one"])(
+  "the metadata model gets own-page links, and code never guesses an application link when it returns %s",
+  async (applyUrl) => {
+    const client = metadataClient();
+    client.chatWithTools.mockResolvedValueOnce({
+      content: JSON.stringify({
+        jobs: [
+          {
+            id: 0,
+            title: "Backend Engineer",
+            company: "Own Employer",
+            location: "Remote",
+            workModes: ["remote"],
+            sourceJobId: null,
+            employmentType: null,
+            seniority: null,
+            salaryText: null,
+            ...(applyUrl !== undefined ? { applyUrl } : {}),
+          },
+        ],
+      }),
+    });
+    const result = await readListings({
+      cards: [card("Backend Engineer")],
+      client,
+      readPage: (finalUrl) =>
+        Promise.resolve({
+          finalUrl,
+          html: '<main><h1>Backend Engineer</h1><p>Own employer and full duties.</p><a href="/blog/applying-for-citizenship">Applying for citizenship</a><a href="https://employer.example/forms/one">Send your application</a></main>',
+        }),
+    });
+    const payload = JSON.parse(
+      String(client.chatWithTools.mock.calls[0][0][1].content),
+    ) as { listings: { links: { label: string; url: string }[] }[] };
+    expect(payload.listings[0]?.links).toEqual([
+      {
+        label: "Applying for citizenship",
+        url: "https://board.example/blog/applying-for-citizenship",
+      },
+      {
+        label: "Send your application",
+        url: "https://employer.example/forms/one",
+      },
+    ]);
+    expect(result.jobs[0]?.applyUrl).toBe(applyUrl ?? null);
+  },
+);
 
 test("an authenticated listing is deferred to the browser lane after HTTP refuses it", async () => {
   const listing = {

@@ -161,6 +161,154 @@ function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
   };
 }
 
+test("a clean model finish retains its report of unread source pages", async () => {
+  const reason = "Read page 1 of 53; the other pages remain unread.";
+  const result = await runJobSearchAgent({
+    hands: hands({ current: rawPage() }),
+    config: config({ inventoryOnly: true }),
+    llmClient: scripted([
+      {
+        name: "finish",
+        args: {
+          reason,
+          stuck: false,
+          needsPerson: false,
+          coverageComplete: false,
+          remainingWork: ["API pages 2–53, beginning with /api/jobs?page=2"],
+        },
+      },
+    ]),
+    jobExtractor: extractor,
+  });
+  expect(result.incomplete).toBe(true);
+  expect(result.phaseCompletionReason).toBe(reason);
+  expect(result.warning).toContain("API pages 2–53");
+  expect(result.accessBlockerReason).toBeUndefined();
+});
+
+test("a supplied index can save its postings from data rather than ask for a vacancy URL", async () => {
+  const index = "https://jobs.example.test/categories/engineering";
+  const postings = [1, 2].map((id) => ({
+    canonicalUrl: `https://jobs.example.test/jobs/${id}`,
+    title: `Platform Engineer ${id}`,
+    company: `Employer ${id}`,
+    location: "Remote",
+    description: `Complete own duties and requirements for posting ${id}`,
+  }));
+  const result = await runJobSearchAgent({
+    hands: hands({
+      current: rawPage({
+        url: index,
+        bodyText: "Engineering vacancies, two cards",
+      }),
+    }),
+    config: config({
+      requestedListing: {
+        url: index,
+        title: "Engineering vacancies",
+        text: "Category index",
+      },
+    }),
+    llmClient: scripted([
+      { name: "save_jobs_from_data", args: { jobs: postings } },
+      {
+        name: "finish",
+        args: {
+          reason:
+            "The supplied address is an index; collected both postings under their own URLs.",
+          coverageComplete: true,
+          remainingWork: [],
+        },
+      },
+    ]),
+    jobExtractor: { extractJobsFromPage: vi.fn(() => Promise.resolve([])) },
+  });
+  expect(result.jobs.map((job) => job.canonicalUrl)).toEqual(
+    postings.map((job) => job.canonicalUrl),
+  );
+  expect(result.jobs.map((job) => job.description)).toEqual(
+    postings.map((job) => job.description),
+  );
+  expect(result.incomplete).toBe(false);
+  expect(result.accessBlockerReason).toBeUndefined();
+});
+
+test("the model can page a public API and save all responses before reporting coverage", async () => {
+  const pages = {
+    current: rawPage({
+      bodyText: "Public API: https://jobs.example.test/api/jobs?page=1",
+    }),
+  };
+  const jobs = [1, 2].map((id) => ({
+    canonicalUrl: `https://jobs.example.test/jobs/${id}`,
+    title: `Platform Engineer ${id}`,
+    company: `Employer ${id}`,
+    location: "Remote",
+    description: `Own complete description ${id}`,
+  }));
+  const get = vi.fn((url: string) => {
+    const id = Number(new URL(url).searchParams.get("page"));
+    return Promise.resolve({
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            jobs: [jobs[id - 1]],
+            next: id === 1 ? "https://jobs.example.test/api/jobs?page=2" : null,
+          }),
+        ),
+      status: () => 200,
+      statusText: () => "OK",
+      headers: () => ({ "content-type": "application/json" }),
+      ok: () => true,
+    });
+  });
+  const page = {
+    url: () => pages.current.url!,
+    content: () => Promise.resolve("<main><p>Public jobs API</p></main>"),
+    context: () => ({ request: { get } }),
+  } as unknown as Page;
+  const result = await runJobSearchAgent({
+    page,
+    hands: hands(pages),
+    config: config({ inventoryOnly: true }),
+    llmClient: scripted([
+      {
+        name: "read_page_api",
+        args: {
+          url: "https://jobs.example.test/api/jobs?page=1",
+          reason: "The page links the API",
+        },
+      },
+      { name: "save_jobs_from_data", args: { jobs: [jobs[0]] } },
+      {
+        name: "read_page_api",
+        args: {
+          url: "https://jobs.example.test/api/jobs?page=2",
+          reason: "The API's next link",
+        },
+      },
+      { name: "save_jobs_from_data", args: { jobs: [jobs[1]] } },
+      {
+        name: "finish",
+        args: {
+          reason: "Both API pages read; next is null.",
+          coverageComplete: true,
+          remainingWork: [],
+        },
+      },
+    ]),
+    jobExtractor: extractor,
+  });
+  expect(get.mock.calls.map(([url]) => url)).toEqual([
+    "https://jobs.example.test/api/jobs?page=1",
+    "https://jobs.example.test/api/jobs?page=2",
+  ]);
+  expect(result.jobs.map((job) => job.description)).toEqual(
+    jobs.map((job) => job.description),
+  );
+  expect(result.incomplete).toBe(false);
+});
+
 function scripted(
   turns: Array<{ name: string; args?: Record<string, unknown> }>,
 ): LLMClient {
@@ -1706,6 +1854,37 @@ test("cached search judgments preserve prior listing details and do not share mu
   );
 });
 
+test("an identical inventory index retains completed own-listing reads for evidence-based reuse", () => {
+  const job = JobPostingSchema.parse({
+    ...posting("Platform Engineer", "Northwind", "j1"),
+    source: "target_site",
+    discoveredAt: "2026-10-05T10:00:00Z",
+    listingDetailFetch: {
+      attemptedAt: "2026-10-05T10:00:00Z",
+      outcome: "enriched",
+      method: "page_text",
+      detail: "Previous full read",
+    },
+  });
+  const input = config({ inventoryOnly: true });
+  const cache = createSearchResultCache();
+  cache.write(
+    input,
+    { jobs: [job], steps: 1, transcriptMessageCount: 0 },
+    "identical card index",
+  );
+  expect(cache.read(input, "identical card index")?.jobs[0]).toMatchObject({
+    canonicalUrl: job.canonicalUrl,
+    listingDetailFetch: job.listingDetailFetch,
+  });
+  // A newly fetched complete feed actually contains the full listing evidence.
+  const feed = { ...input, sourceCatalog: [job], sourceCatalogComplete: true };
+  cache.write(feed, { jobs: [job], steps: 1, transcriptMessageCount: 0 });
+  expect(cache.read(feed)?.jobs[0]?.listingDetailFetch).toEqual(
+    job.listingDetailFetch,
+  );
+});
+
 test("complete browser index reuse requires matching plain and linked reads", async () => {
   const source = rawPage({
     actions: [],
@@ -2614,7 +2793,7 @@ test("a listing read receives its exact identity without the general source-sear
   const run = config({ requestedListing, retainAllFound: true });
   const prompt = createJobSearchPrompts(run);
   expect(prompt.system).toContain(JSON.stringify(requestedListing));
-  expect(prompt.system).toContain("Do not search for other jobs");
+  expect(prompt.system).toContain("Do not save the index as a vacancy");
   expect(prompt.system).not.toContain("find a broad pool");
   expect(
     (
