@@ -7,6 +7,8 @@ import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import {
   loadOriginalResumeBytes,
+  renderApplicationResume,
+  applicationResumeSourceStillApproved,
   approvedJobResumeIdentity,
   loadApprovedJobResumeBytes,
 } from "./resume-artifacts";
@@ -519,8 +521,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           approved.pdfSha256!.toLowerCase(),
         )
       : await loadOriginalResumeBytes(profile.baseResume);
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const artifact = ApplicationResumeArtifactSchema.parse({
+    let sha256 = createHash("sha256").update(bytes).digest("hex");
+    let artifact = ApplicationResumeArtifactSchema.parse({
       id: `resume_${row.jobId}_${sha256}`,
       jobId: String(row.jobId),
       source: approved.pdfPath === null ? "original_upload" : "tailored_export",
@@ -532,9 +534,21 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       sha256,
       approvedAt: approved.approvedAt,
     });
+    let previous = applications.getWork(row.id);
+    const renderedResume = await renderApplicationResume({
+      artifact,
+      approved,
+      profile,
+      job: toResumeJob(job),
+      settings,
+      documentManager: deps.documentManager,
+      existingArtifact: previous?.resumeArtifact ?? null,
+      signal,
+    });
+    artifact = renderedResume.artifact;
+    sha256 = artifact.sha256!;
     signal.throwIfAborted();
     if (!current(row)) return;
-    let previous = applications.getWork(row.id);
     const profileDigest = profileFactsDigest(savedProfile);
     const describeForRun = (question: FormQuestion) => {
       return describeFormQuestion(question, job, profile);
@@ -778,6 +792,27 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         answerRecords: [],
       },
     );
+    if (renderedResume.docx?.ok) {
+      const docx = renderedResume.docx;
+      attachmentArtifacts.unshift({
+        assetId: `${artifact.id}_docx`,
+        questionId: null,
+        sha256: docx.sha256,
+        fileName: docx.fileName,
+        mime: docx.mimeType,
+        prompt: "Your CV",
+        questionKind: "resume",
+        assetKind: "resume",
+        loadVerifiedBytes: async () => {
+          const bytes = await readFile(docx.storagePath);
+          if (createHash("sha256").update(bytes).digest("hex") !== docx.sha256)
+            throw new Error(
+              "The approved resume's Word copy changed after rendering.",
+            );
+          return new Uint8Array(bytes);
+        },
+      });
+    }
     const letterAnswers = readSavedApplicationAnswers(
       jobs,
       [
@@ -1895,9 +1930,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                     !applications.waitsOnFile(row.id) &&
                     jobs.getJob(row.jobId)?.stage === "resume" &&
                     approved?.approvedAt === artifact.approvedAt &&
-                    (approved.pdfPath ??
-                      latestProfile.baseResume.storagePath) ===
-                      artifact.filePath &&
+                    (await applicationResumeSourceStillApproved(
+                      artifact,
+                      approved,
+                      latestProfile,
+                    )) &&
                     (personClicked ||
                       (await modeFor(row)) === "autonomous_submit") &&
                     factsUnchanged(latestProfile) &&

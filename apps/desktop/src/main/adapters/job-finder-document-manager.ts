@@ -100,6 +100,7 @@ async function renderLetterDocx(text: string): Promise<Buffer> {
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
 </Types>`,
+    { date: new Date("2000-01-01T00:00:00Z") },
   );
   zip.folder("_rels")?.file(
     ".rels",
@@ -107,6 +108,7 @@ async function renderLetterDocx(text: string): Promise<Buffer> {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`,
+    { date: new Date("2000-01-01T00:00:00Z") },
   );
   zip.folder("word")?.file(
     "document.xml",
@@ -114,7 +116,11 @@ async function renderLetterDocx(text: string): Promise<Buffer> {
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>${paragraphs}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1247" w:right="1134" w:bottom="1247" w:left="1134"/></w:sectPr></w:body>
 </w:document>`,
+    { date: new Date("2000-01-01T00:00:00Z") },
   );
+  zip.forEach((_name, entry) => {
+    entry.date = new Date("2000-01-01T00:00:00Z");
+  });
   return zip.generateAsync({
     type: "nodebuffer",
     compression: "DEFLATE",
@@ -464,15 +470,59 @@ export function createLocalJobFinderDocumentManager(
         sha256,
       };
     },
+    async renderResumeDocxArtifact(input) {
+      const directory = path.join(
+        path.join(options.outputDirectory, "..", "applications"),
+        `${Date.now()}_${randomUUID()}`,
+      );
+      await mkdir(directory, { recursive: true });
+      const fileName = `${employerFacingFileBaseName(input.profile.fullName, "resume")}.docx`;
+      const storagePath = path.join(directory, fileName);
+      const document = input.renderDocument;
+      const text = [
+        document.fullName,
+        document.headline,
+        document.location,
+        document.contactItems.map((item) => item.text).join(" | "),
+        ...document.sections.flatMap((section) => [
+          section.label,
+          section.text,
+          ...section.bullets.map((bullet) => bullet.text),
+          ...section.entries.flatMap((entry) => [
+            [entry.title, entry.subtitle, entry.location, entry.dateRange]
+              .filter(Boolean)
+              .join(" | "),
+            entry.heading,
+            entry.summary,
+            ...entry.bullets.map((bullet) => bullet.text),
+          ]),
+        ]),
+      ]
+        .filter((part) => part?.trim())
+        .join("\n\n");
+      const bytes = await renderLetterDocx(text);
+      await writeFile(storagePath, bytes);
+      return {
+        ok: true,
+        fileName,
+        mimeType:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        storagePath,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      };
+    },
     async renderResumeArtifact(input) {
       // Parallel drafts for the same employer can render in the same
       // millisecond, so uniqueness lives in the folder name and the file keeps
       // the name an employer sees ("jane-doe-resume.pdf").
       const artifactDirectory = path.join(
-        options.outputDirectory,
+        input.purpose === "application"
+          ? path.join(options.outputDirectory, "..", "applications")
+          : options.outputDirectory,
         `${Date.now()}_${randomUUID()}`,
       );
-      cleanup?.rendering(artifactDirectory);
+      if (input.purpose !== "application")
+        cleanup?.rendering(artifactDirectory);
       if (input.targetPath) cleanup?.renderingFile(input.targetPath);
       const artifactBaseName = employerFacingFileBaseName(
         input.profile.fullName,
