@@ -176,7 +176,7 @@ export const updateAiBehaviorTool = defineTool({
   name: "update_ai_behavior",
   group: "settings",
   description:
-    "Changes Settings › AI behavior and Applying writing: how much the assistant volunteers and how long it talks (aiBehavior.profileAssistant), Count remote jobs as any location (aiBehavior.jobSearch.remoteCountsAsAnyLocation: true or false), how applications are written (aiBehavior.applying), cover letters, and the resume approach (original_resume, conservative, balanced, aggressive). How picky a search is is not a setting; it is chosen on Find jobs before each search. Send only the fields to change; omitted fields and declaration approvals stay saved.",
+    "Changes Settings › AI behavior and Applying writing: how much the assistant volunteers and how long it talks (aiBehavior.profileAssistant), Count remote jobs as any location (aiBehavior.jobSearch.remoteCountsAsAnyLocation: true or false), how applications are written (aiBehavior.applying), cover letters, and the resume approach (original_resume, conservative, balanced, aggressive). How picky a search is is not a setting; it is chosen on Find jobs before each search. Browser permission changes (aiBehavior.browserPermissions: signIn, googleSignIn, solveCaptchas, createAccounts) require the person's explicit request; never turn them on merely to finish another task. Password entry, MFA and missing consent remain with the person. Send only the fields to change; omitted fields and declaration approvals stay saved.",
   parameters: json.object({
     aiBehavior: json.object({
       profileAssistant: json.object({
@@ -186,6 +186,20 @@ export const updateAiBehaviorTool = defineTool({
       jobSearch: json.object({
         remoteCountsAsAnyLocation: json.boolean(
           "Count remote jobs as any location. false requires a listing to match a saved place even when it is remote.",
+        ),
+      }),
+      browserPermissions: json.object({
+        signIn: json.boolean(
+          "Use an existing session or protected saved login when explicitly enabled.",
+        ),
+        googleSignIn: json.boolean(
+          "Use an existing Google session for sign-in or sign-up when explicitly enabled.",
+        ),
+        solveCaptchas: json.boolean(
+          "Attempt browser security checks when explicitly enabled.",
+        ),
+        createAccounts: json.boolean(
+          "Create a required site account when explicitly enabled; missing consent remains with the person.",
         ),
       }),
       applying: json.object({

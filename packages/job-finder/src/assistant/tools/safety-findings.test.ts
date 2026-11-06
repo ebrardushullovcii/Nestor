@@ -2,6 +2,7 @@ import { assistantTestReads } from "../store-reads.test-support";
 import { randomUUID } from "node:crypto";
 import {
   AiBehaviorPreferenceSchema,
+  CandidateAssetSchema,
   AssistantResultSetSchema,
   AssistantMessageSchema,
   browserAgentPermissionsOf,
@@ -14,7 +15,7 @@ import {
   createProfileServiceHarness,
 } from "../../profile-service.test-support";
 import type { AssistantBrowserLease, AssistantHostPorts } from "../ports";
-import { ASSISTANT_SYSTEM_PROMPT } from "../prompt";
+import { ASSISTANT_SYSTEM_PROMPT, buildProfileDigest } from "../prompt";
 import type { AssistantTurnSession } from "../tool-kit";
 import { recordInstructionTool } from "./application-tools";
 import {
@@ -22,7 +23,12 @@ import {
   browserUseApplicationTool,
   browserTools,
 } from "./browser-tools";
-import { editProfileTool, PROFILE_EDITING_RULES } from "./profile-tools";
+import {
+  editProfileTool,
+  PROFILE_EDITING_RULES,
+  listDocumentsTool,
+  readDocumentTool,
+} from "./profile-tools";
 import {
   setDefaultResumeLevelTool,
   updateAiBehaviorTool,
@@ -699,6 +705,137 @@ it("browser permissions start off and save one at a time without touching other 
     googleSignIn: false,
     createAccounts: true,
   });
+});
+
+it("the sidebar exposes permission changes and describes the current saved choices", async () => {
+  const ctx = world();
+  const before = await ctx.ports.readPersonalState();
+  expect(buildProfileDigest(before)).toContain(
+    "website sign-in OFF; Google sign-in/sign-up OFF; CAPTCHA OFF; account creation OFF",
+  );
+  const schema = updateAiBehaviorTool.parameters.properties.aiBehavior as {
+    properties: { browserPermissions: { properties: Record<string, unknown> } };
+  };
+  expect(
+    Object.keys(schema.properties.browserPermissions.properties).sort(),
+  ).toEqual(["createAccounts", "googleSignIn", "signIn", "solveCaptchas"]);
+  await updateAiBehaviorTool.execute(
+    updateAiBehaviorTool.input.parse({
+      aiBehavior: {
+        browserPermissions: {
+          signIn: true,
+          googleSignIn: true,
+          solveCaptchas: true,
+          createAccounts: true,
+        },
+      },
+    }),
+    ctx,
+  );
+  const enabled = await ctx.ports.readPersonalState();
+  expect(buildProfileDigest(enabled)).toContain(
+    "website sign-in ON; Google sign-in/sign-up ON; CAPTCHA ON; account creation ON",
+  );
+  expect(enabled.settings.aiBehavior?.applying.preApprovedDeclarations).toEqual(
+    before.settings.aiBehavior?.applying.preApprovedDeclarations,
+  );
+  await updateAiBehaviorTool.execute(
+    updateAiBehaviorTool.input.parse({
+      aiBehavior: { browserPermissions: { googleSignIn: false } },
+    }),
+    ctx,
+  );
+  expect(
+    browserAgentPermissionsOf((await ctx.ports.readPersonalState()).settings),
+  ).toEqual({
+    signIn: true,
+    googleSignIn: false,
+    solveCaptchas: true,
+    createAccounts: true,
+  });
+  expect(ASSISTANT_SYSTEM_PROMPT).toContain(
+    "use update_ai_behavior only for an explicit request",
+  );
+  expect(ASSISTANT_SYSTEM_PROMPT).toContain(
+    "Password entry, MFA and missing consent stay with the person",
+  );
+  expect(ASSISTANT_SYSTEM_PROMPT).not.toContain(
+    "Sign-in, CAPTCHA, MFA and account creation stay with the person",
+  );
+});
+
+it("file listing continuation reaches files beyond the first sixty without exposing paths", async () => {
+  const ctx = world();
+  ctx.ports.listDocuments = () =>
+    Promise.resolve(
+      Array.from({ length: 130 }, (_, index) =>
+        CandidateAssetSchema.parse({
+          id: `synthetic_${index}`,
+          kind: "other",
+          originalName: `synthetic_${index}.txt`,
+          mime: "text/plain",
+          byteSize: 10,
+          sha256: "a".repeat(64),
+          createdAt: "2026-11-06T00:00:00.000Z",
+          sensitivity: "sensitive",
+          consentScope: "private_storage_only",
+          retention: "until_deleted",
+        }),
+      ),
+    );
+  const ids: string[] = [];
+  const omissions: number[] = [];
+  let input: { offset?: number; limit?: number } | null = {};
+  do {
+    const result = await listDocumentsTool.execute(
+      listDocumentsTool.input.parse(input),
+      ctx,
+    );
+    const page = result.data as {
+      documents: Array<{ id: string }>;
+      omittedCount: number;
+      nextRead: { offset: number; limit: number } | null;
+    };
+    ids.push(...page.documents.map((document) => document.id));
+    omissions.push(page.omittedCount);
+    expect(JSON.stringify(result.data)).not.toContain("storagePath");
+    input = page.nextRead;
+  } while (input);
+  expect(ids).toEqual(
+    Array.from({ length: 130 }, (_, index) => `synthetic_${index}`),
+  );
+  expect(omissions).toEqual([70, 10, 0]);
+});
+
+it("file text continuation reaches the end of a long document with no missing characters", async () => {
+  const ctx = world();
+  const original = `Introduction\n${"Synthetic evidence. ".repeat(1600)}\nFinal qualification.`;
+  ctx.ports.readDocumentText = () => Promise.resolve(original);
+  type ReadPageInput = { documentId: string; offset?: number; length?: number };
+  let input: ReadPageInput | null = { documentId: "synthetic" };
+  const pieces: string[] = [];
+  do {
+    const result = await readDocumentTool.execute(
+      readDocumentTool.input.parse(input),
+      ctx,
+    );
+    const page = result.data as {
+      text: string;
+      omittedCount: number;
+      totalCharacters: number;
+      nextRead: ReadPageInput | null;
+    };
+    pieces.push(page.text);
+    expect(page.totalCharacters).toBe(original.length);
+    if (!page.nextRead) expect(page.omittedCount).toBe(0);
+    input = page.nextRead;
+  } while (input);
+  expect(pieces.length).toBeGreaterThan(2);
+  expect(pieces.join("")).toBe(original);
+  expect(
+    readDocumentTool.input.safeParse({ documentId: "synthetic", offset: -1 })
+      .success,
+  ).toBe(false);
 });
 
 it("refuses unmentioned jobs in second person without echoing internal ids", async () => {
