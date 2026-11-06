@@ -73,6 +73,11 @@ function hands(source: RawApplyPage): ApplyPageHands {
       const control = source.controls.find(
         (entry) => (entry.ref ?? `c${entry.index}`) === ref,
       );
+      if (!control)
+        return Promise.resolve({
+          ok: false,
+          error: "Stale control; observe again.",
+        });
       if (control) control.value = value;
       return Promise.resolve({ ok: true, observedValue: value });
     },
@@ -170,7 +175,7 @@ function model(
 }
 const done = { name: "finish", args: { reason: "Finished", forPerson: [] } };
 test.each(["prepare_only", "autonomous_submit"] as const)(
-  "%s passes a closed-root site-check ref directly to browser hands",
+  "%s passes a closed-root site-check ref directly to click and checkbox hands",
   async (mode) => {
     const source = page({
       clickables: [
@@ -202,11 +207,18 @@ test.each(["prepare_only", "autonomous_submit"] as const)(
       return Promise.resolve({ ok: true as const, observedValue: "clicked" });
     });
     input.hands.clickElement = click;
+    const toggle = vi.fn(input.hands.setToggle);
+    input.hands.setToggle = toggle;
     const result = await runApplyAgent(
       input,
-      model([{ name: "click", args: { ref: "s42" } }, done]),
+      model([
+        { name: "click", args: { ref: "s42" } },
+        { name: "set_checkbox", args: { ref: "s42", checked: true } },
+        done,
+      ]),
     );
     expect(click).toHaveBeenCalledOnce();
+    expect(toggle).toHaveBeenCalledWith("s42", true);
     expect(source.actions[0]?.disabled).toBe(false);
     expect(result.pauses).toEqual([]);
   },

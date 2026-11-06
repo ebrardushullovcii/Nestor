@@ -111,10 +111,17 @@ async function main() {
           )!;
           disabledResult = await hands.clickElement(submit.ref);
           assert.match(JSON.stringify(disabledResult), /disabled/iu);
+          const toolName = scenario.nested ? "set_checkbox" : "click";
           const clickResult = await tools.tools
-            .find((tool) => tool.definition.function.name === "click")!
-            .execute(JSON.stringify({ ref: checkbox.ref }), { step: 1 });
-          assert.match(JSON.stringify(clickResult), /Pressed/iu);
+            .find((tool) => tool.definition.function.name === toolName)!
+            .execute(
+              JSON.stringify({
+                ref: checkbox.ref,
+                ...(scenario.nested ? { checked: true } : {}),
+              }),
+              { step: 1 },
+            );
+          assert.match(JSON.stringify(clickResult), /Pressed|Ticked/iu);
           await page.waitForFunction(
             () =>
               !(document.querySelector("button") as HTMLButtonElement).disabled,

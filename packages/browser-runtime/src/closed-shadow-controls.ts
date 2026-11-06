@@ -244,3 +244,39 @@ export async function clickClosedShadowControl(
     await session.detach().catch(() => undefined);
   }
 }
+
+/** The same observed checkbox can be addressed by either click or set_checkbox. */
+export async function setClosedShadowToggle(
+  page: Page,
+  ref: string,
+  checked: boolean,
+): Promise<ApplyWriteResult> {
+  const target = targets.get(page)?.get(ref);
+  if (!target || target.frame.isDetached())
+    return { ok: false, error: "Stale control; observe again." };
+  const session = await page
+    .context()
+    .newCDPSession(target.frame === page.mainFrame() ? page : target.frame);
+  try {
+    const { root } = await session.send("DOM.getDocument", { depth: 0 });
+    if (root.backendNodeId !== target.document)
+      return { ok: false, error: "Stale control; observe again." };
+    const state = await inNode<{ toggle: boolean; checked: boolean }>(
+      session,
+      target.node,
+      `function(){return {toggle:this.matches('input[type="checkbox"],input[type="radio"],[role="checkbox"],[role="radio"]'),checked:typeof this.checked==='boolean'?this.checked:this.getAttribute('aria-checked')==='true'}}`,
+    );
+    if (!state.toggle)
+      return { ok: false, error: "That element is not a checkbox or radio." };
+    if (state.checked === checked)
+      return { ok: true, observedValue: checked ? "checked" : "not checked" };
+    return await clickClosedShadowControl(page, ref);
+  } catch (error) {
+    return {
+      ok: false,
+      error: `The checkbox could not be set: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  } finally {
+    await session.detach().catch(() => undefined);
+  }
+}

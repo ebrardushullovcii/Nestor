@@ -37,51 +37,58 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server?.close(() => resolve()));
 });
 
-test("a trusted click on a closed-root checkbox in a cross-origin iframe enables Submit", async () => {
-  const page = await browser.newPage();
-  try {
-    const frameLoaded = page.waitForEvent("framenavigated", {
-      predicate: (frame) => frame.url().endsWith("/frame"),
-    });
-    await page.goto(origin);
-    const frame = await frameLoaded;
-    await frame.waitForLoadState();
-    const hands = createApplyPageHands(
-      createPlaywrightApplyPageMechanics(page),
-    );
-    const before = await hands.observe();
-    expect(JSON.stringify(before)).not.toContain(
-      "synthetic-token-not-for-model",
-    );
-    const checkbox = before.clickables.find(
-      (control) => control.role === "checkbox",
-    );
-    expect(checkbox).toMatchObject({
-      label: "Verify you are human",
-      visible: true,
-      disabled: false,
-    });
-    expect(checkbox?.frame?.origin).toContain("localhost");
-    const submit = before.actions.find(
-      (action) => action.label === "Submit Application",
-    )!;
-    const disabled = await hands.clickElement(submit.ref);
-    expect(disabled.ok).toBe(false);
-    if (!disabled.ok) expect(disabled.error).toMatch(/disabled/iu);
-    expect(await hands.clickElement(checkbox!.ref)).toMatchObject({ ok: true });
-    await page.waitForFunction(() => document.body.dataset.passed === "true");
-    const after = await hands.observe();
-    expect(
-      after.actions.find((action) => action.ref === submit.ref)?.disabled,
-    ).toBe(false);
-    await page.goto(origin);
-    const stale = await hands.clickElement(checkbox!.ref);
-    expect(stale.ok).toBe(false);
-    if (!stale.ok) expect(stale.error).toMatch(/stale/iu);
-  } finally {
-    await page.close();
-  }
-});
+test.each(["click", "set_checkbox"] as const)(
+  "%s on a closed-root checkbox in a cross-origin iframe is trusted and enables Submit",
+  async (tool) => {
+    const page = await browser.newPage();
+    try {
+      const frameLoaded = page.waitForEvent("framenavigated", {
+        predicate: (frame) => frame.url().endsWith("/frame"),
+      });
+      await page.goto(origin);
+      const frame = await frameLoaded;
+      await frame.waitForLoadState();
+      const hands = createApplyPageHands(
+        createPlaywrightApplyPageMechanics(page),
+      );
+      const before = await hands.observe();
+      expect(JSON.stringify(before)).not.toContain(
+        "synthetic-token-not-for-model",
+      );
+      const checkbox = before.clickables.find(
+        (control) => control.role === "checkbox",
+      );
+      expect(checkbox).toMatchObject({
+        label: "Verify you are human",
+        visible: true,
+        disabled: false,
+      });
+      expect(checkbox?.frame?.origin).toContain("localhost");
+      const submit = before.actions.find(
+        (action) => action.label === "Submit Application",
+      )!;
+      const disabled = await hands.clickElement(submit.ref);
+      expect(disabled.ok).toBe(false);
+      if (!disabled.ok) expect(disabled.error).toMatch(/disabled/iu);
+      expect(
+        await (tool === "click"
+          ? hands.clickElement(checkbox!.ref)
+          : hands.setToggle(checkbox!.ref, true)),
+      ).toMatchObject({ ok: true });
+      await page.waitForFunction(() => document.body.dataset.passed === "true");
+      const after = await hands.observe();
+      expect(
+        after.actions.find((action) => action.ref === submit.ref)?.disabled,
+      ).toBe(false);
+      await page.goto(origin);
+      const stale = await hands.clickElement(checkbox!.ref);
+      expect(stale.ok).toBe(false);
+      if (!stale.ok) expect(stale.error).toMatch(/stale/iu);
+    } finally {
+      await page.close();
+    }
+  },
+);
 
 test("refs follow DOM identity across label, value, URL and ordinal changes", async () => {
   const page = await browser.newPage();

@@ -41,6 +41,7 @@ import { readPageMessages } from "./page-messages";
 import {
   readClosedShadowControls,
   clickClosedShadowControl,
+  setClosedShadowToggle,
 } from "./closed-shadow-controls";
 import {
   controlSnapshot,
@@ -2871,6 +2872,7 @@ export function createPlaywrightApplyPageMechanics(
       }
     },
     setToggle: async (ref, checked): Promise<ApplyWriteResult> => {
+      if (/^s\d+$/u.test(ref)) return setClosedShadowToggle(page, ref, checked);
       const toggle = actionLocator(page, ref);
       if (toggle) return pressToggleButton(toggle, checked);
       const locator = controlLocator(page, ref);
