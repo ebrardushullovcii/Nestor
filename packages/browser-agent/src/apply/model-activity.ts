@@ -4,6 +4,7 @@ import type { LLMClient } from "../agent/contracts";
 // Structural compatibility while the shared stream-liveness API lands.
 type StreamEvent =
   | { type: "attempt_started"; attempt: number }
+  | { type: "provider_wait"; delayMs: number }
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_call_started"; index: number; name: string }

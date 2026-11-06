@@ -1,4 +1,5 @@
 import type { LLMClient } from "@nestor/browser-agent";
+import { createOpenAiCompatibleJobFinderAiClient } from "@nestor/ai-providers";
 import * as browserAgent from "@nestor/browser-agent";
 import {
   ApplicationAuthorityEnvelopeSchema,
@@ -609,6 +610,89 @@ function modelThatGetsStuck(): LLMClient {
 }
 
 describe("agent application preparation seam", () => {
+  test("an application stays running through ten provider 429s and finishes ready", async () => {
+    vi.useFakeTimers();
+    const openSession = session();
+    let calls = 0;
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() =>
+        Promise.resolve(
+          ++calls <= 10
+            ? new Response(
+                JSON.stringify({ error: { message: "at capacity" } }),
+                {
+                  status: 429,
+                  headers: {
+                    "content-type": "application/json",
+                    "Retry-After": "30",
+                  },
+                },
+              )
+            : new Response(
+                JSON.stringify({
+                  choices: [
+                    {
+                      message: {
+                        tool_calls: [
+                          {
+                            id: "finish-after-wait",
+                            type: "function",
+                            function: {
+                              name: "finish",
+                              arguments: '{"reason":"Nothing left to fill in"}',
+                            },
+                          },
+                        ],
+                      },
+                      finish_reason: "tool_calls",
+                    },
+                  ],
+                }),
+                { headers: { "content-type": "application/json" } },
+              ),
+        ),
+      );
+    const client = createOpenAiCompatibleJobFinderAiClient({
+      apiKey: "synthetic",
+      baseUrl: "https://model.example.test/v1",
+      model: "synthetic",
+    });
+    const notes: string[] = [];
+    const facts = executionInput();
+    const prepare = createApplyFormPreparer({
+      executionInput: facts,
+      aiClient: client,
+      siteLabel: "Local replica",
+      onProgress: (progress) => {
+        notes.push(progress.note);
+      },
+    });
+    let completed = false;
+    try {
+      const pending = prepare({
+        session: openSession,
+        currentUrl: PAGE_URL,
+        startedAt: new Date().toISOString(),
+      }).then((value) => {
+        completed = true;
+        return value;
+      });
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(completed).toBe(false);
+      expect(calls).toBe(10);
+      expect(notes).toContain("waiting for the AI provider");
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await pending;
+      expect(result.state).toBe("ready");
+      expect(result.blocker).toBeNull();
+      expect(calls).toBe(11);
+    } finally {
+      fetchMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   test("gives a continuation the runtime's live bound page instead of stale saved targets", async () => {
     const facts = executionInput();
     facts.job = SavedJobSchema.parse({

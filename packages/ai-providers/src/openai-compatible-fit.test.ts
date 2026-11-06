@@ -66,7 +66,6 @@ test.each([
         apiMode,
         reasoningEffort: "medium",
         streaming: false,
-        maxAttempts: 1,
       });
       const input = {
         assessmentDate: "2026-10-23",
@@ -709,7 +708,6 @@ test("short batch ids map only to this request's jobs without changing verdicts"
       baseUrl: "https://example.com/v1",
       model: "synthetic-model",
       streaming: false,
-      maxAttempts: 1,
     });
     const input = {
       assessmentDate: "2026-10-21",
@@ -756,7 +754,6 @@ test("an oversized batch fails before sending rather than truncating column posi
       model: "synthetic-model",
       contextWindowTokens: 16_000,
       streaming: false,
-      maxAttempts: 1,
     });
     await expect(
       client.judgeJobFits!({
@@ -888,7 +885,6 @@ test("a full fit request keeps current evidence and goals while excluding saved 
       model: "synthetic-model",
       apiMode: "chat_completions",
       streaming: false,
-      maxAttempts: 1,
     });
     const result = await client.assessJobFit({
       assessmentDate: "2026-10-13",

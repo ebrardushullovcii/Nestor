@@ -5945,9 +5945,7 @@ async function runMeasuredApplyAgent(
     subjectLabel: config.siteLabel,
     ceilings: {
       maxSteps: config.runControl?.maxSteps ?? DEFAULT_MAX_STEPS,
-      // A timed-out model turn has produced no tool calls, so retrying the
-      // exact turn once cannot repeat a page write or a submission attempt.
-      modelTurnTimeoutRetries: 1,
+
       noProgressStepLimit:
         config.runControl?.noProgressStepLimit ?? Number.POSITIVE_INFINITY,
     },

@@ -688,45 +688,6 @@ test("a provider access rejection is neither retried nor turned into unchecked s
   }
 });
 
-test("an exhausted transport retry budget is not run a second time by claim checking", async () => {
-  const { job, profile } = context();
-  const draft = draftWith([
-    {
-      text: "Unique retry budget claim that must remain unchecked after unavailable provider503",
-      origin: "ai_generated",
-    },
-  ]);
-  const fetchMock = vi
-    .spyOn(globalThis, "fetch")
-    .mockImplementation(() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({ error: { message: "Service unavailable" } }),
-          { status: 503, headers: { "content-type": "application/json" } },
-        ),
-      ),
-    );
-  const aiClient = createOpenAiCompatibleJobFinderAiClient({
-    apiKey: "synthetic",
-    baseUrl: "https://example.test/v1",
-    model: "synthetic",
-    maxAttempts: 2,
-    retryBaseDelayMs: 1,
-  });
-  try {
-    const result = await withResumeClaimChecks({
-      draft,
-      job,
-      profile,
-      aiClient,
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(result.claimChecks).toEqual([]);
-  } finally {
-    fetchMock.mockRestore();
-  }
-});
-
 test("claim reuse is invalidated when the target job's checker context changes", async () => {
   const { job, profile } = context();
   const draft = draftWith([

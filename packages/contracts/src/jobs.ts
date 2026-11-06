@@ -427,6 +427,7 @@ export const JobSearchSourcePageSchema = z.object({
 });
 export type JobSearchSourcePage = z.infer<typeof JobSearchSourcePageSchema>;
 export const JobSearchProgressSchema = z.object({
+  providerWaiting: z.boolean().optional(),
   httpQueued: z.number(),
   httpActive: z.number(),
   browserQueued: z.number(),

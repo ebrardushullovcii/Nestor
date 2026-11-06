@@ -1,4 +1,5 @@
 import { setMaxListeners } from "node:events";
+import { withModelProviderProgress } from "@nestor/ai-providers";
 import {
   createJobSitesStore,
   createSearchSourcesStore,
@@ -64,6 +65,7 @@ export function createJobSearchRunner(
   let continuation: ReturnType<typeof setTimeout> | null = null;
   let recoveryQueue: FitQueue | null = null;
   let recoveryError: string | null = null;
+  const providerWaits = new Set<object>();
   let visibleIds: readonly number[] = [];
   const scheduleFit = (delay = 300) => {
     if (continuation) clearTimeout(continuation);
@@ -103,7 +105,11 @@ export function createJobSearchRunner(
       search: search ? structuredClone(search) : null,
       ...compact,
       progress: compact.progress
-        ? { ...compact.progress, ...active?.queueProgress?.() }
+        ? {
+            ...compact.progress,
+            ...active?.queueProgress?.(),
+            providerWaiting: providerWaits.size > 0,
+          }
         : null,
       sourceRevision: revision,
     };
@@ -138,6 +144,16 @@ export function createJobSearchRunner(
     if (notification) return;
     notification = setTimeout(emit, 250);
     notification.unref();
+  };
+  const withProviderProgress = <T>(work: () => Promise<T>): Promise<T> => {
+    const token = {};
+    return withModelProviderProgress((waiting) => {
+      if (waiting) providerWaits.add(token);
+      else providerWaits.delete(token);
+      notify(true);
+    }, work).finally(() => {
+      if (providerWaits.delete(token)) notify(true);
+    });
   };
   const update = (
     run: ActiveSearch,
@@ -667,10 +683,12 @@ export function createJobSearchRunner(
         const started = structuredClone(run.record);
         void yieldTurn()
           .then(() =>
-            execute(run, context, targets, {
-              ids: new Set(forced?.targets.map((target) => target.id)),
-              full: forced?.full ?? false,
-            }),
+            withProviderProgress(() =>
+              execute(run, context, targets, {
+                ids: new Set(forced?.targets.map((target) => target.id)),
+                full: forced?.full ?? false,
+              }),
+            ),
           )
           .catch((error: unknown) => {
             finish(
@@ -793,68 +811,70 @@ export function createJobSearchRunner(
       recoveryError = null;
       const controller = new AbortController();
       const result = Promise.resolve()
-        .then(async () => {
-          const run = active;
-          if (run && !run.record) await run.starting;
-          const liveFits = run
-            ? await abortable(run.ready, controller.signal)
-            : null;
-          // Use the live queue, so recovery and discovery cannot score a job twice.
-          if (run && !run.controller.signal.aborted && liveFits) {
-            const current = await abortable(
+        .then(() =>
+          withProviderProgress(async () => {
+            const run = active;
+            if (run && !run.record) await run.starting;
+            const liveFits = run
+              ? await abortable(run.ready, controller.signal)
+              : null;
+            // Use the live queue, so recovery and discovery cannot score a job twice.
+            if (run && !run.controller.signal.aborted && liveFits) {
+              const current = await abortable(
+                deps.readContext(),
+                controller.signal,
+              );
+              current.remoteCountsAsAnyLocation =
+                deps.readRemoteCountsAsAnyLocation?.() ??
+                current.remoteCountsAsAnyLocation ??
+                true;
+              deps.store.syncFitContext(fitContextFingerprint(current));
+              const before = liveFits.scored;
+              liveFits.enqueue([
+                ...visibleIds,
+                ...deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
+              ]);
+              await liveFits.drain();
+              if (liveFits.needsAnotherPass) scheduleFit(5000);
+              return liveFits.scored - before;
+            }
+            controller.signal.throwIfAborted();
+            const context = await abortable(
               deps.readContext(),
               controller.signal,
             );
-            current.remoteCountsAsAnyLocation =
+            context.remoteCountsAsAnyLocation =
               deps.readRemoteCountsAsAnyLocation?.() ??
-              current.remoteCountsAsAnyLocation ??
+              context.remoteCountsAsAnyLocation ??
               true;
-            deps.store.syncFitContext(fitContextFingerprint(current));
-            const before = liveFits.scored;
-            liveFits.enqueue([
+            deps.store.syncFitContext(fitContextFingerprint(context));
+            const fits = createFitQueue(
+              deps,
+              context,
+              controller.signal,
+              concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
+              () => notify(),
+              () => {
+                recoveryError =
+                  "Some saved jobs could not be scored. Your progress is kept; retry fit to continue.";
+                notify();
+              },
+              // The last search's note was for that search only.
+              search ? { ...search.settings, note: "" } : undefined,
+              () => notify(),
+            );
+            recoveryQueue = fits;
+            fits.enqueue([
               ...visibleIds,
               ...deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
             ]);
-            await liveFits.drain();
-            if (liveFits.needsAnotherPass) scheduleFit(5000);
-            return liveFits.scored - before;
-          }
-          controller.signal.throwIfAborted();
-          const context = await abortable(
-            deps.readContext(),
-            controller.signal,
-          );
-          context.remoteCountsAsAnyLocation =
-            deps.readRemoteCountsAsAnyLocation?.() ??
-            context.remoteCountsAsAnyLocation ??
-            true;
-          deps.store.syncFitContext(fitContextFingerprint(context));
-          const fits = createFitQueue(
-            deps,
-            context,
-            controller.signal,
-            concurrency(deps.concurrency?.fit ?? deps.fitRequests?.(), 6),
-            () => notify(),
-            () => {
-              recoveryError =
-                "Some saved jobs could not be scored. Your progress is kept; retry fit to continue.";
-              notify();
-            },
-            // The last search's note was for that search only.
-            search ? { ...search.settings, note: "" } : undefined,
-            () => notify(),
-          );
-          recoveryQueue = fits;
-          fits.enqueue([
-            ...visibleIds,
-            ...deps.store.unscoredJobIds(Number.MAX_SAFE_INTEGER),
-          ]);
-          fits.prioritize(visibleIds);
-          await fits.drain();
-          if (fits.needsAnotherPass && !controller.signal.aborted)
-            scheduleFit(5000);
-          return fits.scored;
-        })
+            fits.prioritize(visibleIds);
+            await fits.drain();
+            if (fits.needsAnotherPass && !controller.signal.aborted)
+              scheduleFit(5000);
+            return fits.scored;
+          }),
+        )
         .catch((error: unknown) => {
           if (controller.signal.aborted) return 0;
           recoveryError =

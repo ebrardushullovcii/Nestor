@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { access, copyFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { withModelProviderProgress } from "@nestor/ai-providers";
 import {
   canRetrySavedResumeImport,
   type CandidateProfile,
@@ -311,28 +312,38 @@ async function importResumeFile(
       ? "Reading your resume and filling in your profile. Anything that would replace details you already saved waits for your review."
       : "Checking what can be recovered from this file.",
   );
-  const snapshot = await profileService
-    .runResumeImport({
-      baseResume,
-      ...(options.signal ? { signal: options.signal } : {}),
-      documentBundle: extractedResume.bundle,
-      importWarnings: [...extractedResume.warnings, ...visionWarnings],
-      ...(generatedVisionArtifact.artifact
-        ? { visionArtifact: generatedVisionArtifact.artifact }
-        : {}),
-    })
-    .then(readImported)
-    .catch(async (error: unknown) => {
-      const saved = await readImported();
-      if (
-        saved.profile.baseResume.id === resumeId &&
-        saved.latestResumeImportRun?.sourceResumeId === resumeId &&
-        saved.latestResumeImportRun.status === "failed"
-      ) {
-        return saved;
-      }
-      throw error;
-    });
+  const snapshot = await withModelProviderProgress(
+    (waiting) =>
+      reportProgress(
+        "building_profile",
+        waiting
+          ? "Waiting for the AI provider"
+          : "Reading your resume and filling in your profile.",
+      ),
+    () =>
+      profileService
+        .runResumeImport({
+          baseResume,
+          ...(options.signal ? { signal: options.signal } : {}),
+          documentBundle: extractedResume.bundle,
+          importWarnings: [...extractedResume.warnings, ...visionWarnings],
+          ...(generatedVisionArtifact.artifact
+            ? { visionArtifact: generatedVisionArtifact.artifact }
+            : {}),
+        })
+        .then(readImported)
+        .catch(async (error: unknown) => {
+          const saved = await readImported();
+          if (
+            saved.profile.baseResume.id === resumeId &&
+            saved.latestResumeImportRun?.sourceResumeId === resumeId &&
+            saved.latestResumeImportRun.status === "failed"
+          ) {
+            return saved;
+          }
+          throw error;
+        }),
+  );
 
   reportProgress(
     "saving_results",

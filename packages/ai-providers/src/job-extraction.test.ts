@@ -666,9 +666,7 @@ describe("job extraction with openai-compatible client", () => {
         parsedUserPayload && typeof parsedUserPayload === "object"
           ? (parsedUserPayload as { pageText?: unknown }).pageText
           : undefined;
-      expect(
-        typeof pageText === "string" ? pageText.length : 0,
-      ).toBe(15000);
+      expect(typeof pageText === "string" ? pageText.length : 0).toBe(15000);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -702,8 +700,9 @@ describe("job extraction with openai-compatible client", () => {
       })) as typeof fetch;
 
     try {
-      const client =
-        createJobFinderAiClientFromEnvironment(createEnvironment());
+      const client = createJobFinderAiClientFromEnvironment(
+        createEnvironment({ NESTOR_AI_TIMEOUT_MS: "5000" }),
+      );
       const extractionPromise = client.extractJobsFromPage({
         pageText: "Frontend Engineer role at Acme",
         pageUrl: "https://jobs.example.com/search",
@@ -714,8 +713,7 @@ describe("job extraction with openai-compatible client", () => {
       const rejected = expect(extractionPromise).rejects.toThrow(
         "Model request timed out",
       );
-      // No absolute clock cuts off a working read. Two silent 180s attempts
-      // (plus retry backoff) report a technical failure.
+      // An explicitly configured operator deadline still applies.
       await vi.advanceTimersByTimeAsync(365_000);
 
       await rejected;

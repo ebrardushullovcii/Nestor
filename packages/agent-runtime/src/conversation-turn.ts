@@ -314,7 +314,6 @@ export async function runConversationTurn(
     const call = modelCalls;
     await emit({ type: "model_call_started", call });
     let response: Awaited<ReturnType<ConversationModel["chatWithTools"]>>;
-    let idleRetries = 0;
     let outputRetries = 0;
     let outputLimit = options.ceilings?.maxOutputTokens;
     for (;;) {
@@ -355,16 +354,12 @@ export async function runConversationTurn(
           await options.onOutputLimitRetry?.();
           continue;
         }
-        if (
-          error instanceof ModelTurnTimeoutError &&
-          error.kind === "idle" &&
-          idleRetries++ === 0
-        ) {
+        if (error instanceof ModelTurnTimeoutError && error.kind === "idle") {
           modelCalls += 1;
           await emit({
             type: "stream",
             call,
-            event: { type: "attempt_started", attempt: 1 },
+            event: { type: "provider_wait", delayMs: 0 },
           });
           continue;
         }

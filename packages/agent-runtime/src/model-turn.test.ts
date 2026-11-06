@@ -97,30 +97,25 @@ for (const kind of ["agent", "conversation"] as const) {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  test(`${kind}: a silent connection retries once, then reports a technical failure`, async () => {
+  test(`${kind}: a silent connection reconnects repeatedly and succeeds`, async () => {
     vi.useFakeTimers();
     const signals: AbortSignal[] = [];
     const chatWithTools = vi.fn<ConversationModel["chatWithTools"]>(
       (_messages, _tools, options) => {
         signals.push(options!.signal!);
-        return new Promise(() => undefined);
+        return signals.length <= 3
+          ? new Promise(() => undefined)
+          : Promise.resolve({ content: "Done" });
       },
     );
     const pending = run(kind, { chatWithTools }, { idleMs: 1000 });
     await vi.advanceTimersByTimeAsync(999);
     expect(chatWithTools).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1001);
+    await vi.advanceTimersByTimeAsync(2001);
     const result = await pending;
-    expect(result.ending).toBe("model_failed");
-    expect(chatWithTools).toHaveBeenCalledTimes(2);
-    expect(signals.every((signal) => signal.aborted)).toBe(true);
-    expect(
-      "error" in result && result.error instanceof Error
-        ? result.error.message
-        : "reason" in result
-          ? result.reason
-          : "",
-    ).toContain("stopped responding");
+    expect(result.ending).toBe(kind === "agent" ? "finished" : "replied");
+    expect(chatWithTools).toHaveBeenCalledTimes(4);
+    expect(signals.slice(0, 3).every((signal) => signal.aborted)).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
 

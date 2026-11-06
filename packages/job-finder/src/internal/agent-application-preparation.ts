@@ -1,4 +1,5 @@
 import { selfLimitSlice } from "@nestor/core";
+import { withModelProviderProgress } from "@nestor/ai-providers";
 import { browserAgentPermissionsOf } from "@nestor/contracts";
 import { resolveListingCountry } from "../applications/questions";
 import {
@@ -1035,61 +1036,82 @@ export function createApplyFormPreparer(input: {
             await onProgress?.(progress);
           }
         : undefined;
-    return runAgentApplicationPreparation({
-      session,
-      currentUrl,
-      executionInput: input.executionInput,
-      ...(input.applicationRecordId
-        ? { applicationRecordId: input.applicationRecordId }
-        : {}),
-      searchPreferences: input.searchPreferences,
-      llmClient,
-      ...(status?.modelContextWindowTokens
-        ? { modelContextWindowTokens: status.modelContextWindowTokens }
-        : {}),
-      ...(status?.modelMaxOutputTokens
-        ? { modelMaxOutputTokens: status.modelMaxOutputTokens }
-        : {}),
-      questionReadCacheScope: input.aiClient,
-      ...(input.reusableAnswers
-        ? { reusableAnswers: input.reusableAnswers }
-        : {}),
-      ...(input.readReusableAnswers
-        ? { readReusableAnswers: input.readReusableAnswers }
-        : {}),
-      ...(input.initialQuestionContexts
-        ? { initialQuestionContexts: input.initialQuestionContexts }
-        : {}),
-      ...(input.initialPickerAttempts
-        ? { initialPickerAttempts: input.initialPickerAttempts }
-        : {}),
-      ...(input.uploadsConfirmedByPerson?.length
-        ? { uploadsConfirmedByPerson: input.uploadsConfirmedByPerson }
-        : {}),
-      ...(input.earlierAttachments?.length
-        ? { earlierAttachments: input.earlierAttachments }
-        : {}),
-      ...(input.replay ? { replay: input.replay } : {}),
-      ...(input.earlierActivity?.length
-        ? { earlierActivity: input.earlierActivity }
-        : {}),
-      ...(input.initialUnansweredPickerQuestions
-        ? {
-            initialUnansweredPickerQuestions:
-              input.initialUnansweredPickerQuestions,
-          }
-        : {}),
-      startedAt,
-      siteLabel: input.siteLabel,
-      providerLabel: status?.label ?? null,
-      modelLabel: status?.model ?? null,
-      ...(input.letters ? { letters: input.letters } : {}),
-      ...(input.envelope ? { envelope: input.envelope } : {}),
-      ...(input.onPrepared ? { onPrepared: input.onPrepared } : {}),
-      ...(reportProgress ? { onProgress: reportProgress } : {}),
-      ...(signal ? { signal } : {}),
-      ...(input.now ? { now: input.now } : {}),
-    });
+    let lastProgress: Parameters<NonNullable<typeof reportProgress>>[0] = {
+      step: 0,
+      progressSteps: 0,
+      elapsedMs: 0,
+      note: "reading the application form",
+    };
+    let waitingForProvider = false;
+    const progress = (value: typeof lastProgress) => {
+      lastProgress = value;
+      return reportProgress?.({
+        ...value,
+        note: waitingForProvider ? "waiting for the AI provider" : value.note,
+      });
+    };
+    return withModelProviderProgress(
+      (waiting) => {
+        waitingForProvider = waiting;
+        void progress(lastProgress);
+      },
+      () =>
+        runAgentApplicationPreparation({
+          session,
+          currentUrl,
+          executionInput: input.executionInput,
+          ...(input.applicationRecordId
+            ? { applicationRecordId: input.applicationRecordId }
+            : {}),
+          searchPreferences: input.searchPreferences,
+          llmClient,
+          ...(status?.modelContextWindowTokens
+            ? { modelContextWindowTokens: status.modelContextWindowTokens }
+            : {}),
+          ...(status?.modelMaxOutputTokens
+            ? { modelMaxOutputTokens: status.modelMaxOutputTokens }
+            : {}),
+          questionReadCacheScope: input.aiClient,
+          ...(input.reusableAnswers
+            ? { reusableAnswers: input.reusableAnswers }
+            : {}),
+          ...(input.readReusableAnswers
+            ? { readReusableAnswers: input.readReusableAnswers }
+            : {}),
+          ...(input.initialQuestionContexts
+            ? { initialQuestionContexts: input.initialQuestionContexts }
+            : {}),
+          ...(input.initialPickerAttempts
+            ? { initialPickerAttempts: input.initialPickerAttempts }
+            : {}),
+          ...(input.uploadsConfirmedByPerson?.length
+            ? { uploadsConfirmedByPerson: input.uploadsConfirmedByPerson }
+            : {}),
+          ...(input.earlierAttachments?.length
+            ? { earlierAttachments: input.earlierAttachments }
+            : {}),
+          ...(input.replay ? { replay: input.replay } : {}),
+          ...(input.earlierActivity?.length
+            ? { earlierActivity: input.earlierActivity }
+            : {}),
+          ...(input.initialUnansweredPickerQuestions
+            ? {
+                initialUnansweredPickerQuestions:
+                  input.initialUnansweredPickerQuestions,
+              }
+            : {}),
+          startedAt,
+          siteLabel: input.siteLabel,
+          providerLabel: status?.label ?? null,
+          modelLabel: status?.model ?? null,
+          ...(input.letters ? { letters: input.letters } : {}),
+          ...(input.envelope ? { envelope: input.envelope } : {}),
+          ...(input.onPrepared ? { onPrepared: input.onPrepared } : {}),
+          onProgress: progress,
+          ...(signal ? { signal } : {}),
+          ...(input.now ? { now: input.now } : {}),
+        }),
+    );
   };
 }
 

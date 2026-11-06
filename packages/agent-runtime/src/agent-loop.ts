@@ -147,12 +147,7 @@ export interface AgentLoopCeilings {
   browserFailureLimit?: number;
   /** Silence between stream events; each event restarts this clock. */
   modelIdleTimeoutMs?: number;
-  /**
-   * Retries a model turn that produced no response or a typed transient HTTP
-   * failure and therefore executed no tools. The same messages are reused and
-   * no tools from a failed response are executed.
-   */
-  modelTurnTimeoutRetries?: number;
+  /** Silence in a tool that reports no progress. */
   toolIdleTimeoutMs?: number;
 }
 
@@ -257,18 +252,6 @@ const STALE_TOOL_RESULT_KEEP_RECENT = 4;
 const STALE_TOOL_RESULT_BATCH = 4;
 const STALE_TOOL_RESULT_NOTE =
   "[Older answer shortened to save room. Look again for the page as it is now.]";
-
-const RETRYABLE_MODEL_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
-
-function isRetryableModelHttpError(error: unknown): boolean {
-  if (!(error instanceof Error) || error.name !== "ModelRequestHttpError") {
-    return false;
-  }
-  const status: unknown = Reflect.get(error, "status");
-  return (
-    typeof status === "number" && RETRYABLE_MODEL_HTTP_STATUSES.has(status)
-  );
-}
 
 export function parseToolArguments(raw: string): Record<string, unknown> {
   if (!raw || raw.trim().length === 0) {
@@ -402,10 +385,6 @@ export async function runAgentLoop(
     1,
     options.ceilings?.browserFailureLimit ?? DEFAULT_BROWSER_FAILURE_LIMIT,
   );
-  const modelTurnTimeoutRetries = Math.max(
-    0,
-    Math.floor(options.ceilings?.modelTurnTimeoutRetries ?? 1),
-  );
   const compactionMaxChars =
     options.compactionMaxChars ?? DEFAULT_COMPACTION_MAX_CHARS;
   const staleToolResultChars =
@@ -536,8 +515,7 @@ export async function runAgentLoop(
     steps += 1;
     await note("asking the assistant what to do next");
     let response: Awaited<ReturnType<AgentLoopModel["chatWithTools"]>>;
-    let modelTurnAttempt = 0;
-    let idleRetries = 0;
+    let providerWaiting = false;
     while (true) {
       const modelStartedAt = now().getTime();
       try {
@@ -565,6 +543,15 @@ export async function runAgentLoop(
           {
             signal: options.signal,
             idleTimeoutMs: options.ceilings?.modelIdleTimeoutMs,
+            onStreamEvent: (event) => {
+              if (event.type === "provider_wait") {
+                if (!providerWaiting) void note("waiting for the AI provider");
+                providerWaiting = true;
+              } else if (event.type === "attempt_started" && providerWaiting) {
+                providerWaiting = false;
+                void note("asking the assistant what to do next");
+              }
+            },
           },
         );
         break;
@@ -576,19 +563,8 @@ export async function runAgentLoop(
           );
         }
         if (error instanceof ModelTurnTimeoutError && error.kind === "idle") {
-          if (idleRetries++ === 0) {
-            await note("retrying the silent AI connection once");
-            continue;
-          }
-          return result("model_failed", error.message);
-        }
-        if (
-          isRetryableModelHttpError(error) &&
-          modelTurnAttempt < modelTurnTimeoutRetries
-        ) {
-          modelTurnAttempt += 1;
           await note(
-            "retrying the same assistant turn after a temporary service failure",
+            "waiting for the AI provider; reconnecting the silent connection",
           );
           continue;
         }

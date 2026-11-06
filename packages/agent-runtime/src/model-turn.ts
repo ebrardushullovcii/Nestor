@@ -1,5 +1,6 @@
 export type ModelTurnStreamEvent =
   | { type: "attempt_started"; attempt: number }
+  | { type: "provider_wait"; delayMs: number }
   | { type: "text_delta"; text: string }
   | { type: "reasoning_delta"; text: string }
   | { type: "tool_call_started"; index: number; name: string }
@@ -60,7 +61,8 @@ export async function runModelTurn<T>(
         signal: controller.signal,
         onStreamEvent: (event) => {
           if (controller.signal.aborted) return;
-          resetIdle();
+          if (event.type === "provider_wait") clearTimeout(idleTimer);
+          else resetIdle();
           options.onStreamEvent?.(event);
         },
       }),

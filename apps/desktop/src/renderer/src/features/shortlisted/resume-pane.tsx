@@ -175,8 +175,9 @@ export function ResumePane(props: {
     resume.state === "writing" ||
     resume.state === "queued";
   const shownLevel = pendingLevel ?? level ?? "tailored";
-  const writingLabel =
-    pendingLevel !== null
+  const writingLabel = resume?.providerWaiting
+    ? "Waiting for the AI provider"
+    : pendingLevel !== null
       ? pendingLevel === "original"
         ? "Switching to your original resume"
         : `Rewriting the ${LEVEL_LABEL[pendingLevel]} resume…`

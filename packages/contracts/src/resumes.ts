@@ -37,6 +37,7 @@ export const ResumeStatusSchema = z.object({
   state: ResumeStateSchema,
   approvedAt: z.string().nullable(),
   error: z.string().nullable(),
+  providerWaiting: z.boolean().optional(),
 });
 export type ResumeStatus = z.infer<typeof ResumeStatusSchema>;
 

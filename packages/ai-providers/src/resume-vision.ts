@@ -58,7 +58,7 @@ export const OpenAiCompatibleResumeVisionProviderOptionsSchema = z.object({
   reservedHeadroomTokens: z.number().int().min(1_000).optional(),
   requestTimeoutMs: z.number().int().min(1_000).optional(),
   idleTimeoutMs: z.number().int().min(1_000).optional(),
-  maxAttempts: z.number().int().min(1).max(10).optional(),
+
   streaming: z.boolean().optional(),
   retryBaseDelayMs: z.number().int().min(0).optional(),
   maxPagesPerBatch: z.number().int().min(1).max(16).optional(),
@@ -651,7 +651,7 @@ export function createOpenAiCompatibleResumeVisionProvider(
         apiMode,
         totalTimeoutMs: timeoutMs,
         idleTimeoutMs: validatedOptions.idleTimeoutMs,
-        maxAttempts: validatedOptions.maxAttempts,
+
         streaming: validatedOptions.streaming,
         retryBaseDelayMs: validatedOptions.retryBaseDelayMs,
       });
@@ -829,7 +829,7 @@ export function createResumeVisionProviderFromEnvironment(
       env.NESTOR_RESUME_VISION_TIMEOUT_MS,
     ),
     idleTimeoutMs: parseConfiguredNumber(env.NESTOR_AI_IDLE_TIMEOUT_MS),
-    maxAttempts: parseConfiguredPositiveInteger(env.NESTOR_AI_MAX_ATTEMPTS),
+
     streaming: parseConfiguredBoolean(env.NESTOR_AI_STREAMING),
     retryBaseDelayMs: parseConfiguredPositiveInteger(
       env.NESTOR_AI_RETRY_BASE_DELAY_MS,
