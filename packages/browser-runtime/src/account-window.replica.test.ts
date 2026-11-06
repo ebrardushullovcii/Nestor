@@ -929,7 +929,7 @@ test("a provider 303 clears its POST body before the allowed application GET", a
   });
 }, 30000);
 
-test("target-blank links are refused and an expired account budget permits only reads", async () => {
+test("target-blank links are refused and a slow model turn does not expire the account surface", async () => {
   await isolated(async (input) => {
     await input.root.locator("body").evaluate((element, url) => {
       element.insertAdjacentHTML(
@@ -958,11 +958,8 @@ test("target-blank links are refused and an expired account budget permits only 
     const clock = vi.spyOn(Date, "now").mockReturnValue(now + 91_000);
     try {
       expect((await input.session.readPage()).accountWindow?.actionsLeft).toBe(
-        0,
+        1,
       );
-      expect(await input.session.clickElement("a0")).toMatchObject({
-        ok: false,
-      });
     } finally {
       clock.mockRestore();
     }
@@ -1738,7 +1735,7 @@ test.each(
               refusal.method === "POST" &&
               refusal.url === f.applicationOrigin + "/submit",
           ),
-        ).toBe(true);
+       ).toBe(true);
         expect(f.confirmed).toHaveBeenCalledExactlyOnceWith(TARGET_EMAIL);
       } else
         expect(
@@ -1804,7 +1801,7 @@ test.each(["popup", "same_tab"] as const)(
   45_000,
 );
 
-test("intended identity grant allows at most four actions and expires without another write", async () => {
+test("intended identity grant keeps its action count across a slow model turn", async () => {
   const f = await intendedIdentityFixture("popup", "budget");
   try {
     const raw = await f.session.readPage();
@@ -1837,13 +1834,10 @@ test("intended identity grant allows at most four actions and expires without an
     try {
       expect(
         (await f.session.clickElement(beforeExpiry.actions[0]!.ref ?? "a0")).ok,
-      ).toBe(false);
+      ).toBe(true);
     } finally {
       clock.mockRestore();
     }
-    expect(
-      (await f.session.clickElement(beforeExpiry.actions[0]!.ref ?? "a0")).ok,
-    ).toBe(true);
     const current = await f.session.readPage();
     expect(current.accountWindow?.actionsLeft).toBe(0);
     expect(

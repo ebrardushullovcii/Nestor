@@ -80,6 +80,12 @@ test("rendered readiness stops on silence and navigation failures close only the
     false,
   );
   expect(close).toHaveBeenCalledTimes(1);
+  // Changing page content is progress even after the old 12-second cutoff.
+  let reads = 0;
+  page.content = () => Promise.resolve(++reads >= 80 ? "Complete" : `Loading ${reads}`);
+  expect(await readRenderedPageHtml(context, page.url(), { ready: html => html === "Complete" })).toMatchObject({ html: "Complete" });
+  expect(reads).toBe(80);
+
   const timeout = Object.assign(Error("Timeout 20000ms exceeded"), {
     name: "TimeoutError",
   });
@@ -90,7 +96,7 @@ test("rendered readiness stops on silence and navigation failures close only the
       (hit) => hit.limit === "operation_timeout" && hit.value === 20000,
     ),
   ).toBe(true);
-  expect(close).toHaveBeenCalledTimes(2);
+  expect(close).toHaveBeenCalledTimes(3);
 });
 test("an attachment command timeout is reported at the real file tool boundary", async () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {}),
