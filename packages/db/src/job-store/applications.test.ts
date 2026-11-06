@@ -151,7 +151,7 @@ it("a refused write preserves the answered link and an open task cannot hide it 
   ).toBe("Yes");
 });
 
-it("an unresolved local task does not suppress a saved answer and model context stays origin-scoped", () => {
+it("an unresolved local task does not suppress a saved answer and model context includes every original site", () => {
   const { jobs, applications } = open();
   applications.applyJobs({ selection: { ids: add(jobs, 1) } });
   const row = applications.claimNext()!;
@@ -196,7 +196,7 @@ it("an unresolved local task does not suppress a saved answer and model context 
     readSavedApplicationAnswers(jobs, undefined, "https://replica.test")
       .map((answer) => answer.question)
       .sort(),
-  ).toEqual(["email", "site"]);
+  ).toEqual(["email", "other", "site"]);
 });
 
 it("search reads only confirmed global country-list rules for the person's saved country", () => {
@@ -1962,7 +1962,7 @@ it("shares stable-key answers, kinds and proof references with Needs you and ign
   expect(matches.map((value) => value.answer)).toEqual(["Two weeks", "5"]);
   expect(
     readSavedApplicationAnswers(jobs).map((value) => value.answer),
-  ).toEqual(["5", "Two weeks"]);
+  ).toEqual(["5", "Two weeks", "Not mine yet"]);
   expect(
     answers.upsert({
       key: "analysis-years",
@@ -2345,3 +2345,57 @@ it("an unavailable pre-send check retains Ready work for explicit retry and cann
   ).toBe(false);
   expect(applications.getApplication(retry.id)?.state).toBe("submitting");
 });
+
+it.each([
+  ["submitted", "submitted", "submission_confirmed"],
+  ["not_submitted", "failed", "policy_decision"],
+  ["outcome_uncertain", "uncertain", "outcome_uncertain"],
+] as const)(
+  "projects the model's recorded %s outcome to %s without another send",
+  (outcome, state, blockReason) => {
+    const { jobs, applications } = open();
+    applications.applyJobs(
+      { selection: { ids: add(jobs, 1) } },
+      "autonomous_submit",
+    );
+    const row = applications.claimNext()!;
+    applications.beginSubmission(row.id, row.attempt);
+    const at = new Date().toISOString();
+    const receipt = SubmissionOutcomeRecordSchema.parse({
+      id: "model_result",
+      preflightId: "intent",
+      idempotencyKey: "chosen_call",
+      authorityEnvelopeId: "application_permission",
+      authorityRevision: 1,
+      jobId: String(row.jobId),
+      applicationRecordId: `application_${row.id}`,
+      runId: `application_run_${row.id}`,
+      resultId: `application_${row.id}_attempt_${row.attempt}`,
+      outcome,
+      attemptedAt: at,
+      verifiedAt: outcome === "outcome_uncertain" ? null : at,
+      evidence: [
+        {
+          id: "observation",
+          kind: "employer_site_state",
+          observedAt: at,
+          destination: {
+            origin: "https://employer.example.test",
+            safePath: "/apply",
+          },
+          artifactRefId: null,
+          summary: "The application model's quoted page observation.",
+        },
+      ],
+      retry: { eligible: false, blockReason },
+      browserAction: { reason: "model_observed_outcome" },
+    });
+    expect(applications.recordSubmission(row.id, row.attempt, receipt)).toBe(
+      true,
+    );
+    expect(applications.getApplication(row.id)?.state).toBe(state);
+    expect(
+      applications.getSubmissionReceipt(row.id)?.evidence[0]?.summary,
+    ).toBe("The application model's quoted page observation.");
+  },
+);

@@ -15,12 +15,6 @@ import {
   createPlaywrightApplyPageMechanics,
   createPlaywrightApplyPageSession,
 } from "./apply-page-mechanics";
-import {
-  allowPrepareOnlyRunNavigation,
-  closePrepareOnlyFinalActionWindow,
-  ensurePrepareOnlyMutationGuard,
-  openPrepareOnlyFinalActionWindow,
-} from "./playwright-application-flow";
 
 /**
  * A closed two-step form brought back from what Fill left, on the
@@ -258,95 +252,22 @@ const answer = (question: string, value: string) => ({
   groundedIn: [],
 });
 
-test("a restored form supplies its replayed answers to the model on every step", async () => {
-  const page = await (await browser!.newContext()).newPage();
-  await ensurePrepareOnlyMutationGuard(page, false, [], true);
-  allowPrepareOnlyRunNavigation(page, `${base}/steps-shape/jobs/1`);
-  await page.goto(`${base}/steps-shape/jobs/1`);
-  const replay: FormReplay = {
-    answers: [
-      answer("First Name", "Alex"),
-      answer("Last Name", "Vanguard"),
-      answer("Email", "alex.vanguard@example.test"),
-      answer("Years of experience", "8"),
-      answer("LinkedIn", "linkedin.com/in/alex-vanguard"),
-    ],
-    attachments: [],
-    // Fill followed the listing's "Apply" to reach the form.
-    path: [
-      {
-        from: `${base}/steps-shape/jobs/1|`,
-        tool: "follow_link",
-        label: "Apply",
-        href: `${base}/steps-shape/apply/1`,
-      },
-    ],
-  };
-  const first = await run(page, replay);
-  expect(first.turns).toBe(1);
-  expect(first.writes).toEqual([
-    "Alex",
-    "Vanguard",
-    "alex.vanguard@example.test",
-  ]);
-  expect(first.result.outcome).toBe("stuck");
-  // "Save and Continue" is the person's: nothing was saved or sent.
-  expect(posts()).toEqual([]);
-
-  // The person presses it in their own window, which the fence opens for
-  // them; the site keeps the step and shows the next.
-  await openPrepareOnlyFinalActionWindow(page);
-  await page.getByRole("button", { name: "Save and Continue" }).click();
-  await page.waitForURL(/step=2/u);
-  await closePrepareOnlyFinalActionWindow(page);
-  const second = await run(page, replay);
-  expect(second.turns).toBe(1);
-  expect(second.writes).toEqual(["8", "linkedin.com/in/alex-vanguard"]);
-  expect(second.result.outcome).toBe("stuck");
-  expect(posts()).toEqual(["/steps-shape/apply/1/step/1"]);
-
-  // Back on the saved step, the site shows its draft: nothing is retyped.
-  allowPrepareOnlyRunNavigation(page, `${base}/steps-shape/apply/1?step=1`);
-  await page.goto(`${base}/steps-shape/apply/1?step=1`);
-  const third = await run(page, replay);
-  expect(third.turns).toBe(1);
-  expect(third.writes).toEqual([]);
-}, 60_000);
-
-test("a closed Needs-you form returns its unresolved question to the model", async () => {
-  const replay: FormReplay = {
-    answers: [answer("First Name", "Alex"), answer("Last Name", "Vanguard")],
-    attachments: [],
-    path: [
-      {
-        from: `${base}/steps-shape/jobs/1|`,
-        tool: "follow_link",
-        label: "Apply",
-        href: `${base}/steps-shape/apply/1`,
-      },
-    ],
-  };
-  const open = async () => {
-    const page = await (await browser!.newContext()).newPage();
-    await ensurePrepareOnlyMutationGuard(page, false, [], true);
-    allowPrepareOnlyRunNavigation(page, `${base}/steps-shape/jobs/1`);
-    await page.goto(`${base}/steps-shape/jobs/1`);
-    return page;
-  };
-  const sent = posts().length;
-  // A previous handoff is context: the model reconsiders the unresolved field.
-  const restored = await run(await open(), replay, ["Email *"]);
-  expect(restored.turns).toBeGreaterThan(0);
-  expect(restored.writes).toEqual(["Alex", "Vanguard"]);
-  expect(restored.result.outcome).toBe("stuck");
-  expect(
-    restored.result.pauses.flatMap((pause) =>
-      (pause.questions ?? []).map((question) => question.prompt),
-    ),
-  ).toEqual([]);
-
-  // A field nobody asked about means the page differs: the model reads it.
-  const differs = await run(await open(), replay);
-  expect(differs.turns).toBeGreaterThan(0);
-  expect(posts()).toHaveLength(sent);
-}, 60_000);
+test("a restored application gives prior answers to the model without writing or navigating for it", async () => {
+  const context = await browser!.newContext();
+  try {
+    const page = await context.newPage();
+    await page.goto(`${base}/steps-shape/apply/1`);
+    const before = posts().length;
+    const restored = await run(page, {
+      answers: [answer("First Name", "Alex"), answer("Last Name", "Vanguard")],
+      attachments: [],
+      path: [],
+    });
+    expect(restored.turns).toBe(1);
+    expect(restored.writes).toEqual([]);
+    expect(restored.result.pauses).toEqual([]);
+    expect(posts()).toHaveLength(before);
+  } finally {
+    await context.close();
+  }
+});

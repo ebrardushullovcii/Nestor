@@ -236,6 +236,16 @@ export const CandidateReusableAnswerSchema = z.object({
   // Absent, not null, on answers without a rule: profiles keep their shape.
   optionFallback: SavedOptionFallbackSchema.nullable().optional(),
   needsConfirmation: z.boolean().optional(),
+  context: z
+    .object({
+      options: z.array(z.string()).optional(),
+      siteOrigin: z.string().optional(),
+      company: z.string().optional(),
+      savedAt: z.number().optional(),
+      givenBy: z.string().optional(),
+      country: z.string().optional(),
+    })
+    .optional(),
   id: NonEmptyStringSchema,
   kind: CandidateAnswerKindSchema.default("other"),
   label: NonEmptyStringSchema,

@@ -2,7 +2,6 @@ import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core";
 import { createHash } from "node:crypto";
 import {
-  submissionConfirmationSummary,
   SubmissionFinalControlIdentitySchema,
   SubmissionObservationIdentitySchema,
   type SubmissionFinalControlIdentity,
@@ -12,191 +11,6 @@ import {
 import type { Page, Request, Response } from "playwright";
 import { actionLocator } from "./apply-page-mechanics";
 import { watchPageSelfLimits } from "./self-limit-page";
-
-import {
-  employerPageConfirmsSubmission,
-  isFinalSubmissionRequest,
-  type SubmissionPageState,
-} from "./submission-confirmation-policy";
-
-import { readPageMessages } from "./page-messages";
-import { mutationResponseSaysError } from "./mutation-response";
-
-/** Read the site's explicit field feedback; do not infer rejection from page prose. */
-async function readApplicationValidationErrors(page: Page): Promise<string[]> {
-  const feedback = await page.evaluate(() => {
-    const errors = new Set<string>();
-    const roots: (Document | ShadowRoot)[] = [document];
-    for (let index = 0; index < roots.length; index++)
-      for (const element of roots[index]!.querySelectorAll("*"))
-        if (element.shadowRoot) roots.push(element.shadowRoot);
-    for (const root of roots) {
-      for (const control of root.querySelectorAll<
-        HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
-      >("input, select, textarea")) {
-        if (
-          control.disabled ||
-          control.type === "hidden" ||
-          control.getClientRects().length === 0
-        )
-          continue;
-        if (
-          control.willValidate &&
-          !control.validity.valid &&
-          control.validationMessage
-        ) {
-          const label = control.labels?.[0]?.textContent?.trim();
-          errors.add(
-            label
-              ? `${label}: ${control.validationMessage}`
-              : control.validationMessage,
-          );
-        }
-        for (const id of (control.getAttribute("aria-describedby") ?? "").split(
-          /\s+/u,
-        )) {
-          const feedback = root.getElementById(id);
-          if (
-            !feedback ||
-            feedback.getAttribute("role") !== "alert" ||
-            feedback.getClientRects().length === 0
-          )
-            continue;
-          const message = feedback.textContent?.trim();
-          if (message) errors.add(message);
-        }
-      }
-    }
-    const alerts = roots.flatMap((root) =>
-      [...root.querySelectorAll<HTMLElement>("[role=alert]")]
-        .filter(
-          (element) =>
-            element.getClientRects().length > 0 &&
-            getComputedStyle(element).visibility !== "hidden",
-        )
-        .map((element) => element.innerText.trim())
-        .filter(Boolean),
-    );
-    return { errors: [...errors], alerts };
-  });
-  return [
-    ...new Set([
-      ...feedback.errors,
-      ...feedback.alerts.filter((text) => mutationResponseSaysError(text)),
-    ]),
-  ];
-}
-
-async function readSubmissionPageState(
-  page: Page,
-): Promise<SubmissionPageState> {
-  return page.evaluate(() => {
-    const text: string[] = [];
-    let editableControls = 0;
-    const appendVisibleText = (root: Element | ShadowRoot): void => {
-      for (const child of root.childNodes) {
-        if (child instanceof HTMLElement) {
-          if (
-            ["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"].includes(child.tagName)
-          )
-            continue;
-          const style = getComputedStyle(child);
-          if (
-            style.display === "none" ||
-            style.visibility === "hidden" ||
-            style.visibility === "collapse" ||
-            Number(style.opacity || "1") === 0
-          )
-            continue;
-          if (
-            style.display !== "contents" &&
-            child.getClientRects().length === 0
-          )
-            continue;
-          if (
-            child.matches(
-              "input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select,[contenteditable=true]",
-            ) &&
-            !child.matches(":disabled") &&
-            child.getClientRects().length > 0
-          )
-            editableControls += 1;
-          const block = !["inline", "inline-block", "contents"].includes(
-            style.display,
-          );
-          if (block) text.push("\n");
-          appendVisibleText(child);
-          if (child.shadowRoot) appendVisibleText(child.shadowRoot);
-          if (block) text.push("\n");
-        } else if (
-          child.nodeType === Node.TEXT_NODE &&
-          child.textContent?.trim()
-        ) {
-          text.push(child.textContent);
-        }
-      }
-    };
-    if (document.body) appendVisibleText(document.body);
-    return {
-      url: location.href,
-      text: text.join(" "),
-      ready: document.readyState !== "loading",
-      editableControls,
-    };
-  });
-}
-
-/** A successful HTTP status can still carry a refusal or an unfinished operation. */
-async function finalResponseAllowsConfirmation(response: {
-  status: () => number;
-  headers: () => Record<string, string>;
-  text: () => Promise<string>;
-}): Promise<boolean> {
-  if (![200, 201, 204].includes(response.status())) return false;
-  const headers = response.headers();
-  if (
-    !/\b(?:application\/(?:[\w.+-]*\+)?json|text\/plain)\b/iu.test(
-      headers["content-type"] ?? "",
-    )
-  )
-    return true;
-  if (Number(headers["content-length"] ?? 0) > 65_536) return false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const body = await Promise.race([
-    response.text().catch(() => null),
-    new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), 2_000);
-    }),
-  ]).finally(() => clearTimeout(timer));
-  if (body === null || body.length > 65_536) return false;
-  if (!body.trim()) return true;
-  let value: unknown = body;
-  if (/\bjson\b/iu.test(headers["content-type"] ?? "")) {
-    try {
-      value = JSON.parse(body);
-    } catch {
-      return false;
-    }
-  }
-  if (mutationResponseSaysError(value)) return false;
-  const pending = (item: unknown, depth = 0): boolean => {
-    if (depth > 8) return true;
-    if (!item || typeof item !== "object") return false;
-    if (Array.isArray(item))
-      return item.some((entry) => pending(entry, depth + 1));
-    return Object.entries(item as Record<string, unknown>).some(
-      ([key, entry]) =>
-        (/^(?:status|state|phase)$/iu.test(key) &&
-          typeof entry === "string" &&
-          /^(?:pending|queued|processing|in[-_ ]?progress|awaiting|started)$/iu.test(
-            entry.trim(),
-          )) ||
-        (/^(?:submitted|completed|complete)$/iu.test(key) && entry === false) ||
-        pending(entry, depth + 1),
-    );
-  };
-  return !pending(value);
-}
 
 export const APPLICATION_FINAL_CONTROL_SELECTOR =
   "button, input[type='submit'], input[type='image']";
@@ -281,9 +95,6 @@ export interface ApplicationActionRequest {
   readonly finalSubmit: boolean;
 }
 
-/** The most requests a receipt keeps; the count still says how many there were. */
-const ACTION_REQUESTS_KEPT = 50;
-
 export type ApplicationFinalActionResult =
   | {
       readonly outcome: "not_submitted";
@@ -349,44 +160,6 @@ export interface ExecuteExactlyOneFinalActionInput {
   readonly signal?: AbortSignal;
   readonly callId?: string;
   readonly clickTimeoutMs?: number;
-  readonly confirmationTimeoutMs?: number;
-}
-
-export type RecheckLastFinalActionInput = Pick<
-  ExecuteExactlyOneFinalActionInput,
-  "expectedObservation" | "expectedControl" | "pageBindingKey"
->;
-
-type ConfirmedFinalActionResult = Extract<
-  ApplicationFinalActionResult,
-  { outcome: "submitted" }
->;
-
-const lastFinalActionChecks = new WeakMap<
-  Page,
-  {
-    key: string;
-    pageBindingKey: string | undefined;
-    read: () => Promise<ConfirmedFinalActionResult | null>;
-    dispose: () => void;
-  }
->();
-
-export async function recheckLastFinalAction(
-  page: Page,
-  input: RecheckLastFinalActionInput,
-): Promise<ConfirmedFinalActionResult | null> {
-  const check = lastFinalActionChecks.get(page);
-  if (
-    !check ||
-    check.pageBindingKey !== input.pageBindingKey ||
-    check.key !== actionKey(input.expectedObservation, input.expectedControl)
-  )
-    return null;
-  const confirmation = await check.read().catch(() => null);
-  if (lastFinalActionChecks.get(page) !== check) return null;
-  if (confirmation) check.dispose();
-  return confirmation;
 }
 
 interface RawApplicationControl {
@@ -410,7 +183,6 @@ interface RawApplicationFormSnapshot {
 }
 
 const DEFAULT_MAX_CONTROLS = 500;
-const DEFAULT_CLICK_TIMEOUT_MS = 5_000;
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -845,22 +617,6 @@ function sameControlIdentity(
 }
 
 /**
- * True only when Playwright's click timed out during its actionability
- * waits: its call log never reached "performing click action", the point at
- * which it dispatches input to the page. Any other failure may have clicked.
- */
-function clickWasNeverDispatched(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const isTimeout =
-    error.name === "TimeoutError" ||
-    /Timeout \d+ms exceeded/.test(error.message);
-  return (
-    isTimeout &&
-    !/performing click action|click action done/i.test(error.message)
-  );
-}
-
-/**
  * Network errors raised before a connection to the site existed. A request
  * that failed this way never delivered a byte, so the site cannot have
  * received the application. A reset, a timeout or an empty response are not
@@ -908,15 +664,6 @@ function rememberIssuedAction(page: Page, key: string): void {
   const keys = pageActionKeys.get(page) ?? new Set<string>();
   keys.add(key);
   pageActionKeys.set(page, keys);
-}
-
-/**
- * A click Playwright never dispatched reached nothing, so the tuple is free
- * again: the person's Send after "the send button could not be pressed" must
- * press it, not come back "stale observation" for ever.
- */
-function forgetIssuedAction(page: Page, key: string): void {
-  pageActionKeys.get(page)?.delete(key);
 }
 
 async function withPageExecutionLock<TValue>(
@@ -981,9 +728,8 @@ export async function observeApplicationForm(
 }
 
 /**
- * Re-observe, validate exact identity/origin, run the immediate veto, and
- * issue at most one final-control click. A click is uncertain unless the
- * employer page then visibly confirms that it received the application.
+ * Re-observe the exact target and issue one click per call ID. Return page
+ * and request facts; the application model records the observed outcome.
  */
 export async function executeExactlyOneFinalAction(
   page: Page,
@@ -1025,6 +771,13 @@ export async function executeExactlyOneFinalAction(
         observation,
         facts: initialFacts,
       });
+    if (input.signal?.aborted)
+      return blockedResult({
+        reason: "aborted",
+        observation,
+        control,
+        facts: initialFacts,
+      });
     const key = input.callId ?? actionKey(expectedObservation, expectedControl);
     if (hasIssuedAction(page, key))
       return blockedResult({
@@ -1033,346 +786,90 @@ export async function executeExactlyOneFinalAction(
         control,
         facts: initialFacts,
       });
-    const allowedOrigins = new Set(
-      [
-        ...input.allowedOrigins,
-        observation.page.origin,
-        control.action.origin,
-      ].filter((value): value is string => !!value),
-    );
     const finalObservation = observation,
-      finalControl = control,
-      postVetoControl = control;
+      finalControl = control;
     const pageBefore = initialPage;
-    const beforeConfirmation = await withBrowserReadLiveness(page, () =>
-      readSubmissionPageState(page),
-    );
-    const postVetoLocator = page
-      .locator(APPLICATION_FINAL_CONTROL_SELECTOR)
-      .nth(control.ordinal);
-    const nativeBinding = nativeActionBindings
-      .get(page)
-      ?.get(control.identity.signature);
-
-    // Consume this page/observation/control tuple before entering Playwright.
-    // A timeout or a black-holed request is therefore not retried by a second
-    // caller that happens to hold the same preflight.
     rememberIssuedAction(page, key);
-    lastFinalActionChecks.get(page)?.dispose();
-    let requestsObservedDuringAction = 0;
-    const requestLog = new Map<
-      Request,
-      {
-        method: string;
-        host: string;
-        path: string;
-        status: number | null;
-        failure: string | null;
-      }
-    >();
-    const finalRequests = new Set<Request>();
-    let mutationObserved = false;
-    const answeredFinalRequests = new Set<Request>();
-    const unreachableFinalRequests = new Set<Request>();
-    const successfulFinalRequests = new Set<Request>();
-    const originalRequest = (request: Request): Request => {
-      let original = request;
-      for (
-        let previous = original.redirectedFrom();
-        previous;
-        previous = original.redirectedFrom()
-      )
-        original = previous;
-      return original;
-    };
-    const isFinalRequest = (request: Request): boolean => {
+    const requests: ApplicationActionRequest[] = [];
+    const byRequest = new Map<Request, ApplicationActionRequest>();
+    const onRequest = (request: Request) => {
       try {
-        return isFinalSubmissionRequest({
-          url: request.url(),
+        const url = new URL(request.url());
+        const entry: ApplicationActionRequest = {
           method: request.method(),
-          body: request.postData(),
-          mainFrame: request.frame() === page.mainFrame(),
-          navigation: request.isNavigationRequest(),
-          allowedOrigins,
-          nativeAction:
-            postVetoControl.formIndex >= 0
-              ? { ...postVetoControl.action, ...nativeBinding }
-              : null,
-        });
+          host: url.host,
+          path: url.pathname,
+          status: null,
+          failure: null,
+          finalSubmit: false,
+        };
+        requests.push(entry);
+        byRequest.set(request, entry);
       } catch {
-        return false;
+        /* Non-HTTP requests have no host/path. */
       }
     };
-    const requestListener = (request: Request): void => {
-      requestsObservedDuringAction += 1;
-      if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method()))
-        mutationObserved = true;
-      if (!request.redirectedFrom() && requestLog.size < ACTION_REQUESTS_KEPT)
-        try {
-          const url = new URL(request.url());
-          if (url.protocol === "http:" || url.protocol === "https:")
-            requestLog.set(request, {
-              method: request.method(),
-              host: url.host,
-              path: url.pathname.slice(0, 500),
-              status: null,
-              failure: null,
-            });
-        } catch {
-          /* An unreadable address is left out of the record. */
-        }
-      try {
-        if (
-          finalRequests.size < 2 &&
-          !request.redirectedFrom() &&
-          isFinalRequest(request)
-        )
-          finalRequests.add(request);
-      } catch {
-        /* A worker or unreadable request supplies no final evidence. */
-      }
+    const onResponse = (response: Response) => {
+      const entry = byRequest.get(response.request());
+      if (entry) Object.assign(entry, { status: response.status() });
     };
-    page.on("request", requestListener);
-    // Keep the exact final request through the confirmation wait: a site's
-    // submit may start after the click returns. Other requests and browser
-    // alerts are neither successful sends nor proof that the site was unreachable.
-    const responseListener = (response: Response): void => {
-      const request = originalRequest(response.request());
-      const logged = requestLog.get(request);
-      if (logged) logged.status = response.status();
-      if (finalRequests.has(request)) answeredFinalRequests.add(request);
-      if (
-        finalRequests.has(request) &&
-        ![301, 302, 303, 307, 308].includes(response.status())
-      ) {
-        // Do not race visible optimistic UI against a JSON refusal body.
-        successfulFinalRequests.delete(request);
-        void finalResponseAllowsConfirmation(response).then((allowed) => {
-          if (allowed) successfulFinalRequests.add(request);
+    const onFailure = (request: Request) => {
+      const entry = byRequest.get(request);
+      if (entry)
+        Object.assign(entry, {
+          failure: request.failure()?.errorText ?? "failed",
         });
-      }
     };
-    const requestFailedListener = (request: Request): void => {
-      const errorText = request.failure()?.errorText;
-      const logged = requestLog.get(originalRequest(request));
-      if (logged && logged.status === null)
-        logged.failure = (errorText ?? "failed").slice(0, 120);
-      if (
-        isSiteUnreachableError(errorText) &&
-        finalRequests.has(originalRequest(request))
-      )
-        unreachableFinalRequests.add(originalRequest(request));
+    page.on("request", onRequest);
+    page.on("response", onResponse);
+    page.on("requestfailed", onFailure);
+    const stopAction = () => {
+      void page.close().catch(() => undefined);
     };
-    page.on("response", responseListener);
-    page.on("requestfailed", requestFailedListener);
-    const requestsAfterClick = (): ApplicationActionRequest[] =>
-      [...requestLog].map(([request, logged]) => ({
-        ...logged,
-        finalSubmit: finalRequests.has(request),
-      }));
-    const stopWatchingNetwork = (): void => {
-      page.off("request", requestListener);
-      page.off("response", responseListener);
-      page.off("requestfailed", requestFailedListener);
-    };
-    const siteNeverReached = (): boolean =>
-      finalRequests.size === 1 &&
-      unreachableFinalRequests.size === 1 &&
-      answeredFinalRequests.size === 0;
-    let actionCompleted = false;
-    let actionError: unknown = null;
-    const closeActionWindow = (): Promise<void> => Promise.resolve();
-    const clickedAt = Date.now();
+    input.signal?.addEventListener("abort", stopAction, { once: true });
+    let actionCompleted = false,
+      actionError: unknown = null;
     try {
-      await selfLimitTimeout(
-        postVetoLocator.click({
-          noWaitAfter: true,
-          timeout: input.clickTimeoutMs ?? DEFAULT_CLICK_TIMEOUT_MS,
-        }),
-        input.clickTimeoutMs ?? DEFAULT_CLICK_TIMEOUT_MS,
-        "packages/browser-runtime/src/application-submission-browser-hands.ts:1859",
-      );
+      await page
+        .locator(APPLICATION_FINAL_CONTROL_SELECTOR)
+        .nth(control.ordinal)
+        .click({ timeout: 0 });
       actionCompleted = true;
-    } catch (clickError) {
-      const pageAfterError = readSafePageUrl(page.url());
-      if (
-        clickWasNeverDispatched(clickError) &&
-        requestsObservedDuringAction === 0 &&
-        pageAfterError.origin === pageBefore.origin &&
-        pageAfterError.safePath === pageBefore.safePath
-      ) {
-        stopWatchingNetwork();
-        // Playwright gave up while waiting for the control to be clickable
-        // (for example a cookie banner over it), so no click reached the
-        // page. Nothing was sent; the prepared form stays for another try
-        // instead of an "uncertain" outcome that blocks every retry.
-        forgetIssuedAction(page, key);
-        await closeActionWindow().catch(() => undefined);
-        return blockedResult({
-          reason: "action_error",
-          observation: finalObservation,
-          control: finalControl,
-          facts: {
-            actionAttempted: true,
-            actionIssued: false,
-            actionCompleted: false,
-            pageBefore,
-            pageAfter: pageAfterError,
-            urlChanged: false,
-            requestsObservedDuringAction,
-            requestsAfterClick: requestsAfterClick(),
-          },
-        });
-      }
-      // A dispatched click can throw while its navigation is already on the
-      // way. Keep observing that one action rather than losing a later receipt.
-      actionError = clickError;
+    } catch (error) {
+      actionError = error;
+    }
+    let siteMessage = "";
+    try {
+      siteMessage = await withBrowserReadLiveness(page, () =>
+        page.locator("body").innerText(),
+      );
+    } catch {
+      /* Navigation/read failure is returned as uncertainty. */
+    } finally {
+      input.signal?.removeEventListener("abort", stopAction);
+      page.off("request", onRequest);
+      page.off("response", onResponse);
+      page.off("requestfailed", onFailure);
     }
     const pageAfter = readSafePageUrl(page.url());
-    const facts: ApplicationExternalActionFacts = {
-      actionAttempted: true,
-      actionIssued: actionError === null,
-      actionCompleted,
-      pageBefore,
-      pageAfter,
-      urlChanged:
-        pageBefore.origin !== pageAfter.origin ||
-        pageBefore.safePath !== pageAfter.safePath,
-      requestsObservedDuringAction,
-      requestsAfterClick: [],
-    };
-    const readConfirmation =
-      async (): Promise<ConfirmedFinalActionResult | null> => {
-        if (finalRequests.size !== 1 || successfulFinalRequests.size !== 1)
-          return null;
-        const currentPage = await withBrowserReadLiveness(page, () =>
-          readSubmissionPageState(page),
-        );
-        if (
-          (await readApplicationValidationErrors(page)).length > 0 ||
-          !employerPageConfirmsSubmission(
-            beforeConfirmation,
-            currentPage,
-            allowedOrigins,
-          )
-        )
-          return null;
-        const destination = readSafePageUrl(currentPage.url);
-        // A second request or refusal may have arrived while the DOM was read.
-        if (finalRequests.size !== 1 || successfulFinalRequests.size !== 1)
-          return null;
-        return {
-          outcome: "submitted",
-          reason: "employer_confirmation",
-          observation: finalObservation,
-          control: finalControl,
-          confirmation: {
-            observedAt: new Date().toISOString(),
-            destination,
-            summary: submissionConfirmationSummary(currentPage.text),
-          },
-          facts: {
-            ...facts,
-            requestsObservedDuringAction,
-            requestsAfterClick: requestsAfterClick(),
-            pageAfter: destination,
-            urlChanged:
-              pageBefore.origin !== destination.origin ||
-              pageBefore.safePath !== destination.safePath,
-          },
-        };
-      };
-    // A late employer receipt can resolve the projection without issuing the
-    // action again. Keep only this page's last exact context, for two minutes.
-    const disposeCheck = (): void => {
-      stopWatchingNetwork();
-      clearTimeout(retentionTimer);
-      page.off("close", disposeCheck);
-      if (lastFinalActionChecks.get(page)?.key === key)
-        lastFinalActionChecks.delete(page);
-    };
-    const retentionTimer = setTimeout(disposeCheck, 120_000);
-    retentionTimer.unref();
-    page.once("close", disposeCheck);
-    lastFinalActionChecks.set(page, {
-      key,
-      pageBindingKey: input.pageBindingKey,
-      read: readConfirmation,
-      dispose: disposeCheck,
-    });
-    const confirmationDeadline =
-      Date.now() + (input.confirmationTimeoutMs ?? 15_000);
-    do {
-      if (input.signal?.aborted) break;
-      if (siteNeverReached()) break;
-      try {
-        const confirmation = await readConfirmation();
-        if (confirmation) {
-          disposeCheck();
-          await closeActionWindow();
-          return confirmation;
-        }
-        const validationErrors = await readApplicationValidationErrors(page);
-        // Client validation can be corrected only before a final request
-        // leaves. Once one was issued, missing receipt evidence is uncertain.
-        if (
-          validationErrors.length > 0 &&
-          finalRequests.size === 0 &&
-          !mutationObserved
-        ) {
-          disposeCheck();
-          await closeActionWindow();
-          forgetIssuedAction(page, key);
-          return {
-            outcome: "not_submitted",
-            reason: "form_validation_failed",
-            observation: finalObservation,
-            control: finalControl,
-            validationErrors,
-            facts: {
-              ...facts,
-              requestsObservedDuringAction,
-              requestsAfterClick: requestsAfterClick(),
-              pageAfter: readSafePageUrl(page.url()),
-            },
-          };
-        }
-      } catch {
-        // Navigation can briefly replace the body. Keep the bounded check.
-      }
-      await page.waitForTimeout(100);
-    } while (Date.now() < confirmationDeadline);
-    await closeActionWindow();
-    if (siteNeverReached()) {
-      disposeCheck();
-      return blockedResult({
-        reason: "site_unreachable",
-        observation: finalObservation,
-        control: finalControl,
-        facts: {
-          ...facts,
-          requestsObservedDuringAction,
-          requestsAfterClick: requestsAfterClick(),
-          pageAfter: readSafePageUrl(page.url()),
-        },
-      });
-    }
-    // What the page said through its own alert after the click (dismissed,
-    // never a window). It is never a sign the application arrived, nor proof
-    // it did not: a site can show one and still take the application.
-    const said = (await readPageMessages(page, clickedAt)).at(-1)?.text;
     return {
       outcome: "outcome_uncertain",
-      reason: actionError === null ? "confirmation_timeout" : "action_error",
+      reason: actionError === null ? "action_issued" : "action_error",
       observation: finalObservation,
       control: finalControl,
       facts: {
-        ...facts,
-        requestsObservedDuringAction,
-        requestsAfterClick: requestsAfterClick(),
-        pageAfter: readSafePageUrl(page.url()),
+        actionAttempted: true,
+        actionIssued: true,
+        actionCompleted,
+        pageBefore,
+        pageAfter,
+        urlChanged:
+          pageBefore.origin !== pageAfter.origin ||
+          pageBefore.safePath !== pageAfter.safePath,
+        requestsObservedDuringAction: requests.length,
+        requestsAfterClick: requests,
       },
-      ...(said ? { siteMessage: said } : {}),
+      ...(siteMessage ? { siteMessage } : {}),
     };
   });
 }

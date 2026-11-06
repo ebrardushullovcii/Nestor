@@ -193,9 +193,9 @@ const control: ApplyFormControl = {
 
 // Exact equality is mechanics; the model still chooses which fact answers a question.
 
-test("draft records, pending answers and private pay are absent from the catalog", () => {
+test("all saved records reach the model, including draft status and pay context", () => {
   const facts = storedFacts(sources, { payDisclosed: false });
-  expect(facts.some((fact) => fact.sourceId.includes("draft"))).toBe(false);
+  expect(facts.some((fact) => fact.sourceId.includes("draft"))).toBe(true);
   expect(
     facts.some((fact) => fact.sourceId.includes("salaryExpectations")),
   ).toBe(false);

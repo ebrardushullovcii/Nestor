@@ -1137,7 +1137,7 @@ export const SubmissionOutcomeEvidenceEntrySchema = z
     observedAt: IsoDateTimeSchema,
     destination: SubmissionEvidenceDestinationSchema,
     artifactRefId: NonEmptyStringSchema.nullable(),
-    summary: NonEmptyStringSchema.max(500),
+    summary: NonEmptyStringSchema,
   })
   .strict();
 export type SubmissionOutcomeEvidenceEntry = z.infer<
@@ -1175,7 +1175,7 @@ export const SubmissionActionRequestSchema = z
   .object({
     method: NonEmptyStringSchema.max(16),
     host: NonEmptyStringSchema.max(253),
-    path: NonEmptyStringSchema.max(500),
+    path: NonEmptyStringSchema,
     /** The site's HTTP status; null when no answer came. */
     status: z.number().int().min(0).max(999).nullable(),
     /** The browser's reason when it ended without an answer. */
@@ -1197,11 +1197,8 @@ export const SubmissionBrowserActionDiagnosticsSchema = z
     actionIssued: z.boolean().optional(),
     actionCompleted: z.boolean().optional(),
     requestsObservedDuringAction: z.number().int().nonnegative().optional(),
-    /** Each request from the click on (the first 50); see the count above. */
-    requestsAfterClick: z
-      .array(SubmissionActionRequestSchema)
-      .max(50)
-      .optional(),
+    /** Each request observed after the click; see the count above. */
+    requestsAfterClick: z.array(SubmissionActionRequestSchema).optional(),
   })
   .strict();
 export type SubmissionBrowserActionDiagnostics = z.infer<
@@ -1348,6 +1345,7 @@ export type SubmissionOutcomeRecordInput = z.input<
  * uncertainty record remains in the durable history and the replacement
  * outcome must use a fresh identity while retaining the same key/lineage.
  */
+/** Append the person's or application model's observed outcome, retaining the consumed call ID. */
 export const SubmissionOutcomeResolutionInputSchema = z
   .object({
     expectedOutcomeId: NonEmptyStringSchema,
@@ -1356,54 +1354,12 @@ export const SubmissionOutcomeResolutionInputSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
-    if (value.outcome.id === value.expectedOutcomeId) {
+    if (value.outcome.id === value.expectedOutcomeId)
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message:
-          "An operator resolution must append a new outcome record identity.",
+        message: "A resolution must append a new outcome record identity.",
         path: ["outcome", "id"],
       });
-    }
-    if (value.outcome.outcome === "outcome_uncertain") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          "An operator resolution must establish submitted or not_submitted.",
-        path: ["outcome", "outcome"],
-      });
-    }
-    if (value.outcome.verifiedAt === null) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "An operator resolution requires a verification timestamp.",
-        path: ["outcome", "verifiedAt"],
-      });
-    }
-    if (value.outcome.evidence.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "An operator resolution requires external evidence.",
-        path: ["outcome", "evidence"],
-      });
-    }
-    if (value.outcome.outcome === "not_submitted") {
-      if (value.outcome.retry.eligible) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message:
-            "An operator not_submitted resolution must not enable automatic retry.",
-          path: ["outcome", "retry", "eligible"],
-        });
-      }
-      if (value.outcome.retry.blockReason === null) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message:
-            "A not_submitted operator resolution requires an explicit retry block reason.",
-          path: ["outcome", "retry", "blockReason"],
-        });
-      }
-    }
   });
 export type SubmissionOutcomeResolutionInput = z.infer<
   typeof SubmissionOutcomeResolutionInputSchema

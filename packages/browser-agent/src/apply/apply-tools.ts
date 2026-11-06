@@ -1,3 +1,4 @@
+import { ApplyPersonRequestSchema } from "@nestor/contracts";
 import type { ApplyProposal } from "./types";
 
 const STORED_FACT_PARAMETER = {
@@ -95,7 +96,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
             reason: {
               type: "string",
               description:
-                "If this leaves the site the listing is on: exactly why it serves the application, what on the page points there, and what you expect to find. A second review reads it.",
+                "If this leaves the site the listing is on: exactly why it serves the application, what on the page points there, and what you expect to find. You decide whether the move serves this application.",
             },
           },
           required: ["url"],
@@ -118,7 +119,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
             reason: {
               type: "string",
               description:
-                "If this leaves the site the listing is on: exactly why it serves the application, what on the page points there, and what you expect to find. A second review reads it.",
+                "If this leaves the site the listing is on: exactly why it serves the application, what on the page points there, and what you expect to find. You decide whether the move serves this application.",
             },
           },
           required: ["ref"],
@@ -130,7 +131,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
       function: {
         name: "click",
         description:
-          "Press a button, link, card, tab, a cookie banner's Reject or Essential only, or the close cross on a chat widget. Never accept optional cookies, tracking or marketing consent. Security checks and unapproved declarations stay with the person.",
+          "Press a button, link, card, tab, a cookie banner's Reject or Essential only, or the close cross on a chat widget. Never accept optional cookies, tracking or marketing consent. Follow the person's browser and declaration settings.",
         parameters: {
           type: "object",
           properties: {
@@ -141,7 +142,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
             reason: {
               type: "string",
               description:
-                "If this leaves the site the listing is on: exactly why it serves the application, what on the page points there, and what you expect to find. A second review reads it.",
+                "If this leaves the site the listing is on: exactly why it serves the application, what on the page points there, and what you expect to find. You decide whether the move serves this application.",
             },
           },
           required: ["ref"],
@@ -277,7 +278,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
       function: {
         name: "submit_application",
         description:
-          "Say the form is complete and this is the button that sends it. First read the fresh page returned by fill_fields or observe and dismiss ordinary cookie banners, newsletter dialogs, and chat overlays using their own controls; readable fields can still have a covered send button. Job Finder checks everything again and presses it only if the person allowed that; otherwise the application stops here, filled in and ready for them.",
+          "Say the form is complete and this is the button that sends it. First read the fresh page returned by fill_fields or observe and dismiss ordinary cookie banners, newsletter dialogs, and chat overlays using their own controls; readable fields can still have a covered send button. Job Finder writes a durable intent and presses it once per call ID, then returns page and request facts. Inspect them and record the observed outcome with record_send_outcome.",
         parameters: {
           type: "object",
           properties: { ref: { type: "string" } },
@@ -290,7 +291,7 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
       function: {
         name: "finish",
         description:
-          "Finish. Before reporting a completed form, read the fresh page returned by fill_fields or observe, dismiss ordinary cookie banners, newsletter dialogs, and chat overlays using their own controls, and check the final button on the returned page. When questions remain for the person, use needsPerson: true and name each one in forPerson; one finish hands back all the questions and ends the run. Call finish when the form is complete, when only the person can go further (they have to sign in, pass a security check, pay, or make an account), or when you are genuinely stuck. The reason is your report to the person: which site and page you were on, what you tried, what the page did, and what they need to do. Pass stuck: true when you could not get there.",
+          "Finish. Before reporting a completed form, read the fresh page returned by fill_fields or observe, dismiss ordinary cookie banners, newsletter dialogs, and chat overlays using their own controls, and check the final button on the returned page. When questions remain for the person, use needsPerson: true and name each one in forPerson; one finish hands back all the questions and ends the run. Call finish when the form is complete, when only the person can go further after using the available tools and vault (a missing secret, MFA code or passkey tap), or when you are genuinely stuck. The reason is your report to the person: which site and page you were on, what you tried, what the page did, and what they need to do. Pass stuck: true when you could not get there.",
         parameters: {
           type: "object",
           properties: {
@@ -306,9 +307,25 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
             },
             forPerson: {
               type: "array",
-              items: { type: "string" },
+              items: {
+                oneOf: [
+                  { type: "string" },
+                  {
+                    type: "object",
+                    properties: {
+                      onPage: {
+                        type: "string",
+                        enum: ["sign_in", "captcha", "mfa", "passkey", "other"],
+                      },
+                      instructions: { type: "string" },
+                    },
+                    required: ["onPage", "instructions"],
+                    additionalProperties: false,
+                  },
+                ],
+              },
               description:
-                "Each question the person must answer or thing they must do before this can go further, one per item, apart from the reason. For a form field, use its observed control ref (for example c3), so any wording stays bound to that field's own question, options and saved answer. Do not restate the field as another question. For a separate manual step such as sign-in or MFA, describe that step in plain words. Leave it empty when the form is complete; a form that only wants looking over is complete.",
+                "Each question the person must answer or thing they must do before this can go further, one per item, apart from the reason. For a form field, use its observed control ref (for example c3), so any wording stays bound to that field's own question, options and saved answer. Do not restate the field as another question. For a step on the website, use {onPage: sign_in|captcha|mfa|passkey|other, instructions: what the person needs to do}. Missing passwords, passkeys and MFA belong on the website, never in a text answer. Leave it empty when the form is complete; a form that only wants looking over is complete.",
             },
           },
           required: ["reason"],
@@ -489,14 +506,16 @@ export function parseApplyProposal(
         : needsRef();
     case "finish": {
       const reason = asString(args.reason) ?? "Finished without saying why.";
-      const named = (asStringArray(args.forPerson) ?? [])
-        .map((item) => item.trim())
-        .filter(Boolean);
-      // Past twenty, the rest go together as one more item: none is dropped.
-      const forPerson =
-        named.length > 20
-          ? [...named.slice(0, 20), named.slice(20).join("; ")]
-          : named;
+      const rawItems = Array.isArray(args.forPerson) ? args.forPerson : [];
+      const requests = rawItems.map((item) =>
+        ApplyPersonRequestSchema.safeParse(item),
+      );
+      const invalid = requests.find((item) => !item.success);
+      if (invalid && !invalid.success)
+        return { ok: false, error: invalid.error.message };
+      const forPerson = requests.flatMap((item) =>
+        item.success ? [item.data] : [],
+      );
       return {
         ok: true,
         proposal: {
@@ -520,7 +539,7 @@ export const FILL_FIELDS_TOOL_DEFINITION: ApplyToolDefinition = {
   function: {
     name: "fill_fields",
     description:
-      "Complete the visible step in one call, from the first step onward: fill all answerable fields, attach the requested available documents with upload, then include thenContinue for Continue or Next when no required answer is missing. Entries use the exact single-tool arguments for type, select, set_checkbox, upload or click through the same executor. Fields execute in the supplied order; clicks, uploads and writes to the same field or choice group retain their order. Click may dismiss a cookie banner or add a required history row on this step; use handles already observed and read the returned page for newly revealed handles. Choose a radio with set_checkbox on its option's ref. A refusal, pause, navigation, changed step or newly revealed question after a field write stops the rest and names entries not attempted. Ordinary upload buttons changing or a chore click revealing a row on this same page do not stop planned entries. Omit thenContinue when a question needs the person; fill everything else, then finish once. Never use this tool to send. Validation errors or an unchanged step are reported with one fresh page observation.",
+      "Complete the visible step in one call, from the first step onward: fill all answerable fields, attach the requested available documents with upload, then include thenContinue for Continue or Next when no required answer is missing. Entries use the exact single-tool arguments for type, select, set_checkbox, upload or click through the same executor. Fields execute in the supplied order; clicks, uploads and writes to the same field or choice group retain their order. Click may dismiss a cookie banner or add a required history row on this step; use handles already observed and read the returned page for newly revealed handles. Choose a radio with set_checkbox on its option's ref. The batch stops only when a planned ref changes identity; browser errors return as facts and independent entries continue. Ordinary upload buttons changing or a chore click revealing a row on this same page do not stop planned entries. Omit thenContinue when a question needs the person; fill everything else, then finish once. Never use this tool to send. Validation errors or an unchanged step are reported with one fresh page observation.",
     parameters: {
       type: "object",
       properties: {

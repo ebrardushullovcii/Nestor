@@ -1,3 +1,4 @@
+import { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { withNavigationLiveness } from "./browser-navigation";
 import { tracePageHands, tracePage } from "./trace-page";
@@ -79,9 +80,7 @@ import {
  * lives above this layer.
  */
 
-export const APPLY_CONTROL_SELECTOR =
-  "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true']";
-
+export { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
 export const APPLY_ACTION_SELECTOR =
   "button, input[type='submit'], input[type='button'], [role='button'], [role='tab']";
 
@@ -688,6 +687,13 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               id: html.id,
               name: input?.name ?? textarea?.name ?? select?.name ?? "",
               scopeKey: scopeKeyFor(element),
+              ...((input?.form ?? textarea?.form ?? select?.form)
+                ? {
+                    formIndex: Array.from(document.forms).indexOf(
+                      (input?.form ?? textarea?.form ?? select?.form)!,
+                    ),
+                  }
+                : {}),
               ...(phoneCallingCode ? { phoneCallingCode } : {}),
               label,
               hint: hintFor(element, label),
@@ -1206,7 +1212,15 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
             ),
           )
         : false;
+    const owner =
+      element instanceof HTMLButtonElement ||
+      element instanceof HTMLInputElement
+        ? element.form
+        : element.closest("form");
     return {
+      ...(owner && Array.from(document.forms).includes(owner)
+        ? { formIndex: Array.from(document.forms).indexOf(owner) }
+        : {}),
       section: section,
       inForm,
       ...(sectionRequired ? { sectionRequired } : {}),
@@ -1221,10 +1235,6 @@ export function collectApplyDocumentSnapshot(
   elements: Element[],
   selectors: typeof APPLY_PAGE_SELECTORS,
   redactCredentials = false,
-  readSubmissionEvidence?: (text: string) => {
-    messages: string[];
-    refused: boolean;
-  },
 ) {
   // This callback is serialized into the page; only fixed limit metadata returns
   // over its console channel. The host records it through reportSelfLimitHit.
@@ -1883,6 +1893,13 @@ export function collectApplyDocumentSnapshot(
         id: html.id ?? "",
         name: input?.name ?? textarea?.name ?? select?.name ?? "",
         scopeKey: scopeKeyFor(element),
+        ...((input?.form ?? textarea?.form ?? select?.form)
+          ? {
+              formIndex: Array.from(document.forms).indexOf(
+                (input?.form ?? textarea?.form ?? select?.form)!,
+              ),
+            }
+          : {}),
         ...(phoneCallingCode ? { phoneCallingCode } : {}),
         label: directLabel(element),
         hint: hintFor(element, directLabel(element)),
@@ -1989,6 +2006,7 @@ export function collectApplyDocumentSnapshot(
           element.getAttribute("aria-disabled") === "true",
         ...(form
           ? {
+              formIndex: Array.from(document.forms).indexOf(form),
               formAction: new URL(
                 (actionElement?.hasAttribute("formaction")
                   ? actionElement.formAction
@@ -2141,12 +2159,6 @@ export function collectApplyDocumentSnapshot(
     url: window.location.href,
     title: document.title,
     bodyText: bodyText,
-    ...(readSubmissionEvidence
-      ? {
-          submissionConfirmationMessages:
-            readSubmissionEvidence(bodyText).messages,
-        }
-      : {}),
     loading: document.readyState !== "complete",
     ...sendPressed(),
   };
@@ -3168,20 +3180,6 @@ export function createPlaywrightApplyPageMechanics(
         return { ok: false, error: `There is nothing called ${ref} here.` };
       }
       try {
-        const changesToggle = await locator.evaluate((element) => {
-          const label = element.closest("label");
-          const target = label?.control ?? element;
-          return target.matches(
-            "input[type='checkbox'], input[type='radio'], [role='checkbox'], [role='radio']",
-          );
-        });
-        if (changesToggle) {
-          return {
-            ok: false,
-            error:
-              "This click changes a checkbox or radio answer. Use set_checkbox with the control reference so its answer is checked first.",
-          };
-        }
         await clickAndSettle(page, locator);
         return { ok: true, observedValue: "clicked" };
       } catch (error) {

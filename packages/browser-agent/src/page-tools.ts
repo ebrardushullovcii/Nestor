@@ -22,22 +22,10 @@ import type { ApplyFormObservation, ApplyPageHands } from "./apply/types";
  * What is added is only what the harness can see and the model cannot: a
  * tab the page opened is brought into the working tab and reported; a page
  * that changed since the model last looked is refused once and shown again;
- * an address outside what the person allowed is refused with the reason.
+ * navigation and page facts are returned for the model to judge.
  */
 
 export interface PageToolPolicy {
-  /** Returns a plain refusal when the address is outside the run's home, else null. */
-  allowUrl?: (url: string) => string | null;
-  /**
-   * Asked when an address is outside the home and the model said why it
-   * wants to go there. A second judgement, made against the goal: allowed
-   * with a note, or refused with the verdict the model reads.
-   */
-  reviewMove?: (input: {
-    url: string;
-    reason: string;
-    fromUrl: string | null;
-  }) => Promise<{ allowed: boolean; verdict: string }>;
   /**
    * How a page view is written for the model. Defaults to the full view; a
    * host can send a leaner one or say a view is unchanged.
@@ -50,16 +38,6 @@ export interface PageToolsState {
   observation: ApplyFormObservation | null;
   /** Every address the run has been on, oldest first, without duplicates. */
   visitedUrls: string[];
-  /** Origins outside the home that a review allowed, with the reason given. */
-  approvedOrigins: Map<string, string>;
-}
-
-function originOf(url: string): string | null {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return null;
-  }
 }
 
 export interface PageTools {
@@ -86,61 +64,8 @@ export function createPageTools(
   const state: PageToolsState = {
     observation: null,
     visitedUrls: [],
-    approvedOrigins: new Map(),
   };
   const describe = policy.describe ?? describeObservation;
-
-  /**
-   * Whether the run may go to an address.
-   *
-   * Inside the home, always. Outside it, only with a specific reason that a
-   * second judgement accepts against the goal; an origin accepted once stays
-   * accepted for the run.
-   */
-  const authorize = async (
-    url: string,
-    reason: string | null,
-  ): Promise<
-    { allowed: true; note: string | null } | { allowed: false; refusal: string }
-  > => {
-    const refusal = policy.allowUrl?.(url) ?? null;
-    if (!refusal) return { allowed: true, note: null };
-    const origin = originOf(url);
-    if (origin && state.approvedOrigins.has(origin)) {
-      return { allowed: true, note: null };
-    }
-    if (!policy.reviewMove) return { allowed: false, refusal };
-    if (!reason) {
-      return {
-        allowed: false,
-        refusal: `${refusal} If going there serves the goal, call again with a reason that says exactly why: what you saw that points there and what you expect to find.`,
-      };
-    }
-    let review: { allowed: boolean; verdict: string };
-    try {
-      review = await policy.reviewMove({
-        url,
-        reason,
-        fromUrl: state.observation?.url ?? null,
-      });
-    } catch {
-      return {
-        allowed: false,
-        refusal: `${refusal} The move could not be reviewed safely right now, so it was not allowed.`,
-      };
-    }
-    if (!review.allowed) {
-      return {
-        allowed: false,
-        refusal: `${refusal} A review of your reason did not allow it: ${review.verdict}`,
-      };
-    }
-    if (origin) state.approvedOrigins.set(origin, reason);
-    return {
-      allowed: true,
-      note: `Leaving the home site was allowed after review: ${review.verdict}`,
-    };
-  };
 
   const remember = (
     observation: ApplyFormObservation,
@@ -158,10 +83,7 @@ export function createPageTools(
    * After anything that may have moved the page: bring in a tab it opened,
    * check the address is allowed, and show the model where it is now.
    */
-  const settle = async (
-    lead: string,
-    reason: string | null = null,
-  ): Promise<AgentLoopToolOutcome> => {
+  const settle = async (lead: string): Promise<AgentLoopToolOutcome> => {
     let observation = await observe();
     const notes: string[] = [lead];
     const newest = observation.openedTabs[observation.openedTabs.length - 1];
@@ -173,20 +95,6 @@ export function createPageTools(
           ? `That opened ${adopted.url} in a new tab. Job Finder works in one tab, so it opened that address here instead.`
           : `That tried to open a new tab, which could not be brought here: ${adopted.error}`,
       );
-    }
-    if (!observation.accountWindow && observation.url && policy.allowUrl) {
-      const verdict = await authorize(observation.url, reason);
-      if (!verdict.allowed) {
-        const back = await hands.goBack();
-        observation = await observe();
-        notes.push(
-          `${verdict.refusal}${back.ok ? " Job Finder went back." : ""}`,
-        );
-        return ok(
-          `${notes.join(" ")}\n\nThe page now:\n\n${describe(observation)}`,
-        );
-      }
-      if (verdict.note) notes.push(verdict.note);
     }
     return ok(
       `${notes.join(" ")}\n\nThe page now:\n\n${describe(observation)}`,
@@ -207,6 +115,27 @@ export function createPageTools(
   };
 
   const tools: AgentLoopTool[] = [
+    {
+      definition: {
+        type: "function",
+        function: {
+          name: "fill_saved_credentials",
+          description:
+            "Ask the vault to fill saved credentials on this page. Secrets never enter model context. An absent login is a fact for your next decision.",
+          parameters: { type: "object", properties: {} },
+        },
+      },
+      execute: async () => {
+        const current = await observe();
+        const filled =
+          current.url && hands.prepareBrowserCredentials
+            ? await hands.prepareBrowserCredentials(current.url)
+            : false;
+        return ok(
+          `${filled ? "The vault filled saved credentials." : "The vault has no usable credentials."}\n${describe(await observe())}`,
+        );
+      },
+    },
     {
       definition: {
         type: "function",
@@ -258,7 +187,7 @@ export function createPageTools(
               reason: {
                 type: "string",
                 description:
-                  "If this leaves the site the run is on: exactly why it serves the goal, what on the page points there, and what you expect to find. A second review reads it.",
+                  "If this leaves the site the run is on: exactly why it serves the goal, what on the page points there, and what you expect to find. The application model decides.",
               },
             },
             required: ["url"],
@@ -274,19 +203,13 @@ export function createPageTools(
             `${url} is a pattern with a placeholder in it, not an address. Use a real address you read on the page, or press the link that leads there.`,
           );
         }
-        const reason = asString(args.reason);
-        const verdict = await authorize(url, reason);
-        if (!verdict.allowed) return ok(verdict.refusal);
         const moved = await hands.navigate(url);
         if (!moved.ok) {
           return ok(
             `${url} would not open: ${moved.error}\n\nThe page now:\n\n${describe(await observe())}`,
           );
         }
-        return settle(
-          [`Opened ${moved.url}.`, verdict.note].filter(Boolean).join(" "),
-          reason,
-        );
+        return settle(`Opened ${moved.url}.`);
       },
     },
     {
@@ -306,7 +229,7 @@ export function createPageTools(
               reason: {
                 type: "string",
                 description:
-                  "If this leaves the site the run is on: exactly why it serves the goal, what on the page points there, and what you expect to find. A second review reads it.",
+                  "If this leaves the site the run is on: exactly why it serves the goal, what on the page points there, and what you expect to find. The application model decides.",
               },
             },
             required: ["ref"],
@@ -317,16 +240,9 @@ export function createPageTools(
         const args = parseToolArguments(raw);
         const ref = asString(args.ref);
         if (!ref) return ok("follow_link needs the link handle in ref.");
-        const reason = asString(args.reason);
         const link = state.observation?.links.find(
           (entry) => entry.ref === ref,
         );
-        let allowedNote: string | null = null;
-        if (link) {
-          const verdict = await authorize(link.href, reason);
-          if (!verdict.allowed) return ok(verdict.refusal);
-          allowedNote = verdict.note;
-        }
         const moved = await hands.followLink(ref);
         if (!moved.ok) {
           return ok(
@@ -334,13 +250,7 @@ export function createPageTools(
           );
         }
         return settle(
-          [
-            `Followed ${link?.label ? `"${link.label}"` : "the link"} to ${moved.url}.`,
-            allowedNote,
-          ]
-            .filter(Boolean)
-            .join(" "),
-          reason,
+          `Followed ${link?.label ? `"${link.label}"` : "the link"} to ${moved.url}.`,
         );
       },
     },
@@ -361,7 +271,7 @@ export function createPageTools(
               reason: {
                 type: "string",
                 description:
-                  "If this leaves the site the run is on: exactly why it serves the goal, what on the page points there, and what you expect to find. A second review reads it.",
+                  "If this leaves the site the run is on: exactly why it serves the goal, what on the page points there, and what you expect to find. The application model decides.",
               },
             },
             required: ["ref"],
@@ -372,7 +282,6 @@ export function createPageTools(
         const args = parseToolArguments(raw);
         const ref = asString(args.ref);
         if (!ref) return ok("click needs the handle of what to press in ref.");
-        const reason = asString(args.reason);
         const seen = state.observation;
         const moved = await refuseIfMoved(seen?.signature ?? "");
         if (moved) return moved;
@@ -388,7 +297,7 @@ export function createPageTools(
           );
         }
         const before = seen?.signature ?? "";
-        const outcome = await settle(`Pressed "${label}".`, reason);
+        const outcome = await settle(`Pressed "${label}".`);
         // A press that changed nothing on the page is not progress, and the
         // model is told so rather than left to press it again.
         if (

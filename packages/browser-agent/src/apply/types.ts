@@ -1,4 +1,8 @@
 import type {
+  ApplyPersonRequest,
+  ApplySendOutcomeDecision,
+} from "@nestor/contracts";
+import type {
   AiApplyingBehavior,
   ApplicationAttemptCheckpoint,
   ApplicationAttemptQuestion,
@@ -65,6 +69,8 @@ export type ApplyAnswerEvidencePolicy =
   | "eligibility";
 
 export interface ApplyFormControl {
+  /** Native identity behind this page-local ref. */
+  nativeIdentity?: string;
   /** Native file-input identity, independent of mutable attachment labels. */
   fileControlKey?: string;
   frame?: ApplyFrameOwner;
@@ -80,6 +86,7 @@ export interface ApplyFormControl {
   /** Current calling code read from this tel input's own native country button. */
   phoneCallingCode?: string;
   scopeKey?: string;
+  formIndex?: number;
   inputConstraints?: {
     type: "number" | "date" | "month";
     min?: string;
@@ -138,6 +145,7 @@ export interface ApplyFormControl {
 
 /** Where an action or clickable sits on the page; see `RawApplyPlacement`. */
 export interface ApplyPlacement {
+  formIndex?: number;
   frame?: ApplyFrameOwner;
   /** The part of the page holding it: legend, dialog or section name, or nearby words. */
   section?: string;
@@ -246,6 +254,7 @@ export interface ApplyOpenedTab {
  * see plainly.
  */
 export interface ApplyFormObservation {
+  navigationNote?: string;
   /** Known browser request count; absence cannot establish a no-op upload gesture. */
   networkMutationCount?: number;
   observedAt: string;
@@ -307,6 +316,8 @@ export interface ApplyDocument {
  */
 export interface ApplyPageHands {
   prepareBrowserCredentials?: ApplyRawPageHands["prepareBrowserCredentials"];
+  listSavedCredentials?: ApplyRawPageHands["listSavedCredentials"];
+  fillSavedCredential?: ApplyRawPageHands["fillSavedCredential"];
   clickAuthorizedFormAction?: ApplyRawPageHands["clickAuthorizedFormAction"];
   observe: () => Promise<ApplyFormObservation>;
   navigate: (url: string) => Promise<ApplyNavigationResult>;
@@ -514,6 +525,9 @@ export interface ApplyAttachedDocument {
 }
 
 export type ApplyAgentOutcome =
+  | "submitted"
+  | "failed"
+  | "uncertain"
   | "prepared"
   /** Complete, with the send button identified. Nobody has pressed it. */
   | "ready_to_send"
@@ -610,7 +624,7 @@ export type ApplyProposal =
       stuck?: boolean;
       needsPerson?: boolean;
       /** Each question or task for the person, apart from the reason. */
-      forPerson?: string[];
+      forPerson?: ApplyPersonRequest[];
     };
 
 export interface ApplyAgentConfig extends BrowserPermissionPolicy {
@@ -623,6 +637,9 @@ export interface ApplyAgentConfig extends BrowserPermissionPolicy {
     prompt: string;
     options: readonly string[];
   }>;
+  recordSendOutcome?: (
+    decision: ApplySendOutcomeDecision & { pageUrl: string | null },
+  ) => Promise<{ recorded: boolean; content: string }>;
   submitApplication?: (decision: {
     actionRef: string;
     actionLabel: string;
@@ -733,16 +750,6 @@ export interface ApplyAgentConfig extends BrowserPermissionPolicy {
     progressSteps: number;
     elapsedMs: number;
   }) => void | Promise<void>;
-  /**
-   * The second judgement on leaving the listing's site. Given the address,
-   * the model's stated reason, and where the run is; allows or refuses.
-   * Without it, a move to another site is reported but not judged.
-   */
-  reviewMove?: (move: {
-    url: string;
-    reason: string;
-    fromUrl: string | null;
-  }) => Promise<{ allowed: boolean; verdict: string }>;
   now?: () => Date;
   signal?: AbortSignal;
 }

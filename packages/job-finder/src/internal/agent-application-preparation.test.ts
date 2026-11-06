@@ -444,7 +444,11 @@ function modelThatNeedsThePerson(reason: string): LLMClient {
             type: "function" as const,
             function: {
               name: "finish",
-              arguments: JSON.stringify({ reason, needsPerson: true }),
+              arguments: JSON.stringify({
+                reason,
+                needsPerson: true,
+                forPerson: [reason],
+              }),
             },
           },
         ],
@@ -582,9 +586,7 @@ test.each([
       startedAt: "2026-09-14T10:00:00.000Z",
       siteLabel: "local replica",
     });
-    expect(observed.join(" ")).toContain(
-      `"id":"posting.country","purpose":"listing","country":"${code}"`,
-    );
+    expect(observed.join(" ")).toContain(`"resolvedCountry":"${code}"`);
   },
 );
 
@@ -775,7 +777,7 @@ describe("agent application preparation seam", () => {
     expect(result.state).toBe("ready");
     expect(result.submittedAt).toBeNull();
     expect(result.outcome).toBeNull();
-    expect(result.detail).toContain("nothing was sent");
+    expect(result.detail).toBe("Nothing left to fill in");
     expect(result.blocker).toBeNull();
     expect(result.replay.lastUrl).toBe(PAGE_URL);
   });
@@ -789,8 +791,8 @@ describe("agent application preparation seam", () => {
       siteLabel: "the careers site",
       now: () => new Date("2026-09-14T10:05:00.000Z"),
     });
-    expect(result.blocker?.code).toBe("application_closed");
-    expect(result.state).toBe("failed");
+    expect(result.blocker).toBeNull();
+    expect(result.state).toBe("ready");
   });
 
   test("a sign-in wall the model reports becomes the record's blocker", async () => {
@@ -807,9 +809,8 @@ describe("agent application preparation seam", () => {
       now: () => new Date("2026-09-14T10:05:00.000Z"),
     });
 
-    expect(result.blocker?.code).toBe("site_login_required");
-    expect(result.summary).toBe("The site wants you signed in first.");
-    expect(result.blocker?.summary).toBe(result.summary);
+    expect(result.blocker?.code).toBe("missing_candidate_answer");
+    expect(result.blocker?.summary).toBe(result.detail);
     expect(result.detail).toContain("wants you signed in");
   });
 
@@ -825,9 +826,8 @@ describe("agent application preparation seam", () => {
       now: () => new Date("2026-09-14T10:05:00.000Z"),
     });
 
-    expect(result.state).toBe("paused");
-    expect(result.blocker?.code).toBe("requires_manual_review");
-    expect(result.blocker?.userActionKind).toBe("captcha");
+    expect(result.state).toBe("ready");
+    expect(result.blocker).toBeNull();
   });
 
   test("an assistant stall is a failed attempt to retry, not a request for the person", async () => {
@@ -886,7 +886,7 @@ describe("the preparer the browser layer is handed", () => {
     expect(installGuard).not.toHaveBeenCalled();
     expect(result.state).toBe("ready");
     expect(result.submittedAt).toBeNull();
-    expect(result.detail).toContain("nothing was sent");
+    expect(result.detail).toBe("Nothing left to fill in");
   });
 
   test("a missing assistant is an outage in the copy, never something to set up", async () => {
@@ -1352,7 +1352,7 @@ describe("questions and failures reaching the record", () => {
   }
 
   /** Answers nothing it has no facts for, and says it is done. */
-  function modelThatTriesBothThenFinishes(): LLMClient {
+  function modelThatTriesBothThenFinishes(refs = ["c0", "c1"]): LLMClient {
     let calls = 0;
     return {
       chatWithTools: () => {
@@ -1361,6 +1361,7 @@ describe("questions and failures reaching the record", () => {
         const args = {
           reason: "The requested personal facts are missing.",
           needsPerson: true,
+          forPerson: refs,
         };
         return Promise.resolve({
           toolCalls: [
@@ -1404,7 +1405,7 @@ describe("questions and failures reaching the record", () => {
     ]);
     expect(result.blocker?.code).toBe("missing_candidate_answer");
     expect(result.blocker?.questionIds).toHaveLength(2);
-    expect(result.summary).toContain("needs your answers to 2 questions");
+    expect(result.summary).toBe("The requested personal facts are missing.");
     expect(result.nextActionLabel).toBe(
       "Answer the form's questions and continue",
     );
@@ -1427,7 +1428,7 @@ describe("questions and failures reaching the record", () => {
         readPage: () => Promise.resolve(page),
       },
       executionInput: executionInput(),
-      llmClient: modelThatTriesBothThenFinishes(),
+      llmClient: modelThatTriesBothThenFinishes(["c0"]),
       startedAt: "2026-09-14T10:00:00.000Z",
       siteLabel: "the careers site",
       now: () => new Date("2026-09-14T10:05:00.000Z"),
@@ -2227,7 +2228,7 @@ test.each(["file", "text"] as const)(
       reviewCard: { letter: { text: string } };
     };
     expect(preparedInput.reviewCard.letter.text).toBe(approved);
-    expect(result.summary).not.toContain("fill-only");
+    expect(result.summary).toContain("Send application not pressed");
     if (delivery === "file")
       expect(new TextDecoder().decode(upload.mock.calls[0]![1].bytes)).toBe(
         approved,

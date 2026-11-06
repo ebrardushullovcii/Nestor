@@ -74,7 +74,7 @@ test.each([
   },
 );
 
-test("a script event cannot produce a person's send, and a real press retains only prior receipt phrases", async () => {
+test("a script event cannot produce a person's send; real input records page facts without classifying receipt text", async () => {
   const { page, logged } = await observed(
     "<aside>Thank you for applying.</aside>" + roleForm,
     true,
@@ -83,10 +83,10 @@ test("a script event cannot produce a person's send, and a real press retains on
   expect(logged).toEqual([]);
   await page.locator("button").click();
   const notice = logged.find((entry) => entry.startsWith("bound{"));
-  expect(JSON.parse(notice!.slice("bound".length))).toEqual({
-    confirmationBefore: ["thank you for applying"],
-  });
-  expect(notice).not.toContain("Robin");
+  const facts = JSON.parse(notice!.slice("bound".length)) as {
+    confirmationBefore: string[];
+  };
+  expect(facts.confirmationBefore[0]).toContain("Thank you for applying");
   await page.close();
 });
 

@@ -5,7 +5,6 @@ import type {
   ApplyFilledControl,
 } from "./types";
 import { isCoverLetterControl } from "./cover-letter";
-import { createQuestionClassifier } from "./question-classification";
 import {
   createApplyGuardState,
   executeApplyProposal,
@@ -37,13 +36,8 @@ export async function replaceApprovedApplicationLetter(input: {
   );
   // Missing or ambiguous fields require a fresh preparation, not a guessed write.
   if (controls.some((matches) => matches.length !== 1)) return null;
-  const classifyQuestions = createQuestionClassifier({
-    client: input.client,
-    signal: config.signal,
-  });
   const deps = {
     config,
-    classifyQuestions,
     now: config.now ?? (() => new Date()),
     guardState: createApplyGuardState(),
   };

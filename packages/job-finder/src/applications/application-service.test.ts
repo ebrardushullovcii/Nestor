@@ -157,61 +157,6 @@ const ready = () =>
   });
 const cleanups: (() => void | Promise<void>)[] = [];
 
-it("shares one blocked-site item, closes tabs, and never retries the site or subsequent jobs", async () => {
-  const f = await setup(2, 1, { onDisk: true });
-  preparation.blocker = {
-    code: "browser_blocked",
-    requiresPerson: true,
-    summary: "The site refused this browser.",
-    detail: "Open the job by hand.",
-    nextActionLabel: "Open in my browser",
-  };
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
-  f.releases.shift()!();
-  await vi.waitFor(() =>
-    expect(
-      f.applications.listApplications({ state: "blocked" }).rows,
-    ).toHaveLength(2),
-  );
-  expect(f.execute).toHaveBeenCalledTimes(1);
-  const tasks = f.applications.needsYou.list().rows;
-  expect(tasks).toHaveLength(1);
-  expect(tasks[0]?.blockedUrl).toBe(
-    f.execute.mock.calls[0]?.[1].job.canonicalUrl,
-  );
-  expect(
-    f.applications.needsYou.details(tasks[0]!.id)?.applications,
-  ).toHaveLength(2);
-  expect(await f.service.checkAccess(tasks[0]!.id)).toBe(false);
-  expect(f.browser.readApplicationPageBinding).not.toHaveBeenCalled();
-  expect(f.browser.releaseApplicationPageBinding).toHaveBeenCalledTimes(2);
-  f.applications.applyJobs({ selection: { ids: f.ids } });
-  expect(
-    f.applications.listApplications({ state: "queued" }).rows,
-  ).toHaveLength(0);
-  f.service.stop();
-  f.jobs.close();
-  const jobs = openJobStore(f.dbPath);
-  const applications = createApplicationStore(jobs);
-  const restarted = createApplicationService({ ...f.deps, jobs, applications });
-  cleanups.unshift(() => {
-    restarted.stop();
-    jobs.close();
-  });
-  await restarted.start();
-  expect(applications.listApplications({ state: "blocked" }).rows).toHaveLength(
-    2,
-  );
-  expect(applications.needsYou.list().rows.map((task) => task.id)).toEqual([
-    tasks[0]!.id,
-  ]);
-  expect(applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(0);
-  expect(f.execute).toHaveBeenCalledOnce();
-  expect(f.authorizeSending).not.toHaveBeenCalled();
-});
-
 it("closes a saved-rule skip without adding a Needs you question", async () => {
   const f = await setup(1);
   await f.service.start();
@@ -934,73 +879,6 @@ it("a picker choice the person answered in Needs you is not refused again on the
   expect(preparation.pickerTries).toEqual([[], []]);
 });
 
-it.each([null, "answer_permission", "text_retention"] as const)(
-  "re-asks only with a refused write, otherwise stops the repeated key (check: %s)",
-  async (check) => {
-    const attempted = check === "text_retention";
-    const f = await setup(1);
-    const unanswered = ApplyExecutionResultSchema.parse({
-      ...ready(),
-      state: "paused",
-      questions: [
-        {
-          id: "salary",
-          prompt: "Annual salary expectation",
-          kind: "salary_expectation",
-          answerControlType: "text",
-          inputConstraints: { type: "number" },
-          detectedAt: new Date().toISOString(),
-        },
-      ],
-    });
-    await f.service.start();
-    f.applications.applyJobs({ selection: { ids: f.ids } });
-    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
-    f.releases.shift()!(unanswered);
-    await vi.waitFor(() =>
-      expect(f.applications.needsYou.list().total).toBe(1),
-    );
-    const first = f.applications.needsYou.list().rows[0]!;
-    f.applications.needsYou.answer({
-      id: first.id,
-      answer: "50000",
-      remember: true,
-    });
-    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-    const next = structuredClone(unanswered);
-    if (check === "answer_permission")
-      next.questions[0]!.askReason = {
-        kind: "source_rejected",
-        check,
-        detail: "A candidate was rejected without a page write.",
-      };
-    if (attempted)
-      next.questions[0]!.askReason = {
-        kind: "page_refused",
-        check: "text_retention",
-        detail: "The page cleared 50000 after it was typed.",
-      };
-    f.releases.shift()!(next);
-    await vi.waitFor(() =>
-      expect(f.applications.listApplications().rows[0]?.state).toBe(
-        attempted ? "needs_you" : "failed",
-      ),
-    );
-    expect(f.applications.needsYou.list().total).toBe(attempted ? 1 : 0);
-    if (attempted) {
-      expect(f.applications.needsYou.list().rows[0]?.id).not.toBe(first.id);
-      expect(
-        f.applications.needsYou.list().rows[0]?.askReason?.detail,
-      ).toContain("50000");
-    } else
-      expect(f.applications.listApplications().rows[0]?.error).toContain(
-        "without trying to write",
-      );
-    expect(f.onError).not.toHaveBeenCalled();
-    expect(f.authorizeSending).not.toHaveBeenCalled();
-  },
-);
-
 it("passes the job's current site notes and learned Apply instructions to preparation", async () => {
   const f = await setup(1);
   const sites = createJobSitesStore(f.jobs);
@@ -1128,12 +1006,16 @@ it.each(["paused", "failed"] as const)(
         questions: [question],
       }),
     );
-    const expectedState = "failed";
+    const expectedState = state === "paused" ? "needs_you" : "failed";
     await vi.waitFor(() =>
       expect(f.applications.listApplications().rows[0]?.state).toBe(
         expectedState,
       ),
     );
+    if (state === "paused")
+      expect(f.applications.needsYou.list().rows[0]?.scope.siteOrigin).toBe(
+        "https://replica.test",
+      );
     f.service.stop();
     const restarted = createApplicationService(f.deps);
     cleanups.unshift(() => restarted.stop());
@@ -1142,7 +1024,9 @@ it.each(["paused", "failed"] as const)(
       expectedState,
     );
     expect(f.execute).toHaveBeenCalledOnce();
-    expect(f.applications.needsYou.list().total).toBe(0);
+    expect(f.applications.needsYou.list().total).toBe(
+      state === "paused" ? 1 : 0,
+    );
   },
 );
 
@@ -1716,122 +1600,6 @@ it.each([false, true])(
   },
 );
 
-it("unknown eligibility shares a country-matched legacy confirmation draft, then reuses only the newly confirmed fingerprint", async () => {
-  const f = await setup(5, 2, {
-    locations: [
-      "Berlin, Germany",
-      "Munich, Germany",
-      "Hamburg, Germany",
-      "Frankfurt, Germany",
-      "Remote, Europe",
-    ],
-  });
-  f.seed.profile.workEligibility = CandidateProfileSchema.parse({
-    ...f.seed.profile,
-    workEligibility: {},
-  }).workEligibility;
-  const question = ApplyExecutionResultSchema.parse({
-    ...ready(),
-    state: "paused",
-    questions: [
-      {
-        id: "eligibility",
-        prompt: "Are you authorized to work here?",
-        kind: "work_authorization",
-        answerControlType: "boolean",
-        answerOptions: ["Yes", "No"],
-        detectedAt: "2026-11-03T06:00:00.000Z",
-      },
-    ],
-  }).questions[0]!;
-  const berlin = f.jobs.getJob(f.ids[0]!)!;
-  const legacy = describeLegacyFormQuestion(question, berlin);
-  const old = f.applications.needsYou.remember({
-    key: legacy.key,
-    input: legacy.input,
-    options: legacy.options,
-    prompt: question.prompt,
-    answer: "Yes",
-    kind: "work_authorization",
-    scope: {},
-  });
-  preparation.givenAnswers.length = 0;
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids.slice(0, 2) } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-  expect(preparation.givenAnswers.flat()).toEqual([]);
-  expect(await preparation.readAnswers!([question])).toEqual([]);
-  const waiting = () => ({
-    ...ready(),
-    state: "paused" as const,
-    questions: [question],
-  });
-  f.releases.shift()!(waiting());
-  f.releases.shift()!(waiting());
-  await vi.waitFor(() =>
-    expect(
-      f.applications.listApplications({ state: "needs_you" }).rows,
-    ).toHaveLength(2),
-  );
-  const tasks = f.applications.needsYou.list();
-  expect(tasks.total).toBe(1);
-  const task = tasks.rows[0]!;
-  expect(f.applications.needsYou.details(task.id)?.draft).toMatchObject({
-    answer: "Yes",
-    remember: true,
-  });
-  expect(task.askReason?.eligibilityContext).toMatchObject({
-    country: "DE",
-    jobId: null,
-    legacyAnswerId: old.id,
-  });
-  expect(f.authorizeSending).not.toHaveBeenCalled();
-  expect(
-    f.applications.needsYou.answer({
-      id: task.id,
-      answer: "Yes",
-      remember: true,
-    }).resolved,
-  ).toBe(true);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(4));
-  expect((await preparation.readAnswers!([question]))[0]?.answer).toBe("Yes");
-  const current = describeFormQuestion(question, berlin, f.seed.profile);
-  const saved = f.applications.needsYou.getAnswerByKey({
-    key: current.key,
-    scope: {},
-  });
-  expect(saved?.proofEntryIds).toContain(`legacy_form_answer:${old.id}`);
-  expect(saved?.proofEntryIds).toContain(
-    `eligibility:${task.askReason!.eligibilityContext!.fingerprint}`,
-  );
-  f.releases.shift()!();
-  f.releases.shift()!();
-  await vi.waitFor(() =>
-    expect(
-      f.applications.listApplications({ state: "ready" }).rows,
-    ).toHaveLength(2),
-  );
-  f.applications.applyJobs({ selection: { ids: [f.ids[2]!] } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(5));
-  expect((await preparation.readAnswers!([question]))[0]?.answer).toBe("Yes");
-  f.releases.shift()!();
-  f.seed.profile.workEligibility.authorizedWorkCountries = ["Germany"];
-  f.applications.applyJobs({ selection: { ids: [f.ids[3]!] } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(6));
-  expect(await preparation.readAnswers!([question])).toEqual([]);
-  expect(preparation.givenAnswers.at(-1)).toEqual([]);
-  f.releases.shift()!();
-  f.applications.applyJobs({ selection: { ids: [f.ids[4]!] } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(7));
-  expect(await preparation.readAnswers!([question])).toEqual([]);
-  f.releases.shift()!(waiting());
-  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
-  expect(
-    f.applications.needsYou.details(f.applications.needsYou.list().rows[0]!.id)
-      ?.draft,
-  ).toBeNull();
-});
-
 it("brings back a form waiting on a question after a restart, still waiting with the same item", async () => {
   const f = await setup(1);
   const waitingOnQuestion = () =>
@@ -2154,283 +1922,6 @@ it("starts approved jobs immediately, caps preparation, and leaves Original form
   );
 });
 
-it("records the person's confirmed submission, moves Approved to applied, and closes that exact tab", async () => {
-  const f = await setup(1);
-  vi.useFakeTimers();
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
-  f.releases.shift()!();
-  await vi.waitFor(() =>
-    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
-  );
-  f.browser.readApplicationPageWithPerson.mockResolvedValue({
-    ...f.personPage,
-    sendPressedAt: new Date().toISOString(),
-    sendConfirmationBefore: [],
-    sendOrigin: "https://replica.test",
-  });
-  await vi.advanceTimersByTimeAsync(2_000);
-  const row = f.applications.listApplications().rows[0]!;
-  expect(row.state).toBe("submitted");
-  expect(f.jobs.getJob(row.jobId)?.stage).toBe("applied");
-  expect(f.applications.getSubmissionReceipt(row.id)?.outcome).toBe(
-    "submitted",
-  );
-  expect(f.browser.releaseApplicationPageBinding).toHaveBeenCalledWith(
-    "target_site",
-    `application_${row.id}_attempt_1`,
-  );
-  // The browser hears it was sent before the page closes, to say so.
-  expect(f.onPersonSent).toHaveBeenCalledExactlyOnceWith({
-    applicationId: row.id,
-    jobId: row.jobId,
-    company: row.company,
-    title: row.title,
-    pageKey: `application_${row.id}_attempt_1`,
-  });
-  expect(f.onPersonSent.mock.invocationCallOrder[0]).toBeLessThan(
-    f.browser.releaseApplicationPageBinding.mock.invocationCallOrder[0]!,
-  );
-  expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
-    0,
-  );
-});
-
-it.each([
-  [
-    "static acknowledgement without a final press",
-    undefined,
-    undefined,
-    "https://replica.test/jobs/0",
-    "https://replica.test",
-    "ready",
-  ],
-  [
-    "acknowledgement already present before the press",
-    true,
-    ["thank you for applying", "your application has been received"],
-    "https://replica.test/jobs/0",
-    "https://replica.test",
-    "uncertain",
-  ],
-  [
-    "receipt in a different origin",
-    true,
-    [],
-    "https://other.test/receipt",
-    "https://replica.test",
-    "uncertain",
-  ],
-  [
-    "receipt in the exact sending iframe",
-    true,
-    [],
-    "https://frame.test/receipt",
-    "https://frame.test",
-    "submitted",
-  ],
-] as const)(
-  "person outcome requires fresh receipt evidence: %s",
-  async (_label, pressed, before, url, sendOrigin, expected) => {
-    const f = await setup(1);
-    vi.useFakeTimers();
-    await f.service.start();
-    f.applications.applyJobs({ selection: { ids: f.ids } });
-    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
-    f.releases.shift()!();
-    await vi.waitFor(() =>
-      expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
-    );
-    f.browser.readApplicationPageWithPerson.mockResolvedValue({
-      ...f.personPage,
-      url,
-      ...(pressed
-        ? { sendPressedAt: new Date().toISOString(), sendOrigin }
-        : {}),
-      ...(before ? { sendConfirmationBefore: [...before] } : {}),
-    });
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(f.applications.listApplications().rows[0]?.state).toBe(expected);
-    expect(f.authorizeSending).not.toHaveBeenCalled();
-  },
-);
-
-it("a late site receipt settles the exact consumed send without another click or fresh Apply", async () => {
-  const f = await setup(1);
-  const guards = createSendGuards(f.jobs);
-  f.deps.authorityRepository = guards;
-  f.seed.settings.applicationAutomationMode = "autonomous_submit";
-  f.authorizeSending.mockImplementation(async ({ artifact, application }) => {
-    const envelope = {
-      ...sendEnvelope(application.jobId, artifact.sha256!),
-      mode: "autonomous_submit" as const,
-    };
-    await guards.commitApplicationAuthorityEnvelope({
-      envelope,
-      expectedRevision: null,
-    });
-    return envelope;
-  });
-  const observation = {
-    identity: { id: "late-form", revision: 1, digest: "a".repeat(64) },
-    page: { origin: "https://replica.test", safePath: "/jobs/0" },
-    complete: true,
-    controls: [
-      {
-        identity: { ref: "final-control-0", signature: "c".repeat(64) },
-        ordinal: 0,
-        kind: "button" as const,
-        label: "Submit Application",
-        formIndex: 0,
-        action: { origin: "https://replica.test", safePath: "/submit" },
-      },
-    ],
-  };
-  const facts = {
-    actionAttempted: true,
-    actionIssued: true,
-    actionCompleted: true,
-    pageBefore: observation.page,
-    pageAfter: observation.page,
-    urlChanged: false,
-    requestsObservedDuringAction: 1,
-    requestsAfterClick: [],
-  };
-  const action = vi.fn<
-    NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>
-  >(async (_source, input) => {
-    expect(
-      await input.veto({ observation, control: observation.controls[0]! }),
-    ).toBe(true);
-    return {
-      outcome: "outcome_uncertain",
-      reason: "confirmation_timeout",
-      observation,
-      control: observation.controls[0]!,
-      facts,
-    };
-  });
-  const recheck = vi
-    .fn<NonNullable<BrowserSessionRuntime["recheckApplicationSubmission"]>>()
-    .mockResolvedValue(null);
-  Object.assign(f.browser, {
-    observeApplicationForm: () => Promise.resolve(observation),
-    executeExactlyOneFinalAction: action,
-    recheckApplicationSubmission: recheck,
-  });
-  f.browser.readApplicationPageBinding.mockResolvedValue({
-    ...f.personPage,
-    bodyText: "Completed form",
-    actions: [
-      {
-        ref: "a0",
-        index: 0,
-        label: "Submit Application",
-        visible: true,
-        disabled: false,
-      },
-    ],
-  });
-  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
-  await f.service.start();
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
-  f.releases.shift()!();
-  await vi.waitFor(() =>
-    expect(f.applications.listApplications().rows[0]?.state).toBe("uncertain"),
-  );
-  const row = f.applications.listApplications().rows[0]!;
-  const original = f.applications.getSubmissionReceipt(row.id)!;
-  expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
-  f.browser.focusRetainedApplicationPage.mockResolvedValue(true);
-  expect(await f.service.open(row.id)).toBe(true);
-  expect(f.execute).toHaveBeenCalledOnce();
-  expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalled();
-  expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
-    0,
-  );
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-  // Restart only the timer registration, preserving the service's exact retained check.
-  f.service.stop();
-  await f.service.start();
-  recheck.mockResolvedValue({
-    outcome: "submitted",
-    reason: "employer_confirmation",
-    observation,
-    control: observation.controls[0]!,
-    facts,
-    confirmation: {
-      observedAt: new Date().toISOString(),
-      destination: observation.page,
-      summary: "The site confirmed receipt.",
-    },
-  });
-  await vi.advanceTimersByTimeAsync(2_000);
-  expect(f.applications.getApplication(row.id)?.state).toBe("submitted");
-  expect(f.applications.getSubmissionReceipt(row.id)?.id).not.toBe(original.id);
-  expect(
-    (await guards.listSubmissionOutcomeRecords({ jobId: String(row.jobId) }))[0]
-      ?.outcome,
-  ).toBe("outcome_uncertain");
-  expect(action).toHaveBeenCalledOnce();
-  expect(recheck).toHaveBeenCalledWith("target_site", {
-    pageBindingKey: `application_${row.id}_attempt_1`,
-    expectedObservation: observation.identity,
-    expectedControl: observation.controls[0]!.identity,
-  });
-  expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
-    0,
-  );
-});
-
-it("the person's own Submit in their window is Uncertain at once, and Applied when the site confirms it", async () => {
-  // EUROPEAN DYNAMICS: the person pressed Submit; the site stayed on
-  // "Submitting…" with no confirmation, and the application stayed Ready.
-  const f = await setup(1);
-  vi.useFakeTimers();
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
-  f.releases.shift()!();
-  await vi.waitFor(() =>
-    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
-  );
-  const submitting: RawApplyPage = {
-    ...f.personPage,
-    title: "Apply",
-    bodyText: "Submitting…",
-    sendPressedAt: new Date(Date.now() + 1_000).toISOString(),
-  };
-  await vi.advanceTimersByTimeAsync(1_000);
-  f.browser.readApplicationPageWithPerson.mockResolvedValue(submitting);
-  await vi.advanceTimersByTimeAsync(2_000);
-  let row = f.applications.listApplications().rows[0]!;
-  expect(row.state).toBe("uncertain");
-  expect(f.applications.getSubmissionReceipt(row.id)).toMatchObject({
-    outcome: "outcome_uncertain",
-    retry: { eligible: false, blockReason: "outcome_uncertain" },
-  });
-  // Nothing sends it again: apply skips it, and its page stays open.
-  expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
-    0,
-  );
-  expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
-  expect(f.onPersonSent).not.toHaveBeenCalled();
-  // The site confirms it on their page.
-  f.browser.readApplicationPageWithPerson.mockResolvedValue(f.personPage);
-  await vi.advanceTimersByTimeAsync(2_000);
-  row = f.applications.listApplications().rows[0]!;
-  expect(row.state).toBe("submitted");
-  expect(f.jobs.getJob(row.jobId)?.stage).toBe("applied");
-  expect(f.browser.releaseApplicationPageBinding).toHaveBeenCalledWith(
-    "target_site",
-    `application_${row.id}_attempt_1`,
-  );
-  expect(f.onPersonSent).toHaveBeenCalledExactlyOnceWith(
-    expect.objectContaining({ applicationId: row.id, jobId: row.jobId }),
-  );
-});
-
 it("a press older than the application's own state is not the person's send", async () => {
   const f = await setup(1);
   vi.useFakeTimers();
@@ -2535,7 +2026,7 @@ it.each([
   ["account_creation_required", "sign_in"],
   ["multi_factor_required", "mfa"],
 ] as const)(
-  "shows the exact retained %s page once, then resumes without Continue",
+  "shows the model-selected %s handoff once, then resumes when the person continues",
   async (code, kind) => {
     const f = await setup(1);
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
@@ -2585,9 +2076,13 @@ it.each([
         },
       ],
     });
-    await vi.advanceTimersByTimeAsync(2000);
+    const taskId = f.applications.needsYou.list().rows[0]!.id;
+    await f.service.checkAccess(taskId);
     await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-    expect(f.applications.needsYou.list().total).toBe(0);
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.needsYou.list().total).toBe(0),
+    );
     expect(f.browser.focusRetainedApplicationPage).toHaveBeenCalledOnce();
     expect(f.authorizeSending).not.toHaveBeenCalled();
   },
@@ -2761,135 +2256,6 @@ it("the person's word settles a send the app could not confirm, with or without 
     1,
   );
   expect(f.applications.getApplication(sent.id)?.state).toBe("submitted");
-});
-
-it("automatically carries every waiting page on after one site sign-in and MFA, checking each checkpoint", async () => {
-  const f = await setup(3);
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-  preparation.blocker = {
-    code: "site_login_required",
-    requiresPerson: true,
-    summary: "Sign in to continue",
-    detail: "Sign in",
-    nextActionLabel: "Open browser",
-  };
-  const pages = new Map<string, RawApplyPage>();
-  const key = (id: number, attempt = 1) =>
-    `application_${id}_attempt_${attempt}`;
-  const base = {
-    ...f.personPage,
-    title: "Sign in",
-    bodyText: "Sign in to continue",
-  };
-  f.browser.readApplicationPageBinding.mockImplementation((_source, id) =>
-    Promise.resolve(pages.get(id) ?? base),
-  );
-  let personKey: string | null = null;
-  f.browser.readApplicationPageWithPerson.mockImplementation((_source, id) =>
-    Promise.resolve(id === personKey ? (pages.get(id) ?? null) : null),
-  );
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
-  f.releases.splice(0).forEach((release) => release());
-  await vi.waitFor(() =>
-    expect(
-      f.applications.listApplications({ state: "needs_you" }).rows,
-    ).toHaveLength(3),
-  );
-  const rows = f.applications
-    .listApplications()
-    .rows.sort((a, b) => a.id - b.id);
-  const first = rows[0]!;
-  const second = rows[1]!;
-  const third = rows[2]!;
-  const task = f.applications.needsYou.list().rows[0]!;
-  expect(f.applications.needsYou.list().total).toBe(1);
-  personKey = key(first.id);
-  pages.set(personKey, { ...base, bodyText: "Enter your verification code" });
-  await vi.advanceTimersByTimeAsync(2000);
-  expect(f.applications.needsYou.list().rows[0]).toMatchObject({
-    id: task.id,
-    kind: "mfa",
-  });
-  expect(f.execute).toHaveBeenCalledTimes(3);
-  // A blank or error document is never evidence that sign-in succeeded.
-  pages.set(personKey, { ...base, bodyText: "Page not found" });
-  await vi.advanceTimersByTimeAsync(2000);
-  expect(f.applications.getApplication(first.id)?.state).toBe("needs_you");
-  const accessible: RawApplyPage = {
-    ...base,
-    bodyText: "Application",
-    links: [
-      {
-        index: 0,
-        label: "Continue application",
-        href: "https://replica.test/application",
-        visible: true,
-        target: "",
-        topOffset: 0,
-      },
-    ],
-  };
-  preparation.blocker = null;
-  f.browser.transferApplicationPageBinding.mockImplementation(
-    (_source, _old, next) =>
-      next === key(first.id, 2)
-        ? Promise.reject(
-            new Error("The exact prepared application page is no longer open."),
-          )
-        : Promise.resolve(true),
-  );
-  pages.set(personKey, accessible);
-  f.browser.reloadApplicationPageBinding.mockImplementation((_source, id) => {
-    // One page still has its own challenge. Sharing the cookie is not proof.
-    pages.set(
-      id,
-      id === key(third.id, 2)
-        ? { ...base, bodyText: "Verify you are human" }
-        : accessible,
-    );
-    return Promise.resolve();
-  });
-  await vi.advanceTimersByTimeAsync(2000);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(6), {
-    timeout: 5000,
-  });
-  expect(f.browser.reloadApplicationPageBinding).toHaveBeenCalledWith(
-    "target_site",
-    key(third.id, 2),
-    f.jobs.getJob(third.jobId)!.applyUrl ?? f.jobs.getJob(third.jobId)!.url,
-  );
-  expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalledWith(
-    "target_site",
-    key(first.id, 2),
-    expect.anything(),
-  );
-  // This attempt lost its old tab, so execute opens a fresh application with
-  // the shared session rather than reloading a retained binding.
-  pages.set(key(second.id, 2), accessible);
-  f.releases.splice(0).forEach((release) => release());
-  await vi.waitFor(() => {
-    expect(f.applications.getApplication(third.id)?.state).toBe("needs_you");
-    expect(f.applications.getApplication(second.id)?.state).toBe("ready");
-  });
-  expect(
-    f.applications.needsYou.details(task.id)?.applications.map((row) => row.id),
-  ).toEqual([third.id]);
-  personKey = key(third.id, 2);
-  pages.set(personKey, accessible);
-  await vi.advanceTimersByTimeAsync(2000);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(7));
-  expect(f.applications.needsYou.list().total).toBe(0);
-  expect(f.applications.needsYou.listAnswers().total).toBe(0);
-  f.releases.splice(0).forEach((release) => release());
-  await vi.waitFor(() =>
-    expect(
-      f.applications.listApplications({ state: "ready" }).rows,
-    ).toHaveLength(3),
-  );
-  expect(f.authorizeSending).not.toHaveBeenCalled();
-  expect(f.onError).not.toHaveBeenCalled();
 });
 
 function sendEnvelope(jobId: number, sha256: string) {
@@ -3094,111 +2460,6 @@ it("Send for me resumes after two Needs-you answers and forwards only the final 
   expect(f.onError).not.toHaveBeenCalled();
 });
 
-it("reads waiting pages nobody holds every 30 seconds, and closely after the person opens one", async () => {
-  const f = await setup(2);
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
-  preparation.blocker = {
-    code: "site_login_required",
-    requiresPerson: true,
-    summary: "Sign in to continue",
-    detail: "Sign in",
-    nextActionLabel: "Open browser",
-  };
-  const signIn = {
-    ...f.personPage,
-    title: "Sign in",
-    bodyText: "Sign in to continue",
-  };
-  f.browser.readApplicationPageBinding.mockResolvedValue(signIn);
-  f.browser.readApplicationPageWithPerson.mockResolvedValue(null);
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-  f.releases.splice(0).forEach((release) => release());
-  await vi.waitFor(() =>
-    expect(
-      f.applications.listApplications({ state: "needs_you" }).rows,
-    ).toHaveLength(2),
-  );
-  const reads = () => f.browser.readApplicationPageBinding.mock.calls.length;
-  await vi.advanceTimersByTimeAsync(2000);
-  const afterFirst = reads();
-  // Ten more watch cycles: an unchanged page nobody holds is not re-read.
-  await vi.advanceTimersByTimeAsync(20_000);
-  expect(reads()).toBe(afterFirst);
-  await vi.advanceTimersByTimeAsync(12_000);
-  expect(reads()).toBe(afterFirst + 2);
-  // The person opens one: that page is read every cycle for a while.
-  const [opened] = f.applications
-    .listApplications({ state: "needs_you" })
-    .rows.sort((a, b) => a.id - b.id);
-  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
-  expect(await f.service.open(opened!.id)).toBe(true);
-  const beforeClose = reads();
-  await vi.advanceTimersByTimeAsync(6000);
-  expect(reads() - beforeClose).toBeGreaterThanOrEqual(3);
-  expect(f.onError).not.toHaveBeenCalled();
-});
-
-it("Check again on a sign-in the page still shows runs the application again from its own address", async () => {
-  const f = await setup(1);
-  preparation.blocker = {
-    code: "site_login_required",
-    requiresPerson: true,
-    summary: "Sign in to continue",
-    detail: "Sign in",
-    nextActionLabel: "Open browser",
-  };
-  f.browser.readApplicationPageBinding.mockResolvedValue({
-    ...f.personPage,
-    title: "Sign in",
-    bodyText: "Sign in to continue",
-  });
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
-  f.releases.splice(0).forEach((release) => release());
-  await vi.waitFor(() =>
-    expect(
-      f.applications.listApplications({ state: "needs_you" }).rows,
-    ).toHaveLength(1),
-  );
-  const [row] = f.applications.listApplications({ state: "needs_you" }).rows;
-  const task = f.applications.needsYou.list().rows[0]!;
-  // The sign-in finished in another window; this page still shows it.
-  expect(await f.service.checkAccess(task.id)).toBe(false);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-  // The shared item stays, and Open can show the currently running retry.
-  expect(f.applications.needsYou.details(task.id)?.applications).toHaveLength(
-    1,
-  );
-  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
-  expect(await f.service.open(row!.id)).toBe(true);
-  expect(f.browser.focusApplicationPageBinding).toHaveBeenLastCalledWith(
-    "target_site",
-    `application_${row!.id}_attempt_2`,
-  );
-  expect(f.execute).toHaveBeenCalledTimes(2);
-  const job = f.jobs.getJob(row!.jobId)!;
-  expect(f.browser.reloadApplicationPageBinding).toHaveBeenCalledWith(
-    "target_site",
-    `application_${row!.id}_attempt_2`,
-    job.applyUrl ?? job.url,
-  );
-  // The site still asks: the new attempt stops at the same item.
-  f.releases.splice(0).forEach((release) => release());
-  await vi.waitFor(() =>
-    expect(f.applications.getApplication(row!.id)?.state).toBe("needs_you"),
-  );
-  expect(f.applications.needsYou.list().rows.map((t) => t.id)).toEqual([
-    task.id,
-  ]);
-  expect(
-    f.applications.needsYou.details(task.id)?.applications.map((a) => a.id),
-  ).toEqual([row!.id]);
-  expect(f.onError).not.toHaveBeenCalled();
-});
-
 it("opening an account child keeps the form ready with finish-or-close guidance", async () => {
   const f = await setup(1);
   await f.service.start();
@@ -3392,7 +2653,7 @@ it.each([false, true])(
     await vi.waitFor(() =>
       expect(f.applications.getApplication(first.id)).toMatchObject({
         attempt: 2,
-        state: refused ? "failed" : "needs_you",
+        state: "failed",
       }),
     );
     expect(adopt).toHaveBeenCalledExactlyOnceWith(
@@ -3401,43 +2662,10 @@ it.each([false, true])(
       `application_${first.id}_attempt_2`,
     );
     expect(f.execute).toHaveBeenCalledOnce();
-    if (refused) {
-      expect(f.applications.getApplication(first.id)?.error).toContain(
-        "send may have been pressed",
-      );
-      return;
-    }
-    expect(f.applications.getWork(first.id)?.execution.questions[0]?.id).toBe(
-      "step_handover",
+    expect(f.applications.needsYou.list().total).toBe(0);
+    expect(f.applications.getApplication(first.id)?.error).toContain(
+      refused ? "send may have been pressed" : "could not attach automation",
     );
-    expect(f.applications.needsYou.list().rows[0]).toMatchObject({
-      input: "text",
-      waitingFor: { count: 1 },
-    });
-    expect(f.applications.needsYou.list().rows[0]?.prompt).toMatch(
-      /^Press .+ on the site, then continue$/u,
-    );
-    const pressedAt = new Date().toISOString();
-    f.browser.readApplicationPageWithPerson.mockImplementation((_source, key) =>
-      Promise.resolve(
-        key === owner
-          ? {
-              ...f.personPage,
-              sendPressedAt: pressedAt,
-              sendConfirmationBefore: [],
-              sendOrigin: "https://replica.test",
-            }
-          : null,
-      ),
-    );
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(f.onError).not.toHaveBeenCalled();
-    expect(f.applications.getApplication(first.id)).toMatchObject({
-      attempt: 2,
-      state: "submitted",
-    });
-    expect(f.applications.getSubmissionReceipt(first.id)?.resultId).toBe(owner);
-    expect(f.execute).toHaveBeenCalledOnce();
   },
 );
 

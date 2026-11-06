@@ -469,24 +469,13 @@ export interface BrowserSessionRuntime {
     },
   ): Promise<void>;
   /**
-   * Main-process-only one-shot final-action hand. It reports submission only
-   * when the employer page visibly confirms receipt after the action.
+   * Main-process-only one-shot final-action hand. Returns page and request facts
+   * for the model to judge, retaining the consumed call ID.
    */
   executeExactlyOneFinalAction?(
     source: JobSource,
     input: ExecuteExactlyOneFinalActionInput,
   ): Promise<ApplicationFinalActionResult>;
-  /** Observe the exact prior final action again; never reloads, clicks or re-arms it. */
-  recheckApplicationSubmission?(
-    source: JobSource,
-    input: Pick<
-      ExecuteExactlyOneFinalActionInput,
-      "expectedObservation" | "expectedControl"
-    > & { pageBindingKey: string },
-  ): Promise<Extract<
-    ApplicationFinalActionResult,
-    { outcome: "submitted" }
-  > | null>;
   captureVisualSnapshot?(
     source: JobSource,
     request: BrowserVisualSnapshotRequest,

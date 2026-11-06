@@ -28,13 +28,6 @@ export {
   isControlAnswered,
 } from "./control-classification";
 export {
-  detectApplyBlocker,
-  canContinueApplicationAfterAccess,
-  hasSubmissionConfirmationText,
-  looksLikeSignInPage,
-  siteLoginRequiredBlocker,
-} from "./blockers";
-export {
   buildCoverLetterRequest,
   coverLetterDeliveryFor,
   detectPostingLanguage,
@@ -105,5 +98,4 @@ export type {
 export { applicationFacts } from "./application-facts";
 export { requiresSavedNationalityAnswer } from "./person-nationality";
 
-export { createQuestionClassifier } from "./question-classification";
 export { replaceApprovedApplicationLetter } from "./approved-letter";

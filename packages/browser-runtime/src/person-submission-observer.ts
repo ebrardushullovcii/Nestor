@@ -1,10 +1,8 @@
-import { readApplicationSubmissionConfirmationEvidence } from "@nestor/contracts";
-
 /** Installed in each document; observes trusted input, never sends or cancels it. */
-function installPersonSubmissionObserver(
-  tokens: { unbound: string | null; bound: string | null },
-  receipts: typeof readApplicationSubmissionConfirmationEvidence,
-): void {
+function installPersonSubmissionObserver(tokens: {
+  unbound: string | null;
+  bound: string | null;
+}): void {
   const pageWindow = window as unknown as Record<string, unknown>;
   const installation = tokens.bound
     ? "__nestorNativePersonSubmissionObserver"
@@ -201,7 +199,7 @@ function installPersonSubmissionObserver(
           sendOrigin?: string;
         }
       | undefined;
-    const before = receipts(text(document.body ?? document)).messages;
+    const before = [text(document.body ?? document)];
     if (!tokens.bound) {
       if (!guard?.finalActionAllowed) return;
       guard.sendPressedAt = Date.now();
@@ -223,5 +221,5 @@ export function personSubmissionObserverSource(
     bound: null,
   },
 ): string {
-  return `(${installPersonSubmissionObserver.toString()})(${JSON.stringify(tokens)},${readApplicationSubmissionConfirmationEvidence.toString()})`;
+  return `(${installPersonSubmissionObserver.toString()})(${JSON.stringify(tokens)})`;
 }

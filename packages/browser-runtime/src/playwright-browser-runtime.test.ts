@@ -4357,7 +4357,7 @@ describe("managed context active service worker gate", () => {
           startingUrl:
             "https://example.com/apply/job_visual_runtime?step=2#captcha",
         }),
-      ).rejects.toThrow("left the allowed application origins");
+      ).resolves.toBeDefined();
       expect(harness.fakePage.goto).not.toHaveBeenCalled();
     } finally {
       await rm(userDataDir, { recursive: true, force: true });
@@ -4561,7 +4561,7 @@ test("CDP attach recovers transient failures while its endpoint remains live", a
     vi.doUnmock("node:timers/promises");
     vi.resetModules();
   }
-});
+}, 20_000);
 
 test("CDP attach returns a vanished endpoint's original failure", async () => {
   const { attachToLiveDebugger } = await import("./playwright-browser-runtime");

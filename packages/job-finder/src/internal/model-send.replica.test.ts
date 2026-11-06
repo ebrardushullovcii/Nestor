@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
-import { CandidateProfileSchema } from "@nestor/contracts";
+import {
+  SubmissionOutcomeRecordSchema,
+  CandidateProfileSchema,
+} from "@nestor/contracts";
 import { createSendGuards, openJobStore } from "@nestor/db/job-store";
 import { createApplyPageHands, runApplyAgent } from "@nestor/browser-agent";
 import {
@@ -156,17 +159,57 @@ test.each([false, true])(
             },
           };
           const sent = await runApplicationSubmissionRuntime(input);
-          expect(sent.status).toBe("submitted");
+          expect(sent.status).toBe("outcome_uncertain");
           return {
-            outcome: "submitted" as const,
-            content: "Send ledger: the replica confirmed receipt.",
+            outcome: "outcome_uncertain" as const,
+            content: `Send ledger: sendCallId=${decision.callId!}; requests=${JSON.stringify("outcome" in sent ? sent.outcome?.browserAction?.requestsAfterClick : [])}. Inspect the page and record your observed outcome.`,
           };
         },
       );
+      let turn = 0;
       const result = await runApplyAgent(
         {
           hands,
           submitApplication: submit,
+          recordSendOutcome: async (decision) => {
+            const key = await repository.getSubmissionIdempotencyRecord(
+              decision.sendCallId,
+            );
+            const previous = await repository.getSubmissionOutcomeRecord(
+              key!.outcomeId!,
+            );
+            const at = new Date().toISOString();
+            const receipt = SubmissionOutcomeRecordSchema.parse({
+              ...previous,
+              id: `${previous!.id}_model`,
+              outcome: "submitted",
+              verifiedAt: at,
+              evidence: [
+                {
+                  id: "model_evidence",
+                  kind: "employer_site_state",
+                  observedAt: at,
+                  destination: {
+                    origin: new URL(page.url()).origin,
+                    safePath: new URL(page.url()).pathname,
+                  },
+                  artifactRefId: null,
+                  summary: decision.evidence,
+                },
+              ],
+              retry: { eligible: false, blockReason: "submission_confirmed" },
+            });
+            const recorded = await repository.resolveSubmissionOutcome({
+              expectedOutcomeId: previous!.id,
+              expectedIdempotencyRevision: key!.revision,
+              outcome: receipt,
+            });
+            expect(recorded.status).toBe("recorded");
+            return {
+              recorded: true,
+              content: "Recorded model-confirmed outcome.",
+            };
+          },
           authority: {
             mode: "autonomous_submit",
             submitAuthorized: true,
@@ -194,25 +237,43 @@ test.each([false, true])(
           },
         },
         {
-          chatWithTools: () =>
-            Promise.resolve({
+          chatWithTools: () => {
+            const decision =
+              ++turn === 1
+                ? { name: "submit_application", args: { ref: action.ref } }
+                : turn === 2
+                  ? {
+                      name: "record_send_outcome",
+                      args: {
+                        sendCallId: "provider-send-1",
+                        outcome: "confirmed",
+                        evidence: "Your application has been received",
+                      },
+                    }
+                  : {
+                      name: "finish",
+                      args: { reason: "The replica received the application." },
+                    };
+            return Promise.resolve({
               toolCalls: [
                 {
-                  id: "provider-send-1",
-                  type: "function",
+                  id: turn === 1 ? "provider-send-1" : `provider-${turn}`,
+                  type: "function" as const,
                   function: {
-                    name: "submit_application",
-                    arguments: JSON.stringify({ ref: action.ref }),
+                    name: decision.name,
+                    arguments: JSON.stringify(decision.args),
                   },
                 },
               ],
-            }),
+            });
+          },
         },
       );
-      expect(result.outcome).toBe("ready_to_send");
+      expect(result.outcome).toBe("submitted");
       expect(submit).toHaveBeenCalledTimes(1);
       expect(accepted).toBe(1);
       expect(await repository.listSubmissionOutcomeRecords()).toEqual([
+        expect.objectContaining({ outcome: "outcome_uncertain" }),
         expect.objectContaining({ outcome: "submitted" }),
       ]);
       expect(await page.locator("body").innerText()).toContain(

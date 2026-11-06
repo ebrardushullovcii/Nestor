@@ -286,7 +286,10 @@ test("a fresh structured review retains known earlier contact values without edi
       a.answer.value,
       a.answer.sourceId,
     ]),
-  ).toEqual([["Full name", "Robin Ashford", "observed.summary_0"]]);
+  ).toEqual([
+    ["Full name", "Robin Ashford", "observed.summary_0"],
+    ["Unknown private value", "not a supplied fact", "observed.summary_1"],
+  ]);
 });
 
 test("a structured summary does not duplicate a control retained with its section context", async () => {

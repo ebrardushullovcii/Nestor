@@ -150,29 +150,10 @@ export function applicationFacts(
             "Limited permissions establish present authorization only within their country and stated conditions. requiresFutureSponsorship describes future work, not a blanket answer for this application. Compare the job type, hours and dates; leave unresolved authorization and sponsorship questions for the person. Reusable answers cannot override permit conditions.",
         }
       : {}),
-    savedAnswers: relevantSavedAnswers(sources.reusableAnswers).map(
-      (saved) => ({
-        id: saved.id,
-        kind: saved.kind,
-        label: saved.label,
-        question: saved.question,
-        answer: saved.answer,
-        needsConfirmation: saved.needsConfirmation,
-        // Native execution binding is host metadata, not a new applicant fact.
-        // Fill and Send see the same scope even when only Fill has that marker.
-        applicationScope: saved.applicationScope
-          ? {
-              resultId: saved.applicationScope.resultId,
-              applicationRecordId: saved.applicationScope.applicationRecordId,
-              location: saved.applicationScope.location,
-              ...(saved.applicationScope.hiringCountry
-                ? { hiringCountry: saved.applicationScope.hiringCountry }
-                : {}),
-            }
-          : undefined,
-        optionFallback: saved.optionFallback,
-      }),
-    ),
+    savedAnswers: sources.reusableAnswers.map((saved) => ({
+      ...saved,
+      storedFactId: `answerLibrary.${saved.id}`,
+    })),
     spokenLanguages: profile.spokenLanguages,
     skills: profile.skills,
     skillGroups: profile.skillGroups,
@@ -315,12 +296,7 @@ export function storedFacts(
       "the username from your code profile",
     );
   }
-  for (const saved of sources.reusableAnswers.filter(
-    (entry) =>
-      !entry.needsConfirmation &&
-      entry.kind !== "work_authorization" &&
-      entry.kind !== "visa_sponsorship",
-  )) {
+  for (const saved of sources.reusableAnswers) {
     add(
       saved.answer,
       `answerLibrary.${saved.id}`,

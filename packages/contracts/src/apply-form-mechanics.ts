@@ -1,3 +1,4 @@
+import type { BrowserPasswordsList } from "./browser-passwords";
 /**
  * The raw shape of an application form, before any product meaning.
  *
@@ -35,6 +36,8 @@ export interface RawApplyControl {
   name: string;
   /** Transient identity of the containing form/root within this page read. */
   scopeKey?: string;
+  /** Native form owner position in this document, when present. */
+  formIndex?: number;
   /** Transient identity of the nearest enclosing row/group within that form. */
   rowScopeKey?: string;
   /** Current visible calling code on this tel input's own collapsed country button. */
@@ -110,6 +113,7 @@ export interface RawApplyUpload {
  * whether that part is a form with fields. Nothing here says what to press.
  */
 export interface RawApplyPlacement {
+  formIndex?: number;
   frame?: ApplyFrameOwner;
   section?: string;
   inForm?: boolean;
@@ -207,6 +211,7 @@ export interface RawApplySummaryRow {
 }
 
 export interface RawApplyPage {
+  navigationNote?: string;
   /** Monotonic count of non-GET/HEAD/OPTIONS page requests, independent of file matching. */
   networkMutationCount?: number;
   /** Visible `dt`/`dd` rows, outermost document first; absent when none. */
@@ -339,6 +344,8 @@ export interface ApplyUploadFile {
 export interface ApplyRawPageHands {
   /** Host-only exact-site autofill. It never returns credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;
+  listSavedCredentials?: () => Promise<BrowserPasswordsList>;
+  fillSavedCredential?: (ref: string, credentialId: string) => Promise<boolean>;
   /** One host-autofilled existing-account JS sign-in press, never a native submit. */
   clickAuthorizedLoginAction?: (input: {
     ref: string;
@@ -556,3 +563,7 @@ export interface ApplyPageSession extends ApplyRawPageHands {
    */
   checkServiceWorker: () => Promise<ApplyServiceWorkerFinding | null>;
 }
+
+/** The same native-control ordering is used for public refs and private vault fills. */
+export const APPLY_CONTROL_SELECTOR =
+  "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true']";

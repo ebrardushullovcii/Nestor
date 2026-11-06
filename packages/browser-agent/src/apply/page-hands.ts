@@ -13,8 +13,6 @@ import {
   normalizeSignal,
   toAnswerControlType,
 } from "./control-classification";
-import { detectApplyBlocker } from "./blockers";
-import { requiresOwnWords } from "./own-words";
 import type {
   ApplyControlKind,
   ApplyFormAction,
@@ -135,6 +133,7 @@ function hashSignature(parts: readonly string[]): string {
 
 function placementOf(raw: RawApplyPlacement): ApplyPlacement {
   return {
+    ...(raw.formIndex !== undefined ? { formIndex: raw.formIndex } : {}),
     ...(raw.section?.trim() ? { section: raw.section.trim() } : {}),
     ...(raw.inForm ? { inForm: true } : {}),
   };
@@ -299,7 +298,16 @@ export function buildApplyFormObservation(
             ]),
           }
         : {}),
+      nativeIdentity: JSON.stringify([
+        rawControl.id,
+        rawControl.name,
+        rawControl.scopeKey ?? null,
+        rawControl.frame ?? null,
+      ]),
       ...(rawControl.scopeKey ? { scopeKey: rawControl.scopeKey } : {}),
+      ...(rawControl.formIndex !== undefined
+        ? { formIndex: rawControl.formIndex }
+        : {}),
       ...(rawControl.rowScopeKey
         ? { rowScopeKey: rawControl.rowScopeKey }
         : {}),
@@ -463,6 +471,7 @@ export function buildApplyFormObservation(
   }
 
   return {
+    ...(raw.navigationNote ? { navigationNote: raw.navigationNote } : {}),
     observedAt,
     signature: hashSignature([
       raw.url ?? "",
@@ -499,7 +508,6 @@ export function buildApplyFormObservation(
     ...(raw.bodyText.length > 6_000
       ? { bodyTextForQuestions: raw.bodyText }
       : {}),
-    ownWordsRequired: requiresOwnWords(raw.bodyText),
     headings: raw.headings.map((heading) => ({
       level: heading.level,
       text: heading.text,
@@ -525,12 +533,7 @@ export function buildApplyFormObservation(
     loading: raw.loading,
     ...(raw.uploads ? { uploads: raw.uploads } : {}),
     validationErrors: raw.validationErrors,
-    blocker: detectApplyBlocker({
-      bodyText: raw.bodyText,
-      controls,
-      actions,
-      links,
-    }),
+    blocker: null,
   };
 }
 
@@ -552,6 +555,12 @@ export function createApplyPageHands(
       ),
     ...(mechanics.prepareBrowserCredentials
       ? { prepareBrowserCredentials: mechanics.prepareBrowserCredentials }
+      : {}),
+    ...(mechanics.listSavedCredentials
+      ? { listSavedCredentials: mechanics.listSavedCredentials }
+      : {}),
+    ...(mechanics.fillSavedCredential
+      ? { fillSavedCredential: mechanics.fillSavedCredential }
       : {}),
     navigate: (url) => mechanics.navigate(url),
     clickElement: (ref) => mechanics.clickElement(ref),

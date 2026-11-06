@@ -109,7 +109,6 @@ import {
 import {
   executeExactlyOneFinalAction as executeExactlyOneFinalActionOnPage,
   observeApplicationForm as observeApplicationFormOnPage,
-  recheckLastFinalAction,
 } from "./application-submission-browser-hands";
 import type {
   ExecuteExactlyOneFinalActionInput,
@@ -205,40 +204,6 @@ export function classifyBrowserNavigationFailure(
 
 function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function parseHttpOrigin(urlString: string): string | null {
-  try {
-    const url = new URL(urlString);
-    return url.protocol === "http:" || url.protocol === "https:"
-      ? url.origin
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function assertRetainedApplicationPageOrigin(
-  pageUrl: string,
-  input: ExecuteApplicationFlowInput,
-): void {
-  const observedOrigin = parseHttpOrigin(pageUrl);
-  const allowedOrigins = new Set(
-    [
-      ...(input.applyAllowedOrigins ?? []),
-      input.startingUrl,
-      input.job.applicationUrl,
-      input.job.canonicalUrl,
-    ]
-      .filter((value): value is string => Boolean(value))
-      .map(parseHttpOrigin)
-      .filter((value): value is string => value !== null),
-  );
-  if (!observedOrigin || !allowedOrigins.has(observedOrigin)) {
-    throw new Error(
-      "The exact prepared application page left the allowed application origins. Prepare the application again before continuing.",
-    );
-  }
 }
 
 async function markManagedChromeProfileExitedCleanly(
@@ -2893,21 +2858,6 @@ export function createBrowserAgentRuntime(
     applyPageMechanics: applyPageMechanicsForSource,
     installApplyPrepareOnlyGuard: installApplyPrepareOnlyGuardForSource,
     executeExactlyOneFinalAction: executeExactlyOneFinalActionForSource,
-    async recheckApplicationSubmission(_source, input) {
-      if (
-        preparedPagesWithPerson.has(input.pageBindingKey) ||
-        options.browserHost?.applicationPageWithPerson?.(input.pageBindingKey)
-      )
-        return null;
-      const page = preparedApplicationPages.get(input.pageBindingKey);
-      if (!page || page.isClosed()) return null;
-      const release = usePage(page);
-      try {
-        return await recheckLastFinalAction(page, input);
-      } finally {
-        release();
-      }
-    },
     async withApplicationPageExecution(
       source,
       pageBindingKey,
@@ -3045,10 +2995,6 @@ export function createBrowserAgentRuntime(
           if (retainedContinuationPage) {
             await closePrepareOnlyAuthorizedFormActionWindow(
               retainedContinuationPage,
-            );
-            assertRetainedApplicationPageOrigin(
-              retainedContinuationPage.url(),
-              input,
             );
           }
           const targetUrl =

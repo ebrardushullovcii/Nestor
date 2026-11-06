@@ -368,7 +368,6 @@ test("Ashby with field saves: guarded Submit sends once after the Yes/No presses
     expectedPageOrigin: origin,
     allowedOrigins: [origin],
     veto: () => true,
-    confirmationTimeoutMs: 2_000,
   };
   const finalRequests: string[] = [];
   page.on("request", (request) => {
@@ -442,7 +441,6 @@ test("A JavaScript-sent form: its Apply submits it, and the guarded click sends 
     expectedPageOrigin: origin,
     allowedOrigins: [origin],
     veto: () => true,
-    confirmationTimeoutMs: 2_000,
   };
   const requests: string[] = [];
   page.on("request", (request) => {
@@ -797,7 +795,7 @@ test.each([
     expect(result.pauses).toEqual([]);
     if (shape === "transient") {
       const log = result.notes.join("\n");
-      expect(log, log).toContain("HTTP 503");
+      expect(log, log).toContain('"status":503');
       expect(log, log).toContain("Document service unavailable");
       expect(log, log).not.toContain("signature=");
     }

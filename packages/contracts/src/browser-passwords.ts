@@ -63,7 +63,14 @@ export const BrowserPasswordFilledSchema = z
 export type BrowserPasswordCapture = z.infer<
   typeof BrowserPasswordCaptureSchema
 >;
+export interface BrowserPasswordFieldTarget {
+  controlIndex: number;
+  id: string;
+  name: string;
+  frame?: { origin: string; pathname: string };
+}
 export interface BrowserPasswordFill {
+  target?: BrowserPasswordFieldTarget;
   requestId: string;
   origin: string;
   username: string;
