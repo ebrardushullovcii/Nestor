@@ -8,10 +8,7 @@ import {
   enrichSearchPreferencesFromProfile,
   mergeEvents,
 } from "./workspace-helpers";
-import {
-  createSeed,
-  createSourceInstructionArtifact,
-} from "../test-fixtures";
+import { createSeed, createSourceInstructionArtifact } from "../test-fixtures";
 
 describe("workspace profile-inferred search intent", () => {
   test("uses saved experience titles when explicit target roles are empty", () => {
@@ -159,7 +156,7 @@ function eventTimestamp(index: number): string {
   return new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString();
 }
 
-describe("mergeEvents application event history bound", () => {
+describe("mergeEvents complete application event history", () => {
   test("keeps every event below the history limit", () => {
     const existing = [
       createApplicationEvent("event_old", eventTimestamp(0)),
@@ -187,7 +184,7 @@ describe("mergeEvents application event history bound", () => {
     expect(merged[0]?.id).toBe(`event_${MAX_APPLICATION_EVENT_HISTORY - 1}`);
   });
 
-  test("keeps only the newest events above the history limit", () => {
+  test("keeps every event above the former history limit", () => {
     const total = MAX_APPLICATION_EVENT_HISTORY + 3;
     const existing = Array.from({ length: total }, (_, index) =>
       createApplicationEvent(`event_${index}`, eventTimestamp(index)),
@@ -195,14 +192,12 @@ describe("mergeEvents application event history bound", () => {
 
     const merged = mergeEvents(existing, []);
 
-    expect(merged).toHaveLength(MAX_APPLICATION_EVENT_HISTORY);
+    expect(merged).toHaveLength(total);
     expect(merged[0]?.id).toBe(`event_${total - 1}`);
-    expect(merged.at(-1)?.id).toBe(
-      `event_${total - MAX_APPLICATION_EVENT_HISTORY}`,
-    );
+    expect(merged.at(-1)?.id).toBe("event_0");
     for (const dropped of [0, 1, 2]) {
       expect(merged.some((event) => event.id === `event_${dropped}`)).toBe(
-        false,
+        true,
       );
     }
   });
@@ -224,12 +219,12 @@ describe("mergeEvents application event history bound", () => {
 
     const merged = mergeEvents(existing, [fresh, retried]);
 
-    expect(merged).toHaveLength(MAX_APPLICATION_EVENT_HISTORY);
+    expect(merged).toHaveLength(MAX_APPLICATION_EVENT_HISTORY + 1);
     expect(merged.find((event) => event.id === "event_5")).toMatchObject({
       title: "Retry outcome",
       emphasis: "warning",
     });
-    expect(merged.some((event) => event.id === "event_0")).toBe(false);
+    expect(merged.some((event) => event.id === "event_0")).toBe(true);
   });
 
   test("orders timestamp ties deterministically by input order", () => {

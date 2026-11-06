@@ -55,7 +55,7 @@ test("page-part links and read concurrency report their boundaries without losin
     expect.arrayContaining(["page_read_concurrency"]),
   );
 });
-test("search observations and catalog summaries report hidden context windows", async () => {
+test("search observations and catalog summaries retain their full evidence", async () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
   describeSearchObservation(
     buildApplyFormObservation(
@@ -90,9 +90,10 @@ test("search observations and catalog summaries report hidden context windows", 
     keep: () => true,
     checkpoint: async () => {},
   });
-  await tools[0].execute("{}", { step: 1 });
+  const result = await tools[0].execute("{}", { step: 1 });
+  expect("content" in result && result.content).toContain(job.description);
   expect(
     hits(log).some((hit) => hit.limit === "search_observation_links"),
   ).toBe(false);
-  expect(hits(log).some((hit) => hit.value === 400)).toBe(true);
+  expect(hits(log)).toEqual([]);
 });

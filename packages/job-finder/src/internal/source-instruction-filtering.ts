@@ -1,5 +1,4 @@
 import { normalizeText, uniqueStrings } from "./shared";
-import { reportSelfLimitHit } from "@nestor/core";
 export type {
   SourceInstructionFinalReviewPhaseContext,
   SourceInstructionQualityAssessment,
@@ -121,24 +120,12 @@ export function isInternalSourceDebugFailure(
 export function filterSourceDebugWarnings(
   values: readonly (string | null | undefined)[],
 ): string[] {
-  if (
-    values.some(
-      (value) =>
-        value && isInternalSourceDebugFailure(normalizeInstructionLine(value)),
-    )
-  )
-    reportSelfLimitHit({
-      limit: "source_warning_keyword_veto",
-      kind: "veto",
-      value: "internal failure phrases",
-      where: "job-finder/filterSourceDebugWarnings",
-    });
   return uniqueStrings(
     values
       .filter((value): value is string => Boolean(value))
       .map((value) => normalizeInstructionLine(value))
       .filter(Boolean)
-      .filter((value) => !isInternalSourceDebugFailure(value)),
+      .filter(Boolean),
   );
 }
 

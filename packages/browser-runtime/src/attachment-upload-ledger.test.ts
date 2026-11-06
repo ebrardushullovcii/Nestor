@@ -503,3 +503,21 @@ test("an uploaded file stays with its original DOM input after rows move, even w
       ?.selectedFileName,
   ).toBeUndefined();
 });
+
+test("a genuine upload survives more than sixty later raw requests", async () => {
+  const { page, outcome, site } = await attach((site) => `${site.url}/upload`, {
+    status: 201,
+    body: JSON.stringify({ fileId: "synthetic-upload-123" }),
+  });
+  await expect.poll(outcome).toBe("accepted");
+  site.answers.set("/noise", { status: 204 });
+  await page.evaluate(async (base) => {
+    for (let i = 0; i < 100; i++)
+      await fetch(`${base}/noise`, {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: "ordinary site activity",
+      });
+  }, site.url);
+  expect(await outcome()).toBe("accepted");
+});

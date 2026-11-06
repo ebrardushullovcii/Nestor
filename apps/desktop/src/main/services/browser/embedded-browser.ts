@@ -1,5 +1,9 @@
 import { traceEvent } from "@nestor/core/run-trace";
-import { reportSelfLimitHit, forwardPageSelfLimitHit } from "@nestor/core";
+import {
+  createConnectionIdleTimeout,
+  reportSelfLimitHit,
+  forwardPageSelfLimitHit,
+} from "@nestor/core";
 import {
   APPLY_PAGE_SELECTORS,
   collectApplyDocumentSnapshot,
@@ -1086,27 +1090,37 @@ export class EmbeddedBrowser {
     if (frameTreeNodeId !== undefined && !frame) return null;
     const url = frame ? frame.url : page.contents.getURL();
     await this.noteAutomationCommand(tabId, true, false);
-    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const idle = createConnectionIdleTimeout(15_000);
+    const progress = (_event: Electron.Event, method: string) => {
+      if (
+        [
+          "Network.dataReceived",
+          "Network.responseReceived",
+          "Network.loadingFinished",
+          "DOM.documentUpdated",
+        ].includes(method)
+      )
+        idle.progress();
+    };
+    page.contents.debugger.on?.("message", progress);
+    let rejectIdle!: () => void;
+    const silent = new Promise<never>((_resolve, reject) => {
+      rejectIdle = () =>
+        reject(new Error("The page connection stopped responding."));
+      idle.signal.addEventListener("abort", rejectIdle, { once: true });
+    });
     try {
       const value = (await Promise.race([
         frame
           ? frame.executeJavaScript(script, false)
           : page.contents.executeJavaScript(script, false),
-        new Promise((_resolve, reject) => {
-          deadline = setTimeout(() => {
-            reportSelfLimitHit({
-              limit: "embedded_page_read",
-              kind: "timeout",
-              value: 3_000,
-              where: "embedded-browser/readTab",
-            });
-            reject(new Error("The page did not answer."));
-          }, 3_000);
-        }),
+        silent,
       ])) as T;
       return { url, value };
     } finally {
-      clearTimeout(deadline);
+      idle.cleanup();
+      idle.signal.removeEventListener("abort", rejectIdle);
+      page.contents.debugger.off?.("message", progress);
       await this.noteAutomationCommand(tabId, false, false);
       this.syncTabLifecycle(page);
     }

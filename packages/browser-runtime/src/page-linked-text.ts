@@ -1,4 +1,4 @@
-import { selfLimitSlice } from "@nestor/core";
+import { withBrowserReadLiveness } from "./browser-read-liveness";
 import type { Frame, Page } from "playwright";
 
 /** A generic page read: keep a link beside its words and retain HTML item boundaries. */
@@ -50,16 +50,16 @@ export async function readPageLinkedText(page: Page): Promise<string> {
         .replace(/\n\s*\n/gu, "\n")
         .trim();
     });
-  const root = await readFrame(page);
-  const children = await Promise.all(
-    selfLimitSlice(
-      page.frames().filter((frame) => frame !== page.mainFrame()),
-      0,
-      16,
-      "packages/browser-runtime/src/page-linked-text.ts:55",
-    ).map((frame) =>
-      readFrame(frame).catch(() => "[A child frame could not be read.]"),
-    ),
-  );
-  return [root, ...children].join("\n\n");
+  return withBrowserReadLiveness(page, async () => {
+    const root = await readFrame(page);
+    const children = await Promise.all(
+      page
+        .frames()
+        .filter((frame) => frame !== page.mainFrame())
+        .map((frame) =>
+          readFrame(frame).catch(() => "[A child frame could not be read.]"),
+        ),
+    );
+    return [root, ...children].join("\n\n");
+  });
 }

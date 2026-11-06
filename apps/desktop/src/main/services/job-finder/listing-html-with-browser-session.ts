@@ -1,4 +1,3 @@
-import { selfLimitSlice } from "@nestor/core";
 import type {
   ListingHtmlFetchResult,
   ListingHtmlFetcher,
@@ -42,8 +41,6 @@ export function withBrowserSignInRetry(
   };
 }
 
-const MAX_RESPONSE_CHARACTERS = 1_500_000;
-
 /** Reads a page with a browser session's cookies (Electron `session.fetch`). */
 export function createSessionListingHtmlFetcher(
   getSession: () => {
@@ -62,15 +59,7 @@ export function createSessionListingHtmlFetcher(
     const text = await response.text();
     return {
       status: response.status,
-      html:
-        text.length > MAX_RESPONSE_CHARACTERS
-          ? selfLimitSlice(
-              text,
-              0,
-              MAX_RESPONSE_CHARACTERS,
-              "apps/desktop/src/main/services/job-finder/listing-html-with-browser-session.ts:67",
-            )
-          : text,
+      html: text,
       finalUrl: response.url || url,
     };
   };

@@ -885,7 +885,7 @@ function numberedCards(
 }
 
 test.each(["pages", "one large inventory"])(
-  "Quick stops an unrelated board after screening 100 cards: %s",
+  "Quick reads the full unrelated board: %s",
   async (kind) => {
     const { runner, engine, context, store } = setup();
     context.sources = context.sources.slice(0, 1);
@@ -920,19 +920,19 @@ test.each(["pages", "one large inventory"])(
     expect(engine.collectSource).toHaveBeenCalledTimes(1);
     expect(
       engine.screenCards.mock.calls.flatMap(([input]) => input.cards),
-    ).toHaveLength(100);
+    ).toHaveLength(kind === "pages" ? 1275 : 1274);
     const source = createSearchSourcesStore(store).list({}).rows[0]!;
     expect(source).toMatchObject({
-      state: "partial",
-      cards: 100,
-      unrelated: 100,
+      state: "done",
+      cards: kind === "pages" ? 1275 : 1274,
+      unrelated: kind === "pages" ? 1275 : 1274,
     });
-    expect(source.message).toContain(
+    expect(source.message).not.toContain(
       "100 listings in a row that don't match your profile",
     );
-    expect(status.progress).toMatchObject({ partial: 1, failed: 0 });
+    expect(status.progress).toMatchObject({ partial: 0, failed: 0 });
     expect(engine.fitJobs).not.toHaveBeenCalled();
-    if (kind === "pages") expect(pages).toBe(4);
+    if (kind === "pages") expect(pages).toBe(51);
   },
 );
 
@@ -1132,7 +1132,7 @@ test("B2 stop preserves early results and continuation only restarts the unfinis
   expect(store.listJobs({ stage: "found" }).rows).toHaveLength(2);
 });
 
-test("Keep reading gives a site Quick stopped a full read and keeps the next search's choices", async () => {
+test("Quick completes a sparse board and keeps the next search's choices", async () => {
   const { runner, engine, context, store } = setup();
   const sites = createJobSitesStore(store);
   sites.add({ text: "https://partial.example/source" });
@@ -1150,9 +1150,8 @@ test("Keep reading gives a site Quick stopped a full read and keeps the next sea
   );
   await runner.start({ depth: "quick", postedWithin: "any" });
   const quick = await finished(runner);
-  expect(quick.progress?.partial).toBe(1);
-  await runner.keepReading();
-  const full = await finished(runner);
+  expect(quick.progress?.partial).toBe(0);
+  const full = quick;
   expect(full.search).toMatchObject({
     state: "done",
     sourcesTotal: 1,
@@ -1330,7 +1329,7 @@ test("one pass scores the whole backlog, visible jobs first, in bounded batches"
   expect(store.unscoredJobIds(200)).toHaveLength(0);
 });
 
-test("quick-stopped validated cards record successful access, while later auth evidence wins", async () => {
+test("validated cards record successful access, while later auth evidence wins", async () => {
   const { runner, engine, store, context } = setup();
   const sites = createJobSitesStore(store);
   sites.add({ text: "https://partial.example/source" });
@@ -1340,14 +1339,14 @@ test("quick-stopped validated cards record successful access, while later auth e
       ...numberedCards(target.id, 5, "Backend Engineer"),
       ...numberedCards(target.id, 250, "Nurse", 5),
     ]);
-    return { cards: [], complete: false, pagesRead: 1, notes: [] };
+    return { cards: [], complete: true, pagesRead: 1, notes: [] };
   });
   await runner.start({ postedWithin: "any" });
   await finished(runner);
   expect(sites.get(1)).toMatchObject({ health: "healthy", lane: "http" });
   expect(sites.get(1)?.lastSearchedAt).toBeTruthy();
   expect(createSearchSourcesStore(store).list({}).rows[0]).toMatchObject({
-    state: "partial",
+    state: "done",
     related: 5,
   });
   engine.collectSource.mockImplementation(() =>
@@ -1365,7 +1364,7 @@ test("quick-stopped validated cards record successful access, while later auth e
 });
 
 test.each([false, true])(
-  "quick-stop health does not close an access ticket before detail reads (blocked=%s)",
+  "successful collection does not close an access ticket before detail reads (blocked=%s)",
   async (blocked) => {
     const { runner, engine, store, context } = setup();
     const sites = createJobSitesStore(store);
@@ -1378,14 +1377,14 @@ test.each([false, true])(
     engine.collectSource.mockImplementation(async ({ target, onCards }) => {
       await onCards?.(numberedCards(target.id, 1, "Backend Engineer"));
       // Related work in two screening waves (the second read waits on the
-      // gate), then a long unrelated run that makes Quick stop.
+      // gate), followed by a long unrelated run.
       await onCards?.([
         ...numberedCards(target.id, 1, "Backend Engineer", 1),
         ...numberedCards(target.id, 99, "Nurse", 2),
         ...numberedCards(target.id, 1, "Backend Engineer", 101),
         ...numberedCards(target.id, 199, "Nurse", 102),
       ]);
-      return { cards: [], complete: false, pagesRead: 1, notes: [] };
+      return { cards: [], complete: true, pagesRead: 1, notes: [] };
     });
     engine.readListings.mockImplementation(async ({ cards }) => {
       const first = reads++ === 0;

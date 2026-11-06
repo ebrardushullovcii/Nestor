@@ -903,16 +903,16 @@ const ApplicationPreparationStartedLocalDateSchema = z
  */
 export const ApplicationReviewAnswerSchema = z
   .object({
-    fieldKey: NonEmptyStringSchema.max(2_000).optional(),
+    fieldKey: NonEmptyStringSchema.optional(),
     /** The run's stored fact or saved answer; observed values use observed.*. */
     sourceId: NonEmptyStringSchema.optional(),
-    question: NonEmptyStringSchema.max(2_000),
-    answer: NonEmptyStringSchema.max(12_000),
-    source: NonEmptyStringSchema.max(240),
+    question: NonEmptyStringSchema,
+    answer: NonEmptyStringSchema,
+    source: NonEmptyStringSchema,
     /** True when the run wrote this for the job rather than reusing a fact. */
     written: z.boolean(),
     /** What a written answer was built from, in the person's words. */
-    groundedIn: z.array(NonEmptyStringSchema.max(240)).max(8).default([]),
+    groundedIn: z.array(NonEmptyStringSchema).default([]),
   })
   .strict();
 export type ApplicationReviewAnswer = z.infer<
@@ -921,10 +921,10 @@ export type ApplicationReviewAnswer = z.infer<
 
 export const ApplicationReviewAttachmentSchema = z
   .object({
-    fieldKey: NonEmptyStringSchema.max(2_000).optional(),
-    label: NonEmptyStringSchema.max(240),
-    fileName: NonEmptyStringSchema.max(240),
-    field: NonEmptyStringSchema.max(2_000),
+    fieldKey: NonEmptyStringSchema.optional(),
+    label: NonEmptyStringSchema,
+    fileName: NonEmptyStringSchema,
+    field: NonEmptyStringSchema,
     /** Exact document carried by a verified non-final native step save. */
     savedSha256: z
       .string()
@@ -945,35 +945,35 @@ export type ApplicationReviewAttachment = z.infer<
  */
 export const ApplicationReviewCardSchema = z
   .object({
-    siteLabel: NonEmptyStringSchema.max(240),
+    siteLabel: NonEmptyStringSchema,
     pageUrl: UrlStringSchema.nullable().default(null),
-    answers: z.array(ApplicationReviewAnswerSchema).max(200).default([]),
+    answers: z.array(ApplicationReviewAnswerSchema).default([]),
     /** Fields checked on the live form, including values the person cleared. */
     observedFieldKeys: z
-      .array(NonEmptyStringSchema.max(2_000))
-      .max(500)
+      .array(NonEmptyStringSchema)
+
       .optional(),
     /** The browser observed a successful non-final field or attachment save. */
     intermediateSaved: optionalStoredField(z.boolean(), false),
-    attachments: z.array(ApplicationReviewAttachmentSchema).max(20).default([]),
+    attachments: z.array(ApplicationReviewAttachmentSchema).default([]),
     letter: z
       .object({
         text: z
           .string()
           .min(1)
-          .max(12_000)
+
           .refine((text) => text.trim().length > 0),
-        reviewReason: NonEmptyStringSchema.max(2_000).optional(),
+        reviewReason: NonEmptyStringSchema.optional(),
         /** The form still holds the previous letter; prepare again before sending. */
         needsRefresh: z.boolean().optional(),
-        fields: z.array(NonEmptyStringSchema.max(2_000)).max(20).optional(),
-        groundedIn: z.array(NonEmptyStringSchema.max(240)).max(8).default([]),
+        fields: z.array(NonEmptyStringSchema).optional(),
+        groundedIn: z.array(NonEmptyStringSchema).default([]),
       })
       .strict()
       .nullable()
       .default(null),
     /** Anything still waiting on the person. Empty means it can be sent. */
-    waitingOnYou: z.array(NonEmptyStringSchema.max(2_000)).max(50).default([]),
+    waitingOnYou: z.array(NonEmptyStringSchema).default([]),
     preparedAt: IsoDateTimeSchema,
   })
   .strict();

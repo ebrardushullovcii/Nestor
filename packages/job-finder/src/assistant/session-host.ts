@@ -793,14 +793,6 @@ export class AssistantSessionHost {
         },
         signal: live.controller.signal,
         isCurrent: () => live.generation === live.turn.generation,
-        storeOverflow: (toolName, content) => {
-          const store = this.handleStoreFor(conversationId);
-          const lines = content.split("\n");
-          const stored = store.put(`${toolName} output`, lines);
-          return Promise.resolve(
-            `The full output (${lines.length} lines) is stored as handle ${stored.handle}; read it with read_result.`,
-          );
-        },
         takeSteering: () => this.takeSteering(live),
         assembleMessages: async (turnMessages) => {
           const current = await this.readPersonalState();

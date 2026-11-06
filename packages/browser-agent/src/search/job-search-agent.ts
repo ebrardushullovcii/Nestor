@@ -1,4 +1,3 @@
-import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import { z } from "zod";
 import { intendedAccountEmail } from "@nestor/contracts";
 import {
@@ -762,16 +761,8 @@ export async function runJobSearchAgent(
           typeof row.url !== "string" ||
           !category.success ||
           typeof row.reason !== "string" ||
-          !row.reason.trim() ||
-          rejections.size >= 50
+          !row.reason.trim()
         ) {
-          if (rejections.size >= 50)
-            reportSelfLimitHit({
-              limit: "extraction_rejections",
-              kind: "count",
-              value: 50,
-              where: "browser-agent/extract_jobs",
-            });
           setAside.push(
             typeof row.url === "string" && row.url ? row.url : "(no address)",
           );
@@ -1018,13 +1009,6 @@ export async function runJobSearchAgent(
       const requested = parseToolArguments(raw).limit;
       const limit =
         typeof requested === "number" ? Math.max(1, Math.floor(requested)) : 40;
-      if (typeof requested === "number" && requested > 200)
-        reportSelfLimitHit({
-          limit: "saved_jobs_count",
-          kind: "jobs",
-          value: 200,
-          where: "browser-agent/saved_jobs",
-        });
       const listed = collected
         .filter((job) => !job.searchRejection)
         .slice(-limit)
@@ -1862,11 +1846,8 @@ ${part.text}`),
 
     const phaseEvidence = isSourceCheck
       ? SourceDebugPhaseEvidenceSchema.parse({
-          routeSignals: selfLimitSlice(
-            pageTools.state.visitedUrls.map((url) => sanitizeUrl(url) ?? url),
-            0,
-            40,
-            "packages/browser-agent/src/search/job-search-agent.ts:1957",
+          routeSignals: pageTools.state.visitedUrls.map(
+            (url) => sanitizeUrl(url) ?? url,
           ),
           warnings: findings?.warnings ?? [],
         })

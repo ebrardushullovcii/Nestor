@@ -67,7 +67,7 @@ it("shortlisting bypasses our failed-read backoff while a site's Retry-After sti
   ).toBe(false);
 });
 
-it("stops consuming an oversized response rather than buffering its entire body", async () => {
+it("preserves the entire response beyond its former byte and character caps", async () => {
   let pulls = 0;
   const cancel = vi.fn();
   const bytes = new TextEncoder().encode("x".repeat(8192));
@@ -84,9 +84,9 @@ it("stops consuming an oversized response rather than buffering its entire body"
     "https://example.test/large",
     { signal: new AbortController().signal },
   );
-  expect(result.html).toHaveLength(1_500_000);
-  expect(pulls).toBeLessThan(200);
-  expect(cancel).toHaveBeenCalledOnce();
+  expect(result.html).toHaveLength(8_192_000);
+  expect(pulls).toBe(1000);
+  expect(cancel).not.toHaveBeenCalled();
 });
 
 function cardOnlyJob(overrides: Partial<SavedJob> = {}): SavedJob {
@@ -237,7 +237,7 @@ describe("jobNeedsListingDetail", () => {
         NOW,
       ),
     ).toBe(false);
-    // A refusal without a stated wait keeps the hour-long back-off.
+    // Our failed read carries no fixed retry delay.
     expect(
       jobNeedsListingDetail(
         cardOnlyJob({
@@ -250,7 +250,7 @@ describe("jobNeedsListingDetail", () => {
         }),
         NOW,
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("reads fetchable jobs until this stage has captured their complete page", () => {
@@ -311,9 +311,8 @@ describe("jobNeedsListingDetail", () => {
         }),
         NOW,
       ),
-    ).toBe(false);
-    // A failed read is worth another try after an hour, a read with no body
-    // only after a day.
+    ).toBe(true);
+    // Technical failures and incomplete reads remain eligible immediately.
     expect(
       jobNeedsListingDetail(
         cardOnlyJob({

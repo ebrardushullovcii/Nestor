@@ -1,5 +1,4 @@
 import { withBrowserReadLiveness } from "./browser-read-liveness";
-import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core";
 import { createHash } from "node:crypto";
 import {
   SubmissionFinalControlIdentitySchema,
@@ -138,8 +137,6 @@ export type ApplicationFinalActionResult =
 export interface ObserveApplicationFormOptions {
   /** Policy-selected page actions, required for JavaScript forms without a form owner. */
   readonly finalActionTargets?: readonly ApplyFinalActionTarget[];
-  /** Optional cap against pathological pages; the default is intentionally bounded. */
-  readonly maxControls?: number;
   /** Exact opaque preparation identity retained by the owning browser runtime. */
   readonly pageBindingKey?: string;
 }
@@ -181,8 +178,6 @@ interface RawApplicationFormSnapshot {
   complete: boolean;
   controls: RawApplicationControl[];
 }
-
-const DEFAULT_MAX_CONTROLS = 500;
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -334,7 +329,6 @@ function buildObservation(
 
 async function readRawApplicationFormSnapshot(
   page: Page,
-  maxControls: number,
 ): Promise<RawApplicationFormSnapshot> {
   watchPageSelfLimits(page);
   const binding = finalActionTargets.get(page);
@@ -345,19 +339,9 @@ async function readRawApplicationFormSnapshot(
       targetsComplete = false;
       continue;
     }
-    if (targets.length >= DEFAULT_MAX_CONTROLS) {
-      reportSelfLimitHit({
-        limit: "final_control_targets",
-        kind: "count",
-        value: DEFAULT_MAX_CONTROLS,
-        where: "browser-runtime/readRawApplicationFormSnapshot",
-      });
-      targetsComplete = false;
-      break;
-    }
     const locator = actionLocator(page, target.ref);
-    const ordinal = await selfLimitTimeout(
-      locator?.evaluate(
+    const ordinal = await locator
+      ?.evaluate(
         (element, selector) => {
           if (window !== window.top) return -1;
           return Array.from(document.querySelectorAll(selector)).indexOf(
@@ -365,11 +349,9 @@ async function readRawApplicationFormSnapshot(
           );
         },
         APPLICATION_FINAL_CONTROL_SELECTOR,
-        { timeout: 250 },
-      ),
-      250,
-      "packages/browser-runtime/src/application-submission-browser-hands.ts:882",
-    ).catch(() => -1);
+        { timeout: 0 },
+      )
+      .catch(() => -1);
     if (
       ordinal === undefined ||
       ordinal < 0 ||
@@ -381,56 +363,9 @@ async function readRawApplicationFormSnapshot(
     targets.push({ ordinal, label: target.label });
   }
   const raw: unknown = await page.evaluate(
-    ({ selector, limit, targets, targetsComplete }) => {
-      // This callback is serialized into the page; only fixed limit metadata returns
-      // over its console channel. The host records it through reportSelfLimitHit.
-      function limitedSlice(
-        value: string,
-        start: number,
-        end: number,
-        where: string,
-      ): string;
-      function limitedSlice<T>(
-        value: readonly T[],
-        start: number,
-        end: number,
-        where: string,
-      ): T[];
-      function limitedSlice<T>(
-        value: string | readonly T[],
-        start: number,
-        end: number,
-        where: string,
-      ): string | T[] {
-        const result =
-          typeof value === "string"
-            ? value.slice(start, end)
-            : value.slice(start, end);
-        if (result.length < value.length) {
-          try {
-            console.debug(
-              "__nestor_self_limit__ " +
-                JSON.stringify({
-                  limit: "evidence_window",
-                  kind: "input",
-                  value: end - start,
-                  where,
-                }),
-            );
-          } catch {
-            /* A page-owned console cannot change the operation. */
-          }
-        }
-        return result;
-      }
-
+    ({ selector, targets, targetsComplete }) => {
       const normalize = (value: string): string =>
-        limitedSlice(
-          value.replace(/\s+/gu, " ").trim(),
-          0,
-          200,
-          "packages/browser-runtime/src/application-submission-browser-hands.ts:951",
-        );
+        value.replace(/\s+/gu, " ").trim();
       const isVisible = (element: Element): boolean => {
         if (!(element instanceof HTMLElement)) return false;
         const style = window.getComputedStyle(element);
@@ -507,25 +442,6 @@ async function readRawApplicationFormSnapshot(
         if (!kind) {
           return;
         }
-        if (controls.length >= limit) {
-          {
-            try {
-              console.debug(
-                "__nestor_self_limit__ " +
-                  JSON.stringify({
-                    limit: "final_controls",
-                    kind: "count",
-                    value: limit,
-                    where: "browser-runtime/readRawApplicationFormSnapshot",
-                  }),
-              );
-            } catch {
-              /* A page-owned console cannot change the operation. */
-            }
-          }
-          complete = false;
-          return;
-        }
         let actionUrl: URL;
         try {
           actionUrl = new URL(
@@ -574,7 +490,6 @@ async function readRawApplicationFormSnapshot(
     },
     {
       selector: APPLICATION_FINAL_CONTROL_SELECTOR,
-      limit: maxControls,
       targets,
       targetsComplete,
     },
@@ -700,16 +615,8 @@ export async function observeApplicationForm(
       url: page.url(),
       targets: options.finalActionTargets.map((target) => ({ ...target })),
     });
-  const requestedMaxControls = options?.maxControls;
-  const maxControls =
-    requestedMaxControls === undefined
-      ? DEFAULT_MAX_CONTROLS
-      : Number.isFinite(requestedMaxControls) &&
-          Number.isInteger(requestedMaxControls)
-        ? Math.max(1, Math.min(requestedMaxControls, DEFAULT_MAX_CONTROLS))
-        : DEFAULT_MAX_CONTROLS;
   const raw = await withBrowserReadLiveness(page, () =>
-    readRawApplicationFormSnapshot(page, maxControls),
+    readRawApplicationFormSnapshot(page),
   );
   const observation = buildObservation(raw);
   nativeActionBindings.set(

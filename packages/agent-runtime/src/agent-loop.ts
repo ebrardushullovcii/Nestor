@@ -76,7 +76,6 @@ export interface AgentLoopModel {
     tools: AgentLoopToolDefinition[],
     options?: {
       signal?: AbortSignal;
-      maxOutputTokens?: number;
       parallelToolCalls?: boolean;
       onStreamEvent?: (event: ModelTurnStreamEvent) => void;
     },
@@ -185,8 +184,6 @@ export interface AgentLoopOptions extends RuntimeObservers {
   staleToolResultKeepRecent?: number;
   /** Old long answers to collect before shortening them. Defaults to four. */
   staleToolResultBatchSize?: number;
-  /** Output cap for one model turn. Omit to use the provider default. */
-  modelMaxOutputTokens?: number;
   parallelToolCalls?: boolean;
   /** Host supplies a fresh observation after a response batch, if needed. */
   afterToolBatch?: () => Promise<string | null>;
@@ -489,7 +486,6 @@ export async function runAgentLoop(
               {
                 messages,
                 tools: definitions,
-                maxOutputTokens: options.modelMaxOutputTokens,
                 parallelToolCalls: options.parallelToolCalls,
               },
               () =>
@@ -498,9 +494,6 @@ export async function runAgentLoop(
                   ...(options.parallelToolCalls === undefined
                     ? {}
                     : { parallelToolCalls: options.parallelToolCalls }),
-                  ...(options.modelMaxOutputTokens
-                    ? { maxOutputTokens: options.modelMaxOutputTokens }
-                    : {}),
                 }),
             ),
           {

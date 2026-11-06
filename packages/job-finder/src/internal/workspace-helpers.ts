@@ -1,5 +1,4 @@
 import type { JobSitesStore } from "@nestor/db/job-store";
-import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import {
   jobSiteTarget,
   JobFinderSettingsSchema,
@@ -27,7 +26,6 @@ import { normalizeResumeDraftEntryOrdering } from "./resume-entry-ordering";
 import { uniqueStrings } from "./shared";
 import { markValidatedSearchPreferences } from "./validated-search-preferences";
 import {
-  DEFAULT_MAX_TARGET_ROLES,
   PROFILE_PLACEHOLDER_HEADLINE,
   PROFILE_PLACEHOLDER_LOCATION,
   SOURCE_DEBUG_APP_SCHEMA_VERSION,
@@ -43,14 +41,7 @@ export function enrichSearchPreferencesFromProfile(
 
   if (targetRoles.length === 0) {
     const addRole = (role: string) => {
-      if (targetRoles.length < DEFAULT_MAX_TARGET_ROLES) targetRoles.push(role);
-      else
-        reportSelfLimitHit({
-          limit: "profile_target_roles",
-          kind: "context",
-          value: DEFAULT_MAX_TARGET_ROLES,
-          where: "workspace/enrichSearchPreferencesFromProfile",
-        });
+      targetRoles.push(role);
     };
     for (const role of profile.targetRoles) {
       addRole(role);
@@ -219,14 +210,8 @@ export function mergeEvents(
     merged.set(event.id, event);
   }
 
-  return selfLimitSlice(
-    [...merged.values()].sort(
-      (left, right) =>
-        new Date(right.at).getTime() - new Date(left.at).getTime(),
-    ),
-    0,
-    MAX_APPLICATION_EVENT_HISTORY,
-    "workspace/application_event_history",
+  return [...merged.values()].sort(
+    (left, right) => new Date(right.at).getTime() - new Date(left.at).getTime(),
   );
 }
 

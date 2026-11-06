@@ -61,7 +61,7 @@ describe("openai-compatible chat and draft behavior", () => {
       const result = await client.chatWithTools(
         [{ role: "user", content: "hello" }],
         [expectedTool],
-        { maxOutputTokens: 42 },
+        {},
       );
 
       const execute = vi.fn(() =>

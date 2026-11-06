@@ -8,7 +8,6 @@ import { settledState, type SourceWork } from "./source-work";
 import type { createFitQueue } from "./fit-queue";
 import { createCardWaves } from "./card-waves";
 import { concurrency } from "./async";
-import { reportSelfLimitHit } from "@nestor/core";
 
 /**
  * Quick reads a site while it keeps finding related jobs, and stops early
@@ -275,7 +274,6 @@ export function createSearchPipeline(input: {
         if (!streamed) source.screened++;
         if (related.has(`${card.sourceId}\n${card.url}`)) {
           if (!streamed) source.row.related++;
-          source.unrelatedRun = 0;
         } else {
           source.processed++;
           if (failed.has(card.url)) {
@@ -283,10 +281,6 @@ export function createSearchPipeline(input: {
             failedSources.set(card.sourceId, failed.get(card.url)!);
           } else if (rejected.has(card.url)) source.row.unrelated++;
           else source.row.seen++;
-          source.unrelatedRun =
-            rejected.has(card.url) && !failed.has(card.url)
-              ? source.unrelatedRun + 1
-              : 0;
         }
       }
       for (const [id, reason] of failedSources)
@@ -310,7 +304,6 @@ export function createSearchPipeline(input: {
       const quick = settings.depth === "quick" && !source.full;
       const chunk = quick ? QUICK_REVIEW_INTERVAL : 400;
       for (let offset = 0; offset < cards.length; offset += chunk) {
-        if (source.quickStopReason) return;
         const fresh: ListingCard[] = [];
         for (const card of cards.slice(offset, offset + chunk)) {
           if (source.urls.has(card.url)) continue;
@@ -335,15 +328,6 @@ export function createSearchPipeline(input: {
           source.row.cards - source.screened >= QUICK_REVIEW_INTERVAL
         )
           await waves.checkpoint(source.target.id);
-        if (quick && source.unrelatedRun >= QUICK_REVIEW_INTERVAL) {
-          reportSelfLimitHit({
-            limit: "quick_unrelated_listings",
-            kind: "jobs",
-            value: QUICK_REVIEW_INTERVAL,
-            where: "job-finder/searchPipeline/accept",
-          });
-          source.quickStopReason = `Quick stopped after ${QUICK_REVIEW_INTERVAL} listings in a row that don't match your profile.`;
-        }
       }
     },
     drain: () => waves.drain(),

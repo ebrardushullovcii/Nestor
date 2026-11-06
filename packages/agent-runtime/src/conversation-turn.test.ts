@@ -418,28 +418,25 @@ describe("runConversationTurn", () => {
     await expect(promise).resolves.toMatchObject({ ending: "aborted" });
   });
 
-  it("caps a long tool result and stores the rest", async () => {
-    const stored: string[] = [];
+  it("passes the complete long tool result to the next model call", async () => {
+    const content = "x".repeat(100_000) + "the final page item";
     const model = scripted([
       { toolCalls: [call("c1", "big")] },
       { content: "ok" },
     ]);
+    const seen: AgentLoopMessage[][] = [];
     const result = await runConversationTurn({
       model,
-      tools: [
-        tool("big", async () => ({ kind: "ok", content: "x".repeat(500) })),
-      ],
-      assembleMessages: async (turn) => [...turn],
-      toolResultLimitChars: 100,
-      storeOverflow: async (_name, content) => {
-        stored.push(content);
-        return "Read handle h1 for the rest.";
+      tools: [tool("big", async () => ({ kind: "ok", content }))],
+      assembleMessages: async (turn) => {
+        seen.push([...turn]);
+        return [...turn];
       },
     });
-    const toolMessage = result.turnMessages.find((m) => m.role === "tool");
-    expect(toolMessage?.content.length).toBeLessThan(200);
-    expect(toolMessage?.content).toMatch(/handle h1/);
-    expect(stored[0]).toHaveLength(500);
+    expect(seen[1]?.find((m) => m.role === "tool")?.content).toBe(content);
+    expect(result.turnMessages.find((m) => m.role === "tool")?.content).toBe(
+      content,
+    );
   });
 
   it("reads the optional status note without ever failing on it", () => {

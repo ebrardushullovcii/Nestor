@@ -175,19 +175,10 @@ export async function inspectMutationResponse(
   const empty = Number(headers["content-length"] ?? 0) === 0;
   if (status === 204)
     return result(upload && empty ? "accepted" : "unconfirmed");
-  if (Number(headers["content-length"] ?? 0) > 64_000)
-    return result("unconfirmed");
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const text = await Promise.race([
-    response.text().catch(() => null),
-    new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), 2000);
-    }),
-  ]).finally(() => clearTimeout(timer));
+  const text = await response.text().catch(() => null);
   if (text !== null && !text.trim() && status === 200 && headers.etag?.trim())
     return result(upload ? "accepted" : "unconfirmed");
-  if (text === null || text.length > 64_000 || !text.trim())
-    return result("unconfirmed");
+  if (text === null || !text.trim()) return result("unconfirmed");
   let body: unknown;
   try {
     body = JSON.parse(text);

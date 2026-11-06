@@ -199,7 +199,7 @@ test("task keeps its full action history beyond the former task ceilings", async
   });
   expect(
     store.read({ handle: result.reference.handle, limit: 100 })?.items,
-  ).toHaveLength(50);
+  ).toHaveLength(100);
   let turn = 0;
   const resultOfTask = await runAgentTask({
     ...base(),
@@ -240,7 +240,7 @@ test("task keeps its full action history beyond the former task ceilings", async
   });
   expect(resultOfTask.receipt.stopReason).toBe("completed");
   expect(events(log).some((hit) => hit.limit === "result_read_items")).toBe(
-    true,
+    false,
   );
   expect(
     events(log).some((hit) => hit.where === "agent-runtime/recent_messages"),

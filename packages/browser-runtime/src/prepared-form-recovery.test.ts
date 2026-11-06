@@ -22,28 +22,23 @@ const snapshot: PreparedFormSnapshot = {
   ],
 };
 
-test("a stalled page creation times out and closes a page that arrives late", async () => {
+test("page creation can finish after the former total deadline", async () => {
   vi.useFakeTimers();
   try {
+    const h = setup(snapshot);
     let finish!: (page: Page) => void;
-    const creation = new Promise<Page>((resolve) => {
-      finish = resolve;
-    });
-    const close = vi.fn().mockResolvedValue(undefined);
-    const context = { newPage: () => creation } as unknown as BrowserContext;
-    const guard = vi.fn();
-    const pending = restorePreparedForm({
-      context,
-      snapshot,
-      files: [],
-      guard,
-    });
-    await vi.advanceTimersByTimeAsync(20_000);
-    await expect(pending).resolves.toBeNull();
-    finish({ close } as unknown as Page);
-    await Promise.resolve();
-    expect(close).toHaveBeenCalledOnce();
-    expect(guard).not.toHaveBeenCalled();
+    const context = {
+      newPage: () =>
+        new Promise<Page>((resolve) => {
+          finish = resolve;
+        }),
+    } as unknown as BrowserContext;
+    const pending = restorePreparedForm({ ...h, context, snapshot, files: [] });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(h.guard).not.toHaveBeenCalled();
+    finish(h.page);
+    expect(await pending).toBe(h.page);
+    expect(h.close).not.toHaveBeenCalled();
   } finally {
     vi.useRealTimers();
   }
@@ -94,7 +89,7 @@ test("a changed wizard or unsupported page is closed without refilling anything"
 test("saved answers are accepted only after an exact readback", async () => {
   const h = setup(snapshot);
   expect(await restorePreparedForm({ ...h, snapshot, files: [] })).toBe(h.page);
-  expect(h.fill).toHaveBeenCalledWith("Synthetic answer", { timeout: 3000 });
+  expect(h.fill).toHaveBeenCalledWith("Synthetic answer", { timeout: 0 });
   expect(h.close).not.toHaveBeenCalled();
   const changed = setup(snapshot, {
     ...snapshot,

@@ -1,4 +1,3 @@
-import { selfLimitTimeout } from "@nestor/core";
 import type { BrowserContext, Page } from "playwright";
 import { createHash } from "node:crypto";
 import { allowPrepareOnlyRunNavigation } from "./playwright-application-flow";
@@ -238,31 +237,16 @@ export async function restorePreparedForm(input: {
 }): Promise<Page | null> {
   const creation = input.context.newPage();
   let page: Page | null = null;
-  let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
-    page = await Promise.race([
-      creation,
-      new Promise<Page>((_resolve, reject) => {
-        deadline = setTimeout(() => {
-          void creation
-            .then((latePage) => latePage.close({ runBeforeUnload: false }))
-            .catch(() => undefined);
-          reject(new Error("Form refill timed out"));
-        }, 20_000);
-      }),
-    ]);
+    page = await creation;
     await input.guard(page);
     // This exact initial GET is ours, even when its path contains /apply.
     // Redirects remain guarded, and no later page navigation inherits it.
     allowPrepareOnlyRunNavigation(page, input.snapshot.url);
-    await selfLimitTimeout(
-      page.goto(input.snapshot.url, {
-        waitUntil: "domcontentloaded",
-        timeout: 15_000,
-      }),
-      15_000,
-      "packages/browser-runtime/src/prepared-form-recovery.ts:251",
-    );
+    await page.goto(input.snapshot.url, {
+      waitUntil: "domcontentloaded",
+      timeout: 0,
+    });
     const fresh = await capturePreparedForm(page);
     if (
       !fresh ||
@@ -296,11 +280,7 @@ export async function restorePreparedForm(input: {
           });
         }
         if (payloads.length)
-          await selfLimitTimeout(
-            control.setInputFiles(payloads, { timeout: 3_000 }),
-            3_000,
-            "packages/browser-runtime/src/prepared-form-recovery.ts:292",
-          );
+          await control.setInputFiles(payloads, { timeout: 0 });
       } else if (field.type === "checkbox" || field.type === "radio") {
         // Restore only changed native checked state; never click a control.
         await control.evaluate((element, checked) => {
@@ -313,17 +293,9 @@ export async function restorePreparedForm(input: {
           input.dispatchEvent(new Event("change", { bubbles: true }));
         }, field.checked);
       } else if (field.type.startsWith("select")) {
-        await selfLimitTimeout(
-          control.selectOption(field.selected, { timeout: 3_000 }),
-          3_000,
-          "packages/browser-runtime/src/prepared-form-recovery.ts:309",
-        );
+        await control.selectOption(field.selected, { timeout: 0 });
       } else {
-        await selfLimitTimeout(
-          control.fill(field.value, { timeout: 3_000 }),
-          3_000,
-          "packages/browser-runtime/src/prepared-form-recovery.ts:315",
-        );
+        await control.fill(field.value, { timeout: 0 });
       }
     }
     input.onProgress?.("verifying");
@@ -342,7 +314,5 @@ export async function restorePreparedForm(input: {
     );
     await page?.close({ runBeforeUnload: false }).catch(() => undefined);
     return null;
-  } finally {
-    clearTimeout(deadline);
   }
 }

@@ -377,3 +377,85 @@ test.each(["prepare_only", "confirm_before_submit"] as const)(
   },
   30_000,
 );
+
+test("the model receives every long-page item and child frame on its first turn", async () => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await page.goto(`${base}/employer-a/apply/1`);
+    const content = Array.from(
+      { length: 300 },
+      (_, i) => `Page item ${i}: ${"complete evidence ".repeat(30)}`,
+    ).join("\n");
+    await page.evaluate((text) => {
+      document.body.replaceChildren();
+      const main = document.createElement("main");
+      main.textContent = text;
+      document.body.append(main);
+      for (let i = 0; i < 20; i++) {
+        const frame = document.createElement("iframe");
+        frame.srcdoc = `<p>Child frame ${i}: last-frame-evidence-${i}</p>`;
+        document.body.append(frame);
+      }
+    }, content);
+    await expect.poll(() => page.frames().length).toBe(21);
+    const hands = createApplyPageHands(
+      createPlaywrightApplyPageMechanics(page),
+    );
+    let read = "";
+    await runApplyAgent(
+      {
+        hands,
+        authority: {
+          mode: "confirm_before_submit",
+          submitAuthorized: false,
+          allowedOrigins: [],
+          preApprovedAttestationKinds: [],
+          salaryDisclosure: "answer_from_profile",
+        },
+        application: {
+          jobId: "job",
+          applicationId: "application",
+          startingUrl: page.url(),
+        },
+        siteLabel: "local replica",
+        sources: {
+          profile,
+          resumeText: null,
+          posting: {
+            title: "Engineer",
+            company: "Replica",
+            location: "Remote",
+            description: "Local regression",
+          },
+          reusableAnswers: [],
+          documents: [],
+        },
+      },
+      {
+        chatWithTools: (messages) => {
+          read = messages.map((message) => message.content).join("\n");
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "finish-long-page",
+                type: "function",
+                function: {
+                  name: "finish",
+                  arguments: JSON.stringify({
+                    reason: "Read complete local evidence.",
+                  }),
+                },
+              },
+            ],
+          });
+        },
+      },
+    );
+    for (const line of content.split("\n")) expect(read).toContain(line.trim());
+    for (let i = 0; i < 20; i++)
+      expect(read).toContain(`last-frame-evidence-${i}`);
+  } finally {
+    await context.close();
+  }
+}, 30_000);

@@ -1,4 +1,3 @@
-import { selfLimitSlice } from "@nestor/core";
 import {
   CandidateExperienceSchema,
   CandidateProfileSchema,
@@ -103,12 +102,7 @@ function buildEvidence(
   return {
     candidateId: candidate.id,
     sourceBlockIds: uniqueStrings(candidate.sourceBlockIds),
-    excerpt: selfLimitSlice(
-      excerpt,
-      0,
-      500,
-      "packages/job-finder/src/internal/resume-timeline-repair.ts:106",
-    ),
+    excerpt: excerpt,
   };
 }
 

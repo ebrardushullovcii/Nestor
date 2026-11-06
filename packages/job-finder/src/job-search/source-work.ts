@@ -8,8 +8,6 @@ export interface SourceWork {
   urls: Set<string>;
   processed: number;
   screened: number;
-  unrelatedRun: number;
-  quickStopReason?: string;
   collected: boolean;
   accessBlocked: boolean;
   counted: boolean;
@@ -37,7 +35,6 @@ export function sourceWork(
     urls: new Set(),
     processed: 0,
     screened: 0,
-    unrelatedRun: 0,
     collected: false,
     accessBlocked: false,
     counted: false,

@@ -109,7 +109,7 @@ test("source review can finish beyond its removed sixty-second deadline", async 
     _tools,
     options,
   ) => {
-    expect(options?.maxOutputTokens).toBeUndefined();
+    expect(Reflect.get(options ?? {}, "maxOutputTokens")).toBeUndefined();
     return new Promise((resolve) =>
       setTimeout(() => resolve({ content: "{}" }), 60001),
     );

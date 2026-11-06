@@ -26,7 +26,7 @@ import { CandidateAssetLibrary } from "../services/job-finder/candidate-asset-li
 import { inferAssetKind, registerAssistantRouteHandlers } from "./assistant";
 import { getCandidateAssetLibrary } from "../services/job-finder/candidate-asset-library-instance";
 
-test("reports files omitted from the person's multi-selection", async () => {
+test("attempts every file in the person's multi-selection", async () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
   const read = vi
     .spyOn(CandidateAssetLibrary.prototype, "importFromSourcePath")
@@ -50,8 +50,8 @@ test("reports files omitted from the person's multi-selection", async () => {
       { sender: { id: 1 } } as unknown as IpcMainInvokeEvent,
       {},
     );
-    expect(read).toHaveBeenCalledTimes(5);
-    expect(String(log.mock.calls[0]?.[0])).toContain('"value":5');
+    expect(read).toHaveBeenCalledTimes(6);
+    expect(log).not.toHaveBeenCalled();
   } finally {
     log.mockRestore();
     read.mockRestore();

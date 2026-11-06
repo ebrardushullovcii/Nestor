@@ -329,7 +329,7 @@ describe("playwright browser runtime utils", () => {
     await expect(isTcpPortReachable(port!)).resolves.toBe(false);
   });
 
-  test("forwards maxOutputTokens to the AI client during agent discovery", async () => {
+  test("forwards cancellation to the AI client during agent discovery", async () => {
     type ChatWithTools = NonNullable<JobFinderAiClient["chatWithTools"]>;
 
     const chatWithTools = vi.fn<ChatWithTools>(() =>
@@ -341,7 +341,7 @@ describe("playwright browser runtime utils", () => {
     const bridge = createAgentChatWithToolsBridge(chatWithTools);
     const messages = [{ role: "user" as const, content: "hello" }];
     const tools: [] = [];
-    const options = { maxOutputTokens: 321 };
+    const options = { signal: new AbortController().signal };
 
     await bridge.chatWithTools(messages, tools, options);
 

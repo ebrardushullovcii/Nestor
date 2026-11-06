@@ -1,4 +1,3 @@
-import { reportSelfLimitHit } from "@nestor/core";
 import { createHash, randomUUID } from "node:crypto";
 import {
   mkdir,
@@ -31,10 +30,6 @@ import {
   type CandidateAssetRetention,
 } from "@nestor/contracts";
 
-const GLOBAL_MAX_BYTES = 25 * 1024 * 1024;
-const TEXT_MAX_BYTES = 5 * 1024 * 1024;
-const IMAGE_MAX_BYTES = 12 * 1024 * 1024;
-const DOCX_MAX_BYTES = 15 * 1024 * 1024;
 const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1_000;
 const TRASH_GRACE_DAYS = 7;
 const ORPHAN_RECOVERY_GRACE_MILLISECONDS = 60 * 60 * 1_000;
@@ -227,14 +222,6 @@ function detectMime(bytes: Buffer, originalName: string): string | null {
   if (extension === ".srt" && isValidUtf8Text(bytes))
     return "application/x-subrip";
   return null;
-}
-
-function getMimeByteLimit(mime: string) {
-  if (mime.startsWith("text/") || mime === "application/x-subrip")
-    return TEXT_MAX_BYTES;
-  if (mime.startsWith("image/")) return IMAGE_MAX_BYTES;
-  if (mime.includes("officedocument")) return DOCX_MAX_BYTES;
-  return GLOBAL_MAX_BYTES;
 }
 
 function createExtractedTextMetadata(
@@ -437,24 +424,12 @@ export class CandidateAssetLibrary {
     if (!sourceStats?.isFile()) {
       throw new CandidateAssetLibraryError("Select a readable file to import.");
     }
-    if (sourceStats.size <= 0 || sourceStats.size > GLOBAL_MAX_BYTES) {
-      if (sourceStats.size > GLOBAL_MAX_BYTES)
-        reportSelfLimitHit({
-          limit: "candidate_asset_bytes",
-          kind: "input",
-          value: GLOBAL_MAX_BYTES,
-          where: "desktop/CandidateAssetLibrary.import",
-        });
-      throw new CandidateAssetLibraryError(
-        "The selected file must be between 1 byte and 25 MB.",
-      );
+    if (sourceStats.size <= 0) {
+      throw new CandidateAssetLibraryError("The selected file is empty.");
     }
 
     const bytes = await readFile(sourcePath);
-    if (
-      bytes.byteLength !== sourceStats.size ||
-      bytes.byteLength > GLOBAL_MAX_BYTES
-    ) {
+    if (bytes.byteLength !== sourceStats.size) {
       throw new CandidateAssetLibraryError(
         "The selected file changed while it was being imported.",
       );
@@ -466,18 +441,6 @@ export class CandidateAssetLibrary {
         `${path.extname(originalName).replace(".", "").toUpperCase() || "That"} files cannot be saved under ${input.kind.replaceAll("_", " ")}. This category accepts ${describeAcceptedFileTypes(input.kind)}.`,
       );
     }
-    if (bytes.byteLength > getMimeByteLimit(mime)) {
-      reportSelfLimitHit({
-        limit: "candidate_asset_mime_bytes",
-        kind: "input",
-        value: getMimeByteLimit(mime),
-        where: "desktop/CandidateAssetLibrary.import",
-      });
-      throw new CandidateAssetLibraryError(
-        "The selected file exceeds the size limit for its file type.",
-      );
-    }
-
     const id = `asset_${randomUUID()}`;
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     const extension = path.extname(originalName).toLowerCase();

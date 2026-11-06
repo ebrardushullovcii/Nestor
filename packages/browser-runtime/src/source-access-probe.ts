@@ -81,48 +81,6 @@ export function createInconclusiveSourceAccessProbeResult(
  * app's embedded browser) can run the same function in that exact tab.
  */
 export function collectVisibleAccessSignals(): VisibleAccessSignals {
-  // This callback is serialized into the page; only fixed limit metadata returns
-  // over its console channel. The host records it through reportSelfLimitHit.
-  function limitedSlice(
-    value: string,
-    start: number,
-    end: number,
-    where: string,
-  ): string;
-  function limitedSlice<T>(
-    value: readonly T[],
-    start: number,
-    end: number,
-    where: string,
-  ): T[];
-  function limitedSlice<T>(
-    value: string | readonly T[],
-    start: number,
-    end: number,
-    where: string,
-  ): string | T[] {
-    const result =
-      typeof value === "string"
-        ? value.slice(start, end)
-        : value.slice(start, end);
-    if (result.length < value.length) {
-      try {
-        console.debug(
-          "__nestor_self_limit__ " +
-            JSON.stringify({
-              limit: "evidence_window",
-              kind: "input",
-              value: end - start,
-              where,
-            }),
-        );
-      } catch {
-        /* A page-owned console cannot change the operation. */
-      }
-    }
-    return result;
-  }
-
   const isVisible = (element: Element): boolean => {
     if (!(element instanceof HTMLElement)) return false;
     const style = window.getComputedStyle(element);
@@ -149,16 +107,11 @@ export function collectVisibleAccessSignals(): VisibleAccessSignals {
       .replace(/\s+/gu, " ")
       .trim()
       .toLowerCase();
-  const controls = limitedSlice(
-    Array.from(
-      document.querySelectorAll(
-        'input, button, a, [role="button"], [role="link"], [role="menuitem"], iframe, [data-sitekey]',
-      ),
-    ).filter(isVisible),
-    0,
-    1_000,
-    "packages/browser-runtime/src/source-access-probe.ts:152",
-  );
+  const controls = Array.from(
+    document.querySelectorAll(
+      'input, button, a, [role="button"], [role="link"], [role="menuitem"], iframe, [data-sitekey]',
+    ),
+  ).filter(isVisible);
   const labels = controls.map((element) => ({
     element,
     label: labelFor(element),

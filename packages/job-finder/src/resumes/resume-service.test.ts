@@ -111,11 +111,36 @@ const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 describe("resumes on the store", () => {
   it("reads a long card once before writing, then reuses the saved complete posting", async () => {
     const seed = createSeed();
-    const body = "Actual complete requirements, including accessibility and design systems.";
-    const read = vi.fn(() => Promise.resolve([{ ...seed.savedJobs[0]!, title: found(2).title, company: found(2).company, description: body }]));
-    const fetchListingHtml = vi.fn((url: string) => Promise.resolve({ html: "<main>The complete posting</main>", status: 200, finalUrl: url }));
-    const { store, service } = setup({ aiClient: { ...createDeterministicJobFinderAiClient(), extractJobsFromPage: read }, fetchListingHtml });
-    const [id] = store.saveFoundJobs({ searchId: null, jobs: [{ ...found(2), facts: {} }] }).added;
+    const body =
+      "Actual complete requirements, including accessibility and design systems.";
+    const read = vi.fn(() =>
+      Promise.resolve([
+        {
+          ...seed.savedJobs[0]!,
+          title: found(2).title,
+          company: found(2).company,
+          description: body,
+        },
+      ]),
+    );
+    const fetchListingHtml = vi.fn((url: string) =>
+      Promise.resolve({
+        html: "<main>The complete posting</main>",
+        status: 200,
+        finalUrl: url,
+      }),
+    );
+    const { store, service } = setup({
+      aiClient: {
+        ...createDeterministicJobFinderAiClient(),
+        extractJobsFromPage: read,
+      },
+      fetchListingHtml,
+    });
+    const [id] = store.saveFoundJobs({
+      searchId: null,
+      jobs: [{ ...found(2), facts: {} }],
+    }).added;
     expect(store.getJob(id!)!.description.length).toBeGreaterThan(400);
     store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
     await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
@@ -128,11 +153,24 @@ describe("resumes on the store", () => {
   });
 
   it("keeps a failed full read retryable instead of writing from the card", async () => {
-    const fetchListingHtml = vi.fn(() => Promise.reject(new Error("Posting unavailable")));
+    const fetchListingHtml = vi.fn(() =>
+      Promise.reject(new Error("Posting unavailable")),
+    );
     const base = createDeterministicJobFinderAiClient();
-    const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) => base.createResumeDraft(input));
-    const { store, service } = setup({ aiClient: { ...createDeterministicJobFinderAiClient(), createResumeDraft: write }, fetchListingHtml });
-    const [id] = store.saveFoundJobs({ searchId: null, jobs: [{ ...found(2), facts: {} }] }).added;
+    const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) =>
+      base.createResumeDraft(input),
+    );
+    const { store, service } = setup({
+      aiClient: {
+        ...createDeterministicJobFinderAiClient(),
+        createResumeDraft: write,
+      },
+      fetchListingHtml,
+    });
+    const [id] = store.saveFoundJobs({
+      searchId: null,
+      jobs: [{ ...found(2), facts: {} }],
+    }).added;
     store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
     await waitFor(() => expect(service.get(id!).resume?.state).toBe("failed"));
     expect(write).not.toHaveBeenCalled();
@@ -443,9 +481,9 @@ describe("resumes on the store", () => {
   it.each([
     ["Product designer using Kubernetes for the listed platform work.", true],
     ["Product designer with 8 years of experience.", true],
-    ["Product designer who improved throughput by 999999 percent.", false],
+    ["Product designer who improved throughput by 999999 percent.", true],
   ] as const)(
-    "keeps main's Aggressive number-only path for %s",
+    "preserves the model's Aggressive output for %s",
     async (text, keep) => {
       const seed = createSeed();
       const profile = { ...seed.profile, yearsExperience: 7 };
@@ -900,3 +938,40 @@ describe("resumes on the store", () => {
     await waitFor(() => expect(service.get(id).resume?.state).toBe("ready"));
   });
 });
+
+it.each(["light", "tailored", "aggressive"] as const)(
+  "%s retains the complete model-written summary without a second model veto",
+  async (level) => {
+    const seed = createSeed();
+    const base = createDeterministicJobFinderAiClient();
+    const { store, id } = setup();
+    const summary =
+      "The model's full written result. " +
+      "Detailed evidence remains. ".repeat(200);
+    const checkResumeClaims = vi.fn<NonNullable<typeof base.checkResumeClaims>>(
+      () => Promise.reject(new Error("No side-model veto")),
+    );
+    const draft = await writeResume(
+      {
+        aiClient: {
+          ...base,
+          checkResumeClaims,
+          createResumeDraft: async (input) => ({
+            ...(await base.createResumeDraft(input)),
+            summary,
+          }),
+        },
+        documentManager: {
+          listResumeTemplates: () => [],
+          renderResumeArtifact: () =>
+            Promise.reject(new Error("No preview needed")),
+        },
+      },
+      { ...seed, job: store.getJob(id)!, level },
+    );
+    expect(
+      draft?.sections.find((section) => section.kind === "summary")?.text,
+    ).toBe(summary.trim());
+    expect(checkResumeClaims).not.toHaveBeenCalled();
+  },
+);

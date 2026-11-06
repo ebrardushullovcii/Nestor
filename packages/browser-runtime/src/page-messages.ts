@@ -1,4 +1,3 @@
-import { selfLimitSlice } from "@nestor/core";
 import type { Page } from "playwright";
 import type { RawApplyPageMessage } from "@nestor/contracts";
 import { watchPageSelfLimits } from "./self-limit-page";
@@ -13,48 +12,6 @@ export const PAGE_MESSAGE_CONSOLE_PREFIX = "nestor-page-message:";
  * design. Keep this function self-contained: it is serialized into pages.
  */
 export function installPageMessageRecorderInPage(): void {
-  // This callback is serialized into the page; only fixed limit metadata returns
-  // over its console channel. The host records it through reportSelfLimitHit.
-  function limitedSlice(
-    value: string,
-    start: number,
-    end: number,
-    where: string,
-  ): string;
-  function limitedSlice<T>(
-    value: readonly T[],
-    start: number,
-    end: number,
-    where: string,
-  ): T[];
-  function limitedSlice<T>(
-    value: string | readonly T[],
-    start: number,
-    end: number,
-    where: string,
-  ): string | T[] {
-    const result =
-      typeof value === "string"
-        ? value.slice(start, end)
-        : value.slice(start, end);
-    if (result.length < value.length) {
-      try {
-        console.debug(
-          "__nestor_self_limit__ " +
-            JSON.stringify({
-              limit: "evidence_window",
-              kind: "input",
-              value: end - start,
-              where,
-            }),
-        );
-      } catch {
-        /* A page-owned console cannot change the operation. */
-      }
-    }
-    return result;
-  }
-
   const pageWindow = window as unknown as Record<string, unknown>;
   if (pageWindow["__nestorPageMessages"]) return;
   const messages: Array<{ kind: string; text: string; at: number }> = [];
@@ -66,30 +23,9 @@ export function installPageMessageRecorderInPage(): void {
         : value === undefined || value === null
           ? ""
           : (JSON.stringify(value) ?? "");
-    const text = limitedSlice(
-      said.replace(/\s+/gu, " ").trim(),
-      0,
-      500,
-      "packages/browser-runtime/src/page-messages.ts:69",
-    );
+    const text = said.replace(/\s+/gu, " ").trim();
     if (!text) return;
     messages.push({ kind, text, at: Date.now() });
-    if (messages.length > 20) {
-      try {
-        console.debug(
-          "__nestor_self_limit__ " +
-            JSON.stringify({
-              limit: "page_message_history",
-              kind: "count",
-              value: 20,
-              where: "browser-runtime/installPageMessageRecorderInPage",
-            }),
-        );
-      } catch {
-        /* A page-owned console cannot change the operation. */
-      }
-    }
-    messages.splice(0, Math.max(0, messages.length - 20));
     try {
       console.debug(`nestor-page-message:${JSON.stringify({ kind, text })}`);
     } catch {
@@ -133,12 +69,7 @@ export async function readPageMessages(
       .catch(() => [] as RawApplyPageMessage[]);
     messages.push(...recorded.filter((message) => message.at >= sinceMs));
   }
-  return selfLimitSlice(
-    messages.sort((a, b) => a.at - b.at),
-    -20,
-    undefined,
-    "packages/browser-runtime/src/page-messages.ts:136",
-  );
+  return messages.sort((a, b) => a.at - b.at);
 }
 
 /**
