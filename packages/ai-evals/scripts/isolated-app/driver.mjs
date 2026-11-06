@@ -91,7 +91,10 @@ function buildEnv() {
   ])
     delete base[key];
   for (const key of Object.keys(base))
-    if (key.startsWith("NESTOR_VERIFY_") && key !== "NESTOR_VERIFY_LABEL")
+    if (
+      key.startsWith("NESTOR_VERIFY_") &&
+      !["NESTOR_VERIFY_LABEL", "NESTOR_VERIFY_WINDOWS"].includes(key)
+    )
       delete base[key];
   const live = launch.ai === "live" ? "1" : "0";
   if (launch.ai !== "live")
@@ -748,6 +751,8 @@ const commands = {
 };
 
 async function failureShot(cmd) {
+  // Live workspaces contain personal data; never save automatic screenshots.
+  if (launch.net === "live") return null;
   try {
     if (app) return await shot(`failure-${cmd}`);
   } catch {}
@@ -835,6 +840,20 @@ const server = http.createServer(async (req, res) => {
 });
 
 async function verifyGuard() {
+  if (launch.net === "live") {
+    const authorized = await app.evaluate(
+      ({ session }) =>
+        process.env.NESTOR_LIVE_APPLY_AUTHORIZED === "1" &&
+        globalThis.__nestorVerify?.netMode === "live" &&
+        globalThis.__nestorVerify.guardInstalled(
+          session.fromPartition("persist:nestor-browser"),
+        ),
+    );
+    if (!authorized)
+      throw new Error("Live network authorization check failed.");
+    update({ guard: "verified" });
+    return;
+  }
   const probePath = `/apply/${randomBytes(8).toString("hex")}`;
   const guardProbe = await app.evaluate(async ({ session }, probePath) => {
     try {

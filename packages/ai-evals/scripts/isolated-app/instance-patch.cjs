@@ -4,7 +4,8 @@
 // 2. Native pickers and links: answered from files in the state folder, logged to evidence.
 // 3. Send guard: every Electron session refuses requests to anywhere but loopback
 //    (NESTOR_VERIFY_NET=replica), or refuses only non-GET requests to non-loopback
-//    hosts (NESTOR_VERIFY_NET=web), so nothing can be sent to a real employer.
+//    hosts (NESTOR_VERIFY_NET=web). Explicitly authorized live mode allows writes;
+//    the app's own permissions and Send rules still apply.
 const Module = require("node:module");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -12,7 +13,11 @@ const electron = require("electron");
 
 const stateDir = process.env.NESTOR_VERIFY_STATE;
 const evidenceDir = process.env.NESTOR_VERIFY_EVIDENCE;
-const netMode = process.env.NESTOR_VERIFY_NET === "web" ? "web" : "replica";
+const netMode = ["web", "live"].includes(process.env.NESTOR_VERIFY_NET)
+  ? process.env.NESTOR_VERIFY_NET
+  : "replica";
+if (netMode === "live" && process.env.NESTOR_LIVE_APPLY_AUTHORIZED !== "1")
+  throw new Error("Live network requires NESTOR_LIVE_APPLY_AUTHORIZED=1.");
 const log = (file, entry) =>
   fs.appendFileSync(
     path.join(evidenceDir, file),
@@ -319,6 +324,7 @@ function guard(ses) {
     const blocked =
       remote &&
       !synthetic &&
+      netMode !== "live" &&
       (netMode === "replica" || !READS.has(details.method));
     if (blocked)
       log("blocked-requests.jsonl", {

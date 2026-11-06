@@ -180,7 +180,12 @@ async function up() {
   });
   if (!["deterministic", "live"].includes(values.ai))
     fail("--ai is deterministic or live");
-  if (!["replica", "web"].includes(values.net)) fail("--net is replica or web");
+  if (!["replica", "web", "live"].includes(values.net))
+    fail("--net is replica, web or live");
+  if (values.net === "live" && process.env.NESTOR_LIVE_APPLY_AUTHORIZED !== "1")
+    fail(
+      "--net live requires NESTOR_LIVE_APPLY_AUTHORIZED=1 (real sites, writes allowed)",
+    );
   try {
     validateLaunchMode(values.launch, values);
   } catch (error) {
@@ -291,6 +296,12 @@ async function up() {
   step(
     `=== up label=${label} checkout=${checkout} build=${fingerprintText(stamp)} source=${fingerprintText(now)} ai=${values.ai} net=${values.net} launch=${values.launch}`,
   );
+  if (values.net === "live") {
+    const notice =
+      "LIVE NETWORK: real sites, writes allowed (NESTOR_LIVE_APPLY_AUTHORIZED=1). Product permissions and Send rules still apply.";
+    step(notice);
+    console.log(notice);
+  }
 
   const log = openSync(path.join(stateDir, "driver.log"), "a");
   const driver = spawn(
@@ -550,10 +561,10 @@ function db() {
 async function down() {
   const keepData = rest.includes("--keep-data");
   // A run on the owner's imported real state: archive no databases or app log.
-  const privateData = rest.includes("--private-data");
-  if (keepData && privateData)
-    fail("--private-data deletes the data folder; it cannot be kept.");
   const state = readState();
+  const privateData = rest.includes("--private-data") || state?.net === "live";
+  if (keepData && rest.includes("--private-data"))
+    fail("--private-data deletes the data folder; it cannot be kept.");
   if (!state) return console.log(`Nothing recorded for label ${label}.`);
   if (driverUp(state) && state.driverPort) {
     await send("stop").catch(() => {});
@@ -604,6 +615,7 @@ async function down() {
         label,
         checkout,
         userDataDir: state.userDataDir,
+        ...(state.net === "live" ? { net: "live" } : {}),
         keptAt: new Date().toISOString(),
       });
     } else rmSync(stateDir, { recursive: true, force: true });
