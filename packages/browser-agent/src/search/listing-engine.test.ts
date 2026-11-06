@@ -739,7 +739,7 @@ test.each([undefined, null, "https://employer.example/forms/one"])(
         }),
     });
     const payload = JSON.parse(
-      String(client.chatWithTools.mock.calls[0]![0][1]!.content),
+      String(client.chatWithTools.mock.calls[0][0][1].content),
     ) as { listings: { links: { label: string; url: string }[] }[] };
     expect(payload.listings[0]?.links).toEqual([
       {
