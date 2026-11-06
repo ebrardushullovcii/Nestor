@@ -86,12 +86,25 @@ function toRow(row: Row): ApplicationRow {
 
 /** These commands write only the selected rows, inside the shared transaction. */
 /**
- * Job `j` has an approved resume. Apply works only on these, whatever the
- * job's stage says; for Original that is the approved row with no tailored
- * PDF (the imported file).
+ * Job `j` has an approved resume: the person's own marker (the Approved tab),
+ * never a condition for applying.
  */
 export const HAS_APPROVED_RESUME = `EXISTS (
   SELECT 1 FROM resumes r WHERE r.job_id = j.id AND r.approved_at IS NOT NULL)`;
+
+/**
+ * Job `j` is shortlisted (To review or Approved) and its resume at the chosen
+ * level is written. Apply takes these, approved or not; for Original that is
+ * the ready row with no draft (the imported file).
+ */
+export const HAS_READY_RESUME = `j.stage IN ('shortlisted', 'resume') AND EXISTS (
+  SELECT 1 FROM resumes r WHERE r.job_id = j.id AND r.state = 'ready')`;
+
+/** Apply's filter choices: one Shortlisted tab, exactly as stored. */
+const APPLY_FILTER_STAGES: ReadonlySet<string> = new Set([
+  "shortlisted",
+  "resume",
+]);
 
 /** An outcome names this row's own job, application, run and attempt. */
 function isOwnSendLineage(
@@ -134,18 +147,18 @@ export function createApplicationStore(store: JobStore) {
     selectedJobIds(input: JobSelectionInput): number[] {
       const selection = JobSelectionSchema.parse(input);
       if ("ids" in selection) return [...new Set(selection.ids)];
-      if (selection.filter.stage !== "resume")
-        throw new Error("Apply requires the Approved filter.");
+      if (!APPLY_FILTER_STAGES.has(selection.filter.stage))
+        throw new Error("Apply takes the To review or Approved filter.");
       const filter = toFilterSql(selection.filter);
       return (
-        sql(`SELECT j.id FROM jobs j WHERE ${filter.where} AND ${HAS_APPROVED_RESUME}
+        sql(`SELECT j.id FROM jobs j WHERE ${filter.where} AND ${HAS_READY_RESUME}
         AND j.id NOT IN (SELECT value FROM json_each(?)) ORDER BY j.id`).all(
           ...filter.params,
           JSON.stringify(selection.except),
         ) as { id: number }[]
       ).map((row) => row.id);
     },
-    /** Queues approved jobs; the browser runner consumes these rows separately. */
+    /** Queues jobs with a ready resume; the browser runner consumes these rows separately. */
     applyJobs(
       input: ApplyJobsInput,
       requestedMode: ApplicationApplyMode = DEFAULT_APPLICATION_APPLY_MODE,
@@ -153,15 +166,17 @@ export function createApplicationStore(store: JobStore) {
     ): ApplyJobsResult {
       const mode = ApplicationApplyModeSchema.parse(requestedMode);
       const { selection, bulk } = ApplyJobsInputSchema.parse(input);
-      if (!("ids" in selection) && selection.filter.stage !== "resume") {
-        throw new Error("Apply requires the Approved filter.");
+      if (
+        !("ids" in selection) &&
+        !APPLY_FILTER_STAGES.has(selection.filter.stage)
+      ) {
+        throw new Error("Apply takes the To review or Approved filter.");
       }
       const selected = "ids" in selection ? [...new Set(selection.ids)] : null;
       const filter =
         "ids" in selection
           ? {
-              where:
-                "j.stage = 'resume' AND j.id IN (SELECT value FROM json_each(?))",
+              where: "j.id IN (SELECT value FROM json_each(?))",
               params: [JSON.stringify(selected)],
             }
           : toFilterSql(selection.filter);
@@ -173,8 +188,8 @@ export function createApplicationStore(store: JobStore) {
         ...filter.params,
         ...("ids" in selection ? [] : [JSON.stringify(selection.except)]),
       ];
-      // A job in Approved without an approval is reported as not approved.
-      const approvedWhere = `${where} AND ${HAS_APPROVED_RESUME}`;
+      // A job whose resume is still being written is reported as not ready.
+      const readyWhere = `${where} AND ${HAS_READY_RESUME}`;
       return store.transaction(() => {
         const count = (condition: string) =>
           (
@@ -182,14 +197,14 @@ export function createApplicationStore(store: JobStore) {
               ...params,
             ) as { n: number }
           ).n;
-        const approved = count(approvedWhere);
+        const ready = count(readyWhere);
         const now = Date.now();
         // A job the person picked by name is their own intent: it comes
         // back even after a saved rule skipped it. Apply all, or ids that
         // only stand for a filter, never undo a skip.
         const result = sql(
           `INSERT INTO applications (job_id, mode, state, queued_at, updated_at)
-           SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${approvedWhere}
+           SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${readyWhere}
            ON CONFLICT(job_id) DO UPDATE SET
              mode = excluded.mode, state = 'queued', queued_at = excluded.queued_at,
              updated_at = excluded.updated_at, error = NULL, disposition = NULL
@@ -217,8 +232,8 @@ export function createApplicationStore(store: JobStore) {
           changed(selected && selected.length <= 200 ? selected : null);
         return {
           queued,
-          unchanged: approved - queued,
-          notApproved: (selected ? selected.length : count(where)) - approved,
+          unchanged: ready - queued,
+          notReady: (selected ? selected.length : count(where)) - ready,
         };
       });
     },
@@ -794,8 +809,7 @@ export function createApplicationStore(store: JobStore) {
           `UPDATE applications SET state = 'running', attempt = attempt + 1, updated_at = ?
            WHERE id = (
              SELECT a.id FROM applications a JOIN jobs j ON j.id = a.job_id
-             WHERE (a.state = 'queued' OR (a.state='needs_you' AND a.id IN (SELECT application_id FROM application_details WHERE access_recheck=2))) AND j.stage = 'resume'
-               AND ${HAS_APPROVED_RESUME}
+             WHERE (a.state = 'queued' OR (a.state='needs_you' AND a.id IN (SELECT application_id FROM application_details WHERE access_recheck=2))) AND ${HAS_READY_RESUME}
              ORDER BY a.queued_at, a.id LIMIT 1
            ) RETURNING id, job_id`,
         ).get(Date.now()) as { id: number; job_id: number } | undefined;

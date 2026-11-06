@@ -92,9 +92,9 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 
 ## Resume Safety
 
-- tailored mode requires a current approved resume export before apply; original-CV mode requires the imported source file to remain available on disk
+- Apply takes the ready resume at the chosen level, approved or not (ADR 0079): the PDF made at approval, or one rendered for the application from the unapproved draft; original-CV mode requires the imported source file to remain available on disk. The application records the file it attached (path, SHA-256, level, approval time or null)
 - browser apply runtimes receive one typed application-resume artifact whose source is either `tailored_export` or `original_upload`; orchestration must not fabricate a tailored export for an original file
-- stale drafts cannot be used as approved exports
+- a stale draft is written again before Apply takes it
 - every canonical experience remains represented in the editor even when excluded from recruiter-facing output
 - final sends require an authority envelope and preflight: Send for me uses
   `autonomous_submit`, and the person's Send confirms `confirm_before_submit`.

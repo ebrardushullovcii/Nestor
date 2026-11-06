@@ -103,7 +103,7 @@ function context(ids: number[] = []) {
   const grants: AssistantInstructionGrant[] = [];
   const ctx = {
     ports: {
-      resolveApprovedJobs: (selection: JobSelectionInput) =>
+      resolveReadyJobs: (selection: JobSelectionInput) =>
         Promise.resolve(applications.selectedJobIds(selection)),
     },
     session: {
@@ -186,7 +186,7 @@ it("freezes all approved jobs across pages, respects exclusions and keeps later 
     expect(result.data).toEqual({
       queued: 204,
       unchanged: 0,
-      notApproved: 0,
+      notReady: 0,
       refused: 1,
     });
     expect(applications.forJobs([ids[0]!, later])).toEqual([]);
@@ -224,8 +224,8 @@ it("Assistant Apply all keeps a skipped job skipped; naming the job brings it ba
   expect(applications.getApplication(work.id)?.state).toBe("queued");
 });
 
-it("uses one/selected ids, refuses unapproved jobs and never upgrades or duplicates existing Fill work", async () => {
-  const ids = add(3);
+it("uses one/selected ids, applies with an unapproved ready resume, counts one still writing as not ready, and never upgrades or duplicates existing Fill work", async () => {
+  const ids = add(4);
   const { ctx } = context(ids);
   const selection = { ids: ids.slice(0, 2) };
   await record(ctx, selection, "prepare");
@@ -243,12 +243,47 @@ it("uses one/selected ids, refuses unapproved jobs and never upgrades or duplica
     "confirm_before_submit",
     "confirm_before_submit",
   ]);
-  jobs.setStage([ids[2]!], "shortlisted");
+  // To review: written, never approved. Apply takes it as it is.
+  unapprove(ids[2]!);
   await record(ctx, { ids: [ids[2]!] });
   expect(
     (await tool.execute({ selection: { ids: [ids[2]!] } }, ctx)).data,
-  ).toMatchObject({ queued: 0, notApproved: 1 });
+  ).toMatchObject({ queued: 1, notReady: 0 });
+  expect(applications.forJobs([ids[2]!])[0]?.state).toBe("queued");
+  unapprove(ids[3]!, "writing");
+  await record(ctx, { ids: [ids[3]!] });
+  expect(
+    (await tool.execute({ selection: { ids: [ids[3]!] } }, ctx)).data,
+  ).toMatchObject({ queued: 0, notReady: 1 });
 });
+
+it("freezes every To review job with a ready resume through the shortlisted filter", async () => {
+  const ids = add(3);
+  unapprove(ids[0]!);
+  unapprove(ids[1]!);
+  unapprove(ids[2]!, "writing");
+  const { ctx } = context();
+  const selection = { filter: { stage: "shortlisted" as const }, except: [] };
+  await record(ctx, selection);
+  const result = await assistantApplicationCommands()
+    .find((t) => t.name === "apply_to_jobs")!
+    .execute({ selection }, ctx);
+  expect(result.data).toMatchObject({ queued: 2, notReady: 0 });
+  expect(
+    applications
+      .forJobs(ids)
+      .map((row) => row.jobId)
+      .sort(),
+  ).toEqual([ids[0], ids[1]].sort());
+});
+
+/** The job back in To review with its resume not approved (or still writing). */
+function unapprove(id: number, state: "ready" | "writing" = "ready") {
+  jobs
+    .sql("UPDATE resumes SET approved_at = NULL, state = ? WHERE job_id = ?")
+    .run(state, id);
+  jobs.setStage([id], "shortlisted");
+}
 
 it("requires a send instruction in Fill mode; Open and Stop use the work id and never send", async () => {
   const ids = add(1);

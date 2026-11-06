@@ -970,7 +970,7 @@ export const editProfileTool = defineTool({
       canFinish: result.invalidatedApprovedResumeJobIds.length === 0,
       summary: `Saved: ${input.summary}. Changed ${recorded.fields.join(", ")}.${
         result.invalidatedApprovedResumeJobIds.length > 0
-          ? ` This cleared approval on ${plural(result.invalidatedApprovedResumeJobIds.length, "resume")}; those resumes are now stale and need refreshing and fresh review before they can be sent.`
+          ? ` This cleared approval on ${plural(result.invalidatedApprovedResumeJobIds.length, "resume")}; those resumes are being written again from the new facts, and Apply takes them once they are ready.`
           : ""
       }`,
       data: {

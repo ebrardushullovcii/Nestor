@@ -23,6 +23,7 @@ import {
   UPLOAD_ATTACHED_ANSWER,
   type FoundJob,
   type ApplyExecutionResult,
+  type ResumeLevel,
   type RawApplyPage,
 } from "@nestor/contracts";
 import { createApplicationStore } from "@nestor/db/applications";
@@ -34,6 +35,7 @@ import {
 } from "@nestor/db/job-store";
 import { afterEach, expect, it, vi } from "vitest";
 import { createSeed } from "../test-fixtures";
+import { seedResumeDraft } from "../internal/resume-workspace-structure";
 import {
   createApplicationService,
   type ApplicationServiceDeps,
@@ -347,6 +349,132 @@ it.each(["queued", "filling", "final_veto"] as const)(
   },
 );
 
+it.each([
+  { approve: false, by: "never approved" },
+  { approve: true, by: "approved" },
+])(
+  "Send for me applies with an Aggressive resume the person $by and records the file that went",
+  async ({ approve }) => {
+    const f = await setup(1, undefined, {
+      draft: { level: "aggressive", approve },
+    });
+    const [id] = f.ids as [number];
+    expect(f.jobs.getJob(id)?.stage).toBe(approve ? "resume" : "shortlisted");
+    const approvedAt = f.resumes.get(id)!.approvedAt;
+    expect(approvedAt === null).toBe(!approve);
+    const guards = createSendGuards(f.jobs);
+    f.deps.authorityRepository = guards;
+    f.seed.settings.applicationAutomationMode = "autonomous_submit";
+    f.authorizeSending.mockImplementation(async ({ artifact, application }) => {
+      const envelope = {
+        ...sendEnvelope(application.jobId, artifact.sha256!),
+        mode: "autonomous_submit" as const,
+      };
+      await guards.commitApplicationAuthorityEnvelope({
+        envelope,
+        expectedRevision: null,
+      });
+      return envelope;
+    });
+    const observation = {
+      identity: { id: "draft-form", revision: 1, digest: "a".repeat(64) },
+      page: { origin: "https://replica.test", safePath: "/jobs/0" },
+      complete: true,
+      controls: [
+        {
+          identity: { ref: "final-control-0", signature: "c".repeat(64) },
+          ordinal: 0,
+          kind: "button" as const,
+          label: "Submit Application",
+          formIndex: -1,
+          action: { origin: "https://replica.test", safePath: "/jobs/0" },
+        },
+      ],
+    };
+    const action = vi.fn<
+      NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>
+    >(async (_source, input) => {
+      expect(
+        await input.veto({ observation, control: observation.controls[0]! }),
+      ).toBe(true);
+      return {
+        outcome: "submitted",
+        reason: "employer_confirmation",
+        observation,
+        control: observation.controls[0]!,
+        facts: {
+          actionAttempted: true,
+          actionIssued: true,
+          actionCompleted: true,
+          pageBefore: observation.page,
+          pageAfter: observation.page,
+          urlChanged: false,
+          requestsObservedDuringAction: 1,
+          requestsAfterClick: [],
+        },
+        confirmation: {
+          observedAt: new Date().toISOString(),
+          destination: observation.page,
+          summary: "Application received.",
+        },
+      };
+    });
+    Object.assign(f.browser, {
+      observeApplicationForm: () => Promise.resolve(observation),
+      executeExactlyOneFinalAction: action,
+    });
+    f.browser.readApplicationPageBinding.mockResolvedValue({
+      ...f.personPage,
+      bodyText: "Completed form",
+      actions: [
+        {
+          ref: "a0",
+          index: 0,
+          label: "Submit Application",
+          visible: true,
+          disabled: false,
+        },
+      ],
+    });
+    // The screen's single Apply: the job by id, from whichever tab it is in.
+    expect(
+      f.applications.applyJobs(
+        { selection: { ids: [id] } },
+        "autonomous_submit",
+      ),
+    ).toEqual({ queued: 1, unchanged: 0, notReady: 0 });
+    await f.service.start();
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    const attached = f.execute.mock.calls[0]![1].resumeArtifact;
+    expect(attached).toMatchObject({
+      jobId: String(id),
+      source: "tailored_export",
+      filePath: f.pdfPath,
+      sha256: f.pdfSha256,
+      level: "aggressive",
+      approvedAt,
+      exportArtifactId: approve
+        ? `job_resume:${id}:${approvedAt}:${f.pdfSha256}`
+        : `job_resume_draft:${id}:${f.pdfSha256}`,
+    });
+    // An approved resume sends the PDF made at approval; an unapproved one
+    // is rendered from its words for this application.
+    expect(f.renderResumeArtifact).toHaveBeenCalledTimes(approve ? 0 : 1);
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe(
+        "submitted",
+      ),
+    );
+    expect(action).toHaveBeenCalledOnce();
+    const rows = f.applications.listApplications().rows;
+    expect(rows).toHaveLength(1);
+    expect(f.applications.getResumeArtifact(rows[0]!.id)).toEqual(attached);
+    expect(f.jobs.getJob(id)?.stage).toBe("applied");
+    expect(f.onError).not.toHaveBeenCalled();
+  },
+);
+
 it.each(["queued", "filling", "ready"] as const)(
   "Fill keeps its queued mode when the default changes at %s",
   async (phase) => {
@@ -587,7 +715,12 @@ it("a Send for me form waiting on a question keeps Send through Open's refill an
 async function setup(
   count: number,
   concurrency?: number,
-  options: { onDisk?: boolean; locations?: string[] } = {},
+  options: {
+    onDisk?: boolean;
+    locations?: string[];
+    /** A written resume at this level instead of an approved Original. */
+    draft?: { level: ResumeLevel; approve: boolean };
+  } = {},
 ) {
   const directory = await mkdtemp(path.join(tmpdir(), "nestor-apply-"));
   const imported = path.join(directory, "imported.txt");
@@ -633,7 +766,21 @@ async function setup(
     ),
   }).added;
   jobs.setStage(ids, "shortlisted");
+  const pdfSha256 = createHash("sha256").update(pdfBytes).digest("hex");
   for (const id of ids) {
+    if (options.draft) {
+      resumes.startWriting(id, options.draft.level);
+      resumes.finishWriting(
+        id,
+        seedResumeDraft({
+          profile: seed.profile,
+          job: seed.savedJobs[0]!,
+          templateId: "classic_ats",
+        }),
+      );
+      if (options.draft.approve) resumes.approve(id, pdfPath, pdfSha256);
+      continue;
+    }
     resumes.startWriting(id, "original");
     resumes.finishWriting(id, null);
     resumes.approve(id, null);
@@ -698,19 +845,21 @@ async function setup(
     listSubmissionOutcomeRecords: vi.fn(() => Promise.resolve([])),
   } as unknown as ApplicationServiceDeps["authorityRepository"];
   const onPersonSent = vi.fn();
+  const renderResumeArtifact = vi.fn(() =>
+    Promise.resolve({
+      fileName: "resume.pdf",
+      storagePath: pdfPath,
+      format: "pdf",
+      sha256: pdfSha256,
+    }),
+  );
   const deps: ApplicationServiceDeps = {
     jobs,
     applications,
     browser: browser as unknown as BrowserSessionRuntime,
     aiClient: createDeterministicJobFinderAiClient(),
     documentManager: {
-      renderResumeArtifact: () =>
-        Promise.resolve({
-          fileName: "resume.pdf",
-          storagePath: pdfPath,
-          format: "pdf",
-          sha256: createHash("sha256").update(pdfBytes).digest("hex"),
-        }),
+      renderResumeArtifact,
     } as unknown as ApplicationServiceDeps["documentManager"],
     authorityRepository,
     readInputs: () =>
@@ -744,6 +893,10 @@ async function setup(
     dbPath,
     ids,
     imported,
+    pdfPath,
+    pdfSha256,
+    renderResumeArtifact,
+    resumes,
     seed,
     browser,
     execute,

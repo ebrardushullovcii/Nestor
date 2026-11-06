@@ -373,7 +373,7 @@ it("says where Apply failed: the toast names the job, and Approved marks it with
   expect(screen.queryByText("Applying to 1 job")).toBeNull();
   expect(
     screen.getByText(
-      "The application page did not load. It’s marked in Approved, with Try again.",
+      "The application page did not load. It’s marked in Shortlisted, with Try again.",
     ),
   ).toBeTruthy();
 
@@ -382,9 +382,7 @@ it("says where Apply failed: the toast names the job, and Approved marks it with
     expect(within(pane).getByText("Could not apply")).toBeTruthy(),
   );
   expect(
-    within(pane).getByText(
-      "The application page did not load.",
-    ),
+    within(pane).getByText("The application page did not load."),
   ).toBeTruthy();
   expect(within(pane).getByRole("button", { name: "Try again" })).toBeTruthy();
   expect(
@@ -396,4 +394,68 @@ it("says where Apply failed: the toast names the job, and Approved marks it with
       name: /^Instructional Designer 1, Could not apply/,
     }),
   ).toBeTruthy();
+});
+
+it("applies from To review with a written resume nobody approved: one job, the ticked ones, or all of the tab", async () => {
+  const resumes = createResumeStore(store);
+  const [writing, ...written] = ids as [number, ...number[]];
+  for (const id of written) {
+    resumes.startWriting(id, "original");
+    resumes.finishWriting(id, null);
+  }
+  resumes.startWriting(writing, "original");
+  const applications = createApplicationStore(store);
+  const applyJobs = vi.fn(
+    (input: Parameters<typeof applications.applyJobs>[0]) =>
+      Promise.resolve(applications.applyJobs(input)),
+  );
+  Object.assign(window.nestor, {
+    jobFinder: {
+      applyJobs,
+      applicationsForJobs: () => Promise.resolve([]),
+      onApplicationsChange: () => () => undefined,
+    },
+  });
+  render(
+    <MemoryRouter>
+      <ToastProvider>
+        <ShortlistedScreen />
+      </ToastProvider>
+    </MemoryRouter>,
+  );
+  await screen.findByRole("button", { name: "To review 3" });
+  const [one, two] = written as [number, number];
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: new RegExp(`^${store.getJob(one)!.title},`),
+    }),
+  );
+  const pane = await screen.findByRole("region", {
+    name: `Resume for ${store.getJob(one)!.title}`,
+  });
+  // Approve stays the person's own marker, beside Apply.
+  expect(
+    within(pane).getByRole("button", { name: /^Approve Original$/ }),
+  ).toBeTruthy();
+  fireEvent.click(within(pane).getByRole("button", { name: "Apply" }));
+  await screen.findByText("Applying to 1 job");
+  expect(applyJobs.mock.calls[0]![0]).toEqual({
+    selection: { ids: [one] },
+  });
+  expect(applications.forJobs([one])[0]?.state).toBe("queued");
+  expect(resumes.get(one)?.approvedAt).toBeNull();
+  expect(store.getJob(one)?.stage).toBe("shortlisted");
+
+  // Apply to all of To review: the written one is queued, the one still
+  // being written stays here, and the toast says so.
+  fireEvent.click(screen.getByRole("button", { name: "Apply to all 3 jobs" }));
+  await screen.findByText("Applying to 1 job");
+  expect(applyJobs.mock.calls[1]![0]).toEqual({
+    selection: { filter: { stage: "shortlisted", text: "" }, except: [] },
+  });
+  expect(
+    await screen.findByText("1 resume still being written stayed here."),
+  ).toBeTruthy();
+  expect(applications.forJobs([two])[0]?.state).toBe("queued");
+  expect(applications.forJobs([writing])).toEqual([]);
 });

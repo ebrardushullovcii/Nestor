@@ -85,7 +85,7 @@ export function assistantApplicationCommands() {
           const result: ApplyJobsResult = {
             queued: 0,
             unchanged: 0,
-            notApproved: 0,
+            notReady: 0,
           };
           for (const [mode, jobIds] of groups) {
             for (let offset = 0; offset < jobIds.length; offset += 5000) {
@@ -100,11 +100,11 @@ export function assistantApplicationCommands() {
               );
               result.queued += next.queued;
               result.unchanged += next.unchanged;
-              result.notApproved += next.notApproved;
+              result.notReady += next.notReady;
             }
           }
           return {
-            summary: `Queued ${result.queued} applications; ${result.unchanged} already queued, prepared or sent; ${result.notApproved} need an approved resume.${refused.length ? ` ${refused.length} outside the recorded instruction were left out.` : ""} Apply runs in the background.`,
+            summary: `Queued ${result.queued} applications; ${result.unchanged} already queued, prepared or sent; ${result.notReady} have no ready resume yet (still writing or failed).${refused.length ? ` ${refused.length} outside the recorded instruction were left out.` : ""} Apply runs in the background.`,
             data: { ...result, refused: refused.length },
           };
         },

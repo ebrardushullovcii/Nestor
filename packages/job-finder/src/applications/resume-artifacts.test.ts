@@ -1,8 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 import { createSeed } from "../test-fixtures";
+import { seedResumeDraft } from "../internal/resume-workspace-structure";
 import {
   renderApplicationResume,
-  applicationResumeSourceStillApproved,
+  renderReadyJobResume,
 } from "./resume-artifacts";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -51,7 +52,7 @@ function fixture(fileName = "original.txt") {
   return {
     input: {
       artifact,
-      approved: { draft: null } as StoredResume,
+      resume: { draft: null } as StoredResume,
       profile: seed.profile,
       settings: { ...seed.settings, resumeFormat: "html" as const },
       job: { id: "job", title: "Engineer", company: "Synthetic" } as Parameters<
@@ -120,52 +121,6 @@ describe("approved resume application formats", () => {
   });
 });
 
-test("a converted resume keeps its approval only while the original source bytes and identity still match", async () => {
-  const f = fixture();
-  const directory = await mkdtemp(
-    path.join(tmpdir(), "nestor-approved-source-"),
-  );
-  try {
-    const sourcePath = path.join(directory, "original.txt");
-    const text = f.input.profile.baseResume.textContent!;
-    await writeFile(sourcePath, text);
-    f.input.profile.baseResume.storagePath = sourcePath;
-    f.input.profile.baseResume.sha256 = createHash("sha256")
-      .update(text)
-      .digest("hex");
-    f.input.approved.approvedAt = f.input.artifact.approvedAt;
-    f.input.approved.pdfPath = null;
-    f.input.artifact.source = "original_upload";
-    f.input.artifact.sourceDocumentId = f.input.profile.baseResume.id;
-    const { artifact } = await renderApplicationResume(f.input);
-    expect(
-      await applicationResumeSourceStillApproved(
-        artifact,
-        f.input.approved,
-        f.input.profile,
-      ),
-    ).toBe(true);
-    await writeFile(sourcePath, "Changed synthetic source");
-    await expect(
-      applicationResumeSourceStillApproved(
-        artifact,
-        f.input.approved,
-        f.input.profile,
-      ),
-    ).rejects.toThrow("Original resume changed");
-    f.input.profile.baseResume.id = "different-import";
-    expect(
-      await applicationResumeSourceStillApproved(
-        artifact,
-        f.input.approved,
-        f.input.profile,
-      ),
-    ).toBe(false);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
 test("a continuation reuses the verified PDF and regenerates it if the approved content or file changes", async () => {
   const f = fixture();
   const directory = await mkdtemp(path.join(tmpdir(), "nestor-resume-copy-"));
@@ -200,6 +155,68 @@ test("a continuation reuses the verified PDF and regenerates it if the approved 
     });
     expect(changed.artifact.id).not.toBe(first.artifact.id);
     expect(f.renderResumeArtifact).toHaveBeenCalledTimes(3);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a ready resume nobody approved is rendered once, recorded as unapproved, and reused while its words match", async () => {
+  const f = fixture();
+  const directory = await mkdtemp(path.join(tmpdir(), "nestor-ready-resume-"));
+  try {
+    const storagePath = path.join(directory, "resume.pdf");
+    const bytes = Buffer.from("%PDF-1.4 synthetic ready resume");
+    await writeFile(storagePath, bytes);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    f.renderResumeArtifact.mockResolvedValue({
+      format: "pdf",
+      fileName: "resume.pdf",
+      storagePath,
+      sha256,
+    });
+    const seed = createSeed();
+    const resume = {
+      jobId: 7,
+      level: "aggressive",
+      state: "ready",
+      approvedAt: null,
+      draft: seedResumeDraft({
+        profile: f.input.profile,
+        job: seed.savedJobs[0]!,
+        templateId: "classic_ats",
+      }),
+      pdfPath: null,
+    } as unknown as StoredResume;
+    const input = {
+      resume,
+      profile: f.input.profile,
+      job: f.input.job,
+      settings: f.input.settings,
+      documentManager: f.input.documentManager,
+    };
+    const first = await renderReadyJobResume(input);
+    expect(first).toMatchObject({
+      jobId: "7",
+      source: "tailored_export",
+      filePath: storagePath,
+      sha256,
+      approvedAt: null,
+      level: "aggressive",
+      exportArtifactId: `job_resume_draft:7:${sha256}`,
+    });
+    expect(f.renderResumeArtifact.mock.calls[0]![0].settings.resumeFormat).toBe(
+      "pdf",
+    );
+    expect(
+      await renderReadyJobResume({ ...input, existingArtifact: first }),
+    ).toEqual(first);
+    expect(f.renderResumeArtifact).toHaveBeenCalledTimes(1);
+    await expect(
+      renderReadyJobResume({
+        ...input,
+        resume: { ...resume, state: "writing" },
+      }),
+    ).rejects.toThrow("still being written");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

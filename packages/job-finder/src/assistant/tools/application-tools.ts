@@ -14,13 +14,13 @@ export const recordInstructionTool = defineTool({
   name: "record_instruction",
   group: "applications",
   description:
-    "Records what the person's own message authorizes for applications before you start any: prepare (fill in and stop; they send), prepare_and_send (they wrote that the applications should be sent), or apply_saved_mode (they said apply and nothing about sending). Name the jobs by id, a result set and positions, or a typed selection. For all approved jobs use selection:{filter:{stage:resume}}; for all selected use the context filter and exclusions. Read them first when ids are not on screen. The jobs are frozen: jobs that arrive later are not added. Quote their words in 'quote'.",
+    "Records what the person's own message authorizes for applications before you start any: prepare (fill in and stop; they send), prepare_and_send (they wrote that the applications should be sent), or apply_saved_mode (they said apply and nothing about sending). Name the jobs by id, a result set and positions, or a typed selection. For all To review jobs use selection:{filter:{stage:shortlisted}}, for all Approved jobs selection:{filter:{stage:resume}} (for both, record each); for all selected use the context filter and exclusions. Read them first when ids are not on screen. The jobs are frozen: jobs that arrive later are not added. Quote their words in 'quote'.",
   parameters: json.object(
     {
       action: json.enumOf(["prepare", "prepare_and_send", "apply_saved_mode"]),
       jobIds: json.ids(),
       selection: json.looseObject(
-        "Apply choice: {ids:[numeric job ids]} or {filter:{stage:resume,text},except:[]}. A filter freezes every approved matching job, across pages.",
+        "Apply choice: {ids:[numeric job ids]} or {filter:{stage:shortlisted|resume,text},except:[]}. A filter freezes every matching job with a ready resume, across pages.",
       ),
       resultSetId: json.string(),
       positions: json.array(
@@ -66,9 +66,9 @@ export const recordInstructionTool = defineTool({
     const frozenSelection = input.selection;
     const resolvedSelectionIds: string[] = [];
     if (frozenSelection) {
-      if (!ports.resolveApprovedJobs) throw new Error("Apply is unavailable.");
+      if (!ports.resolveReadyJobs) throw new Error("Apply is unavailable.");
       resolvedSelectionIds.push(
-        ...(await ports.resolveApprovedJobs(frozenSelection)).map(String),
+        ...(await ports.resolveReadyJobs(frozenSelection)).map(String),
       );
       requested.push(...resolvedSelectionIds);
     }
@@ -93,7 +93,7 @@ export const recordInstructionTool = defineTool({
         "Name the jobs the instruction covers.",
       );
     }
-    // A typed Approved filter is resolved once in storage, not one model call per page.
+    // A typed Shortlisted filter is resolved once in storage, not one model call per page.
     const filterIds =
       frozenSelection && "filter" in frozenSelection
         ? new Set(resolvedSelectionIds)

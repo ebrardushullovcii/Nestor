@@ -156,7 +156,7 @@ export const RESUME_COMMANDS = {
   approve_resume: {
     effect: "local_write",
     description:
-      "Approves a written resume. The job moves to the resume stage, where Apply can take it at once.",
+      "Marks a written resume approved, the person's own marker: the job moves to the Approved tab (stage resume). Apply never needs it; Apply takes any ready resume and records whether it was approved.",
     input: z.object({ jobId: JobIdSchema }).strict(),
   },
   export_resume_pdf: {

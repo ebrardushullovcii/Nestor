@@ -49,7 +49,8 @@ import { savedFileToast } from "@renderer/features/job-finder/lib/saved-file-toa
 
 /**
  * One shortlisted job's resume: its level, where writing is, the editor with
- * a live preview, and the one main action, approving it for Apply.
+ * a live preview, Apply once it is written, and Approve, the person's own
+ * marker (Apply never waits for it).
  */
 export function ResumePane(props: {
   view: ReturnType<typeof useResume>;
@@ -498,28 +499,42 @@ export function ResumePane(props: {
             </Button>
           ) : writing && !props.approving ? null : (
             // While the page is still being written there is nothing to
-            // approve: the status beside the level says so, and the
-            // button arrives with the page.
-            <Button
-              disabled={!canApprove || props.approving}
-              onClick={props.onApprove}
-              pending={props.approving}
-              size="toolbar"
-              title={
-                canApprove
-                  ? `${modShortcut("Enter")} approves this one and opens the next`
-                  : "You can approve it once the page is written"
-              }
-              variant={
-                (canApprove || props.approving) && !props.bulkActive
-                  ? "primary"
-                  : "outline"
-              }
-            >
-              {/* The level being approved is named on the button, so the
+            // approve or send: the status beside the level says so, and the
+            // buttons arrive with the page. A written resume can be applied
+            // with as it is; approving it stays the person's own marker.
+            <>
+              {canApprove ? (
+                <Button
+                  disabled={props.applying}
+                  onClick={props.onApply}
+                  pending={props.applying}
+                  size="toolbar"
+                  variant="outline"
+                >
+                  Apply
+                </Button>
+              ) : null}
+              <Button
+                disabled={!canApprove || props.approving}
+                onClick={props.onApprove}
+                pending={props.approving}
+                size="toolbar"
+                title={
+                  canApprove
+                    ? `${modShortcut("Enter")} approves this one and opens the next`
+                    : "You can approve it once the page is written"
+                }
+                variant={
+                  (canApprove || props.approving) && !props.bulkActive
+                    ? "primary"
+                    : "outline"
+                }
+              >
+                {/* The level being approved is named on the button, so the
                   person never approves a level they did not mean. */}
-              {`Approve ${LEVEL_LABEL[shownLevel]}`}
-            </Button>
+                {`Approve ${LEVEL_LABEL[shownLevel]}`}
+              </Button>
+            </>
           )}
         </div>
       </div>

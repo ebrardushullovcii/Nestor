@@ -226,7 +226,7 @@ export function createAssistantHostPorts(input: {
         await (await loadEmbeddedBrowser()).command({ type: "minimize" });
       }
     },
-    resolveApprovedJobs: (selection) =>
+    resolveReadyJobs: (selection) =>
       Promise.resolve(getApplicationStore().selectedJobIds(selection)),
     async checkSource(targetId, options) {
       const service = await getProfileService();

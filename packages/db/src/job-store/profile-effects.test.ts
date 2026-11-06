@@ -131,7 +131,7 @@ test.each([null, "github.com/riley-synthetic"])(
   },
 );
 
-test("a live Profile fallback revokes only the resume whose printed header changes", () => {
+test("a live Profile fallback revokes only the resume whose printed header changes; Apply keeps the file it took", () => {
   const { store, profile, resumes } = setup();
   profile.patch({ fields: { headline: "Analyst" } });
   for (const id of [1, 3]) {
@@ -162,7 +162,9 @@ test("a live Profile fallback revokes only the resume whose printed header chang
   expect(store.getJob(1)?.stage).toBe("shortlisted");
   expect(resumes.get(3)).toEqual(kept);
   expect(store.getJob(3)?.stage).toBe("resume");
-  expect(applications.getApplication(affected.id)?.state).toBe("stopped");
+  // Approval is the person's marker, not Apply's condition: taking it away
+  // leaves running work on the file it already attached.
+  expect(applications.getApplication(affected.id)?.state).toBe("running");
   expect(applications.getApplication(unaffected.id)?.state).toBe("running");
 });
 

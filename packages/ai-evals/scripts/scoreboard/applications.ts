@@ -448,7 +448,9 @@ export async function batch(app: App, r: Result) {
 
 export async function send(app: App, r: Result) {
   await app.mode("Send for me");
-  const job = await app.fixture("board", 3);
+  // Sent from To review with a resume nobody approved: approval is the
+  // person's marker, never a condition for Apply.
+  const job = await app.fixture("board", 3, false);
   const receipts = () =>
     app.ctx.sites.submissions().filter((x) => x.path === "/employer-a/apply/3");
   assert.equal(receipts().length, 0);
@@ -471,6 +473,21 @@ export async function send(app: App, r: Result) {
     "the app recorded its confirmed receipt",
   );
   assert.equal(receipts().length, 1);
+  const artifact = app.read<{ resume_artifact_json: string }>(
+    "SELECT resume_artifact_json FROM application_details WHERE application_id=?",
+    a.id,
+  )[0];
+  const attached = artifact
+    ? (JSON.parse(artifact.resume_artifact_json) as {
+        approvedAt: string | null;
+        level?: string | null;
+        sha256?: string | null;
+      })
+    : null;
+  r.metrics.attachedResume = attached;
+  assert.ok(attached?.sha256, "the application records the attached file");
+  assert.equal(attached.approvedAt, null, "recorded as not approved");
+  assert.equal(attached.level, "original");
   // There is intentionally no Retry button after submission. Exercise the same
   // typed preload request used by Apply again, without inventing UI controls.
   app.log("retry submitted job through typed Apply request");

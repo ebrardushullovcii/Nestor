@@ -119,6 +119,14 @@ export interface ResumeStore {
    * Cleanup of generated files must keep all of them.
    */
   pdfPathsInUse(): string[];
+  /**
+   * The file an application attached under this resume identity (one Apply
+   * rendered from a ready, unapproved resume), so a form a restart closed can
+   * attach the same bytes again.
+   */
+  applicationResumeFile(
+    identity: string,
+  ): { path: string; sha256: string } | null;
   /** Jobs whose resume the person approved. */
   approvedJobIds(): number[];
   /**
@@ -217,6 +225,17 @@ export function createResumeStore(store: JobStore): ResumeStore {
              WHERE json_extract(resume_artifact_json, '$.filePath') IS NOT NULL`,
         ).all() as { path: string }[]
       ).map((row) => row.path);
+    },
+    applicationResumeFile(identity) {
+      const row = sql(
+        `SELECT json_extract(resume_artifact_json, '$.filePath') AS path,
+           json_extract(resume_artifact_json, '$.sha256') AS sha256
+         FROM application_details
+         WHERE json_extract(resume_artifact_json, '$.exportArtifactId') = ?
+           AND json_extract(resume_artifact_json, '$.sha256') IS NOT NULL
+         LIMIT 1`,
+      ).get(identity) as { path: string; sha256: string } | undefined;
+      return row ?? null;
     },
     listUnwritten(limit) {
       return (

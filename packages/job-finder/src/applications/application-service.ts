@@ -8,7 +8,7 @@ import { basename } from "node:path";
 import {
   loadOriginalResumeBytes,
   renderApplicationResume,
-  applicationResumeSourceStillApproved,
+  renderReadyJobResume,
   approvedJobResumeIdentity,
   loadApprovedJobResumeBytes,
 } from "./resume-artifacts";
@@ -471,14 +471,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
 
   async function run(row: ApplicationRow, signal: AbortSignal): Promise<void> {
     const job = jobs.getJob(row.jobId);
-    const approved = resumes.get(row.jobId);
-    if (
-      !job ||
-      job.stage !== "resume" ||
-      approved?.state !== "ready" ||
-      !approved.approvedAt
-    )
-      throw new Error("Approve this job's resume before applying.");
+    // The resume at the person's chosen level, approved or not: approval is
+    // their own marker and is recorded with the file, never a condition.
+    const resume = resumes.get(row.jobId);
+    if (!job || resume?.state !== "ready")
+      throw new Error(
+        "This job's resume is being written again. Apply again once it is ready.",
+      );
     const knownBlock = applications.needsYou.blockedSite(
       new URL(job.applyUrl ?? job.url).origin,
     );
@@ -506,38 +505,54 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       sourceInstructionArtifacts = [],
     } = await deps.readInputs();
     const profile = savedProfile;
-    const filePath = approved.pdfPath ?? profile.baseResume.storagePath;
-    if (!filePath)
-      throw new Error(
-        "Your approved resume file is unavailable. Import or export it again.",
-      );
-    const exportIdentity = approved.pdfPath
-      ? approvedJobResumeIdentity(approved)
-      : null;
-    const bytes = exportIdentity
-      ? await loadApprovedJobResumeBytes(
-          approved,
-          exportIdentity,
-          approved.pdfSha256!.toLowerCase(),
-        )
-      : await loadOriginalResumeBytes(profile.baseResume);
-    let sha256 = createHash("sha256").update(bytes).digest("hex");
-    let artifact = ApplicationResumeArtifactSchema.parse({
-      id: `resume_${row.jobId}_${sha256}`,
-      jobId: String(row.jobId),
-      source: approved.pdfPath === null ? "original_upload" : "tailored_export",
-      sourceDocumentId:
-        approved.pdfPath === null ? profile.baseResume.id : null,
-      exportArtifactId: exportIdentity,
-      fileName: basename(filePath),
-      filePath,
-      sha256,
-      approvedAt: approved.approvedAt,
-    });
     let previous = applications.getWork(row.id);
+    let artifact: ApplicationResumeArtifact;
+    if (resume.draft && !resume.pdfPath) {
+      // Written and not approved: rendered now, as approval would render it.
+      artifact = await renderReadyJobResume({
+        resume,
+        profile,
+        job: toResumeJob(job),
+        settings,
+        documentManager: deps.documentManager,
+        existingArtifact: previous?.resumeArtifact ?? null,
+        signal,
+      });
+    } else {
+      // The PDF made at approval, or the imported file for Original.
+      const filePath = resume.pdfPath ?? profile.baseResume.storagePath;
+      if (!filePath)
+        throw new Error(
+          "Your resume file is unavailable. Import or export it again.",
+        );
+      const exportIdentity = resume.pdfPath
+        ? approvedJobResumeIdentity(resume)
+        : null;
+      const bytes = exportIdentity
+        ? await loadApprovedJobResumeBytes(
+            resume,
+            exportIdentity,
+            resume.pdfSha256!.toLowerCase(),
+          )
+        : await loadOriginalResumeBytes(profile.baseResume);
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      artifact = ApplicationResumeArtifactSchema.parse({
+        id: `resume_${row.jobId}_${digest}`,
+        jobId: String(row.jobId),
+        source: resume.pdfPath === null ? "original_upload" : "tailored_export",
+        sourceDocumentId:
+          resume.pdfPath === null ? profile.baseResume.id : null,
+        exportArtifactId: exportIdentity,
+        fileName: basename(filePath),
+        filePath,
+        sha256: digest,
+        approvedAt: resume.approvedAt,
+        level: resume.level,
+      });
+    }
     const renderedResume = await renderApplicationResume({
       artifact,
-      approved,
+      resume,
       profile,
       job: toResumeJob(job),
       settings,
@@ -546,7 +561,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       signal,
     });
     artifact = renderedResume.artifact;
-    sha256 = artifact.sha256!;
+    const sha256 = artifact.sha256!;
     signal.throwIfAborted();
     if (!current(row)) return;
     const profileDigest = profileFactsDigest(savedProfile);
@@ -806,9 +821,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         loadVerifiedBytes: async () => {
           const bytes = await readFile(docx.storagePath);
           if (createHash("sha256").update(bytes).digest("hex") !== docx.sha256)
-            throw new Error(
-              "The approved resume's Word copy changed after rendering.",
-            );
+            throw new Error("The resume's Word copy changed after rendering.");
           return new Uint8Array(bytes);
         },
       });
@@ -918,12 +931,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         }
         const latest = await deps.readInputs();
         const latestMode = await modeFor(row);
-        const resume = resumes.get(row.jobId);
         return (
           latestMode !== null &&
-          jobs.getJob(row.jobId)?.stage === "resume" &&
-          resume?.approvedAt === approved.approvedAt &&
-          resume.pdfPath === approved.pdfPath &&
           JSON.stringify(
             AiBehaviorPreferenceSchema.parse(latest.settings.aiBehavior ?? {})
               .applying.preApprovedDeclarations,
@@ -1498,11 +1507,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             return;
           }
           const job = jobs.getJob(row.jobId);
-          if (!job || job.stage !== "resume")
-            return leaveForPerson(
-              row,
-              "This job no longer has an approved resume ready to apply.",
-            );
+          if (!job)
+            return leaveForPerson(row, "This job is no longer in Job Finder.");
           const origin = new URL(job.applyUrl ?? job.url).origin;
           const proof = applications.getWork(row.id)?.execution
             .answerDependencies;
@@ -1922,19 +1928,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 veto: async (facts) => {
                   const { profile: latestProfile } = await deps.readInputs();
                   const app = applications.getApplication(row.id);
-                  const approved = resumes.get(row.jobId);
                   return (
                     !!app &&
                     app.attempt === row.attempt &&
                     app.state === "submitting" &&
                     !applications.waitsOnFile(row.id) &&
-                    jobs.getJob(row.jobId)?.stage === "resume" &&
-                    approved?.approvedAt === artifact.approvedAt &&
-                    (await applicationResumeSourceStillApproved(
-                      artifact,
-                      approved,
-                      latestProfile,
-                    )) &&
                     (personClicked ||
                       (await modeFor(row)) === "autonomous_submit") &&
                     factsUnchanged(latestProfile) &&
@@ -2694,7 +2692,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         for (const row of applications.listWorkInState(state))
           waiting.set(row.id, row.attempt);
       unsubscribe = jobs.onChange((change) => {
-        if (change.cause !== "application" && !change.stages.includes("resume"))
+        if (
+          change.cause !== "application" &&
+          !change.stages.includes("resume") &&
+          !change.stages.includes("shortlisted")
+        )
           return;
         for (const [id, controller] of active) {
           const row = applications.getApplication(id);
@@ -2722,14 +2724,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       const row = applications.getApplication(id);
       const work = applications.getWork(id);
       const job = row && jobs.getJob(row.jobId);
-      if (
-        !row ||
-        row.state !== "ready" ||
-        !work ||
-        !job ||
-        job.stage !== "resume"
-      )
-        return false;
+      if (!row || row.state !== "ready" || !work || !job) return false;
       const controller = new AbortController();
       // Called only by a person's send action or a checked sidebar send instruction.
       const envelope = await deps.authorizeSending({

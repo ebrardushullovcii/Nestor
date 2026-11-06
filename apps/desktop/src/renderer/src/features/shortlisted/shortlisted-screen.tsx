@@ -62,11 +62,11 @@ const FILTER_ID = "shortlisted-filter";
 
 /**
  * Shortlisted: every shortlisted job's resume is written as soon as it lands
- * here. Read each one, edit it if you like, and approve it; Apply takes the
- * approved ones at once.
+ * here. Read each one, edit it if you like, approve it if you like; Apply
+ * takes any written resume, approved or not, from either tab.
  */
-function needApproval(count: number): string {
-  return `${plural(count, "job")} need${count === 1 ? "s" : ""} an approved resume`;
+function notReady(count: number): string {
+  return `${plural(count, "resume")} still being written`;
 }
 
 export function ShortlistedScreen() {
@@ -390,7 +390,7 @@ export function ShortlistedScreen() {
             approved.length === 1 && !ticked
               ? `Approved ${view.job?.title ?? "the resume"}`
               : `Approved ${plural(approved.length, "resume")}`,
-          description: "Apply can take it now, from Approved.",
+          description: "It waits in Approved. Apply works from either tab.",
           tone: "success",
         });
     }
@@ -427,8 +427,8 @@ export function ShortlistedScreen() {
                 : `Couldn’t apply to ${plural(failed.length, "job")}`,
             description:
               failed.length === 1
-                ? `${applyFailureLine(first.error)} It’s marked in Approved, with Try again.`
-                : "Nothing was sent. They’re marked in Approved, with Try again.",
+                ? `${applyFailureLine(first.error)} It’s marked in Shortlisted, with Try again.`
+                : "Nothing was sent. They’re marked in Shortlisted, with Try again.",
             tone: "warning",
             duration: 15_000,
           });
@@ -438,15 +438,16 @@ export function ShortlistedScreen() {
   }, [showToast]);
 
   /**
-   * Applies the ticked jobs or the open one, every matching approved job, or
-   * the jobs shown on this page of the list.
+   * Applies the ticked jobs or the open one, every matching job in this tab
+   * whose resume is written (approved or not), or the jobs shown on this
+   * page of the list.
    */
   const apply = useCallback(
     async (scope: "target" | "all" | "page" = "target") => {
       const input: JobSelectionInput | null =
         scope === "all"
           ? {
-              filter: { stage: "resume", text: latest.current.text },
+              filter: { stage: latest.current.tab, text: latest.current.text },
               except: [],
             }
           : scope === "page"
@@ -481,12 +482,12 @@ export function ShortlistedScreen() {
               ? `Applying to ${plural(result.queued, "job")}`
               : result.unchanged > 0
                 ? "Those jobs are already being applied to"
-                : needApproval(result.notApproved),
+                : notReady(result.notReady),
           description:
             result.queued === 0 && result.unchanged === 0
-              ? "Approve a resume, then apply."
-              : result.notApproved > 0
-                ? `${needApproval(result.notApproved)} and stayed here.`
+              ? "Apply once a resume is written."
+              : result.notReady > 0
+                ? `${notReady(result.notReady)} stayed here.`
                 : "Each one moves to Applications once it is sent.",
         });
       } catch (error) {
@@ -621,9 +622,8 @@ export function ShortlistedScreen() {
 
   const jobsText = (count: number, capped = false) =>
     `${count.toLocaleString()}${capped ? "+" : ""} ${count === 1 ? "job" : "jobs"}`;
-  // Every approved job here already has Apply at work: nothing to press.
+  // Every job here already has Apply at work: nothing to press.
   const allApplying =
-    tab === "resume" &&
     selectedCount === 0 &&
     list.rows.length > 0 &&
     list.nextCursor === null &&
@@ -682,7 +682,7 @@ export function ShortlistedScreen() {
         >
           <PageHeader
             actions={
-              tab === "resume" && list.total > 0 ? (
+              list.total > 0 ? (
                 <>
                   {selectedCount === 0 && list.total > list.rows.length ? (
                     // More jobs match than this page shows.
@@ -717,7 +717,7 @@ export function ShortlistedScreen() {
             }
             description={
               tab === "shortlisted"
-                ? "Resumes write themselves as jobs arrive. Read, edit if you like, approve."
+                ? "Resumes write themselves as jobs arrive. Read, edit if you like, approve or apply."
                 : "Approved resumes. Apply takes them from here."
             }
             title="Shortlisted"
@@ -828,7 +828,11 @@ export function ShortlistedScreen() {
                   onClick={() =>
                     void (tab === "shortlisted" ? approve() : apply())
                   }
-                  pending={busy === "approve" || busy === "apply"}
+                  pending={
+                    tab === "shortlisted"
+                      ? busy === "approve"
+                      : busy === "approve" || busy === "apply"
+                  }
                   size="toolbar"
                 >
                   {`${tab === "shortlisted" ? "Approve" : "Apply"} ${
@@ -839,6 +843,20 @@ export function ShortlistedScreen() {
                         : selectedText
                   }`.trim()}
                 </Button>
+                {tab === "shortlisted" ? (
+                  // A written resume can be applied with as it is: approval
+                  // is the person's marker, never a step before Apply.
+                  <Button
+                    aria-label={`Apply to ${selectedText} selected`}
+                    disabled={busy !== null || counting}
+                    onClick={() => void apply()}
+                    pending={busy === "apply"}
+                    size="toolbar"
+                    variant="outline"
+                  >
+                    {`Apply ${counting ? "" : selectedText}`.trim()}
+                  </Button>
+                ) : null}
                 <Button
                   aria-label={`Move back ${selectedText} selected`}
                   disabled={busy !== null || counting}
