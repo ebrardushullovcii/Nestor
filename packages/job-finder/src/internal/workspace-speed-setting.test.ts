@@ -18,16 +18,19 @@ describe("Speed setting", () => {
     );
   });
 
-  it("gives each faster level more of everything", () => {
+  it("gives each faster level more pages and applications", () => {
     const { standard, faster, maximum } = SPEED_LEVELS;
-    for (const key of [
-      "searchPages",
-      "applyAtOnce",
-      "waitingPages",
-      "fitRequests",
-    ] as const) {
+    for (const key of ["searchPages", "applyAtOnce", "waitingPages"] as const) {
       expect(faster[key]).toBeGreaterThan(standard[key]);
       expect(maximum[key]).toBeGreaterThan(faster[key]);
     }
+  });
+
+  it("sends fit checks at full concurrency at every level", () => {
+    // Fit requests are network-bound and cost no memory, so a slower level
+    // gains nothing by holding them back.
+    const { standard, faster, maximum } = SPEED_LEVELS;
+    expect(standard.fitRequests).toBe(maximum.fitRequests);
+    expect(faster.fitRequests).toBe(maximum.fitRequests);
   });
 });

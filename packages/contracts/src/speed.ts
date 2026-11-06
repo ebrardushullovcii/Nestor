@@ -18,7 +18,7 @@ export interface SpeedLevelLimits {
   applyAtOnce: number;
   /** Ready and Needs-you pages kept open; older ones close and refill on Open. */
   waitingPages: number;
-  /** Fit batches sent to the AI at once; network-bound, so no memory cost. */
+  /** Fit batches sent to the AI at once; network-bound, so no memory cost and the same at every level. */
   fitRequests: number;
 }
 
@@ -32,14 +32,14 @@ export const SPEED_LEVELS: Record<SpeedLevel, SpeedLevelLimits> = {
     searchPages: 2,
     applyAtOnce: 4,
     waitingPages: 3,
-    fitRequests: 6,
+    fitRequests: 16,
   },
   faster: {
     label: "Faster",
     searchPages: 4,
     applyAtOnce: 6,
     waitingPages: 6,
-    fitRequests: 10,
+    fitRequests: 16,
   },
   maximum: {
     label: "Maximum",
