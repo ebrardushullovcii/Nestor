@@ -36,7 +36,7 @@ import {
 } from "./listing-html";
 import {
   extractListingDetailFromHtml,
-  findApplyLinkInHtml,
+  listingPageLinks,
   listingPageText,
 } from "./listing-detail-extraction";
 import { blockedByCheck } from "./bot-check";
@@ -853,8 +853,7 @@ export async function readListings(
       applyUrl:
         applyUrl !== undefined
           ? applyUrl
-          : (read.card.providerFacts?.applyUrl ??
-            findApplyLinkInHtml(read.page.html, read.page.finalUrl)),
+          : (read.card.providerFacts?.applyUrl ?? null),
       sourceId: read.card.sourceId,
       sourceLabel: read.card.sourceLabel,
       postedAt:
@@ -893,7 +892,7 @@ export async function readListings(
   const readMetadata = async (batch: Read[]): Promise<void> => {
     const answer = await ask(
       input,
-      'Read listing metadata faithfully from the complete page text and published facts. Each listing carries its own requested URL, landed URL and complete body; never use another listing as its evidence. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A redirect is evidence about the requested listing, not a new listing identity. When the landed board says the requested vacancy is closed, return that requested vacancy with closed=true, not another board posting. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"canonicalUrl":"real listing URL","applyUrl":string|null,"closed":boolean,"isListing":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Keep the real listing URL through login redirects. A login page is not an application link: when a link carries its listing destination, return that actual canonicalUrl; use applyUrl=null if no real application link was observed. Do not assess fit or summarize the body.',
+      'Read listing metadata faithfully from the complete page text and published facts. Each listing carries its own requested URL, landed URL and complete body; never use another listing as its evidence. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A redirect is evidence about the requested listing, not a new listing identity. When the landed board says the requested vacancy is closed, return that requested vacancy with closed=true, not another board posting. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"canonicalUrl":"real listing URL","applyUrl":string|null,"closed":boolean,"isListing":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Keep the real listing URL through login redirects. A login page is not an application link: when a link carries its listing destination, return that actual canonicalUrl; use applyUrl=null if no real application link was observed. Choose the application URL from the supplied own-listing links or published direct-apply fact; distinguish the actual application entry from navigation or help articles. If no application entry is known, return applyUrl=null. Do not assess fit or summarize the body.',
       {
         listings: batch.map((read, id) => ({
           id,
@@ -902,6 +901,7 @@ export async function readListings(
           finalUrl: read.page.finalUrl,
           card: read.card.text,
           pageText: listingPageText(read.page.html),
+          links: listingPageLinks(read.page.html, read.page.finalUrl),
           description: read.body.text,
           published: read.structured
             ? {
@@ -912,6 +912,7 @@ export async function readListings(
                 employmentType: read.structured.employmentType,
                 salaryText: read.structured.salaryText,
                 validThrough: read.structured.validThrough,
+                directApplyUrl: read.structured.directApplyUrl,
               }
             : null,
         })),
