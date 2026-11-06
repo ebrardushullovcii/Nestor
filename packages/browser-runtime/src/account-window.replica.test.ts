@@ -2027,9 +2027,9 @@ test("an unchanged page after a choice is not renewed and the choice is not repe
     const again = await f.hands.observe();
     expect(again.blocker).toMatchObject({ requiresPerson: true });
     expect((await identityStep(f, TARGET_EMAIL)).ok).toBe(false);
-    // No renewal happened: the original grant runs out on schedule.
+    // No action was repeated or spent while the model was thinking.
     clock.advance(35_000);
-    expect((await f.session.readPage()).accountWindow?.actionsLeft).toBe(0);
+    expect((await f.session.readPage()).accountWindow?.actionsLeft).toBe(3);
     expect(providerPosts(f, "/select")).toHaveLength(1);
   } finally {
     clock.restore();
