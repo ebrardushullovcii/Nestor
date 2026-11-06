@@ -688,8 +688,10 @@ async function uploadRun(
   input.hands.uploadFile = (_ref, file) => {
     const method = file.method ?? "input";
     methods.push(method);
-    if (changingLabel)
+    if (changingLabel) {
+      raw.controls[0].id = `input-${methods.length}`;
       raw.controls[0].label = `Resume/CV ${file.name} ATTACH RESUME/CV Couldn't auto-read resume`;
+    }
     const accepted = dropOnly && method === "drop";
     const noRequest = dropOnly && !accepted;
     if (counter === "changed" && method === "chooser") {
@@ -812,6 +814,67 @@ test("an upload that replaces the form with an error is a technical stop, not a 
   expect(result.outcome).toBe("stuck");
   expect(result.reason).toContain("attachment field disappeared");
   expect(result.pauses).toEqual([]);
+});
+
+test("a repeated Attach press after an upload failure keeps genuine gaps instead of an attachment chore", async () => {
+  const raw = page({
+    controls: [
+      field({ inputType: "file", label: "Resume", name: "resume" }),
+      field({ index: 1, id: "pay", name: "pay", label: "Expected salary" }),
+      field({
+        index: 2,
+        id: "degree",
+        name: "degree",
+        label: "Highest degree",
+      }),
+    ],
+    actions: [{ index: 0, label: "Attach", visible: true, disabled: false }],
+  });
+  const input = config(raw);
+  input.sources.documents = [
+    {
+      id: "resume",
+      kind: "resume",
+      label: "Your CV",
+      fileName: "synthetic.pdf",
+      mimeType: "application/pdf",
+      loadBytes: () => Promise.resolve(new Uint8Array([1])),
+    },
+  ];
+  input.hands.uploadFile = () =>
+    Promise.resolve({ ok: false, error: "The upload request was blocked." });
+  let calls = 0;
+  const model: LLMClient = {
+    chatWithTools: () =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: `call-${calls}`,
+            type: "function",
+            function:
+              calls++ === 0
+                ? {
+                    name: "upload",
+                    arguments: JSON.stringify({
+                      ref: "c0",
+                      documentId: "resume",
+                    }),
+                  }
+                : { name: "click", arguments: JSON.stringify({ ref: "a0" }) },
+          },
+        ],
+      }),
+  };
+  const result = await runApplyAgent(input, model);
+  const prompts = result.pauses
+    .flatMap((pause) => pause.questions ?? [])
+    .map((question) => question.prompt);
+  expect(prompts).toEqual(
+    expect.arrayContaining(["Expected salary", "Highest degree"]),
+  );
+  expect(prompts).toHaveLength(2);
+  expect(result.reason).toContain("upload request was blocked");
+  expect(result.reviewAttachments).toEqual([]);
 });
 
 test("a rejected recovery upload fails with its cause and creates no candidate question", async () => {

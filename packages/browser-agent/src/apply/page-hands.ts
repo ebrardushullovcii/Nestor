@@ -293,8 +293,9 @@ export function buildApplyFormObservation(
             fileControlKey: JSON.stringify([
               rawControl.frame ?? null,
               rawControl.scopeKey ?? "",
-              rawControl.id,
-              rawControl.name,
+              rawControl.name
+                ? ["name", rawControl.name]
+                : ["id", rawControl.id],
             ]),
           }
         : {}),

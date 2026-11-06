@@ -579,27 +579,20 @@ async function runMeasuredApplyAgent(
    * with it, the person's questions first (their answers belong on this
    * page, so the press waits for the next run).
    */
-  const handOverPress = (pause: ApplyPause): AgentLoopToolOutcome => {
-    if (
-      exhaustedUploads.size &&
-      !pageTools.state.observation?.controls.some(
-        (control) =>
-          control.visible && !control.disabled && control.kind !== "file",
-      )
-    ) {
-      // A failed upload can replace the form with an error page whose only
-      // control is Home/Back. That navigation is not a candidate question.
+  const handOverPress = async (
+    pause: ApplyPause,
+  ): Promise<AgentLoopToolOutcome> => {
+    if (exhaustedUploads.size) {
+      // A failed upload's Attach/Home button is not a candidate question.
+      // Use normal finishing so genuine required gaps are still collected.
       needsPersonFinishPending = false;
       forPerson = [];
-      return {
-        kind: "finish",
-        finish: {
-          reason: [...exhaustedUploads.values()].join(" "),
-          stuck: true,
-          needsPerson: pendingQuestions.size > 0,
-          data: {},
-        },
-      };
+      return outcomeToLoop({
+        kind: "finished",
+        reason: [...exhaustedUploads.values()].join(" "),
+        stuck: true,
+        needsPerson: false,
+      });
     }
     const handover = collectedQuestionsPause() ?? pause;
     pauses.push(handover);
@@ -4639,7 +4632,7 @@ async function runMeasuredApplyAgent(
       if (parsed.thenContinue && deferredPress && !wrote) {
         // The form button is already left for the person and this batch
         // wrote nothing new: the page is as filled as the run can make it.
-        stopOutcome = handOverPress(deferredPress);
+        stopOutcome = await handOverPress(deferredPress);
       } else if (parsed.thenContinue) {
         const current = pageTools.state.observation!;
         const unresolved = unresolvedRequiredControls(current);
