@@ -1635,3 +1635,35 @@ test("a saved access ticket does not skip the next real search attempt", async (
   expect(createSourceAccessStore(store).pending(1)).toBe(false);
   expect(createSearchSourcesStore(store).list({}).rows[0]?.state).toBe("done");
 });
+
+test("late collection progress preserves the actual listing failure in the final source report", async () => {
+  const { runner, engine, store, context } = setup();
+  context.sources = context.sources.slice(0, 1);
+  engine.screenCards.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      related: [],
+      seen: [],
+      skipped: 0,
+      failed: cards.map((card) => ({
+        url: card.url,
+        reason: "The listing connection was reset",
+      })),
+    }),
+  );
+  engine.collectSource.mockImplementation(async (input) => {
+    await input.onCards?.(numberedCards(input.target.id, 100));
+    input.message("Asking the assistant what to do next");
+    return {
+      cards: [],
+      complete: true,
+      pagesRead: 1,
+      notes: ["Inventory read"],
+    };
+  });
+  await runner.start({ depth: "quick", postedWithin: "any" });
+  await finished(runner);
+  const row = createSearchSourcesStore(store).list({}).rows[0];
+  expect(row?.state).toBe("failed");
+  expect(row?.message).toContain("listing connection was reset");
+  expect(row?.message).not.toContain("Asking the assistant");
+});

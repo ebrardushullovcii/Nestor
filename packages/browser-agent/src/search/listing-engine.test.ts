@@ -296,7 +296,7 @@ test("an empty shell is incomplete and explicit emptiness cannot hide a failed p
   expect(failed.notes.join(" ")).not.toContain("collected from 2 pages");
 });
 
-test("a browser fallback may confirm an empty inventory but cannot assert emptiness without evidence", async () => {
+test("browser navigation owns its completion judgment even with an empty inventory", async () => {
   for (const emptyConfirmed of [true, false]) {
     const inventory = await collectSource({
       source,
@@ -316,10 +316,10 @@ test("a browser fallback may confirm an empty inventory but cannot assert emptin
             : [],
         }),
     });
-    expect(inventory.complete).toBe(emptyConfirmed);
+    expect(inventory.complete).toBe(true);
     expect(
       inventory.notes.join(" ").includes("coverage could not be confirmed"),
-    ).toBe(!emptyConfirmed);
+    ).toBe(false);
   }
 });
 
@@ -1294,7 +1294,7 @@ test.each([403, 429, 999, 404, 410, 500])(
   },
 );
 
-test("zero cards can never inherit complete coverage from browser navigation", async () => {
+test("a model-completed browser inventory can contain zero new cards", async () => {
   const inventory = await collectSource({
     source,
     lane: "browser",
@@ -1311,8 +1311,8 @@ test("zero cards can never inherit complete coverage from browser navigation", a
         notes: ["Finished"],
       }),
   });
-  expect(inventory.complete).toBe(false);
-  expect(inventory.notes.join(" ")).toContain("No listings were read");
+  expect(inventory.complete).toBe(true);
+  expect(inventory.notes.join(" ")).not.toContain("No listings were read");
 });
 
 test("unlabelled paragraphs after a card title are not location evidence", () => {

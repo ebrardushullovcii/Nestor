@@ -333,8 +333,7 @@ export function createListingSearchEngine(deps: {
                     result.inventoryCompleteness === "complete" ||
                     (result.agentMetadata?.phaseCompletionMode ===
                       "structured_finish" &&
-                      result.agentMetadata.incomplete === false &&
-                      cards.length > 0),
+                      result.agentMetadata.incomplete === false),
                   needsYou:
                     result.agentMetadata?.accessBlockerReason ===
                       "auth_required" ||

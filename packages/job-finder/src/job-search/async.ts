@@ -50,5 +50,5 @@ export function errorMessage(error: unknown): string {
       /timed? out|timeout/iu.test(error.message))
   )
     return `The page or model stopped responding: ${error.message}. Saved progress is kept; Retry this site to continue.`;
-  return (error instanceof Error ? error.message : String(error)).slice(0, 240);
+  return error instanceof Error ? error.message : String(error);
 }

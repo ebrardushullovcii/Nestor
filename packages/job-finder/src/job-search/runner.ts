@@ -276,9 +276,7 @@ export function createJobSearchRunner(
         (source.row.failedReads
           ? ` ${source.row.failedReads} listing reads need attention.`
           : "") +
-        (source.notes.length
-          ? ` ${source.notes.join(" ").slice(0, 1800)}`
-          : "");
+        (source.notes.length ? ` ${source.notes.join(" ")}` : "");
       write(source);
       update(run, { sourcesDone: 1 });
       source.urls.clear();
@@ -304,7 +302,11 @@ export function createJobSearchRunner(
     const failedSource = (source: SourceWork, message: string) => {
       if (!current(source)) return;
       source.row.state = "failed";
-      source.notes.push(message);
+      source.row.message = message;
+      source.notes = [
+        message,
+        ...source.notes.filter((note) => note !== message),
+      ];
       siteRows.record(
         Number(source.target.id),
         {
@@ -416,7 +418,11 @@ export function createJobSearchRunner(
               readSignal.throwIfAborted();
             },
             message: (message) => {
-              if (current(source)) {
+              if (
+                current(source) &&
+                !source.counted &&
+                !settledState(source.row.state)
+              ) {
                 source.row.message = message;
                 write(source);
               }
@@ -432,7 +438,7 @@ export function createJobSearchRunner(
         source.accessBlocked = inventory.complete
           ? false
           : source.accessBlocked || Boolean(inventory.accessBlocked);
-        source.notes = inventory.notes;
+        source.notes = [...new Set([...source.notes, ...inventory.notes])];
         source.row.lane = inventory.lane ?? lane;
         if (lane === "http" && inventory.requiresBrowser) {
           browserTask(source, async (browserSignal) => {
@@ -517,6 +523,7 @@ export function createJobSearchRunner(
             if (!current(source)) return;
             source.notes = [
               `HTTP reading did not finish: ${errorMessage(error)}`,
+              ...source.notes,
             ];
             browserTask(source, async (browserSignal) => {
               await collect(source, "browser", browserSignal);

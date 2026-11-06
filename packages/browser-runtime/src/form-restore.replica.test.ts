@@ -110,7 +110,7 @@ test("Gatekeeper remembers verification and all six detail reads reach content",
           chatWithTools: () => {
             const action =
               ++turn === 1
-                ? { name: "wait", args: { milliseconds: 1000 } }
+                ? { name: "wait", args: { milliseconds: id === 1 ? 9000 : 0 } }
                 : {
                     name: "finish",
                     args: {

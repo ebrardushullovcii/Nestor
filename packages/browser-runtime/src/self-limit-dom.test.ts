@@ -75,7 +75,7 @@ test("the serialized snapshot preserves full body, headings, clickables, alerts,
   expect(snapshot.headings.length).toBe(65);
   expect(snapshot.clickables.length).toBeGreaterThan(300);
   expect(snapshot.validationErrors.length).toBe(15);
-  expect(hits(log)).toEqual([]);
+  expect(hits(log), JSON.stringify(hits(log))).toEqual([]);
 });
 
 test("summary rows, placement sections and access-signal scanning report their own boundaries", () => {
@@ -121,7 +121,7 @@ test("a small complete DOM does not report a self-limit", () => {
   page.window.eval(
     `(${collectApplyDocumentSnapshot.toString()})(Array.from(document.querySelectorAll(${JSON.stringify(Object.values(APPLY_PAGE_SELECTORS).join(", "))})),${JSON.stringify(APPLY_PAGE_SELECTORS)})`,
   );
-  expect(hits(log)).toEqual([]);
+  expect(hits(log), JSON.stringify(hits(log))).toEqual([]);
 });
 
 test.each(["options", "steps"] as const)(

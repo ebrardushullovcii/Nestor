@@ -393,22 +393,8 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 .replace(label, "")
                 .replace(/\s+/gu, " ")
                 .trim();
-            if (hint.length > 300) {
-              try {
-                console.debug(
-                  "__nestor_self_limit__ " +
-                    JSON.stringify({
-                      limit: "long_field_hint_veto",
-                      kind: "input",
-                      value: 300,
-                      where: "browser-runtime/hintFor",
-                    }),
-                );
-              } catch {
-                /* A page-owned console cannot change the operation. */
-              }
-            }
-            return hint.length <= 300 ? hint : "";
+
+            return hint;
           };
           const roots = Array.from(
             new Set(elements.map((element) => element.getRootNode())),
@@ -1559,22 +1545,8 @@ export function collectApplyDocumentSnapshot(
           .replace(label, "")
           .replace(/\s+/gu, " ")
           .trim();
-      if (hint.length > 300) {
-        try {
-          console.debug(
-            "__nestor_self_limit__ " +
-              JSON.stringify({
-                limit: "long_field_hint_veto",
-                kind: "input",
-                value: 300,
-                where: "browser-runtime/hintFor",
-              }),
-          );
-        } catch {
-          /* A page-owned console cannot change the operation. */
-        }
-      }
-      return hint.length <= 300 ? hint : "";
+
+      return hint;
     };
     const isVisible = (element: HTMLElement): boolean => {
       if (element.getAttribute("aria-hidden") === "true") {
@@ -3231,14 +3203,7 @@ export function createPlaywrightApplyPageMechanics(
       }
     },
     wait: async (milliseconds) => {
-      if (milliseconds > 10_000)
-        reportSelfLimitHit({
-          limit: "browser_wait",
-          kind: "timeout",
-          value: 10000,
-          where: "browser-runtime/createPlaywrightApplyPageMechanics",
-        });
-      await page.waitForTimeout(Math.max(0, Math.min(10_000, milliseconds)));
+      await page.waitForTimeout(Math.max(0, milliseconds));
     },
     goBack: async (): Promise<ApplyNavigationResult> => {
       try {

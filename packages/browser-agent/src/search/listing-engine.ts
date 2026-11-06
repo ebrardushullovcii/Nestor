@@ -351,9 +351,7 @@ async function collectSourceObserved(
       cards: [...cards.values()],
       lane: "browser",
       pagesRead: visited.size + fallback.pagesRead,
-      complete:
-        fallback.complete &&
-        (cards.size > 0 || fallback.emptyConfirmed === true),
+      complete: fallback.complete,
       ...(!cards.size && fallback.emptyConfirmed
         ? { emptyConfirmed: true }
         : {}),
@@ -369,7 +367,7 @@ async function collectSourceObserved(
               "Browser inventory coverage is not confirmed. Saved listings are kept; continue this site to check remaining results.",
             ]
           : []),
-        ...(cards.size || (fallback.complete && fallback.emptyConfirmed)
+        ...(cards.size || fallback.complete
           ? []
           : [
               "No listings were read; coverage could not be confirmed. Open the site or check its jobs-board URL.",
