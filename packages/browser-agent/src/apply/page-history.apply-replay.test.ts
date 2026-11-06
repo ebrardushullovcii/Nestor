@@ -48,3 +48,26 @@ test("page-history cost replay retains current fields, instructions, resume and 
   );
   expect(result.at(-1)?.content).toContain("c1 Start date 11");
 });
+
+test("earlier form results stay whole until the route context budget is near", () => {
+  const earlier =
+    "Full earlier field instructions, choices and validation. ".repeat(100);
+  const messages: AgentMessage[] = [
+    { role: "tool", toolCallId: "read-1", content: earlier },
+  ];
+  const roomy = compactApplyPageHistory(
+    messages,
+    new Set([earlier]),
+    "Current form",
+    64_000 * 3.6 * 0.8,
+  );
+  expect(roomy[0].content).toContain(earlier);
+  const full = compactApplyPageHistory(
+    messages,
+    new Set([earlier]),
+    "Current form",
+    earlier.length,
+  );
+  expect(full[0].content).not.toContain(earlier);
+  expect(full[0].content).toContain("Current form");
+});

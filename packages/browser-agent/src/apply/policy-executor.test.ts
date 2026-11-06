@@ -5427,7 +5427,33 @@ describe("picker replay: refused choices", () => {
     });
   });
 
-  test("refusals from earlier runs hold: after two, only the person's answer is tried", async () => {
+  test("a long search never repeats an earlier refused picker choice", async () => {
+    const source = picker({ label: "City", options: [] });
+    const chooseOption = refusing();
+    const { config } = configFor(source, { hands: { chooseOption } });
+    config.sources.profile.currentLocation = "Prishtina";
+    const guardState = createApplyGuardState();
+    const tryOption = (option: string) =>
+      executeApplyProposal(
+        { tool: "select", ref: "c0", option },
+        observationOf(source).signature,
+        {
+          config,
+          now,
+          guardState,
+          checkWrittenAnswer: () =>
+            Promise.resolve({ supported: true, reason: "Supported spelling." }),
+        },
+      );
+    for (let index = 0; index < 25; index++)
+      await tryOption(`City spelling ${index}`);
+    expect(chooseOption).toHaveBeenCalledTimes(25);
+    const repeated = await tryOption("City spelling 0");
+    expect(repeated.kind).toBe("suggestion");
+    expect(chooseOption).toHaveBeenCalledTimes(25);
+  });
+
+  test("distinct supported choices remain available after two earlier refusals", async () => {
     const source = picker();
     const { config, hands } = configFor(source);
     const control = observationOf(source).controls[0];
@@ -5456,10 +5482,8 @@ describe("picker replay: refused choices", () => {
     expect((await invent(createApplyGuardState())).kind).toBe("filled");
     expect(chooseOption).toHaveBeenCalledTimes(1);
     chooseOption.mockClear();
-    expect((await invent(createApplyGuardState(earlier))).kind).toBe(
-      "suggestion",
-    );
-    expect(chooseOption).not.toHaveBeenCalled();
+    expect((await invent(createApplyGuardState(earlier))).kind).toBe("filled");
+    expect(chooseOption).toHaveBeenCalledTimes(1);
 
     config.sources.reusableAnswers = [savedCountry(pickerReplay.options[0])];
     const answered = await executeApplyProposal(

@@ -19,11 +19,35 @@ export function applicationSiteKey(url: string): string | null {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:")
       return null;
     const hostname = parsed.hostname.toLowerCase();
-    if (isIP(hostname.replace(/^\[|\]$/gu, "")) !== 0) return hostname;
-    const parts = hostname.split(".");
-    // Group subdomains and deliberately group more broadly for compound public
-    // suffixes. Extra serialization is safer than sharing an account session.
-    return parts.length > 1 ? parts.slice(-2).join(".") : hostname;
+    const address = hostname.replace(/^\[|\]$/gu, "");
+    if (
+      hostname === "localhost" ||
+      address === "::1" ||
+      (isIP(address) === 4 && address.startsWith("127."))
+    ) {
+      // Replica sites share a loopback server, but their first path segment
+      // is their site boundary.
+      const site = parsed.pathname.split("/").find(Boolean) ?? "";
+      return `${parsed.origin}/${site}`;
+    }
+    if (isIP(address) !== 0) return hostname;
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    // Shared application hosts commonly prefix a board token before the job
+    // route. This is URL structure, independent of the site or ATS provider.
+    const first = segments[0];
+    const boardParameter = ["board", "company", "for", "tenant"]
+      .map((key) => parsed.searchParams.get(key)?.trim())
+      .find(Boolean);
+    const board =
+      segments.length > 1 &&
+      first &&
+      !/^(?:jobs?|careers?|positions?|openings?|apply|applications?|requisitions?|en(?:-[a-z]+)?|[0-9]+)$/iu.test(
+        first,
+      )
+        ? first
+        : null;
+    const token = boardParameter ?? board;
+    return token ? `${hostname}/${encodeURIComponent(token)}` : hostname;
   } catch {
     return null;
   }
@@ -122,6 +146,10 @@ export function createApplicationPreparationScheduler(
   };
 
   const waitFor = (request: Request, key: string): Promise<void> => {
+    const startedAt = Date.now();
+    const queuedBehindSite = [...requests].some(
+      (other) => other.granted && other.key === key,
+    );
     request.key = key;
     request.granted = false;
     return new Promise<void>((resolve, reject) => {
@@ -148,9 +176,19 @@ export function createApplicationPreparationScheduler(
       });
       requests.add(request);
       drain();
-    }).finally(() =>
-      request.signal?.removeEventListener("abort", request.onAbort),
-    );
+    }).finally(() => {
+      request.signal?.removeEventListener("abort", request.onAbort);
+      if (process.env.NESTOR_APPLY_PROFILE === "1")
+        console.info(
+          "[apply-profile]",
+          JSON.stringify({
+            event: "queue",
+            durationMs: Date.now() - startedAt,
+            queuedBehindSite,
+            granted: request.granted,
+          }),
+        );
+    });
   };
 
   return {

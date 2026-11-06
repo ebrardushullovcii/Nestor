@@ -307,9 +307,6 @@ export function createApplyGuardState(
   };
 }
 
-/** Distinct choices a picker may refuse before Job Finder stops choosing for it. */
-export const MAX_PICKER_ATTEMPTS = 2;
-
 /** One picker question on this application, the same across reloads and reruns. */
 export function pickerQuestionKey(control: ApplyFormControl): string {
   return normalizeFormQuestionPrompt(questionPrompt(control));
@@ -320,11 +317,7 @@ export function pickerExhausted(
   control: ApplyFormControl,
 ): boolean {
   const key = pickerQuestionKey(control);
-  return (
-    guardState.repeatedPickers.has(key) ||
-    (guardState.pickerAttempts.get(key)?.tried.length ?? 0) >=
-      MAX_PICKER_ATTEMPTS
-  );
+  return guardState.repeatedPickers.has(key);
 }
 
 /** Remembers a refused choice and what the list offered instead, when it said. */
@@ -342,12 +335,12 @@ function recordPickerFailure(
     tried: [
       ...(previous?.tried ?? []).filter((value) => value !== tried),
       tried,
-    ].slice(-20),
+    ],
     notOffered: [
       ...(previous?.notOffered ?? []).filter((value) => value !== tried),
       // A refusal proves absence only with the list it showed instead.
       ...(offeredOptions?.length ? [tried] : []),
-    ].slice(-20),
+    ],
     offeredOptions: offeredOptions?.length
       ? offeredOptions.slice(0, 500)
       : (previous?.offeredOptions ?? []),
@@ -3114,19 +3107,6 @@ export async function executeApplyProposal(
           at,
         );
       }
-      // After two refused choices only the person's own answers are tried.
-      if (
-        pickerExhausted(deps.guardState, control) &&
-        choice.answer.sourceKind === "generated"
-      )
-        return pickerHandover(
-          deps,
-          observation,
-          control,
-          option,
-          `This picker refused ${MAX_PICKER_ATTEMPTS} choices already.`,
-          at,
-        );
       const write = await choosePickerOption(deps, control, option);
       if (!write.ok) {
         const after = await config.hands.observe();

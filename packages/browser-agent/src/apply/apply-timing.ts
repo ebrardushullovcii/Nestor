@@ -2,9 +2,26 @@ import type { ApplyAgentTiming, ModelTokenUsage } from "@nestor/contracts";
 import type { LLMClient } from "../agent/contracts";
 import type { ApplyPageHands } from "./types";
 
+let nextProfileId = 0;
+
 /** Only sizes, counts and durations are retained, never page or candidate text. */
 export function createApplyTiming(now: () => Date) {
   const startedAt = now().getTime();
+  const profileId = ++nextProfileId;
+  const profile = (event: string, data: Record<string, unknown>) => {
+    if (process.env.NESTOR_APPLY_PROFILE === "1")
+      console.info(
+        "[apply-profile]",
+        JSON.stringify({
+          application: profileId,
+          event,
+          elapsedMs: Math.max(0, now().getTime() - startedAt),
+          ...data,
+        }),
+      );
+  };
+  let lastObservation: string | undefined;
+  let modelCall = 0;
   const timing: ApplyAgentTiming = {
     totalMs: 0,
     modelMs: 0,
@@ -70,6 +87,7 @@ export function createApplyTiming(now: () => Date) {
       const duration = Math.max(0, now().getTime() - start);
       activeTools.delete(activeKey);
       timing[key] += duration;
+      profile("hands", { purpose: name, durationMs: duration });
     }
   };
   return {
@@ -117,7 +135,36 @@ export function createApplyTiming(now: () => Date) {
     },
     hands: (hands: ApplyPageHands): ApplyPageHands => ({
       ...hands,
-      observe: () => measure("observe", "pageReadMs", hands.observe),
+      observe: async () => {
+        const observation = await measure(
+          "observe",
+          "pageReadMs",
+          hands.observe,
+        );
+        if (process.env.NESTOR_APPLY_PROFILE === "1") {
+          const signature = JSON.stringify({
+            ...observation,
+            observedAt: undefined,
+          });
+          profile("observation", {
+            unchanged: signature === lastObservation,
+            controls: observation.controls.length,
+          });
+          lastObservation = signature;
+        }
+        return observation;
+      },
+      wait: async (ms) => {
+        const start = now().getTime();
+        try {
+          return await hands.wait(ms);
+        } finally {
+          profile("wait", {
+            requestedMs: ms,
+            durationMs: Math.max(0, now().getTime() - start),
+          });
+        }
+      },
       readText: (ref) =>
         measure("read_text", "pageReadMs", () => hands.readText(ref)),
       ...(hands.checkAction
@@ -148,6 +195,21 @@ export function createApplyTiming(now: () => Date) {
             ? "answer"
             : "other";
         const start = now().getTime();
+        const call = ++modelCall;
+        const purpose =
+          kind === "question"
+            ? "reading_questions"
+            : kind === "answer"
+              ? "fact_check"
+              : "step_decision";
+        profile("model_start", { call, purpose });
+        const callUsage = {
+          inputTokens: 0,
+          outputTokens: 0,
+          reasoningTokens: 0,
+          cachedInputTokens: 0,
+        };
+        let attempts = 0;
         const key = {};
         activeModels.set(key, { startedAt: start, loop, kind });
         if (kind === "question") timing.questionReadingCalls! += 1;
@@ -170,7 +232,15 @@ export function createApplyTiming(now: () => Date) {
         const usage = timing.tokenUsage!;
         usage.unreportedCalls += 1;
         let usageEvents = 0;
+        let completed = false;
         const recordUsage = (current: ModelTokenUsage) => {
+          for (const field of [
+            "inputTokens",
+            "outputTokens",
+            "reasoningTokens",
+            "cachedInputTokens",
+          ] as const)
+            callUsage[field] += current[field];
           if (!current.estimated) {
             usage.unreportedCalls -= 1;
             usage.reportedCalls += 1;
@@ -204,6 +274,12 @@ export function createApplyTiming(now: () => Date) {
               options?.onRequestUsage?.(event);
             },
             onRequestAttempt: (event) => {
+              attempts += 1;
+              profile("model_attempt", {
+                call,
+                purpose,
+                attempt: event.attempt,
+              });
               timing.transportCalls! += 1;
               if (event.attempt > 0) {
                 timing.transportRetries! += 1;
@@ -213,7 +289,11 @@ export function createApplyTiming(now: () => Date) {
             },
           });
           // Legacy injected clients may only expose usage on their final reply.
-          if (!usageEvents && response.usage) recordUsage(response.usage);
+          if (!usageEvents && response.usage) {
+            recordUsage(response.usage);
+            usageEvents += 1;
+          }
+          completed = true;
           return response;
         } finally {
           const duration = Math.max(0, now().getTime() - start);
@@ -221,6 +301,19 @@ export function createApplyTiming(now: () => Date) {
           timing[loop ? "modelMs" : "auxiliaryModelMs"] += duration;
           if (kind === "question") timing.questionReadingMs! += duration;
           if (kind === "answer") timing.answerCheckMs! += duration;
+          profile("model_end", {
+            call,
+            purpose,
+            durationMs: duration,
+            attempts,
+            usageReported: usageEvents > 0,
+            outcome: completed
+              ? "completed"
+              : options?.signal?.aborted
+                ? "aborted"
+                : "failed",
+            ...callUsage,
+          });
         }
       },
     }),

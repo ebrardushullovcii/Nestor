@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { writeFileSync } from "node:fs";
 import { ApplyAgentTimingSchema } from "@nestor/contracts";
 import type { RawApplyPage, ModelRequestUsage } from "@nestor/contracts";
@@ -6,6 +6,72 @@ import type { ApplyPageHands } from "./types";
 import { buildApplyFormObservation } from "./page-hands";
 import recordedPage from "./synthetic-page.snapshot.json";
 import { createApplyTiming } from "./apply-timing";
+
+test("opt-in model profiling reports purpose, retries and tokens without prompt or response text", async () => {
+  vi.stubEnv("NESTOR_APPLY_PROFILE", "1");
+  const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+  try {
+    let ms = 0;
+    const timing = createApplyTiming(() => new Date(ms));
+    await timing
+      .model({
+        chatWithTools: (_messages, _tools, options) => {
+          options?.onRequestAttempt?.({ attempt: 0, maxAttempts: 2 });
+          options?.onRequestAttempt?.({ attempt: 1, maxAttempts: 2 });
+          ms += 20;
+          return Promise.resolve({
+            content: "PRIVATE_RESPONSE",
+            usage: {
+              inputTokens: 12,
+              outputTokens: 4,
+              reasoningTokens: 2,
+              cachedInputTokens: 0,
+            },
+          });
+        },
+      })
+      .chatWithTools(
+        [{ role: "user", content: "PRIVATE_PROMPT" }],
+        [
+          {
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              description: "PRIVATE_TOOL",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+        ],
+      );
+    const lines = log.mock.calls
+      .flat()
+      .filter((value): value is string => typeof value === "string")
+      .join("\n");
+    expect(lines).not.toMatch(/PRIVATE_/u);
+    expect(lines).toContain('"purpose":"fact_check"');
+    expect(lines).toContain('"attempt":1');
+    expect(lines).toContain('"durationMs":20');
+    expect(lines).toContain('"usageReported":true');
+    expect(lines).toContain('"reasoningTokens":2');
+  } finally {
+    log.mockRestore();
+    vi.unstubAllEnvs();
+  }
+});
+
+test("apply profiling is silent unless explicitly enabled", async () => {
+  vi.stubEnv("NESTOR_APPLY_PROFILE", "0");
+  const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
+  try {
+    await createApplyTiming(() => new Date(0))
+      .model({ chatWithTools: () => Promise.resolve({}) })
+      .chatWithTools([], []);
+    expect(log).not.toHaveBeenCalled();
+  } finally {
+    log.mockRestore();
+    vi.unstubAllEnvs();
+  }
+});
 
 const requestUsage = (
   patch: Partial<ModelRequestUsage> = {},

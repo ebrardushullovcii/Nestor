@@ -181,6 +181,61 @@ const questions = (result: Awaited<ReturnType<typeof runApplyAgent>>) =>
     (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
   );
 
+test("decision and question reading overlap, but writes wait for reading and prose waits for the batch check", async () => {
+  const s = setup(["Full name", "Describe your interface experience"]);
+  let releaseRead!: () => void;
+  const reading = new Promise<void>((resolve) => {
+    releaseRead = resolve;
+  });
+  let sawDecision!: () => void;
+  const decision = new Promise<void>((resolve) => {
+    sawDecision = resolve;
+  });
+  let releaseCheck!: () => void;
+  const checking = new Promise<void>((resolve) => {
+    releaseCheck = resolve;
+  });
+  let sawCheck!: () => void;
+  const checkStarted = new Promise<void>((resolve) => {
+    sawCheck = resolve;
+  });
+  const check = vi.fn<LLMClient["chatWithTools"]>(async () => {
+    sawCheck();
+    await checking;
+    return report("report_answer_checks", {
+      checks: [
+        {
+          index: 0,
+          supported: true,
+          reason: "Recorded experience",
+          evidence: [evidence],
+        },
+      ],
+    });
+  });
+  const base = model(["Jamie Rivers", "Built React interfaces."], check);
+  const result = runApplyAgent(s.config, {
+    chatWithTools: async (messages, tools, options) => {
+      if (tools[0]?.function.name === "report_question_kinds") await reading;
+      else if (tools[0]?.function.name !== "report_answer_checks")
+        sawDecision();
+      return base.chatWithTools(messages, tools, options);
+    },
+  });
+  await decision;
+  expect(s.write).not.toHaveBeenCalled();
+  releaseRead();
+  await checkStarted;
+  expect(s.raw.controls[1].value).toBe("");
+  releaseCheck();
+  await result;
+  expect(check).toHaveBeenCalledTimes(1);
+  expect(s.raw.controls.map((control) => control.value)).toEqual([
+    "Jamie Rivers",
+    "Built React interfaces.",
+  ]);
+});
+
 test("saved preferences with changed wording share one batch check", async () => {
   const s = setup([
     "Your favourite frontend language",
@@ -322,7 +377,7 @@ test("one batch check rejects inferred age and invented dates while filling reco
 });
 
 test.each(["missing report", "request failure"])(
-  "one retry of a %s keeps supported siblings and asks only unchecked fields",
+  "stalled retries after a %s keeps supported siblings and asks only unchecked fields",
   async (failure) => {
     const s = setup([
       "Full name",
@@ -359,7 +414,7 @@ test.each(["missing report", "request failure"])(
         check,
       ),
     );
-    expect(check).toHaveBeenCalledTimes(2);
+    expect(check).toHaveBeenCalledTimes(3);
     expect(s.raw.controls.map((c) => c.value)).toEqual([
       "Jamie Rivers",
       "I build interfaces with React.",

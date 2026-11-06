@@ -3523,7 +3523,12 @@ describe("managed context active service worker gate", () => {
 
   test.each([
     ["different sites", "https://beta.test/apply/second", true],
-    ["the same site", "https://jobs.example.com/apply/second", false],
+    [
+      "another hostname on the same parent domain",
+      "https://jobs.example.com/apply/second",
+      true,
+    ],
+    ["the same host", "https://example.com/apply/second", false],
   ])(
     "application preparation overlaps only for %s",
     async (_label, secondUrl, overlaps) => {
@@ -3763,7 +3768,7 @@ describe("managed context active service worker gate", () => {
           ...prepareInput,
           job: {
             ...prepareInput.job,
-            applicationUrl: "https://jobs.example.com/second",
+            applicationUrl: "https://example.com/second",
           },
         },
         { signal: controller.signal },
@@ -3908,7 +3913,7 @@ describe("managed context active service worker gate", () => {
         applicationPageBindingKey: "same_site_busy",
         job: {
           ...prepareInput.job,
-          applicationUrl: "https://jobs.example.com/second",
+          applicationUrl: "https://example.com/second",
         },
         prepareApplicationForm: async (args) => {
           sameSiteEntered();

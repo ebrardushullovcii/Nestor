@@ -118,10 +118,7 @@ export async function equivalentApplicationQuestions(input: {
         ],
         {
           reasoningTask: "claim_check",
-          maxOutputTokens: 3000,
-          signal: input.signal
-            ? AbortSignal.any([input.signal, AbortSignal.timeout(30000)])
-            : AbortSignal.timeout(30000),
+          ...(input.signal ? { signal: input.signal } : {}),
         },
       );
     } catch (error) {

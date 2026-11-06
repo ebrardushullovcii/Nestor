@@ -4,6 +4,7 @@ import { describe, expect, test, vi } from "vitest";
 import { buildApplyFormObservation } from "./page-hands";
 import type { RawApplyPage } from "@nestor/contracts";
 import type { LLMClient } from "../agent/contracts";
+import { questionReadContext } from "./own-words";
 import {
   classifyApplicationQuestions,
   createQuestionClassifier,
@@ -11,6 +12,171 @@ import {
 } from "./question-classification";
 
 const readContext = () => "synthetic-resolved-context";
+
+test("inline chooser status and filenames reuse the whole page reading", async () => {
+  const client = clientReplyingSparse({ plainIndexes: [0, 1], flagged: [] });
+  const classify = createQuestionClassifier({ client });
+  const email = { ...controls("Email", [])[0], ref: "email" };
+  const file = {
+    ...controls("Resume", [])[0],
+    ref: "resume",
+    kind: "file" as const,
+  };
+  const context = (status: string, instruction = "") =>
+    JSON.stringify({
+      instructions: `Email\nAttach resume   ${status}\n${instruction}`,
+      fieldChrome: ["Attach resume"],
+    });
+  await classify([email, file], context("No file selected"));
+  file.value = "C:\\fakepath\\synthetic.pdf";
+  await classify([email, file], context("synthetic.pdf"));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  await classify(
+    [email, file],
+    context(
+      "synthetic.pdf",
+      "Upload synthetic.pdf only if you wrote it yourself",
+    ),
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+});
+
+test("opening inline picker options reads only the changed picker", async () => {
+  const client: LLMClient = {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>((messages) => {
+      const questions = JSON.parse(messages[1].content) as unknown[];
+      return Promise.resolve({
+        toolCalls: [
+          {
+            id: "read",
+            type: "function",
+            function: {
+              name: "report_question_kinds",
+              arguments: JSON.stringify({
+                plainIndexes: questions.map((_, index) => index),
+                flagged: [],
+              }),
+            },
+          },
+        ],
+      });
+    }),
+  };
+  const classify = createQuestionClassifier({ client });
+  const email = { ...controls("Email", [])[0], ref: "email" };
+  const country = {
+    ...controls("Country", [])[0],
+    ref: "country",
+    placeholder: "Select...",
+  };
+  await classify(
+    [email, country],
+    JSON.stringify({ instructions: "Email\nCountry Select..." }),
+  );
+  country.options = ["Germany", "France"];
+  await classify(
+    [email, country],
+    JSON.stringify({ instructions: "Email\nCountry Germany France" }),
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  const questions = JSON.parse(
+    vi.mocked(client.chatWithTools).mock.calls[1][0][1].content,
+  ) as { question: string }[];
+  expect(questions.map((question) => question.question)).toEqual(["Country"]);
+  await classify(
+    [email, country],
+    JSON.stringify({
+      instructions:
+        "Email\nCountry Germany France\nDo not use AI for this answer",
+    }),
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+});
+
+test("page context retains observed label chrome for inline file echoes", () => {
+  const page = buildApplyFormObservation(
+    {
+      url: "https://employer.example.test",
+      title: "",
+      bodyText: "",
+      controls: [],
+      headings: [],
+      actions: [],
+      links: [],
+      openedTabs: [],
+      validationErrors: [],
+      loading: false,
+      stepLabel: null,
+      clickables: [
+        {
+          index: 0,
+          label: "Attach resume",
+          role: "",
+          tagName: "label",
+          visible: true,
+          disabled: false,
+          topOffset: 0,
+        },
+      ],
+    },
+    "2026-11-06T00:00:00Z",
+  );
+  expect(
+    (JSON.parse(questionReadContext(page)) as { fieldChrome: string[] })
+      .fieldChrome,
+  ).toEqual(["Attach resume"]);
+});
+
+test("a moving navigation excerpt cutoff cannot invalidate unchanged full-page instructions", async () => {
+  const client = clientReplyingSparse({ plainIndexes: [0, 1], flagged: [] });
+  const classify = createQuestionClassifier({ client });
+  const email = { ...controls("Email", [])[0], ref: "email" };
+  const file = {
+    ...controls("Resume", [])[0],
+    ref: "resume",
+    kind: "file" as const,
+  };
+  const context = (status: string) => {
+    const bodyText = `${"Employer description. ".repeat(275)}\nAttach resume ${status}\n${"A complete instruction remains unchanged. ".repeat(35)}\nDo not use AI to write your motivation.`;
+    const page = buildApplyFormObservation(
+      {
+        url: "https://employer.example.test",
+        title: "",
+        bodyText,
+        controls: [],
+        headings: [],
+        actions: [],
+        links: [],
+        clickables: [
+          {
+            index: 0,
+            label: "Attach resume",
+            role: "",
+            tagName: "label",
+            visible: true,
+            disabled: false,
+            topOffset: 0,
+          },
+        ],
+        openedTabs: [],
+        loading: false,
+        validationErrors: [],
+        stepLabel: null,
+      },
+      "2026-11-06T00:00:00Z",
+    );
+    expect(page.bodyTextExcerpt).toHaveLength(6000);
+    expect(page.bodyTextForQuestions).toBe(bodyText);
+    expect(JSON.parse(questionReadContext(page)) as unknown).toMatchObject({
+      instructions: bodyText,
+    });
+    return questionReadContext(page);
+  };
+  await classify([email, file], context("No file selected"));
+  file.value = "synthetic.pdf";
+  await classify([email, file], context("synthetic.pdf"));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+});
 
 const formQuestions = [
   ["First Name", "profile.firstName"],
@@ -227,7 +393,7 @@ test("a question that fails every read stays unread while the other fields retai
   ).toEqual(["First Name"]);
   for (const [prompt, sourceId] of formQuestions.slice(1))
     expect(result.get(prompt)).toMatchObject({ answerTags: { sourceId } });
-  expect(client.chatWithTools).toHaveBeenCalledTimes(8);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(11);
 });
 
 function clientReplying(questions: unknown): LLMClient {
@@ -418,7 +584,7 @@ test("caches an incomplete page as a handover after exactly two retries", async 
   expect(client.chatWithTools).toHaveBeenCalledTimes(3);
 });
 
-test("a truncated report can recover on its single larger retry", async () => {
+test("a truncated report can recover on its single uncapped retry", async () => {
   const client = clientReplyingSparse({
     plainIndexes: [0],
     flagged: [],
@@ -456,7 +622,7 @@ test("a truncated report can recover on its single larger retry", async () => {
     vi
       .mocked(client.chatWithTools)
       .mock.calls.map((call) => call[2]?.maxOutputTokens),
-  ).toEqual([4000, 8000]);
+  ).toEqual([undefined, undefined]);
   await classify(controls("Full name", []));
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
@@ -556,7 +722,7 @@ test("an unread remainder is handed over without discarding a read question", as
     readFailed: true,
     answerTags: null,
   });
-  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
 });
 
 test("filled data and chosen options do not reread the page, but new instructions do", async () => {
@@ -618,7 +784,7 @@ test("gives a large page enough output budget to classify every question", async
   });
   expect(
     vi.mocked(client.chatWithTools).mock.calls[0]?.[2]?.maxOutputTokens,
-  ).toBe(7000);
+  ).toBeUndefined();
 });
 
 test("returning to any step reuses each earlier question classification", async () => {
@@ -1650,4 +1816,19 @@ test("classification cache uses all evidence and resolved recipient/permission/a
       browserPermissions: undefined,
     }),
   ).toBeNull();
+});
+
+test("question reads keep going beyond three rounds while coverage improves", async () => {
+  const client = clientReplyingSparse({ plainIndexes: [0], flagged: [] });
+  const questions = Array.from({ length: 30 }, (_, index) => ({
+    prompt: `Distinct question ${index}`,
+    kind: "text",
+    options: [],
+  }));
+  const readings = await classifyApplicationQuestions({ client, questions });
+  expect(readings.size).toBe(30);
+  expect([...readings.values()].some((reading) => reading.readFailed)).toBe(
+    false,
+  );
+  expect(vi.mocked(client.chatWithTools).mock.calls.length).toBeGreaterThan(9);
 });

@@ -259,14 +259,20 @@ describe("application preparation ownership", () => {
     }
   });
 
-  test("subdomains of one site serialize", async () => {
+  test("full hostnames run independently", async () => {
     const scheduler = createApplicationPreparationScheduler(2);
     expect(applicationSiteKey("https://apply.example.com/a")).toBe(
-      "example.com",
+      "apply.example.com",
     );
-    expect(applicationSiteKey("http://127.0.0.1:8080/apply")).toBe("127.0.0.1");
-    expect(applicationSiteKey("http://127.0.0.2:8080/apply")).toBe("127.0.0.2");
-    expect(applicationSiteKey("http://[::1]:8080/apply")).toBe("[::1]");
+    expect(applicationSiteKey("http://127.0.0.1:8080/apply")).toBe(
+      "http://127.0.0.1:8080/apply",
+    );
+    expect(applicationSiteKey("http://127.0.0.2:8080/apply")).toBe(
+      "http://127.0.0.2:8080/apply",
+    );
+    expect(applicationSiteKey("http://[::1]:8080/apply")).toBe(
+      "http://[::1]:8080/apply",
+    );
     const first = await scheduler.acquire("https://jobs.example.com/apply");
     const second = scheduler.acquire("https://account.example.com/form");
     let started = false;
@@ -274,18 +280,55 @@ describe("application preparation ownership", () => {
       started = true;
     });
     await tick();
-    expect(started).toBe(false);
-    first.release();
-    const secondLease = await second;
     expect(started).toBe(true);
-    secondLease.release();
+    first.release();
+    (await second).release();
+  });
+
+  test("replica origins and first path segments run independently, while one replica stays serialized", async () => {
+    const scheduler = createApplicationPreparationScheduler(4);
+    const board = await scheduler.acquire(
+      "http://127.0.0.1:8080/board/apply/1",
+    );
+    const greenhouse = await scheduler.acquire(
+      "http://127.0.0.1:8080/greenhouse/apply/1",
+    );
+    const otherOrigin = await scheduler.acquire(
+      "http://127.0.0.1:8081/board/apply/1",
+    );
+    let granted = false;
+    const next = scheduler
+      .acquire("http://127.0.0.1:8080/board/apply/2")
+      .then((lease) => {
+        granted = true;
+        return lease;
+      });
+    await tick();
+    expect(granted).toBe(false);
+    greenhouse.release();
+    otherOrigin.release();
+    expect(granted).toBe(false);
+    board.release();
+    (await next).release();
+    expect(applicationSiteKey("http://localhost:8080/board/jobs/1")).toBe(
+      "http://localhost:8080/board",
+    );
+    expect(applicationSiteKey("http://[::1]:8080/board/jobs/1")).toBe(
+      "http://[::1]:8080/board",
+    );
+    expect(applicationSiteKey("http://192.0.2.1:8080/board/jobs/1")).toBe(
+      "192.0.2.1",
+    );
+    expect(
+      applicationSiteKey("https://127.0.0.1.example.test/board/jobs/1"),
+    ).toBe("127.0.0.1.example.test/board");
   });
 
   test("a redirect waits before work on the shared destination site", async () => {
     const scheduler = createApplicationPreparationScheduler(2);
     const first = await scheduler.acquire("https://one.example/apply");
     const second = await scheduler.acquire("https://two.test/apply");
-    const redirected = second.moveTo("https://account.one.example/form");
+    const redirected = second.moveTo("https://one.example/form");
     let moved = false;
     void redirected.then(() => {
       moved = true;
@@ -355,4 +398,43 @@ describe("application preparation ownership", () => {
     retry.release();
     (await third).release();
   });
+});
+
+test("shared hosts separate board tokens while one employer's jobs serialize", async () => {
+  const scheduler = createApplicationPreparationScheduler(3);
+  expect(applicationSiteKey("https://shared.example/acme/jobs/1")).toBe(
+    "shared.example/acme",
+  );
+  expect(applicationSiteKey("https://shared.example/jobs/2")).toBe(
+    "shared.example",
+  );
+  const acme = await scheduler.acquire("https://shared.example/acme/jobs/1");
+  const beta = await scheduler.acquire("https://shared.example/beta/jobs/1");
+  let started = false;
+  const same = scheduler
+    .acquire("https://shared.example/acme/jobs/2")
+    .then((lease) => {
+      started = true;
+      return lease;
+    });
+  await tick();
+  expect(started).toBe(false);
+  beta.release();
+  await tick();
+  expect(started).toBe(false);
+  acme.release();
+  (await same).release();
+  expect(started).toBe(true);
+});
+
+test("explicit board tokens separate employers on a shared embedding route", () => {
+  expect(
+    applicationSiteKey("https://shared.example/embed/job?for=acme&token=123"),
+  ).toBe("shared.example/acme");
+  expect(
+    applicationSiteKey("https://shared.example/embed/job?for=beta&token=456"),
+  ).toBe("shared.example/beta");
+  expect(
+    applicationSiteKey("https://shared.example/embed/job?for=acme&token=789"),
+  ).toBe("shared.example/acme");
 });

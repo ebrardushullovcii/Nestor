@@ -223,7 +223,12 @@ test("stalled reads of other questions do not hand stored name and email to the 
   const { model, reads } = client([SALARY, CODING]);
   const result = await runApplyAgent(input, model);
   // Whole page, three groups, then each remaining question on its own.
-  expect(reads.map((group) => group.length)).toEqual([5, 2, 2, 1, 1, 1, 1]);
+  expect(reads.map((group) => group.length)).toEqual([
+    5,
+    2,
+    2,
+    ...Array<number>(10).fill(1),
+  ]);
   expect(raw.controls.map((control) => control.value)).toEqual([
     "Jamie",
     "Rivers",
@@ -265,14 +270,20 @@ test("an unread first-name question fills from its exact Profile fact; unread pa
   );
 });
 
-test("a page with no readable question stops before any model turn and says why", async () => {
+test("a page with no readable question discards the overlapping decision before any write", async () => {
   const { raw, input } = setup();
   const { model, reads } = client([FIRST, LAST, EMAIL, SALARY, CODING]);
   const fill = vi.spyOn(model, "chatWithTools");
   const result = await runApplyAgent(input, model);
-  // Whole page, three groups, then each question on its own; no form turn.
+  // Nine question reads and one overlapping decision; that decision is
+  // discarded, its request aborted, and none of its proposed writes execute.
   expect(reads).toHaveLength(9);
-  expect(fill).toHaveBeenCalledTimes(9);
+  expect(fill).toHaveBeenCalledTimes(10);
+  expect(
+    fill.mock.calls.find(
+      ([, tools]) => tools[0]?.function.name !== "report_question_kinds",
+    )?.[2]?.signal?.aborted,
+  ).toBe(true);
   expect(raw.controls.every((control) => control.value === "")).toBe(true);
   // Council B10/D6: a full outage is Nestor's technical failure, with no
   // personal question; the page is kept for one ordinary Retry.
@@ -284,4 +295,33 @@ test("a page with no readable question stops before any model turn and says why"
     retryable: true,
     pageDisposition: "retain",
   });
+});
+
+test("a partial read refuses navigation even when a decision ignores the restricted tools", async () => {
+  const { raw, input } = setup();
+  const { model } = client([SALARY, CODING]);
+  const navigate = vi.spyOn(input.hands, "navigate");
+  const result = await runApplyAgent(input, {
+    chatWithTools: (messages, tools, options) =>
+      tools[0]?.function.name === "report_question_kinds"
+        ? model.chatWithTools(messages, tools, options)
+        : Promise.resolve({
+            toolCalls: [
+              {
+                id: "forbidden-navigation",
+                type: "function",
+                function: {
+                  name: "navigate",
+                  arguments: JSON.stringify({ url: raw.url }),
+                },
+              },
+            ],
+          }),
+  });
+  expect(navigate).not.toHaveBeenCalled();
+  expect(result.outcome).toBe("stuck");
+  expect(result.readyToSend).toBeNull();
+  expect(result.technicalFailure?.code).toBe(
+    "question_classification_unavailable",
+  );
 });

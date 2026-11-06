@@ -107,13 +107,11 @@ describe("reading the choices of lists the page draws itself", () => {
         allowedOrigins: [new URL(url).origin],
       });
       await session.registerPreparedValue("Synthetic Person");
-      await page
-        .locator("input[type=file]")
-        .setInputFiles({
-          name: "synthetic.txt",
-          mimeType: "text/plain",
-          buffer: Buffer.from("Synthetic resume"),
-        });
+      await page.locator("input[type=file]").setInputFiles({
+        name: "synthetic.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("Synthetic resume"),
+      });
       await session.openIntermediateWriteWindow();
       const fresh = await session.readPage();
       const binding = {
@@ -590,6 +588,61 @@ describe("reading the choices of lists the page draws itself", () => {
       expect(automated.validationErrors).toEqual(["Visible error"]);
       expect(JSON.stringify(native)).not.toContain("synthetic-secret");
       expect(JSON.stringify(native)).not.toContain("123456");
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("clipped picker announcements do not enter page instructions; hidden errors and field descriptions do", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(`<style>.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}</style>
+        <label for="email" id="email-label" class="sr-only">Application email *</label>
+        <input id="email" aria-describedby="email-help" aria-errormessage="email-error" aria-invalid="true" required>
+        <span id="email-help" role="status" aria-live="polite" class="sr-only">3 results available. Use your application email.</span>
+        <span id="email-error" role="status" aria-live="polite" class="sr-only">2 results available. Email is invalid.</span>
+        <label for="region">Region</label><input id="region" role="combobox" aria-describedby="navigation">
+        <span id="navigation" role="status" aria-live="polite" class="sr-only">7 results available. Use Up and Down to choose options.</span>
+        <span role="status" class="sr-only">Option Germany selected. Press Enter to select.</span>
+        <span aria-live="polite">9 results available. This status is visible.</span>
+        <span role="alert" class="sr-only">11 results available. The request was refused.</span>
+        <span aria-live="assertive" class="sr-only">13 results available. Please check your application.</span>
+        <span aria-live="polite" class="sr-only">15 results available. Upload failed.</span>
+        <span aria-live="polite" class="sr-only">An unrecognized instruction must remain readable.</span>
+        <span aria-live="polite" class="sr-only">17 results available. You agree to overseas data processing.</span>`);
+      const raw = await readRawApplyPage(page);
+      expect(raw.bodyText).not.toMatch(/\b7 results available\b/u);
+      expect(raw.bodyText).not.toContain("Option Germany selected");
+      for (const kept of [
+        "Application email *",
+        "3 results available",
+        "2 results available",
+        "9 results available",
+        "11 results available",
+        "13 results available",
+        "15 results available",
+        "An unrecognized instruction",
+        "You agree to overseas data processing",
+      ])
+        expect(raw.bodyText).toContain(kept);
+      expect(raw.controls[0]).toMatchObject({
+        label: "Application email *",
+        required: true,
+      });
+      expect(raw.controls[0]?.hint).toContain("Use your application email");
+      expect(raw.controls[1]?.hint).toContain("7 results available");
+      expect(raw.validationErrors).toEqual(
+        expect.arrayContaining([
+          "11 results available. The request was refused.",
+          "13 results available. Please check your application.",
+        ]),
+      );
+      const source = `(${collectApplyDocumentSnapshot.toString()})(Array.from(document.querySelectorAll(${JSON.stringify(Object.values(APPLY_PAGE_SELECTORS).join(", "))})),${JSON.stringify(APPLY_PAGE_SELECTORS)},true)`;
+      const native =
+        await page.evaluate<ReturnType<typeof collectApplyDocumentSnapshot>>(
+          source,
+        );
+      expect(native.bodyText).toBe(raw.bodyText);
     } finally {
       await page.close();
     }

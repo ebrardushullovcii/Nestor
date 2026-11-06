@@ -1646,7 +1646,22 @@ test.each(["truncated", "unparseable"])(
     s.config.modelQuestionClassification = true;
     const client: LLMClient = {
       chatWithTools: vi.fn<LLMClient["chatWithTools"]>((_messages, tools) => {
-        expect(tools[0]?.function.name).toBe("report_question_kinds");
+        if (tools[0]?.function.name !== "report_question_kinds")
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "unread-proposal",
+                type: "function",
+                function: {
+                  name: "type",
+                  arguments: JSON.stringify({
+                    ref: "c0",
+                    text: "Unverified answer",
+                  }),
+                },
+              },
+            ],
+          });
         return failure === "truncated"
           ? Promise.reject(new Error("incomplete response: max_output_tokens"))
           : Promise.resolve({
@@ -1664,7 +1679,14 @@ test.each(["truncated", "unparseable"])(
       }),
     };
     const result = await runApplyAgent(s.config, client);
-    expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+    expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+    expect(
+      vi
+        .mocked(client.chatWithTools)
+        .mock.calls.filter(
+          ([, tools]) => tools[0]?.function.name === "report_question_kinds",
+        ),
+    ).toHaveLength(3);
     expect(s.fillText).not.toHaveBeenCalled();
     expect(result.outcome).toBe("stuck");
     expect(result.reason).toContain("Nestor could not read this page");
