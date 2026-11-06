@@ -1,4 +1,4 @@
-import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
+import { selfLimitSlice } from "@nestor/core";
 import {
   parseToolArguments,
   type AgentLoopTool,

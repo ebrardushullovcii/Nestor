@@ -1,10 +1,6 @@
 import { withNavigationLiveness } from "./browser-navigation";
 import { tracePageHands, tracePage } from "./trace-page";
-import {
-  selfLimitTimeout,
-  reportSelfLimitHit,
-  selfLimitSlice,
-} from "@nestor/core";
+import { selfLimitTimeout, selfLimitSlice } from "@nestor/core";
 
 import { watchPageSelfLimits } from "./self-limit-page";
 import {
