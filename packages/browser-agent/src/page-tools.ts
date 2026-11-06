@@ -1,4 +1,4 @@
-import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
+import { selfLimitSlice } from "@nestor/core";
 import {
   parseToolArguments,
   type AgentLoopTool,
@@ -241,14 +241,7 @@ export function createPageTools(
       execute: async (raw) => {
         const ref = asString(parseToolArguments(raw).ref);
         const text = await hands.readText(ref ?? undefined);
-        return ok(
-          selfLimitSlice(
-            text,
-            0,
-            20_000,
-            "packages/browser-agent/src/page-tools.ts:245",
-          ) || "That has no text.",
-        );
+        return ok(text || "That has no text.");
       },
     },
     {
@@ -610,7 +603,7 @@ export function createPageTools(
               milliseconds: {
                 type: "number",
                 description:
-                  "Up to 30000. A page checking the browser by itself can take a minute or two: wait 20000 to 30000 at a time.",
+                  "How long to wait, in milliseconds. Choose from the page state.",
               },
             },
           },
@@ -619,17 +612,8 @@ export function createPageTools(
       isWait: true,
       execute: async (raw) => {
         const requested = parseToolArguments(raw).milliseconds;
-        if (typeof requested === "number" && requested > 30_000)
-          reportSelfLimitHit({
-            limit: "browser_wait_request",
-            kind: "timeout",
-            value: 30000,
-            where: "browser-agent/wait",
-          });
         const milliseconds =
-          typeof requested === "number"
-            ? Math.max(0, Math.min(30_000, requested))
-            : 1_000;
+          typeof requested === "number" ? Math.max(0, requested) : 1_000;
         await hands.wait(milliseconds);
         return ok(
           `Waited ${Math.round(milliseconds)}ms. The page now:\n\n${describe(await observe())}`,

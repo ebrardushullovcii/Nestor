@@ -48,7 +48,7 @@ function hits(log: ReturnType<typeof vi.spyOn>) {
   );
 }
 
-test("the serialized snapshot reports actual body, heading, clickable, alert, hint and option omissions", () => {
+test("the serialized snapshot preserves full body, headings, clickables, alerts, hints and options", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
   const page = dom(
     `<body>${"<h2>" + "H".repeat(350) + "</h2>"}`.repeat(65) +
@@ -71,15 +71,11 @@ test("the serialized snapshot reports actual body, heading, clickable, alert, hi
     clickables: unknown[];
     validationErrors: unknown[];
   };
-  expect(snapshot.bodyText.length).toBe(20000);
-  expect(snapshot.headings.length).toBe(60);
-  expect(snapshot.clickables.length).toBe(300);
-  expect(snapshot.validationErrors.length).toBe(12);
-  const values = hits(log).map((hit) => hit.value);
-  expect(values).toEqual(
-    expect.arrayContaining([20000, 60, 300, 12, 500, 600, 200]),
-  );
-  expect(JSON.stringify(log.mock.calls)).not.toContain("hint hint");
+  expect(snapshot.bodyText.length).toBeGreaterThan(20000);
+  expect(snapshot.headings.length).toBe(65);
+  expect(snapshot.clickables.length).toBeGreaterThan(300);
+  expect(snapshot.validationErrors.length).toBe(15);
+  expect(hits(log), JSON.stringify(hits(log))).toEqual([]);
 });
 
 test("summary rows, placement sections and access-signal scanning report their own boundaries", () => {
@@ -91,14 +87,14 @@ test("summary rows, placement sections and access-signal scanning report their o
     `(${readApplySummaryRows.toString()})(Array.from(document.querySelectorAll("dl")))`,
   ) as { label: string; value: string }[];
   expect(rows).toHaveLength(200);
-  expect(rows[0]!.label).toHaveLength(500);
-  expect(rows[0]!.value).toHaveLength(12000);
+  expect(rows[0]!.label).toHaveLength(550);
+  expect(rows[0]!.value).toHaveLength("value ".repeat(2100).trim().length);
   page.window.eval(
     `(${readApplyPlacements.toString()})(Array.from(document.querySelectorAll("input")))`,
   );
   page.window.eval(`(${collectVisibleAccessSignals.toString()})()`);
   expect(hits(log).map((hit) => hit.value)).toEqual(
-    expect.arrayContaining([200, 500, 12000, 1000]),
+    expect.arrayContaining([200, 1000]),
   );
   expect(hits(log).some((hit) => hit.limit === "summary_rows")).toBe(true);
 });
@@ -125,7 +121,7 @@ test("a small complete DOM does not report a self-limit", () => {
   page.window.eval(
     `(${collectApplyDocumentSnapshot.toString()})(Array.from(document.querySelectorAll(${JSON.stringify(Object.values(APPLY_PAGE_SELECTORS).join(", "))})),${JSON.stringify(APPLY_PAGE_SELECTORS)})`,
   );
-  expect(hits(log)).toEqual([]);
+  expect(hits(log), JSON.stringify(hits(log))).toEqual([]);
 });
 
 test.each(["options", "steps"] as const)(

@@ -1,8 +1,9 @@
-import { selfLimitTimeout, createConnectionIdleTimeout } from "@nestor/core";
+import { traceEvent } from "@nestor/core/run-trace";
+import { createConnectionIdleTimeout } from "@nestor/core";
 import { DiscoveryPageReadError } from "@nestor/contracts";
 import type { BrowserContext, Page } from "playwright";
 
-/** A fresh read-only tab. It never reuses a person's page or a prepared form. */
+/** Capture a page in its own tab. Readiness and further interaction belong to the caller. */
 export async function readRenderedPageHtml(
   context: BrowserContext,
   url: string,
@@ -21,49 +22,48 @@ export async function readRenderedPageHtml(
     throw new Error("Only website pages can be read.");
   options.signal?.throwIfAborted();
   const page = await context.newPage();
+  const idle = createConnectionIdleTimeout(15_000);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, idle.signal])
+    : idle.signal;
+  const progress = () => idle.progress();
   const abort = () => {
     void page.close().catch(() => undefined);
   };
-  options.signal?.addEventListener("abort", abort, { once: true });
+  signal.addEventListener("abort", abort, { once: true });
+  page.on("response", progress);
+  page.on("requestfinished", progress);
+  page.on("domcontentloaded", progress);
   try {
     await options.onPage?.(page);
-    options.signal?.throwIfAborted();
-    const response = await selfLimitTimeout(
-      page.goto(url, {
-        waitUntil: "domcontentloaded",
-        timeout: 20_000,
-      }),
-      20_000,
-      "packages/browser-runtime/src/rendered-page-reader.ts:31",
-    );
+    signal.throwIfAborted();
+    // Active navigation can outlast any wall clock. Only connection silence
+    // or the person's Stop interrupts it. Never wait for semantic markup or
+    // networkidle here: ads/animation can keep either changing indefinitely.
+    traceEvent("search_page_started", { url, rendered: true });
+    const response = await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 0,
+    });
+    signal.throwIfAborted();
+    traceEvent("search_page_fetched", {
+      url,
+      finalUrl: page.url(),
+      rendered: true,
+      status: response?.status() ?? null,
+    });
     if (response && response.status() >= 400)
       throw new DiscoveryPageReadError(response.status());
-    // Let script-loaded content finish. Busy sites still get a bounded read.
-    if (!options.ready)
-      await selfLimitTimeout(
-        page.waitForLoadState("networkidle", { timeout: 8_000 }),
-        8_000,
-        "packages/browser-runtime/src/rendered-page-reader.ts:43",
-      ).catch(() => undefined);
-    options.signal?.throwIfAborted();
-    let html = await page.content();
-    if (options.ready && !options.ready(html)) {
-      const idle = createConnectionIdleTimeout(12_000);
-      try {
-        while (!options.ready(html) && !idle.signal.aborted) {
-          options.signal?.throwIfAborted();
-          await page.waitForTimeout(200);
-          const next = await page.content().catch(() => html);
-          if (next !== html) idle.progress();
-          html = next;
-        }
-      } finally {
-        idle.cleanup();
-      }
-    }
-    return { html, finalUrl: page.url() };
+    return { html: await page.content(), finalUrl: page.url() };
+  } catch (error) {
+    signal.throwIfAborted();
+    throw error;
   } finally {
-    options.signal?.removeEventListener("abort", abort);
+    idle.cleanup();
+    signal.removeEventListener("abort", abort);
+    page.off("response", progress);
+    page.off("requestfinished", progress);
+    page.off("domcontentloaded", progress);
     await page.close().catch(() => undefined);
   }
 }

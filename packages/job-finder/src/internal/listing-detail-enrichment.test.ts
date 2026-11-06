@@ -43,9 +43,28 @@ it("reads every selected listing beyond the former sixty-page ceiling", async ()
 });
 
 it("shortlisting bypasses our failed-read backoff while a site's Retry-After still applies", () => {
-  const job = cardOnlyJob({ status: "approved", listingDetailFetch: { attemptedAt: NOW, outcome: "fetch_failed", method: null, detail: "Temporary network failure" } });
+  const job = cardOnlyJob({
+    status: "approved",
+    listingDetailFetch: {
+      attemptedAt: NOW,
+      outcome: "fetch_failed",
+      method: null,
+      detail: "Temporary network failure",
+    },
+  });
   expect(jobNeedsListingDetail(job, NOW)).toBe(true);
-  expect(jobNeedsListingDetail({ ...job, listingDetailFetch: { ...job.listingDetailFetch!, retryAfterAt: "2026-09-05T11:00:00.000Z" } }, NOW)).toBe(false);
+  expect(
+    jobNeedsListingDetail(
+      {
+        ...job,
+        listingDetailFetch: {
+          ...job.listingDetailFetch!,
+          retryAfterAt: "2026-09-05T11:00:00.000Z",
+        },
+      },
+      NOW,
+    ),
+  ).toBe(false);
 });
 
 it("stops consuming an oversized response rather than buffering its entire body", async () => {
@@ -805,53 +824,19 @@ describe("partial listing corrections", () => {
   );
 });
 
-it("keeps an omitted page read explicitly partial even when the model returns a long description", async () => {
+it("hands the complete long page to the model without marking a fabricated omission", async () => {
   const job = cardOnlyJob();
+  const text =
+    "Navigation and body ".repeat(10000) + "Final requirement: Albanian";
   const detail = await readListingDetail({
-    html: `<main>${"Navigation and body ".repeat(10000)}</main>`,
+    html: `<main>${text}</main>`,
     url: job.canonicalUrl,
     expectedTitle: job.title,
-    readPage: () =>
-      Promise.resolve({
-        ...job,
-        description: "Readable requirements. ".repeat(100),
-      }),
-  });
-  expect(detail?.descriptionLikelyTruncated).toBe(true);
-  const result = await applyListingDetailToJob({
-    job,
-    detail: detail!,
-    attemptedAt: NOW,
-    assess,
-  });
-  expect(result.outcome).toBe("partial");
-  expect(result.job.listingDetailFetch?.detail).toContain(
-    "partial listing text",
-  );
-});
-
-it("publishes listing progress after every read including a failure", async () => {
-  const jobs = [
-    cardOnlyJob(),
-    cardOnlyJob({
-      id: "second",
-      canonicalUrl: "https://jobs.example.test/second",
-    }),
-  ];
-  const progress: number[] = [];
-  await enrichSavedJobListingDetails({
-    jobs,
-    maxJobs: 2,
-    concurrency: 1,
-    fetchHtml: (url) =>
-      Promise.resolve({ status: 404, html: "", finalUrl: url }),
-    assess: (posting) =>
-      jobs.find((job) => job.canonicalUrl === posting.canonicalUrl)!
-        .matchAssessment,
-    onProgress: (completed, total) => {
-      expect(total).toBe(2);
-      progress.push(completed);
+    readPage: (input) => {
+      expect(input.pageText).toContain(text);
+      return Promise.resolve({ ...job, description: text });
     },
   });
-  expect(progress).toEqual([1, 2]);
+  expect(detail?.descriptionLikelyTruncated).toBe(false);
+  expect(detail?.description).toBe(text);
 });

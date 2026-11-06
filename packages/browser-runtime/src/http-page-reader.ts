@@ -1,6 +1,6 @@
 import { traceEvent } from "@nestor/core/run-trace";
 import { createHostQueue } from "./host-queue";
-import { createConnectionIdleTimeout, reportSelfLimitHit } from "@nestor/core";
+import { createConnectionIdleTimeout } from "@nestor/core";
 import {
   DiscoveryPageReadError,
   type ReadDiscoveryPostingPage,
@@ -71,10 +71,7 @@ export function createHttpPageReader(
               status: response.status,
               attempt,
             });
-            if (
-              (response.status === 429 || response.status === 503) &&
-              attempt < 3
-            ) {
+            if (response.status === 429 || response.status === 503) {
               const retry = response.headers.get("retry-after");
               const until =
                 retry && /^\d+(?:\.\d+)?$/u.test(retry)
@@ -88,20 +85,8 @@ export function createHttpPageReader(
                   ? until
                   : Date.now() + 1000 * 2 ** attempt,
               );
-              await response.body?.cancel();
-              return null;
             }
             if (!response.ok) {
-              if (
-                (response.status === 429 || response.status === 503) &&
-                attempt >= 3
-              )
-                reportSelfLimitHit({
-                  limit: "http_retries",
-                  kind: "retry",
-                  value: 3,
-                  where: "browser-runtime/createHttpPageReader",
-                });
               await response.body?.cancel();
               throw new DiscoveryPageReadError(response.status);
             }

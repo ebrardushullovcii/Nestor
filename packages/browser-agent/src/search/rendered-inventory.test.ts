@@ -3,7 +3,6 @@ import type { ListingCard } from "@nestor/contracts";
 import { collectRenderedInventory } from "./rendered-inventory";
 import { buildApplyFormObservation } from "../apply/page-hands";
 import type { ApplyPageHands } from "../apply/types";
-import { listingClosedReason } from "./listing-status";
 
 const card = (id: number) =>
   `<article class="job"><p class="company">Example Employer</p><h2><a href="/vacancy/${id}">Data Analyst ${id}</a></h2><p>Remote Germany</p></article>`;
@@ -150,25 +149,4 @@ test("cancellation after a saved batch preserves the callback rather than transc
   ).rejects.toThrow();
   expect(saved).toHaveBeenCalledOnce();
   expect(saved.mock.calls[0]?.[0]).toHaveLength(1);
-});
-
-test.each([
-  [
-    "We are no longer recruiting for this role. Former terms were part-time.",
-    true,
-  ],
-  [
-    "We are no longer hiring for the position. Applications cannot proceed.",
-    true,
-  ],
-  [
-    "Our Hamburg office itself is closed on Fridays; remote work continues normally.",
-    false,
-  ],
-  [
-    "This role is open. The office reception is no longer accepting applications for visitor badges.",
-    false,
-  ],
-])("availability remains scoped to the vacancy: %s", (text, closed) => {
-  expect(Boolean(listingClosedReason(text))).toBe(closed);
 });

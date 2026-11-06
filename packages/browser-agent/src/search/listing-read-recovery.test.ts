@@ -154,24 +154,23 @@ test("inventory waits through a temporary check rather than declaring it ready",
   ).toBe(true);
 });
 
-test("a persistent check remains a retryable screening failure without remembering the negative", async () => {
+test("the profession model sees a persistent check with the full card and chooses whether to keep it", async () => {
   const readPage = vi.fn(() =>
     Promise.resolve({ html: interstitial, finalUrl: card.url }),
   );
-  const chatWithTools = vi
-    .fn<LLMClient["chatWithTools"]>()
-    .mockResolvedValue({ content: '{"keep":{"0":0}}' });
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>((messages) => {
+    expect(messages[1].content).toContain("Performing security verification");
+    return Promise.resolve({ content: '{"keep":{"0":1}}' });
+  });
   const result = await screenCards({
     cards: [card],
     goals,
     readPage,
     client: { chatWithTools },
   });
-  expect(result.related).toEqual([]);
-  expect(result.seen).toEqual([]);
-  expect(result.failed).toHaveLength(1);
-  expect(readPage).toHaveBeenCalledTimes(2);
-  expect(chatWithTools).not.toHaveBeenCalled();
+  expect(result.related).toHaveLength(1);
+  expect(result.failed).toEqual([]);
+  expect(chatWithTools).toHaveBeenCalledOnce();
 });
 
 test("listing metadata also retries truncation and accounts for both model turns", async () => {

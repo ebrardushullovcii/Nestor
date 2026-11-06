@@ -164,6 +164,7 @@ export function createSearchPipeline(input: {
         const result = await deps.engine
           .readListings({
             cards: relatedCards,
+            context,
             signal,
             lane: "http",
           })
@@ -208,6 +209,7 @@ export function createSearchPipeline(input: {
             try {
               result = await deps.engine.readListings({
                 cards: group,
+                context,
                 signal: browserSignal,
                 lane: "browser",
               });

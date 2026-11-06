@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { createHttpPageReader } from "./http-page-reader";
 
-test("honors server backoff and reads only with GET; browser work stays explicit", async () => {
+test("preserves server refusals for browser continuation and reads only with GET", async () => {
   const request = vi
     .fn<typeof fetch>()
     .mockResolvedValueOnce(
@@ -12,6 +12,9 @@ test("honors server backoff and reads only with GET; browser work stays explicit
     )
     .mockResolvedValueOnce(new Response("<main>Listing</main>"));
   const reader = createHttpPageReader({ fetch: request });
+  await expect(reader("https://example.test/jobs", {})).rejects.toMatchObject({
+    status: 429,
+  });
   expect(await reader("https://example.test/jobs", {})).toEqual({
     html: "<main>Listing</main>",
     finalUrl: "https://example.test/jobs",

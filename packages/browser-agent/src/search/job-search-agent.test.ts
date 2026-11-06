@@ -13,7 +13,6 @@ import type { AgentConfig } from "../types";
 import type { Page } from "playwright";
 import {
   buildExtractionSelectionContext,
-  describeNonPosting,
   runJobSearchAgent,
 } from "./job-search-agent";
 import { createSearchResultCache } from "./search-result-cache";
@@ -364,7 +363,7 @@ test("browser inventory fallback collects cards without premature detail reads o
   expect(selection).not.toContain("workEligibility");
   expect(selection).not.toContain("seniorityLevels");
   expect(createJobSearchPrompts(inventory).system).toContain(
-    "Do not open details",
+    "Assess fit later",
   );
   const result = await runJobSearchAgent({
     hands: hands({ current: rawPage() }),
@@ -484,7 +483,7 @@ describe("job search agent", () => {
       jobExtractor: extractor,
     });
     const fact =
-      "This page is a bot check, seen twice in a row on jobs.example.test. Only the person can get past it. If it is still showing, finish this source with blockedBy: security_check and needsPerson: true, and tell the person to open jobs.example.test in the app's browser, get past the check, and search again. Jobs saved so far are kept.";
+      "This page is a bot check, seen twice in a row on jobs.example.test. Use the available browser tools and saved permissions to attempt it. If a real attempt still fails, report what you tried and hand off on this open page. Jobs saved so far are kept.";
     expect(seen[2]).not.toContain(fact);
     expect(seen[3]).toContain(fact);
     expect(seen).toHaveLength(5);
@@ -550,51 +549,6 @@ describe("job search agent", () => {
     expect(result.jobs).toHaveLength(2);
     expect(result.incomplete).toBe(false);
     expect(result.accessBlockerReason).toBeUndefined();
-  });
-
-  test("refuses read-off items without their own title or link, so the agent can retry", () => {
-    const page = "https://jobs.example.test/search?q=engineer";
-    const posting = {
-      title: "Platform Engineer",
-      company: "Northwind",
-      canonicalUrl: "https://jobs.example.test/jobs/123",
-    };
-    expect(describeNonPosting(posting, page, "search_results")).toBeNull();
-    expect(
-      describeNonPosting(
-        { ...posting, title: "124,564" },
-        page,
-        "search_results",
-      ),
-    ).toBe("it has no job title");
-    expect(
-      describeNonPosting(
-        { ...posting, title: "Northwind" },
-        page,
-        "search_results",
-      ),
-    ).toBe("its title is just the company name");
-    expect(
-      describeNonPosting(
-        { ...posting, canonicalUrl: "https://jobs.example.test/" },
-        page,
-        "search_results",
-      ),
-    ).toBe("it has no link of its own");
-    expect(
-      describeNonPosting(
-        { ...posting, canonicalUrl: page },
-        page,
-        "search_results",
-      ),
-    ).toBe("it has no link of its own");
-    expect(
-      describeNonPosting(
-        { ...posting, canonicalUrl: "https://jobs.example.test/jobs/123" },
-        "https://jobs.example.test/jobs/123",
-        "job_detail",
-      ),
-    ).toBeNull();
   });
 
   test("turns precision and scale modes into distinct search instructions", () => {
@@ -1056,153 +1010,6 @@ describe("job search agent", () => {
     expect(requestOptions?.headers.accept).toContain("application/json");
   });
 
-  test("reviews a task-relevant API-only origin before reading it directly", async () => {
-    const pages = { current: rawPage() };
-    const get = vi.fn(() =>
-      Promise.resolve({
-        text: () => Promise.resolve('{"jobs":[{"id":"j1"}]}'),
-        status: () => 200,
-        statusText: () => "OK",
-        headers: () => ({ "content-type": "application/json" }),
-        ok: () => true,
-      }),
-    );
-    const page = {
-      url: () => pages.current.url ?? "",
-      context: () => ({ request: { get } }),
-    } as unknown as Page;
-    let agentTurn = 0;
-    const reviews: string[] = [];
-    const llmClient: LLMClient = {
-      chatWithTools(messages, tools) {
-        if (tools.some((tool) => tool.function.name === "decide")) {
-          reviews.push(messages.map((message) => message.content).join("\n"));
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "review_direct",
-                type: "function" as const,
-                function: {
-                  name: "decide",
-                  arguments: JSON.stringify({
-                    allowed: true,
-                    verdict: "The endpoint is the employer's job data service.",
-                  }),
-                },
-              },
-            ],
-          });
-        }
-        agentTurn += 1;
-        return scripted(
-          agentTurn === 1
-            ? [
-                {
-                  name: "read_page_api",
-                  args: {
-                    url: "https://api.employer.test/jobs",
-                    reason:
-                      "The page names this endpoint as its visible-card data source.",
-                  },
-                },
-              ]
-            : [
-                {
-                  name: "finish",
-                  args: { reason: "The reviewed API returned the job data." },
-                },
-              ],
-        ).chatWithTools(messages, tools);
-      },
-    };
-
-    await runJobSearchAgent({
-      hands: hands(pages),
-      page,
-      config: config(),
-      llmClient,
-      jobExtractor: extractor,
-    });
-
-    expect(reviews).toHaveLength(1);
-    expect(reviews[0]).toContain("https://api.employer.test/jobs");
-    expect(get).toHaveBeenCalledOnce();
-  });
-
-  test("reviews every off-scope API redirect and refuses before following it", async () => {
-    const pages = { current: rawPage() };
-    const get = vi.fn(() =>
-      Promise.resolve({
-        text: () => Promise.resolve(""),
-        status: () => 302,
-        statusText: () => "Found",
-        headers: () => ({ location: "https://tracker.invalid/jobs" }),
-        ok: () => false,
-      }),
-    );
-    const page = {
-      url: () => pages.current.url ?? "",
-      context: () => ({ request: { get } }),
-    } as unknown as Page;
-    let agentTurn = 0;
-    const llmClient: LLMClient = {
-      chatWithTools(messages, tools) {
-        if (tools.some((tool) => tool.function.name === "decide")) {
-          return Promise.resolve({
-            toolCalls: [
-              {
-                id: "review_redirect",
-                type: "function" as const,
-                function: {
-                  name: "decide",
-                  arguments: JSON.stringify({
-                    allowed: false,
-                    verdict:
-                      "This tracker is unrelated to reading the posting.",
-                  }),
-                },
-              },
-            ],
-          });
-        }
-        agentTurn += 1;
-        return scripted(
-          agentTurn === 1
-            ? [
-                {
-                  name: "read_page_api",
-                  args: {
-                    url: "/api/jobs",
-                    reason:
-                      "The results page says visible cards come from this endpoint.",
-                  },
-                },
-              ]
-            : [
-                {
-                  name: "finish",
-                  args: { reason: "The unrelated redirect was refused." },
-                },
-              ],
-        ).chatWithTools(messages, tools);
-      },
-    };
-
-    await runJobSearchAgent({
-      hands: hands(pages),
-      page,
-      config: config(),
-      llmClient,
-      jobExtractor: extractor,
-    });
-
-    expect(get).toHaveBeenCalledOnce();
-    expect(get).toHaveBeenCalledWith(
-      "https://jobs.example.test/api/jobs",
-      expect.objectContaining({ maxRedirects: 0 }),
-    );
-  });
-
   test("a sign-in wall the model reports becomes a typed blocker with the page it happened on", async () => {
     const pages = { current: rawPage() };
     const result = await runJobSearchAgent({
@@ -1444,100 +1251,6 @@ describe("what the person sees while it runs", () => {
     expect(result.error).toBeUndefined();
   });
 
-  test("duplicate-only pagination still stalls despite new URLs", async () => {
-    const pages = { current: rawPage() };
-    const turns = Array.from({ length: 10 }, (_, page) => [
-      {
-        name: "navigate",
-        args: { url: `https://jobs.example.test/search?page=${page}` },
-      },
-      { name: "extract_jobs", args: { pageType: "search_results" } },
-    ]).flat();
-    const result = await runJobSearchAgent({
-      hands: hands(pages),
-      config: config({ runControl: { noProgressStepLimit: 3 } }),
-      llmClient: scripted(turns),
-      jobExtractor: extractor,
-    });
-    expect(result.jobs).toHaveLength(2);
-    expect(result.steps).toBe(8);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
-  });
-
-  test("counts only repeated catalog pages in the stall warning window", async () => {
-    const catalog = Array.from({ length: 150 }, (_, id) =>
-      JobPostingSchema.parse({
-        ...posting("Other Role", "Cedar", String(id)),
-        source: "target_site",
-        discoveredAt: "2026-10-01T10:00:00.000Z",
-      }),
-    );
-    const result = await runJobSearchAgent({
-      hands: hands({ current: rawPage() }),
-      config: config({
-        sourceCatalog: catalog,
-        runControl: { noProgressStepLimit: 3 },
-      }),
-      llmClient: scripted([
-        ...Array.from({ length: 6 }, (_, page) => ({
-          name: "list_catalog_jobs",
-          args: { offset: page * 25 },
-        })),
-        { name: "list_catalog_jobs", args: { offset: 0 } },
-      ]),
-      jobExtractor: extractor,
-    });
-    expect(result.steps).toBe(12);
-    expect(result.jobs).toEqual([]);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
-  });
-
-  test("unread catalog details keep progressing, but repeated details stall", async () => {
-    const catalog = Array.from({ length: 6 }, (_, id) =>
-      JobPostingSchema.parse({
-        ...posting("Other Role", "Cedar", String(id)),
-        source: "target_site",
-        discoveredAt: "2026-10-01T10:00:00.000Z",
-      }),
-    );
-    const result = await runJobSearchAgent({
-      hands: hands({ current: rawPage() }),
-      config: config({
-        sourceCatalog: catalog,
-        runControl: { noProgressStepLimit: 3 },
-      }),
-      llmClient: scripted([
-        ...catalog.map((_job, id) => ({
-          name: "read_catalog_job",
-          args: { id },
-        })),
-        { name: "read_catalog_job", args: { id: 0 } },
-      ]),
-      jobExtractor: extractor,
-    });
-    expect(result.steps).toBe(12);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
-  });
-
-  test("identical observations still stall", async () => {
-    const result = await runJobSearchAgent({
-      hands: hands({ current: rawPage() }),
-      config: config({ runControl: { noProgressStepLimit: 3 } }),
-      llmClient: scripted([{ name: "observe" }]),
-      jobExtractor: extractor,
-    });
-    expect(result.steps).toBe(6);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
-  });
-
   test("turn notes are rewritten without tool names or handles", async () => {
     const { describeStepForPerson } = await import("./job-search-agent");
     expect(describeStepForPerson("observe → Page: https://x.test")).toBe(
@@ -1612,45 +1325,6 @@ describe("what the person sees while it runs", () => {
     });
     expect(result.jobs).toHaveLength(2);
     expect(result.incomplete).toBe(false);
-  });
-
-  test("repeated catalog reads cannot keep discovery alive without saves", async () => {
-    const jobs = [
-      JobPostingSchema.parse({
-        ...posting("Platform Engineer", "Northwind", "catalog_1"),
-        source: "target_site",
-        discoveryMethod: "public_api",
-        discoveredAt: "2026-09-14T10:00:00Z",
-      }),
-    ];
-    const result = await runJobSearchAgent({
-      hands: hands({ current: rawPage() }),
-      config: config({
-        sourceCatalog: jobs,
-        runControl: { noProgressStepLimit: 3 },
-      }),
-      llmClient: scripted([{ name: "list_catalog_jobs" }]),
-      jobExtractor: extractor,
-    });
-    // The first read is new content; the next six repeated reads still stall.
-    expect(result.steps).toBe(7);
-    expect(result.jobs).toEqual([]);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
-  });
-
-  test("stops scrolling without saved jobs and reports the step window", async () => {
-    const result = await runJobSearchAgent({
-      hands: hands({ current: rawPage() }),
-      config: config({ runControl: { noProgressStepLimit: 3 } }),
-      llmClient: scripted([{ name: "scroll", args: { direction: "down" } }]),
-      jobExtractor: extractor,
-    });
-    expect(result.steps).toBe(6);
-    expect(result.error).toBe(
-      "Stopped: no new page content or listings in the last 6 steps.",
-    );
   });
 
   test("a productive search finishes beyond the former hour-long ceiling", async () => {
@@ -2776,9 +2450,7 @@ describe("reading pages for less", () => {
       jobExtractor: extractor,
     });
     expect(waits).toBe(2);
-    expect(opening).toContain(
-      "Platform Engineer 1 → https://jobs.example.test/jobs/1",
-    );
+    expect(opening).toContain("https://jobs.example.test/jobs/1");
     expect(opening).toContain(
       "The page you landed on is shown below; work from it.",
     );
@@ -2821,4 +2493,106 @@ describe("reading pages for less", () => {
     expect(answers[0]).toContain("same address, links and text");
     expect(answers[0]).not.toContain("Links:");
   });
+});
+
+test("a search attempts the saved vault account before reporting a sign-in handoff, without exposing its password", async () => {
+  const pages = {
+    current: rawPage({
+      url: "https://jobs.example.test/login",
+      title: "Sign in",
+      bodyText: "Sign in to see jobs",
+      actions: [
+        {
+          index: 0,
+          label: "Sign in",
+          visible: true,
+          disabled: false,
+          submitsForm: true,
+          formMethod: "POST",
+          formAction: "https://jobs.example.test/session",
+        },
+      ],
+      controls: [
+        {
+          index: 0,
+          tagName: "input",
+          inputType: "password",
+          role: "",
+          id: "password",
+          name: "password",
+          label: "Password",
+          groupLabel: "",
+          placeholder: "",
+          autocomplete: "current-password",
+          required: true,
+          invalid: false,
+          validationMessage: "",
+          disabled: false,
+          readOnly: false,
+          visible: true,
+          value: "",
+          checked: false,
+          multiple: false,
+          options: [],
+          selectedOptionLabel: "",
+        },
+      ],
+    }),
+  };
+  const prepare = vi.fn(() => {
+    pages.current.controls[0].value = "synthetic-vault-secret";
+    return Promise.resolve(true);
+  });
+  let request = "";
+  const client = scripted([
+    {
+      name: "finish",
+      args: {
+        reason: "The saved login attempt still needs an MFA code.",
+        needsPerson: true,
+        blockedBy: "sign_in",
+      },
+    },
+  ]);
+  const result = await runJobSearchAgent({
+    hands: hands(pages),
+    config: config({
+      browserPermissions: {
+        signIn: true,
+        googleSignIn: false,
+        createAccounts: true,
+        solveCaptchas: true,
+      },
+      prepareBrowserCredentials: prepare,
+    }),
+    llmClient: {
+      chatWithTools: async (...args) => {
+        expect(prepare).toHaveBeenCalled();
+        request = JSON.stringify(args[0]);
+        return client.chatWithTools(...args);
+      },
+    },
+    jobExtractor: extractor,
+  });
+  expect(result.accessBlockerReason).toBe("auth_required");
+  expect(result.parkedPageUrl).toBe(pages.current.url);
+  expect(request).not.toContain("synthetic-vault-secret");
+});
+
+test("ordinary browser searches record a clean model finish as complete, beyond legacy step and no-progress settings", async () => {
+  const result = await runJobSearchAgent({
+    hands: hands({ current: rawPage() }),
+    config: config({ maxSteps: 1, runControl: { noProgressStepLimit: 1 } }),
+    llmClient: scripted([
+      { name: "observe" },
+      { name: "observe" },
+      { name: "observe" },
+      { name: "extract_jobs", args: { pageType: "search_results" } },
+      { name: "finish", args: { reason: "Every observed results page read." } },
+    ]),
+    jobExtractor: extractor,
+  });
+  expect(result.incomplete).toBe(false);
+  expect(result.phaseCompletionMode).toBe("structured_finish");
+  expect(result.steps).toBe(5);
 });

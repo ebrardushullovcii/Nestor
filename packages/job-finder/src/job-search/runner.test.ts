@@ -764,7 +764,7 @@ test("a site's screening failure stays visible without stopping successful sites
   expect(failed?.failedReads).toBe(2);
 });
 
-test("a proven access block becomes one source ticket if browser reading also fails", async () => {
+test("an HTTP access refusal followed by our browser error is a retryable error, not a question for the person", async () => {
   const { runner, engine, store, context } = setup();
   const sites = createJobSitesStore(store);
   sites.add({ text: "https://blocked.example/jobs" });
@@ -783,12 +783,12 @@ test("a proven access block becomes one source ticket if browser reading also fa
   );
   await runner.start({ postedWithin: "any" });
   await finished(runner);
-  expect(createSourceAccessStore(store).pending(1)).toBe(true);
+  expect(createSourceAccessStore(store).pending(1)).toBe(false);
   expect(
     (store.sql("SELECT count(*) AS n FROM needs_you").get() as { n: number }).n,
-  ).toBe(1);
+  ).toBe(0);
   expect(createSearchSourcesStore(store).list({}).rows[0]?.state).toBe(
-    "needs_you",
+    "failed",
   );
 });
 
@@ -1622,3 +1622,48 @@ test("healthy-source jobs persist and score while another source detail is held"
   await finished(runner);
   expect(store.listJobs({ stage: "found" }).rows).toHaveLength(2);
 }, 10000);
+
+test("a saved access ticket does not skip the next real search attempt", async () => {
+  const { runner, engine, store, context } = setup();
+  const sites = createJobSitesStore(store);
+  sites.add({ text: "https://retry.example/jobs" });
+  context.sources = sites.enabled().map(jobSiteTarget);
+  createSourceAccessStore(store).request(1, "Sign-in failed on an earlier run");
+  await runner.start({ postedWithin: "any" });
+  await finished(runner);
+  expect(engine.collectSource).toHaveBeenCalled();
+  expect(createSourceAccessStore(store).pending(1)).toBe(false);
+  expect(createSearchSourcesStore(store).list({}).rows[0]?.state).toBe("done");
+});
+
+test("late collection progress preserves the actual listing failure in the final source report", async () => {
+  const { runner, engine, store, context } = setup();
+  context.sources = context.sources.slice(0, 1);
+  engine.screenCards.mockImplementation(({ cards }) =>
+    Promise.resolve({
+      related: [],
+      seen: [],
+      skipped: 0,
+      failed: cards.map((card) => ({
+        url: card.url,
+        reason: "The listing connection was reset",
+      })),
+    }),
+  );
+  engine.collectSource.mockImplementation(async (input) => {
+    await input.onCards?.(numberedCards(input.target.id, 100));
+    input.message("Asking the assistant what to do next");
+    return {
+      cards: [],
+      complete: true,
+      pagesRead: 1,
+      notes: ["Inventory read"],
+    };
+  });
+  await runner.start({ depth: "quick", postedWithin: "any" });
+  await finished(runner);
+  const row = createSearchSourcesStore(store).list({}).rows[0];
+  expect(row?.state).toBe("failed");
+  expect(row?.message).toContain("listing connection was reset");
+  expect(row?.message).not.toContain("Asking the assistant");
+});

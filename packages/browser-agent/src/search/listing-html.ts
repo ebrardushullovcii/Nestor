@@ -1,4 +1,3 @@
-import { listingClosedReason } from "./listing-status";
 import { parse, type DefaultTreeAdapterTypes as Tree } from "parse5";
 import type { ListingCard } from "@nestor/contracts";
 import { createHash } from "node:crypto";
@@ -296,12 +295,6 @@ export function readInventoryHtml(
       url: href,
       title: job.title,
       text: body,
-      ...(listingClosedReason(
-        "",
-        typeof job.validThrough === "string" ? job.validThrough : null,
-      )
-        ? { closed: true }
-        : {}),
       cardFingerprint: fingerprint(job.title.trim().toLowerCase()),
       sourceId: source.id,
       sourceLabel: source.label,
@@ -429,10 +422,6 @@ export function readInventoryHtml(
         : {}),
       // Profession screening reads the title, so an age or sponsored badge is not a new decision.
       cardFingerprint: fingerprint(title.trim().toLowerCase()),
-      ...(/(?:^|[·|\n])\s*closed(?:\s|$)/iu.test(body) ||
-      listingClosedReason(body)
-        ? { closed: true }
-        : {}),
     });
   }
   // A source can point at a vacancy itself, with no linked title/card around it.
@@ -517,7 +506,6 @@ export function readInventoryHtml(
           sourceLabel: source.label,
           cardFingerprint: fingerprint(title.trim().toLowerCase()),
           listingPage: { html, finalUrl: url },
-          ...(listingClosedReason(body) ? { closed: true } : {}),
         });
     }
   }

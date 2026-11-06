@@ -1,10 +1,8 @@
 import { traceEvent, withTraceScope } from "@nestor/core/run-trace";
 import {
-  clearRoleMatch,
   professionEvidence,
   professionInstructions,
 } from "./listing-screening";
-import { listingClosedReason } from "./listing-status";
 import { z } from "zod";
 import {
   DiscoveryPageReadError,
@@ -168,7 +166,7 @@ export function roleGoalsKey(goals: RoleScreenGoals): string {
   const normalized = (values: readonly string[]) =>
     [...new Set(values.map((value) => value.trim().toLowerCase()))].sort();
   return fingerprint([
-    8,
+    9,
     normalized(goals.targetRoles),
     normalized(goals.relatedRoles),
     goals.strategy,
@@ -220,8 +218,7 @@ async function collectSourceObserved(
   let complete = true,
     recognized = false,
     emptyConfirmed = false,
-    needsAccess = false,
-    httpError = false;
+    needsAccess = false;
   while (queue.length) {
     input.signal?.throwIfAborted();
     const urls = queue.splice(0, 4).filter((url) => !visited.has(url));
@@ -253,14 +250,6 @@ async function collectSourceObserved(
           page.finalUrl,
           input.source,
         );
-        for (const next of [...parsed.next, ...parsed.portals])
-          if (!visited.has(next) && !queue.includes(next)) queue.push(next);
-        if (!parsed.cards.length && parsed.portals.length) {
-          notes.push(
-            `Following the site's open-jobs portal from ${page.finalUrl}.`,
-          );
-          return;
-        }
         if (
           !parsed.cards.length &&
           /\b(?:no (?:current |open |available )?(?:jobs|positions|vacancies)|(?:0|zero) (?:open )?(?:jobs|positions|vacancies))\b/iu.test(
@@ -270,6 +259,24 @@ async function collectSourceObserved(
           recognized = true;
           emptyConfirmed = true;
           notes.push("The site explicitly reports no open positions.");
+          for (const next of parsed.next)
+            if (!visited.has(next) && !queue.includes(next)) queue.push(next);
+          return;
+        }
+        if (
+          !parsed.cards.length &&
+          (parsed.portals.length > 1 || parsed.next.length > 0)
+        ) {
+          complete = false;
+          notes.push(
+            `No listing cards were readable at ${page.finalUrl}. A directory is a choice of searches; browser navigation must choose among the observed job directories or pagination using the person's goals.`,
+          );
+          return;
+        }
+        if (!parsed.cards.length && parsed.portals.length) {
+          for (const portal of parsed.portals)
+            if (!visited.has(portal) && !queue.includes(portal))
+              queue.push(portal);
           return;
         }
         if (!parsed.cards.length) {
@@ -304,7 +311,6 @@ async function collectSourceObserved(
       } catch (error) {
         input.signal?.throwIfAborted();
         complete = false;
-        if (error instanceof DiscoveryPageReadError) httpError = true;
         if (
           error instanceof DiscoveryPageReadError &&
           [401, 403].includes(error.status)
@@ -316,20 +322,7 @@ async function collectSourceObserved(
       }
     });
   }
-  if (needsAccess && input.lane === "browser" && !input.browserAccessAuthorized)
-    return {
-      cards: [...cards.values()],
-      lane: "browser",
-      pagesRead: visited.size,
-      complete: false,
-      needsYou: true,
-      notes,
-    };
-  if (
-    (!recognized || !complete) &&
-    input.navigateFallback &&
-    (!httpError || (needsAccess && input.browserAccessAuthorized))
-  ) {
+  if ((!recognized || !complete) && input.navigateFallback) {
     let fallback = await input.navigateFallback([...visited].at(-1));
     if (
       needsAccess &&
@@ -358,9 +351,7 @@ async function collectSourceObserved(
       cards: [...cards.values()],
       lane: "browser",
       pagesRead: visited.size + fallback.pagesRead,
-      complete:
-        fallback.complete &&
-        (cards.size > 0 || fallback.emptyConfirmed === true),
+      complete: fallback.complete,
       ...(!cards.size && fallback.emptyConfirmed
         ? { emptyConfirmed: true }
         : {}),
@@ -376,7 +367,7 @@ async function collectSourceObserved(
               "Browser inventory coverage is not confirmed. Saved listings are kept; continue this site to check remaining results.",
             ]
           : []),
-        ...(cards.size || (fallback.complete && fallback.emptyConfirmed)
+        ...(cards.size || fallback.complete
           ? []
           : [
               "No listings were read; coverage could not be confirmed. Open the site or check its jobs-board URL.",
@@ -393,9 +384,6 @@ async function collectSourceObserved(
     cards: [...cards.values()],
     lane: input.lane ?? "http",
     requiresBrowser: !recognized || !complete,
-    ...(needsAccess && !input.browserAccessAuthorized
-      ? { accessBlocked: true }
-      : {}),
     pagesRead: visited.size,
     complete: covered,
     ...(!cards.size && emptyConfirmed ? { emptyConfirmed: true } : {}),
@@ -469,12 +457,6 @@ export async function screenCards(
   }
   const allTitles = [...groups.keys()];
   const decisions = input.decisions ?? new Map<string, boolean>();
-  for (const card of fresh)
-    if (
-      !decisions.has(titleKey(card)) &&
-      clearRoleMatch(card.title, input.goals)
-    )
-      decisions.set(titleKey(card), true);
   const evidence = new Map(
     fresh.map((card) => [titleKey(card), professionEvidence(card)]),
   );
@@ -508,7 +490,7 @@ export async function screenCards(
     try {
       const raw = await ask(
         input,
-        `${professionInstructions(input.goals)} Each titles row is [index, title, cardEvidence, fullListingDutyEvidence]. Preserve the two-stage screening gate: first judge only the title and card evidence. A broader profession that can contain the requested specialty stays ambiguous unless the card explicitly identifies incompatible work. Missing specialty keywords, generic duties, location or rank do not prove a different profession. Never infer pure management from rank alone when the advertised duties are unknown. Keep a requested, substantially overlapping or genuinely ambiguous card even if its full listing would receive a low fit score. Full listing duties can rescue a card that otherwise looks clearly unrelated; they cannot revoke a keep from the card gate. Return 0 only when the card is clearly a different profession and the full duties, when supplied, do not rescue it. Fit is judged separately after saving.`,
+        `${professionInstructions()} Each titles row is [index, title, cardEvidence, fullListingDutyEvidence]. Preserve the two-stage screening gate: first judge only the title and card evidence. A broader profession that can contain the requested specialty stays ambiguous unless the card explicitly identifies incompatible work. Missing specialty keywords, generic duties, location or rank do not prove a different profession. Never infer pure management from rank alone when the advertised duties are unknown. Keep a requested, substantially overlapping or genuinely ambiguous card even if its full listing would receive a low fit score. Full listing duties can rescue a card that otherwise looks clearly unrelated; they cannot revoke a keep from the card gate. Return 0 only when the card is clearly a different profession and the full duties, when supplied, do not rescue it. Fit is judged separately after saving.`,
         {
           goals: input.goals,
           titles: titles.map((key, index) => [
@@ -652,13 +634,8 @@ export async function screenCards(
               page =
                 card.listingPage ??
                 (await readPage(card.url, { signal: input.signal }));
-            } catch (error) {
+            } catch {
               input.signal?.throwIfAborted();
-              if (
-                !(error instanceof DiscoveryPageReadError) ||
-                ![401, 403].includes(error.status)
-              )
-                throw error;
               rendered = true;
               page = await render();
             }
@@ -674,15 +651,9 @@ export async function screenCards(
               page = await render();
               body = readListingHtml(page.html, card.title);
             }
-            if (
-              blockedByCheck(page.html) ||
-              listingSignInRequired(page.html) ||
-              body.renderSuggested ||
-              !body.detailHeading ||
-              !body.text
-            )
+            if (!body.text)
               throw new Error(
-                "The full listing is not readable enough to verify its profession.",
+                "The listing needs browser interaction before its duties can be read.",
               );
             enriched.set(card.url, {
               ...card,
@@ -698,11 +669,13 @@ export async function screenCards(
           return key;
         } catch (error) {
           input.signal?.throwIfAborted();
-          failedTitles.set(
+          // A read failure is evidence, not a profession verdict. Give the
+          // model the card and the failure; full reads can use the browser.
+          evidence.set(
             key,
-            `Profession not verified: ${error instanceof Error ? error.message : String(error)} Try this site again to continue.`,
+            `${cardEvidence.get(key) ?? ""}\nFull listing read did not finish: ${error instanceof Error ? error.message : String(error)}`,
           );
-          return null;
+          return key;
         }
       })
     ).filter((key): key is string => key !== null),
@@ -773,6 +746,7 @@ const fieldsSchema = z.object({
   seniority: z.string().nullable(),
   salaryText: z.string().nullable(),
   closed: z.boolean().default(false),
+  isListing: z.boolean().optional(),
 });
 
 /** Full text is extracted mechanically once, then metadata for many bodies is read in one model call. No fit judgment here. */
@@ -870,10 +844,6 @@ export async function readListings(
           rendered: true,
           ready: (html) => !blockedByCheck(html),
         });
-      if (blockedByCheck(page.html) || listingSignInRequired(page.html)) {
-        needsYou = true;
-        throw new Error("The listing is behind a browser check.");
-      }
       let body = card.listingText
         ? {
             text: card.listingText,
@@ -882,7 +852,7 @@ export async function readListings(
             renderSuggested: false,
           }
         : readListingHtml(page.html, card.title);
-      if (body.renderSuggested && input.lane !== "browser")
+      if (body.renderSuggested && !body.text && input.lane !== "browser")
         throw new Error("This listing needs a browser read.");
       if (body.renderSuggested && input.lane === "browser" && !body.text) {
         page = await input.readPage(card.url, {
@@ -938,15 +908,11 @@ export async function readListings(
   type Read = (typeof good)[number];
   type Fields = z.infer<typeof fieldsSchema>;
   const append = (read: Read, fields: Omit<Fields, "id">): void => {
-    const { closed, ...facts } = fields;
-    const hiddenReason =
-      listingClosedReason(
-        listingPageText(read.page.html) + "\n" + read.body.text,
-        read.structured?.validThrough,
-      ) ??
-      (closed
-        ? "Closed: this vacancy is no longer accepting applications."
-        : null);
+    const { closed, isListing, ...facts } = fields;
+    if (isListing === false) return;
+    const hiddenReason = closed
+      ? "Closed: this vacancy is no longer accepting applications."
+      : null;
     for (const sighting of [read.card, ...read.aliases])
       jobs.push({
         ...facts,
@@ -1054,34 +1020,20 @@ export async function readListings(
       salaryText: read.structured?.salaryText ?? null,
     });
   }
-  const metadataEvidence = (text: string): string => {
-    const paragraphs = text.split(/\n\s*\n/u);
-    const facts = paragraphs.filter(
-      (line) =>
-        line.length <= 800 &&
-        /(?:company|employer|join|location|remote|hybrid|on.?site|salary|compensation|pay range|requisition|reference|full.time|part.time|contract|closed|applications|standort|gehalt|arbeitgeber)/iu.test(
-          line,
-        ),
-    );
-    return [
-      ...new Set([text.slice(0, 1600), ...facts, text.slice(-1000)]),
-    ].join("\n\n");
-  };
-  const readMetadata = async (batch: Read[], full = false): Promise<void> => {
+  const readMetadata = async (batch: Read[]): Promise<void> => {
     const { passages, encode } = sharedPassages();
     const answer = await ask(
       input,
-      'Read listing metadata faithfully from these excerpts and published facts. Each listing references the shared passages array by index, in order. Do not invent missing identity: return empty company when the actual hiring employer is unclear, so the complete text can be checked. A sign-in page, talent pool or results list is not one vacancy: return empty title and company. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"closed":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Do not assess fit or summarize the body.',
+      'Read listing metadata faithfully from the complete page text and published facts. Each listing references the shared passages array by index, in order. Decide whether each page is a vacancy: set isListing=false for a sign-in page, talent pool or results list. Missing title or employer alone does not make a vacancy unreadable. Use empty strings for unknown metadata; the complete text remains available for fit. A closed vacancy is still a listing: set closed=true only for explicit evidence applications ended, never an old posting date. Return {"jobs":[{"id":0,"title":"...","company":"actual hiring employer, never the board or ATS brand","location":"...","workModes":["remote"|"hybrid"|"onsite"|"flexible"],"sourceJobId":string|null,"employmentType":string|null,"seniority":string|null,"salaryText":string|null,"closed":boolean,"isListing":boolean}]}. One result per id. Unknown fields are null or empty strings/arrays. Preserve employer and requisition numbers exactly. Do not assess fit or summarize the body.',
       {
         passages,
         listings: batch.map((read, id) => ({
           id,
           title: read.card.title,
           url: read.card.url,
-          card: full ? read.card.text : read.card.text.slice(0, 800),
-          passages: encode(
-            full ? read.body.text : metadataEvidence(read.body.text),
-          ),
+          card: read.card.text,
+          pageText: listingPageText(read.page.html),
+          passages: encode(read.body.text),
           published: read.structured
             ? {
                 title: read.structured.title,
@@ -1090,6 +1042,7 @@ export async function readListings(
                 workModeHints: read.structured.workModeHints,
                 employmentType: read.structured.employmentType,
                 salaryText: read.structured.salaryText,
+                validThrough: read.structured.validThrough,
               }
             : null,
         })),
@@ -1107,24 +1060,20 @@ export async function readListings(
       throw new Error(
         "Metadata response did not cover each listing exactly once.",
       );
-    const missing: Read[] = [];
     for (const [id, read] of batch.entries()) {
       const fields = byId.get(id)!;
-      if (!fields.title || !fields.company) {
-        if (!full) missing.push(read);
-        else
-          failures.push({
-            url: read.card.url,
-            reason: read.needsYou
-              ? "Sign in to read this listing."
-              : "The listing's title or hiring employer could not be read.",
-            ...(read.needsYou ? { needsYou: true } : {}),
-          });
+      if (fields.isListing === false) {
+        failures.push({
+          url: read.card.url,
+          reason:
+            "The model read the full page and identified it as something other than a vacancy.",
+          ...(input.lane !== "browser" ? { requiresBrowser: true } : {}),
+        });
         continue;
       }
       append(read, {
-        title: fields.title,
-        company: fields.company,
+        title: fields.title || read.card.title || "Title not stated",
+        company: fields.company || "Company not stated",
         location: fields.location,
         workModes: fields.workModes,
         sourceJobId: fields.sourceJobId,
@@ -1134,15 +1083,9 @@ export async function readListings(
         closed: fields.closed,
       });
     }
-    if (missing.length) await readMetadata(missing, true);
   };
   await mapConcurrent(
-    batches(
-      uncertain,
-      32,
-      (read) => metadataEvidence(read.body.text).length,
-      40000,
-    ),
+    batches(uncertain, 32, (read) => read.body.text.length, 40000),
     3,
     (batch) => readMetadata(batch),
   );
