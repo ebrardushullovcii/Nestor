@@ -13,6 +13,107 @@ import { openJobStore } from "@nestor/db/job-store";
 import { expect, test, vi } from "vitest";
 import { createSeed } from "../test-fixtures";
 import { createListingSearchEngine } from "./engine";
+import { createJobSearchRunner } from "./runner";
+import { fitContextFingerprint } from "./fit-input";
+
+test("a repeated search does not read or rescore an unchanged saved posting", async () => {
+  const seed = createSeed();
+  const store = openJobStore(":memory:");
+  const url = "https://board.example/jobs/interface-engineer-101";
+  const source = JobDiscoveryTargetSchema.parse({
+    id: "board",
+    label: "Board",
+    startingUrl: "https://board.example/",
+  });
+  const context = {
+    profile: seed.profile,
+    searchPreferences: seed.searchPreferences,
+    sources: [source],
+    sourceInstructionArtifacts: [],
+    remoteCountsAsAnyLocation: true,
+  };
+  const fetchPage = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation((requested) => {
+      expect(requested).toBe(source.startingUrl);
+      return Promise.resolve(
+        new Response(
+          '<main><article><p class="company">Own Employer</p><h2><a href="/jobs/interface-engineer-101">Interface Engineer</a></h2><p class="job-location">Remote, Worldwide</p></article></main>',
+        ),
+      );
+    });
+  const chatWithTools = vi.fn<NonNullable<JobFinderAiClient["chatWithTools"]>>(
+    () =>
+      Promise.reject(Error("Unchanged saved work must not need a model turn")),
+  );
+  const engine = createListingSearchEngine({
+    aiClient: { ...createDeterministicJobFinderAiClient(), chatWithTools },
+    browserRuntime: {},
+  });
+  const read = vi.spyOn(engine, "readListings"),
+    fit = vi.spyOn(engine, "fitJobs");
+  const runner = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+  });
+  try {
+    const [id] = store.saveFoundJobs({
+      searchId: "old",
+      jobs: [
+        {
+          title: "Interface Engineer",
+          company: "Own Employer",
+          location: "Remote, Worldwide",
+          workModes: ["remote"],
+          url,
+          applyUrl: url,
+          sourceId: "board",
+          sourceLabel: "Board",
+          sourceJobId: "101",
+          postedAt: null,
+          salaryText: null,
+          salaryMin: null,
+          salaryMax: null,
+          salaryCurrency: null,
+          seniority: null,
+          employmentType: null,
+          summary: null,
+          description: "Own complete posting duties.",
+          facts: { fullListingRead: true },
+        },
+      ],
+    }).added;
+    store.syncFitContext(fitContextFingerprint(context));
+    store.setFit([
+      {
+        id: id!,
+        score: 82,
+        summary: "Existing valid fit",
+        reasons: [],
+        gaps: [],
+      },
+    ]);
+    for (let repeat = 0; repeat < 2; repeat++) {
+      await runner.start({ depth: "thorough", postedWithin: "any" });
+      await vi.waitFor(() =>
+        expect(runner.status().search?.state).toBe("done"),
+      );
+      expect(store.getJob(id!)).toMatchObject({
+        fitScore: 82,
+        fitStale: false,
+      });
+    }
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(read).not.toHaveBeenCalled();
+    expect(fit).not.toHaveBeenCalled();
+    expect(chatWithTools).not.toHaveBeenCalled();
+  } finally {
+    runner.stop();
+    store.close();
+    fetchPage.mockRestore();
+  }
+});
 
 test("a saved crossed row is refreshed from browser data without losing its own posting facts or partial coverage report", async () => {
   const seed = createSeed();
@@ -111,8 +212,11 @@ test("a saved crossed row is refreshed from browser data without losing its own 
       searchId: "old",
       jobs: [crossed],
     }).added;
+    const prepared = store.prepareListingCards(inventory.cards);
+    expect(prepared.refreshUrls).toEqual([url]);
     const screened = await engine.screenCards({
-      cards: inventory.cards,
+      cards: prepared.cards,
+      refreshUrls: prepared.refreshUrls,
       context,
       settings,
       signal,
@@ -134,6 +238,7 @@ test("a saved crossed row is refreshed from browser data without losing its own 
       salaryText: job.salaryText,
     });
     expect(chatWithTools).not.toHaveBeenCalled();
+    expect(store.prepareListingCards(inventory.cards).refreshUrls).toEqual([]);
   } finally {
     store.close();
   }

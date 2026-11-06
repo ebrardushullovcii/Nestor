@@ -534,7 +534,7 @@ test("collects all observed pages without AI, ignoring editorial links and prese
   expect(readPage).toHaveBeenCalledTimes(2);
 });
 
-test("screens titles once, rereads saved postings and skips remembered rejected cards", async () => {
+test("screens titles once, refreshes only named saved postings and skips unchanged saved cards", async () => {
   const cards = [
     card("Data Analyst"),
     card("Senior Data Analyst"),
@@ -556,6 +556,7 @@ test("screens titles once, rereads saved postings and skips remembered rejected 
     cards,
     goals,
     lookupKnownUrls: () => Promise.resolve([cards[3].url]),
+    refreshUrls: [cards[3].url],
   });
   expect(first.related.map((card) => card.title)).toEqual([
     "Data Analyst",
@@ -571,11 +572,8 @@ test("screens titles once, rereads saved postings and skips remembered rejected 
     lookupKnownUrls: () =>
       Promise.resolve(first.related.map((card) => card.url)),
   });
-  expect(again.related.map((card) => card.title)).toEqual([
-    "Data Analyst",
-    "Senior Data Analyst",
-  ]);
-  expect(again.skipped).toBe(1);
+  expect(again.related).toEqual([]);
+  expect(again.skipped).toBe(3);
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 

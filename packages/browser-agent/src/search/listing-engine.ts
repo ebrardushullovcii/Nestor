@@ -396,6 +396,8 @@ export async function screenCards(
       roleGoalsKey: string,
     ) => Promise<readonly SeenListingCard[]>;
     lookupKnownUrls?: (urls: readonly string[]) => Promise<readonly string[]>;
+    /** Saved postings whose own card/record evidence needs a fresh read. */
+    refreshUrls?: readonly string[];
     /** Verify a negative card verdict against its own full listing before remembering it. */
     readPage?: ListingSearchReader["readPage"];
     /** Publish proven matches while other titles and negative verifications finish. */
@@ -426,8 +428,9 @@ export async function screenCards(
   );
   const fresh = input.cards.filter(
     (card) =>
-      saved.has(card.url) ||
-      !seenKeys.has(`${card.url}\n${screeningFingerprint(card)}`),
+      input.refreshUrls?.includes(card.url) ||
+      (!saved.has(card.url) &&
+        !seenKeys.has(`${card.url}\n${screeningFingerprint(card)}`)),
   );
   // Keep the whole title: stripping rank also erased the distinction between
   // hands-on analytics and a different management or infrastructure profession.
@@ -463,10 +466,10 @@ export async function screenCards(
     allTitles.filter(
       (key) =>
         decisions.get(key) === true ||
-        groups.get(key)!.some((card) => saved.has(card.url)),
+        groups.get(key)!.some((card) => input.refreshUrls?.includes(card.url)),
     ),
   );
-  // A saved posting is reread even if an older title-only decision was negative.
+  // A repair read is not a new profession decision.
   for (const key of positive) unrelated.delete(key);
   const enriched = new Map<string, ListingCard>();
   const published = new Set<ListingCard>();
@@ -847,6 +850,15 @@ export async function readListings(
       : null;
     jobs.push({
       ...facts,
+      ...(read.card.evidenceFingerprint
+        ? {
+            listingCardEvidence: {
+              url: read.card.url,
+              sourceId: read.card.sourceId,
+              fingerprint: read.card.evidenceFingerprint,
+            },
+          }
+        : {}),
       ...(hiddenReason ? { hiddenReason } : {}),
       sourceJobId: fields.sourceJobId ?? read.card.sourceJobId ?? null,
       url: canonicalUrl ?? read.card.url,

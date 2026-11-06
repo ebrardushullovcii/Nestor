@@ -275,6 +275,8 @@ export type JobChange = z.infer<typeof JobChangeSchema>;
 
 /** One job as a search found it on one site, before it is merged. */
 export interface FoundJob {
+  /** The exact source card whose complete read produced these facts. */
+  listingCardEvidence?: { url: string; sourceId: string; fingerprint: string };
   title: string;
   company: string;
   location: string;

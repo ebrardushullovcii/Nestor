@@ -1854,7 +1854,7 @@ test("cached search judgments preserve prior listing details and do not share mu
   );
 });
 
-test("an identical inventory index reuses cards but makes their full bodies due for a fresh own-page read", () => {
+test("an identical inventory index retains completed own-listing reads for evidence-based reuse", () => {
   const job = JobPostingSchema.parse({
     ...posting("Platform Engineer", "Northwind", "j1"),
     source: "target_site",
@@ -1875,7 +1875,7 @@ test("an identical inventory index reuses cards but makes their full bodies due 
   );
   expect(cache.read(input, "identical card index")?.jobs[0]).toMatchObject({
     canonicalUrl: job.canonicalUrl,
-    listingDetailFetch: null,
+    listingDetailFetch: job.listingDetailFetch,
   });
   // A newly fetched complete feed actually contains the full listing evidence.
   const feed = { ...input, sourceCatalog: [job], sourceCatalogComplete: true };

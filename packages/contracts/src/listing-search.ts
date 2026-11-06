@@ -14,6 +14,8 @@ export interface ListingCard {
   cardFingerprint: string;
   sourceId: string;
   sourceLabel: string;
+  /** Stable own-card evidence, carried through the read to persistence. */
+  evidenceFingerprint?: string;
   /** Complete body from an authoritative provider feed; avoids a second GET. */
   listingText?: string;
   /** An already-read detail page, when a source URL itself was a vacancy. */

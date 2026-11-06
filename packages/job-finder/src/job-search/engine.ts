@@ -54,6 +54,7 @@ export interface JobSearchEngine {
     input: SearchInput & {
       cards: readonly ListingCard[];
       knownUrls(urls: readonly string[]): readonly string[];
+      refreshUrls?: readonly string[];
       seenCards(
         cards: readonly ListingCard[],
         roleGoalsKey: string,
@@ -389,6 +390,7 @@ export function createListingSearchEngine(deps: {
         signal: input.signal,
         goals,
         lookupKnownUrls: (urls) => Promise.resolve(input.knownUrls(urls)),
+        refreshUrls: input.refreshUrls ?? [],
         lookupSeenCards: (cards, key) =>
           Promise.resolve(input.seenCards(cards, key)),
         readPage,
@@ -468,6 +470,15 @@ export function createListingSearchEngine(deps: {
           );
           for (const job of discovery.jobs)
             result.jobs.push({
+              ...(card.evidenceFingerprint
+                ? {
+                    listingCardEvidence: {
+                      url: card.url,
+                      sourceId: card.sourceId,
+                      fingerprint: card.evidenceFingerprint,
+                    },
+                  }
+                : {}),
               title: job.title,
               company: job.company,
               location: job.location,

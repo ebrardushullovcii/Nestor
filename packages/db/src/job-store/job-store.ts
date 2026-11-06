@@ -15,6 +15,7 @@ import {
   type MoveJobsResult,
   type SaveFoundJobsResult,
   type SeenListingCard,
+  type ListingCard,
   type TriageStage,
   FIT_SHORT_MAX,
 } from "@nestor/contracts";
@@ -41,6 +42,10 @@ import {
 import { createSearches, type JobSearches } from "./searches";
 import { createStatements, type Statements } from "./statements";
 import { lookupSeenCards, rememberSeenCards } from "./seen-cards";
+import {
+  prepareListingCards,
+  rememberListingCardReads,
+} from "./listing-card-evidence";
 import {
   syncFitContext,
   fitCounts,
@@ -95,6 +100,10 @@ export interface JobStore {
   readonly searches: JobSearches;
   /** Indexed identity lookup before discovery reads a saved listing again. */
   findKnownUrls(urls: readonly string[]): string[];
+  prepareListingCards(cards: readonly ListingCard[]): {
+    cards: ListingCard[];
+    refreshUrls: string[];
+  };
   knownJobsBeforeSearch(urls: readonly string[], searchId: string): number[];
   /** Listing-card closure evidence can retire an existing Found job without another detail read. */
   closeFoundUrls(urls: readonly string[]): number;
@@ -322,6 +331,8 @@ export function openJobStore(
         Boolean(find.get(`url:${normalizeUrl(url)}`)),
       );
     },
+    prepareListingCards: (cards) =>
+      transaction(() => prepareListingCards(sql, cards)),
     knownJobsBeforeSearch(urls, searchId) {
       if (!urls.length) return [];
       return (
@@ -345,6 +356,7 @@ export function openJobStore(
           ids: byInput,
           mergedStages,
         } = writeFoundJobs(sql, searchId, jobs, Date.now());
+        rememberListingCardReads(sql, jobs, byInput);
         const stages = new Set(mergedStages);
         if (added.length > 0) stages.add("found");
         if (hidden.length > 0) stages.add("hidden");

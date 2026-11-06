@@ -33,6 +33,7 @@ import { JOB_SITES_SCHEMA } from "./job-sites";
 import { TRACKER_SCHEMA } from "./tracker-schema";
 import { APPLICATION_SCHEMA } from "./application-schema";
 import { SEEN_CARDS_SCHEMA } from "./seen-cards";
+import { LISTING_CARD_EVIDENCE_SCHEMA } from "./listing-card-evidence";
 
 /**
  * The layout the store keeps from. A file from before it (an earlier
@@ -326,6 +327,7 @@ export const JOB_STORE_SCHEMA: readonly string[] = [
   RESUMES,
   APPLICATION_SCHEMA,
   SEEN_CARDS_SCHEMA,
+  LISTING_CARD_EVIDENCE_SCHEMA,
   TRACKER_SCHEMA,
   JOB_SITES_SCHEMA,
   SOURCE_ACCESS_SCHEMA,
