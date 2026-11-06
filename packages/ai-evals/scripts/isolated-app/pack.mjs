@@ -664,7 +664,7 @@ export function generateRound(dir) {
     "",
     "Generated from each run's manifest. Raw packs win over this index.",
     "",
-    "| Run | ATS | Outcome | Minutes | Needs you | Ours | First stop reason |",
+    "| Run | ATS | Outcome | Minutes | Needs you | Ours | Recorded stop-related event / application error |",
     "| --- | --- | --- | ---: | ---: | ---: | --- |",
     ...packs.map(
       (p) =>

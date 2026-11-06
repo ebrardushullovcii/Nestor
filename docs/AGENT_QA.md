@@ -47,7 +47,7 @@ owner grant, other runs stay `prepare_only` with `submitAuthorized: false`.
 The owner's standing grant covers real-site runs, scripted or unattended included,
 with his real profile, browser data, settings and application history. Use the
 isolated live driver with `NESTOR_LIVE_APPLY_AUTHORIZED=1` and
-`up --ai live --net live --reuse-data`, as described in
+`up --ai live --net live --live-profile <persistent-profile-dir> --campaign-dir <campaign-dir>`, as described in
 [Real-site runs](TESTING.md#real-site-runs); retain and reuse that profile and check
 the send ledger and site before any send that could repeat one. Do not turn off
 permissions or switch an authorized live run to prepare-only. Replicas are regression
