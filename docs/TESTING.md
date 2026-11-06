@@ -2,13 +2,13 @@
 
 ## Automated checks by change
 
-| Change                                   | Run                                                                                                                                                                                                                                     |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| package-local code                       | `pnpm validate:package <alias>` (`desktop`, `job-finder`, `browser-agent`, `browser-runtime`, `contracts`)                                                                                                                              |
-| contracts or IPC                         | `pnpm validate:contracts` plus typecheck of affected packages                                                                                                                                                                           |
-| discovery or source-debug                | `pnpm source-generic:check` plus focused package tests                                                                                                                                                                                  |
-| desktop UI                               | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                                                                                                                                               |
-| broad cross-package behavior             | `pnpm verify:affected`                                                                                                                                                                                                                  |
+| Change                       | Run                                                                                                        |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| package-local code           | `pnpm validate:package <alias>` (`desktop`, `job-finder`, `browser-agent`, `browser-runtime`, `contracts`) |
+| contracts or IPC             | `pnpm validate:contracts` plus typecheck of affected packages                                              |
+| discovery or source-debug    | `pnpm source-generic:check` plus focused package tests                                                     |
+| desktop UI                   | `pnpm validate:desktop` plus the matching `ui:*` harness from `apps/desktop/package.json`                  |
+| broad cross-package behavior | `pnpm verify:affected`                                                                                     |
 
 Other entry points: `pnpm test:correctness`, `pnpm test:coverage`, `pnpm format`, `pnpm knip`, `pnpm structure:check`.
 
@@ -33,18 +33,36 @@ Builds and full suites are the slowest part of most changes. CI runs lint, typec
 - For exploratory agent testing, use `pnpm --filter @nestor/desktop qa`. It uses an isolated session with synthetic data and local replica sites. See [Agent development QA](AGENT_QA.md). Existing focused harnesses remain available.
 
 - Build first in a worktree: `pnpm --filter @nestor/desktop build`. Do not overwrite the owner's running main-checkout build. Scripts that launch `out/main/index.cjs` run whatever was last built; rebuild after changing build inputs.
-- Use a temporary user-data directory and synthetic data (`apps/desktop/test-fixtures/job-finder/resume-import-sample.txt`, or the synthetic personas in `apps/desktop/test-fixtures/job-finder/resume-import-personas/` in PDF, DOCX, TXT and Markdown), never the user's real workspace or a real person's resume.
+- Automated harnesses use a temporary user-data directory and synthetic data (`apps/desktop/test-fixtures/job-finder/resume-import-sample.txt`, or the synthetic personas in `apps/desktop/test-fixtures/job-finder/resume-import-personas/` in PDF, DOCX, TXT and Markdown). Authorized live runs use the owner's real profile (see Real-site runs).
 - Serialize isolated Electron launches unless a coordinated parallel run explicitly uses the QA launcher's shared `--parallel-group` with distinct `--session-id` values (see [Agent development QA](AGENT_QA.md)). Build once before starting the group and audit only the processes you own.
 - Harness commands live in `apps/desktop/package.json` (`ui:*`, `test:embedded-browser`, `test:live-assistant-*`). `:built` variants use the existing build; the others rebuild.
 - For an isolated production import without a native picker: `node apps/desktop/scripts/seed-product-quality-audit.mjs --user-data-dir <dir> --resume <synthetic-resume>`.
 
 ## Safety rules
 
-- Never submit to a real employer site. Final submits, from an apply harness or the assistant, are allowed only against the local replica job sites (below): the harness must fail before sending if any application target is not a loopback replica origin. Every other apply harness keeps `submitAuthorized: false` and `accountCreationAuthorized: false` and fails if any attempt, job, or application record reaches `submitted`.
-- Live prepare-only runs use a temporary user-data directory, a fake profile, and an approved synthetic resume. Anonymous Workday must stop at the account gate with a sign-in item in Needs you; never attempt credentials.
+- CI and synthetic regression tests send applications only to the local replica job sites (below). Never send a synthetic applicant to a real employer. Without an owner grant, real-site runs stay prepare-only; authorized live runs follow Real-site runs.
 - Live Assistant harnesses default to deterministic providers with AI credentials blanked. Live providers require `UI_LIVE_ASSISTANT_PROVIDER_MODE=configured` (see `docs/AI_PROVIDER_SETUP.md`).
 - Never add personal resumes, live workspaces, credentials, or authenticated browser state to benchmark corpora.
 - Approve store resumes through `approve_resume` (or the store test seed for a precondition); never bypass approval when Apply is the behavior under test.
+
+## Real-site runs
+
+The owner has given a standing grant for live runs on real sites (Nov 6, 2026: "i give full permissions"; "i give perms to apply and whatever its fine i want to apply for jobs anyways and use live pages for whatever dont be shy or stupid"). This includes scripted and unattended runs, real applications, account creation, Google sign-in and sign-up. A permission stays given until the owner takes it back; do not ask again or infer its withdrawal from a summary, a brief or an older ADR. See [ADR 0079](adr/0079-job-finder-is-a-harness.md).
+
+Live runs use the owner's real profile, resume, browser data, settings and application history in one dedicated isolated-app data folder. Reuse that profile and its send ledger across runs. Check the ledger and the site before any send that could repeat one. Don't switch an authorized run to prepare-only, block ordinary site requests or turn off permissions. Replicas are for synthetic regression only and never count toward live grades.
+
+From a built worktree, launch the existing isolated driver with live AI and live network. In PowerShell:
+
+```powershell
+$env:NESTOR_VERIFY_WORK = 'D:\Projects-Personal\nestor-agent-work'
+$env:NESTOR_VERIFY_LABEL = 'job-finder-live'
+$env:NESTOR_LIVE_APPLY_AUTHORIZED = '1'
+node packages/ai-evals/scripts/isolated-app/cli.mjs up --ai live --net live --reuse-data
+```
+
+On the Mac, use the same command with shell environment variables and `NESTOR_VERIFY_WORK=/Users/ebrardushullovci/Projects/nestor-agent-work`. Keep the same label and checkout. Today the driver creates a private temporary data folder on the first launch; `--reuse-data` reopens its recorded folder when it exists. Build the owner's real profile there through guided setup and browser import before a live application; never use a seeded synthetic profile. Until the persistent live profile lands, retain the folder between launches with `node packages/ai-evals/scripts/isolated-app/cli.mjs down --keep-data`, then use `up --ai live --net live --reuse-data` again. The flag reuses data; it does not create or verify a real profile.
+
+For every live run, record the requested model and effort separately from the model and effort reported by the response (unknown if absent), build commit, profile identity and data-folder path, network mode and every permission setting. Keep live-run evidence outside the repo in the campaign folder, never published; it may contain the owner's data, never passwords, cookies, tokens or MFA codes. The authenticated profile itself stays outside the evidence folder. Synthetic or deterministic runs do not prove live product quality.
 
 ## Fit judging
 
@@ -108,4 +126,4 @@ From the repo root, run `node apps/desktop/test-fixtures/job-sites/serve.mjs` wi
 
 Run `node apps/desktop/test-fixtures/job-sites/check.mjs` for the HTTP self-check. It starts its own server on a random port, visits every original job/application, walks every new listing page, opens representative details and forms, submits one synthetic application per site, checks confirmations and POST logs, then stops that server. It also checks filters, duplicates, unavailable jobs, local redirects, validation, delays and HTTP 429 recovery. It checks iframe and wizard markup but does not execute browser JavaScript.
 
-Every parsed POST is logged as JSON to stdout and the gitignored `apps/desktop/test-fixtures/job-sites/submissions.log`; passwords are redacted and uploads record metadata only. A logged POST proves receipt of a request, not acceptance of an application: validation failures and intermediate saves are logged too. Submission tests must separately assert the server's accepted-application count and the app's outcome, then verify that retries or restarts add no acceptance. All content is local and synthetic. Agent runs may send applications to these fixtures, and only to them. Runs against any other site stay prepare-only. See the fixture folder's `README.md` for details.
+Every parsed POST is logged as JSON to stdout and the gitignored `apps/desktop/test-fixtures/job-sites/submissions.log`; passwords are redacted and uploads record metadata only. A logged POST proves receipt of a request, not acceptance of an application: validation failures and intermediate saves are logged too. Submission tests must separately assert the server's accepted-application count and the app's outcome, then verify that retries or restarts add no acceptance. All content is local and synthetic. CI and synthetic regression runs send applications only to these fixtures. Without an owner grant, runs against any other site stay prepare-only; authorized live runs follow Real-site runs. See the fixture folder's `README.md` for details.

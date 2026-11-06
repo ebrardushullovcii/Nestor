@@ -2,6 +2,8 @@
 
 Status: partly superseded by ADRs 0025 (saved search behavior), 0029 (setup eligibility), 0034 (tab takeover) and 0041 (ordinary discovery). Job-store Apply replaces batch overrides with a mode captured per queued application (0b25b734); the 2026-10-27 safe-step amendment and submission boundaries remain accepted.
 
+Status update (2026-11-06): partly superseded by [ADR 0079](0079-job-finder-is-a-harness.md). Its harness decision wins wherever this ADR disagrees; see its per-ADR supersession list for the provisions replaced and retained.
+
 Date: 2026-09-16
 
 Supersedes ADR 0022. Clarifies ADRs 0012, 0013, 0017 and 0023. ADR 0018 remains unchanged.

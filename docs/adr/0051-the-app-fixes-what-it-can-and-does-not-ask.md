@@ -2,6 +2,8 @@
 
 Status: partly superseded for Aggressive resumes: local number checks replace model claim verdicts (588a399e), and local rules add listing skills, remove generic or repeated prose and prioritize metric bullets (fef8af09). Automatic settlement, non-blocking stretches and the person's review remain accepted.
 
+Status update (2026-11-06): partly superseded by [ADR 0079](0079-job-finder-is-a-harness.md). Its harness decision wins wherever this ADR disagrees; see its per-ADR supersession list for the provisions replaced and retained.
+
 ## Context
 
 The owner started ten resumes and read the screen as "all failed". The ten had been written and saved, but nine rendered at three or four pages, and three pages or more was an approval-blocking error. The writer could not fix it: the step that turns its proposal into the resume put back every saved achievement and listed every saved skill, so no resume could be shorter than the whole profile. Each resume still spent two extra AI calls being told to shorten itself. On top of that, approval waited on the person to keep each Aggressive stretch line by line, to decide every line the AI had not checked, to confirm each role the writer left off before applying, and a single source asking for a sign-in disabled Search for all sources.

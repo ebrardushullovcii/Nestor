@@ -2,6 +2,8 @@
 
 Status: partly superseded: the five-state, newest-run projection is replaced by indexed application work states and the tracker (0b053477, 7fd1f246); unanswered questions and reusable answers live in Needs you (49cec8a9). Same-page continuation, guarded sending and the 2026-10-27 ready-forms group remain accepted.
 
+Status update (2026-11-06): partly superseded by [ADR 0079](0079-job-finder-is-a-harness.md). Its harness decision wins wherever this ADR disagrees; see its per-ADR supersession list for the provisions replaced and retained.
+
 ## Context
 
 Every test of the Applications page failed at a different step, and the product owner's summary was that it "just does not work". Three defects sat under most of the failures:
