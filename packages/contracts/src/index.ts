@@ -82,3 +82,4 @@ export * from "./form-question-meaning";
 export * from "./application-question-reason";
 export * from "./assistant-job-list";
 export * from "./browser-passwords";
+export type { SelfLimitHit } from "./self-limit";

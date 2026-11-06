@@ -1,3 +1,4 @@
+import { selfLimitSlice } from "@nestor/core";
 import type { Frame, Page } from "playwright";
 
 /** A generic page read: keep a link beside its words and retain HTML item boundaries. */
@@ -51,13 +52,14 @@ export async function readPageLinkedText(page: Page): Promise<string> {
     });
   const root = await readFrame(page);
   const children = await Promise.all(
-    page
-      .frames()
-      .filter((frame) => frame !== page.mainFrame())
-      .slice(0, 16)
-      .map((frame) =>
-        readFrame(frame).catch(() => "[A child frame could not be read.]"),
-      ),
+    selfLimitSlice(
+      page.frames().filter((frame) => frame !== page.mainFrame()),
+      0,
+      16,
+      "packages/browser-runtime/src/page-linked-text.ts:55",
+    ).map((frame) =>
+      readFrame(frame).catch(() => "[A child frame could not be read.]"),
+    ),
   );
   return [root, ...children].join("\n\n");
 }

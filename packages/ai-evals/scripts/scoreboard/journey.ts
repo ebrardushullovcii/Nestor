@@ -7,6 +7,7 @@ import { setup } from "./profile.ts";
 import { search } from "./search.ts";
 import { auditQuestions, PERSONA, save, SCENARIOS } from "./report.ts";
 import type { Context, Result, Run } from "./types.ts";
+import { startReplicaAliases } from "./replicas.ts";
 
 const handlers: Record<string, (app: App, result: Result) => Promise<void>> = {
   search,
@@ -42,7 +43,7 @@ export default async function journey(ctx: Context) {
   const config = JSON.parse(ctx.args[0]) as {
     output: string;
     scenario?: string;
-    timeout: number;
+    timeout?: number;
     driver: string;
     provider?: { configPath: string; employerOrigin: string };
   };
@@ -54,6 +55,7 @@ export default async function journey(ctx: Context) {
   const setupStarted = Date.now();
   if (ctx.ai !== "live") throw Error("Scoreboard requires --ai live");
   try {
+    await startReplicaAliases(ctx.sites.url);
     await setup(app);
     run.setupSeconds =
       (run.setupSeconds ?? 0) + (Date.now() - setupStarted) / 1000;

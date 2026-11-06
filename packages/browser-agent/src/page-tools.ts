@@ -1,3 +1,4 @@
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import {
   parseToolArguments,
   type AgentLoopTool,
@@ -240,7 +241,14 @@ export function createPageTools(
       execute: async (raw) => {
         const ref = asString(parseToolArguments(raw).ref);
         const text = await hands.readText(ref ?? undefined);
-        return ok(text.slice(0, 20_000) || "That has no text.");
+        return ok(
+          selfLimitSlice(
+            text,
+            0,
+            20_000,
+            "packages/browser-agent/src/page-tools.ts:245",
+          ) || "That has no text.",
+        );
       },
     },
     {
@@ -521,7 +529,7 @@ export function createPageTools(
         const chosen = await hands.chooseOption(ref, option);
         if (!chosen.ok) {
           return ok(
-            `The list did not take "${option}": ${chosen.error}${chosen.offeredOptions?.length ? ` It offers: ${chosen.offeredOptions.slice(0, 40).join(", ")}.` : ""}`,
+            `The list did not take "${option}": ${chosen.error}${chosen.offeredOptions?.length ? ` It offers: ${selfLimitSlice(chosen.offeredOptions, 0, 40, "packages/browser-agent/src/page-tools.ts:532").join(", ")}.` : ""}`,
           );
         }
         return ok(
@@ -611,6 +619,13 @@ export function createPageTools(
       isWait: true,
       execute: async (raw) => {
         const requested = parseToolArguments(raw).milliseconds;
+        if (typeof requested === "number" && requested > 30_000)
+          reportSelfLimitHit({
+            limit: "browser_wait_request",
+            kind: "timeout",
+            value: 30000,
+            where: "browser-agent/wait",
+          });
         const milliseconds =
           typeof requested === "number"
             ? Math.max(0, Math.min(30_000, requested))

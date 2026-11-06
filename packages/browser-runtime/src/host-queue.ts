@@ -1,3 +1,5 @@
+import { reportSelfLimitHit } from "@nestor/core";
+
 /**
  * Fair, bounded concurrency per host. Waiting and server cooldowns occupy no
  * active slot. A limit given as a function is read each time work could
@@ -78,6 +80,20 @@ export function createHostQueue(options: {
         hosts.set(key, host);
       }
       const group = host;
+      if (active >= limit())
+        reportSelfLimitHit({
+          limit: "host_queue_total",
+          kind: "concurrency",
+          value: limit(),
+          where: "browser-runtime/createHostQueue",
+        });
+      if (group.active >= options.perHost)
+        reportSelfLimitHit({
+          limit: "host_queue_per_host",
+          kind: "concurrency",
+          value: options.perHost,
+          where: "browser-runtime/createHostQueue",
+        });
       return new Promise<T>((resolve, reject) => {
         let started = false,
           settled = false;

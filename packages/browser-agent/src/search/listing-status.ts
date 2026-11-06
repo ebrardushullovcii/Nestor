@@ -1,3 +1,5 @@
+import { reportSelfLimitHit } from "@nestor/core";
+
 /** Explicit availability evidence; role fit cannot make a closed vacancy actionable. */
 export function listingClosedReason(
   text: string,
@@ -8,14 +10,28 @@ export function listingClosedReason(
     /\bno longer (?:recruiting|hiring|accepting applications) for (?:this|the) (?:job|position|role|vacancy)\b/iu.test(
       normalized,
     )
-  )
+  ) {
+    reportSelfLimitHit({
+      limit: "closed_listing_wording",
+      kind: "veto",
+      value: "closed vacancy phrases",
+      where: "browser-agent/listingClosedReason",
+    });
     return "Closed: this vacancy is no longer accepting applications.";
+  }
   if (
     /\b(?:this (?:job|position|role|vacancy) (?:is )?no longer accepting applications|(?:job|position|role|vacancy) (?:has been |is )?(?:closed|filled)|applications (?:are |have )?(?:now )?(?:closed|ended)|diese stelle ist nicht mehr verf[uü]gbar|bewerbungen sind nicht mehr m[oö]glich)\b/iu.test(
       normalized,
     )
-  )
+  ) {
+    reportSelfLimitHit({
+      limit: "closed_listing_wording",
+      kind: "veto",
+      value: "closed vacancy phrases",
+      where: "browser-agent/listingClosedReason",
+    });
     return "Closed: this vacancy is no longer accepting applications.";
+  }
   const until =
     validThrough && Number.isFinite(Date.parse(validThrough))
       ? Date.parse(validThrough) +

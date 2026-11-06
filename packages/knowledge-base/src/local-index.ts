@@ -1,3 +1,4 @@
+import { selfLimitSlice } from "@nestor/core";
 import MiniSearch from "minisearch";
 
 import { chunkText, type ChunkTextOptions } from "./chunk";
@@ -117,9 +118,7 @@ export function createLocalKnowledgeIndex(
         stale = false;
       }
 
-      const tagFilter = searchOptions.tags
-        ? new Set(searchOptions.tags)
-        : null;
+      const tagFilter = searchOptions.tags ? new Set(searchOptions.tags) : null;
       const results = miniSearch.search(normalizedQuery, {
         prefix: searchOptions.prefix ?? true,
         fuzzy: searchOptions.fuzzy ?? 0,
@@ -142,18 +141,23 @@ export function createLocalKnowledgeIndex(
             score: result.score,
           };
         })
-        .filter((result): result is IndexedChunk & { score: number } => result !== null)
+        .filter(
+          (result): result is IndexedChunk & { score: number } =>
+            result !== null,
+        )
         .filter((result) => {
-        if (!tagFilter) {
-          return true;
-        }
+          if (!tagFilter) {
+            return true;
+          }
 
-        const metadataTags = result.metadata.tags ?? [];
-        return metadataTags.some((tag: KnowledgeDocumentTag) => tagFilter.has(tag));
+          const metadataTags = result.metadata.tags ?? [];
+          return metadataTags.some((tag: KnowledgeDocumentTag) =>
+            tagFilter.has(tag),
+          );
         });
 
-      return filteredResults
-        .sort((left, right) => {
+      return selfLimitSlice(
+        filteredResults.sort((left, right) => {
           if (!tagFilter) {
             const leftPriority = getTagPriority(left.metadata.tags);
             const rightPriority = getTagPriority(right.metadata.tags);
@@ -172,16 +176,18 @@ export function createLocalKnowledgeIndex(
           }
 
           return left.chunkIndex - right.chunkIndex;
-        })
-        .slice(0, searchOptions.limit ?? 5)
-        .map((result) => ({
-          id: result.id,
-          documentId: result.documentId,
-          chunkIndex: result.chunkIndex,
-          text: result.text,
-          metadata: result.metadata,
-          score: result.score,
-        }));
+        }),
+        0,
+        searchOptions.limit ?? 5,
+        "packages/knowledge-base/src/local-index.ts:159",
+      ).map((result) => ({
+        id: result.id,
+        documentId: result.documentId,
+        chunkIndex: result.chunkIndex,
+        text: result.text,
+        metadata: result.metadata,
+        score: result.score,
+      }));
     },
     clear() {
       storedDocuments.clear();

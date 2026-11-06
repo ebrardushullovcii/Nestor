@@ -1,3 +1,4 @@
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import type { JobPosting, JobSearchPreferences } from "@nestor/contracts";
 import type { CatalogSessionAgentDiscoveryOptions } from "./session-agent";
 import {
@@ -22,6 +23,12 @@ export function filterCatalogDiscoveryJobs(
 ): JobPosting[] {
   return jobs.filter((job) => {
     if (job.applyPath !== "easy_apply" || !job.easyApplyEligible) {
+      reportSelfLimitHit({
+        limit: "catalog_apply_path_veto",
+        kind: "veto",
+        value: "easy_apply only",
+        where: "packages/browser-agent/src/catalog-session-agent/discovery.ts",
+      });
       return false;
     }
 
@@ -52,6 +59,13 @@ export function filterCatalogDiscoveryJobs(
       searchPreferences.compensation,
     );
 
+    if (!matchesRole || !matchesLocation)
+      reportSelfLimitHit({
+        limit: "catalog_keyword_veto",
+        kind: "veto",
+        value: "title/location phrase match",
+        where: "packages/browser-agent/src/catalog-session-agent/discovery.ts",
+      });
     return (
       matchesRole &&
       matchesLocation &&
@@ -65,9 +79,16 @@ export function filterCatalogAgentDiscoveryJobs(
   jobs: readonly JobPosting[],
   options: CatalogSessionAgentDiscoveryOptions,
 ): JobPosting[] {
-  return jobs
-    .filter((job) => {
+  return selfLimitSlice(
+    jobs.filter((job) => {
       if (job.applyPath !== "easy_apply" || !job.easyApplyEligible) {
+        reportSelfLimitHit({
+          limit: "catalog_apply_path_veto",
+          kind: "veto",
+          value: "easy_apply only",
+          where:
+            "packages/browser-agent/src/catalog-session-agent/discovery.ts",
+        });
         return false;
       }
 
@@ -87,7 +108,18 @@ export function filterCatalogAgentDiscoveryJobs(
         job.location,
         options.searchPreferences.locations,
       );
+      if (!matchesRole || !matchesLocation)
+        reportSelfLimitHit({
+          limit: "catalog_keyword_veto",
+          kind: "veto",
+          value: "title/location phrase match",
+          where:
+            "packages/browser-agent/src/catalog-session-agent/discovery.ts",
+        });
       return matchesRole && matchesLocation;
-    })
-    .slice(0, options.targetJobCount);
+    }),
+    0,
+    options.targetJobCount,
+    "packages/browser-agent/src/catalog-session-agent/discovery.ts:82",
+  );
 }

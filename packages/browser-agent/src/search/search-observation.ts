@@ -1,5 +1,6 @@
 import { describeObservation } from "../apply/apply-prompts";
 import type { ApplyFormObservation } from "../apply/types";
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 
 /**
  * How a search turn sees the page.
@@ -23,7 +24,16 @@ function firstLine(text: string, max: number): string {
       .split("\n")
       .map((part) => part.trim())
       .find((part) => part.length > 0) ?? "";
-  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line;
+  if (line !== text.trim())
+    reportSelfLimitHit({
+      limit: "observation_first_line",
+      kind: "input",
+      value: 1,
+      where: "browser-agent/search_observation_label",
+    });
+  return line.length > max
+    ? `${selfLimitSlice(line, 0, max - 1, "browser-agent/search_observation_label").trimEnd()}…`
+    : line;
 }
 
 /** The address without its fragment, or null when it is not a web address. */
@@ -79,6 +89,13 @@ export function describeSearchObservation(
   observation: ApplyFormObservation,
 ): string {
   const compact = compactSearchObservation(observation);
+  if (compact.links.length > LINK_LIMIT)
+    reportSelfLimitHit({
+      limit: "search_observation_links",
+      kind: "count",
+      value: LINK_LIMIT,
+      where: "browser-agent/describeSearchObservation",
+    });
   const view = describeObservation(compact, {
     linkLimit: LINK_LIMIT,
   });

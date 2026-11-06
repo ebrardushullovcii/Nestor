@@ -10,7 +10,7 @@ import type {
   ResumeDraft,
   SavedJob,
 } from "@nestor/contracts";
-import { fnv1a32 } from "@nestor/core";
+import { fnv1a32, reportSelfLimitHit } from "@nestor/core";
 
 import { applyPatchToResumeDraft } from "./resume-workspace-patches";
 import {
@@ -64,8 +64,15 @@ async function checkWithinWritingBudget(
   if (
     remaining !== undefined &&
     (!Number.isFinite(remaining) || remaining <= 0)
-  )
+  ) {
+    reportSelfLimitHit({
+      limit: "claim_check_writing_budget",
+      kind: "timeout",
+      value: 0,
+      where: "job-finder/checkWithinWritingBudget",
+    });
     throw new ResumeClaimBudgetExceededError();
+  }
   const timeoutMs =
     remaining === undefined ? undefined : Math.max(1, Math.floor(remaining));
   const deadline = timeoutMs === undefined ? undefined : new AbortController();
@@ -97,10 +104,15 @@ async function checkWithinWritingBudget(
   try {
     signal?.throwIfAborted();
     if (deadline && timeoutMs !== undefined)
-      timer = setTimeout(
-        () => deadline.abort(new ResumeClaimBudgetExceededError()),
-        timeoutMs,
-      );
+      timer = setTimeout(() => {
+        reportSelfLimitHit({
+          limit: "claim_check_writing_budget",
+          kind: "timeout",
+          value: timeoutMs,
+          where: "job-finder/checkWithinWritingBudget",
+        });
+        deadline.abort(new ResumeClaimBudgetExceededError());
+      }, timeoutMs);
     const checking = check({
       ...request,
       ...(signal ? { signal } : {}),

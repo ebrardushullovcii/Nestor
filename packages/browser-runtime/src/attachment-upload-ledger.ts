@@ -1,3 +1,4 @@
+import { reportSelfLimitHit } from "@nestor/core";
 import type { Page, Request, Response } from "playwright";
 import type { RawApplyPage, RawApplyUpload } from "@nestor/contracts";
 
@@ -131,8 +132,15 @@ function add(records: UploadRecord[], record: UploadRecord): UploadRecord {
   const sameKind = records.filter(
     (entry) => entry.carriesFile === record.carriesFile,
   );
-  if (sameKind.length > MAX_PER_KIND)
+  if (sameKind.length > MAX_PER_KIND) {
+    reportSelfLimitHit({
+      limit: "upload_ledger_records",
+      kind: "count",
+      value: MAX_PER_KIND,
+      where: "browser-runtime/uploadLedger/add",
+    });
     records.splice(records.indexOf(sameKind[0]!), 1);
+  }
   return record;
 }
 
@@ -177,6 +185,13 @@ function track(records: UploadRecord[], request: Request): UploadRecord | null {
     type.startsWith("text/")
   ) {
     // A long body is still read for the file's name, up to the limit.
+    if (body.length > MAX_TEXT)
+      reportSelfLimitHit({
+        limit: "upload_response_text",
+        kind: "input",
+        value: MAX_TEXT,
+        where: "browser-runtime/uploadLedger/track",
+      });
     return add(records, {
       ...base,
       carriesFile: false,

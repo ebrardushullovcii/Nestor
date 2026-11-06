@@ -1,3 +1,4 @@
+import { selfLimitSlice } from "@nestor/core";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -108,10 +109,14 @@ function collectGroundedEvidence(profile: CandidateProfile) {
   }
 
   for (const experience of profile.experiences) {
-    const text = [experience.summary, ...experience.achievements]
-      .filter((value): value is string => Boolean(value?.trim()))
-      .slice(0, 2)
-      .join(" ");
+    const text = selfLimitSlice(
+      [experience.summary, ...experience.achievements].filter(
+        (value): value is string => Boolean(value?.trim()),
+      ),
+      0,
+      2,
+      "apps/desktop/src/main/services/job-finder/application-document-library.ts:112",
+    ).join(" ");
     if (!text) continue;
     evidence.push({
       id: `experience.${experience.id}`,
@@ -142,7 +147,12 @@ function collectGroundedEvidence(profile: CandidateProfile) {
       id: "profile.skills",
       source: "skill",
       label: "Approved profile skills",
-      text: profile.skills.slice(0, 12).join(", "),
+      text: selfLimitSlice(
+        profile.skills,
+        0,
+        12,
+        "apps/desktop/src/main/services/job-finder/application-document-library.ts:150",
+      ).join(", "),
     });
   }
 
@@ -232,7 +242,12 @@ function selectRelevantEvidence(input: {
       .slice(0, summary ? 2 : 3)
       .map(({ entry }) => entry),
   ];
-  return selected.slice(0, 3);
+  return selfLimitSlice(
+    selected,
+    0,
+    3,
+    "apps/desktop/src/main/services/job-finder/application-document-library.ts:245",
+  );
 }
 
 function normalizeSentence(value: string) {
@@ -343,7 +358,12 @@ function composeGroundedSentences(
       }
     }
   }
-  return sentences.slice(0, limit);
+  return selfLimitSlice(
+    sentences,
+    0,
+    limit,
+    "apps/desktop/src/main/services/job-finder/application-document-library.ts:361",
+  );
 }
 
 function renderDocument(input: {

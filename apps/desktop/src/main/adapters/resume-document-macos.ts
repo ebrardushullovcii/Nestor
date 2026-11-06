@@ -1,3 +1,4 @@
+import { reportSelfLimitHit } from "@nestor/core";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -68,7 +69,10 @@ export async function extractDocxTextWithTextutil(
     "/usr/bin/textutil",
     ["-convert", "txt", "-stdout", filePath],
     { maxBuffer: MAX_MACOS_PROCESS_OUTPUT_BYTES },
-  );
+  ).catch((error: unknown) => {
+    reportMacParserBufferLimit(error);
+    throw error;
+  });
 
   const normalized = stdout
     .replace(/\r\n/g, "\n")
@@ -98,7 +102,25 @@ export async function extractPdfDocumentBundleWithMacOs(
       input.sourceResumeId,
     ],
     { maxBuffer: MAX_MACOS_PROCESS_OUTPUT_BYTES },
-  );
+  ).catch((error: unknown) => {
+    reportMacParserBufferLimit(error);
+    throw error;
+  });
 
   return ResumeDocumentBundleSchema.parse(JSON.parse(stdout) as unknown);
+}
+
+function reportMacParserBufferLimit(error: unknown): void {
+  if (
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    error.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER"
+  )
+    reportSelfLimitHit({
+      limit: "mac_resume_parser_buffer",
+      kind: "input",
+      value: MAX_MACOS_PROCESS_OUTPUT_BYTES,
+      where: "desktop/resume-document-macos",
+    });
 }

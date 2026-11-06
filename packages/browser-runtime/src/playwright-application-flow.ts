@@ -1,3 +1,4 @@
+import { selfLimitTimeout } from "@nestor/core";
 import { redactAccountUrl, recordAccountFlowEntry } from "./account-flow-entry";
 import { createHash } from "node:crypto";
 import { personSubmissionObserverSource } from "./person-submission-observer";
@@ -3275,9 +3276,11 @@ export async function closePrepareOnlyAttachmentUploadWindow(
     if (now - startedAt >= UPLOAD_LEGS_WAIT_MS) break;
     await page.waitForTimeout(200).catch(() => undefined);
   }
-  await page
-    .waitForLoadState("networkidle", { timeout: 1_500 })
-    .catch(() => undefined);
+  await selfLimitTimeout(
+    page.waitForLoadState("networkidle", { timeout: 1_500 }),
+    1_500,
+    "packages/browser-runtime/src/playwright-application-flow.ts:3279",
+  ).catch(() => undefined);
   guard.attachmentUploadWindow = null;
   for (const frame of page.frames()) {
     await frame

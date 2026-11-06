@@ -1,3 +1,4 @@
+import { selfLimitSlice } from "@nestor/core";
 import type {
   ResumeDocumentBundle,
   ResumeImportFieldCandidate,
@@ -193,9 +194,14 @@ function extractHeaderWorkModes(documentBundle: ResumeDocumentBundle): {
 } {
   const sectionHeadingPattern =
     /^(?:summary|profile|experience|work experience|employment|education|skills|projects?|certifications?|languages?)\s*:?$/i;
-  const headerBlocks = [...documentBundle.blocks]
-    .sort((left, right) => left.readingOrder - right.readingOrder)
-    .slice(0, 12);
+  const headerBlocks = selfLimitSlice(
+    [...documentBundle.blocks].sort(
+      (left, right) => left.readingOrder - right.readingOrder,
+    ),
+    0,
+    12,
+    "packages/job-finder/src/internal/resume-import-literal-extraction.ts:197",
+  );
   const modes: Array<"remote" | "hybrid" | "onsite" | "flexible"> = [];
   const evidenceLines: string[] = [];
   const sourceBlockIds: string[] = [];
@@ -642,9 +648,12 @@ export function extractLiteralCandidates(
 ): ResumeImportFieldCandidate[] {
   const text = documentBundle.fullText ?? "";
   const drafts: ResumeImportFieldCandidateDraft[] = [];
-  const nameBlock = documentBundle.blocks
-    .slice(0, 8)
-    .find((block) => isLikelyPersonName(block.text));
+  const nameBlock = selfLimitSlice(
+    documentBundle.blocks,
+    0,
+    8,
+    "packages/job-finder/src/internal/resume-import-literal-extraction.ts:651",
+  ).find((block) => isLikelyPersonName(block.text));
   const emailMatches =
     text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
   const phoneMatches =
@@ -659,15 +668,23 @@ export function extractLiteralCandidates(
   const firstBlockId = documentBundle.blocks[0]?.id;
   const literalName =
     nameBlock?.text ??
-    lines
-      .slice(0, 12)
+    selfLimitSlice(
+      lines,
+      0,
+      12,
+      "packages/job-finder/src/internal/resume-import-literal-extraction.ts:671",
+    )
       .map((line) => extractNameFromHeaderLine(line))
       .find(Boolean) ??
     lines.find((line) => isLikelyPersonName(line)) ??
     null;
   const inlineLocation =
-    lines
-      .slice(0, 12)
+    selfLimitSlice(
+      lines,
+      0,
+      12,
+      "packages/job-finder/src/internal/resume-import-literal-extraction.ts:682",
+    )
       .map((line) => extractLocationFromHeaderLine(line, literalName))
       .find((line) => line && isLikelyLocationValue(line)) ?? null;
   const locationLine =

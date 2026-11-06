@@ -1,3 +1,4 @@
+import { selfLimitSlice } from "@nestor/core";
 import {
   CandidateProfileSchema,
   CandidateWorkEligibilitySchema,
@@ -683,10 +684,12 @@ function mergeResolvedSelectionIntoWorkspace(
           .map((entry) => entry.id)
       : profile.applicationIdentity.preferredLinkIds.length > 0
         ? profile.applicationIdentity.preferredLinkIds
-        : mergedLinks
-            .filter((entry) => entry.kind && entry.kind !== "other")
-            .slice(0, 3)
-            .map((entry) => entry.id);
+        : selfLimitSlice(
+            mergedLinks.filter((entry) => entry.kind && entry.kind !== "other"),
+            0,
+            3,
+            "packages/job-finder/src/internal/resume-import-apply.ts:687",
+          ).map((entry) => entry.id);
 
   const nextEmail =
     selection.scalarFields.email !== undefined

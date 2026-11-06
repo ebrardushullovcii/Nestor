@@ -1,3 +1,4 @@
+import { selfLimitTimeout } from "@nestor/core";
 import {
   readAccountFlowEntry,
   trackAccountFlowEntry,
@@ -345,9 +346,11 @@ export function withAccountWindowSession(input: {
         interacting = false;
       }
     }
-    const settle = page
-      .waitForEvent("domcontentloaded", { timeout: 10_000 })
-      .catch(() => undefined);
+    const settle = selfLimitTimeout(
+      page.waitForEvent("domcontentloaded", { timeout: 10_000 }),
+      10_000,
+      "packages/browser-runtime/src/account-window-session.ts:349",
+    ).catch(() => undefined);
     const writes = await openPrepareOnlyProviderWriteWindow(page, {
       origins: active.writeOrigins,
       disclosableValues: active.disclosable,
@@ -642,12 +645,14 @@ export function withAccountWindowSession(input: {
           )
             opened.documents++;
         });
-        const loaded = await child
-          .waitForLoadState("domcontentloaded", { timeout: 15_000 })
-          .then(
-            () => true,
-            () => false,
-          );
+        const loaded = await selfLimitTimeout(
+          child.waitForLoadState("domcontentloaded", { timeout: 15_000 }),
+          15_000,
+          "packages/browser-runtime/src/account-window-session.ts:648",
+        ).then(
+          () => true,
+          () => false,
+        );
         if (inactive())
           return refused("aborted", "The application run was cancelled.");
         if (!loaded && !child.isClosed()) {

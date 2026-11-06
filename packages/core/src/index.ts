@@ -1,4 +1,5 @@
 export * from "./concurrency-limiter";
+export * from "./self-limit";
 export { fnv1a64 } from "./fnv1a64";
 export { yieldToEventLoop } from "./event-loop-turn";
 export { copyView } from "./copy-view";

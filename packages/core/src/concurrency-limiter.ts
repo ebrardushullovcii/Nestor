@@ -1,3 +1,5 @@
+import { reportSelfLimitHit } from "./self-limit";
+
 /** FIFO admission for expensive asynchronous work. Permits always release on failure. */
 export function createConcurrencyLimiter(capacity: number) {
   if (!Number.isInteger(capacity) || capacity < 1)
@@ -6,7 +8,15 @@ export function createConcurrencyLimiter(capacity: number) {
   const waiting: Array<() => void> = [];
   async function acquire(): Promise<() => void> {
     if (active < capacity) active += 1;
-    else await new Promise<void>((resolve) => waiting.push(resolve));
+    else {
+      reportSelfLimitHit({
+        limit: "concurrency",
+        kind: "concurrency",
+        value: capacity,
+        where: "core/createConcurrencyLimiter",
+      });
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    }
     let released = false;
     return () => {
       if (released) return;
@@ -59,7 +69,15 @@ export function createAdaptiveConcurrencyLimiter(options: {
   };
   async function acquire(): Promise<() => void> {
     if (active < capacity && waiting.length === 0) active += 1;
-    else await new Promise<void>((resolve) => waiting.push(resolve));
+    else {
+      reportSelfLimitHit({
+        limit: "adaptive_concurrency",
+        kind: "concurrency",
+        value: capacity,
+        where: "core/createAdaptiveConcurrencyLimiter",
+      });
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    }
     let released = false;
     return () => {
       if (released) return;

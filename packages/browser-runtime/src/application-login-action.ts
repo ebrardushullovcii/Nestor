@@ -1,3 +1,4 @@
+import { selfLimitTimeout } from "@nestor/core";
 import { randomUUID } from "node:crypto";
 import type { ApplyRawPageHands, ApplyWriteResult } from "@nestor/contracts";
 import type { Locator, Page } from "playwright";
@@ -142,9 +143,11 @@ export async function clickPreparedLoginAction(
           { timeout: 10_000 },
         )
         .catch(() => undefined);
-      await page
-        .waitForLoadState("networkidle", { timeout: 1500 })
-        .catch(() => undefined);
+      await selfLimitTimeout(
+        page.waitForLoadState("networkidle", { timeout: 1500 }),
+        1500,
+        "packages/browser-runtime/src/application-login-action.ts:146",
+      ).catch(() => undefined);
       signal?.throwIfAborted();
       return {
         ok: true,

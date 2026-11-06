@@ -1,4 +1,5 @@
 import type { AgentLoopMessage } from "./agent-loop";
+import { reportSelfLimitHit } from "@nestor/core";
 
 /**
  * Keeping a long conversation inside a model's window.
@@ -135,6 +136,12 @@ export function elideOldToolOutputs(
       return message;
     }
     elided += 1;
+    reportSelfLimitHit({
+      limit: "old_tool_outputs",
+      kind: "context",
+      value: options.keepRecent,
+      where: "agent-runtime/elideOldToolOutputs",
+    });
     const toolName = toolNameById.get(message.toolCallId) ?? null;
     const firstLine = message.content.split("\n")[0]?.slice(0, 240) ?? "";
     return {
@@ -177,5 +184,12 @@ export function trimOldestExchanges(
     cut = boundary;
     if (estimate(messages.slice(cut)) <= options.budgetTokens) break;
   }
+  if (cut > 0)
+    reportSelfLimitHit({
+      limit: "old_exchanges",
+      kind: "context",
+      value: options.budgetTokens,
+      where: "agent-runtime/trimOldestExchanges",
+    });
   return { kept: messages.slice(cut), dropped: messages.slice(0, cut) };
 }

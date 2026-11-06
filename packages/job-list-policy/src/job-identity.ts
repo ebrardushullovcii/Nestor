@@ -1,3 +1,4 @@
+import { reportSelfLimitHit } from "@nestor/core";
 import { createHash } from "node:crypto";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import {
@@ -891,6 +892,17 @@ export function createJobIdentityIndex<T extends object>(
                       ),
                 )
               : indexedMatches;
+      if (
+        alias.kind === "cross_source_listing_facts" &&
+        indexedMatches &&
+        indexedMatches.size > MAX_CROSS_SOURCE_CANDIDATES
+      )
+        reportSelfLimitHit({
+          limit: "cross_source_candidates",
+          kind: "count",
+          value: MAX_CROSS_SOURCE_CANDIDATES,
+          where: "job-list-policy/job-identity",
+        });
       if (!matches || matches.size === 0) {
         continue;
       }

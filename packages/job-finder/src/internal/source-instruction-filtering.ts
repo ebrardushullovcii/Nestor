@@ -1,4 +1,5 @@
 import { normalizeText, uniqueStrings } from "./shared";
+import { reportSelfLimitHit } from "@nestor/core";
 export type {
   SourceInstructionFinalReviewPhaseContext,
   SourceInstructionQualityAssessment,
@@ -19,7 +20,9 @@ export function formatStatusLabel(value: string): string {
     .join(" ");
 }
 
-export function splitCustomDiscoveryInstructions(value: string | null): string[] {
+export function splitCustomDiscoveryInstructions(
+  value: string | null,
+): string[] {
   return (value ?? "")
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -84,8 +87,10 @@ function scrubBrokenInstructionRouteExamples(value: string): string {
     .replace(/https?:\/\/[^\s)\]>",]+/gi, (match) =>
       isBrokenInstructionRouteToken(match) ? "that route" : match,
     )
-    .replace(/(^|[\s(])(\/[^\s)\]>",]+)/g, (match, prefix: string, route: string) =>
-      isBrokenInstructionRouteToken(route) ? `${prefix}that route` : match,
+    .replace(
+      /(^|[\s(])(\/[^\s)\]>",]+)/g,
+      (match, prefix: string, route: string) =>
+        isBrokenInstructionRouteToken(route) ? `${prefix}that route` : match,
     );
 }
 
@@ -116,6 +121,18 @@ export function isInternalSourceDebugFailure(
 export function filterSourceDebugWarnings(
   values: readonly (string | null | undefined)[],
 ): string[] {
+  if (
+    values.some(
+      (value) =>
+        value && isInternalSourceDebugFailure(normalizeInstructionLine(value)),
+    )
+  )
+    reportSelfLimitHit({
+      limit: "source_warning_keyword_veto",
+      kind: "veto",
+      value: "internal failure phrases",
+      where: "job-finder/filterSourceDebugWarnings",
+    });
   return uniqueStrings(
     values
       .filter((value): value is string => Boolean(value))
@@ -125,6 +142,9 @@ export function filterSourceDebugWarnings(
   );
 }
 
-export function prefixedLines(prefix: string, values: readonly string[]): string[] {
+export function prefixedLines(
+  prefix: string,
+  values: readonly string[],
+): string[] {
   return values.map((value) => `${prefix}${normalizeInstructionLine(value)}`);
 }

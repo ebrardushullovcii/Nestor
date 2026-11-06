@@ -1,3 +1,4 @@
+import { selfLimitTimeout } from "@nestor/core";
 import type { ApplyUploadFile } from "@nestor/contracts";
 import type { Locator, Page } from "playwright";
 
@@ -34,7 +35,11 @@ export async function attachFile(
     buffer: Buffer.from(file.bytes),
   };
   if (!file.method || file.method === "input") {
-    await input.setInputFiles(payload, { timeout: 15_000 });
+    await selfLimitTimeout(
+      input.setInputFiles(payload, { timeout: 15_000 }),
+      15_000,
+      "packages/browser-runtime/src/file-attachment.ts:38",
+    );
     return;
   }
   // Bind to this input's own field, including a frame or open shadow root.
@@ -141,11 +146,17 @@ export async function attachFile(
       throw new Error("This field has no reachable attachment target.");
     if (file.method === "chooser") {
       // Register before the click; consume the timeout even if the click fails.
-      const choosing = page
-        .waitForEvent("filechooser", { timeout: 2_000 })
-        .catch(() => null);
+      const choosing = selfLimitTimeout(
+        page.waitForEvent("filechooser", { timeout: 2_000 }),
+        2_000,
+        "packages/browser-runtime/src/file-attachment.ts:149",
+      ).catch(() => null);
       try {
-        await element.click({ timeout: 2_000 });
+        await selfLimitTimeout(
+          element.click({ timeout: 2_000 }),
+          2_000,
+          "packages/browser-runtime/src/file-attachment.ts:155",
+        );
         const chooser = await choosing;
         if (
           !chooser ||
@@ -157,7 +168,11 @@ export async function attachFile(
             ))
         )
           throw new Error("The field did not open its own file chooser.");
-        await chooser.setFiles(payload, { timeout: 15_000 });
+        await selfLimitTimeout(
+          chooser.setFiles(payload, { timeout: 15_000 }),
+          15_000,
+          "packages/browser-runtime/src/file-attachment.ts:171",
+        );
       } finally {
         await choosing;
       }

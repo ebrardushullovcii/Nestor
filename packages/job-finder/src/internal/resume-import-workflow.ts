@@ -1,5 +1,5 @@
 import { resumeImportSavedAnswers } from "./resume-import-saved-answers";
-import { createConcurrencyLimiter } from "@nestor/core";
+import { createConcurrencyLimiter, reportSelfLimitHit } from "@nestor/core";
 import { ResumeImportStageUnreadError } from "@nestor/ai-providers";
 import {
   CandidateProfileSchema,
@@ -706,6 +706,12 @@ function withVisionBranchDeadline(
 
   const timeoutPromise = new Promise<ResumeVisionBranchResult>((resolve) => {
     timer = setTimeout(() => {
+      reportSelfLimitHit({
+        limit: "resume_vision_branch",
+        kind: "timeout",
+        value: timeoutMs,
+        where: "job-finder/withVisionBranchDeadline",
+      });
       resolve({ ok: true, result: createTimedOutVisionResult(ctx, timeoutMs) });
     }, timeoutMs);
     if (options.unrefTimer) {

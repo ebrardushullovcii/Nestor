@@ -1,3 +1,4 @@
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import type { ListingCard, RoleScreenGoals } from "@nestor/contracts";
 
 const words = (text: string) =>
@@ -16,13 +17,21 @@ export function clearRoleMatch(title: string, goals: RoleScreenGoals): boolean {
     goals.strategy === "target_roles"
       ? goals.targetRoles
       : [...goals.targetRoles, ...goals.relatedRoles];
-  return roles.some((role) => {
+  const matched = roles.some((role) => {
     const profession = words(role).replace(rank, "");
     return (
       profession.split(" ").length >= 2 &&
       (candidate === profession || candidate.startsWith(`${profession} `))
     );
   });
+  if (matched)
+    reportSelfLimitHit({
+      limit: "role_keyword_shortcut",
+      kind: "veto",
+      value: "exact title prefix",
+      where: "browser-agent/clearRoleMatch",
+    });
+  return matched;
 }
 
 /** Profession screening needs duties/team evidence, not pay, place or provider metadata. */
@@ -35,29 +44,37 @@ export function professionEvidence(card: ListingCard): string {
         row.categories && typeof row.categories === "object"
           ? (row.categories as Record<string, unknown>)
           : {};
-      return [
-        row.department,
-        row.team,
-        categories.department,
-        categories.team,
-        row.summary,
-        row.description,
-      ]
-        .filter((part): part is string => typeof part === "string")
-        .join("; ")
-        .slice(0, 1200);
+      return selfLimitSlice(
+        [
+          row.department,
+          row.team,
+          categories.department,
+          categories.team,
+          row.summary,
+          row.description,
+        ]
+          .filter((part): part is string => typeof part === "string")
+          .join("; "),
+        0,
+        1200,
+        "packages/browser-agent/src/search/listing-screening.ts:47",
+      );
     }
   } catch {
     /* Plain visible cards are also useful evidence. */
   }
-  return card.text
-    .replaceAll(card.title, "")
-    .replace(
-      /^(?:Posted\s+)?\d+\s+(?:minutes?|hours?|days?|weeks?)\s+ago\s*$/gimu,
-      "",
-    )
-    .trim()
-    .slice(0, 1200);
+  return selfLimitSlice(
+    card.text
+      .replaceAll(card.title, "")
+      .replace(
+        /^(?:Posted\s+)?\d+\s+(?:minutes?|hours?|days?|weeks?)\s+ago\s*$/gimu,
+        "",
+      )
+      .trim(),
+    0,
+    1200,
+    "packages/browser-agent/src/search/listing-screening.ts:66",
+  );
 }
 
 /** Give a small classifier only examples for the person's requested professions. */

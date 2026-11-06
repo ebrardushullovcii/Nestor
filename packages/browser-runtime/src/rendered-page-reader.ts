@@ -1,3 +1,4 @@
+import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core";
 import { DiscoveryPageReadError } from "@nestor/contracts";
 import type { BrowserContext, Page } from "playwright";
 
@@ -27,17 +28,23 @@ export async function readRenderedPageHtml(
   try {
     await options.onPage?.(page);
     options.signal?.throwIfAborted();
-    const response = await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout: 20_000,
-    });
+    const response = await selfLimitTimeout(
+      page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 20_000,
+      }),
+      20_000,
+      "packages/browser-runtime/src/rendered-page-reader.ts:31",
+    );
     if (response && response.status() >= 400)
       throw new DiscoveryPageReadError(response.status());
     // Let script-loaded content finish. Busy sites still get a bounded read.
     if (!options.ready)
-      await page
-        .waitForLoadState("networkidle", { timeout: 8_000 })
-        .catch(() => undefined);
+      await selfLimitTimeout(
+        page.waitForLoadState("networkidle", { timeout: 8_000 }),
+        8_000,
+        "packages/browser-runtime/src/rendered-page-reader.ts:43",
+      ).catch(() => undefined);
     options.signal?.throwIfAborted();
     let html = await page.content();
     const deadline = Date.now() + 12_000;
@@ -46,6 +53,13 @@ export async function readRenderedPageHtml(
       await page.waitForTimeout(200);
       html = await page.content().catch(() => html);
     }
+    if (options.ready && !options.ready(html))
+      reportSelfLimitHit({
+        limit: "rendered_page_ready",
+        kind: "timeout",
+        value: 12000,
+        where: "browser-runtime/readRenderedPageHtml",
+      });
     return { html, finalUrl: page.url() };
   } finally {
     options.signal?.removeEventListener("abort", abort);

@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@nestor/contracts": "workspace:*",
+    "@nestor/core": "workspace:*",
     "@nestor/os-integration": "workspace:*"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   createLiveAssistantService,
@@ -122,6 +122,38 @@ async function acceptSetup(service: ReturnType<typeof createService>) {
 }
 
 describe("live assistant service", () => {
+  test("reports transcript, degraded-capability and conversation history omissions", async () => {
+    const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const service = createService(createMemoryRepository(), {
+        cueCardProvider: {
+          ...createDeterministicInterviewCueCardProvider(),
+          generateCueCard: () =>
+            Promise.reject(Error("Synthetic provider unavailable")),
+        },
+      });
+      await acceptSetup(service);
+      await service.runRehearsal();
+      const session = (await service.startSession()).activeSession!;
+      for (let i = 0; i < 101; i++)
+        await service.sendChatMessage({
+          conversationId: `interview_${session.id}`,
+          sessionId: session.id,
+          content: `Explain this synthetic architecture question ${i}?`,
+          attachments: [],
+        });
+      const lines = log.mock.calls.map(([line]) => String(line)).join("\n");
+      expect(lines).toContain("live-assistant/conversation_messages");
+      expect(lines).toContain("live-assistant/degraded_capability_context");
+      expect(
+        (await service.getWorkspace()).activeSession?.chatConversation
+          ?.messages,
+      ).toHaveLength(200);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   test("blocks session start until setup consent is explicit", async () => {
     const service = createService();
 

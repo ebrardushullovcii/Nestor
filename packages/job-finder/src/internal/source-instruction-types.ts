@@ -1,4 +1,5 @@
 import { SourceIntelligenceArtifactSchema } from "@nestor/contracts";
+import { reportSelfLimitHit } from "@nestor/core";
 import type {
   SourceIntelligenceArtifact,
   BrowserVisualEvidenceSummary,
@@ -118,6 +119,12 @@ export function parseSourceInstructionReviewOverride(
       }
       return SourceIntelligenceArtifactSchema.parse(normalized);
     } catch (error) {
+      reportSelfLimitHit({
+        limit: "source_intelligence_validator",
+        kind: "validator",
+        value: "SourceIntelligenceArtifactSchema",
+        where: "job-finder/parseSourceInstructionReviewOverride",
+      });
       if (process.env.NODE_ENV === "development") {
         console.warn(
           "Failed to parse payload.intelligence into SourceIntelligenceArtifactSchema",

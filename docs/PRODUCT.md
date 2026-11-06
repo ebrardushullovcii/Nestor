@@ -10,6 +10,7 @@ Someone imports a resume, finds lots of relevant jobs, gets a good resume for ea
 
 ## AI and automation
 
+- The goal is that the app does the job well for the person: anything we put in the model's way must protect safety, privacy or the person's own settings; when results look wrong or worse than expected, find the cause and fix the same pattern everywhere.
 - AI access is included in the product. People do not enter API keys, configure providers or choose models. Provider configuration is for development and operations; unavailable AI is a service outage, not a setup task for the person.
 - The AI should do the work through capable tools within the person's saved permissions. Use its judgment where rigid rules fail, avoid asking for facts already known, and ask for help only when the person really needs to act.
 - Development checks use isolated instances, synthetic data and local replica sites for application submissions. The detailed rules belong in [Testing](TESTING.md#safety-rules).

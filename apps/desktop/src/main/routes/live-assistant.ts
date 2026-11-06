@@ -1,3 +1,4 @@
+import { reportSelfLimitHit } from "@nestor/core";
 import { open, stat } from "node:fs/promises";
 import path from "node:path";
 import { clipboard, dialog, type IpcMain } from "electron";
@@ -39,9 +40,16 @@ async function withSyncedOverlays<
   return workspace;
 }
 
-async function readNativeCaptionFileText(filePath: string) {
+export async function readNativeCaptionFileText(filePath: string) {
   const fileStats = await stat(filePath);
   const bytesToRead = Math.min(fileStats.size, MAX_NATIVE_CAPTION_FILE_BYTES);
+  if (fileStats.size > MAX_NATIVE_CAPTION_FILE_BYTES)
+    reportSelfLimitHit({
+      limit: "native_caption_file_bytes",
+      kind: "input",
+      value: MAX_NATIVE_CAPTION_FILE_BYTES,
+      where: "live-assistant/readNativeCaptionFileText",
+    });
   const start = Math.max(0, fileStats.size - bytesToRead);
   const buffer = Buffer.alloc(bytesToRead);
   const file = await open(filePath, "r");

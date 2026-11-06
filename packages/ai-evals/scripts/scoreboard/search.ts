@@ -1,3 +1,5 @@
+import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core/self-limit";
+
 import assert from "node:assert/strict";
 import type { App } from "./app.ts";
 import type { Result } from "./types.ts";
@@ -50,7 +52,7 @@ export async function search(app: App, r: Result) {
   const firstStarted = latest().started_at;
   let firstSeconds: number | null = null;
   r.metrics.timeToFirstResultSeconds = null;
-  const end = Date.now() + Math.max(app.timeout, 240) * 1000;
+  const end = Date.now() + app.timeout * 1000;
   let stopped = false;
   let continued = false;
   let restarted = false;
@@ -96,7 +98,11 @@ export async function search(app: App, r: Result) {
           name: /^(Continue unfinished sites|Keep reading (?:it|them))$/,
         });
         app.log("Continue unfinished sites");
-        await control.click({ timeout: 15000 });
+        await selfLimitTimeout(
+          control.click({ timeout: 15000 }),
+          15000,
+          "packages/ai-evals/scripts/scoreboard/search.ts:101",
+        );
         await app.until(
           () => latest().state === "running",
           20,
@@ -189,6 +195,13 @@ export async function search(app: App, r: Result) {
     summary: `${final.length} listings; first=${firstSeconds ?? "none"}s; state=${latest().state}; source failures=${sourceFailures.length}; dup=${duplicates}; Stop/Continue/restart=${stopped}/${continued}/${restarted}`,
   };
   if (latest().state === "running") {
+    if (Date.now() >= end)
+      reportSelfLimitHit({
+        limit: "search_scenario_deadline",
+        kind: "timeout",
+        value: app.timeout * 1000,
+        where: "scoreboard/search",
+      });
     app.log("stop timed-out search before other scenarios");
     const stop = p.getByRole("button", { name: "Stop search", exact: true });
     if (await stop.count()) await stop.click();

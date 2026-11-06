@@ -1,6 +1,5 @@
-import {
-  type JobFitJudgmentResult,
-} from "@nestor/ai-providers";
+import { selfLimitSlice } from "@nestor/core";
+import { type JobFitJudgmentResult } from "@nestor/ai-providers";
 import type {
   FitJudgment,
   JobPosting,
@@ -42,8 +41,18 @@ export function toFitJudgment(
     preferences: result.preferences,
     preferencesExplanation: result.preferencesExplanation,
     locationReach: result.locationReach,
-    reasons: result.reasons.slice(0, 4),
-    gaps: result.gaps.slice(0, 4),
+    reasons: selfLimitSlice(
+      result.reasons,
+      0,
+      4,
+      "packages/job-finder/src/internal/fit-judgment.ts:44",
+    ),
+    gaps: selfLimitSlice(
+      result.gaps,
+      0,
+      4,
+      "packages/job-finder/src/internal/fit-judgment.ts:50",
+    ),
     summary: result.summary ?? null,
     listingClosed: result.listingClosed,
     listingClosedEvidence: result.listingClosedEvidence,

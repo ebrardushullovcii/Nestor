@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./self-limit": "./src/self-limit.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
@@ -13,4 +14,3 @@
     "test": "vitest run --passWithNoTests"
   }
 }
-

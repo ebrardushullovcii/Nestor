@@ -1,4 +1,5 @@
 import type { CandidateProfile, ResumeDraft } from "@nestor/contracts";
+import { reportSelfLimitHit } from "@nestor/core";
 import {
   buildPersonsOwnResumeClaimMatcher,
   resumeClaimContentHash,
@@ -113,6 +114,12 @@ export async function balanceResumePages(input: {
     layout.lastPageFillRatio < 0.5;
   if ((layout.pageCount ?? 0) <= 2 && !sparseLastPage()) return draft;
   const target = sparseLastPage() ? 1 : 2;
+  reportSelfLimitHit({
+    limit: "resume_page_target",
+    kind: "pages",
+    value: target,
+    where: "job-finder/balanceResumePages",
+  });
   // Lowest-value prose goes first; metric evidence survives ahead of it.
   // Keep one bullet per role until other available material is exhausted.
   const entries = draft.sections

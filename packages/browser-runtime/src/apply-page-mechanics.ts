@@ -1,4 +1,11 @@
 import {
+  selfLimitTimeout,
+  reportSelfLimitHit,
+  selfLimitSlice,
+} from "@nestor/core";
+
+import { watchPageSelfLimits } from "./self-limit-page";
+import {
   trackAccountFlowEntry,
   readAccountFlowEntry,
 } from "./account-flow-entry";
@@ -100,9 +107,11 @@ export const APPLY_CLICKABLE_SELECTOR =
  * runs before every read and a run is made of many reads.
  */
 async function settlePage(page: Page, timeout = 4_000): Promise<void> {
-  await page
-    .waitForLoadState("domcontentloaded", { timeout })
-    .catch(() => undefined);
+  await selfLimitTimeout(
+    page.waitForLoadState("domcontentloaded", { timeout }),
+    timeout,
+    "packages/browser-runtime/src/apply-page-mechanics.ts:110",
+  ).catch(() => undefined);
 }
 
 const mutationCounts = new WeakMap<Page, { count: number }>();
@@ -122,6 +131,7 @@ function mutationCounter(page: Page): { count: number } {
 }
 
 export async function readRawApplyPage(page: Page): Promise<RawApplyPage> {
+  watchPageSelfLimits(page);
   const counter = mutationCounter(page);
   const raw = await readRawApplyPageContent(page);
   // A dropzone's inner input often says only "Choose a file". Its actual
@@ -249,7 +259,12 @@ async function includeChildFrameContent(
   if (frames.length === 0) return root;
 
   const snapshots = await Promise.all(
-    frames.slice(0, 16).map((frame, index) => readApplyFrame(frame, index)),
+    selfLimitSlice(
+      frames,
+      0,
+      16,
+      "packages/browser-runtime/src/apply-page-mechanics.ts:262",
+    ).map((frame, index) => readApplyFrame(frame, index)),
   );
   const readable = snapshots.filter(
     (snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== null,
@@ -258,10 +273,14 @@ async function includeChildFrameContent(
 
   return {
     ...root,
-    bodyText: [root.bodyText, ...readable.map((item) => item.bodyText)]
-      .filter(Boolean)
-      .join("\n\n")
-      .slice(0, 20_000),
+    bodyText: selfLimitSlice(
+      [root.bodyText, ...readable.map((item) => item.bodyText)]
+        .filter(Boolean)
+        .join("\n\n"),
+      0,
+      20_000,
+      "packages/browser-runtime/src/apply-page-mechanics.ts:276",
+    ),
     controls: [...root.controls, ...readable.flatMap((item) => item.controls)],
     actions: [...root.actions, ...readable.flatMap((item) => item.actions)],
     links: [...root.links, ...readable.flatMap((item) => item.links)],
@@ -270,17 +289,27 @@ async function includeChildFrameContent(
       ...readable.flatMap((item) => item.clickables),
     ],
     headings: [...root.headings, ...readable.flatMap((item) => item.headings)],
-    validationErrors: [
-      ...root.validationErrors,
-      ...readable.flatMap((item) => item.validationErrors),
-    ].slice(0, 24),
+    validationErrors: selfLimitSlice(
+      [
+        ...root.validationErrors,
+        ...readable.flatMap((item) => item.validationErrors),
+      ],
+      0,
+      24,
+      "packages/browser-runtime/src/apply-page-mechanics.ts:292",
+    ),
     ...(root.summaryRows?.length ||
     readable.some((item) => item.summaryRows.length)
       ? {
-          summaryRows: [
-            ...(root.summaryRows ?? []),
-            ...readable.flatMap((item) => item.summaryRows),
-          ].slice(0, 200),
+          summaryRows: selfLimitSlice(
+            [
+              ...(root.summaryRows ?? []),
+              ...readable.flatMap((item) => item.summaryRows),
+            ],
+            0,
+            200,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:304",
+          ),
         }
       : {}),
   };
@@ -314,6 +343,48 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
       frame
         .locator(APPLY_CONTROL_SELECTOR)
         .evaluateAll((elements, prefix): RawApplyControl[] => {
+          // This callback is serialized into the page; only fixed limit metadata returns
+          // over its console channel. The host records it through reportSelfLimitHit.
+          function limitedSlice(
+            value: string,
+            start: number,
+            end: number,
+            where: string,
+          ): string;
+          function limitedSlice<T>(
+            value: readonly T[],
+            start: number,
+            end: number,
+            where: string,
+          ): T[];
+          function limitedSlice<T>(
+            value: string | readonly T[],
+            start: number,
+            end: number,
+            where: string,
+          ): string | T[] {
+            const result =
+              typeof value === "string"
+                ? value.slice(start, end)
+                : value.slice(start, end);
+            if (result.length < value.length) {
+              try {
+                console.debug(
+                  "__nestor_self_limit__ " +
+                    JSON.stringify({
+                      limit: "evidence_window",
+                      kind: "input",
+                      value: end - start,
+                      where,
+                    }),
+                );
+              } catch {
+                /* A page-owned console cannot change the operation. */
+              }
+            }
+            return result;
+          }
+
           const labelText = (element: Element | null): string => {
             if (!element) return "";
             const clone = element.cloneNode(true) as Element;
@@ -359,6 +430,21 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 .replace(label, "")
                 .replace(/\s+/gu, " ")
                 .trim();
+            if (hint.length > 300) {
+              try {
+                console.debug(
+                  "__nestor_self_limit__ " +
+                    JSON.stringify({
+                      limit: "long_field_hint_veto",
+                      kind: "input",
+                      value: 300,
+                      where: "browser-runtime/hintFor",
+                    }),
+                );
+              } catch {
+                /* A page-owned console cannot change the operation. */
+              }
+            }
             return hint.length <= 300 ? hint : "";
           };
           const roots = Array.from(
@@ -484,13 +570,22 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             const style = window.getComputedStyle(input);
             const rect = input.getBoundingClientRect();
             return {
-              described: described.slice(0, 500),
+              described: limitedSlice(
+                described,
+                0,
+                500,
+                "packages/browser-runtime/src/apply-page-mechanics.ts:573",
+              ),
               ariaInvalid: input.getAttribute("aria-invalid") === "true",
-              nearby: (box?.innerText ?? "")
-                .replace(/[ \t]+/gu, " ")
-                .replace(/\s*\n\s*/gu, "\n")
-                .trim()
-                .slice(0, 600),
+              nearby: limitedSlice(
+                (box?.innerText ?? "")
+                  .replace(/[ \t]+/gu, " ")
+                  .replace(/\s*\n\s*/gu, "\n")
+                  .trim(),
+                0,
+                600,
+                "packages/browser-runtime/src/apply-page-mechanics.ts:580",
+              ),
               shown:
                 style.display !== "none" &&
                 style.visibility !== "hidden" &&
@@ -786,9 +881,56 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
           }),
         `f${frameIndex}`,
       ),
-      frame.locator(APPLY_LINK_SELECTOR).evaluateAll(
-        (elements, prefix): RawApplyLink[] =>
-          elements.slice(0, 400).map((element, index) => {
+      frame
+        .locator(APPLY_LINK_SELECTOR)
+        .evaluateAll((elements, prefix): RawApplyLink[] => {
+          // This callback is serialized into the page; only fixed limit metadata returns
+          // over its console channel. The host records it through reportSelfLimitHit.
+          function limitedSlice(
+            value: string,
+            start: number,
+            end: number,
+            where: string,
+          ): string;
+          function limitedSlice<T>(
+            value: readonly T[],
+            start: number,
+            end: number,
+            where: string,
+          ): T[];
+          function limitedSlice<T>(
+            value: string | readonly T[],
+            start: number,
+            end: number,
+            where: string,
+          ): string | T[] {
+            const result =
+              typeof value === "string"
+                ? value.slice(start, end)
+                : value.slice(start, end);
+            if (result.length < value.length) {
+              try {
+                console.debug(
+                  "__nestor_self_limit__ " +
+                    JSON.stringify({
+                      limit: "evidence_window",
+                      kind: "input",
+                      value: end - start,
+                      where,
+                    }),
+                );
+              } catch {
+                /* A page-owned console cannot change the operation. */
+              }
+            }
+            return result;
+          }
+          return limitedSlice(
+            elements,
+            0,
+            400,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:928",
+          ).map((element, index) => {
             const html = element as HTMLElement;
             const anchor =
               element instanceof HTMLAnchorElement ? element : null;
@@ -811,12 +953,57 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 html.getClientRects().length > 0,
               topOffset: Math.round(rect.top + window.scrollY),
             };
-          }),
-        `f${frameIndex}`,
-      ),
+          });
+        }, `f${frameIndex}`),
       frame.locator(APPLY_CLICKABLE_SELECTOR).evaluateAll(
-        (elements, [prefix, owned]): RawApplyClickable[] =>
-          elements.slice(0, 300).flatMap((element, index) => {
+        (elements, [prefix, owned]): RawApplyClickable[] => {
+          // This callback is serialized into the page; only fixed limit metadata returns
+          // over its console channel. The host records it through reportSelfLimitHit.
+          function limitedSlice(
+            value: string,
+            start: number,
+            end: number,
+            where: string,
+          ): string;
+          function limitedSlice<T>(
+            value: readonly T[],
+            start: number,
+            end: number,
+            where: string,
+          ): T[];
+          function limitedSlice<T>(
+            value: string | readonly T[],
+            start: number,
+            end: number,
+            where: string,
+          ): string | T[] {
+            const result =
+              typeof value === "string"
+                ? value.slice(start, end)
+                : value.slice(start, end);
+            if (result.length < value.length) {
+              try {
+                console.debug(
+                  "__nestor_self_limit__ " +
+                    JSON.stringify({
+                      limit: "evidence_window",
+                      kind: "input",
+                      value: end - start,
+                      where,
+                    }),
+                );
+              } catch {
+                /* A page-owned console cannot change the operation. */
+              }
+            }
+            return result;
+          }
+          return limitedSlice(
+            elements,
+            0,
+            300,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:1001",
+          ).flatMap((element, index) => {
             // A button already has its own ref, with its form's action:
             // neither it nor anything inside it (a label span, an icon),
             // across shadow roots, is a second name to press it under.
@@ -830,12 +1017,15 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
               if (node.matches(owned)) return [];
             const html = element as HTMLElement;
             const style = window.getComputedStyle(html);
-            const label = (
+            const label = limitedSlice(
               element.getAttribute("aria-label")?.trim() ||
-              html.innerText.trim() ||
-              element.getAttribute("title")?.trim() ||
-              ""
-            ).slice(0, 300);
+                html.innerText.trim() ||
+                element.getAttribute("title")?.trim() ||
+                "",
+              0,
+              300,
+              "packages/browser-runtime/src/apply-page-mechanics.ts:1020",
+            );
             if (!label) return [];
             return [
               {
@@ -855,16 +1045,66 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 topOffset: 0,
               },
             ];
-          }),
+          });
+        },
         [`f${frameIndex}`, APPLY_ACTION_SELECTOR] as const,
       ),
       frame
         .locator("h1, h2, h3, [role='heading']")
-        .evaluateAll((elements): RawApplyHeading[] =>
-          elements.slice(0, 60).flatMap((element) => {
-            const text = (element as HTMLElement).innerText
-              .trim()
-              .slice(0, 300);
+        .evaluateAll((elements): RawApplyHeading[] => {
+          // This callback is serialized into the page; only fixed limit metadata returns
+          // over its console channel. The host records it through reportSelfLimitHit.
+          function limitedSlice(
+            value: string,
+            start: number,
+            end: number,
+            where: string,
+          ): string;
+          function limitedSlice<T>(
+            value: readonly T[],
+            start: number,
+            end: number,
+            where: string,
+          ): T[];
+          function limitedSlice<T>(
+            value: string | readonly T[],
+            start: number,
+            end: number,
+            where: string,
+          ): string | T[] {
+            const result =
+              typeof value === "string"
+                ? value.slice(start, end)
+                : value.slice(start, end);
+            if (result.length < value.length) {
+              try {
+                console.debug(
+                  "__nestor_self_limit__ " +
+                    JSON.stringify({
+                      limit: "evidence_window",
+                      kind: "input",
+                      value: end - start,
+                      where,
+                    }),
+                );
+              } catch {
+                /* A page-owned console cannot change the operation. */
+              }
+            }
+            return result;
+          }
+          return limitedSlice(
+            elements,
+            0,
+            60,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:1096",
+          ).flatMap((element) => {
+            const text = limitedSlice(
+              (element as HTMLElement).innerText.trim(),
+              0,
+              300,
+              "packages/browser-runtime/src/apply-page-mechanics.ts:1102",
+            );
             if (!text) return [];
             const explicit = element.getAttribute("aria-level");
             const fromTag = /^H([1-6])$/u.exec(element.tagName)?.[1];
@@ -874,20 +1114,83 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 text,
               },
             ];
-          }),
-        ),
-      frame
-        .locator("body")
-        .innerText({ timeout: 3_000 })
-        .catch(() => ""),
+          });
+        }),
+      selfLimitTimeout(
+        frame.locator("body").innerText({ timeout: 3_000 }),
+        3_000,
+        "packages/browser-runtime/src/apply-page-mechanics.ts:1119",
+      ).catch(() => ""),
       frame
         .locator("[role='alert'], [aria-live='assertive']")
-        .evaluateAll((elements) =>
-          elements
-            .map((element) => (element as HTMLElement).innerText.trim())
-            .filter((text) => text.length > 0 && text.length < 300)
-            .slice(0, 12),
-        )
+        .evaluateAll((elements) => {
+          // This callback is serialized into the page; only fixed limit metadata returns
+          // over its console channel. The host records it through reportSelfLimitHit.
+          function limitedSlice(
+            value: string,
+            start: number,
+            end: number,
+            where: string,
+          ): string;
+          function limitedSlice<T>(
+            value: readonly T[],
+            start: number,
+            end: number,
+            where: string,
+          ): T[];
+          function limitedSlice<T>(
+            value: string | readonly T[],
+            start: number,
+            end: number,
+            where: string,
+          ): string | T[] {
+            const result =
+              typeof value === "string"
+                ? value.slice(start, end)
+                : value.slice(start, end);
+            if (result.length < value.length) {
+              try {
+                console.debug(
+                  "__nestor_self_limit__ " +
+                    JSON.stringify({
+                      limit: "evidence_window",
+                      kind: "input",
+                      value: end - start,
+                      where,
+                    }),
+                );
+              } catch {
+                /* A page-owned console cannot change the operation. */
+              }
+            }
+            return result;
+          }
+          return limitedSlice(
+            elements
+              .map((element) => (element as HTMLElement).innerText.trim())
+              .filter((text) => {
+                if (text.length >= 300) {
+                  try {
+                    console.debug(
+                      "__nestor_self_limit__ " +
+                        JSON.stringify({
+                          limit: "long_validation_text_veto",
+                          kind: "input",
+                          value: 300,
+                          where: "browser-runtime/readValidationErrors",
+                        }),
+                    );
+                  } catch {
+                    /* A page-owned console cannot change the operation. */
+                  }
+                }
+                return text.length > 0 && text.length < 300;
+              }),
+            0,
+            12,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:1168",
+          );
+        })
         .catch(() => [] as string[]),
       // Where each sits is extra: a frame that will not say still reads.
       frame
@@ -943,6 +1246,48 @@ export async function readApplyStepLabel(
       "[aria-current='step'], [role='progressbar'], [aria-label*='step' i]",
     )
     .evaluateAll((elements) => {
+      // This callback is serialized into the page; only fixed limit metadata returns
+      // over its console channel. The host records it through reportSelfLimitHit.
+      function limitedSlice(
+        value: string,
+        start: number,
+        end: number,
+        where: string,
+      ): string;
+      function limitedSlice<T>(
+        value: readonly T[],
+        start: number,
+        end: number,
+        where: string,
+      ): T[];
+      function limitedSlice<T>(
+        value: string | readonly T[],
+        start: number,
+        end: number,
+        where: string,
+      ): string | T[] {
+        const result =
+          typeof value === "string"
+            ? value.slice(start, end)
+            : value.slice(start, end);
+        if (result.length < value.length) {
+          try {
+            console.debug(
+              "__nestor_self_limit__ " +
+                JSON.stringify({
+                  limit: "evidence_window",
+                  kind: "input",
+                  value: end - start,
+                  where,
+                }),
+            );
+          } catch {
+            /* A page-owned console cannot change the operation. */
+          }
+        }
+        return result;
+      }
+
       const current = elements.find((element) =>
         element.matches("[aria-current='step']"),
       );
@@ -957,7 +1302,12 @@ export async function readApplyStepLabel(
           (candidate) => candidate === current || candidate.contains(current),
         );
         if (index >= 0 && steps.length >= 2) {
-          const label = (current as HTMLElement).innerText.trim().slice(0, 120);
+          const label = limitedSlice(
+            (current as HTMLElement).innerText.trim(),
+            0,
+            120,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:1305",
+          );
           return `Step ${index + 1} of ${steps.length}${label ? `: ${label}` : ""}`;
         }
       }
@@ -965,7 +1315,12 @@ export async function readApplyStepLabel(
         element.matches("[role='progressbar'], [aria-label*='step' i]"),
       );
       return progress
-        ? (progress as HTMLElement).innerText.trim().slice(0, 200)
+        ? limitedSlice(
+            (progress as HTMLElement).innerText.trim(),
+            0,
+            200,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:1318",
+          )
         : null;
     })
     .catch(() => null);
@@ -979,6 +1334,48 @@ export async function readApplyStepLabel(
 export function readApplySummaryRows(
   elements: Element[],
 ): { label: string; value: string }[] {
+  // This callback is serialized into the page; only fixed limit metadata returns
+  // over its console channel. The host records it through reportSelfLimitHit.
+  function limitedSlice(
+    value: string,
+    start: number,
+    end: number,
+    where: string,
+  ): string;
+  function limitedSlice<T>(
+    value: readonly T[],
+    start: number,
+    end: number,
+    where: string,
+  ): T[];
+  function limitedSlice<T>(
+    value: string | readonly T[],
+    start: number,
+    end: number,
+    where: string,
+  ): string | T[] {
+    const result =
+      typeof value === "string"
+        ? value.slice(start, end)
+        : value.slice(start, end);
+    if (result.length < value.length) {
+      try {
+        console.debug(
+          "__nestor_self_limit__ " +
+            JSON.stringify({
+              limit: "evidence_window",
+              kind: "input",
+              value: end - start,
+              where,
+            }),
+        );
+      } catch {
+        /* A page-owned console cannot change the operation. */
+      }
+    }
+    return result;
+  }
+
   const shown = (element: Element) => {
     const style = getComputedStyle(element);
     return (
@@ -1010,10 +1407,40 @@ export function readApplySummaryRows(
       const [value] = values;
       if (values.length !== 1 || !value || !shown(term) || !shown(value))
         continue;
-      const label = text(term).slice(0, 500);
+      const label = limitedSlice(
+        text(term),
+        0,
+        500,
+        "packages/browser-runtime/src/apply-page-mechanics.ts:1410",
+      );
       if (!label) continue;
-      rows.push({ label, value: text(value).slice(0, 12_000) });
-      if (rows.length >= 200) return rows;
+      rows.push({
+        label,
+        value: limitedSlice(
+          text(value),
+          0,
+          12_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:1419",
+        ),
+      });
+      if (rows.length >= 200) {
+        {
+          try {
+            console.debug(
+              "__nestor_self_limit__ " +
+                JSON.stringify({
+                  limit: "summary_rows",
+                  kind: "count",
+                  value: 200,
+                  where: "browser-runtime/readApplySummaryRows",
+                }),
+            );
+          } catch {
+            /* A page-owned console cannot change the operation. */
+          }
+        }
+        return rows;
+      }
     }
   }
   return rows;
@@ -1034,6 +1461,48 @@ export const APPLY_PAGE_SELECTORS = {
  * `collectApplyDocumentSnapshot` keeps the same reading for the top page.
  */
 export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
+  // This callback is serialized into the page; only fixed limit metadata returns
+  // over its console channel. The host records it through reportSelfLimitHit.
+  function limitedSlice(
+    value: string,
+    start: number,
+    end: number,
+    where: string,
+  ): string;
+  function limitedSlice<T>(
+    value: readonly T[],
+    start: number,
+    end: number,
+    where: string,
+  ): T[];
+  function limitedSlice<T>(
+    value: string | readonly T[],
+    start: number,
+    end: number,
+    where: string,
+  ): string | T[] {
+    const result =
+      typeof value === "string"
+        ? value.slice(start, end)
+        : value.slice(start, end);
+    if (result.length < value.length) {
+      try {
+        console.debug(
+          "__nestor_self_limit__ " +
+            JSON.stringify({
+              limit: "evidence_window",
+              kind: "input",
+              value: end - start,
+              where,
+            }),
+        );
+      } catch {
+        /* A page-owned console cannot change the operation. */
+      }
+    }
+    return result;
+  }
+
   return elements.map((element) => {
     const words = (node: Element | null | undefined): string =>
       (node?.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -1122,7 +1591,12 @@ export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
           )
         : false;
     return {
-      section: section.slice(0, 200),
+      section: limitedSlice(
+        section,
+        0,
+        200,
+        "packages/browser-runtime/src/apply-page-mechanics.ts:1594",
+      ),
       inForm,
       ...(sectionRequired ? { sectionRequired } : {}),
     };
@@ -1141,6 +1615,48 @@ export function collectApplyDocumentSnapshot(
     refused: boolean;
   },
 ) {
+  // This callback is serialized into the page; only fixed limit metadata returns
+  // over its console channel. The host records it through reportSelfLimitHit.
+  function limitedSlice(
+    value: string,
+    start: number,
+    end: number,
+    where: string,
+  ): string;
+  function limitedSlice<T>(
+    value: readonly T[],
+    start: number,
+    end: number,
+    where: string,
+  ): T[];
+  function limitedSlice<T>(
+    value: string | readonly T[],
+    start: number,
+    end: number,
+    where: string,
+  ): string | T[] {
+    const result =
+      typeof value === "string"
+        ? value.slice(start, end)
+        : value.slice(start, end);
+    if (result.length < value.length) {
+      try {
+        console.debug(
+          "__nestor_self_limit__ " +
+            JSON.stringify({
+              limit: "evidence_window",
+              kind: "input",
+              value: end - start,
+              where,
+            }),
+        );
+      } catch {
+        /* A page-owned console cannot change the operation. */
+      }
+    }
+    return result;
+  }
+
   const matching = (selector: string) =>
     elements.filter((element) => element.matches(selector));
   const fieldDescriptions = matching(selectors.controls).flatMap((control) => {
@@ -1404,7 +1920,12 @@ export function collectApplyDocumentSnapshot(
           )
         : false;
     return {
-      section: section.slice(0, 200),
+      section: limitedSlice(
+        section,
+        0,
+        200,
+        "packages/browser-runtime/src/apply-page-mechanics.ts:1923",
+      ),
       inForm,
       ...(sectionRequired ? { sectionRequired } : {}),
     };
@@ -1454,6 +1975,21 @@ export function collectApplyDocumentSnapshot(
           .replace(label, "")
           .replace(/\s+/gu, " ")
           .trim();
+      if (hint.length > 300) {
+        try {
+          console.debug(
+            "__nestor_self_limit__ " +
+              JSON.stringify({
+                limit: "long_field_hint_veto",
+                kind: "input",
+                value: 300,
+                where: "browser-runtime/hintFor",
+              }),
+          );
+        } catch {
+          /* A page-owned console cannot change the operation. */
+        }
+      }
       return hint.length <= 300 ? hint : "";
     };
     const isVisible = (element: HTMLElement): boolean => {
@@ -1552,10 +2088,14 @@ export function collectApplyDocumentSnapshot(
         element.getAttribute("aria-owns");
       const listbox = owned ? document.getElementById(owned) : null;
       if (!listbox) return [];
-      return Array.from(listbox.querySelectorAll("[role='option']"))
-        .map((option) => option.textContent?.trim() ?? "")
-        .filter(Boolean)
-        .slice(0, 200);
+      return limitedSlice(
+        Array.from(listbox.querySelectorAll("[role='option']"))
+          .map((option) => option.textContent?.trim() ?? "")
+          .filter(Boolean),
+        0,
+        200,
+        "packages/browser-runtime/src/apply-page-mechanics.ts:2091",
+      );
     };
 
     const roots = Array.from(
@@ -1675,13 +2215,22 @@ export function collectApplyDocumentSnapshot(
       const style = window.getComputedStyle(input);
       const rect = input.getBoundingClientRect();
       return {
-        described: described.slice(0, 500),
+        described: limitedSlice(
+          described,
+          0,
+          500,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:2218",
+        ),
         ariaInvalid: input.getAttribute("aria-invalid") === "true",
-        nearby: (box?.innerText ?? "")
-          .replace(/[ \t]+/gu, " ")
-          .replace(/\s*\n\s*/gu, "\n")
-          .trim()
-          .slice(0, 600),
+        nearby: limitedSlice(
+          (box?.innerText ?? "")
+            .replace(/[ \t]+/gu, " ")
+            .replace(/\s*\n\s*/gu, "\n")
+            .trim(),
+          0,
+          600,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:2225",
+        ),
         shown:
           style.display !== "none" &&
           style.visibility !== "hidden" &&
@@ -1944,23 +2493,54 @@ export function collectApplyDocumentSnapshot(
   const validationErrors = safe(
     () =>
       ((elements: Element[]) =>
-        elements
-          .filter(
-            (element) =>
-              element.getClientRects().length > 0 &&
-              window.getComputedStyle(element).visibility !== "hidden",
-          )
-          .map((element) => (element as HTMLElement).innerText.trim())
-          .filter((text) => text.length > 0 && text.length < 300)
-          .slice(0, 12))(matching(selectors.validationErrors)),
+        limitedSlice(
+          elements
+            .filter(
+              (element) =>
+                element.getClientRects().length > 0 &&
+                window.getComputedStyle(element).visibility !== "hidden",
+            )
+            .map((element) => (element as HTMLElement).innerText.trim())
+            .filter((text) => {
+              if (text.length >= 300) {
+                try {
+                  console.debug(
+                    "__nestor_self_limit__ " +
+                      JSON.stringify({
+                        limit: "long_validation_text_veto",
+                        kind: "input",
+                        value: 300,
+                        where: "browser-runtime/readValidationErrors",
+                      }),
+                  );
+                } catch {
+                  /* A page-owned console cannot change the operation. */
+                }
+              }
+              return text.length > 0 && text.length < 300;
+            }),
+          0,
+          12,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:2496",
+        ))(matching(selectors.validationErrors)),
     [],
   );
   const headings = safe(
     () =>
       ((elements: Element[]): RawApplyHeading[] =>
-        elements.slice(0, 60).flatMap((element) => {
+        limitedSlice(
+          elements,
+          0,
+          60,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:2531",
+        ).flatMap((element) => {
           const html = element as HTMLElement;
-          const text = html.innerText.trim().slice(0, 300);
+          const text = limitedSlice(
+            html.innerText.trim(),
+            0,
+            300,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:2538",
+          );
           if (!text) return [];
           const explicit = element.getAttribute("aria-level");
           const fromTag = /^H([1-6])$/u.exec(element.tagName)?.[1];
@@ -1976,7 +2556,12 @@ export function collectApplyDocumentSnapshot(
   const clickables = safe(
     () =>
       ((elements: Element[]): RawApplyClickable[] =>
-        elements.slice(0, 300).flatMap((element, index) => {
+        limitedSlice(
+          elements,
+          0,
+          300,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:2559",
+        ).flatMap((element, index) => {
           // A button already has its own ref, with its form's action:
           // neither it nor anything inside it (a label span, an icon),
           // across shadow roots, is a second name to press it under.
@@ -1991,12 +2576,15 @@ export function collectApplyDocumentSnapshot(
           const html = element as HTMLElement;
           const style = window.getComputedStyle(html);
           const rect = html.getBoundingClientRect();
-          const label = (
+          const label = limitedSlice(
             element.getAttribute("aria-label")?.trim() ||
-            html.innerText.trim() ||
-            element.getAttribute("title")?.trim() ||
-            ""
-          ).slice(0, 300);
+              html.innerText.trim() ||
+              element.getAttribute("title")?.trim() ||
+              "",
+            0,
+            300,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:2579",
+          );
           if (!label) return [];
           return [
             {
@@ -2029,7 +2617,12 @@ export function collectApplyDocumentSnapshot(
     clickables,
     url: window.location.href,
     title: document.title,
-    bodyText: bodyText.slice(0, 20_000),
+    bodyText: limitedSlice(
+      bodyText,
+      0,
+      20_000,
+      "packages/browser-runtime/src/apply-page-mechanics.ts:2620",
+    ),
     ...(readSubmissionEvidence
       ? {
           submissionConfirmationMessages:
@@ -2119,7 +2712,12 @@ async function readOpenedTabs(page: Page): Promise<RawApplyOpenedTab[]> {
   try {
     const others = await listTaskOwnedPopups(page);
     return await Promise.all(
-      others.slice(0, 8).map(async (candidate, index) => ({
+      selfLimitSlice(
+        others,
+        0,
+        8,
+        "packages/browser-runtime/src/apply-page-mechanics.ts:2715",
+      ).map(async (candidate, index) => ({
         index,
         url: candidate.url(),
         title: await candidate.title().catch(() => ""),
@@ -2246,16 +2844,23 @@ async function readClosedComboboxOptions(
     toOpen.push(control);
   }
 
-  for (const control of toOpen.slice(0, MAX_OPENED_COMBOBOXES)) {
+  for (const control of selfLimitSlice(
+    toOpen,
+    0,
+    MAX_OPENED_COMBOBOXES,
+    "packages/browser-runtime/src/apply-page-mechanics.ts:2847",
+  )) {
     const locator = page.locator(APPLY_CONTROL_SELECTOR).nth(control.index);
     try {
       // Whatever the last list left open is closed first: a click that only
       // dismisses someone else's flyout reads as a list with no choices, and
       // the question then reaches the person as a bare text box.
       await page.keyboard.press("Escape").catch(() => undefined);
-      await locator
-        .scrollIntoViewIfNeeded({ timeout: 1_500 })
-        .catch(() => undefined);
+      await selfLimitTimeout(
+        locator.scrollIntoViewIfNeeded({ timeout: 1_500 }),
+        1_500,
+        "packages/browser-runtime/src/apply-page-mechanics.ts:2859",
+      ).catch(() => undefined);
       const menuRead = await locator.evaluateHandle((element) => {
         const ownedMenu = () => {
           const ids = (
@@ -2296,11 +2901,17 @@ async function readClosedComboboxOptions(
       let options: string[] = [];
       try {
         await locator.focus({ timeout: 1500 }).catch(() => undefined);
-        await locator
-          .press("ArrowDown", { timeout: 1500 })
-          .catch(() => undefined);
+        await selfLimitTimeout(
+          locator.press("ArrowDown", { timeout: 1500 }),
+          1500,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:2904",
+        ).catch(() => undefined);
         if ((await locator.getAttribute("aria-expanded")) !== "true")
-          await locator.click({ timeout: 1500 });
+          await selfLimitTimeout(
+            locator.click({ timeout: 1500 }),
+            1500,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:2910",
+          );
         const owner = keyFor(control);
         const observed = await menuRead.evaluate(
           async (state, context) => {
@@ -2502,7 +3113,11 @@ async function pressToggleButton(
         )
           element.type = "button";
       });
-      await locator.click({ timeout: 5_000 });
+      await selfLimitTimeout(
+        locator.click({ timeout: 5_000 }),
+        5_000,
+        "packages/browser-runtime/src/apply-page-mechanics.ts:3116",
+      );
     }
     return (await pressed()) === checked
       ? { ok: true, observedValue: checked ? "pressed" : "not pressed" }
@@ -2572,11 +3187,17 @@ function describeWriteFailure(error: unknown, fallback: string): string {
  * than the document it destroyed on the way.
  */
 async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
-  await locator
-    .scrollIntoViewIfNeeded({ timeout: 2_000 })
-    .catch(() => undefined);
+  await selfLimitTimeout(
+    locator.scrollIntoViewIfNeeded({ timeout: 2_000 }),
+    2_000,
+    "packages/browser-runtime/src/apply-page-mechanics.ts:3190",
+  ).catch(() => undefined);
   try {
-    await locator.click({ timeout: 10_000 });
+    await selfLimitTimeout(
+      locator.click({ timeout: 10_000 }),
+      10_000,
+      "packages/browser-runtime/src/apply-page-mechanics.ts:3196",
+    );
   } catch (error) {
     // Something is drawn over it, or it sits under a sticky header. A person
     // would still get the click in; so does a click aimed straight at it.
@@ -2587,11 +3208,17 @@ async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
     ) {
       throw error;
     }
-    await locator.click({ timeout: 5_000, force: true });
+    await selfLimitTimeout(
+      locator.click({ timeout: 5_000, force: true }),
+      5_000,
+      "packages/browser-runtime/src/apply-page-mechanics.ts:3211",
+    );
   }
-  await page
-    .waitForLoadState("domcontentloaded", { timeout: 3_000 })
-    .catch(() => undefined);
+  await selfLimitTimeout(
+    page.waitForLoadState("domcontentloaded", { timeout: 3_000 }),
+    3_000,
+    "packages/browser-runtime/src/apply-page-mechanics.ts:3217",
+  ).catch(() => undefined);
 }
 
 /** The live-page implementation of the apply mechanics. */
@@ -2636,53 +3263,101 @@ export function createPlaywrightApplyPageMechanics(
       if (!locator)
         return { ok: false, error: `No action named ${ref} on this page.` };
       try {
-        return await locator.evaluate(
-          (element): ApplyWriteResult => {
-            if (
-              !(element instanceof HTMLElement) ||
-              element.matches(":disabled, [aria-disabled='true']")
-            )
+        return await selfLimitTimeout(
+          locator.evaluate(
+            (element): ApplyWriteResult => {
+              // This callback is serialized into the page; only fixed limit metadata returns
+              // over its console channel. The host records it through reportSelfLimitHit.
+              function limitedSlice(
+                value: string,
+                start: number,
+                end: number,
+                where: string,
+              ): string;
+              function limitedSlice<T>(
+                value: readonly T[],
+                start: number,
+                end: number,
+                where: string,
+              ): T[];
+              function limitedSlice<T>(
+                value: string | readonly T[],
+                start: number,
+                end: number,
+                where: string,
+              ): string | T[] {
+                const result =
+                  typeof value === "string"
+                    ? value.slice(start, end)
+                    : value.slice(start, end);
+                if (result.length < value.length) {
+                  try {
+                    console.debug(
+                      "__nestor_self_limit__ " +
+                        JSON.stringify({
+                          limit: "evidence_window",
+                          kind: "input",
+                          value: end - start,
+                          where,
+                        }),
+                    );
+                  } catch {
+                    /* A page-owned console cannot change the operation. */
+                  }
+                }
+                return result;
+              }
+
+              if (
+                !(element instanceof HTMLElement) ||
+                element.matches(":disabled, [aria-disabled='true']")
+              )
+                return {
+                  ok: false,
+                  error: "The intended button is unavailable.",
+                };
+              element.scrollIntoView({
+                block: "center",
+                inline: "center",
+                behavior: "instant",
+              });
+              const rect = element.getBoundingClientRect();
+              const root = element.getRootNode();
+              const hit = (
+                root instanceof ShadowRoot ? root : document
+              ).elementFromPoint(
+                rect.x + rect.width / 2,
+                rect.y + rect.height / 2,
+              );
+              if (
+                rect.width > 0 &&
+                rect.height > 0 &&
+                hit &&
+                (hit === element || element.contains(hit))
+              )
+                return {
+                  ok: true,
+                  observedValue: "The intended button is reachable.",
+                };
+              const covering =
+                hit?.closest("[role='dialog'], [role='alertdialog'], aside") ??
+                hit;
+              const text = limitedSlice(
+                (covering?.textContent ?? "").replace(/\s+/gu, " ").trim(),
+                0,
+                300,
+                "packages/browser-runtime/src/apply-page-mechanics.ts:3345",
+              );
               return {
                 ok: false,
-                error: "The intended button is unavailable.",
+                error: `The intended button is covered or outside the visible page.${text ? ` In front of it: ${text}` : ""}`,
               };
-            element.scrollIntoView({
-              block: "center",
-              inline: "center",
-              behavior: "instant",
-            });
-            const rect = element.getBoundingClientRect();
-            const root = element.getRootNode();
-            const hit = (
-              root instanceof ShadowRoot ? root : document
-            ).elementFromPoint(
-              rect.x + rect.width / 2,
-              rect.y + rect.height / 2,
-            );
-            if (
-              rect.width > 0 &&
-              rect.height > 0 &&
-              hit &&
-              (hit === element || element.contains(hit))
-            )
-              return {
-                ok: true,
-                observedValue: "The intended button is reachable.",
-              };
-            const covering =
-              hit?.closest("[role='dialog'], [role='alertdialog'], aside") ??
-              hit;
-            const text = (covering?.textContent ?? "")
-              .replace(/\s+/gu, " ")
-              .trim()
-              .slice(0, 300);
-            return {
-              ok: false,
-              error: `The intended button is covered or outside the visible page.${text ? ` In front of it: ${text}` : ""}`,
-            };
-          },
-          undefined,
-          { timeout: 5_000 },
+            },
+            undefined,
+            { timeout: 5_000 },
+          ),
+          5_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:3266",
         );
       } catch (error) {
         return {
@@ -2703,10 +3378,18 @@ export function createPlaywrightApplyPageMechanics(
         // A calendar's text box takes a date, picked from its calendar.
         const picked = await pickCalendarDate(page, locator, value);
         if (picked) return picked;
-        await locator.fill(value, { timeout: 5_000 });
+        await selfLimitTimeout(
+          locator.fill(value, { timeout: 5_000 }),
+          5_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:3381",
+        );
         // Check immediate acceptance here. The apply workflow checks retention
         // after 300 ms, sharing that window across a batch of typed answers.
-        const observedValue = await locator.inputValue({ timeout: 2_000 });
+        const observedValue = await selfLimitTimeout(
+          locator.inputValue({ timeout: 2_000 }),
+          2_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:3388",
+        );
         if (value.trim().length > 0 && observedValue.trim().length === 0) {
           return {
             ok: false,
@@ -2880,13 +3563,19 @@ export function createPlaywrightApplyPageMechanics(
           return { ok: false, error: `No element named ${ref} on this page.` };
         }
         if (locator) {
-          await locator.press(key, { timeout: 5_000 });
+          await selfLimitTimeout(
+            locator.press(key, { timeout: 5_000 }),
+            5_000,
+            "packages/browser-runtime/src/apply-page-mechanics.ts:3566",
+          );
         } else {
           await page.keyboard.press(key);
         }
-        await page
-          .waitForLoadState("domcontentloaded", { timeout: 3_000 })
-          .catch(() => undefined);
+        await selfLimitTimeout(
+          page.waitForLoadState("domcontentloaded", { timeout: 3_000 }),
+          3_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:3574",
+        ).catch(() => undefined);
         return { ok: true, observedValue: key };
       } catch (error) {
         return {
@@ -2905,13 +3594,17 @@ export function createPlaywrightApplyPageMechanics(
       }
       let href = "";
       try {
-        href = await locator.evaluate(
-          (element) =>
-            (element as HTMLAnchorElement).href ||
-            element.getAttribute("href") ||
-            "",
-          undefined,
-          { timeout: 5_000 },
+        href = await selfLimitTimeout(
+          locator.evaluate(
+            (element) =>
+              (element as HTMLAnchorElement).href ||
+              element.getAttribute("href") ||
+              "",
+            undefined,
+            { timeout: 5_000 },
+          ),
+          5_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:3597",
         );
       } catch (error) {
         return {
@@ -2936,12 +3629,16 @@ export function createPlaywrightApplyPageMechanics(
         // clicking it, keeps the hop a plain read: no popup, no script, and
         // nothing the page can turn into a write.
         allowPrepareOnlyRunNavigation(page, target.toString());
-        await page.goto(target.toString(), {
-          waitUntil: "domcontentloaded",
-          // Short on purpose: a hop that does not answer quickly is a hop
-          // that is costing the person their run.
-          timeout: 15_000,
-        });
+        await selfLimitTimeout(
+          page.goto(target.toString(), {
+            waitUntil: "domcontentloaded",
+            // Short on purpose: a hop that does not answer quickly is a hop
+            // that is costing the person their run.
+            timeout: 15_000,
+          }),
+          15_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:3632",
+        );
         return { ok: true, url: page.url() };
       } catch (error) {
         return {
@@ -2975,10 +3672,14 @@ export function createPlaywrightApplyPageMechanics(
       }
       try {
         allowPrepareOnlyRunNavigation(page, target.toString());
-        await page.goto(target.toString(), {
-          waitUntil: "domcontentloaded",
-          timeout: 20_000,
-        });
+        await selfLimitTimeout(
+          page.goto(target.toString(), {
+            waitUntil: "domcontentloaded",
+            timeout: 20_000,
+          }),
+          20_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:3675",
+        );
         return { ok: true, url: page.url() };
       } catch (error) {
         return {
@@ -3038,11 +3739,22 @@ export function createPlaywrightApplyPageMechanics(
       }
     },
     wait: async (milliseconds) => {
+      if (milliseconds > 10_000)
+        reportSelfLimitHit({
+          limit: "browser_wait",
+          kind: "timeout",
+          value: 10000,
+          where: "browser-runtime/createPlaywrightApplyPageMechanics",
+        });
       await page.waitForTimeout(Math.max(0, Math.min(10_000, milliseconds)));
     },
     goBack: async (): Promise<ApplyNavigationResult> => {
       try {
-        await page.goBack({ waitUntil: "domcontentloaded", timeout: 15_000 });
+        await selfLimitTimeout(
+          page.goBack({ waitUntil: "domcontentloaded", timeout: 15_000 }),
+          15_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:3753",
+        );
         return { ok: true, url: page.url() };
       } catch (error) {
         return {
@@ -3069,9 +3781,11 @@ export function createPlaywrightApplyPageMechanics(
           error:
             "An account window belongs to its original application and cannot be adopted.",
         };
-      await opened
-        .waitForLoadState("domcontentloaded", { timeout: 5_000 })
-        .catch(() => undefined);
+      await selfLimitTimeout(
+        opened.waitForLoadState("domcontentloaded", { timeout: 5_000 }),
+        5_000,
+        "packages/browser-runtime/src/apply-page-mechanics.ts:3784",
+      ).catch(() => undefined);
       const url = opened.url();
       if (!/^https?:/iu.test(url)) {
         await opened.close().catch(() => undefined);
@@ -3080,10 +3794,14 @@ export function createPlaywrightApplyPageMechanics(
       await opened.close().catch(() => undefined);
       try {
         allowPrepareOnlyRunNavigation(page, url);
-        await page.goto(url, {
-          waitUntil: "domcontentloaded",
-          timeout: 20_000,
-        });
+        await selfLimitTimeout(
+          page.goto(url, {
+            waitUntil: "domcontentloaded",
+            timeout: 20_000,
+          }),
+          20_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:3797",
+        );
         return { ok: true, url: page.url() };
       } catch (error) {
         return {
@@ -3094,7 +3812,11 @@ export function createPlaywrightApplyPageMechanics(
     },
     readText: async (ref) => {
       if (!ref) {
-        return page.locator("body").innerText({ timeout: 5_000 });
+        return selfLimitTimeout(
+          page.locator("body").innerText({ timeout: 5_000 }),
+          5_000,
+          "packages/browser-runtime/src/apply-page-mechanics.ts:3815",
+        );
       }
       const locator =
         controlLocator(page, ref) ??
@@ -3104,7 +3826,11 @@ export function createPlaywrightApplyPageMechanics(
       if (!locator) {
         return "";
       }
-      return locator.innerText({ timeout: 5_000 });
+      return selfLimitTimeout(
+        locator.innerText({ timeout: 5_000 }),
+        5_000,
+        "packages/browser-runtime/src/apply-page-mechanics.ts:3829",
+      );
     },
   };
 }

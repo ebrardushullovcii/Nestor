@@ -18,6 +18,7 @@ import {
   SCENARIOS,
 } from "./report.ts";
 import { startProvider } from "./provider.ts";
+import { auditSelfLimits } from "./self-limits.ts";
 import type { Run } from "./types.ts";
 
 const root = path.resolve(import.meta.dirname, "../../../..");
@@ -35,7 +36,7 @@ const args = parseArgs({
     scenario: { type: "string" },
     out: { type: "string" },
     "no-build": { type: "boolean" },
-    timeout: { type: "string", default: "240" },
+    timeout: { type: "string" },
   },
 }).values;
 if (args.help || args.list) {
@@ -45,8 +46,11 @@ if (args.help || args.list) {
 } else {
   if (args.scenario && !SCENARIOS.some(([id]) => id === args.scenario))
     throw Error(`Unknown scenario: ${args.scenario}`);
-  const timeout = Number(args.timeout);
-  if (!Number.isFinite(timeout) || timeout < 15 || timeout > 1800)
+  const timeout = args.timeout === undefined ? undefined : Number(args.timeout);
+  if (
+    timeout !== undefined &&
+    (!Number.isFinite(timeout) || timeout < 15 || timeout > 1800)
+  )
     throw Error("--timeout must be 15–1800 seconds");
   // Refuse the former invocation: otherwise an internal build could wait on
   // the slot held by its own parent for the entire scoreboard session.
@@ -210,7 +214,9 @@ if (args.help || args.list) {
     save(run);
     if (interrupted) throw Error("Interrupted before launch");
     const requested =
-      args.scenario && args.scenario !== "needs-you"
+      args.scenario &&
+      args.scenario !== "needs-you" &&
+      args.scenario !== "self-limits"
         ? [args.scenario]
         : [
             "search",
@@ -330,6 +336,7 @@ if (args.help || args.list) {
     }
     latest.ai = `live: ${[...models].join(", ") || "no completed model call recorded"}`;
     auditQuestions(latest);
+    auditSelfLimits(latest);
     save(latest);
     console.log(
       "\n" + markdown(latest).split("## Every Needs you question")[0],
