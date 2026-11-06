@@ -2742,7 +2742,7 @@ export async function executeApplyProposal(
       if (!write.ok) {
         return { kind: "refused", reason: write.error, observation };
       }
-      afterWrite(deps, null);
+      if (clicked?.role !== "tab") afterWrite(deps, null);
       if (fillPress) recordFillPress(deps.guardState, fillPress);
       const review = await reviewGuard(deps, observation.url);
       if (review.pause) {
@@ -3510,6 +3510,7 @@ export async function executeApplyProposal(
               reason:
                 "The form did not keep the selected file. Nothing was recorded as attached.",
               observation: await config.hands.observe(),
+              uploadFailed: true,
             };
           }
           afterWrite(deps, questionPrompt(control));
@@ -3803,6 +3804,7 @@ export async function executeApplyProposal(
           kind: "refused",
           reason: `${document.label} came back empty, so nothing was attached.`,
           observation,
+          uploadFailed: true,
         };
       }
       const write = await writeUnderGuard(deps, {
@@ -3829,6 +3831,7 @@ export async function executeApplyProposal(
           reason:
             "The form did not keep the selected file. Nothing was recorded as attached.",
           observation: await config.hands.observe(),
+          uploadFailed: true,
         };
       }
       afterWrite(deps, questionPrompt(control));

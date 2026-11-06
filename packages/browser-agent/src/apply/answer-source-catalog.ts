@@ -1695,7 +1695,7 @@ export function classifyAnswerPermission(input: {
         input.control.label,
         (input.controls ?? [input.control]).map(questionPrompt),
       )) ||
-    requiresSavedNationalityAnswer(input.control.label) ||
+    (!legal && requiresSavedNationalityAnswer(input.control.label)) ||
     (["motivation", "factual_summary"].includes(tags.kind) &&
       asksForSpecificStory(
         `${input.control.groupLabel} ${input.control.label}`,
@@ -1705,6 +1705,16 @@ export function classifyAnswerPermission(input: {
     return exactSaved
       ? { kind: "literal", source }
       : deny("This question needs your own unchanged answer.");
+  // A work-rights question may offer citizenship OR a permit as alternatives.
+  // Explicit work permission can answer that question without establishing
+  // citizenship. Check the whole proposition; never turn permission into a
+  // literal citizenship answer or let a country-word scan choose the answer.
+  if (legal && requiresSavedNationalityAnswer(legalPrompt))
+    return input.sources.profile.workEligibility.authorizedWorkCountries
+      .length > 0 ||
+      input.sources.profile.workEligibility.limitedWorkPermissions?.length
+      ? { kind: "inference", source: null, evidencePolicy: "eligibility" }
+      : deny("This legal question needs explicit work-permission evidence.");
   if (
     tags.kind === "other" &&
     input.control.asksHiringCountry &&
@@ -1867,16 +1877,25 @@ export function classifyAnswerPermission(input: {
         );
   }
   if (exactSaved) return { kind: "literal", source };
-  if (tags.kind === "residence_country")
-    return source.id === "profile.currentCountry" &&
+  if (tags.kind === "residence_country") {
+    const currentCountry =
+      source.id === "profile.currentCountry" &&
       source.purpose === "profile" &&
       !fieldNamesAnotherPerson(input.control) &&
-      !input.control.asksHiringCountry &&
+      !input.control.asksHiringCountry;
+    return currentCountry &&
       literalValueMatches(source, input.control, input.answer)
       ? { kind: "literal", source }
-      : deny(
-          "This residence-country answer must use your recorded current country.",
-        );
+      : currentCountry && factualInferenceAllowed(input)
+        ? {
+            kind: "inference",
+            source: null,
+            evidencePolicy: "factual_inference",
+          }
+        : deny(
+            "This residence-country answer must use your recorded current country.",
+          );
+  }
   const literalQuestion =
     tags.kind === "other" || tags.kind === "factual_summary";
   if (
@@ -2104,6 +2123,17 @@ function factualInferenceAllowed(input: {
   payDisclosed?: boolean;
 }): boolean {
   const { control, tags } = input;
+  // Some forms use a textarea for a scalar URL. It still needs the same
+  // whole-question check, rather than being rejected as invented prose.
+  const profileUrl =
+    isProfileUrlSource(tags?.sourceId) &&
+    wantsProfileUrl(control) &&
+    /\b(?:url|link)\b/iu.test(control.label) &&
+    fullProfileUrl(input.answer) === input.answer;
+  const valueControl =
+    profileUrl && control.kind === "long_text"
+      ? { ...control, kind: "text" as const }
+      : control;
   const question = [
     ...(control.sectionPath ?? []),
     control.groupLabel,
@@ -2115,14 +2145,15 @@ function factualInferenceAllowed(input: {
     (["other", "residence_country"].includes(tags.kind) ||
       (tags.kind === "salary" && input.payDisclosed === true)) &&
     ["text", "select", "combobox", "radio", "checkbox"].includes(
-      control.kind,
+      valueControl.kind,
     ) &&
-    (control.kind !== "text" ||
+    (profileUrl ||
+      valueControl.kind !== "text" ||
       isShortValueAnswer(
         input.payDisclosed === true &&
           control.questionKind === "salary_expectation"
-          ? { ...control, questionKind: "other" }
-          : control,
+          ? { ...valueControl, questionKind: "other" }
+          : valueControl,
         input.answer,
       )) &&
     !["work_authorization", "visa_sponsorship"].includes(

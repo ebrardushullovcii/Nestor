@@ -44,6 +44,7 @@ const FIELD_PART_ROLES = new Set([
   "menuitemradio",
   "menuitemcheckbox",
   "treeitem",
+  "tab",
 ]);
 
 /**
@@ -121,7 +122,7 @@ function cookieChoiceRank(entry: Pressable): number | null {
 }
 
 const OPENS_FORM =
-  /^(?:apply|apply now|apply here|apply online|apply for (?:this|the) (?:job|position|role|vacancy|opening)|apply to (?:this|the) (?:job|position|role)|(?:start|begin)(?: (?:my|your|an))? application|i m interested|im interested)$/u;
+  /^(?:apply|apply now|apply here|apply online|apply manually|apply for (?:this|the) (?:job|position|role|vacancy|opening)|apply to (?:this|the) (?:job|position|role)|(?:start|begin)(?: (?:my|your|an))? application|i m interested|im interested)$/u;
 
 const ADDS_ROW =
   /^add(?: (?:another|more|a|an|new|one more))*(?: [a-z]+){0,4}$/u;
@@ -212,11 +213,28 @@ export function fillPressFor(input: {
     (candidate) => candidate.ref === ref,
   );
   if (!entry) return null;
-  if ("role" in entry && FIELD_PART_ROLES.has(entry.role.toLowerCase()))
+  if ("submitsForm" in entry && entry.submitsForm === true) return null;
+  if (entry.role && FIELD_PART_ROLES.has(entry.role.toLowerCase()))
     return { kind: "field_part", ref };
   const manual = manualEntryPressFor(observation, ref);
   if (manual) return manual;
   const label = normalizeSignal(entry.label);
+
+  const code = /\+([1-9]\d{0,2})(?!\d)/u.exec(entry.label)?.[0];
+  if (
+    code &&
+    /\b(?:change|select|choose) (?:phone )?(?:country|calling code|dialling code|dialing code)\b/u.test(
+      label,
+    ) &&
+    observation.controls.some(
+      (control) =>
+        control.visible &&
+        !control.disabled &&
+        control.telInput &&
+        control.phoneCallingCode === code,
+    )
+  )
+    return { kind: "field_part", ref };
 
   const cookie = cookieConsentChoice(observation, ref);
   if (cookie) return cookie.kind === "cookie_banner" ? cookie : null;
@@ -226,7 +244,8 @@ export function fillPressFor(input: {
   // button that would submit a form.
   if (
     OPENS_FORM.test(label) &&
-    !entry.formAction &&
+    (!entry.formAction ||
+      ("submitsForm" in entry && entry.submitsForm === false)) &&
     !state.openedForm &&
     state.fieldWrites === 0 &&
     !config.application.continuation &&

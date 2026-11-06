@@ -2652,7 +2652,7 @@ describe("apply agent run endings", () => {
     });
   });
 
-  test("an upload repair keeps the selected CV identity after a supported filename conversion", async () => {
+  test("a failed upload reports the actual converted filename without a candidate question", async () => {
     const source = page({
       controls: [
         {
@@ -2695,16 +2695,10 @@ describe("apply agent run endings", () => {
       ]),
     );
     expect(source.controls[0].value).toBe("synthetic-resume.txt");
-    expect(
-      result.pauses
-        .flatMap((pause) => pause.questions ?? [])
-        .find((question) => question.id === "upload_repair")?.askReason
-        ?.selectedDocument,
-    ).toEqual({
-      kind: "resume",
-      label: "Your CV",
-      fileName: "synthetic-resume.md",
-    });
+    expect(result.outcome).toBe("stuck");
+    expect(result.reason).toContain("synthetic-resume.txt");
+    expect(result.reason).toContain("server refusal");
+    expect(result.pauses).toEqual([]);
   });
 
   const resumeFile = (
@@ -2949,7 +2943,7 @@ describe("apply agent run endings", () => {
     ]);
   });
 
-  test("a refused upload stops after input, chooser and drop tries and says what was refused", async () => {
+  test("a refused upload stops after one recovery pass and reports the cause without a candidate question", async () => {
     // Workable: every storage POST was held back, and the run kept
     // uploading the same file until it was stopped by hand.
     const source = page({
@@ -2986,17 +2980,13 @@ describe("apply agent run endings", () => {
       input,
       repeatingModel("upload", { ref: "c1", documentId: suppliedResume.id }),
     );
-    expect(uploadFile).toHaveBeenCalledTimes(3);
-    expect(result.outcome).toBe("paused");
+    expect(uploadFile).toHaveBeenCalledTimes(2);
+    expect(result.outcome).toBe("stuck");
     expect(result.readyToSend).toBeNull();
     expect(result.reason).toContain("resume.txt");
-    expect(result.reason).toContain("after 3 tries: its upload was refused");
-    expect(fileQuestions(result)).toEqual([
-      expect.objectContaining({
-        id: "upload_repair",
-        prompt: "Resume — upload failed",
-      }),
-    ]);
+    expect(result.reason).toContain("after one recovery pass");
+    expect(result.reason).toContain("server refusal");
+    expect(fileQuestions(result)).toEqual([]);
   });
 
   test("an upload that never finishes is handed over instead of waited on forever", async () => {
@@ -5894,6 +5884,7 @@ describe("fill_fields visible steps", () => {
           name: "certificate.pdf",
           mimeType: "application/pdf",
           bytes,
+          method: "input",
         });
         source.controls[1].value = file.name;
         return Promise.resolve({ ok: true as const, observedValue: file.name });
@@ -6023,7 +6014,7 @@ describe("fill_fields visible steps", () => {
       } else expect(report).toContain("c1: not attempted");
       expect(upload).toHaveBeenCalledTimes(
         barrier === "write refused"
-          ? 3
+          ? 2
           : ["navigation", "new field"].includes(barrier)
             ? 1
             : 0,
@@ -9496,7 +9487,8 @@ test.each([
         .flatMap((pause) => pause.questions ?? [])
         .filter((question) => question.answerControlType === "file")
         .map((question) => question.prompt),
-    ).toEqual(asked);
+    ).toEqual(formSubmits ? asked : []);
+    if (!formSubmits) expect(result.outcome).toBe("stuck");
   },
 );
 

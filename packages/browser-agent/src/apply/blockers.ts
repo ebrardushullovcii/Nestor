@@ -63,6 +63,9 @@ const CHALLENGE_SIGNALS = [
   "unusual traffic",
   "complete the challenge",
   "prove you are not a robot",
+  "slide right to secure your access",
+  "slide to verify",
+  "drag the slider to verify",
 ];
 
 /** A model may describe a challenge read in a child frame but omit the
@@ -75,7 +78,12 @@ export function reportedSecurityChallenge(reason: string): ApplyBlocker | null {
     `(?:review|solve|complete|finish|retry) (?:the |a )?${challenge}\\b|\\b${challenge}\\b.{0,140}(?:please try again|needs (?:you|a person)|requires (?:human|manual)|waiting for (?:you|a person))`,
     "u",
   ).test(text);
-  if (!asksForPerson) return null;
+  const slider =
+    contains(text, CHALLENGE_SIGNALS) &&
+    /\b(?:complete|finish|solve|slide|drag|verification required)\b/u.test(
+      text,
+    );
+  if (!asksForPerson && !slider) return null;
   return {
     code: "security_challenge",
     requiresPerson: true,

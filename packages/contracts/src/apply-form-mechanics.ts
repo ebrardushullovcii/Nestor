@@ -120,6 +120,8 @@ export interface RawApplyPlacement {
 export interface RawApplyAction extends RawApplyPlacement {
   ref?: string;
   index: number;
+  /** An explicit ARIA role, such as a tab implemented as a native button. */
+  role?: string;
   label: string;
   visible: boolean;
   disabled: boolean;
@@ -205,6 +207,8 @@ export interface RawApplySummaryRow {
 }
 
 export interface RawApplyPage {
+  /** Monotonic count of non-GET/HEAD/OPTIONS page requests, independent of file matching. */
+  networkMutationCount?: number;
   /** Visible `dt`/`dd` rows, outermost document first; absent when none. */
   summaryRows?: RawApplySummaryRow[];
   /** Transient account surface; never includes query, fragment or userinfo. */

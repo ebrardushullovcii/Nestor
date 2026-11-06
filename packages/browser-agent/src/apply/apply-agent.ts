@@ -1742,6 +1742,7 @@ async function runMeasuredApplyAgent(
       state,
       since,
     });
+    if (state === "accepted") exhaustedUploads.delete(fieldKey);
     if (state !== "rejected" && state !== "unconfirmed") return;
     const requests =
       control.upload?.requests
@@ -1772,21 +1773,43 @@ async function runMeasuredApplyAgent(
       )
     );
   };
-  // A file the site (or Nestor's fence) refused gets a fixed number of
-  // tries per field; after that the run stops and hands the upload over.
-  const MAX_UPLOAD_TRIES = 3;
+  // One initial attempt and one recovery pass. A no-op chooser may fall
+  // through to drop in that same pass, only with independent request proof.
+  const MAX_UPLOAD_TRIES = 2;
   const uploadTries = new Map<string, number>();
+  const exhaustedUploads = new Map<string, string>();
   const uploadsStillUploading = () =>
     [...uploadLedger.values()].some((entry) => entry.state === "uploading");
+  const exhaustedUploadReason = (
+    key: string,
+    label: string,
+    detail?: string,
+  ) => {
+    const file =
+      uploadLedger.get(key)?.fileName ||
+      selectedFiles.get(key)?.fileName ||
+      "the selected file";
+    const recovery =
+      (uploadTries.get(key) ?? 0) >= MAX_UPLOAD_TRIES
+        ? "after one recovery pass"
+        : "because a recovery could not safely reach the attachment field";
+    return `Nestor could not attach ${file} to "${label}" ${recovery}. ${uploadDiagnostics.get(key) ?? detail ?? "The site did not confirm the file."} Your recorded answers are kept.`;
+  };
 
   // A chosen file the site refused is already the person's one upload item.
-  const repairsUpload = (control: ApplyFormObservation["controls"][number]) =>
-    control.kind === "file" &&
-    pendingQuestions.has(UPLOAD_REPAIR_QUESTION_ID) &&
-    [...uploadLedger.values()].some(
-      (entry) =>
-        entry.state !== "accepted" && entry.label === questionPrompt(control),
+  const repairsUpload = (control: ApplyFormObservation["controls"][number]) => {
+    const page = pageTools.state.observation;
+    return (
+      control.kind === "file" &&
+      ((page && exhaustedUploads.has(uploadFieldKey(control, page))) ||
+        (pendingQuestions.has(UPLOAD_REPAIR_QUESTION_ID) &&
+          [...uploadLedger.values()].some(
+            (entry) =>
+              entry.state !== "accepted" &&
+              entry.label === questionPrompt(control),
+          )))
     );
+  };
 
   await config.onProgress?.({
     step: 0,
@@ -1909,7 +1932,11 @@ async function runMeasuredApplyAgent(
           if (saved.controlLabel === questionPrompt(control))
             nativeSavedFiles.delete(key);
       const label = questionPrompt(control);
-      const nationality = nationalityQuestionIdentity(label);
+      const nationality = ["work_authorization", "visa_sponsorship"].includes(
+        control.questionKind,
+      )
+        ? null
+        : nationalityQuestionIdentity(label);
       const nationalitySaved = nationality
         ? savedAnswerForQuestion(control, runConfig.sources.reusableAnswers)
         : null;
@@ -2182,6 +2209,7 @@ async function runMeasuredApplyAgent(
       }
       if (state !== entry.state)
         uploadLedger.set(key, { ...entry, state, since: now().getTime() });
+      if (state === "accepted") exhaustedUploads.delete(key);
       if (state !== "accepted") continue;
       const recorded = [...attachments]
         .reverse()
@@ -2257,9 +2285,13 @@ async function runMeasuredApplyAgent(
     // However many files the site refused, on this step or an earlier one,
     // the person gets one item for this application. It goes only once each
     // of those files is seen accepted.
-    const repairs = [...uploadLedger.values()].filter(
-      (entry) => entry.state === "rejected" || entry.state === "unconfirmed",
-    );
+    const repairs = [...uploadLedger.entries()]
+      .filter(
+        ([key, entry]) =>
+          !uploadTries.has(key) &&
+          (entry.state === "rejected" || entry.state === "unconfirmed"),
+      )
+      .map(([, entry]) => entry);
     const [firstRepair] = repairs;
     if (firstRepair) {
       const selectedDocument =
@@ -2700,6 +2732,13 @@ async function runMeasuredApplyAgent(
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();
+        const reportedChallenge = !securityChallengeSolved(observation)
+          ? [outcome.reason, ...forPerson]
+              .map(reportedSecurityChallenge)
+              .find((blocker) => blocker !== null)
+          : null;
+        if (!observation.blocker && reportedChallenge)
+          observation = { ...observation, blocker: reportedChallenge };
         const permissions = await currentBrowserPermissions(config);
         const identityContext = await googleIdentityContext(
           config,
@@ -2786,8 +2825,19 @@ async function runMeasuredApplyAgent(
           // Credentials and verification belong on the website. Even with an
           // enabled permission, a step the agent could not finish is an access
           // handoff, never a saved-answer question asking for a password/code.
-          pendingQuestions.clear();
-          forPerson = [];
+          if (observation.blocker?.code === "security_challenge") {
+            // The puzzle is an access handoff. Keep genuine form questions
+            // beside it, without turning the puzzle into a saved answer.
+            forPerson = forPerson.filter(
+              (item) => !reportedSecurityChallenge(item),
+            );
+            for (const [key, question] of pendingQuestions)
+              if (reportedSecurityChallenge(question.prompt))
+                pendingQuestions.delete(key);
+          } else {
+            pendingQuestions.clear();
+            forPerson = [];
+          }
           const blocker: ApplyBlocker = observation.blocker
             ? { ...observation.blocker, requiresPerson: true }
             : {
@@ -2812,6 +2862,8 @@ async function runMeasuredApplyAgent(
             question: null,
             blocker,
           });
+          const questions = collectedQuestionsPause();
+          if (questions) pauses.push(questions);
           return {
             kind: "finish",
             finish: {
@@ -2838,6 +2890,41 @@ async function runMeasuredApplyAgent(
           );
           observation = await pageTools.observe();
           syncObservation(observation);
+        }
+        // A later autosave or a later step can invalidate an earlier upload.
+        // Retry a reachable field once; a missing/disabled field is a
+        // technical stop, never a request for candidate information.
+        for (const [key, entry] of [...uploadLedger]) {
+          if (
+            !uploadTries.has(key) ||
+            exhaustedUploads.has(key) ||
+            !["rejected", "unconfirmed"].includes(entry.state)
+          )
+            continue;
+          const field = observation.controls.find(
+            (control) =>
+              control.kind === "file" &&
+              !control.disabled &&
+              uploadFieldKey(control, observation) === key,
+          );
+          if (
+            field &&
+            entry.documentId &&
+            (uploadTries.get(key) ?? 0) < MAX_UPLOAD_TRIES
+          ) {
+            const repair = await runProposal(
+              { tool: "upload", ref: field.ref, documentId: entry.documentId },
+              checkOne,
+            );
+            if (repair.kind === "paused") return outcomeToLoop(repair);
+            await outcomeToLoop(repair);
+            observation = pageTools.state.observation ?? observation;
+          }
+          if (
+            uploadLedger.get(key)?.state !== "accepted" &&
+            !exhaustedUploads.has(key)
+          )
+            exhaustedUploads.set(key, exhaustedUploadReason(key, entry.label));
         }
         const observedShape = applyStepShape(observation);
         const classifications = await classifyQuestions?.(
@@ -3062,16 +3149,37 @@ async function runMeasuredApplyAgent(
               }),
             );
           }
+          const uploadFailure = [...exhaustedUploads.values()].join(" ");
           return {
             kind: "finish",
             finish: {
-              reason: outcome.reason,
-              stuck: false,
-              needsPerson: true,
+              reason: uploadFailure || outcome.reason,
+              stuck: !!uploadFailure,
+              needsPerson: uploadFailure
+                ? pendingQuestions.size > 0 || forPerson.length > 0
+                : true,
               data: {},
             },
           };
         };
+        if (exhaustedUploads.size) {
+          forPerson = forPerson.filter(
+            (item) =>
+              !observation.controls.some(
+                (control) =>
+                  control.kind === "file" &&
+                  repairsUpload(control) &&
+                  (item === control.ref ||
+                    matchesFinishQuestion(
+                      questionPrompt(control),
+                      false,
+                      item,
+                    )),
+              ),
+          );
+          needsPersonFinishPending = false;
+          return finishWithQuestions();
+        }
         if (pendingQuestions.size > 0) return finishWithQuestions();
         const resume = documentCatalog.find(
           (document) => document.kind === "resume",
@@ -3444,15 +3552,15 @@ async function runMeasuredApplyAgent(
         // ticked) is not waiting on them, whatever the finish text says.
         const challengeAlreadySolved = securityChallengeSolved(observation);
         const challengeInReason = reportedSecurityChallenge(outcome.reason);
-        const reportedChallenge = challengeAlreadySolved
+        const remainingChallenge = challengeAlreadySolved
           ? null
           : challengeInReason;
-        if (reportedChallenge) {
+        if (remainingChallenge) {
           pauses.push({
             code: "page_blocked",
-            summary: reportedChallenge.summary,
+            summary: remainingChallenge.summary,
             question: null,
-            blocker: reportedChallenge,
+            blocker: remainingChallenge,
           });
           finish.needsPerson = true;
         }
@@ -3495,6 +3603,7 @@ async function runMeasuredApplyAgent(
       evidencePolicy?: ApplyAnswerEvidencePolicy,
     ) => Promise<WrittenAnswerCheck>,
     deferTextCommit?: (commit: () => void) => void,
+    dropWithinRecovery = false,
   ): Promise<ApplyExecutionOutcome> => {
     await refreshReusableAnswers();
     const current = pageTools.state.observation;
@@ -3617,48 +3726,30 @@ async function runMeasuredApplyAgent(
         };
     }
     if (proposal.tool === "upload" && control) {
-      const documentId = proposal.documentId;
       const label = questionPrompt(control);
       const fieldKey = uploadFieldKey(control, current!);
       const tries = uploadTries.get(fieldKey) ?? 0;
-      const refused = uploadLedger.get(fieldKey);
-      if (tries >= MAX_UPLOAD_TRIES) {
-        const fileName =
-          refused?.fileName ||
-          control.upload?.fileName ||
-          config.sources.documents.find(
-            (document) => document.id === documentId,
-          )?.fileName;
-        const file = fileName ? `${fileName} ` : "the file ";
-        const summary = `"${label}" did not take ${file}after ${tries} tries${refused?.state === "rejected" ? ": its upload was refused" : ": the site never showed it attached"}. The input, chooser and drop recovery could not confirm it; your other answers are kept.`;
+      if (tries >= MAX_UPLOAD_TRIES && !dropWithinRecovery) {
+        const summary =
+          exhaustedUploads.get(fieldKey) ??
+          exhaustedUploadReason(fieldKey, label);
+        exhaustedUploads.set(fieldKey, summary);
         return {
-          kind: "paused",
-          pause: {
-            code: "document_needs_you",
-            summary,
-            question: pendingQuestions.get(UPLOAD_REPAIR_QUESTION_ID) ?? {
-              ...buildPendingQuestion({
-                control,
-                jobId: config.application.jobId,
-                detectedAt: now().toISOString(),
-                suggestion: null,
-              }),
-              note: summary,
-            },
-            blocker: null,
-          },
+          kind: "refused",
+          reason: summary,
+          observation: current!,
+          fieldRef: control.ref,
         };
       }
       proposal = {
         ...proposal,
-        ...(tries > 0
-          ? { method: (["chooser", "drop"] as const)[Math.min(tries - 1, 1)] }
-          : {}),
+        method: dropWithinRecovery ? "drop" : tries > 0 ? "chooser" : "input",
       };
-      uploadTries.set(fieldKey, tries + 1);
+      const attempt = dropWithinRecovery ? tries : tries + 1;
+      uploadTries.set(fieldKey, attempt);
       uploadLedger.delete(fieldKey);
       note(
-        `Attaching to "${label}" using ${proposal.method ?? "input"} (try ${tries + 1} of ${MAX_UPLOAD_TRIES} in this attempt).`,
+        `Attaching to "${label}" using ${proposal.method} (try ${attempt} of ${MAX_UPLOAD_TRIES}${dropWithinRecovery ? "; chooser made no request" : ""} in this attempt).`,
       );
     }
     const writeKey = controlWriteKey(proposal);
@@ -3685,7 +3776,15 @@ async function runMeasuredApplyAgent(
           else timingRecord.onAnswerWaited();
         },
       },
-    );
+    ).catch((error: unknown): ApplyExecutionOutcome => {
+      if (proposal.tool !== "upload" || !current || !control) throw error;
+      return {
+        kind: "refused",
+        reason: describeBrowserError(error, "The file could not be attached."),
+        observation: current,
+        uploadFailed: true,
+      };
+    });
     if (outcome.kind === "moved" && outcome.confirmedStepPage)
       stepReceipts.advance(outcome.confirmedStepPage, now().toISOString());
     if (
@@ -3921,6 +4020,7 @@ async function runMeasuredApplyAgent(
       if (
         (failed || outcome.kind === "refused") &&
         nextControl &&
+        nextControl.upload?.network !== "pending" &&
         (uploadTries.get(fieldKey) ?? 0) < MAX_UPLOAD_TRIES &&
         !config.signal?.aborted
       ) {
@@ -3935,6 +4035,49 @@ async function runMeasuredApplyAgent(
           },
           checkWrittenAnswer,
         );
+      }
+      const beforeRequests = current?.networkMutationCount;
+      const afterRequests = after.networkMutationCount;
+      if (
+        (failed || outcome.kind === "refused") &&
+        proposal.method === "chooser" &&
+        !dropWithinRecovery &&
+        nextControl &&
+        !nextControl.answered &&
+        nextControl.upload?.network === undefined &&
+        beforeRequests !== undefined &&
+        afterRequests !== undefined &&
+        beforeRequests === afterRequests &&
+        !config.signal?.aborted
+      ) {
+        note(
+          `The chooser made no network request and attached nothing to "${label}". Trying its drop target in the same recovery pass.`,
+        );
+        return runProposal(
+          {
+            tool: "upload",
+            ref: nextControl.ref,
+            documentId: proposal.documentId,
+          },
+          checkWrittenAnswer,
+          undefined,
+          true,
+        );
+      }
+      if (failed || outcome.kind === "refused") {
+        const summary = exhaustedUploadReason(
+          fieldKey,
+          label,
+          outcome.kind === "refused" ? outcome.reason : undefined,
+        );
+        exhaustedUploads.set(fieldKey, summary);
+        note(summary);
+        return {
+          kind: "refused",
+          reason: summary,
+          observation: after,
+          fieldRef: control.ref,
+        };
       }
       if (outcome.kind === "attached")
         return { ...outcome, observation: after };
@@ -3959,7 +4102,7 @@ async function runMeasuredApplyAgent(
               return name === "upload"
                 ? Math.max(
                     DOCUMENT_TOOL_TIMEOUT_MS,
-                    MAX_UPLOAD_TRIES * (uploadWaitMs + 20_000),
+                    (MAX_UPLOAD_TRIES + 1) * (uploadWaitMs + 20_000),
                   )
                 : control && isCoverLetterControl(control)
                   ? DOCUMENT_TOOL_TIMEOUT_MS
@@ -4033,7 +4176,7 @@ async function runMeasuredApplyAgent(
         })
         ? Math.max(
             DOCUMENT_TOOL_TIMEOUT_MS,
-            MAX_UPLOAD_TRIES * (uploadWaitMs + 20_000),
+            (MAX_UPLOAD_TRIES + 1) * (uploadWaitMs + 20_000),
           )
         : undefined;
     },
@@ -6230,6 +6373,9 @@ async function runMeasuredApplyAgent(
     outcome = "paused";
     reason = skipReason;
     readyToSend = null;
+  } else if (exhaustedUploads.size > 0 && !pending && pauses.length === 0) {
+    outcome = "stuck";
+    reason = [...exhaustedUploads.values()].join(" ");
   } else if (
     technicalFailure &&
     pendingQuestions.size === 0 &&
@@ -6266,7 +6412,7 @@ async function runMeasuredApplyAgent(
   } else if (pending) {
     pauses.push(pending);
     outcome = "paused";
-    reason = pending.summary;
+    reason = [pending.summary, ...exhaustedUploads.values()].join(" ");
   } else if (loop.finish?.stuck) {
     outcome = "stuck";
     reason = `Job Finder stopped on ${config.siteLabel} because it got stuck: ${loop.finish.reason.replace(/\.?$/u, ".")}`;

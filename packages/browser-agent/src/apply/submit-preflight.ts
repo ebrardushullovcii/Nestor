@@ -196,7 +196,17 @@ function fileUploadState(
   ).some((line) => {
     const said = words(line);
     if (mine.some((entry) => said.has(entry))) return true;
-    if (genericFailure.test(line) && !others.some((other) => other.answered))
+    // An application-send error is not evidence that a retained file failed.
+    // Deferred-upload forms can show that banner before Send was attempted.
+    const sendFailure =
+      /\b(?:submitt?ing|sending|submission)\b.*\b(?:application|form)\b|\b(?:application|form)\b.*\b(?:submission|submit|send)\b/iu.test(
+        line,
+      );
+    if (
+      genericFailure.test(line) &&
+      !sendFailure &&
+      !others.some((other) => other.answered)
+    )
       return true;
     return (
       fileWords.test(line) &&

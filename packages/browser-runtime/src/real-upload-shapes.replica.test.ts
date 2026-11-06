@@ -825,14 +825,15 @@ test.each([
 );
 
 test.each(["refused", "vanished"])(
-  "upload recovery: %s records the cause after all methods",
+  "upload recovery: %s records a technical failure after one recovery pass",
   async (shape) => {
     const { page, result } = await recoveryRun(shape);
-    expect(result.outcome).toBe("paused");
+    expect(result.outcome).toBe("stuck");
     const log = result.notes.join("\n");
     expect(log).toContain("using input");
     expect(log).toContain("using chooser");
-    expect(log).toContain("using drop");
+    if (shape === "vanished") expect(log).toContain("using drop");
+    else expect(log).not.toContain("using drop");
     expect(log).toContain(
       shape === "refused"
         ? "Document service unavailable"
@@ -849,7 +850,12 @@ test.each(["refused", "vanished"])(
             pause.questions ?? (pause.question ? [pause.question] : []),
         )
         .some((question) => question.id === "upload_repair"),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      posts().filter(
+        (post) => post.path === `/upload-recovery/${shape}/attachments/1`,
+      ),
+    ).toHaveLength(shape === "refused" ? 2 : 0);
     await page.context().close();
   },
   30_000,
@@ -876,7 +882,7 @@ test("upload recovery: a fresh attempt retries an old failure even when replay k
   );
   expect(result.outcome, result.notes.join("\n")).toBe("prepared");
   expect(result.notes.join("\n")).toContain("fresh attempt");
-  expect(result.notes.join("\n")).toContain("try 1 of 3");
+  expect(result.notes.join("\n")).toContain("try 1 of 2");
   expect(result.reviewAttachments?.map((file) => file.fileName)).toContain(
     resume.name,
   );
