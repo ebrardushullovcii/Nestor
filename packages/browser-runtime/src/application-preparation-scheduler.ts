@@ -122,6 +122,10 @@ export function createApplicationPreparationScheduler(
   };
 
   const waitFor = (request: Request, key: string): Promise<void> => {
+    const startedAt = Date.now();
+    const queuedBehindSite = [...requests].some(
+      (other) => other.granted && other.key === key,
+    );
     request.key = key;
     request.granted = false;
     return new Promise<void>((resolve, reject) => {
@@ -148,9 +152,19 @@ export function createApplicationPreparationScheduler(
       });
       requests.add(request);
       drain();
-    }).finally(() =>
-      request.signal?.removeEventListener("abort", request.onAbort),
-    );
+    }).finally(() => {
+      request.signal?.removeEventListener("abort", request.onAbort);
+      if (process.env.NESTOR_APPLY_PROFILE === "1")
+        console.info(
+          "[apply-profile]",
+          JSON.stringify({
+            event: "queue",
+            durationMs: Date.now() - startedAt,
+            queuedBehindSite,
+            granted: request.granted,
+          }),
+        );
+    });
   };
 
   return {
