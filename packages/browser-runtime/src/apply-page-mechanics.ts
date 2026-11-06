@@ -1143,6 +1143,115 @@ export function collectApplyDocumentSnapshot(
 ) {
   const matching = (selector: string) =>
     elements.filter((element) => element.matches(selector));
+  const fieldDescriptions = matching(selectors.controls).flatMap((control) => {
+    const root = control.getRootNode();
+    // Live picker guidance can be aria-describedby too. Its text still stays
+    // in the control's hint; only labels and explicit errors protect body text.
+    const ids = ["aria-labelledby", "aria-errormessage"]
+      .flatMap((attribute) =>
+        (control.getAttribute(attribute) ?? "").split(/\s+/u),
+      )
+      .filter(Boolean);
+    return [
+      ...(control instanceof HTMLInputElement ||
+      control instanceof HTMLSelectElement ||
+      control instanceof HTMLTextAreaElement
+        ? Array.from(control.labels ?? [])
+        : []),
+      ...ids.flatMap((id) => {
+        const label =
+          root instanceof Document || root instanceof ShadowRoot
+            ? root.getElementById(id)
+            : null;
+        return label ? [label] : [];
+      }),
+    ];
+  });
+  const hiddenPickerAnnouncement = (node: HTMLElement): boolean => {
+    const region = node.closest('[role="status"], [aria-live="polite"]');
+    if (
+      !region ||
+      region.matches(selectors.controls) ||
+      region.querySelector(selectors.controls) ||
+      region.closest('[role="alert"], [aria-live="assertive"]') ||
+      region.querySelector(
+        '[role="alert"], [aria-live="assertive"], [aria-invalid="true"], input, select, textarea',
+      ) ||
+      fieldDescriptions.some(
+        (description) =>
+          description.contains(region) || region.contains(description),
+      )
+    )
+      return false;
+    const text = region.textContent ?? "";
+    // Positive picker-navigation evidence only. Unknown live prose stays;
+    // an error mixed with a picker announcement stays too.
+    if (
+      !/\b(?:\d+ (?:results?|options?) (?:are )?available|option .{1,100} selected|select is focused|use (?:up|down) and (?:up|down)|press (?:up|down|enter|escape))\b/iu.test(
+        text,
+      ) ||
+      /\b(?:error|invalid|fail(?:ed|ure)?|missing|required|cannot|unable|denied|captcha|robot|must|try again)\b|\bplease (?:enter|choose|select|provide)\b/iu.test(
+        text,
+      )
+    )
+      return false;
+    const navigationWords = new Set(
+      "option options result results available selected select selection focused focus is are was currently current you your have has been a an the for of in on at by with can to and or use up down left right arrow arrows key keys enter escape esc tab space backspace home end press open close menu list choose choices type typing search term refine input value values edit clear remove exit move navigate item items".split(
+        " ",
+      ),
+    );
+    for (const control of matching(selectors.controls))
+      for (const value of [
+        control.getAttribute("placeholder"),
+        "value" in control && typeof control.value === "string"
+          ? control.value
+          : "",
+      ])
+        for (const word of value?.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])
+          navigationWords.add(word);
+    const announcement = text
+      .replace(
+        /\boption\s+[^.!?]{1,160}?\s*,?\s*(?:selected|focused)\b/giu,
+        "option selected",
+      )
+      .replace(
+        /(?:^|[.!?])\s*[^.!?]{1,160},\s*(?:selected|focused)\b/giu,
+        ". selected",
+      );
+    if (
+      (announcement.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).some(
+        (word) => !/^\d+$/u.test(word) && !navigationWords.has(word),
+      )
+    )
+      return false;
+    for (
+      let box: Element | null = region;
+      box && box !== document.body;
+      box = box.parentElement
+    ) {
+      const style = getComputedStyle(box);
+      const rect = box.getBoundingClientRect();
+      const clip = style.clip
+        .match(/^rect\(([^)]+)\)$/u)?.[1]
+        ?.split(/[,\s]+/u)
+        .map(Number.parseFloat);
+      const emptyClip =
+        clip?.length === 4 &&
+        clip.every(Number.isFinite) &&
+        (clip[2]! <= clip[0]! || clip[1]! <= clip[3]!);
+      const tiny =
+        rect.width <= 1 &&
+        rect.height <= 1 &&
+        [style.overflow, style.overflowX, style.overflowY].includes("hidden");
+      if (
+        emptyClip ||
+        tiny ||
+        /^(?:inset\((?:50|100)%|circle\(0(?:px)?)/u.test(style.clipPath)
+      )
+        return true;
+    }
+    return false;
+  };
   const renderedText = (root: ParentNode): string => {
     const parts: string[] = [];
     for (const node of root.childNodes) {
@@ -1163,6 +1272,7 @@ export function collectApplyDocumentSnapshot(
         (style.display !== "contents" && !node.getClientRects().length)
       )
         continue;
+      if (hiddenPickerAnnouncement(node)) continue;
       const block = !["inline", "inline-block", "contents"].includes(
         style.display,
       );

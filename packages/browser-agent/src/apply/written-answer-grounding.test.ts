@@ -4,50 +4,31 @@ import { checkWrittenApplicationAnswers } from "./written-answer-grounding";
 import type { LLMClient } from "../agent/contracts";
 import letterRetry from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/letter-check-retry.json";
 
-test("a timed-out short check leaves a full independent recovery window", async () => {
+test("a working check can exceed the former three-minute deadline without an output cap", async () => {
   vi.useFakeTimers();
-  const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), ms);
-    return controller.signal;
-  });
   try {
-    const chatWithTools = vi
-      .fn<LLMClient["chatWithTools"]>()
-      .mockImplementationOnce(
-        (_m, _t, o) =>
-          new Promise((_resolve, reject) => {
-            o?.signal?.addEventListener(
-              "abort",
-              () => reject(new Error("Aborted")),
-              { once: true },
-            );
-          }),
-      )
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) =>
-            setTimeout(() => resolve(checkedReply), 1000),
-          ),
-      );
-    const pending = expect(
-      checkWrittenApplicationAnswers({
-        client: { chatWithTools },
-        sources,
-        payDisclosed: false,
-        answers: [
-          { question: "Why this role?", answer: letterRetry.answerSentence },
-        ],
-      }),
-    ).resolves.toMatchObject([{ supported: true }]);
-    await vi.advanceTimersByTimeAsync(61000);
-    await pending;
-    expect(chatWithTools).toHaveBeenCalledTimes(2);
-    expect(chatWithTools.mock.calls[0]?.[2]?.signal).not.toBe(
-      chatWithTools.mock.calls[1]?.[2]?.signal,
+    const controller = new AbortController();
+    const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve(checkedReply), 240_000),
+        ),
     );
+    const result = checkWrittenApplicationAnswers({
+      client: { chatWithTools },
+      sources,
+      payDisclosed: false,
+      signal: controller.signal,
+      answers: [
+        { question: "Why this role?", answer: letterRetry.answerSentence },
+      ],
+    });
+    await vi.advanceTimersByTimeAsync(240_000);
+    await expect(result).resolves.toMatchObject([{ supported: true }]);
+    expect(chatWithTools).toHaveBeenCalledTimes(1);
+    expect(chatWithTools.mock.calls[0][2]?.signal).toBe(controller.signal);
+    expect(chatWithTools.mock.calls[0][2]?.maxOutputTokens).toBeUndefined();
   } finally {
-    timeout.mockRestore();
     vi.clearAllTimers();
     vi.useRealTimers();
   }
@@ -102,9 +83,7 @@ test("a slow incomplete letter check leaves time for its grounded retry", async 
     );
     await result;
     expect(chatWithTools).toHaveBeenCalledTimes(2);
-    expect(
-      chatWithTools.mock.calls[0][2]?.maxOutputTokens,
-    ).toBeGreaterThanOrEqual(8_000);
+    expect(chatWithTools.mock.calls[0][2]?.maxOutputTokens).toBeUndefined();
     const prompt = JSON.stringify(chatWithTools.mock.calls[0][0]);
     expect(prompt).toContain("shortest verbatim passage");
   } finally {
@@ -400,7 +379,7 @@ test("the person's exact saved No and numeric zero remain usable evidence", asyn
   expect(result.map((value) => value.supported)).toEqual([true, true]);
 });
 
-test("budgets letters by text length and retries incomplete output once with more room", async () => {
+test("leaves letters uncapped and retries incomplete output once", async () => {
   const chatWithTools = vi
     .fn<LLMClient["chatWithTools"]>()
     .mockRejectedValueOnce(new Error("incomplete: max_output_tokens"))
@@ -416,11 +395,8 @@ test("budgets letters by text length and retries incomplete output once with mor
     }),
   ).resolves.toEqual([{ supported: true, reason: "Supported" }]);
   expect(chatWithTools).toHaveBeenCalledTimes(2);
-  const initial = chatWithTools.mock.calls[0][2]!.maxOutputTokens!;
-  expect(initial).toBeGreaterThan(6_000);
-  expect(chatWithTools.mock.calls[1][2]!.maxOutputTokens).toBeGreaterThan(
-    initial,
-  );
+  expect(chatWithTools.mock.calls[0][2]?.maxOutputTokens).toBeUndefined();
+  expect(chatWithTools.mock.calls[1][2]?.maxOutputTokens).toBeUndefined();
 });
 
 test("a repeated incomplete check reports plain copy without provider errors", async () => {
@@ -556,4 +532,45 @@ test("a malformed citation gets one correction against the same Profile facts", 
   expect(correction).toContain("source_path_not_found");
   expect(correction).not.toContain("did not return a valid");
   expect(correction).not.toContain("JSON-encoded");
+});
+
+test("partial batch checks keep going beyond two rounds while verdict coverage improves", async () => {
+  let calls = 0;
+  const answers = Array.from({ length: 5 }, (_, index) => ({
+    question: `Question ${index}`,
+    answer: `Unrecorded fact ${index}`,
+  }));
+  const client: LLMClient = {
+    chatWithTools: () =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: `check-${calls}`,
+            type: "function",
+            function: {
+              name: "report_answer_checks",
+              arguments: JSON.stringify({
+                checks: [
+                  {
+                    index: calls++,
+                    supported: false,
+                    reason: "This fact is missing.",
+                    evidence: [],
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
+  };
+  const result = await checkWrittenApplicationAnswers({
+    client,
+    sources,
+    payDisclosed: false,
+    answers,
+  });
+  expect(calls).toBe(5);
+  expect(result).toHaveLength(5);
+  expect(result.every((entry) => !entry.supported)).toBe(true);
 });

@@ -142,8 +142,10 @@ export function createApplyTiming(now: () => Date) {
           hands.observe,
         );
         if (process.env.NESTOR_APPLY_PROFILE === "1") {
-          const { observedAt: _at, ...state } = observation;
-          const signature = JSON.stringify(state);
+          const signature = JSON.stringify({
+            ...observation,
+            observedAt: undefined,
+          });
           profile("observation", {
             unchanged: signature === lastObservation,
             controls: observation.controls.length,
@@ -230,6 +232,7 @@ export function createApplyTiming(now: () => Date) {
         const usage = timing.tokenUsage!;
         usage.unreportedCalls += 1;
         let usageEvents = 0;
+        let completed = false;
         const recordUsage = (current: ModelTokenUsage) => {
           for (const field of [
             "inputTokens",
@@ -286,7 +289,11 @@ export function createApplyTiming(now: () => Date) {
             },
           });
           // Legacy injected clients may only expose usage on their final reply.
-          if (!usageEvents && response.usage) recordUsage(response.usage);
+          if (!usageEvents && response.usage) {
+            recordUsage(response.usage);
+            usageEvents += 1;
+          }
+          completed = true;
           return response;
         } finally {
           const duration = Math.max(0, now().getTime() - start);
@@ -300,6 +307,11 @@ export function createApplyTiming(now: () => Date) {
             durationMs: duration,
             attempts,
             usageReported: usageEvents > 0,
+            outcome: completed
+              ? "completed"
+              : options?.signal?.aborted
+                ? "aborted"
+                : "failed",
             ...callUsage,
           });
         }

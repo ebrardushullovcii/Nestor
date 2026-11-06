@@ -115,7 +115,7 @@ test("one unusable citation preserves a supported answer and a genuine question"
       stage: "citation_binding",
     },
   });
-  expect(chatWithTools).toHaveBeenCalledTimes(2);
+  expect(chatWithTools).toHaveBeenCalledTimes(3);
 });
 
 function observation() {

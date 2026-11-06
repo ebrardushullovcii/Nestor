@@ -259,6 +259,8 @@ export interface ApplyFormObservation {
   step: ApplyStepPosition;
   /** A bounded excerpt of what the page says. `read_text` gets the rest. */
   bodyTextExcerpt: string;
+  /** Complete bounded read for question/answer meaning; the navigation prompt stays short. */
+  bodyTextForQuestions?: string;
   /** Read from the full observed page before its model excerpt is shortened. */
   ownWordsRequired?: boolean;
   headings: ApplyHeading[];
@@ -622,6 +624,8 @@ export interface ApplyAgentConfig extends BrowserPermissionPolicy {
     options: readonly string[];
   }>;
   hands: ApplyPageHands;
+  /** Route context window, when supplied by the host (64k conservative fallback). */
+  modelContextWindowTokens?: number;
   /**
    * The model classifies each page's questions (ADR 0041): which ask about
    * pay and which are declarations. Off in scripted tests, where the keyword

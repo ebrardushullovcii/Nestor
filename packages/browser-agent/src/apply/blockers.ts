@@ -64,6 +64,8 @@ const CHALLENGE_SIGNALS = [
   "verify you are human",
   "verify you are a human",
   "i am not a robot",
+  "i m not a robot",
+  "im not a robot",
   "security check",
   "unusual traffic",
   "complete the challenge",
@@ -86,7 +88,15 @@ export function reportedSecurityChallenge(reason: string): ApplyBlocker | null {
     /\b(?:complete|finish|solve|slide|drag|verification required)\b/u.test(
       text,
     );
-  if (!asksForPerson && !slider) return null;
+  const robot = contains(text, [
+    "i am not a robot",
+    "i m not a robot",
+    "im not a robot",
+    "verify you are human",
+    "verify you are a human",
+    "prove you are not a robot",
+  ]);
+  if (!asksForPerson && !slider && !robot) return null;
   return {
     code: "security_challenge",
     requiresPerson: true,
@@ -375,7 +385,13 @@ export function detectApplyBlocker(input: {
 
   if (
     contains(text, AUTOMATIC_CHECK_SIGNALS) &&
-    !contains(text, ["captcha", "i am not a robot", "verify you are human"])
+    !contains(text, [
+      "captcha",
+      "i am not a robot",
+      "i m not a robot",
+      "im not a robot",
+      "verify you are human",
+    ])
   ) {
     return {
       code: "security_challenge",

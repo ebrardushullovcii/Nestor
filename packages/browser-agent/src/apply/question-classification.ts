@@ -130,7 +130,8 @@ export async function classifyApplicationQuestions(
 ): Promise<Map<string, ApplyQuestionClassification>> {
   const result = new Map<string, ApplyQuestionClassification>();
   let missing = [...input.questions];
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  let noProgress = 0;
+  for (let attempt = 0; noProgress < 3; attempt += 1) {
     input.signal?.throwIfAborted();
     // A failed whole-page report is retried in at most three smaller groups,
     // then what is still unread once more, one question per call when only
@@ -141,7 +142,7 @@ export async function classifyApplicationQuestions(
     const size =
       attempt === 0
         ? missing.length
-        : attempt === 2 && missing.length <= 6
+        : attempt >= 2 && missing.length <= 6
           ? 1
           : Math.ceil(missing.length / 3);
     const batches = [];
@@ -173,6 +174,7 @@ export async function classifyApplicationQuestions(
       )
     ).flat();
     input.signal?.throwIfAborted();
+    noProgress = unread.length < missing.length ? 0 : noProgress + 1;
     missing = unread;
     if (!missing.length) return result;
   }
@@ -194,13 +196,16 @@ function questionReadInstructions(
 ): string {
   let text = "";
   const chrome = new Set<string>();
+  const fieldChrome = new Set<string>();
   try {
     const context = JSON.parse(contextText ?? "{}") as {
       instructions?: unknown;
       chrome?: string[];
+      fieldChrome?: string[];
     };
     if (typeof context.instructions === "string") text = context.instructions;
     for (const line of context.chrome ?? []) chrome.add(line.trim());
+    for (const line of context.fieldChrome ?? []) fieldChrome.add(line.trim());
   } catch {
     /* Legacy step keys carry no instructions. */
   }
@@ -218,6 +223,7 @@ function questionReadInstructions(
     for (const value of [
       control.value,
       control.selectedOptionLabel,
+      control.phoneCallingCode ?? "",
       ...control.options,
     ])
       if (value?.trim()) fieldData.add(value.trim());
@@ -231,6 +237,22 @@ function questionReadInstructions(
     )
     .map((control) => control.hint?.replace(/\s/gu, "") ?? "")
     .filter(Boolean);
+  // innerText can put a chooser label and its status on the SAME line, or
+  // several picker choices beside each other. Those are still field echoes.
+  // Remove a line only when ALL its words are observed field data/chrome;
+  // instructions containing other words (including a filename) stay intact.
+  const dataLine = fieldDataLineMatcher([
+    ...chrome,
+    ...fieldChrome,
+    ...fieldData,
+    ...controls.flatMap((control) => [
+      control.label,
+      control.groupLabel,
+      control.placeholder,
+      ...(control.sectionPath ?? []),
+    ]),
+    ...(hasFile ? ["No file selected", "No file chosen"] : []),
+  ]);
   return text
     .split(/\r?\n/u)
     .filter((line) => {
@@ -252,12 +274,46 @@ function questionReadInstructions(
             ].includes(value) && !requiresOwnWords(value),
         ) &&
         !(hasFile && FILE_STATUS.test(value) && !instructions.has(value)) &&
+        (requiresOwnWords(value) ||
+          instructions.has(value) ||
+          !dataLine(value)) &&
         (!fieldData.has(value) ||
           instructions.has(value) ||
           requiresOwnWords(value))
       );
     })
     .join("\n");
+}
+
+function fieldDataLineMatcher(values: readonly string[]) {
+  const normalize = (value: string) =>
+    value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
+  const terms = [...new Set(values.map(normalize).filter(Boolean))].sort(
+    (a, b) => b.length - a.length,
+  );
+  const separator = /[\s*|:·—–]/u;
+  return (line: string): boolean => {
+    const text = normalize(line);
+    const reachable = new Set([0]);
+    for (let start = 0; start < text.length; start += 1) {
+      if (!reachable.has(start)) continue;
+      let cursor = start;
+      while (cursor < text.length && separator.test(text.charAt(cursor)))
+        cursor += 1;
+      if (cursor === text.length) return true;
+      for (const term of terms) {
+        const end = cursor + term.length;
+        if (
+          text.startsWith(term, cursor) &&
+          (end === text.length || separator.test(text.charAt(end)))
+        ) {
+          if (end === text.length) return true;
+          reachable.add(end);
+        }
+      }
+    }
+    return false;
+  };
 }
 
 async function readApplicationQuestions(
@@ -434,18 +490,9 @@ async function readApplicationQuestions(
       }),
     },
   ] as const;
-  const signal = input.signal
-    ? AbortSignal.any([input.signal, AbortSignal.timeout(60_000)])
-    : AbortSignal.timeout(60_000);
   const response = await input.client.chatWithTools([...messages], tools, {
-    signal,
+    ...(input.signal ? { signal: input.signal } : {}),
     reasoningTask: "apply",
-    // A full page can have dozens of questions; truncation used to leave
-    // later questions unclassified and trigger another call on each write.
-    maxOutputTokens: Math.min(
-      16_000,
-      Math.max(4000, input.questions.length * 200 + 1000) * (attempt + 1),
-    ),
   });
   const call = response.toolCalls?.find(
     (item) => item.function.name === "report_question_kinds",
@@ -800,7 +847,6 @@ export function createQuestionClassifier(input: {
   const classify = async (
     controls: readonly ApplyFormControl[],
     context?: string,
-    refreshes = 0,
   ): ReturnType<QuestionClassifier> => {
     if (input.signal?.aborted)
       return Promise.reject(
@@ -924,11 +970,7 @@ export function createQuestionClassifier(input: {
         currentContext = (await input.readContext?.()) ?? null;
         const fresh = resultFor(questionsFor(controls, context), controls);
         if (fresh) return fresh;
-        if (refreshes >= 1)
-          throw new QuestionReadUnavailableError(
-            "Nestor's question context changed while reading. Your page is kept. Retry this application.",
-          );
-        return classify(controls, context, refreshes + 1);
+        return classify(controls, context);
       })
       .finally(() => inFlight.delete(setKey));
     inFlight.set(setKey, result);

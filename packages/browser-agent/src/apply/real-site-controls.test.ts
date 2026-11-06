@@ -583,6 +583,30 @@ test("a visible verification slider becomes an access handoff", () => {
   ).toMatchObject({ code: "security_challenge", requiresPerson: true });
 });
 
+test.each([
+  "I'm not a robot",
+  "I’m not a robot",
+  "Im not a robot",
+  "Slide to verify",
+])("%s is an access handoff without a typed question", async (label) => {
+  const raw = page({
+    bodyText: `Apply for this job\n${label}`,
+    controls: [field({ label, placeholder: label })],
+  });
+  const result = await runApplyAgent(
+    config(raw),
+    finishModel([label], "Please complete the security check."),
+  );
+  expect(
+    result.pauses.some((pause) => pause.blocker?.code === "security_challenge"),
+  ).toBe(true);
+  expect(
+    result.pauses.flatMap(
+      (pause) => pause.questions ?? (pause.question ? [pause.question] : []),
+    ),
+  ).toEqual([]);
+});
+
 test("a provider choice screen is a sign-in handoff, not a typed question", async () => {
   const raw = page({
     bodyText:
@@ -920,13 +944,18 @@ test("the recovery pass drops only after a chooser with no request and no attach
 });
 
 test.each(["changed", "missing"] as const)(
-  "a %s mutation count prevents drop even when the file ledger reports no request",
+  "a %s mutation counter limits uploads to two possible network sends",
   async (counter) => {
-    const { result, methods } = await uploadRun(true, counter);
-    expect(methods).toEqual(["input", "chooser"]);
-    expect(result.outcome).toBe("stuck");
+    const { result, methods, writes } = await uploadRun(true, counter);
+    expect(methods).toEqual(
+      counter === "changed"
+        ? ["input", "chooser", "drop"]
+        : ["input", "chooser"],
+    );
+    expect(writes).toBeLessThanOrEqual(2);
+    expect(result.outcome).toBe(counter === "changed" ? "prepared" : "stuck");
     expect(result.pauses).toEqual([]);
-    expect(result.readyToSend).toBeNull();
+    if (counter === "missing") expect(result.readyToSend).toBeNull();
   },
 );
 

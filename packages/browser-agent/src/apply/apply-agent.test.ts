@@ -1760,7 +1760,7 @@ describe("written answer fact check recovery", () => {
       ),
     ).toBe(true);
     expect(lastCall?.[1].length).toBeGreaterThan(0);
-    expect(lastCall?.[2]?.maxOutputTokens).toBeGreaterThan(4_000);
+    expect(lastCall?.[2]?.maxOutputTokens).toBeUndefined();
   });
 
   test("refuses to enter an answer when both fact reports are unusable", async () => {
@@ -9574,6 +9574,7 @@ describe("a finish that says needsPerson always ends paused", () => {
     reason?: string;
     forPerson?: string[];
     handed?: string[];
+    accessHandoff?: boolean;
   }> = [
     { name: "Polar's review request", page: plain(), reason: polar },
     {
@@ -9622,6 +9623,7 @@ describe("a finish that says needsPerson always ends paused", () => {
     { name: "MFA code, reason only", page: plain(), reason: mfa },
     {
       name: "human check, reason only",
+      accessHandoff: true,
       page: plain(),
       reason: "Please verify you are human before submitting.",
     },
@@ -10022,7 +10024,14 @@ describe("a finish that says needsPerson always ends paused", () => {
       );
       expect(result.outcome).toBe("paused");
       expect(result.readyToSend).toBeNull();
-      expect(handedOver(result).length).toBeGreaterThan(0);
+      if (scenario.accessHandoff) {
+        expect(
+          result.pauses.some(
+            (pause) => pause.blocker?.code === "security_challenge",
+          ),
+        ).toBe(true);
+        expect(handedOver(result)).toEqual([]);
+      } else expect(handedOver(result).length).toBeGreaterThan(0);
       for (const prompt of scenario.handed ?? [])
         expect(handedOver(result)).toContain(prompt);
     },
@@ -12156,4 +12165,43 @@ test("an unobserved navigation handoff never exposes a raw URL as a question", a
   expect(JSON.stringify(result.pauses)).not.toContain(
     "https://example.test/next-page",
   );
+});
+
+test("a progressing form can exceed 200 turns and thirty minutes", async () => {
+  const raw = page({ actions: [] });
+  let turns = 0;
+  const input = config(raw, {
+    now: () => new Date(Date.UTC(2026, 0, 1) + turns * 60_000),
+  });
+  input.hands.observe = () => {
+    raw.stepLabel = `Step ${turns + 1} of 210`;
+    return Promise.resolve(
+      buildApplyFormObservation(raw, new Date().toISOString()),
+    );
+  };
+  const model: LLMClient = {
+    chatWithTools: () => {
+      turns++;
+      return Promise.resolve({
+        toolCalls: [
+          {
+            id: `long-${turns}`,
+            type: "function",
+            function:
+              turns <= 205
+                ? { name: "observe", arguments: "{}" }
+                : {
+                    name: "finish",
+                    arguments: JSON.stringify({
+                      reason: "Finished the long form.",
+                    }),
+                  },
+          },
+        ],
+      });
+    },
+  };
+  const result = await runApplyAgent(input, model);
+  expect(turns).toBe(206);
+  expect(result.reason).not.toContain("very long run");
 });

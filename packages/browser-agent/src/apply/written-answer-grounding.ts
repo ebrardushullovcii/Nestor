@@ -326,17 +326,6 @@ export async function checkWrittenApplicationAnswers(input: {
       },
     },
   ];
-  const answerChars = input.answers.reduce(
-    (total, entry) => total + entry.answer.length,
-    0,
-  );
-  const longWriting =
-    answerChars >= 1_200 ||
-    input.answers.some((entry) =>
-      /\b(?:cover|motivation|application) letter\b/iu.test(entry.question),
-    );
-  // A letter check and its one retry fit inside the document tool's five-minute
-  // deadline. A slow first attempt must leave a useful retry window.
   const verdicts = new Map<number, WrittenAnswerCheck>();
   const priorReports: unknown[] = [];
   const correctionItems = new Map<number, unknown[]>();
@@ -346,11 +335,10 @@ export async function checkWrittenApplicationAnswers(input: {
       if (!verdicts.has(index)) failures.set(index, { category, stage });
     });
   };
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const timeout = AbortSignal.timeout(longWriting ? 180_000 : 60_000);
-    const signal = input.signal
-      ? AbortSignal.any([input.signal, timeout])
-      : timeout;
+  let noProgress = 0;
+  for (let attempt = 0; noProgress < 2; attempt += 1) {
+    const checkedBefore = verdicts.size;
+    const signal = input.signal;
     let response;
     try {
       response = await input.client.chatWithTools(
@@ -391,7 +379,7 @@ export async function checkWrittenApplicationAnswers(input: {
             ],
         [...tools],
         {
-          signal,
+          ...(signal ? { signal } : {}),
           reasoningTask:
             input.shortValues === true &&
             !input.answers.some(
@@ -399,33 +387,16 @@ export async function checkWrittenApplicationAnswers(input: {
             )
               ? "apply"
               : "claim_check",
-          maxOutputTokens: Math.min(
-            16_000,
-            Math.max(
-              longWriting ? 8_000 : 4_000,
-              4_000 +
-                400 * input.answers.length +
-                Math.ceil(
-                  (answerChars +
-                    input.answers.reduce(
-                      (total, entry) => total + entry.question.length,
-                      0,
-                    )) /
-                    2,
-                ),
-            ) *
-              (attempt + 1),
-          ),
         },
       );
     } catch {
       if (input.signal?.aborted)
         throw new WrittenAnswerCheckUnavailableError("request_aborted");
       failRemaining(
-        signal.aborted ? "request_deadline" : "request_failed",
+        signal?.aborted ? "request_deadline" : "request_failed",
         "request",
       );
-      if (attempt === 1) break;
+      noProgress += 1;
       continue;
     }
     const call = response.toolCalls?.find(
@@ -553,8 +524,7 @@ export async function checkWrittenApplicationAnswers(input: {
               );
             }));
         // A supported verdict with an invalid citation is a checker-format
-        // failure, not proof that the person's fact is missing. One bounded
-        // correction uses the same current sources and all the same gates.
+        // failure, not proof that the person's fact is missing. A correction uses the same current sources and all the same gates.
         if (raw.supported && !quotesVerified) {
           failures.set(raw.index, {
             category: "unverified_evidence",
@@ -637,6 +607,7 @@ export async function checkWrittenApplicationAnswers(input: {
         });
       }
     }
+    noProgress = verdicts.size > checkedBefore ? 0 : noProgress + 1;
     if (verdicts.size === input.answers.length) break;
   }
   return input.answers.map((_, index) => {

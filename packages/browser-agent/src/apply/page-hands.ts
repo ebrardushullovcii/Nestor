@@ -496,6 +496,9 @@ export function buildApplyFormObservation(
     title: raw.title,
     step: readStepPosition(raw.stepLabel, raw.bodyText),
     bodyTextExcerpt: raw.bodyText.slice(0, 6_000),
+    ...(raw.bodyText.length > 6_000
+      ? { bodyTextForQuestions: raw.bodyText }
+      : {}),
     ownWordsRequired: requiresOwnWords(raw.bodyText),
     headings: raw.headings.map((heading) => ({
       level: heading.level,

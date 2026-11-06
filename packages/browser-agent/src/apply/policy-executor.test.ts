@@ -5427,7 +5427,7 @@ describe("picker replay: refused choices", () => {
     });
   });
 
-  test("refusals from earlier runs hold: after two, only the person's answer is tried", async () => {
+  test("distinct supported choices remain available after two earlier refusals", async () => {
     const source = picker();
     const { config, hands } = configFor(source);
     const control = observationOf(source).controls[0];
@@ -5456,10 +5456,8 @@ describe("picker replay: refused choices", () => {
     expect((await invent(createApplyGuardState())).kind).toBe("filled");
     expect(chooseOption).toHaveBeenCalledTimes(1);
     chooseOption.mockClear();
-    expect((await invent(createApplyGuardState(earlier))).kind).toBe(
-      "suggestion",
-    );
-    expect(chooseOption).not.toHaveBeenCalled();
+    expect((await invent(createApplyGuardState(earlier))).kind).toBe("filled");
+    expect(chooseOption).toHaveBeenCalledTimes(1);
 
     config.sources.reusableAnswers = [savedCountry(pickerReplay.options[0])];
     const answered = await executeApplyProposal(

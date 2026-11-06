@@ -5,8 +5,16 @@ export function compactApplyPageHistory(
   messages: readonly AgentMessage[],
   pageViews: ReadonlySet<string>,
   currentPage: string,
+  compactAtChars = 0,
 ): AgentMessage[] {
-  const views = [...pageViews].sort((a, b) => b.length - a.length);
+  const chars = messages.reduce(
+    (total, message) => total + message.content.length,
+    0,
+  );
+  const views =
+    chars >= compactAtChars
+      ? [...pageViews].sort((a, b) => b.length - a.length)
+      : [];
   const compacted = messages.map((message) => {
     if (message.role !== "tool" && message.role !== "user") return message;
     let content = message.content;

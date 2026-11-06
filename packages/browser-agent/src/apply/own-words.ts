@@ -25,12 +25,13 @@ export function formWritingInstructions(
   page:
     | {
         bodyTextExcerpt: string;
+        bodyTextForQuestions?: string;
         ownWordsRequired?: boolean;
       }
     | null
     | undefined,
 ): string {
-  const text = page?.bodyTextExcerpt ?? "";
+  const text = page?.bodyTextForQuestions ?? page?.bodyTextExcerpt ?? "";
   return page?.ownWordsRequired && !requiresOwnWords(text)
     ? `${text}\nIn your own words`
     : text;
@@ -82,5 +83,8 @@ export function questionReadContext(page: ApplyFormObservation): string {
       ...page.actions.map((action) => action.label),
       page.step.label ?? "",
     ],
+    fieldChrome: page.clickables
+      .filter((control) => control.tagName.toLowerCase() === "label")
+      .map((control) => control.label),
   });
 }
