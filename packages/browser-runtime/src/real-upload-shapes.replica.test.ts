@@ -882,7 +882,7 @@ test("upload recovery: a fresh attempt retries an old failure even when replay k
   );
   expect(result.outcome, result.notes.join("\n")).toBe("prepared");
   expect(result.notes.join("\n")).toContain("fresh attempt");
-  expect(result.notes.join("\n")).toContain("try 1 of 2");
+  expect(result.notes.join("\n")).toContain("at most 1 of 2 network sends");
   expect(result.reviewAttachments?.map((file) => file.fileName)).toContain(
     resume.name,
   );

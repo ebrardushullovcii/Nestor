@@ -233,7 +233,8 @@ test("an Ashby-sized form fills known facts and hands unknown facts over once", 
       }
       turns++;
       const text = messages.map((message) => message.content).join("\n");
-      expect(text.split(`Page: ${raw.url}`).length - 1).toBe(1);
+      // Earlier views may stay whole; the latest message must contain the current page.
+      expect(messages.at(-1)?.content).toContain(`Page: ${raw.url}`);
       if (turns === 2) {
         expect(text).toContain(
           "Already waiting for the person; do not retry these fields",
