@@ -29,6 +29,26 @@ test("native tab buttons retain their role in the root and child-frame readers w
   }
 });
 
+test("anchor tabs have one action handle rather than an ordinary-link route", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(
+      `<nav role="tablist"><a role="tab" href="https://example.test/job">Overview</a><a role="tab" href="https://example.test/job/application">Application</a></nav><a href="https://example.test/privacy">Privacy</a><iframe srcdoc="<a role='tab' href='https://example.test/details'>Application details</a>"></iframe>`,
+    );
+    const raw = await readRawApplyPage(page);
+    expect(
+      raw.actions
+        .filter((action) => action.role === "tab")
+        .map((action) => action.label),
+    ).toEqual(["Overview", "Application", "Application details"]);
+    expect(raw.links.map((link) => link.label)).toEqual(["Privacy"]);
+    expect(raw.clickables.filter((entry) => entry.role === "tab")).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+});
+
 test("the mutation count includes opaque and blocked requests independently of attachment matching", async () => {
   const browser = await chromium.launch({ headless: true });
   try {

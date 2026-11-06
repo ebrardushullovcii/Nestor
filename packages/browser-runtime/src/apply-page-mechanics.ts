@@ -77,9 +77,11 @@ export const APPLY_CONTROL_SELECTOR =
   "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true']";
 
 export const APPLY_ACTION_SELECTOR =
-  "button, input[type='submit'], input[type='button'], [role='button']";
+  "button, input[type='submit'], input[type='button'], [role='button'], [role='tab']";
 
-export const APPLY_LINK_SELECTOR = "a[href]";
+// A tab implemented as an anchor keeps its panel-navigation semantics and
+// has one action handle, rather than a second ordinary-link handle.
+export const APPLY_LINK_SELECTOR = "a[href]:not([role='tab'])";
 
 /**
  * Everything else a person could press.

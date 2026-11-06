@@ -104,7 +104,7 @@ const FORM_STEP_WORDS =
 
 const COOKIE_PART = /\b(?:cookies?|consent|gdpr|tracking|privacy)\b/u;
 const COOKIE_REJECT =
-  /^(?:i )?(?:reject|decline|deny|refuse|disagree)(?: all)?(?: optional| non essential| additional)?(?: cookies)?$/u;
+  /^(?:i )?(?:reject|decline|deny|refuse|disagree)(?: all)?(?: optional| non essential| non necessary| additional)?(?: cookies)?$/u;
 const COOKIE_NECESSARY =
   /^(?:(?:use|allow|accept) )?(?:only )?(?:strictly )?(?:necessary|essential|required)(?: cookies)?(?: only)?$|^only (?:strictly )?(?:necessary|essential|required)(?: cookies)?$/u;
 const COOKIE_ACCEPT =
@@ -219,6 +219,18 @@ export function fillPressFor(input: {
   const manual = manualEntryPressFor(observation, ref);
   if (manual) return manual;
   const label = normalizeSignal(entry.label);
+
+  // Cookie notices often use a plain Dismiss button outside a form with no
+  // enclosing heading. Closing that notice does not opt into its terms.
+  if (
+    /^(?:dismiss|close)$/u.test(label) &&
+    !entry.inForm &&
+    !entry.formAction &&
+    /\b(?:uses?|using) cookies\b/u.test(
+      normalizeSignal(observation.bodyTextExcerpt),
+    )
+  )
+    return { kind: "cookie_banner", ref, label: entry.label };
 
   const code = /\+([1-9]\d{0,2})(?!\d)/u.exec(entry.label)?.[0];
   if (

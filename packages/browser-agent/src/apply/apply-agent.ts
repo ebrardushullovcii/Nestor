@@ -3165,6 +3165,15 @@ async function runMeasuredApplyAgent(
         if (exhaustedUploads.size) {
           forPerson = forPerson.filter(
             (item) =>
+              ![
+                ...observation.actions,
+                ...observation.links,
+                ...observation.clickables,
+              ].some(
+                (entry) =>
+                  item === entry.ref ||
+                  matchesFinishQuestion(entry.label, false, item),
+              ) &&
               !observation.controls.some(
                 (control) =>
                   control.kind === "file" &&
@@ -3983,6 +3992,30 @@ async function runMeasuredApplyAgent(
           `Upload for "${label}" was not confirmed using ${proposal.method ?? "input"}. Rule: attachment gesture failed. ${outcome.reason}`,
         );
       let after = outcome.observation;
+      if (
+        !after.controls.some(
+          (entry) =>
+            entry.kind === "file" && uploadFieldKey(entry, after) === fieldKey,
+        )
+      ) {
+        // A gesture can succeed just as the site replaces the entire form
+        // with an error page. Retain the unconfirmed attempt so that losing
+        // the field cannot silently erase its technical failure. A matching
+        // accepted request below can still confirm a replaced upload widget.
+        const selected = selectedFiles.get(fieldKey);
+        uploadLedger.set(fieldKey, {
+          label,
+          control,
+          fileName: selected?.fileName ?? control.upload?.fileName ?? "",
+          documentId: selected?.documentId ?? proposal.documentId,
+          state: "unconfirmed",
+          since: now().getTime(),
+        });
+        uploadDiagnostics.set(
+          fieldKey,
+          "The attachment field disappeared before the site confirmed the selected file.",
+        );
+      }
       syncObservation(after);
       const started = Date.now();
       const pendingUpload = () =>

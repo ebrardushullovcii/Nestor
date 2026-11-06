@@ -219,6 +219,56 @@ test.each(["Apply Manually", "Apply for This Job"])(
   },
 );
 
+test("a plain cookie dismissal outside the form stays an ordinary press", () => {
+  const raw = page({
+    bodyText:
+      "Privacy Notice. This website uses cookies to improve your web experience.",
+    actions: [{ index: 0, label: "dismiss", visible: true, disabled: false }],
+  });
+  const press = () =>
+    fillPressFor({
+      config: config(raw),
+      observation: buildApplyFormObservation(raw, now().toISOString()),
+      ref: "a0",
+      state: createApplyGuardState(),
+    });
+  expect(press()).toMatchObject({ kind: "cookie_banner" });
+  raw.actions[0].inForm = true;
+  expect(press()).toBeNull();
+  raw.actions[0].inForm = false;
+  raw.bodyText = "Application details";
+  expect(press()).toBeNull();
+});
+
+test("declining non-necessary cookies stays an ordinary privacy choice", () => {
+  const raw = page({
+    actions: [
+      {
+        index: 0,
+        label: "Accept all cookies",
+        section: "Cookies",
+        visible: true,
+        disabled: false,
+      },
+      {
+        index: 1,
+        label: "Decline all non-necessary cookies",
+        section: "Cookies",
+        visible: true,
+        disabled: false,
+      },
+    ],
+  });
+  expect(
+    fillPressFor({
+      config: config(raw),
+      observation: buildApplyFormObservation(raw, now().toISOString()),
+      ref: "a1",
+      state: createApplyGuardState(),
+    }),
+  ).toMatchObject({ kind: "cookie_banner", ref: "a1" });
+});
+
 test("a phone-country dialog is part of the visible phone control", () => {
   const raw = page({
     controls: [
@@ -630,6 +680,72 @@ async function uploadRun(
   };
   return { result: await runApplyAgent(input, model), methods, writes };
 }
+
+test("an upload that replaces the form with an error is a technical stop, not a homepage chore", async () => {
+  const raw = page({
+    controls: [field({ inputType: "file", name: "resume", label: "Resume" })],
+  });
+  const input = config(raw);
+  input.sources.documents = [
+    {
+      id: "resume",
+      kind: "resume",
+      label: "Synthetic CV",
+      fileName: "synthetic.pdf",
+      mimeType: "application/pdf",
+      loadBytes: () => Promise.resolve(new TextEncoder().encode("synthetic")),
+    },
+  ];
+  input.hands.uploadFile = (_ref, file) => {
+    raw.controls = [];
+    raw.bodyText = "Sorry, an unknown error occurred. Go to homepage";
+    raw.links = [
+      {
+        index: 0,
+        label: "Go to homepage",
+        href: "https://employer.example.test/",
+        target: "",
+        visible: true,
+        topOffset: 0,
+      },
+    ];
+    raw.networkMutationCount = 1;
+    return Promise.resolve({ ok: true, observedValue: file.name });
+  };
+  let calls = 0;
+  const model: LLMClient = {
+    chatWithTools: () =>
+      Promise.resolve({
+        toolCalls: [
+          {
+            id: `call-${calls}`,
+            type: "function",
+            function:
+              calls++ === 0
+                ? {
+                    name: "upload",
+                    arguments: JSON.stringify({
+                      ref: "c0",
+                      documentId: "resume",
+                    }),
+                  }
+                : {
+                    name: "finish",
+                    arguments: JSON.stringify({
+                      reason: "The page failed.",
+                      needsPerson: true,
+                      forPerson: ["Go to homepage"],
+                    }),
+                  },
+          },
+        ],
+      }),
+  };
+  const result = await runApplyAgent(input, model);
+  expect(result.outcome).toBe("stuck");
+  expect(result.reason).toContain("attachment field disappeared");
+  expect(result.pauses).toEqual([]);
+});
 
 test("a rejected recovery upload fails with its cause and creates no candidate question", async () => {
   const { result, methods, writes } = await uploadRun(false);
