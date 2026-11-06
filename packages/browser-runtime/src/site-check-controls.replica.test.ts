@@ -2,7 +2,10 @@ import { createServer, type Server } from "node:http";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, expect, test } from "vitest";
 import { createApplyPageHands } from "@nestor/browser-agent";
-import { createPlaywrightApplyPageMechanics } from "./apply-page-mechanics";
+import {
+  createPlaywrightApplyPageMechanics,
+  createPlaywrightApplyPageSession,
+} from "./apply-page-mechanics";
 
 let browser: Browser;
 let server: Server;
@@ -14,7 +17,7 @@ beforeAll(async () => {
     if (request.url === "/frame") {
       response.end(`<!doctype html><body><div id="challenge"></div><script>
         const root=document.querySelector('#challenge').attachShadow({mode:'closed'});
-        root.innerHTML='<label><input type="checkbox">Verify you are human</label><input type="hidden" name="cf-turnstile-response" value="synthetic-token-not-for-model">';
+        root.innerHTML='<p>Complete this site check to enable Submit</p><label><input type="checkbox">Verify you are human</label><input type="hidden" name="cf-turnstile-response" value="synthetic-token-not-for-model">';
         root.querySelector('input').addEventListener('click',event=>{
           if(event.isTrusted) parent.postMessage({passed:true},'*');
         });
@@ -54,6 +57,9 @@ test.each(["click", "set_checkbox"] as const)(
       const before = await hands.observe();
       expect(JSON.stringify(before)).not.toContain(
         "synthetic-token-not-for-model",
+      );
+      expect(before.bodyTextExcerpt).toContain(
+        "Complete this site check to enable Submit",
       );
       const checkbox = before.clickables.find(
         (control) => control.role === "checkbox",
@@ -97,7 +103,7 @@ test("refs follow DOM identity across label, value, URL and ordinal changes", as
     await page.setContent(
       `<label>Name<input></label><button id="target" onclick="this.dataset.clicked='true'">Apply</button>`,
     );
-    const hands = createPlaywrightApplyPageMechanics(page);
+    const hands = createPlaywrightApplyPageSession({ page });
     const first = await hands.readPage();
     const ref = first.actions[0]!.ref!;
     const field = first.controls[0]!.ref!;
@@ -113,6 +119,23 @@ test("refs follow DOM identity across label, value, URL and ordinal changes", as
       changed.actions.find((action) => action.label === "Continue")?.ref,
     ).toBe(ref);
     expect(changed.actions[0]?.ref).not.toBe(ref);
+    expect(
+      await hands.clickBoundAction!({
+        ref,
+        label: "Apply",
+        url: origin + "/plain",
+        stepLabel: null,
+        frame: null,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await hands.clickWithoutWrites!({
+        ref,
+        label: "Apply",
+        url: origin + "/plain",
+        stepLabel: null,
+      }),
+    ).toMatchObject({ ok: true });
     expect(await hands.clickElement(ref)).toMatchObject({ ok: true });
     expect(await page.locator("#target").getAttribute("data-clicked")).toBe(
       "true",

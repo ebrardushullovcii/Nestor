@@ -100,16 +100,37 @@ async function inNode<T>(
   }
 }
 
+/** Rendered text only: scripts, hidden inputs and hidden ancestors contribute none. */
+function readShadowText(this: ShadowRoot): string {
+  const walker = this.ownerDocument.createTreeWalker(
+    this,
+    NodeFilter.SHOW_TEXT,
+  );
+  const parts: string[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const range = this.ownerDocument.createRange();
+    range.selectNodeContents(node);
+    const parent = node.parentElement ?? this.host;
+    if (
+      range.getClientRects().length > 0 &&
+      getComputedStyle(parent).visibility !== "hidden"
+    )
+      parts.push(node.textContent ?? "");
+  }
+  return parts.join(" ").replace(/\s+/gu, " ").trim();
+}
+
 /** CDP can read closed roots without changing attachShadow or the site's DOM. */
 export async function readClosedShadowControls(
   page: Page,
   selector: string,
-): Promise<RawApplyClickable[]> {
+): Promise<{ clickables: RawApplyClickable[]; bodyText: string }> {
   // Test doubles and non-Chromium runtimes have no CDP surface.
-  if (!page.context?.()?.newCDPSession) return [];
+  if (!page.context?.()?.newCDPSession) return { clickables: [], bodyText: "" };
   const previous = targets.get(page) ?? new Map<string, Target>();
   const current = new Map(previous);
   const controls: RawApplyClickable[] = [];
+  const text: string[] = [];
   for (const frame of page.frames()) {
     let session: CDPSession;
     try {
@@ -128,8 +149,11 @@ export async function readClosedShadowControls(
         pierce: true,
       });
       const candidates: number[] = [];
+      const closedRoots: number[] = [];
       const visit = (node: DomNode, closed: boolean) => {
         if (node.shadowRootType === "user-agent") return;
+        if (node.shadowRootType === "closed")
+          closedRoots.push(node.backendNodeId);
         closed ||= node.shadowRootType === "closed";
         if (closed && node.nodeType === 1) candidates.push(node.backendNodeId);
         for (const child of node.children ?? []) visit(child, closed);
@@ -139,6 +163,14 @@ export async function readClosedShadowControls(
         if (node.contentDocument) visit(node.contentDocument, false);
       };
       visit(root, false);
+      for (const shadow of closedRoots) {
+        const visible = await inNode<string>(
+          session,
+          shadow,
+          readShadowText.toString(),
+        );
+        if (visible) text.push(visible);
+      }
       for (const node of candidates) {
         const control = await inNode<Omit<
           RawApplyClickable,
@@ -164,7 +196,7 @@ export async function readClosedShadowControls(
     }
   }
   targets.set(page, current);
-  return controls;
+  return { clickables: controls, bodyText: text.join("\n\n") };
 }
 
 /** Click through Chromium's input router, including out-of-process frames. */
@@ -261,11 +293,17 @@ export async function setClosedShadowToggle(
     const { root } = await session.send("DOM.getDocument", { depth: 0 });
     if (root.backendNodeId !== target.document)
       return { ok: false, error: "Stale control; observe again." };
-    const state = await inNode<{ toggle: boolean; checked: boolean }>(
+    const state = await inNode<{
+      connected: boolean;
+      toggle: boolean;
+      checked: boolean;
+    }>(
       session,
       target.node,
-      `function(){return {toggle:this.matches('input[type="checkbox"],input[type="radio"],[role="checkbox"],[role="radio"]'),checked:typeof this.checked==='boolean'?this.checked:this.getAttribute('aria-checked')==='true'}}`,
+      `function(){return {connected:this.isConnected && this.ownerDocument.defaultView?.document === this.ownerDocument,toggle:this.matches('input[type="checkbox"],input[type="radio"],[role="checkbox"],[role="radio"]'),checked:typeof this.checked==='boolean'?this.checked:this.getAttribute('aria-checked')==='true'}}`,
     );
+    if (!state.connected)
+      return { ok: false, error: "Stale control; observe again." };
     if (!state.toggle)
       return { ok: false, error: "That element is not a checkbox or radio." };
     if (state.checked === checked)

@@ -62,7 +62,6 @@ import {
 
 import {
   closePrepareOnlyAuthorizedFormActionWindow,
-  fencePrepareOnlyLocalPress,
   closePrepareOnlyIntermediateMutationWindow,
   ensurePrepareOnlyMutationGuard,
   getBlockedPrepareOnlyAttempts,
@@ -143,12 +142,13 @@ async function collectRawApplyPage(page: Page): Promise<RawApplyPage> {
   watchPageSelfLimits(page);
   const counter = mutationCounter(page);
   const raw = await readRawApplyPageContent(page);
-  raw.clickables.push(
-    ...(await readClosedShadowControls(
-      page,
-      `${APPLY_CONTROL_SELECTOR}, ${APPLY_ACTION_SELECTOR}, ${APPLY_LINK_SELECTOR}, ${APPLY_CLICKABLE_SELECTOR}`,
-    )),
+  const closed = await readClosedShadowControls(
+    page,
+    `${APPLY_CONTROL_SELECTOR}, ${APPLY_ACTION_SELECTOR}, ${APPLY_LINK_SELECTOR}, ${APPLY_CLICKABLE_SELECTOR}`,
   );
+  raw.clickables.push(...closed.clickables);
+  if (closed.bodyText)
+    raw.bodyText = [raw.bodyText, closed.bodyText].filter(Boolean).join("\n\n");
   // A dropzone's inner input often says only "Choose a file". Its actual
   // question lives outside the shadow root, beside the widget's host.
   for (const [index, frame] of page.frames().entries()) {
@@ -3296,128 +3296,8 @@ export function createPlaywrightApplyPageSession(input: {
         input.signal,
       );
     },
-    clickWithoutWrites: async (expected) => {
-      const fresh = await mechanics.readPage();
-      const action = fresh.actions.find(
-        (item) => (item.ref ?? `a${item.index}`) === expected.ref,
-      );
-      if (
-        fresh.url !== expected.url ||
-        fresh.stepLabel !== expected.stepLabel ||
-        !action ||
-        action.label !== expected.label ||
-        !action.visible ||
-        action.disabled ||
-        action.submitsForm !== false
-      )
-        return {
-          ok: false,
-          error: "The exact step control changed. Check the page again.",
-        };
-      const locator = actionLocator(page, expected.ref);
-      if (!locator)
-        return { ok: false, error: "The step control is unavailable." };
-      const valid = await locator.evaluate((element) => {
-        const button =
-          element instanceof HTMLButtonElement ||
-          element instanceof HTMLInputElement
-            ? element
-            : null;
-        return (
-          !!button &&
-          button.type === "button" &&
-          !!button.form &&
-          [...button.form.elements].every((field) => {
-            const control = field as HTMLInputElement;
-            return (
-              !control.willValidate ||
-              control.getClientRects().length === 0 ||
-              control.validity.valid
-            );
-          })
-        );
-      });
-      if (!valid)
-        return {
-          ok: false,
-          error:
-            "This step's fields or control are not valid for a local press.",
-        };
-      const worker = await input.sentinel?.check("local_control_press");
-      if (worker)
-        return {
-          ok: false,
-          error: "This page needs the person before it can advance.",
-        };
-      await fencePrepareOnlyLocalPress(page);
-      return mechanics.clickElement(expected.ref);
-    },
-    clickBoundAction: async (expected) => {
-      const changed = {
-        ok: false as const,
-        error: "The exact step control changed. Check the page again.",
-        reason: "binding_changed" as const,
-      };
-      const fresh = await mechanics.readPage();
-      const action = fresh.actions.find(
-        (item) => (item.ref ?? `a${item.index}`) === expected.ref,
-      );
-      if (
-        fresh.url !== expected.url ||
-        fresh.stepLabel !== expected.stepLabel ||
-        !action ||
-        action.label !== expected.label ||
-        !action.visible ||
-        action.disabled ||
-        (expected.nativeForm &&
-          (action.submitsForm !== true ||
-            action.formAction !== expected.nativeForm.action ||
-            action.formMethod?.toUpperCase() !== expected.nativeForm.method))
-      )
-        return changed;
-      const locator = actionLocator(page, expected.ref);
-      if (!locator) return changed;
-      // The document that owns the control now, read from the control itself.
-      const owner = await locator
-        .evaluate(() =>
-          window === window.top
-            ? null
-            : { origin: location.origin, pathname: location.pathname },
-        )
-        .catch(() => undefined);
-      if (
-        owner === undefined ||
-        (owner === null
-          ? expected.frame !== null
-          : !expected.frame ||
-            owner.origin !== expected.frame.origin ||
-            owner.pathname !== expected.frame.pathname) ||
-        !(await locator.isVisible().catch(() => false)) ||
-        !(await locator.isEnabled().catch(() => false))
-      )
-        return changed;
-      if (await input.sentinel?.check("bound_control_press"))
-        return {
-          ...changed,
-          error: "This page needs the person before it can advance.",
-        };
-      if (!expected.nativeForm) return mechanics.clickElement(expected.ref);
-      // The workflow proved a numbered non-final step. Bind its one native
-      // POST to the same freshly observed submitter and destination.
-      try {
-        await openPrepareOnlyAuthorizedFormActionWindow(
-          page,
-          locator,
-          20_000,
-          expected.nativeForm,
-        );
-        const result = await mechanics.clickElement(expected.ref);
-        await waitForPrepareOnlyAuthorizedFormAction(page);
-        return result;
-      } finally {
-        await closePrepareOnlyAuthorizedFormActionWindow(page);
-      }
-    },
+    clickWithoutWrites: (expected) => mechanics.clickElement(expected.ref),
+    clickBoundAction: (expected) => mechanics.clickElement(expected.ref),
     setToggle: async (ref, checked) => {
       // A radio or checkbox sends its value ("PT") and its page shows a label
       // ("Portugal"): the guard has to know both before it is activated.
