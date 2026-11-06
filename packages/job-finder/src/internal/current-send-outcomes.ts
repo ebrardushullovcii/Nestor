@@ -9,12 +9,12 @@ export async function currentSendOutcomes<
 ): Promise<T[]> {
   const current = await Promise.all(
     outcomes.map(async (outcome) => {
-      if (!outcome.id || !outcome.idempotencyKey) return outcome;
+      if (!outcome.id || !outcome.idempotencyKey) return true;
       const key = await repository.getSubmissionIdempotencyRecord(
         outcome.idempotencyKey,
       );
-      return key?.outcomeId === outcome.id ? outcome : null;
+      return key?.outcomeId === outcome.id;
     }),
   );
-  return current.filter((outcome): outcome is T => outcome !== null);
+  return outcomes.filter((_outcome, index) => current[index]);
 }
