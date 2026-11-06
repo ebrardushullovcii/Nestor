@@ -52,6 +52,9 @@ export async function setup(app: App) {
   await p.getByRole("checkbox", { name: "Remote", exact: true }).check();
   await p.getByRole("checkbox", { name: "Hybrid", exact: true }).check();
   await ctx.click("Finish setup and find jobs");
+  // The app may stay on Profile while the first search starts; open Find jobs
+  // so its Stop button can be seen.
+  await app.go("Find jobs");
   // Guided setup starts search automatically. Stop it before establishing the
   // measured search's starting set. Its rows are retained and recorded.
   const stop = p.getByRole("button", { name: "Stop search", exact: true });
