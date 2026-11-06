@@ -703,6 +703,12 @@ async function setup(
     applications,
     browser: browser as unknown as BrowserSessionRuntime,
     aiClient: createDeterministicJobFinderAiClient(),
+    checkPostingAvailability: () =>
+      Promise.resolve({
+        state: "open",
+        reason: "Posting is open",
+        checkedAt: Date.now(),
+      }),
     documentManager: {
       renderResumeArtifact: () =>
         Promise.resolve({
@@ -4793,4 +4799,49 @@ it("a technical failure keeps Try again visible while a separate genuine questio
     "Preferred contact time",
   ]);
   expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
+});
+
+it("fresh closure stops a queued application before any form work", async () => {
+  const f = await setup(1);
+  f.deps.checkPostingAvailability = () =>
+    Promise.resolve({
+      state: "closed",
+      reason: "Closed: posting removed (HTTP 404).",
+      checkedAt: Date.now(),
+    });
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() =>
+    expect(f.applications.forJobs(f.ids)[0]?.state).toBe("failed"),
+  );
+  expect(f.jobs.getJob(f.ids[0]!)?.stageNote).toContain("HTTP 404");
+  expect(f.execute).not.toHaveBeenCalled();
+  expect(f.applications.needsYou.list().total).toBe(0);
+});
+
+it("batch posting checks respect Speed concurrency and exclude closure before queueing", async () => {
+  const f = await setup(3, 2);
+  let active = 0,
+    peak = 0;
+  f.deps.checkPostingAvailability = async (job) => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    active--;
+    return {
+      state: job.id === f.ids[0] ? "closed" : "unknown",
+      reason:
+        job.id === f.ids[0]
+          ? "Closed: posting removed."
+          : "Could not read page.",
+      checkedAt: Date.now(),
+    };
+  };
+  const checks = await f.service.checkPostings(f.ids);
+  expect(peak).toBe(2);
+  expect(checks.size).toBe(3);
+  expect(f.applications.applyJobs({ selection: { ids: f.ids } }).queued).toBe(
+    2,
+  );
+  expect(f.jobs.getJob(f.ids[1]!)?.stage).toBe("resume");
 });

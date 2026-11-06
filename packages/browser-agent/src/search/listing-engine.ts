@@ -252,14 +252,6 @@ export async function collectSource(
           page.finalUrl,
           input.source,
         );
-        for (const next of [...parsed.next, ...parsed.portals])
-          if (!visited.has(next) && !queue.includes(next)) queue.push(next);
-        if (!parsed.cards.length && parsed.portals.length) {
-          notes.push(
-            `Following the site's open-jobs portal from ${page.finalUrl}.`,
-          );
-          return;
-        }
         if (
           !parsed.cards.length &&
           /\b(?:no (?:current |open |available )?(?:jobs|positions|vacancies)|(?:0|zero) (?:open )?(?:jobs|positions|vacancies))\b/iu.test(
@@ -269,6 +261,30 @@ export async function collectSource(
           recognized = true;
           emptyConfirmed = true;
           notes.push("The site explicitly reports no open positions.");
+          for (const next of parsed.next)
+            if (!visited.has(next) && !queue.includes(next)) queue.push(next);
+          return;
+        }
+        if (
+          !parsed.cards.length &&
+          (input.lane !== "browser" || input.navigateFallback) &&
+          (parsed.portals.length > 1 || parsed.next.length > 0)
+        ) {
+          // A directory is a choice of searches, not evidence that all of
+          // its locations/categories/pages belong in this collection.
+          complete = false;
+          notes.push(
+            `No listing cards were readable at ${page.finalUrl}. Browser navigation must choose among the observed job directories or pagination.`,
+          );
+          return;
+        }
+        if (!parsed.cards.length && parsed.portals.length) {
+          for (const portal of parsed.portals)
+            if (!visited.has(portal) && !queue.includes(portal))
+              queue.push(portal);
+          notes.push(
+            `Following the site's open-jobs portal from ${page.finalUrl}.`,
+          );
           return;
         }
         if (!parsed.cards.length) {
@@ -968,7 +984,10 @@ export async function readListings(
           read.card.postedAt ??
           null,
         description: read.body.text,
-        facts: { fullListingRead: !read.publishedOnly || !read.structured?.descriptionLikelyTruncated },
+        facts: {
+          fullListingRead:
+            !read.publishedOnly || !read.structured?.descriptionLikelyTruncated,
+        },
         summary: null,
         salaryMin: null,
         salaryMax: null,

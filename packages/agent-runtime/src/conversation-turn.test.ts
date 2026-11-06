@@ -440,3 +440,23 @@ describe("context budget", () => {
     ).toBe(104_000);
   });
 });
+
+it("a detached tool abort is a failed step with its cause, and the turn can retry", async () => {
+  const controller = new AbortController();
+  const events: ConversationTurnEvent[] = [];
+  let reads = 0;
+  const result = await runConversationTurn({
+    model: scripted([{toolCalls:[call("one","read")]},{toolCalls:[call("two","read")]},{content:"Read the item."}]),
+    signal: controller.signal,
+    tools:[tool("read",()=>{
+      if (++reads===1) throw new DOMException("The child read disconnected","AbortError");
+      return Promise.resolve({kind:"ok",content:"Read succeeded",progress:true});
+    })],
+    assembleMessages: async turn=>[...turn],
+    onEvent: event=>{events.push(event);},
+  });
+  expect(result.ending).toBe("replied");
+  expect(reads).toBe(2);
+  expect(events.some(event=>event.type==="tool_finished"&&event.outcome==="failed"&&event.summary.includes("child read disconnected"))).toBe(true);
+  expect(events.some(event=>event.type==="tool_finished"&&event.outcome==="cancelled")).toBe(false);
+});

@@ -50,6 +50,9 @@ export async function executeApplicationStoreCommand(
           "The person paused background work. Resume it before applying.",
         );
       noteExplicitUserStart();
+      await (
+        await getApplicationService()
+      ).checkPostings(store.selectedJobIds(value.selection));
       return ApplyJobsResultSchema.parse(
         store.applyJobs(
           value,

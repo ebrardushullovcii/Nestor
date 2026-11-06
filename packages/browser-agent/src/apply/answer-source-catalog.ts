@@ -1656,7 +1656,8 @@ export function classifyAnswerPermission(input: {
         )
       : null;
   if (start && start.id === source.id)
-    return canonicalStartDate(input.answer) === start.value
+    return canonicalStartDate(input.answer, input.control) ===
+      canonicalStartDate(start.value, input.control)
       ? { kind: "literal", source: { ...source, value: input.answer } }
       : deny(
           "This date must be calculated from your recorded availability or notice period.",
@@ -1854,11 +1855,15 @@ export function classifyAnswerPermission(input: {
   if (
     exactSaved &&
     (!isStartDateControl(input.control) ||
-      hasStartDateValue({
-        ...input.control,
-        value: input.answer,
-        invalid: false,
-      }))
+      hasStartDateValue(
+        {
+          ...input.control,
+          value: input.answer,
+          invalid: false,
+        },
+        input.now ?? new Date(),
+        input.sources.profile,
+      ))
   )
     return { kind: "literal", source };
   if (tags.kind === "other" && isStartDateControl(input.control)) {
@@ -1870,7 +1875,8 @@ export function classifyAnswerPermission(input: {
     );
     return start &&
       start.id === source.id &&
-      canonicalStartDate(input.answer) === start.value
+      canonicalStartDate(input.answer, input.control) ===
+        canonicalStartDate(start.value, input.control)
       ? { kind: "literal", source: { ...source, value: input.answer } }
       : deny(
           "This date must be calculated from your recorded availability or notice period.",

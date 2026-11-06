@@ -12205,3 +12205,24 @@ test("a progressing form can exceed 200 turns and thirty minutes", async () => {
   expect(turns).toBe(206);
   expect(result.reason).not.toContain("very long run");
 });
+
+test.each(["This job is no longer taking applications.", "Job not found"])(
+  "a removed posting ends as closed without asking the model or recording filters (%s)",
+  async (bodyText) => {
+    const model = { chatWithTools: vi.fn() };
+    const result = await runApplyAgent(
+      config(
+        page({
+          bodyText,
+          controls: [{ ...nameControl(), label: "Language", value: "English" }],
+        }),
+      ),
+      model,
+    );
+    expect(result.outcome).toBe("closed");
+    expect(result.reason).not.toContain("stuck");
+    expect(result.reviewFilled).toEqual([]);
+    expect(result.pauses[0]?.blocker?.code).toBe("application_closed");
+    expect(model.chatWithTools).not.toHaveBeenCalled();
+  },
+);

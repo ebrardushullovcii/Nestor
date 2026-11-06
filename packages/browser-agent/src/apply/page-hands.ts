@@ -14,6 +14,7 @@ import {
   toAnswerControlType,
 } from "./control-classification";
 import { detectApplyBlocker } from "./blockers";
+import { listingClosedReason } from "../search/listing-status";
 import { requiresOwnWords } from "./own-words";
 import type {
   ApplyControlKind,
@@ -254,7 +255,14 @@ export function buildApplyFormObservation(
         !control.disabled &&
         control.inputType.toLowerCase() === "password",
     ) || /\b(?:sign[ -]?in|log[ -]?in)\b/iu.test(`${raw.title} ${raw.url}`);
-  const controls: ApplyFormControl[] = raw.controls.map((rawControl) => {
+  const applicationControls = raw.controls.filter(
+    (control) =>
+      control.inputType.toLowerCase() !== "search" &&
+      !control.sectionPath?.some((part) =>
+        /^(?:footer|contentinfo|nav|navigation|search)$/iu.test(part),
+      ),
+  );
+  const controls: ApplyFormControl[] = applicationControls.map((rawControl) => {
     const kind = toControlKind(rawControl);
     const inputType = rawControl.inputType.toLowerCase();
     const oneTimeCode =
@@ -525,12 +533,20 @@ export function buildApplyFormObservation(
     loading: raw.loading,
     ...(raw.uploads ? { uploads: raw.uploads } : {}),
     validationErrors: raw.validationErrors,
-    blocker: detectApplyBlocker({
-      bodyText: raw.bodyText,
-      controls,
-      actions,
-      links,
-    }),
+    blocker: listingClosedReason(raw.bodyText)
+      ? {
+          code: "application_closed",
+          requiresPerson: false,
+          summary: "This job is no longer taking applications.",
+          detail: listingClosedReason(raw.bodyText)!,
+          nextActionLabel: "Find another job",
+        }
+      : detectApplyBlocker({
+          bodyText: raw.bodyText,
+          controls,
+          actions,
+          links,
+        }),
   };
 }
 

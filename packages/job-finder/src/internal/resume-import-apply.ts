@@ -577,22 +577,33 @@ function mergeProofBankEntries(
     ]),
   );
 
-  return extracted.map((entry, index) => {
+  const merged = [...existing];
+  extracted.forEach((entry, index) => {
     const key = normalizeText(`${entry.title}|${entry.claim}`);
     const match = existingByKey.get(key);
-    return {
+    const record = {
       id:
         match?.id ??
         `proof_${index}_${normalizeText(entry.title).replaceAll(" ", "_")}`,
       title: entry.title,
       claim: entry.claim,
-      heroMetric: entry.heroMetric,
-      supportingContext: entry.supportingContext,
-      roleFamilies: uniqueStrings(entry.roleFamilies),
-      projectIds: uniqueStrings(entry.projectIds),
-      linkIds: uniqueStrings(entry.linkIds),
+      heroMetric: match?.heroMetric ?? entry.heroMetric,
+      supportingContext: match?.supportingContext ?? entry.supportingContext,
+      roleFamilies: uniqueStrings([
+        ...(match?.roleFamilies ?? []),
+        ...entry.roleFamilies,
+      ]),
+      projectIds: uniqueStrings([
+        ...(match?.projectIds ?? []),
+        ...entry.projectIds,
+      ]),
+      linkIds: uniqueStrings([...(match?.linkIds ?? []), ...entry.linkIds]),
     };
+    if (match) merged.splice(merged.indexOf(match), 1, record);
+    else merged.push(record);
+    existingByKey.set(key, record);
   });
+  return merged;
 }
 
 function mergeResolvedSelectionIntoWorkspace(
@@ -633,12 +644,8 @@ function mergeResolvedSelectionIntoWorkspace(
       ...(selection.scalarFields.skillGroups?.highlightedSkills ?? []),
       ...profile.skills,
     ],
-    skills: selection.scalarFields.skills?.length
-      ? uniqueStrings(selection.scalarFields.skills)
-      : profile.skills,
-    strengths: selection.scalarFields.skillGroups?.highlightedSkills.length
-      ? selection.scalarFields.skillGroups.highlightedSkills
-      : profile.professionalSummary.strengths,
+    skills: selection.scalarFields.skills ?? [],
+    strengths: selection.scalarFields.skillGroups?.highlightedSkills ?? [],
   });
   const namedLinks = [
     ["Website", "website", selection.scalarFields.personalWebsiteUrl],
@@ -787,7 +794,12 @@ function mergeResolvedSelectionIntoWorkspace(
         fullSummary:
           selection.scalarFields.summary ??
           profile.professionalSummary.fullSummary,
-        strengths: partitionedSkills.strengths,
+        // Partition new extraction only. Saved chips belong to the person,
+        // even when a later read also lists one as a technology or skill.
+        strengths: uniqueStrings([
+          ...profile.professionalSummary.strengths,
+          ...partitionedSkills.strengths,
+        ]),
       },
       narrative: {
         ...profile.narrative,
@@ -822,8 +834,26 @@ function mergeResolvedSelectionIntoWorkspace(
         preferredLinkIds,
       },
       skillGroups: {
-        ...profile.skillGroups,
-        ...(selection.scalarFields.skillGroups ?? {}),
+        coreSkills: uniqueStrings([
+          ...profile.skillGroups.coreSkills,
+          ...(selection.scalarFields.skillGroups?.coreSkills ?? []),
+        ]),
+        tools: uniqueStrings([
+          ...profile.skillGroups.tools,
+          ...(selection.scalarFields.skillGroups?.tools ?? []),
+        ]),
+        languagesAndFrameworks: uniqueStrings([
+          ...profile.skillGroups.languagesAndFrameworks,
+          ...(selection.scalarFields.skillGroups?.languagesAndFrameworks ?? []),
+        ]),
+        softSkills: uniqueStrings([
+          ...profile.skillGroups.softSkills,
+          ...(selection.scalarFields.skillGroups?.softSkills ?? []),
+        ]),
+        highlightedSkills: uniqueStrings([
+          ...profile.skillGroups.highlightedSkills,
+          ...(selection.scalarFields.skillGroups?.highlightedSkills ?? []),
+        ]),
       },
       targetRoles: selection.scalarFields.targetRoles?.length
         ? uniqueStrings(selection.scalarFields.targetRoles)
@@ -831,7 +861,7 @@ function mergeResolvedSelectionIntoWorkspace(
       locations: selection.scalarFields.locations?.length
         ? uniqueStrings(selection.scalarFields.locations)
         : profile.locations,
-      skills: partitionedSkills.skills,
+      skills: uniqueStrings([...profile.skills, ...partitionedSkills.skills]),
       experiences: mergeExperienceRecords(
         profile.experiences,
         selection.experiences,

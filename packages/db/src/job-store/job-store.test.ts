@@ -798,3 +798,48 @@ it("duplicates within a search differ from jobs saved before it", () => {
   const later = store.saveFoundJobs({ searchId: "later", jobs: [found(1)] });
   expect(later.alreadySaved).toEqual(first.added);
 });
+
+it("keeps closure history, restores an approved job on reopening, and never changes a sent application", () => {
+  const store = open();
+  const { ids } = store.saveFoundJobs({
+    searchId: null,
+    jobs: [found(901), found(902)],
+  });
+  store.setStage([ids[0]!], "resume");
+  store
+    .sql(
+      "INSERT INTO resumes(job_id,state,level,approved_at,updated_at) VALUES (?,'ready','original',?,0)",
+    )
+    .run(ids[0]!, Date.now());
+  store.setStage([ids[1]!], "applied");
+  store
+    .sql(
+      "INSERT INTO applications(job_id,mode,state,queued_at,updated_at,submitted_at) VALUES (?,'autonomous_submit','submitted',1,2,3)",
+    )
+    .run(ids[1]!);
+  const before = store.getJob(ids[0]!)!;
+  expect(store.markClosed(ids, "The posting was removed (HTTP 404).")).toBe(2);
+  expect(store.getJob(ids[0]!)).toMatchObject({
+    stage: "hidden",
+  });
+  expect(store.getJob(ids[0]!)?.stageNote).toContain("HTTP 404");
+  expect(store.getJob(ids[1]!)).toMatchObject({ stage: "applied" });
+  expect(createApplicationStore(store).forJobs([ids[1]!])[0]).toMatchObject({
+    state: "submitted",
+    submittedAt: "1970-01-01T00:00:00.003Z",
+  });
+  expect(store.markClosed([ids[0]!], "Applications ended.")).toBe(1);
+  expect(store.markOpen(ids)).toBe(2);
+  expect(store.getJob(ids[0]!)).toMatchObject({
+    stage: "resume",
+    stageNote: before.stageNote,
+  });
+  expect(createApplicationStore(store).forJobs([ids[1]!])[0]).toMatchObject({
+    state: "submitted",
+    submittedAt: "1970-01-01T00:00:00.003Z",
+  });
+  expect(
+    store.sql("SELECT count(*) AS n FROM job_availability_checks").get(),
+  ).toMatchObject({ n: 5 });
+  expect(store.getJob(ids[0]!)?.description).toBe("Listing 901");
+});

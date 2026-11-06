@@ -298,8 +298,18 @@ describe("runAgentLoop", () => {
   });
 
   test("a browser failure uses its generous failure allowance instead of a shorter no-progress window", async () => {
-    const dead = tool("observe", () => Promise.reject(new Error("The tab was closed")), { failureKind: "browser", describeError: () => "The tab was closed" });
-    const result = await runAgentLoop({ messages: opening, model: scripted([[call("observe")]]), tools: [dead], subjectLabel: "the site", ceilings: { noProgressStepLimit: 3 } });
+    const dead = tool(
+      "observe",
+      () => Promise.reject(new Error("The tab was closed")),
+      { failureKind: "browser", describeError: () => "The tab was closed" },
+    );
+    const result = await runAgentLoop({
+      messages: opening,
+      model: scripted([[call("observe")]]),
+      tools: [dead],
+      subjectLabel: "the site",
+      ceilings: { noProgressStepLimit: 3 },
+    });
     expect(result.ending).toBe("browser_failed");
     expect(result.steps).toBe(30);
     expect(result.reason).toContain("tab was closed");
@@ -1033,3 +1043,51 @@ test("compaction lets a delta-observation host restore the complete current page
     );
   expect(results).toEqual(calls);
 });
+
+test.each(["browser", undefined] as const)(
+  "a step AbortError with an active run remains a failed step and can be retried (%s)",
+  async (failureKind) => {
+    const controller = new AbortController();
+    let tries = 0;
+    const result = await runAgentLoop({
+      messages: opening,
+      signal: controller.signal,
+      subjectLabel: "the site",
+      model: scripted([[call("read")], [call("read")], [call("finish")]]),
+      tools: [
+        tool(
+          "read",
+          () => {
+            if (++tries === 1)
+              return Promise.reject(
+                new DOMException(
+                  "The detail connection was interrupted",
+                  "AbortError",
+                ),
+              );
+            return Promise.resolve({
+              kind: "ok",
+              content: "Read successfully",
+              progress: true,
+            });
+          },
+          { failureKind },
+        ),
+        finishTool,
+      ],
+    });
+    expect(result.ending).toBe("finished");
+    expect(tries).toBe(2);
+    expect(controller.signal.aborted).toBe(false);
+    expect(result.turnNotes.join(" ")).toContain(
+      "detail connection was interrupted",
+    );
+    expect(
+      result.messages.some(
+        (message) =>
+          message.role === "tool" &&
+          message.content.includes("detail connection was interrupted"),
+      ),
+    ).toBe(true);
+  },
+);

@@ -1,3 +1,4 @@
+import { writePostingAvailability } from "./posting-availability";
 import {
   JobFilterSchema,
   JobListQuerySchema,
@@ -98,6 +99,10 @@ export interface JobStore {
   knownJobsBeforeSearch(urls: readonly string[], searchId: string): number[];
   /** Listing-card closure evidence can retire an existing Found job without another detail read. */
   closeFoundUrls(urls: readonly string[]): number;
+  /** Fresh posting evidence; retains resumes, applications and job history. */
+  markClosed(ids: readonly number[], reason: string): number;
+  /** Only a fresh open posting can undo an automatic closure. */
+  markOpen(ids: readonly number[]): number;
   lookupSeenCards(
     cards: readonly Pick<SeenListingCard, "url" | "cardFingerprint">[],
     roleGoalsKey: string,
@@ -367,26 +372,52 @@ export function openJobStore(
 
     closeFoundUrls(urls) {
       if (!urls.length) return 0;
+      const ids = (
+        sql(`SELECT DISTINCT j.id FROM jobs j JOIN job_sightings s ON s.job_id = j.id
+        WHERE (j.stage IN ('found','shortlisted','resume','applied') OR j.hide_owner IN ('age_retention','closed_listing'))
+          AND s.url IN (SELECT value FROM json_each(?))`).all(
+          JSON.stringify(urls),
+        ) as { id: number }[]
+      ).map((row) => row.id);
+      return store.markClosed(
+        ids,
+        "Closed: this vacancy is no longer accepting applications.",
+      );
+    },
+    markClosed(ids, reason) {
+      if (!ids.length) return 0;
       return transaction(() => {
-        const rows =
-          sql(`SELECT DISTINCT j.id FROM jobs j JOIN job_sightings s ON s.job_id = j.id
-          WHERE (j.stage = 'found' OR (j.stage='hidden' AND j.hide_owner='age_retention')) AND s.url IN (SELECT value FROM json_each(?))`).all(
-            JSON.stringify(urls),
-          ) as { id: number }[];
-        if (!rows.length) return 0;
-        const ids = rows.map((row) => row.id);
-        sql(`UPDATE jobs SET stage = 'hidden', hide_owner='closed_listing', stage_at = ?, stage_note = 'Closed: this vacancy is no longer accepting applications.'
-          WHERE id IN (SELECT value FROM json_each(?)) AND (stage = 'found' OR hide_owner='age_retention')`).run(
-          Date.now(),
-          JSON.stringify(ids),
+        const result = writePostingAvailability(
+          sql,
+          ids,
+          "closed",
+          reason.startsWith("Closed:") ? reason : `Closed: ${reason}`,
         );
         notify({
           cause: "stage",
-          stages: ["found", "hidden"],
-          ids,
+          stages: result.stages,
+          ids: result.ids.length > CHANGE_ID_LIMIT ? null : result.ids,
           searchId: null,
         });
-        return ids.length;
+        return result.ids.length;
+      });
+    },
+    markOpen(ids) {
+      if (!ids.length) return 0;
+      return transaction(() => {
+        const result = writePostingAvailability(
+          sql,
+          ids,
+          "open",
+          "The posting is accepting applications again.",
+        );
+        notify({
+          cause: "stage",
+          stages: result.stages,
+          ids: result.ids.length > CHANGE_ID_LIMIT ? null : result.ids,
+          searchId: null,
+        });
+        return result.ids.length;
       });
     },
     setFit(updates) {

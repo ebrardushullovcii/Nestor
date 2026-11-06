@@ -4,6 +4,8 @@ import type {
   ExtractListingDetailInput,
 } from "@nestor/contracts";
 
+export { listingClosedReason } from "./listing-status";
+
 /**
  * Reads the body of a job listing out of its own page HTML, without a browser.
  *

@@ -2,7 +2,11 @@ import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import { classifyAnswerPermission } from "./answer-source-catalog";
 import { createApplyGuardState, executeApplyProposal } from "./policy-executor";
-import { relativeStartDate } from "./start-date";
+import {
+  hasStartDateValue,
+  relativeStartDate,
+  startDateAnswer,
+} from "./start-date";
 import type {
   ApplyAgentConfig,
   ApplyFormControl,
@@ -262,3 +266,162 @@ test("calendar arithmetic crosses daylight saving, leap days and years", () => {
     "2027-01-08",
   );
 });
+
+test("a past date already in the resumed field is replaced by today plus notice", async () => {
+  const f = fixture("", "2026-11-01", false);
+  f.config.sources.profile.workEligibility.availableStartDate = "2026-11-01";
+  f.config.sources.profile.workEligibility.noticePeriodDays = 14;
+  expect(
+    await executeApplyProposal(
+      { tool: "type", ref: "start", text: "2026-11-01" },
+      f.observation.signature,
+      f.deps,
+    ),
+  ).toMatchObject({
+    kind: "filled",
+    filled: { answer: { value: "2026-11-29" } },
+  });
+  expect(f.fillText).toHaveBeenCalledExactlyOnceWith("start", "2026-11-29");
+});
+
+test("stale saved answers and profile dates cannot defeat usable notice", () => {
+  const f = fixture("2026-11-01");
+  f.config.sources.profile.workEligibility.availableStartDate = "2026-11-02";
+  f.config.sources.profile.workEligibility.noticePeriodDays = 14;
+  expect(
+    startDateAnswer(f.control, f.config.sources, [f.control], now()),
+  ).toEqual({
+    id: "profile.workEligibility.noticePeriodDays",
+    value: "2026-11-29",
+  });
+  f.config.sources.profile.workEligibility.noticePeriodDays = null;
+  expect(
+    startDateAnswer(f.control, f.config.sources, [f.control], now()),
+  ).toBeNull();
+  expect(
+    classifyAnswerPermission({
+      control: f.control,
+      controls: [f.control],
+      tags: f.tags,
+      sources: f.config.sources,
+      answer: "2026-11-01",
+      pageInstructions: "",
+      now: now(),
+    }).kind,
+  ).toBe("needs_you");
+});
+
+test("a future profile date wins over a saved relative notice answer", () => {
+  const f = fixture("two weeks");
+  f.config.sources.profile.workEligibility.availableStartDate = "2026-12-20";
+  expect(
+    startDateAnswer(f.control, f.config.sources, [f.control], now())?.value,
+  ).toBe("2026-12-20");
+});
+
+test("a stale date's source tag cannot veto the calculated notice-period replacement", async () => {
+  const f = fixture("", "2026-11-01", false);
+  f.config.sources.profile.workEligibility.availableStartDate = "2026-11-01";
+  f.config.sources.profile.workEligibility.noticePeriodDays = 14;
+  const deps = {
+    ...f.deps,
+    classifyQuestions: () =>
+      Promise.resolve(
+        new Map([
+          [
+            question,
+            {
+              asksAboutPay: false,
+              declarationKind: null,
+              answerTags: {
+                ...f.tags,
+                sourceId: "profile.workEligibility.availableStartDate",
+              },
+            },
+          ],
+        ]),
+      ),
+  };
+  expect(
+    await executeApplyProposal(
+      { tool: "type", ref: "start", text: "2026-11-01" },
+      f.observation.signature,
+      deps,
+    ),
+  ).toMatchObject({
+    kind: "filled",
+    filled: { answer: { value: "2026-11-29" } },
+  });
+});
+
+test.each(["Available now", "Immediately"])(
+  "explicit %s uses today; a future saved date wins over notice",
+  (answer) => {
+    const f = fixture(answer);
+    f.config.sources.profile.workEligibility.noticePeriodDays = 14;
+    expect(
+      startDateAnswer(f.control, f.config.sources, [f.control], now())?.value,
+    ).toBe("2026-11-15");
+    f.config.sources.reusableAnswers = [];
+    f.config.sources.profile.workEligibility.availableStartDate = "2026-12-20";
+    expect(
+      startDateAnswer(f.control, f.config.sources, [f.control], now())?.value,
+    ).toBe("2026-12-20");
+  },
+);
+
+test("today and notice use the person's calendar day across time zones", () => {
+  const f = fixture("Immediately");
+  f.config.sources.profile.timeZone = "Pacific/Kiritimati";
+  const instant = new Date("2026-11-15T12:30:00Z");
+  expect(
+    startDateAnswer(f.control, f.config.sources, [f.control], instant)?.value,
+  ).toBe("2026-11-16");
+  f.control.value = "2026-11-15";
+  expect(hasStartDateValue(f.control, instant, f.config.sources.profile)).toBe(
+    false,
+  );
+  f.config.sources.reusableAnswers = [];
+  f.config.sources.profile.workEligibility.noticePeriodDays = 14;
+  expect(
+    startDateAnswer(f.control, f.config.sources, [f.control], instant)?.value,
+  ).toBe("2026-11-30");
+  f.config.sources.profile.timeZone = "America/Los_Angeles";
+  expect(
+    startDateAnswer(
+      f.control,
+      f.config.sources,
+      [f.control],
+      new Date("2026-11-15T01:00:00Z"),
+    )?.value,
+  ).toBe("2026-11-28");
+});
+
+test.each([
+  ["DD/MM/YYYY", "16/11/2026"],
+  ["MM-DD-YYYY", "11-16-2026"],
+])(
+  "a text date uses the form's %s format and the same permission check",
+  (format, answer) => {
+    const f = fixture("Immediately");
+    f.control.kind = "text";
+    delete f.control.dateInputType;
+    f.control.placeholder = format;
+    f.config.sources.profile.timeZone = "Pacific/Kiritimati";
+    const instant = new Date("2026-11-15T12:30:00Z");
+    expect(
+      startDateAnswer(f.control, f.config.sources, [f.control], instant)?.value,
+    ).toBe(answer);
+    expect(
+      classifyAnswerPermission({
+        control: f.control,
+        controls: [f.control],
+        tags: f.tags,
+        sources: f.config.sources,
+        answer,
+        pageInstructions: "",
+        now: instant,
+      }).kind,
+    ).toBe("literal");
+  },
+);

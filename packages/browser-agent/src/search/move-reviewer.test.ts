@@ -95,3 +95,23 @@ describe("move reviewer", () => {
     expect(verdict.verdict).toContain("could not be made");
   });
 });
+
+test("an interrupted review with an active run refuses this move with its cause and can retry", async () => {
+  const controller=new AbortController();
+  const chatWithTools=vi.fn<LLMClient["chatWithTools"]>()
+    .mockRejectedValueOnce(new DOMException("The review connection was interrupted","AbortError"))
+    .mockResolvedValueOnce({toolCalls:[{id:"decision",type:"function",function:{name:"decide",arguments:JSON.stringify({allowed:true,verdict:"Observed employer handoff"})}}]});
+  const review=createMoveReviewer({llmClient:{chatWithTools},goal:"Read the listing",homeLabel:"Board",homeHosts:["board.test"],signal:controller.signal});
+  const move={url:"https://employer.test/jobs/1",fromUrl:"https://board.test",reason:"The listing links to the employer"};
+  const failed = await review(move);
+  expect(failed.allowed).toBe(false);
+  expect(failed.verdict).toContain("review connection was interrupted");
+  expect((await review(move)).allowed).toBe(true);
+  expect(controller.signal.aborted).toBe(false);
+});
+
+test("a real Stop still interrupts a move review", async () => {
+  const controller=new AbortController();const cause=new DOMException("The person pressed Stop","AbortError");
+  const review=createMoveReviewer({llmClient:{chatWithTools:()=>{controller.abort(cause);return Promise.reject(cause);}},goal:"Read",homeLabel:"Board",homeHosts:["board.test"],signal:controller.signal});
+  await expect(review({url:"https://employer.test",fromUrl:"https://board.test",reason:"Employer handoff"})).rejects.toBe(cause);
+});

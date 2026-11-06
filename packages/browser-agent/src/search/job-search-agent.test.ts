@@ -2671,3 +2671,52 @@ describe("reading pages for less", () => {
     expect(answers[0]).not.toContain("Links:");
   });
 });
+
+test("an interrupted part read records its cause and the next extraction retries it while the run stays active", async () => {
+  const controller = new AbortController();
+  let reads = 0;
+  const result = await runJobSearchAgent({
+    hands: hands({ current: rawPage() }),
+    config: config(),
+    signal: controller.signal,
+    llmClient: scripted([
+      { name: "extract_jobs", args: { pageType: "search_results" } },
+      { name: "extract_jobs", args: { pageType: "search_results" } },
+      { name: "finish", args: { reason: "Read the page." } },
+    ]),
+    jobExtractor: {
+      extractJobsFromPage: async (input) => {
+        if (++reads === 1)
+          throw new DOMException(
+            "The part connection was interrupted",
+            "AbortError",
+          );
+        return extractor.extractJobsFromPage(input);
+      },
+    },
+  });
+  expect(controller.signal.aborted).toBe(false);
+  expect(reads).toBeGreaterThan(1);
+  expect(result.jobs.length).toBeGreaterThan(0);
+  expect(result.warning).toContain("part connection was interrupted");
+});
+
+test("Stop interrupts a pending part read at once without a retry", async () => {
+  const controller = new AbortController();
+  const read = vi.fn(async () => {
+    controller.abort(new DOMException("The person pressed Stop", "AbortError"));
+    return new Promise<never>(() => {});
+  });
+  const result = await runJobSearchAgent({
+    hands: hands({ current: rawPage() }),
+    config: config(),
+    signal: controller.signal,
+    llmClient: scripted([
+      { name: "extract_jobs", args: { pageType: "search_results" } },
+    ]),
+    jobExtractor: { extractJobsFromPage: read },
+  });
+  expect(read).toHaveBeenCalledOnce();
+  expect(result.jobs).toEqual([]);
+  expect(result.incomplete).toBe(true);
+});
