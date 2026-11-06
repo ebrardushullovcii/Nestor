@@ -15,6 +15,9 @@ import {
 } from "./browser-profile-import";
 
 const temporary: string[] = [];
+// Longer than the old 200-character source-ID limit. Windows cannot open a file
+// under a path near 260 characters without long-path support, so stay below it there.
+const LONG_PATH = process.platform === "win32" ? 230 : 300;
 afterEach(async () => {
   for (const directory of temporary.splice(0))
     await rm(directory, { recursive: true, force: true });
@@ -28,12 +31,12 @@ async function chromeProfile(platform: "darwin" | "linux") {
       ? "Library/Application Support/Google/Chrome/Default"
       : ".config/google-chrome/Default";
   const nested = path.join(directory, "a".repeat(60));
-  const padding = 300 - path.join(nested, suffix).length - 1;
+  const padding = LONG_PATH - path.join(nested, suffix).length - 1;
   expect(padding).toBeGreaterThan(0);
   expect(padding).toBeLessThan(255);
   const home = path.join(nested, "b".repeat(padding));
   const profile = path.join(home, suffix);
-  expect(profile).toHaveLength(300);
+  expect(profile).toHaveLength(LONG_PATH);
   await mkdir(profile, { recursive: true });
   await writeFile(
     path.join(path.dirname(profile), "Local State"),
@@ -64,7 +67,7 @@ async function chromeProfile(platform: "darwin" | "linux") {
 }
 
 test.each(["darwin", "linux"] as const)(
-  "%s discovers a 300-character Chrome profile with stable short IDs and unchanged display names",
+  "%s discovers a long-path Chrome profile with stable short IDs and unchanged display names",
   async (platform) => {
     const { env, profile } = await chromeProfile(platform);
     const listed = DesktopBrowserImportSourcesSchema.parse(
@@ -88,7 +91,7 @@ test.each(["darwin", "linux"] as const)(
   },
 );
 
-test("a short source ID still imports from the complete 300-character Chrome path", async () => {
+test("a short source ID still imports from the complete long Chrome path", async () => {
   const { env } = await chromeProfile("linux");
   const source = DesktopBrowserImportSourcesSchema.parse(
     await listBrowserImportSources(env),
