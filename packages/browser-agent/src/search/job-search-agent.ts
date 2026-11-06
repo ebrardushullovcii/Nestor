@@ -175,7 +175,7 @@ export function buildExtractionSelectionContext(
 const SEARCH_MODEL_TURN_TIMEOUT_MS = Infinity;
 const DEFAULT_MAX_STEPS = 10_000;
 const DEFAULT_TIME_BUDGET_MS = 60 * 60_000;
-const DEFAULT_NO_PROGRESS_STEP_LIMIT = 24;
+const DEFAULT_NO_PROGRESS_STEP_LIMIT = 120;
 
 function jobKey(
   job: Pick<JobPosting, "canonicalUrl" | "sourceJobId" | "source">,
