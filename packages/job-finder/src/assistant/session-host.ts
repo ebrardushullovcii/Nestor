@@ -124,6 +124,7 @@ export interface AssistantSessionHostOptions {
 }
 
 interface LiveTurn {
+  toolCallId?: string;
   turn: AssistantTurn;
   controller: AbortController;
   generation: number;
@@ -1125,6 +1126,7 @@ export class AssistantSessionHost {
         return;
       }
       case "tool_started": {
+        live.toolCallId = event.toolCallId;
         await this.setActivity(live, {
           label: (event.status ?? event.label).slice(0, 200),
           toolName: event.toolName,
@@ -1357,7 +1359,10 @@ export class AssistantSessionHost {
           toolName,
           argumentsHash,
         });
-        if (previous?.status === "committed") {
+        if (
+          previous?.status === "committed" &&
+          toolName !== "send_application"
+        ) {
           return {
             kind: "ok",
             content: `Already done in this turn: ${previous.resultSummary ?? "done"}`,
@@ -1420,6 +1425,9 @@ export class AssistantSessionHost {
     const conversationId = live.turn.conversationId;
     const session: AssistantTurnSession = {
       conversationId,
+      get callId() {
+        return live.toolCallId;
+      },
       get turnId() {
         return live.turn.id;
       },

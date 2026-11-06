@@ -560,7 +560,11 @@ export interface ApplyAgentResult {
    * The button that sends this application, once the form is complete and the
    * checks passed. Null whenever the application is not ready to go.
    */
-  readyToSend: { actionRef: string; actionLabel: string } | null;
+  readyToSend: {
+    actionRef: string;
+    actionLabel: string;
+    callId?: string;
+  } | null;
 }
 
 /**
@@ -618,6 +622,14 @@ export interface ApplyAgentConfig extends BrowserPermissionPolicy {
   initialUnansweredPickerQuestions?: ReadonlyArray<{
     prompt: string;
     options: readonly string[];
+  }>;
+  submitApplication?: (decision: {
+    actionRef: string;
+    actionLabel: string;
+    callId?: string;
+  }) => Promise<{
+    outcome: "submitted" | "outcome_uncertain" | "not_submitted" | null;
+    content: string;
   }>;
   hands: ApplyPageHands;
   /** Route context window, when supplied by the host (64k conservative fallback). */

@@ -20,7 +20,11 @@ const actions = {
 export async function runApplicationCommand<K extends ApplicationCommandName>(
   name: K,
   input: unknown,
-  instruction?: { conversationId: string; mode: ApplicationAutomationMode },
+  instruction?: {
+    conversationId: string;
+    mode: ApplicationAutomationMode;
+    callId?: string;
+  },
 ): Promise<ApplicationCommandOutputs[K]> {
   if (!Object.hasOwn(APPLICATION_COMMANDS, name))
     throw new Error("Unknown application command.");

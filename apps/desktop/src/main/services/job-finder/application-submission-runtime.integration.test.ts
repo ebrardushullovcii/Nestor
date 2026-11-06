@@ -300,8 +300,7 @@ describe("desktop main application submission composition", () => {
 
       const second = await runApplicationSubmissionRuntime(input);
       expect(second).toMatchObject({
-        status: "blocked",
-        reason: "idempotency_outcome_uncertain",
+        status: "outcome_uncertain",
       });
       expect(
         fixture.requests.filter((request) => request === "POST /submit"),

@@ -2,6 +2,7 @@ import { selfLimitTimeout } from "@nestor/core";
 import type { BrowserContext, Page } from "playwright";
 import { createHash } from "node:crypto";
 import { allowPrepareOnlyRunNavigation } from "./playwright-application-flow";
+import { withBrowserReadLiveness } from "./browser-read-liveness";
 import {
   PreparedFormSnapshotSchema,
   type PreparedFormAttachment,
@@ -39,6 +40,12 @@ export interface RecoveryFile {
 }
 
 export async function capturePreparedForm(
+  page: Page,
+): Promise<PreparedFormSnapshot | null> {
+  return withBrowserReadLiveness(page, () => capturePreparedFormOnPage(page));
+}
+
+async function capturePreparedFormOnPage(
   page: Page,
 ): Promise<PreparedFormSnapshot | null> {
   if (page.isClosed() || page.frames().length !== 1) return null;

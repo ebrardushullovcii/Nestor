@@ -2,13 +2,11 @@ import type {
   ApplicationAutomationMode,
   JobSource,
   SubmissionAnswerSnapshotIdentity,
-  SubmissionExecutionGrant,
   SubmissionFinalControlIdentity,
   SubmissionOutcomeRetryEligibility,
   SubmissionPreflightRecord,
 } from "@nestor/contracts";
 import {
-  isActiveApplicationAuthorityEnvelope,
   describeBrowserError,
   SubmissionFinalControlIdentitySchema,
   SubmissionObservationIdentitySchema,
@@ -69,6 +67,7 @@ export interface ApplicationSubmissionRuntimeInput {
   readonly capacity: SubmissionPreflightCapacityFacts;
   readonly currentPolicyFacts: CurrentApplicationSubmissionPolicyFacts;
   readonly now: SubmissionPreflightRecord["createdAt"];
+  readonly finalAction?: { actionRef: string; actionLabel: string };
   readonly executionGrantId?: string | null;
   /** The person pressed Send on an "Ask before sending" application. */
   readonly personConfirmation?: { grantedAt: string; expiresAt: string } | null;
@@ -94,17 +93,6 @@ function blockedResult(
     idempotency: null,
     executionGrant: null,
   };
-}
-
-function samePolicyIdentity(
-  left: CurrentApplicationSubmissionPolicyFacts["policy"],
-  right: CurrentApplicationSubmissionPolicyFacts["policy"],
-): boolean {
-  return (
-    left?.version === right?.version &&
-    left?.revision === right?.revision &&
-    left?.digest === right?.digest
-  );
 }
 
 function mapNotSubmittedRetry(input: {
@@ -178,56 +166,6 @@ function mapBrowserActionResult(input: {
   return { outcome: "outcome_uncertain", evidence: [], browserAction };
 }
 
-function hasExactOneFinalControl(
-  observation: ApplicationFormObservation,
-): boolean {
-  return observation.complete && observation.controls.length === 1;
-}
-
-function consumedGrantMatchesAttempt(input: {
-  grant: SubmissionExecutionGrant | null;
-  grantId: string | null;
-  preflight: SubmissionPreflightRecord;
-  armedAt: string;
-  now: string;
-}): boolean {
-  const { grant, preflight } = input;
-  if (!grant) {
-    return false;
-  }
-  const now = Date.parse(input.now);
-  const expiresAt = Date.parse(grant.expiresAt);
-  return (
-    grant.id === input.grantId &&
-    grant.status === "consumed" &&
-    grant.consumedAt === input.armedAt &&
-    grant.revokedAt === null &&
-    Number.isFinite(now) &&
-    Number.isFinite(expiresAt) &&
-    expiresAt > now &&
-    grant.preflightId === preflight.id &&
-    grant.idempotencyKey === preflight.idempotencyKey &&
-    grant.runId === preflight.runId &&
-    grant.jobId === preflight.jobId &&
-    grant.resultId === preflight.resultId &&
-    grant.applicationRecordId === preflight.applicationRecordId &&
-    grant.authorityEnvelopeId === preflight.authorityEnvelopeId &&
-    grant.authorityRevision === preflight.authorityRevision
-  );
-}
-
-/**
- * Compose the generic browser hands with Job Finder's durable authority
- * orchestrator for one local attempt. This is intentionally an internal seam:
- * it has no renderer/IPC caller and is not used by the legacy prepare-only
- * application flow.
- *
- * The sequence is observe -> exact-one preflight -> durable authority
- * orchestrator -> one browser hand. The veto callback rereads the envelope on
- * every browser-hands last-instant check with a fresh clock. Confirm mode also
- * rereads the exact grant consumed when this attempt was armed, so expiry,
- * revocation, or lineage drift prevents the action crossing the browser boundary.
- */
 export async function runApplicationSubmissionRuntime(
   input: ApplicationSubmissionRuntimeInput,
 ): Promise<ApplicationSubmissionRuntimeResult> {
@@ -238,70 +176,55 @@ export async function runApplicationSubmissionRuntime(
     );
   }
 
-  // Prepare-only is a hard boundary. Do not even observe a final control or
-  // persist a preflight when the saved mode cannot authorize final action.
-  if (input.savedMode === "prepare_only") {
-    return blockedResult(
-      "prepare_only",
-      "Prepare-only automation never authorizes a final browser action.",
+  const previous = await input.repository.getSubmissionIdempotencyRecord(
+    input.idempotencyKey,
+  );
+  if (previous && previous.status !== "available") {
+    const recorded = await input.repository.getSubmissionPreflightRecord(
+      previous.preflightId,
     );
+    if (recorded)
+      return runSyntheticApplicationSubmission({
+        repository: input.repository,
+        preflight: recorded,
+        savedMode: input.savedMode,
+        jobId: recorded.jobId,
+        campaignId: recorded.campaignId,
+        observation: {
+          origin: recorded.origin!,
+          formObservation: recorded.formObservation,
+          resumeSha256: recorded.resumeSha256,
+          answers: recorded.answers,
+          finalControl: recorded.finalControl,
+          remainingRunCapacity: recorded.remainingRunCapacityBefore,
+          currentPolicyFacts: input.currentPolicyFacts,
+        },
+        now: input.now,
+        executor: {
+          execute: () =>
+            Promise.reject(
+              new Error("A recorded send call is never replayed."),
+            ),
+        },
+      });
   }
-
-  let initialEnvelope: Awaited<
-    ReturnType<
-      SyntheticSubmissionAuthorityRepository["getApplicationAuthorityEnvelope"]
-    >
-  >;
-  try {
-    initialEnvelope = await input.repository.getApplicationAuthorityEnvelope(
-      input.authorityEnvelopeId,
-    );
-  } catch {
-    return blockedResult(
-      "authority_missing",
-      "The current authority envelope could not be read; no browser action was attempted.",
-    );
-  }
-  if (initialEnvelope === null) {
-    return blockedResult(
-      "authority_missing",
-      "The current authority envelope is missing; no browser action was attempted.",
-    );
-  }
-  if (
-    initialEnvelope.id !== input.authorityEnvelopeId ||
-    initialEnvelope.revision !== input.authorityRevision ||
-    initialEnvelope.mode !== input.savedMode ||
-    !isActiveApplicationAuthorityEnvelope(
-      initialEnvelope,
-      new Date().toISOString(),
-    ) ||
-    !samePolicyIdentity(
-      initialEnvelope.decisionPolicy,
-      input.currentPolicyFacts.policy,
-    )
-  ) {
-    return blockedResult(
-      "preflight_authority_mismatch",
-      "The current authority mode, revision, policy, or lifecycle no longer matches this attempt; no browser observation or action was attempted.",
-    );
-  }
-
-  if (
-    typeof input.browserRuntime.observeApplicationForm !== "function" ||
-    typeof input.browserRuntime.executeExactlyOneFinalAction !== "function"
-  ) {
-    return blockedResult(
-      "immediate_recheck_failed",
-      "The configured browser runtime does not expose the main-process application hands; no action was attempted.",
-    );
-  }
-
   let observation: ApplicationFormObservation;
   try {
     observation = await input.browserRuntime.observeApplicationForm(
       input.source,
-      { pageBindingKey: input.lineage.resultId },
+      {
+        pageBindingKey: input.lineage.resultId,
+        ...(input.finalAction
+          ? {
+              finalActionTargets: [
+                {
+                  ref: input.finalAction.actionRef,
+                  label: input.finalAction.actionLabel,
+                },
+              ],
+            }
+          : {}),
+      },
     );
   } catch {
     return blockedResult(
@@ -310,21 +233,13 @@ export async function runApplicationSubmissionRuntime(
     );
   }
 
-  if (!hasExactOneFinalControl(observation)) {
-    return blockedResult(
-      "ambiguous_final_control",
-      "The current application page did not expose exactly one complete final control; no action was attempted.",
-    );
-  }
-
   const pageOrigin = observation.page.origin;
   const control = observation.controls[0];
-  if (!pageOrigin || !control) {
+  if (!pageOrigin || !control)
     return blockedResult(
-      "origin_not_allowed",
-      "The current application form has no safe HTTP(S) origin or final control; no action was attempted.",
+      "immediate_recheck_failed",
+      "That control is stale or missing; observe again.",
     );
-  }
 
   let formObservation: ReturnType<
     typeof SubmissionObservationIdentitySchema.parse
@@ -365,65 +280,6 @@ export async function runApplicationSubmissionRuntime(
     );
   }
   const preflightOrigin = preflight.origin;
-  const executionGrantId =
-    input.savedMode === "confirm_before_submit"
-      ? input.personConfirmation
-        ? `grant_${preflight.id}`
-        : (input.executionGrantId ?? null)
-      : null;
-
-  let authorityVetoed = false;
-  const veto = async (): Promise<boolean> => {
-    if (input.signal?.aborted) {
-      return false;
-    }
-
-    let currentEnvelope: NonNullable<typeof initialEnvelope> | null;
-    let currentGrant: SubmissionExecutionGrant | null = null;
-    try {
-      if (executionGrantId) {
-        currentGrant =
-          await input.repository.getSubmissionExecutionGrant(executionGrantId);
-      }
-      currentEnvelope = await input.repository.getApplicationAuthorityEnvelope(
-        preflight.authorityEnvelopeId,
-      );
-    } catch {
-      authorityVetoed = true;
-      return false;
-    }
-
-    if (input.signal?.aborted) {
-      return false;
-    }
-    // Read the clock after the durable reads: those reads and the preceding
-    // browser observations may themselves have outlasted either expiry.
-    const now = new Date().toISOString();
-    const authorityStillMatches = Boolean(
-      currentEnvelope &&
-      currentEnvelope.id === preflight.authorityEnvelopeId &&
-      currentEnvelope.revision === preflight.authorityRevision &&
-      currentEnvelope.mode === input.savedMode &&
-      isActiveApplicationAuthorityEnvelope(currentEnvelope, now) &&
-      samePolicyIdentity(
-        currentEnvelope.decisionPolicy,
-        input.currentPolicyFacts.policy,
-      ) &&
-      (input.savedMode !== "confirm_before_submit" ||
-        consumedGrantMatchesAttempt({
-          grant: currentGrant,
-          grantId: executionGrantId,
-          preflight,
-          armedAt: input.now,
-          now,
-        })),
-    );
-    if (!authorityStillMatches) {
-      authorityVetoed = true;
-    }
-    return authorityStillMatches;
-  };
-
   const execute = async (executorInput: {
     preflight: SubmissionPreflightRecord;
   }): Promise<SyntheticSubmissionExecutorResult> => {
@@ -437,11 +293,12 @@ export async function runApplicationSubmissionRuntime(
 
     const actionInput: ExecuteExactlyOneFinalActionInput = {
       pageBindingKey: input.lineage.resultId,
+      callId: input.idempotencyKey,
       expectedObservation: executorInput.preflight.formObservation,
       expectedControl: executorInput.preflight.finalControl,
       expectedPageOrigin: preflightOrigin,
-      allowedOrigins: initialEnvelope.allowedOrigins,
-      veto,
+      allowedOrigins: [preflightOrigin],
+      veto: () => !input.signal?.aborted,
       ...(input.signal ? { signal: input.signal } : {}),
     };
 
@@ -453,7 +310,7 @@ export async function runApplicationSubmissionRuntime(
         );
       return mapBrowserActionResult({
         result: browserResult,
-        authorityVetoed,
+        authorityVetoed: false,
         preflightId: executorInput.preflight.id,
       });
     } catch (error) {

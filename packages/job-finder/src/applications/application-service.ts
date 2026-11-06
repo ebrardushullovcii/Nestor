@@ -844,6 +844,14 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       origin,
       savedAnswers,
     );
+    const previousSends =
+      await deps.authorityRepository.listSubmissionOutcomeRecords({
+        jobId: String(row.jobId),
+      });
+    for (const previousSend of previousSends)
+      instructions.push(
+        `Send ledger: a send to this posting at ${previousSend.attemptedAt} is ${previousSend.outcome}. This is recorded history, not permission to replay it. Check the site's applied list or confirmation before a new send decision.`,
+      );
     const facts: Omit<ExecuteApplicationFlowInput, "prepareApplicationForm"> = {
       ...(instructions.length ? { instructions } : {}),
       job: toResumeJob(job),
@@ -853,12 +861,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       resumeArtifact: artifact,
       applicationAttachments: attachmentArtifacts,
       mode: "prepare_only",
-      applyAutomationMode:
-        sends && envelope
-          ? "autonomous_submit"
-          : mode === "prepare_only"
-            ? "prepare_only"
-            : "confirm_before_submit",
+      applyAutomationMode: mode,
       submitAuthorized: sends && envelope !== null,
       applicationPageBindingKey: identity.resultId,
       // The review card keeps what each run filled: a closed page comes back
@@ -969,6 +972,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         return next;
       },
     };
+    let sentDuringPreparation: SubmissionOutcomeRecord | null = null;
     let agent: ApplyAgentResult | null = null;
     let review: ApplicationReviewCard | null = null;
     let currentReview: ApplicationReviewCard | null = null;
@@ -1141,6 +1145,43 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               ).values(),
             ]);
           },
+          submitApplication: async (decision) => {
+            signal.throwIfAborted();
+            const sent = await submitPreparedApplication({
+              repository: deps.authorityRepository,
+              browserRuntime: {
+                observeApplicationForm:
+                  browser.observeApplicationForm!.bind(browser),
+                executeExactlyOneFinalAction:
+                  browser.executeExactlyOneFinalAction!.bind(browser),
+              },
+              source: "target_site",
+              envelope,
+              mode,
+              lineage: {
+                ...identity,
+                jobId: String(row.jobId),
+                campaignId: null,
+              },
+              finalAction: decision,
+              ...(decision.callId ? { callId: decision.callId } : {}),
+              loadResumeBytes: async () =>
+                new Uint8Array(await readFile(artifact.filePath)),
+              now: new Date().toISOString(),
+              signal,
+              runSubmission: runApplicationSubmissionRuntime,
+            });
+            const receipt = "outcome" in sent ? sent.outcome : null;
+            if (receipt) sentDuringPreparation = receipt;
+            return {
+              outcome: receipt?.outcome ?? null,
+              content: receipt
+                ? `Send ledger: ${receipt.attemptedAt}, ${receipt.outcome}. ${receipt.outcome === "outcome_uncertain" ? "This send call was not replayed. Check the site's applied list or confirmation before deciding whether to send again." : receipt.outcome === "submitted" ? "The employer confirmed receipt." : "The site did not confirm a send. Inspect the page and decide the next action."}`
+                : "detail" in sent
+                  ? sent.detail
+                  : "The send did not execute; observe again.",
+            };
+          },
           onPrepared: (outcome) => {
             agent = outcome.result;
             currentReview = outcome.reviewCard;
@@ -1179,6 +1220,21 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       })
     )
       return;
+    const recordedSend =
+      sentDuringPreparation as SubmissionOutcomeRecord | null;
+    if (recordedSend) {
+      applications.beginSubmission(row.id, row.attempt);
+      applications.recordSubmission(row.id, row.attempt, recordedSend);
+      if (recordedSend.outcome === "submitted")
+        await closePage(row.id, row.attempt);
+      else if (recordedSend.outcome === "outcome_uncertain")
+        pendingSiteConfirmation.set(row.id, {
+          attempt: row.attempt,
+          outcomeId: recordedSend.id,
+          until: Date.now() + 120_000,
+        });
+      return;
+    }
     const retainedTechnicalFailure = shouldRetainFailedApplicationPage(result);
     const finishTechnicalFailure = async () => {
       // Only this live, cancelled-checked attempt may retain its owned binding.
@@ -1450,8 +1506,16 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       await closePage(row.id, row.attempt);
       return;
     }
-    if (sends && envelope && prepared?.readyToSend) {
-      await send(row, artifact, envelope, profileDigest, signal);
+    if (prepared?.readyToSend) {
+      await send(
+        row,
+        artifact,
+        envelope,
+        profileDigest,
+        signal,
+        false,
+        prepared.readyToSend,
+      );
     } else {
       await leaveForPerson(
         row,
@@ -1467,10 +1531,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   async function send(
     row: ApplicationRow,
     artifact: ApplicationResumeArtifact,
-    original: ApplicationAuthorityEnvelope,
+    original: ApplicationAuthorityEnvelope | null,
     profileDigest: string,
     signal: AbortSignal,
     personClicked = false,
+    decision?: NonNullable<ApplyAgentResult["readyToSend"]>,
+    callId?: string,
   ): Promise<void> {
     const identity = applicationIdentity(row.id, row.attempt);
     const queuedAt = Date.now();
@@ -1480,144 +1546,40 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       );
     const operation = () => {
       timing("send_queue", queuedAt);
-      const preflightAt = Date.now();
       return withApplicationAuthorityGate(
         deps.authorityRepository,
         signal,
         async () => {
-          const { profile } = await deps.readInputs();
+          void profileDigest;
+          signal.throwIfAborted();
+          const latest = applications.getApplication(row.id);
           if (
-            !current(row) ||
-            (!personClicked && (await modeFor(row)) !== "autonomous_submit")
-          ) {
-            await leaveForPerson(
-              row,
-              "The permission for this application changed. The filled form is ready for your review.",
-            );
-            return;
-          }
-          const job = jobs.getJob(row.jobId);
-          if (!job)
-            return leaveForPerson(row, "This job is no longer in Job Finder.");
-          const origin = new URL(job.applyUrl ?? job.url).origin;
-          const proof = applications.getWork(row.id)?.execution
-            .answerDependencies;
-          const factsUnchanged = (latestProfile: CandidateProfile) =>
-            profileFactsDigest(latestProfile) === profileDigest &&
-            applicationAnswersUnchanged(
-              applications.needsYou,
-              row.id,
-              origin,
-              proof,
-            );
-          if (!factsUnchanged(profile)) {
-            await leaveForPerson(row);
-            await closePage(row.id, row.attempt);
-            if (
-              applications.reprepareForReview(
-                row.id,
-                row.attempt,
-                "The Profile or saved answers for this form need checking again. Refilling it for your review; it will not send automatically.",
-              )
-            )
-              void wake();
-            return;
-          }
-          const activeEnvelopes =
-            await deps.authorityRepository.listApplicationAuthorityEnvelopes({
-              status: "active",
-            });
-          const envelope =
-            activeEnvelopes.length === 1 ? activeEnvelopes[0] : null;
-          if (
-            !envelope ||
-            envelope.id !==
-              resolveApplicationAuthoritySuccessorId(
-                deps.authorityRepository,
-                original.id,
-              ) ||
-            envelope.mode !== original.mode ||
-            !envelope.scope.jobIds.includes(String(row.jobId)) ||
-            !envelope.allowedResumeSha256.includes(artifact.sha256!)
+            !latest ||
+            latest.attempt !== row.attempt ||
+            signal.aborted ||
+            ["stopped", "failed", "submitted"].includes(latest.state)
           )
-            return leaveForPerson(
-              row,
-              "The permission to send this application changed. Review the filled form before trying again.",
-            );
-          if (!applications.beginSubmission(row.id, row.attempt))
-            // A file still open in Needs you holds the send back.
-            return applications.waitsOnFile(row.id)
-              ? leaveForPerson(row)
-              : undefined;
-          // The preparer understands which page actions are final. Pass their
-          // exact refs, rather than asking browser hands to guess from labels.
-          const finalPage = await browser
-            .readApplicationPageBinding?.("target_site", identity.resultId)
-            .catch(() => null);
-          const finalActionTargets = finalPage
-            ? buildApplyFormObservation(finalPage, new Date().toISOString())
-                .actions.filter(
-                  (action) =>
-                    action.kind === "final" &&
-                    action.visible &&
-                    !action.disabled,
-                )
-                .map((action) => ({ ref: action.ref, label: action.label }))
-            : undefined;
-          if (finalActionTargets && finalActionTargets.length !== 1)
-            return leaveForPerson(
-              row,
-              "The form does not expose exactly one final action. Review it before sending.",
-            );
+            return;
+          if (
+            !applications.beginSubmission(row.id, row.attempt, {
+              newSendDecision: !!callId,
+            })
+          )
+            return;
+          const envelope = original;
           const runtime = {
-            observeApplicationForm: (
-              source: Parameters<
-                NonNullable<BrowserSessionRuntime["observeApplicationForm"]>
-              >[0],
-              options?: Parameters<
-                NonNullable<BrowserSessionRuntime["observeApplicationForm"]>
-              >[1],
-            ) =>
-              browser.observeApplicationForm!(source, {
-                ...options,
-                ...(finalActionTargets ? { finalActionTargets } : {}),
-              }),
-            executeExactlyOneFinalAction: (
-              source: Parameters<
-                NonNullable<
-                  BrowserSessionRuntime["executeExactlyOneFinalAction"]
-                >
-              >[0],
-              input: Parameters<
-                NonNullable<
-                  BrowserSessionRuntime["executeExactlyOneFinalAction"]
-                >
-              >[1],
-            ) => {
-              timing("send_preflight", preflightAt);
-              const receiptAt = Date.now();
-              return browser.executeExactlyOneFinalAction!(source, {
-                ...input,
-                veto: async (facts) => {
-                  const { profile: latestProfile } = await deps.readInputs();
-                  const app = applications.getApplication(row.id);
-                  return (
-                    !!app &&
-                    app.attempt === row.attempt &&
-                    app.state === "submitting" &&
-                    !applications.waitsOnFile(row.id) &&
-                    (personClicked ||
-                      (await modeFor(row)) === "autonomous_submit") &&
-                    factsUnchanged(latestProfile) &&
-                    (await input.veto(facts))
-                  );
-                },
-              }).finally(() => timing("send_receipt", receiptAt));
-            },
+            observeApplicationForm:
+              browser.observeApplicationForm!.bind(browser),
+            executeExactlyOneFinalAction:
+              browser.executeExactlyOneFinalAction!.bind(browser),
           };
+          const sendCallId = decision?.callId ?? callId;
           const outcome = await submitPreparedApplication({
             repository: deps.authorityRepository,
             browserRuntime: runtime,
+            ...(decision ? { finalAction: decision } : {}),
+            ...(sendCallId ? { callId: sendCallId } : {}),
+            ...(personClicked ? { confirmedByPerson: true } : {}),
             source: "target_site",
             envelope,
             lineage: {
@@ -2305,11 +2267,17 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       for (const controller of active.values()) controller.abort();
     },
     wake,
-    async sendPrepared(id: number): Promise<boolean> {
+    async sendPrepared(id: number, callId?: string): Promise<boolean> {
       const row = applications.getApplication(id);
       const work = applications.getWork(id);
       const job = row && jobs.getJob(row.jobId);
-      if (!row || row.state !== "ready" || !work || !job) return false;
+      if (
+        !row ||
+        !(row.state === "ready" || (callId && row.state === "uncertain")) ||
+        !work ||
+        !job
+      )
+        return false;
       const controller = new AbortController();
       // Called only by a person's send action or a checked sidebar send instruction.
       const envelope = await deps.authorizeSending({
@@ -2319,7 +2287,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         signal: controller.signal,
         personClicked: true,
       });
-      if (!envelope) return false;
       await send(
         row,
         work.resumeArtifact,
@@ -2327,6 +2294,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         work.profileDigest,
         controller.signal,
         true,
+        undefined,
+        callId,
       );
       return applications.getApplication(id)?.state === "submitted";
     },

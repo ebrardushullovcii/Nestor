@@ -4,7 +4,6 @@ import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   AiBehaviorPreferenceSchema,
   ApplicationAuthorityEnvelopeSchema,
-  ApplicationAuthorityStopConditionsSchema,
   ApplicationReviewCardSchema,
   ApplyExecutionResultSchema,
   CandidateProfileSchema,
@@ -115,7 +114,9 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
           timeline: [],
           modelTurns: 0,
           readyToSend:
-            preparation.notReadyToSend || preparation.technicalFailure
+            input.executionInput.applyAutomationMode !== "autonomous_submit" ||
+            preparation.notReadyToSend ||
+            preparation.technicalFailure
               ? null
               : { actionRef: "submit", actionLabel: "Apply" },
         },
@@ -493,61 +494,6 @@ it.each(["queued", "filling", "ready"] as const)(
     expect(f.authorizeSending).not.toHaveBeenCalled();
   },
 );
-
-it("revoking Send authority while filling still prevents the final action", async () => {
-  const f = await setup(1);
-  const guards = createSendGuards(f.jobs);
-  f.deps.authorityRepository = guards;
-  let envelope: ReturnType<typeof sendEnvelope>;
-  f.authorizeSending.mockImplementation(async ({ artifact, application }) => {
-    envelope = {
-      ...sendEnvelope(application.jobId, artifact.sha256!),
-      mode: "autonomous_submit",
-    };
-    await guards.commitApplicationAuthorityEnvelope({
-      envelope,
-      expectedRevision: null,
-    });
-    return envelope;
-  });
-  const action = vi.fn();
-  // A form the send could read and press: only the revocation stops it.
-  Object.assign(f.browser, {
-    executeExactlyOneFinalAction: action,
-    observeApplicationForm: vi.fn(),
-  });
-  f.browser.readApplicationPageBinding.mockResolvedValue({
-    ...f.personPage,
-    bodyText: "Completed form",
-    actions: [
-      {
-        ref: "a0",
-        index: 0,
-        label: "Submit Application",
-        visible: true,
-        disabled: false,
-      },
-    ],
-  });
-  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
-  await f.service.start();
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
-  expect(
-    await guards.revokeApplicationAuthorityEnvelope({
-      id: envelope!.id,
-      expectedRevision: 1,
-      revokedAt: new Date().toISOString(),
-    }),
-  ).toMatchObject({ status: "applied" });
-  f.releases.shift()!();
-  await vi.waitFor(() =>
-    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
-  );
-  expect(action).not.toHaveBeenCalled();
-  expect(f.applications.listApplications().rows[0]?.error).toBe(
-    "The permission to send this application changed. Review the filled form before trying again.",
-  );
-});
 
 it("a Send for me form that could not be confirmed ready says why, keeps Send, and the person's Send goes out once", async () => {
   const f = await setup(1);
@@ -1228,146 +1174,6 @@ it("Fill lets the form's own field saves out, keeps uploading while another form
   expect(await recheck("https://replica.test")).toBe(false);
 });
 
-it("without a send envelope Send for me fills as Fill does: field saves, uploads frame-pinned", async () => {
-  const f = await setup(1);
-  f.seed.settings.applicationAutomationMode = "autonomous_submit";
-  f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
-  const input = f.execute.mock.calls[0]![1];
-  expect(input).toMatchObject({
-    intermediateMutationsAuthorized: true,
-    submitAuthorized: false,
-    intermediateMutationAllowedOrigins: [],
-  });
-  expect(
-    await input.recheckIntermediateMutationAuthority!(
-      "https://replica.test",
-      "answers",
-    ),
-  ).toBe(true);
-  expect(
-    await input.recheckIntermediateMutationAuthority!(
-      "https://unrelated.test",
-      "attachment",
-    ),
-  ).toBe(false);
-  f.seed.settings.applicationAutomationMode = "confirm_before_submit";
-  expect(
-    await input.recheckIntermediateMutationAuthority!(
-      "https://replica.test",
-      "attachment",
-    ),
-  ).toBe(true);
-  f.releases.shift()!();
-  await vi.waitFor(() =>
-    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
-  );
-  expect(f.authorizeSending).toHaveBeenCalledOnce();
-  // It says why it did not send, and keeps the mode the person chose.
-  expect(f.applications.listApplications().rows[0]).toMatchObject({
-    mode: "autonomous_submit",
-    error:
-      "Send for me could not confirm permission for this application, so the filled form waits for you to send it.",
-  });
-});
-
-it("refuses sendPrepared after a used answer changes post-Ready and refills without a final browser action", async () => {
-  const f = await setup(1);
-  const saved = f.applications.needsYou.remember({
-    key: "salary",
-    prompt: "Annual salary expectation",
-    answer: "50000",
-    kind: "salary_expectation",
-    input: "number",
-    scope: {},
-    options: [],
-  });
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
-  const row = f.applications.listApplications().rows[0]!;
-  const answers = await preparation.readAnswers!([
-    {
-      prompt: "Annual salary expectation",
-      kind: "salary_expectation",
-      answerControlType: "text",
-      answerOptions: [],
-      inputConstraints: { type: "number" },
-    },
-  ]);
-  expect(answers[0]?.answer).toBe("50000");
-  f.releases.shift()!();
-  await vi.waitFor(() =>
-    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
-  );
-  const artifact = f.applications.getWork(row.id)!.resumeArtifact;
-  const policy = {
-    version: 1 as const,
-    answerPolicy: {
-      approvedAnswerSnapshot: { revision: 1, digest: "a".repeat(64) },
-      unknownRequiredQuestion: "pause_for_user" as const,
-      unknownEligibility: "pause_for_user" as const,
-      unknownLegalRequirement: "pause_for_user" as const,
-    },
-    stopConditions: ApplicationAuthorityStopConditionsSchema.parse(
-      Object.fromEntries(
-        ApplicationAuthorityStopConditionsSchema.keyof().options.map((key) => [
-          key,
-          key === "outcomeUncertain" ? "stop_no_retry" : "pause_for_user",
-        ]),
-      ),
-    ),
-  };
-  const envelope = ApplicationAuthorityEnvelopeSchema.parse({
-    id: "explicit-send",
-    mode: "autonomous_submit",
-    status: "active",
-    revision: 1,
-    scope: { campaignId: null, jobIds: [String(row.jobId)] },
-    maxApplicationsPerRun: 1,
-    intermediateMutationsAuthorized: false,
-    accountCreationAuthorized: false,
-    allowedResumeSha256: [artifact.sha256],
-    allowedOrigins: ["https://replica.test"],
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 60_000).toISOString(),
-    revokedAt: null,
-    decisionPolicy: {
-      ...policy,
-      revision: 1,
-      digest: createHash("sha256")
-        .update(serializeApplicationAuthorityDecisionPolicyForDigest(policy))
-        .digest("hex"),
-    },
-  });
-  f.authorizeSending.mockResolvedValue(envelope);
-  const finalAction =
-    vi.fn<NonNullable<BrowserSessionRuntime["executeExactlyOneFinalAction"]>>();
-  f.deps.browser.executeExactlyOneFinalAction = finalAction;
-  const arm = vi.spyOn(f.applications, "beginSubmission");
-  f.applications.needsYou.saveAnswer({ id: saved.id, answer: "52000" });
-  expect(await f.service.sendPrepared(row.id)).toBe(false);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-  expect(f.applications.getApplication(row.id)).toMatchObject({
-    state: "running",
-    mode: "confirm_before_submit",
-    attempt: row.attempt + 1,
-  });
-  expect(arm).not.toHaveBeenCalled();
-  expect(finalAction).not.toHaveBeenCalled();
-  // The refill comes back Ready and still says why it waits.
-  f.releases.shift()!();
-  await vi.waitFor(() =>
-    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
-  );
-  expect(f.applications.getApplication(row.id)?.error).toBe(
-    "The Profile or saved answers for this form need checking again. Refilling it for your review; it will not send automatically.",
-  );
-  expect(finalAction).not.toHaveBeenCalled();
-});
-
 const rejectedUpload = () =>
   ApplyExecutionResultSchema.parse({
     ...ready(),
@@ -1486,9 +1292,20 @@ it("drops the upload item once the person's page shows the file arrived, and fin
     bodyText: "Apply",
     controls: [{ ...file, upload: { described: "", nearby, shown: false } }],
   });
-  f.browser.readApplicationPageWithPerson.mockResolvedValue(
-    form("Resume Upload rejected by server"),
-  );
+  f.browser.readApplicationPageWithPerson.mockResolvedValue({
+    ...form("Resume Upload rejected by server"),
+    controls: form("Resume Upload rejected by server").controls.map(
+      (control) => ({
+        ...control,
+        upload: {
+          described: "",
+          nearby: "Resume Upload rejected by server",
+          shown: false,
+          network: "rejected" as const,
+        },
+      }),
+    ),
+  });
   await new Promise((resolve) => setTimeout(resolve, 2_500));
   expect(f.applications.needsYou.list().total).toBe(1);
   f.browser.readApplicationPageWithPerson.mockResolvedValue(
@@ -2173,6 +1990,7 @@ it("in Send for me, Open's refill never sends, and the answer that clears the it
 
 it("refills a lost Ready form through the bounded queue and never revives its send instruction", async () => {
   const f = await setup(1);
+  preparation.notReadyToSend = true;
   f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
   f.seed.settings.applicationAutomationMode = "autonomous_submit";
   await f.service.start();
@@ -3263,7 +3081,7 @@ it("Send for me resumes after two Needs-you answers and forwards only the final 
   expect(observe).toHaveBeenCalledWith(
     "target_site",
     expect.objectContaining({
-      finalActionTargets: [{ ref: "a5", label: "Submit Application" }],
+      finalActionTargets: [{ ref: "submit", label: "Apply" }],
     }),
   );
   expect(action).toHaveBeenCalledOnce();

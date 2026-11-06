@@ -47,11 +47,16 @@ test("action capture uses the exact native-owned Page, masks secrets and never w
       fillText: () => Promise.resolve(result),
     });
     expect(await hands.fillText()).toBe(result);
-    expect(native).toHaveBeenCalledWith(page, {
-      masks: [secretBox],
-      viewport: { width: 800, height: 600 },
-    });
+    await vi.waitFor(() =>
+      expect(native).toHaveBeenCalledWith(page, {
+        masks: [secretBox],
+        viewport: { width: 800, height: 600 },
+      }),
+    );
     expect(screenshot).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(readdirSync(dir).some((f) => f.endsWith(".jsonl"))).toBe(true),
+    );
     const file = readdirSync(dir).find((f) => f.endsWith(".jsonl"))!;
     const raw = readFileSync(path.join(dir, file), "utf8");
     expect(raw).toContain('"applicationKey":"application_1_attempt_1"');
@@ -61,3 +66,38 @@ test("action capture uses the exact native-owned Page, masks secrets and never w
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test.each(["locator", "viewport", "capture"])(
+  "a stalled %s capture never holds the browser action",
+  async (stage) => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "nestor-detached-trace-"));
+    vi.stubEnv("NESTOR_RUN_TRACE_DIR", dir);
+    const never = () => new Promise<never>(() => {});
+    const page = {
+      context: () => context,
+      frames: () => [
+        {
+          locator: () => ({
+            count: stage === "locator" ? never : () => Promise.resolve(0),
+            all: () => Promise.resolve([]),
+          }),
+        },
+      ],
+      evaluate:
+        stage === "viewport"
+          ? never
+          : () => Promise.resolve({ width: 800, height: 600 }),
+      url: () => "https://replica.invalid/form",
+    } as unknown as Page;
+    const context = {};
+    bindTracePage(page, "application_stalled", never);
+    const action = vi.fn(() => Promise.resolve("the action result"));
+    const hands = tracePageHands(page, { readPage: action });
+    try {
+      expect(await hands.readPage()).toBe("the action result");
+      expect(action).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);

@@ -1,22 +1,14 @@
-import { AiBehaviorPreferenceSchema } from "@nestor/contracts";
 import type { JobFinderRepository } from "@nestor/db";
 import {
   createApplicationService,
   type ApplicationService,
   type ApplicationServiceDeps,
 } from "@nestor/job-finder/applications";
-import {
-  withApplicationAuthorityGate,
-  recordApplicationAuthoritySuccessor,
-} from "@nestor/job-finder";
 
 import { getJobStore } from "./job-store";
 import { registerServiceStopper } from "./service-stoppers";
 import { getApplicationStore } from "./job-finder/application-store";
-import {
-  createJobFinderApplicationAuthorityService,
-  readAuthorityRecords,
-} from "./job-finder/application-authority-service";
+
 import { getSendGuards } from "./send-guards";
 import { getCandidateAssetLibrary } from "./job-finder/candidate-asset-library-instance";
 import { loadEmbeddedBrowser } from "./browser/load-embedded-browser";
@@ -42,10 +34,7 @@ export async function startApplicationService(
   const applications = getApplicationStore();
   // One guards object: every send and permission change queues on it.
   const guards = getSendGuards();
-  const records = readAuthorityRecords(guards);
-  const authority = createJobFinderApplicationAuthorityService({
-    repository: records,
-  });
+
   const instructionMode: NonNullable<
     ApplicationServiceDeps["instructionMode"]
   > = async (input) => {
@@ -54,137 +43,11 @@ export async function startApplicationService(
     return assistantApplicationMode(input);
   };
 
-  const authorizeSending: ApplicationServiceDeps["authorizeSending"] = async (
-    input,
-  ) =>
-    withApplicationAuthorityGate(guards, input.signal, async () => {
-      for (let retry = 0; retry < 5; retry += 1) {
-        input.signal.throwIfAborted();
-        const { revision } = await records.getProfileWithRevision();
-        const approval = await authority.approveCurrentAnswers({
-          expectedProfileRevision: revision,
-          confirmedCurrentAnswers: true,
-        });
-        if (approval.status === "stale") continue;
-        if (approval.status !== "created" && approval.status !== "duplicate")
-          throw new Error(
-            "Your current profile could not be checked before applying. Try Apply again.",
-          );
-        const settings = await repository.getSettings();
-        const instruction = applications.instructionFor(input.application.id);
-        if (
-          !input.personClicked &&
-          (input.application.mode !== "autonomous_submit" ||
-            (instruction &&
-              (await instructionMode({
-                ...instruction,
-                jobId: input.job.id,
-              })) !== "autonomous_submit"))
-        )
-          return null;
-        const active =
-          (await authority.list({ status: "active" })).at(0) ?? null;
-        // The active permission contains only running work, never every job in storage.
-        const running = [
-          ...applications.listWorkInState("running"),
-          ...applications.listWorkInState("submitting"),
-        ];
-        const scoped = running
-          .filter((row) => row.mode === "autonomous_submit")
-          .flatMap((row) => {
-            const artifact = applications.getResumeArtifact(row.id);
-            const job = getJobStore().getJob(row.jobId);
-            return artifact?.sha256 && job
-              ? [
-                  {
-                    id: String(job.id),
-                    digest: artifact.sha256,
-                    origins: [
-                      new URL(job.applyUrl ?? job.url).origin,
-                      new URL(job.url).origin,
-                    ],
-                  },
-                ]
-              : [];
-          });
-        const policy = {
-          mode: "autonomous_submit" as const,
-          scope: {
-            campaignId: null,
-            jobIds: [
-              ...new Set([
-                String(input.job.id),
-                ...scoped.map((item) => item.id),
-              ]),
-            ],
-          },
-          maxApplicationsPerRun: 1,
-          intermediateMutationsAuthorized: true,
-          preApprovedAttestationKinds: AiBehaviorPreferenceSchema.parse(
-            settings.aiBehavior ?? {},
-          ).applying.preApprovedDeclarations,
-          salaryDisclosure: settings.salaryDisclosure ?? "pause_for_user",
-          allowedResumeSha256: [
-            ...new Set([
-              input.artifact.sha256!,
-              ...scoped.map((item) => item.digest),
-            ]),
-          ],
-          allowedOrigins: [
-            ...new Set([
-              new URL(input.job.applyUrl ?? input.job.url).origin,
-              new URL(input.job.url).origin,
-              ...scoped.flatMap((item) => item.origins),
-              // Reviewed ATS origins remain available to another in-flight form.
-              ...applications.originsForApplications([
-                input.application.id,
-                ...running.map((row) => row.id),
-              ]),
-            ]),
-          ],
-          expiresAt: new Date(
-            Date.now() + 30 * 24 * 60 * 60 * 1000,
-          ).toISOString(),
-        };
-        if (active) {
-          if (active.mode !== "autonomous_submit") {
-            const revoked = await authority.revoke({
-              id: active.id,
-              expectedRevision: active.revision,
-            });
-            if (revoked.status !== "applied") continue;
-          } else {
-            const update = {
-              ...policy,
-              id: active.id,
-              expectedRevision: active.revision,
-            };
-            const changed = await authority.update(update);
-            if (changed.status === "applied") return changed.envelope;
-            if (
-              changed.status === "stale" &&
-              changed.current?.revision === active.revision
-            ) {
-              const replaced = await authority.replaceUsed(update);
-              if (replaced.status === "applied") {
-                recordApplicationAuthoritySuccessor(
-                  guards,
-                  active.id,
-                  replaced.envelope.id,
-                );
-                return replaced.envelope;
-              }
-            }
-            continue;
-          }
-        }
-        const created = await authority.create(policy);
-        if (created.status === "applied") return created.envelope;
-      }
-      throw new Error(
-        "The application permission changed while Apply was starting. Try again.",
-      );
-    });
+  // ADR 0079: the model's send call goes directly to the durable ledger.
+  // Legacy authorities and grants remain readable; their profile preflight,
+  // mode refusal and retry loop no longer stand in front of application work.
+  const authorizeSending: ApplicationServiceDeps["authorizeSending"] = () =>
+    Promise.resolve(null);
 
   service = createApplicationService({
     ...deps,

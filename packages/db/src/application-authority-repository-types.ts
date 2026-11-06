@@ -1,4 +1,5 @@
 import type {
+  ApplicationAutomationMode,
   ApplicationAuthorityEnvelope,
   ApplicationAuthorityStatus,
   ApprovedApplicationAnswerSnapshot,
@@ -129,9 +130,7 @@ export type SubmissionExecutionGrantTransitionResult =
  * prepare-only envelope can still be persisted, but it can never be armed by
  * this transition.
  */
-export type SubmissionAttemptArmMode =
-  | "confirm_before_submit"
-  | "autonomous_submit";
+export type SubmissionAttemptArmMode = ApplicationAutomationMode;
 
 export type SubmissionAttemptArmBlockReason =
   | "invalid_input"
@@ -355,5 +354,6 @@ export interface ApplicationAuthorityRepository {
   ): Promise<SubmissionOutcomeResolutionResult>;
   recoverArmedSubmissionAttempts(input: {
     now: string;
+    idempotencyKey?: string;
   }): Promise<readonly SubmissionOutcomeRecord[]>;
 }

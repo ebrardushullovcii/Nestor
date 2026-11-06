@@ -2,7 +2,6 @@ import { traceOurs } from "@nestor/core/run-trace";
 import {
   intendedAccountEmail,
   normalizeFormQuestionPrompt,
-  resumeFormFileNames,
   type ApplicationAttemptQuestion,
   type ApplyPickerAttempt,
   type ApplyWriteResult,
@@ -40,7 +39,6 @@ import {
   isAnswerFromThisApplication,
   savedAnswerForQuestion,
 } from "./application-facts";
-import { attemptKey, judgeBlockedAttempt } from "./blocked-attempts";
 import { isSecurityChallengeControl } from "./blockers";
 import { normalizeSignal } from "./control-classification";
 import {
@@ -55,21 +53,11 @@ import {
   recordFillPress,
   type FillPressState,
 } from "./fill-presses";
-import {
-  localStepAdvanced,
-  localStepPreflight,
-  numberedStepAdvanced,
-  numberedStepPreflight,
-  unconfirmedStepText,
-} from "./local-step-preflight";
 import { savedPickerRule, strictOptionMatch } from "./option-fallback";
 import { matchOption } from "./option-match";
 import { formWritingInstructions, questionReadContext } from "./own-words";
 import type { ApplyQuestionClassification } from "./question-classification";
-import {
-  runSubmitPreflight,
-  STEP_HANDOVER_QUESTION_ID,
-} from "./submit-preflight";
+import { STEP_HANDOVER_QUESTION_ID } from "./form-facts";
 import type {
   ApplyAgentConfig,
   ApplyAnswer,
@@ -1011,7 +999,7 @@ function findControl(
  * same-origin window is opened before the write and left to run out, so the
  * save the site sends a moment later still gets through.
  */
-async function writeUnderGuard(
+function writeUnderGuard(
   deps: ApplyExecutorDeps,
   input: {
     declaredValue: string | null;
@@ -1019,25 +1007,7 @@ async function writeUnderGuard(
     write: () => Promise<ApplyWriteResult>;
   },
 ): Promise<ApplyWriteResult> {
-  const safety = deps.config.safety;
-  if (!safety) {
-    return input.write();
-  }
-  if (input.declaredValue) {
-    await safety.registerPreparedValue(input.declaredValue);
-  }
-  if (
-    deps.config.intermediateWritesAuthorized === true &&
-    input.intermediateWindow !== false
-  ) {
-    // Opened before the write and left to expire on its own. Sites save a
-    // field a moment after it changes, not during the write; closing the
-    // window the instant the write returned blocked exactly those saves and
-    // left every select on the form reverting to empty.
-    await safety.openIntermediateWriteWindow().catch(() => undefined);
-  } else if (input.intermediateWindow === false) {
-    await safety.closeIntermediateWriteWindow();
-  }
+  void deps;
   return input.write();
 }
 
@@ -1056,54 +1026,13 @@ export async function guardStop(
   return (await reviewGuard(deps, pageUrl)).pause;
 }
 
-async function reviewGuard(
+function reviewGuard(
   deps: ApplyExecutorDeps,
   pageUrl: string | null,
 ): Promise<GuardReview> {
-  const safety = deps.config.safety;
-  if (!safety) {
-    return { pause: null, openedWindowUrl: null };
-  }
-  const attempt = await safety.readBlockedAttempt();
-  const judgement = judgeBlockedAttempt({
-    attempt,
-    acknowledged: deps.guardState.acknowledged,
-    hasWritten: deps.guardState.hasWritten,
-    pageUrl,
-    lastFieldLabel: deps.guardState.lastFieldLabel,
-  });
-  if (judgement.stop) {
-    return {
-      pause: {
-        code: "site_tried_to_send",
-        summary: judgement.summary,
-        question: null,
-        blocker: null,
-      },
-      openedWindowUrl: null,
-    };
-  }
-  let openedWindowUrl: string | null = null;
-  if (attempt && judgement.tolerated) {
-    deps.guardState.acknowledged.add(attemptKey(attempt));
-    if (judgement.note) {
-      deps.guardState.notes.push(judgement.note);
-    }
-    if (judgement.savesAsYouGo) {
-      deps.guardState.lastBlockedSave = {
-        host: judgement.savesAsYouGo.host,
-        fieldLabel: deps.guardState.lastFieldLabel,
-      };
-      deps.guardState.blockedSaveCount += 1;
-    }
-    if (
-      judgement.openedWindow?.url &&
-      /^https?:/iu.test(judgement.openedWindow.url)
-    ) {
-      openedWindowUrl = judgement.openedWindow.url;
-    }
-  }
-  return { pause: null, openedWindowUrl };
+  void deps;
+  void pageUrl;
+  return Promise.resolve({ pause: null, openedWindowUrl: null });
 }
 
 /**
@@ -1234,39 +1163,6 @@ export function unconfirmedStepPause(
  * window, so the site can save the step (B6); without write authority only
  * a proven local press under a read-only fence is possible.
  */
-export function fillStepPress(
-  config: Pick<
-    ApplyAgentConfig,
-    "pressesFormButtons" | "intermediateWritesAuthorized" | "hands" | "safety"
-  >,
-  page: ApplyFormObservation,
-  ref: string,
-) {
-  if (pressesFormButtons(config)) return null;
-  if (
-    config.intermediateWritesAuthorized === true &&
-    config.safety &&
-    config.hands.clickBoundAction
-  ) {
-    const numbered = numberedStepPreflight(page, ref);
-    if (numbered) return { kind: "numbered" as const, ...numbered };
-  }
-  if (!config.hands.clickWithoutWrites) return null;
-  const local = localStepPreflight(page, ref);
-  return local ? { kind: "local" as const, ...local } : null;
-}
-
-/** Whether this run may press the form's own buttons (Send for me). */
-export function pressesFormButtons(
-  config: Pick<
-    ApplyAgentConfig,
-    "pressesFormButtons" | "intermediateWritesAuthorized"
-  >,
-): boolean {
-  return (
-    config.pressesFormButtons ?? config.intermediateWritesAuthorized === true
-  );
-}
 
 function afterWrite(deps: ApplyExecutorDeps, label: string | null): void {
   deps.guardState.hasWritten = true;
@@ -1455,7 +1351,10 @@ async function executeApplyProposalObserved(
 
   // A page that moved on since the model looked is retried, not stopped: the
   // model gets what is there now and decides again.
-  if (observation.signature !== seenSignature) {
+  if (
+    proposal.tool !== "submit_application" &&
+    observation.signature !== seenSignature
+  ) {
     return {
       kind: "refused",
       reason:
@@ -1628,53 +1527,8 @@ async function executeApplyProposalObserved(
     };
   }
 
-  // Validate attachment selection before leaving a form step. An earlier
-  // attempt may still hold a different resume on this retained page.
-  if (proposal.tool === "click" || proposal.tool === "submit_application") {
-    const action =
-      "ref" in proposal
-        ? observation.actions.find(
-            (candidate) => candidate.ref === proposal.ref,
-          )
-        : null;
-    if (
-      proposal.tool !== "click" ||
-      action?.kind === "advance" ||
-      action?.kind === "final"
-    ) {
-      const resume = config.sources.documents.find(
-        (document) => document.kind === "resume",
-      );
-      const staleUpload = observation.controls.find(
-        (control) =>
-          control.kind === "file" &&
-          control.questionKind === "resume" &&
-          control.answered &&
-          resume &&
-          resumeFormFileNames(resume.fileName).every((name) =>
-            fileFieldHoldsOtherFile(control.value, name),
-          ),
-      );
-      if (staleUpload && resume) {
-        return {
-          kind: "refused",
-          reason: `"${questionPrompt(staleUpload)}" still contains ${staleUpload.value.split(/[\\/]/u).at(-1)}. The selected resume is ${resume.fileName}.`,
-          observation,
-        };
-      }
-    }
-  }
-
   switch (proposal.tool) {
     case "click": {
-      const submits = observation.actions.find(
-        (action) => action.ref === proposal.ref,
-      );
-      if (submits && unrecognizedSubmit(submits))
-        return {
-          kind: "paused",
-          pause: formSendPause(submits.label, deps.now()),
-        };
       const control = findControl(observation, proposal.ref);
       if (control?.kind === "checkbox" || control?.kind === "radio") {
         // A click changes an answer just as set_checkbox does. Keep consent
@@ -1721,7 +1575,6 @@ async function executeApplyProposalObserved(
             "No further complete Profile record can fill this optional history row. Continue without adding it.",
           observation,
         };
-      let removesOwnedEmptyRow = false;
       if (
         clicked &&
         /^(?:remove|delete)(?:$|\b.*\b(?:entry|row|experience|education)\b)/iu.test(
@@ -1743,28 +1596,7 @@ async function executeApplyProposalObserved(
               "Only an empty history row added by this run may be removed. Keep the person's entries.",
             observation,
           };
-        removesOwnedEmptyRow = true;
       }
-      const stepPress = fillPress
-        ? null
-        : fillStepPress(config, observation, proposal.ref);
-      const localStep = stepPress?.kind === "local" ? stepPress : null;
-      const numberedStep = stepPress?.kind === "numbered" ? stepPress : null;
-      const stepReceipt = stepPress
-        ? unconfirmedStepText(observation, stepPress.label)
-        : null;
-      // A step whose earlier press the page never confirmed is not pressed
-      // again, from any path: model click, finish, replay or a continuation.
-      if (
-        stepPress &&
-        stepReceipt &&
-        deps.guardState.uncertainAdvances.has(stepReceipt)
-      )
-        return {
-          kind: "paused",
-          pause: unconfirmedStepPause(stepPress.label, observation, deps.now()),
-        };
-      // "Apply now" before anything is filled opens the form; it sends nothing.
       const finalAction =
         fillPress?.kind === "open_form"
           ? undefined
@@ -1773,14 +1605,6 @@ async function executeApplyProposalObserved(
                 candidate.ref === proposal.ref && candidate.kind === "final",
             );
       if (finalAction) {
-        const preflight = runSubmitPreflight({
-          observation,
-          proposedActionRef: proposal.ref,
-          authority: config.authority,
-        });
-        if (!preflight.ok) {
-          return { kind: "refused", reason: preflight.reason, observation };
-        }
         // Models sometimes choose the generic click tool for the visible send
         // button. Treat that as the same intent as submit_application so the
         // irreversible action still belongs to the separately authorized
@@ -1792,165 +1616,7 @@ async function executeApplyProposalObserved(
           observation,
         };
       }
-      if (
-        !pressesFormButtons(deps.config) &&
-        !fillPress &&
-        !removesOwnedEmptyRow &&
-        !localStep &&
-        !numberedStep
-      )
-        return {
-          kind: "paused",
-          pause: pressOnSitePause(
-            describeRef(observation, proposal.ref),
-            deps.now(),
-          ),
-        };
       const livePage = await config.hands.observe();
-      if (localStep) {
-        // Rebind to a fresh exact observation immediately before the press.
-        if (
-          livePage.signature !== observation.signature ||
-          !localStepPreflight(livePage, proposal.ref)
-        )
-          return {
-            kind: "refused",
-            reason: "The step changed. Read the current page before advancing.",
-            observation: livePage,
-          };
-        await config.safety?.closeIntermediateWriteWindow();
-        await config.safety?.closeUploadWindow?.();
-        const worker = await config.safety?.checkServiceWorker();
-        if (worker)
-          return {
-            kind: "paused",
-            pause: pressOnSitePause(
-              describeRef(livePage, proposal.ref),
-              deps.now(),
-            ),
-          };
-        // This mechanic never opens a field, upload, form-action or send window.
-        const pressed = await config.hands.clickWithoutWrites!(localStep);
-        const after = await config.hands.observe();
-        const guard = await reviewGuard(deps, after.url);
-        if (guard.pause) return { kind: "paused", pause: guard.pause };
-        if (
-          !pressed.ok ||
-          guard.openedWindowUrl ||
-          !localStepAdvanced(livePage, after)
-        ) {
-          if (stepReceipt)
-            deps.guardState.uncertainAdvances.set(
-              stepReceipt,
-              deps.now().toISOString(),
-            );
-          return {
-            kind: "paused",
-            pause: unconfirmedStepPause(localStep.label, livePage, deps.now()),
-          };
-        }
-        afterWrite(deps, null);
-        return {
-          kind: "moved",
-          note: `Advanced to step ${after.step.index} of ${after.step.total}.`,
-          observation: after,
-          progress: true,
-          confirmedStepPage: livePage,
-        };
-      }
-      if (numberedStep) {
-        // Rebind to a fresh exact observation immediately before the press.
-        if (
-          livePage.signature !== observation.signature ||
-          !numberedStepPreflight(livePage, proposal.ref)
-        )
-          return {
-            kind: "refused",
-            reason: "The step changed. Read the current page before advancing.",
-            observation: livePage,
-          };
-        // A selected file finishes uploading first; this press cannot carry it.
-        await config.safety?.closeUploadWindow?.().catch(() => undefined);
-        const handOver = (): ApplyExecutionOutcome => ({
-          kind: "paused",
-          pause: pressOnSitePause(
-            describeRef(livePage, proposal.ref),
-            deps.now(),
-          ),
-        });
-        if (await config.safety!.checkServiceWorker()) return handOver();
-        // The press opens its own per-action window: same-origin saves pass,
-        // final-action requests stay refused. No window, no server-backed step.
-        try {
-          await config.safety!.openIntermediateWriteWindow();
-        } catch {
-          return handOver();
-        }
-        const pressed = await config.hands.clickBoundAction!({
-          ref: numberedStep.ref,
-          label: numberedStep.label,
-          url: numberedStep.url,
-          stepLabel: numberedStep.stepLabel,
-          frame: numberedStep.frame,
-          ...(numberedStep.nativeForm
-            ? { nativeForm: numberedStep.nativeForm }
-            : {}),
-        });
-        if (!pressed.ok && pressed.reason === "binding_changed") {
-          await config.safety!.closeIntermediateWriteWindow();
-          return {
-            kind: "refused",
-            reason: "The step changed. Read the current page before advancing.",
-            observation: await config.hands.observe(),
-          };
-        }
-        afterWrite(deps, null);
-        // A server-backed step shows the next one when its save answers.
-        let after = await config.hands.observe();
-        for (
-          let wait = 0;
-          wait < 20 &&
-          (after.loading ||
-            (!numberedStepAdvanced(livePage, after) &&
-              !after.blocker &&
-              !after.validationErrors.length));
-          wait++
-        ) {
-          await config.hands.wait(500);
-          after = await config.hands.observe();
-        }
-        const guard = await reviewGuard(deps, after.url);
-        if (
-          !pressed.ok ||
-          guard.pause ||
-          guard.openedWindowUrl ||
-          !numberedStepAdvanced(livePage, after)
-        ) {
-          await config.safety!.closeIntermediateWriteWindow();
-          if (stepReceipt)
-            deps.guardState.uncertainAdvances.set(
-              stepReceipt,
-              deps.now().toISOString(),
-            );
-          return {
-            kind: "paused",
-            pause:
-              guard.pause ??
-              unconfirmedStepPause(numberedStep.label, livePage, deps.now()),
-          };
-        }
-        deps.guardState.lastOnSiteUrl = after.url;
-        return {
-          kind: "moved",
-          note: `Pressed "${numberedStep.label}"; the form moved to its next application section.`,
-          observation: after,
-          progress: true,
-          confirmedStepPage: livePage,
-          ...(numberedStep.nativeForm
-            ? { confirmedNativeForm: numberedStep.nativeForm }
-            : {}),
-        };
-      }
       const personOwnedBlocker = livePage.blocker?.requiresPerson
         ? livePage.blocker
         : null;
@@ -1973,7 +1639,6 @@ async function executeApplyProposalObserved(
       }
       // A press is never a field write: let the selected file finish
       // uploading, then shut its window so this press cannot carry it.
-      await config.safety?.closeUploadWindow?.().catch(() => undefined);
       // A cookie banner is dismissed with the choice that keeps the least,
       // whichever of its buttons the model named.
       const pressRef = fillPress?.ref ?? proposal.ref;
@@ -2799,17 +2464,15 @@ async function executeApplyProposalObserved(
     }
 
     case "submit_application": {
-      const preflight = runSubmitPreflight({
-        observation,
-        proposedActionRef: proposal.ref,
-        authority: config.authority,
-      });
-      if (!preflight.ok) {
-        return { kind: "refused", reason: preflight.reason, observation };
-      }
       const action = observation.actions.find(
         (candidate) => candidate.ref === proposal.ref,
       );
+      if (!action)
+        return {
+          kind: "refused",
+          reason: "That control is stale or missing; observe again.",
+          observation,
+        };
       // Nothing is pressed here. Sending an application is one irreversible
       // act that has to be recorded as it happens, so it belongs to the
       // submission path rather than to this loop.

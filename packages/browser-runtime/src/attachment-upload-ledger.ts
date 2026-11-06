@@ -1,13 +1,12 @@
+import { createHash } from "node:crypto";
 import { reportSelfLimitHit } from "@nestor/core";
 import type { Page, Request, Response } from "playwright";
 import type { RawApplyPage, RawApplyUpload } from "@nestor/contracts";
 
-import { inspectPageMutationResponse } from "./mutation-response-body";
 import {
-  getPrepareOnlyRequestPermit,
-  getAttachmentGuardRefusal,
-  onPrepareOnlyUploadPermit,
-} from "./playwright-application-flow";
+  installMutationResponseBodyObserver,
+  inspectPageMutationResponse,
+} from "./mutation-response-body";
 
 /**
  * What the site's own server said about each file sent from a page.
@@ -279,21 +278,81 @@ function tokensIn(
   return into;
 }
 
+/** Match passive page-side file metadata in request order, without touching traffic. */
+async function observeRequestFiles(
+  record: UploadRecord,
+  request: Request,
+): Promise<void> {
+  if (record.names.length) return;
+  const key = await request
+    .frame()
+    .evaluate(
+      ({ url, method, sequence }) => {
+        const entries = (window as unknown as Record<string, unknown>)
+          .__nestorMutationResponses as
+          | {
+              url: string;
+              method: string;
+              bodyKey: string;
+              observedBy?: number;
+            }[]
+          | undefined;
+        const entry = entries?.find(
+          (entry) =>
+            entry.url === url &&
+            entry.method === method &&
+            (!entry.observedBy || entry.observedBy === sequence),
+        );
+        if (entry) {
+          entry.observedBy = sequence;
+          return entry.bodyKey;
+        }
+        return null;
+      },
+      {
+        url: request.url(),
+        method: request.method(),
+        sequence: record.sequence ?? 0,
+      },
+    )
+    .catch(() => null);
+  if (!key) return;
+  try {
+    const parsed = JSON.parse(key) as unknown;
+    if (
+      Array.isArray(parsed) &&
+      parsed[0] === "files" &&
+      Array.isArray(parsed[1])
+    )
+      for (const part of parsed[1] as unknown[])
+        if (Array.isArray(part) && typeof part[1] === "string") {
+          record.names = [...record.names, part[1].toLowerCase()];
+          record.carriesFile = true;
+        }
+  } catch {
+    /* A text or byte-only request has no file names. */
+  }
+}
+
 async function settle(page: Page, record: UploadRecord, response: Response) {
   // Ordered by when the answer arrived, not by when its body was read.
   record.completedAt = ++answered;
   record.httpStatus = response.status();
-  // The fence's upload permit names the exact file this request carried:
-  // it is a carrier whatever its content type (a raw text/plain PUT too).
-  const permit = getPrepareOnlyRequestPermit(response.request());
-  if (permit && permit.uploadLeg !== "presign") {
-    record.carriesFile = true;
-    record.identity = { ...permit.file };
+  // A raw body can identify the selected file without modifying the request.
+  const request = response.request();
+  const raw = request.postDataBuffer();
+  const selected = [...(given.get(page)?.values() ?? [])];
+  if (raw?.length) {
+    const sha256 = createHash("sha256").update(raw).digest("hex");
+    const exact = selected.filter(
+      (file) => file.size === raw.length && file.sha256 === sha256,
+    );
+    if (exact.length === 1) {
+      record.identity = exact[0]!;
+      record.carriesFile = true;
+    }
   }
-  // The shared check reads the body in the page too when the embedded browser
-  // never hands it over, and fails closed. Only "accepted" (the fence's
-  // upload permit for this exact request, and a storage receipt) attaches a
-  // file; a refusal refuses whatever was sent.
+  await observeRequestFiles(record, request);
   const { judgment, body } = await inspectPageMutationResponse(page, response);
   if (judgment === "refused") {
     record.status = "rejected";
@@ -315,6 +374,14 @@ export function watchAttachmentUploads(page: Page): void {
   if (ledgers.has(page) || typeof page.on !== "function") return;
   const records: UploadRecord[] = [];
   ledgers.set(page, records);
+  if (typeof page.addInitScript === "function")
+    void page
+      .addInitScript(installMutationResponseBodyObserver)
+      .catch(() => undefined);
+  for (const frame of page.frames?.() ?? [])
+    void frame
+      .evaluate(installMutationResponseBodyObserver)
+      .catch(() => undefined);
   const tracked = new WeakMap<Request, UploadRecord>();
   page.on("request", (request) => {
     try {
@@ -324,44 +391,31 @@ export function watchAttachmentUploads(page: Page): void {
       const from = request.redirectedFrom();
       const followed = from ? tracked.get(from) : undefined;
       const record = followed ?? track(records, request);
-      if (record) tracked.set(request, record);
+      if (record) {
+        const raw = request.postDataBuffer();
+        if (raw?.length) {
+          const sha256 = createHash("sha256").update(raw).digest("hex");
+          const exact = [...(given.get(page)?.values() ?? [])].filter(
+            (file) => file.size === raw.length && file.sha256 === sha256,
+          );
+          if (exact.length === 1) {
+            record.identity = exact[0]!;
+            record.carriesFile = true;
+          }
+        }
+        tracked.set(request, record);
+        void observeRequestFiles(record, request);
+      }
     } catch {
       // An unreadable body is not an upload this ledger can judge.
     }
-  });
-  // The fence names a carrier when it lets the file out, before any answer:
-  // a carrier whose answer never comes, or whose connection drops, is then
-  // pending or refused, never silently attached.
-  onPrepareOnlyUploadPermit(page, (request, permit) => {
-    if (permit.uploadLeg === "presign") return;
-    let record = tracked.get(request);
-    if (!record) {
-      record = add(records, {
-        completedAt: null,
-        url: request.url().toLowerCase(),
-        endpoint: `${new URL(request.url()).host}${new URL(request.url()).pathname}`,
-        tokens: [],
-        status: "pending",
-        blocked: false,
-        identity: null,
-        carriesFile: true,
-        names: [],
-        size: null,
-        text: "",
-      });
-      tracked.set(request, record);
-    }
-    record.carriesFile = true;
-    record.names = [permit.file.name.toLowerCase()];
-    record.size = permit.file.size;
-    record.identity = { ...permit.file };
   });
   page.on("response", (response) => {
     const record = tracked.get(response.request());
     const status = response.status();
     if (!record || (status >= 300 && status < 400)) return;
     void settle(page, record, response).catch(() => {
-      record.status = "rejected";
+      record.status = "unconfirmed";
     });
   });
   page.on("requestfailed", (request) => {
@@ -375,8 +429,6 @@ export function watchAttachmentUploads(page: Page): void {
     record.blocked = /BLOCKED_BY_CLIENT/iu.test(
       request.failure()?.errorText ?? "",
     );
-    const guardRefusal = getAttachmentGuardRefusal(request);
-    if (guardRefusal) record.guardRefusal = guardRefusal;
     record.status = "rejected";
     record.completedAt = ++answered;
   });

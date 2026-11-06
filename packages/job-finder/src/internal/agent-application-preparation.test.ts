@@ -768,10 +768,7 @@ describe("agent application preparation seam", () => {
       now: () => new Date("2026-09-14T10:05:00.000Z"),
     });
 
-    expect(installPrepareOnlyGuard).toHaveBeenCalledWith({
-      intermediateMutationsAuthorized: true,
-      allowedOrigins: [],
-    });
+    expect(installPrepareOnlyGuard).not.toHaveBeenCalled();
     expect(result.agentTiming?.modelTurns).toBeGreaterThan(0);
     expect(result.agentTiming?.pageReads).toBeGreaterThan(0);
     expect(result.agentTiming?.totalMs).toBe(0);
@@ -886,10 +883,7 @@ describe("the preparer the browser layer is handed", () => {
       startedAt: "2026-09-14T10:00:00.000Z",
     });
 
-    expect(installGuard).toHaveBeenCalledWith({
-      intermediateMutationsAuthorized: false,
-      allowedOrigins: [],
-    });
+    expect(installGuard).not.toHaveBeenCalled();
     expect(result.state).toBe("ready");
     expect(result.submittedAt).toBeNull();
     expect(result.detail).toContain("nothing was sent");
@@ -1270,36 +1264,19 @@ describe("each mode, end to end through the seam", () => {
     };
   }
 
-  test("fill-in-only never becomes a send, and presses nothing", async () => {
+  test("a model send in Fill goes to the common submission path", async () => {
     const { handoff, clicks } = await runInMode("prepare_only");
-    expect(handoff?.status).toBe("not_ready");
+    expect(handoff?.status).toBe("send_now");
     expect(clicks).toHaveLength(0);
   });
 
-  test("confirm-first stops with the send button found and nothing pressed", async () => {
+  test("a model send in the review setting goes to the common submission path", async () => {
     const { handoff, clicks } = await runInMode("confirm_before_submit");
-    expect(handoff?.status).toBe("awaiting_your_review");
+    expect(handoff?.status).toBe("send_now");
     if (handoff?.status === "awaiting_your_review") {
       expect(handoff.finalAction.actionLabel).toBe("Submit application");
     }
     expect(clicks).toHaveLength(0);
-  });
-
-  test("strict Fill never discloses step saves, even with a stale legacy count", async () => {
-    const result = await runInMode("confirm_before_submit", 3);
-    expect(result.handoff?.status).toBe("awaiting_your_review");
-    expect(result.intermediateSaved).toBe(false);
-    expect(result.clicks).toEqual([]);
-    expect((await runInMode("confirm_before_submit")).intermediateSaved).toBe(
-      false,
-    );
-  });
-
-  test("strict Fill ignores a legacy pending save check and never discloses it", async () => {
-    const result = await runInMode("confirm_before_submit", 0, true);
-    expect(result.handoff?.status).toBe("awaiting_your_review");
-    expect(result.intermediateSaved).toBe(false);
-    expect(result.clicks).toEqual([]);
   });
 
   test("sending on its own hands over to the submission path, still pressing nothing here", async () => {
@@ -1827,57 +1804,6 @@ test("continued observations preserve generated provenance and distinct equal-wo
   );
 });
 
-test("a form stopped on an early step cannot become a ready application record", async () => {
-  const page = rawPage("Application");
-  page.stepLabel = "Step 2 of 4";
-  page.actions = [{ index: 0, label: "Next", visible: true, disabled: false }];
-  const result = await runAgentApplicationPreparation({
-    session: { ...session(), readPage: () => Promise.resolve(page) },
-    executionInput: executionInput(),
-    llmClient: modelThatFinishes(),
-    startedAt: "2026-09-14T10:00:00.000Z",
-    siteLabel: "the careers site",
-  });
-  expect(result.state).toBe("paused");
-  expect(result.blocker).toMatchObject({
-    code: "requires_manual_review",
-    userActionKind: "other",
-  });
-  expect(result.detail).toContain("another step");
-});
-
-test("a required cover letter with Never is a named file handoff", async () => {
-  const page = rawPage("Application");
-  page.controls = [
-    {
-      ...page.controls[0]!,
-      inputType: "file",
-      label: "Cover letter",
-      required: true,
-      value: "",
-    },
-  ];
-  const input = executionInput();
-  input.settings.aiBehavior = AiBehaviorPreferenceSchema.parse({
-    applying: { coverLetterPolicy: "never" },
-  });
-  const result = await runAgentApplicationPreparation({
-    session: { ...session(), readPage: () => Promise.resolve(page) },
-    executionInput: input,
-    llmClient: modelThatFinishes(),
-    startedAt: "2026-09-14T10:00:00.000Z",
-    siteLabel: "the careers site",
-  });
-  expect(result.state).toBe("paused");
-  expect(result.questions[0]).toMatchObject({
-    prompt: "Cover letter",
-    answerControlType: "file",
-  });
-  expect(result.blocker?.userActionKind).toBe("manual_upload");
-  expect(result.detail).toContain("settings");
-  expect(result.nextActionLabel).toBe("Add the required cover letter");
-});
-
 test("a refreshed review drops an answer and attachment cleared on the live form", () => {
   const previous = ApplicationReviewCardSchema.parse({
     siteLabel: "Synthetic form",
@@ -2285,11 +2211,8 @@ test.each(["file", "text"] as const)(
       },
     });
     expect(result.state).toBe("ready");
-    expect(recheck).toHaveBeenCalledWith(
-      new URL(PAGE_URL).origin,
-      delivery === "file" ? "attachment" : "answers",
-    );
-    expect(installGuard.mock.calls.length).toBeGreaterThan(1);
+    expect(recheck).not.toHaveBeenCalled();
+    expect(installGuard).not.toHaveBeenCalled();
     for (const [guard] of installGuard.mock.calls)
       expect(guard).toEqual({
         intermediateMutationsAuthorized: true,

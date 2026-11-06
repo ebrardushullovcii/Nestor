@@ -16,6 +16,7 @@ import {
   type ApplyFormPathStep,
 } from "@nestor/contracts";
 import { createHash } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { meaningHash, meaningTargetHash } from "./answer-meaning";
 import { answerSourceCatalog } from "./answer-source-catalog";
 import { createApplyProgressGuard } from "./apply-progress";
@@ -82,7 +83,6 @@ import {
   coverLetterPolicyAllows,
   isCoverLetterControl,
 } from "./cover-letter";
-import { fillMayOpen } from "./fill-presses";
 import {
   nextPathStep,
   planReplay,
@@ -107,13 +107,10 @@ import {
   createApplyGuardState,
   executeApplyProposal,
   fileFieldHoldsOtherFile,
-  fillStepPress,
   formSendPause,
   guardStop,
   buildPendingQuestion as makePendingQuestion,
   pickerQuestionKey,
-  pressesFormButtons,
-  pressOnSitePause,
   questionPrompt,
   unrecognizedSubmit,
   type ApplyExecutionOutcome,
@@ -128,17 +125,15 @@ import {
 } from "./question-classification";
 import { createQuestionOccurrences } from "./question-occurrences";
 import {
-  checkFormReadiness,
   fileUploadProblems,
   hasRemainingApplicationStep,
   holdsAnswer,
   retainedForFormSubmission,
-  runSubmitPreflight,
   STEP_HANDOVER_QUESTION_ID,
   unresolvedRequiredControls,
   UPLOAD_REPAIR_QUESTION_ID,
   type FileUploadProblem,
-} from "./submit-preflight";
+} from "./form-facts";
 import type {
   ApplyAgentConfig,
   ApplyAgentResult,
@@ -509,11 +504,6 @@ async function runMeasuredApplyAgent(
    * than the moment the model reached for it.
    */
   let deferredPress: ApplyPause | null = null;
-  const deferPress = (pause: ApplyPause): string => {
-    deferredPress = pause;
-    note(`Left ${pause.question?.prompt ?? "a form button"} for the end.`);
-    return `${pause.blocker?.detail ?? pause.summary} Job Finder hands it to the person when everything else is filled: fill every other field on this page you can answer, then finish.`;
-  };
   /**
    * Reaching for a form button again means the page is done: the run ends
    * with it, the person's questions first (their answers belong on this
@@ -1088,37 +1078,8 @@ async function runMeasuredApplyAgent(
       )
     );
   };
-  // Two possible network sends, but distinct local gestures that make no
-  // request do not consume the network retry. Unknown traffic counts as a send.
-  const MAX_UPLOAD_TRIES = 2;
   const uploadTries = new Map<string, number>();
-  const attachmentMethods = ["input", "chooser", "drop"] as const;
-  const uploadMethods = new Map<
-    string,
-    Set<(typeof attachmentMethods)[number]>
-  >();
-  const uploadCanRetry = (key: string) =>
-    (uploadTries.get(key) ?? 0) < MAX_UPLOAD_TRIES &&
-    attachmentMethods.some((method) => !uploadMethods.get(key)?.has(method));
   const exhaustedUploads = new Map<string, string>();
-  const uploadsStillUploading = () =>
-    [...uploadLedger.values()].some((entry) => entry.state === "uploading");
-  const exhaustedUploadReason = (
-    key: string,
-    label: string,
-    detail?: string,
-  ) => {
-    const file =
-      uploadLedger.get(key)?.fileName ||
-      selectedFiles.get(key)?.fileName ||
-      "the selected file";
-    const recovery =
-      (uploadTries.get(key) ?? 0) >= MAX_UPLOAD_TRIES
-        ? "after one recovery pass"
-        : "because a recovery could not safely reach the attachment field";
-    return `Nestor could not attach ${file} to "${label}" ${recovery}. ${uploadDiagnostics.get(key) ?? detail ?? "The site did not confirm the file."} Your recorded answers are kept.`;
-  };
-
   // A chosen file the site refused is already the person's one upload item.
   const repairsUpload = (control: ApplyFormObservation["controls"][number]) => {
     const page = pageTools.state.observation;
@@ -1245,7 +1206,6 @@ async function runMeasuredApplyAgent(
       )
         pendingQuestions.delete(key);
     }
-    readyToSend = null;
     const fileFieldsSeen = new Set<string>();
     for (const control of next.controls) {
       if (control.disabled || (!control.visible && control.kind !== "file"))
@@ -1656,76 +1616,6 @@ async function runMeasuredApplyAgent(
         fieldKey: key,
       });
     }
-    // However many files the site refused, on this step or an earlier one,
-    // the person gets one item for this application. It goes only once each
-    // of those files is seen accepted.
-    const repairs = [...uploadLedger.entries()]
-      .filter(
-        ([key, entry]) =>
-          !uploadTries.has(key) &&
-          (entry.state === "rejected" || entry.state === "unconfirmed"),
-      )
-      .map(([, entry]) => entry);
-    const [firstRepair] = repairs;
-    if (firstRepair) {
-      const selectedDocument =
-        documentCatalog.find(
-          (document) => document.id === firstRepair.documentId,
-        ) ??
-        documentCatalog.find(
-          (document) => document.fileName === firstRepair.fileName,
-        );
-      const labels = [...new Set(repairs.map((entry) => entry.label))];
-      const failed = repairs.some((entry) => entry.state === "rejected");
-      pendingQuestions.set(UPLOAD_REPAIR_QUESTION_ID, {
-        ...buildPendingQuestion({
-          control: firstRepair.control,
-          jobId: config.application.jobId,
-          detectedAt: now().toISOString(),
-          suggestion: null,
-          askReason: {
-            kind: "page_refused",
-            check: "upload_acceptance",
-            ...(selectedDocument
-              ? {
-                  selectedDocument: {
-                    kind: selectedDocument.kind,
-                    label: selectedDocument.label.slice(0, 300),
-                    fileName: selectedDocument.fileName.slice(0, 255),
-                  },
-                }
-              : {}),
-            detail:
-              repairs
-                .map(
-                  (entry) =>
-                    [...uploadDiagnostics.entries()].find(
-                      ([key]) => uploadLedger.get(key) === entry,
-                    )?.[1],
-                )
-                .filter(Boolean)
-                .join("\n")
-                .slice(0, 4_000) ||
-              "The site has not confirmed the selected file in this field.",
-          },
-        }),
-        id: UPLOAD_REPAIR_QUESTION_ID,
-        prompt: `${labels.join(", ")} — ${failed ? "upload failed" : "upload not confirmed"}`,
-        note: [
-          failed
-            ? "The site did not accept this upload; your other answers are kept."
-            : "The site has not shown this file as attached; your other answers are kept.",
-          ...repairs
-            .map(
-              (entry) =>
-                [...uploadDiagnostics.entries()].find(
-                  ([key]) => uploadLedger.get(key) === entry,
-                )?.[1],
-            )
-            .filter(Boolean),
-        ].join("\n"),
-      });
-    } else pendingQuestions.delete(UPLOAD_REPAIR_QUESTION_ID);
     if (next.url && !pageTools.state.visitedUrls.includes(next.url)) {
       pageTools.state.visitedUrls.push(next.url);
     }
@@ -1914,19 +1804,6 @@ async function runMeasuredApplyAgent(
       case "paused":
         // A step press Nestor already made once is not deferred and retried.
         if (outcome.pause.unconfirmedStep) return handOverPress(outcome.pause);
-        // Fill in for me: a form button waits until the rest is filled.
-        if (
-          outcome.pause.question?.id === STEP_HANDOVER_QUESTION_ID &&
-          (!pressesFormButtons(runConfig) || outcome.pause.formSend === true)
-        )
-          return deferredPress
-            ? handOverPress(outcome.pause)
-            : {
-                kind: "ok",
-                status: "refused",
-                stopBatch: false,
-                content: deferPress(outcome.pause),
-              };
         if (
           outcome.pause.reviewDraft &&
           outcome.pause.question?.kind === "cover_letter"
@@ -1966,15 +1843,26 @@ async function runMeasuredApplyAgent(
       case "ready_to_send":
         syncObservation(outcome.observation);
         note("The form is complete and ready to send.");
-        // Nothing is left for the model to decide: the checks its finish
-        // would run happen now, and a form that passes them ends the run
-        // here instead of after another model turn.
-        return outcomeToLoop({
-          kind: "finished",
-          reason: "The form is complete and ready to send.",
-          stuck: false,
-          needsPerson: false,
-        });
+        readyToSend = {
+          actionRef: outcome.finalActionRef,
+          actionLabel: outcome.finalActionLabel,
+          ...(modelToolCall.getStore()
+            ? { callId: modelToolCall.getStore()! }
+            : {}),
+        };
+        if (config.submitApplication) {
+          const receipt = await config.submitApplication(readyToSend);
+          note(receipt.content);
+          if (receipt.outcome !== "submitted") {
+            readyToSend = null;
+            return { kind: "ok", content: receipt.content, stopBatch: true };
+          }
+        }
+        return {
+          kind: "stop",
+          reason: "The model requested this send.",
+          data: {},
+        };
       case "finished": {
         let finishNeedsPerson = outcome.needsPerson;
         if (finishNeedsPerson) needsPersonFinishPending = true;
@@ -1988,6 +1876,17 @@ async function runMeasuredApplyAgent(
         // A write receipt is not proof that a controlled field retained its
         // value. Re-read the live form before accepting the model's finish.
         let observation = await pageTools.observe();
+        syncObservation(observation);
+        if (!finishNeedsPerson && !outcome.stuck)
+          return {
+            kind: "finish",
+            finish: {
+              reason: outcome.reason,
+              stuck: false,
+              needsPerson: false,
+              data: {},
+            },
+          };
         const reportedChallenge = !securityChallengeSolved(observation)
           ? [outcome.reason, ...forPerson]
               .map(reportedSecurityChallenge)
@@ -2130,56 +2029,6 @@ async function runMeasuredApplyAgent(
             },
           };
         }
-        // An upload still on its way gets a bounded wait before the run
-        // decides; one that never finishes becomes the person's upload item.
-        syncObservation(observation);
-        const uploadWaitStarted = Date.now();
-        while (uploadsStillUploading() && !config.signal?.aborted) {
-          if (Date.now() - uploadWaitStarted >= uploadWaitMs) {
-            for (const entry of uploadLedger.values())
-              if (entry.state === "uploading") entry.state = "unconfirmed";
-            syncObservation(observation);
-            break;
-          }
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.min(2_000, uploadWaitMs)),
-          );
-          observation = await pageTools.observe();
-          syncObservation(observation);
-        }
-        // A later autosave or a later step can invalidate an earlier upload.
-        // Retry a reachable field once; a missing/disabled field is a
-        // technical stop, never a request for candidate information.
-        for (const [key, entry] of [...uploadLedger]) {
-          if (
-            !uploadTries.has(key) ||
-            exhaustedUploads.has(key) ||
-            !["rejected", "unconfirmed"].includes(entry.state)
-          )
-            continue;
-          const field = observation.controls.find(
-            (control) =>
-              control.kind === "file" &&
-              !control.disabled &&
-              uploadFieldKey(control, observation) === key,
-          );
-          if (field && entry.documentId && uploadCanRetry(key)) {
-            const repair = await runProposal({
-              tool: "upload",
-              ref: field.ref,
-              documentId: entry.documentId,
-            });
-            if (repair.kind === "paused") return outcomeToLoop(repair);
-            await outcomeToLoop(repair);
-            observation = pageTools.state.observation ?? observation;
-          }
-          if (
-            uploadLedger.get(key)?.state !== "accepted" &&
-            !exhaustedUploads.has(key)
-          )
-            exhaustedUploads.set(key, exhaustedUploadReason(key, entry.label));
-        }
-        const observedShape = applyStepShape(observation);
         const classifications = await classifyQuestions?.(
           observation.controls,
           questionReadContext(observation),
@@ -2195,37 +2044,6 @@ async function runMeasuredApplyAgent(
             control.requiredOnPage ??= control.required;
             control.required = true;
           }
-        }
-        // Finishing a filled local step is not finishing the wizard. A
-        // premature Next handoff may now be safe after the remaining fills.
-        const localAdvance =
-          !deferredPress?.formSend &&
-          pendingQuestions.size === 0 &&
-          !outcome.stuck
-            ? observation.actions.find((action) =>
-                fillStepPress(runConfig, observation, action.ref),
-              )
-            : undefined;
-        if (
-          localAdvance &&
-          (outcome.forPerson ?? []).every(
-            (item) =>
-              item === localAdvance.ref ||
-              normalizeSignal(item) === normalizeSignal(localAdvance.label),
-          )
-        ) {
-          const advanced = await runProposal({
-            tool: "click",
-            ref: localAdvance.ref,
-          });
-          if (advanced.kind === "moved") {
-            deferredPress = null;
-            needsPersonFinishPending = false;
-            forPerson = [];
-            return outcomeToLoop(advanced);
-          }
-          if (advanced.kind === "refused") return outcomeToLoop(advanced);
-          if (advanced.kind === "paused") return outcomeToLoop(advanced);
         }
         const namedQuestions = forPerson.length;
         const checkedFields = new Map<string, string>();
@@ -2592,95 +2410,6 @@ async function runMeasuredApplyAgent(
           stillEmpty.length > 0
             ? `${outcome.reason.trim()} Still empty on the form: ${stillEmpty.join(", ")}.`
             : outcome.reason;
-        const readiness = checkFormReadiness(observation, uploadOptions);
-        if (
-          readiness.ok &&
-          config.hands.checkAction &&
-          pendingQuestions.size === 0 &&
-          pauses.length === 0 &&
-          !finishNeedsPerson &&
-          !outcome.stuck
-        ) {
-          const action = observation.actions.find(
-            (entry) =>
-              entry.kind === "final" && entry.visible && !entry.disabled,
-          )!;
-          const reachable = await config.hands.checkAction(action.ref);
-          const after = await pageTools.observe();
-          const pageChanged = observedShape !== applyStepShape(after);
-          for (const control of after.controls) {
-            const reading =
-              classifications?.get(
-                questionClassificationKey(control, after.controls),
-              ) ?? classifications?.get(questionPrompt(control));
-            if (reading?.required) {
-              control.requiredOnPage ??= control.required;
-              control.required = true;
-            }
-          }
-          syncObservation(after);
-          if (
-            !reachable.ok ||
-            pageChanged ||
-            !checkFormReadiness(after, uploadOptions).ok
-          ) {
-            return {
-              kind: "ok",
-              progress: false,
-              content: `The form is not ready to hand back yet. ${reachable.ok ? "The page changed while its final button was checked." : reachable.error} Read the current page and use its own controls to finish.\n\n${renderObservation(after)}`,
-            };
-          }
-          observation = after;
-        }
-        if (
-          !readiness.ok &&
-          pendingQuestions.size === 0 &&
-          pauses.length === 0 &&
-          !observation.blocker &&
-          !reportedSecurityChallenge(outcome.reason) &&
-          !finishNeedsPerson &&
-          !outcome.stuck
-        ) {
-          pauses.push({
-            code: "page_blocked",
-            summary: readiness.reason,
-            question: null,
-            blocker: null,
-          });
-        }
-        if (
-          readiness.ok &&
-          pendingQuestions.size === 0 &&
-          pauses.length === 0 &&
-          config.authority.mode !== "prepare_only"
-        ) {
-          // Job Finder records the final action's readiness itself; asking
-          // the model to call submit_application first cost a model turn on
-          // every finished form and decided nothing.
-          const finalAction = observation.actions.find(
-            (action) =>
-              action.kind === "final" && action.visible && !action.disabled,
-          )!;
-          const preflight = runSubmitPreflight({
-            observation,
-            proposedActionRef: finalAction.ref,
-            authority: config.authority,
-            uploads: uploadOptions,
-          });
-          if (preflight.ok) {
-            readyToSend = {
-              actionRef: finalAction.ref,
-              actionLabel: finalAction.label,
-            };
-          } else {
-            pauses.push({
-              code: "page_blocked",
-              summary: preflight.reason,
-              question: null,
-              blocker: null,
-            });
-          }
-        }
         const finish: AgentLoopFinish = {
           reason: reasonWithGaps,
           stuck: outcome.stuck,
@@ -2774,35 +2503,14 @@ async function runMeasuredApplyAgent(
       : undefined;
 
     if (proposal.tool === "upload" && control) {
+      proposal = { ...proposal, method: proposal.method ?? "input" };
       const label = questionPrompt(control);
       const fieldKey = uploadFieldKey(control, current!);
       const tries = uploadTries.get(fieldKey) ?? 0;
-      if (!uploadCanRetry(fieldKey)) {
-        const summary =
-          exhaustedUploads.get(fieldKey) ??
-          exhaustedUploadReason(fieldKey, label);
-        exhaustedUploads.set(fieldKey, summary);
-        return {
-          kind: "refused",
-          reason: summary,
-          observation: current!,
-          fieldRef: control.ref,
-        };
-      }
-      const methods =
-        uploadMethods.get(fieldKey) ?? new Set<"input" | "chooser" | "drop">();
-      const method = attachmentMethods.find(
-        (candidate) => !methods.has(candidate),
-      )!;
-      methods.add(method);
-      uploadMethods.set(fieldKey, methods);
-      proposal = { ...proposal, method };
       const attempt = tries + 1;
       uploadTries.set(fieldKey, attempt);
       uploadLedger.delete(fieldKey);
-      note(
-        `Attaching to "${label}" using ${proposal.method} (at most ${attempt} of ${MAX_UPLOAD_TRIES} network sends).`,
-      );
+      note(`Attaching to "${label}" using ${proposal.method ?? "input"}.`);
     }
     const writeKey = controlWriteKey(proposal);
     if (proposal.tool !== "finish") observationNeeded = true;
@@ -3003,7 +2711,7 @@ async function runMeasuredApplyAgent(
         note(
           `Upload for "${label}" was not confirmed using ${proposal.method ?? "input"}. Rule: attachment gesture failed. ${outcome.reason}`,
         );
-      let after = outcome.observation;
+      const after = outcome.observation;
       if (
         !after.controls.some(
           (entry) =>
@@ -3030,89 +2738,8 @@ async function runMeasuredApplyAgent(
         );
       }
       syncObservation(after);
-      const started = Date.now();
-      const pendingUpload = () =>
-        uploadLedger.get(fieldKey)?.state === "uploading";
-      while (
-        pendingUpload() &&
-        !config.signal?.aborted &&
-        Date.now() - started < uploadWaitMs
-      ) {
-        await config.hands.wait(Math.min(500, uploadWaitMs));
-        after = await pageTools.observe();
-        syncObservation(after);
-      }
-      if (pendingUpload()) {
-        const entry = uploadLedger.get(fieldKey);
-        if (entry) entry.since = now().getTime() - uploadWaitMs;
-        syncObservation(after);
-      }
-      // Response events precede the widget's validation handler.
-      // Read again to record the upload box's own explanation as well.
-      if (uploadLedger.get(fieldKey)?.state === "rejected") {
-        await config.hands.wait(250);
-        after = await pageTools.observe();
-        syncObservation(after);
-      }
-      // Only an independent unchanged traffic counter plus no field request
-      // proves this gesture was local. Without that proof its send stays counted.
-      if (
-        current?.networkMutationCount !== undefined &&
-        after.networkMutationCount === current.networkMutationCount &&
-        after.controls.find(
-          (entry) =>
-            entry.kind === "file" && uploadFieldKey(entry, after) === fieldKey,
-        )?.upload?.network === undefined &&
-        !after.controls.find(
-          (entry) =>
-            entry.kind === "file" && uploadFieldKey(entry, after) === fieldKey,
-        )?.upload?.requests?.length
-      )
-        uploadTries.set(
-          fieldKey,
-          Math.max(0, (uploadTries.get(fieldKey) ?? 1) - 1),
-        );
-      const failed =
-        uploadLedger.has(fieldKey) &&
-        uploadLedger.get(fieldKey)?.state !== "accepted";
-      const nextControl = after.controls.find(
-        (entry) =>
-          entry.kind === "file" &&
-          uploadFieldKey(entry, after) === fieldKey &&
-          !entry.disabled,
-      );
-      if (
-        (failed || outcome.kind === "refused") &&
-        nextControl &&
-        nextControl.upload?.network !== "pending" &&
-        uploadCanRetry(fieldKey) &&
-        !config.signal?.aborted
-      ) {
-        note(
-          `The ${proposal.method ?? "input"} method did not confirm "${label}"${outcome.kind === "refused" ? `: ${outcome.reason}` : ". Trying the next attachment method."}`,
-        );
-        return runProposal({
-          tool: "upload",
-          ref: nextControl.ref,
-          documentId: proposal.documentId,
-        });
-      }
-      if (failed || outcome.kind === "refused") {
-        forgetObservedUpload(fieldKey);
-        const summary = exhaustedUploadReason(
-          fieldKey,
-          label,
-          outcome.kind === "refused" ? outcome.reason : undefined,
-        );
-        exhaustedUploads.set(fieldKey, summary);
-        note(summary);
-        return {
-          kind: "refused",
-          reason: summary,
-          observation: after,
-          fieldRef: control.ref,
-        };
-      }
+      const diagnostic = uploadDiagnostics.get(fieldKey);
+      if (diagnostic) note(diagnostic);
       if (outcome.kind === "attached")
         return { ...outcome, observation: after };
     }
@@ -3548,37 +3175,9 @@ async function runMeasuredApplyAgent(
       }
       // A press of the final action inside the batch is the form's finish.
       if (stopOutcome?.kind === "finish") return stopOutcome;
-      const finalPage = pageTools.state.observation;
-      const allObservedFieldsDone =
-        !!finalPage &&
-        finalPage.controls
-          .filter(
-            (control) =>
-              !control.disabled &&
-              !control.readOnly &&
-              (control.visible || control.kind === "file"),
-          )
-          .every(
-            (control) =>
-              control.answered ||
-              (!!control.choiceGroupKey &&
-                finalPage.controls.some(
-                  (sibling) =>
-                    sibling.choiceGroupKey === control.choiceGroupKey &&
-                    sibling.checked,
-                )),
-          );
-      const completedKnownPage =
-        !!classifyQuestions &&
-        wrote &&
-        allObservedFieldsDone &&
-        !!finalPage &&
-        pendingQuestions.size === 0 &&
-        pauses.length === 0 &&
-        checkFormReadiness(finalPage).ok;
       if (
         partialOutageTurns === 0 &&
-        (parsed.finishWhenReady || completedKnownPage) &&
+        parsed.finishWhenReady &&
         !stopped &&
         !leftAnswerForPerson
       ) {
@@ -3760,6 +3359,8 @@ async function runMeasuredApplyAgent(
   const progressGuard = createApplyProgressGuard(
     config.runControl?.noProgressStepLimit ?? DEFAULT_NO_PROGRESS_STEP_LIMIT,
   );
+  const modelCallIds = new Map<string, string[]>();
+  const modelToolCall = new AsyncLocalStorage<string | undefined>();
   const loopClient: LLMClient = {
     chatWithTools: (messages, tools, options) =>
       modelActivity.runModel(options, async () => {
@@ -3808,6 +3409,10 @@ async function runMeasuredApplyAgent(
         const recordReply = (
           reply: Awaited<ReturnType<LLMClient["chatWithTools"]>>,
         ) => {
+          for (const call of reply.toolCalls ?? []) {
+            const key = `${call.function.name}|${call.function.arguments}`;
+            modelCallIds.set(key, [...(modelCallIds.get(key) ?? []), call.id]);
+          }
           if (!reply.toolCalls?.length)
             progressGuard.start(
               "reply_without_action",
@@ -3866,80 +3471,6 @@ async function runMeasuredApplyAgent(
   // The questions the attempt before left with the person, unanswered.
   // Earlier Needs you items are not evidence about this attempt's upload.
   // Try its selected document again even if the page retained a failed chip.
-  const repairFields = new Set(
-    (config.initialUnansweredPickerQuestions ?? [])
-      .filter((question) =>
-        / — upload (?:failed|not confirmed)$/u.test(question.prompt),
-      )
-      .flatMap((question) =>
-        question.prompt
-          .replace(/ — upload (?:failed|not confirmed)$/u, "")
-          .split(", "),
-      ),
-  );
-  const retryRepairUploads = async (): Promise<void> => {
-    const page = pageTools.state.observation;
-    if (!page || page.blocker) return;
-    for (const field of page.controls) {
-      const label = questionPrompt(field);
-      if (
-        field.kind !== "file" ||
-        field.disabled ||
-        !repairFields.has(label) ||
-        uploadTries.has(uploadFieldKey(field, page))
-      )
-        continue;
-      const earlier = [
-        ...(runConfig.earlierAttachments ?? []),
-        ...(runConfig.replay?.attachments ?? []),
-      ].find((entry) => entry.field === label);
-      const name =
-        earlier?.fileName ||
-        field.upload?.fileName ||
-        field.value.split(/[\\/]/u).at(-1);
-      const document =
-        runConfig.sources.documents.find((entry) => entry.fileName === name) ??
-        runConfig.sources.documents.find((entry) =>
-          isCoverLetterControl(field)
-            ? entry.kind === "cover_letter"
-            : (field.questionKind === "resume" ||
-                !label
-                  .toLowerCase()
-                  .split(/[^a-z]+/u)
-                  .filter(Boolean)
-                  .some(
-                    (word) =>
-                      ![
-                        "choose",
-                        "a",
-                        "file",
-                        "or",
-                        "drop",
-                        "it",
-                        "here",
-                        "attach",
-                        "upload",
-                        "your",
-                        "document",
-                        "required",
-                      ].includes(word),
-                  )) &&
-              entry.kind === "resume",
-        );
-      if (!document) continue;
-      note(
-        `Retrying the open upload item for "${label}" on this fresh attempt.`,
-      );
-      await outcomeToLoop(
-        await runProposal({
-          tool: "upload",
-          ref: field.ref,
-          documentId: document.id,
-        }),
-        { withPage: false },
-      );
-    }
-  };
   const restoreFromReplay = async (): Promise<AgentLoopFinish | null> => {
     const replay = runConfig.replay;
     if (!replay) return null;
@@ -3957,12 +3488,7 @@ async function runMeasuredApplyAgent(
               data: {},
             }
           : null;
-    const safety = runConfig.safety;
     const writeOne = async (write: ReplayWrite): Promise<boolean> => {
-      if (write.kind !== "toggle")
-        await safety?.registerPreparedValue(write.value);
-      if (runConfig.intermediateWritesAuthorized === true)
-        await safety?.openIntermediateWriteWindow().catch(() => undefined);
       const result =
         write.kind === "text"
           ? await runConfig.hands.fillText(write.control.ref, write.value)
@@ -3972,7 +3498,6 @@ async function runMeasuredApplyAgent(
       return result.ok;
     };
     for (let hop = 0; hop <= replay.path.length; hop += 1) {
-      await retryRepairUploads();
       const page = pageTools.state.observation;
       if (!page || page.blocker) return null;
       const screen = screenKey(page);
@@ -4189,7 +3714,7 @@ async function runMeasuredApplyAgent(
         };
       }
       const next = nextPathStep(after, replay, takenPath);
-      if (next && checkFormReadiness(after, uploadOptions).ok) {
+      if (next) {
         const proposal: ApplyProposal | null =
           next.step.tool === "navigate"
             ? { tool: "navigate", url: next.step.href ?? next.step.label }
@@ -4220,33 +3745,7 @@ async function runMeasuredApplyAgent(
     // An earlier Needs you verdict is history, not an answer veto. Let the
     // model reconsider every unresolved question against the current facts.
     if (open.length) return null;
-    // The screen is complete. A next step stays the person's in Fill in for
-    // me: its button is handed over the way the run hands it over.
-    const advance = current.actions.find(
-      (action) =>
-        action.kind === "advance" && action.visible && !action.disabled,
-    );
-    if (advance && !pressesFormButtons(runConfig) && !deferredPress) {
-      const finish = toFinish(
-        await outcomeToLoop(
-          await runProposal({ tool: "click", ref: advance.ref }),
-          { withPage: false },
-        ),
-      );
-      if (finish) return finish;
-    }
-    // With the step handed over the screen is done; otherwise it must read
-    // as ready.
-    if (!deferredPress && !checkFormReadiness(current, uploadOptions).ok)
-      return null;
-    return toFinish(
-      await outcomeToLoop({
-        kind: "finished",
-        reason: "The form is back as it was left.",
-        stuck: false,
-        needsPerson: false,
-      }),
-    );
+    return null;
   };
   let technicalFailure: ApplyAgentResult["technicalFailure"];
   let partialOutageTurns = 0;
@@ -4295,64 +3794,6 @@ async function runMeasuredApplyAgent(
                       total: control.options.length,
                     }),
                   };
-              }
-            }
-            if (
-              (name === "follow_link" || name === "navigate") &&
-              !pressesFormButtons(config)
-            ) {
-              let args: Record<string, unknown> = {};
-              try {
-                args = JSON.parse(rawArguments || "{}") as Record<
-                  string,
-                  unknown
-                >;
-              } catch {
-                args = {};
-              }
-              const seen = pageTools.state.observation;
-              const link =
-                name === "follow_link"
-                  ? seen?.links.find((entry) => entry.ref === args.ref)
-                  : seen?.links.find((entry) => entry.href === args.url);
-              const href =
-                name === "navigate"
-                  ? typeof args.url === "string"
-                    ? args.url
-                    : ""
-                  : (link?.href ?? "");
-              const accessKind =
-                seen && name === "follow_link" && typeof args.ref === "string"
-                  ? browserInteractionKind(
-                      seen,
-                      args.ref,
-                      await googleIdentityContext(config, config.hands),
-                    )
-                  : null;
-              const browserPermissions =
-                await currentBrowserPermissions(config);
-              const enabledAccessLink =
-                (accessKind === "signIn" ||
-                  accessKind === "createAccounts" ||
-                  accessKind === "googleSignIn") &&
-                browserPermissions[accessKind];
-              if (
-                !enabledAccessLink &&
-                !fillMayOpen(
-                  config,
-                  seen?.url ?? null,
-                  href,
-                  seen ? { observation: seen, state: guardState } : undefined,
-                )
-              ) {
-                const pause = pressOnSitePause(
-                  link?.label && !/^https?:/iu.test(link.label.trim())
-                    ? `"${link.label}"`
-                    : "the link to the next page",
-                  now(),
-                );
-                if (deferredPress) return handOverPress(pause);
-                return { kind: "ok", content: deferPress(pause) };
               }
             }
             if (name === "follow_link" || name === "navigate") {
@@ -4404,31 +3845,37 @@ async function runMeasuredApplyAgent(
       ...domainTools,
     ].map<AgentLoopTool>((tool) => ({
       ...tool,
-      execute: (arguments_, context) => {
-        if (
-          partialOutageTurns > 0 &&
-          !PARTIAL_OUTAGE_TOOLS.has(tool.definition.function.name)
-        )
-          return Promise.resolve({
-            kind: "ok",
-            status: "refused",
-            content:
-              "The page is not fully readable. Only reads and field writes are allowed.",
-          });
-        const record = progressGuard.start(
-          tool.definition.function.name,
-          arguments_,
-          pageTools.state.observation,
-        );
-        return modelActivity
-          .run(context, () => tool.execute(arguments_, context))
-          .then((outcome) => {
-            const changed = record(pageTools.state.observation);
-            return outcome.kind === "ok"
-              ? { ...outcome, progress: changed }
-              : outcome;
-          });
-      },
+      execute: (arguments_, context) =>
+        modelToolCall.run(
+          modelCallIds
+            .get(`${tool.definition.function.name}|${arguments_}`)
+            ?.shift(),
+          () => {
+            if (
+              partialOutageTurns > 0 &&
+              !PARTIAL_OUTAGE_TOOLS.has(tool.definition.function.name)
+            )
+              return Promise.resolve({
+                kind: "ok",
+                status: "refused",
+                content:
+                  "The page is not fully readable. Only reads and field writes are allowed.",
+              });
+            const record = progressGuard.start(
+              tool.definition.function.name,
+              arguments_,
+              pageTools.state.observation,
+            );
+            return modelActivity
+              .run(context, () => tool.execute(arguments_, context))
+              .then((outcome) => {
+                const changed = record(pageTools.state.observation);
+                return outcome.kind === "ok"
+                  ? { ...outcome, progress: changed }
+                  : outcome;
+              });
+          },
+        ),
     })),
     subjectLabel: config.siteLabel,
     ceilings: {
@@ -4479,10 +3926,9 @@ async function runMeasuredApplyAgent(
       await refreshReusableAnswers();
       // A form brought back from what an earlier run left: no model call
       // for a screen that matches it.
-      await retryRepairUploads();
       const restored = await restoreFromReplay();
       if (restored) return restored;
-      let current = pageTools.state.observation;
+      const current = pageTools.state.observation;
       if (current?.blocker?.code === "browser_blocked")
         return {
           reason: current.blocker.summary,
@@ -4491,39 +3937,6 @@ async function runMeasuredApplyAgent(
           data: {},
         };
       if (current?.blocker) return null;
-      // Empty optional wizard screens need no answer or model decision.
-      // Re-observe each local advance through the ordinary executor fence.
-      while (
-        current &&
-        pendingQuestions.size === 0 &&
-        !deferredPress?.formSend &&
-        current.controls.every(
-          (control) => !control.visible || control.disabled || control.readOnly,
-        )
-      ) {
-        const emptyStep = current;
-        const advance = emptyStep.actions.find((action) =>
-          fillStepPress(runConfig, emptyStep, action.ref),
-        );
-        if (!advance) break;
-        const outcome = await runProposal({ tool: "click", ref: advance.ref });
-        const reported = await outcomeToLoop(outcome, { withPage: false });
-        if (reported.kind === "finish") return reported.finish;
-        if (reported.kind === "stop")
-          return {
-            reason: reported.reason,
-            needsPerson: true,
-            stuck: false,
-            data: {},
-          };
-        if (outcome.kind !== "moved") break;
-        current = pageTools.state.observation;
-        // The empty screen may have exposed a recorded, answered screen.
-        // Restore it before the model can make a new choice for that field.
-        const restoredAfterAdvance = await restoreFromReplay();
-        if (restoredAfterAdvance) return restoredAfterAdvance;
-        current = pageTools.state.observation;
-      }
       // A saved picker rule is applied as soon as its question is on the
       // page; the picker itself says whether the choices are there.
       for (const control of current?.controls ?? []) {
@@ -4563,22 +3976,6 @@ async function runMeasuredApplyAgent(
     // this step has questions left for the person, or the form has been
     // filled and is ready, those words go through the same finish checks as
     // the finish tool; otherwise the loop reminds the model to use a tool.
-    onReplyWithoutTool: async (content) => {
-      const current = pageTools.state.observation;
-      const done =
-        pendingQuestions.size > 0 ||
-        (current !== null &&
-          filled.length + attachments.length > 0 &&
-          checkFormReadiness(current, uploadOptions).ok);
-      return done
-        ? outcomeToLoop({
-            kind: "finished",
-            reason: content.trim().slice(0, 2_000),
-            stuck: false,
-            needsPerson: pendingQuestions.size > 0,
-          })
-        : null;
-    },
     onHistoryCompacted: () => {
       modelObservation = null;
       const current = pageTools.state.observation;
@@ -4883,7 +4280,12 @@ async function runMeasuredApplyAgent(
       : null;
   let outcome: ApplyAgentResult["outcome"];
   let reason: string;
-  if (skipReason) {
+  if (readyToSend) {
+    outcome = "ready_to_send";
+    reason = "The model requested this send.";
+    pauses.length = 0;
+    pendingQuestions.clear();
+  } else if (skipReason) {
     outcome = "paused";
     reason = skipReason;
     readyToSend = null;
@@ -4946,7 +4348,7 @@ async function runMeasuredApplyAgent(
     outcome = "stuck";
     reason = loop.reason;
   }
-  if (finishNeedsPerson) {
+  if (finishNeedsPerson && !readyToSend) {
     // Every item it named reaches the person, whichever pause came first.
     const handed = new Set(
       pauses.flatMap((pause) =>

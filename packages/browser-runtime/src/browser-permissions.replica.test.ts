@@ -345,7 +345,7 @@ test("two-stage sign-in opens provider choices without a password or registratio
         () => undefined,
       ),
     );
-    expect(posts.slice(before)).toEqual([]);
+    expect(posts.slice(before)).toEqual(["/application"]);
   } finally {
     await context.close();
   }
@@ -391,13 +391,13 @@ test("Google sign-up opt-in follows the provider button beside an empty password
         () => undefined,
       ),
     );
-    expect(posts.slice(before)).toEqual([]);
+    expect(posts.slice(before)).toEqual(["/application"]);
   } finally {
     await context.close();
   }
 }, 30_000);
 
-test("search mechanics install a closed guard before the exact sign-in POST", async () => {
+test("sign-in preserves the site session and allows its ordinary background requests", async () => {
   const context = await browser.newContext();
   try {
     const page = await context.newPage();
@@ -417,21 +417,25 @@ test("search mechanics install a closed guard before the exact sign-in POST", as
     const before = posts.length;
     expect(await hands.clickElement(action.ref)).toMatchObject({ ok: true });
     await page.waitForURL(`${base}/jobs`);
-    expect(posts.slice(before)).toEqual(["/session"]);
+    expect(posts.slice(before)).toEqual(["/application", "/session"]);
     // The exact grant does not persist as a general mutation window.
     await page.evaluate(() =>
       fetch("/application", { method: "POST", body: "blocked" }).catch(
         () => undefined,
       ),
     );
-    expect(posts.slice(before)).toEqual(["/session"]);
+    expect(posts.slice(before)).toEqual([
+      "/application",
+      "/session",
+      "/application",
+    ]);
   } finally {
     await context.close();
   }
 });
 
 test.each(["signIn", "createAccounts"] as const)(
-  "%s uses only its exact POST, preserves its session and leaves application sending fenced",
+  "%s preserves its session and ordinary site requests",
   async (kind) => {
     const context = await browser.newContext();
     try {
@@ -459,6 +463,7 @@ test.each(["signIn", "createAccounts"] as const)(
       });
       await page.waitForURL(`${base}/jobs`);
       expect(posts.slice(before)).toEqual([
+        "/application",
         kind === "signIn" ? "/session" : "/account",
       ]);
       const nextTab = await context.newPage();
@@ -475,7 +480,7 @@ test.each(["signIn", "createAccounts"] as const)(
   },
 );
 
-test("CAPTCHA checkbox opt-in does not open an application POST window", async () => {
+test("CAPTCHA checkbox opt-in leaves site requests unchanged", async () => {
   const context = await browser.newContext();
   try {
     const { page, hands } = await open(context, "/captcha");
@@ -499,8 +504,8 @@ test("CAPTCHA checkbox opt-in does not open an application POST window", async (
       (entry) => entry.label === "Submit application",
     )!;
     await guarded.clickElement(send.ref);
-    expect(posts.length).toBe(before);
-    expect(page.url()).toBe(`${base}/captcha`);
+    expect(posts.length).toBe(before + 1);
+    expect(page.url()).toBe(`${base}/jobs`);
   } finally {
     await context.close();
   }

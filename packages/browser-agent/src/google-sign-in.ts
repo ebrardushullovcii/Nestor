@@ -85,9 +85,7 @@ export function googleAccountWindowReady(
   return (
     (!ctx?.fenced || !isGoogleAccountPage(page) || !!surface) &&
     (!surface ||
-      (surface.origin === GOOGLE_ACCOUNT_WINDOW_ORIGINS[0] &&
-        surface.actionsLeft > 0 &&
-        !surface.refusal))
+      (surface.origin === GOOGLE_ACCOUNT_WINDOW_ORIGINS[0] && !surface.refusal))
   );
 }
 function ready(

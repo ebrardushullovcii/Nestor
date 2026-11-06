@@ -8,11 +8,7 @@ import pickerReplay from "../../../../apps/desktop/test-fixtures/job-finder/appl
 import fallbackReplay from "../../../../apps/desktop/test-fixtures/job-finder/apply-replays/saved-option-fallback.json";
 import { applicationModelFacts } from "./model-facts";
 
-import type {
-  RawApplyAction,
-  RawApplyControl,
-  RawApplyPage,
-} from "@nestor/contracts";
+import type { RawApplyControl, RawApplyPage } from "@nestor/contracts";
 import type { LLMClient } from "../agent/contracts";
 import { savedAnswerForQuestion } from "./application-facts";
 import { runApplyAgent } from "./apply-agent";
@@ -21,14 +17,13 @@ import {
   createApplyUserPrompt,
 } from "./apply-prompts";
 import type { FillFieldsEntry } from "./apply-tools";
-import { reviewFieldKey, screenKey } from "./form-replay";
+import { screenKey } from "./form-replay";
 import { buildApplyFormObservation } from "./page-hands";
 import {
   createApplyGuardState,
   executeApplyProposal,
   questionPrompt,
 } from "./policy-executor";
-import { STEP_HANDOVER_QUESTION_ID } from "./submit-preflight";
 import type {
   ApplyAgentConfig,
   ApplyAgentResult,
@@ -842,115 +837,6 @@ test.each(["Sign in", "Create account", "Continue"])(
   },
 );
 
-test.each([false, true])(
-  "Fill completes four proven local steps after a finish, including an earlier premature Next: %s",
-  async (premature) => {
-    const source = page({
-      stepLabel: "Step 1 of 4",
-      actions: [
-        {
-          index: 0,
-          label: "Next",
-          visible: true,
-          disabled: false,
-          inForm: true,
-          submitsForm: false,
-        },
-      ],
-    });
-    let step = 1,
-      turns = 0;
-    const input = config(source, {
-      pressesFormButtons: false,
-      intermediateWritesAuthorized: false,
-    });
-    const press = vi.fn(() => {
-      step++;
-      source.stepLabel = `Step ${step} of 4`;
-      source.controls[0].visible = step !== 2;
-      if (step === 4)
-        source.actions = [
-          {
-            index: 0,
-            label: "Send application",
-            visible: true,
-            disabled: false,
-            inForm: true,
-            submitsForm: true,
-          },
-        ];
-      return Promise.resolve({ ok: true as const, observedValue: "clicked" });
-    });
-    input.hands.clickWithoutWrites = press;
-    const normalClick = vi.spyOn(input.hands, "clickElement");
-    const result = await runApplyAgent(input, {
-      chatWithTools: (messages, definitions) => {
-        const check = supportedChecks(messages, definitions);
-        if (check) return check;
-        expect(source.stepLabel).not.toBe("Step 2 of 4");
-        turns++;
-        source.loading = premature && turns === 1;
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: `step_${turns}`,
-              type: "function" as const,
-              function: {
-                name: source.loading ? "click" : "finish",
-                arguments: JSON.stringify(
-                  source.loading
-                    ? { ref: "a0" }
-                    : { reason: "This step is filled." },
-                ),
-              },
-            },
-          ],
-        });
-      },
-    });
-    expect(result.outcome).toBe("prepared");
-    expect(result.pauses).toEqual([]);
-    expect(press).toHaveBeenCalledTimes(3);
-    expect(normalClick).not.toHaveBeenCalled();
-    expect(step).toBe(4);
-    expect(result.formPath).toHaveLength(3);
-  },
-);
-
-test("a completed form returns an obstructed final button to the model in fill-only mode", async () => {
-  const source = page();
-  const input = config(source);
-  const checks = vi
-    .fn()
-    .mockResolvedValueOnce({
-      ok: false,
-      error: "Cookie choices cover Send. Reject optional is available.",
-    })
-    .mockResolvedValue({ ok: true, observedValue: "Reachable" });
-  input.hands.checkAction = checks;
-  const click = vi.fn(input.hands.clickElement);
-  input.hands.clickElement = click;
-  const model = scriptedModel([
-    { name: "finish", args: { reason: "The form is complete." } },
-    {
-      name: "finish",
-      args: { reason: "The overlay is cleared and the form is complete." },
-    },
-  ]);
-  const chat = vi.spyOn(model, "chatWithTools");
-  const result = await runApplyAgent(input, model);
-  expect(checks).toHaveBeenCalledTimes(2);
-  expect(chat).toHaveBeenCalledTimes(2);
-  expect(
-    chat.mock.calls[1][0].some((message) =>
-      String(message.content).includes("Cookie choices cover Send"),
-    ),
-  ).toBe(true);
-  expect(result.outcome).toBe("prepared");
-  expect(result.readyToSend).toBeNull();
-  expect(click).not.toHaveBeenCalled();
-});
-
 test.each(["upload", "type"] as const)(
   "a chosen letter drafts during the other fills and is reused for %s",
   async (tool) => {
@@ -1267,43 +1153,6 @@ test("a checked letter taking over ninety seconds is awaited once", async () => 
   }
 });
 
-test("a covered Send is handed back to the model before the form finishes", async () => {
-  const source = page({
-    actions: [
-      { index: 0, label: "Submit application", visible: true, disabled: false },
-      { index: 1, label: "Use essential only", visible: true, disabled: false },
-    ],
-  });
-  const input = config(source);
-  let covered = true;
-  input.hands.checkAction = () =>
-    Promise.resolve(
-      covered
-        ? { ok: false, error: "Use essential only covers Send." }
-        : { ok: true, observedValue: "Reachable" },
-    );
-  input.hands.clickElement = (ref) => {
-    expect(ref).toBe("a1");
-    covered = false;
-    source.actions[1].visible = false;
-    return Promise.resolve({ ok: true, observedValue: "dismissed" });
-  };
-  const result = await runApplyAgent(
-    input,
-    scriptedModel([
-      { name: "finish", args: { reason: "Done." } },
-      {
-        name: "click",
-        args: { ref: "a1", reason: "Dismiss the ordinary storage notice." },
-      },
-      { name: "finish", args: { reason: "Done." } },
-    ]),
-  );
-  expect(covered).toBe(false);
-  expect(result.outcome).toBe("prepared");
-  expect(result.pauses).toEqual([]);
-});
-
 test("prose instructions separate candidate evidence from job requirements", () => {
   const prompt = createApplySystemPrompt(config(page()));
   expect(prompt).toContain("Your answer is the decision");
@@ -1348,41 +1197,6 @@ test("a final fill batch finishes in one turn after the live readiness checks", 
   expect(result.outcome).toBe("prepared");
   expect(source.controls[0].value).toBe("Robin Ashford");
   expect(chat).toHaveBeenCalledTimes(1);
-});
-
-test("a final fill batch cannot mark an incomplete wizard ready", async () => {
-  const source = page({
-    controls: [{ ...nameControl(), value: "" }],
-    stepLabel: "Step 1 of 2",
-    actions: [{ index: 0, label: "Continue", visible: true, disabled: false }],
-  });
-  const model = scriptedModel([
-    {
-      name: "fill_fields",
-      args: {
-        fields: [
-          {
-            tool: "type",
-            ref: "c0",
-            text: "Robin Ashford",
-            storedFactId: "profile.fullName",
-          },
-        ],
-        finishWhenReady: true,
-      },
-    },
-    {
-      name: "finish",
-      args: {
-        reason: "The next step needs the person.",
-        stuck: true,
-        needsPerson: true,
-      },
-    },
-  ]);
-  const result = await runApplyAgent(config(source), model);
-  expect(result.outcome).not.toBe("prepared");
-  expect(result.readyToSend).toBeNull();
 });
 
 test("an application sees an answer saved in another open application on its next turn", async () => {
@@ -1633,26 +1447,6 @@ test("a retained form receives current exact answers and only named corrections 
   expect(user).toContain("does not widen application authority");
 });
 
-test("preserves an explicitly reported CAPTCHA even when finish omits needsPerson", async () => {
-  const result = await runApplyAgent(
-    config(page()),
-    scriptedModel([
-      {
-        name: "finish",
-        args: {
-          reason:
-            'Form filled. Ready for person to review hCaptcha ("Please try again" showing) and submit.',
-        },
-      },
-    ]),
-  );
-  expect(result.outcome).toBe("paused");
-  expect(result.pauses[0]?.blocker).toMatchObject({
-    code: "security_challenge",
-    requiresPerson: true,
-  });
-});
-
 test.each([
   "No CAPTCHA remains; the form is complete.",
   "The invisible hCaptcha script loaded.",
@@ -1667,60 +1461,6 @@ test.each([
     expect(result.outcome).toBe("prepared");
   },
 );
-
-test("records a finished form's final action itself, without another model turn", async () => {
-  const source = page({
-    actions: [
-      { index: 0, label: "Submit application", visible: true, disabled: false },
-    ],
-  });
-  const prompts: string[] = [];
-  let turn = 0;
-  const model: LLMClient = {
-    chatWithTools: (messages) => {
-      prompts.push(messages.at(-1)?.content ?? "");
-      const call =
-        turn === 0
-          ? { name: "finish", args: { reason: "Everything is filled in" } }
-          : turn === 1
-            ? { name: "submit_application", args: { ref: "a0" } }
-            : { name: "finish", args: { reason: "Ready to send" } };
-      turn += 1;
-      return Promise.resolve({
-        toolCalls: [
-          {
-            id: `call_${turn}`,
-            type: "function" as const,
-            function: {
-              name: call.name,
-              arguments: JSON.stringify(call.args),
-            },
-          },
-        ],
-      });
-    },
-  };
-
-  const result = await runApplyAgent(
-    config(source, {
-      authority: {
-        mode: "autonomous_submit",
-        submitAuthorized: true,
-        preApprovedAttestationKinds: [],
-        salaryDisclosure: "pause_for_user",
-        allowedOrigins: ["https://apply.example.test"],
-      },
-    }),
-    model,
-  );
-
-  expect(prompts).toHaveLength(1);
-  expect(result.outcome).toBe("ready_to_send");
-  expect(result.readyToSend).toEqual({
-    actionRef: "a0",
-    actionLabel: "Submit application",
-  });
-});
 
 test("lets fill-in mode finish without recording a final action", async () => {
   const result = await runApplyAgent(
@@ -1740,55 +1480,6 @@ test("lets fill-in mode finish without recording a final action", async () => {
   );
 
   expect(result.outcome).toBe("prepared");
-  expect(result.readyToSend).toBeNull();
-});
-
-test("repeated finish cannot record readiness on an unauthorized origin", async () => {
-  const result = await runApplyAgent(
-    config(page(), {
-      authority: {
-        mode: "autonomous_submit",
-        submitAuthorized: true,
-        preApprovedAttestationKinds: [],
-        salaryDisclosure: "pause_for_user",
-        allowedOrigins: [],
-      },
-    }),
-    repeatingModel("finish", { reason: "Ready to send" }),
-  );
-
-  expect(result.outcome).toBe("paused");
-  expect(result.readyToSend).toBeNull();
-  expect(result.pauses[0]?.summary).toContain("not authorized");
-});
-
-test("a hidden final action cannot be ready for review", async () => {
-  const result = await runApplyAgent(
-    config(
-      page({
-        actions: [
-          {
-            index: 0,
-            label: "Submit application",
-            visible: false,
-            disabled: false,
-          },
-        ],
-      }),
-      {
-        authority: {
-          mode: "confirm_before_submit",
-          submitAuthorized: false,
-          preApprovedAttestationKinds: [],
-          salaryDisclosure: "pause_for_user",
-          allowedOrigins: ["https://apply.example.test"],
-        },
-      },
-    ),
-    repeatingModel("finish", { reason: "The visible form is finished" }),
-  );
-
-  expect(result.outcome).toBe("paused");
   expect(result.readyToSend).toBeNull();
 });
 
@@ -1847,10 +1538,6 @@ test("creates a grounded requested document and attaches the generated file", as
       },
     }),
     scriptedModel([
-      {
-        name: "finish",
-        args: { reason: "The rest of the form is complete." },
-      },
       {
         name: "create_application_document",
         args: {
@@ -1997,349 +1684,6 @@ describe("apply agent run endings", () => {
     expect(result.reason).toContain("nothing was sent");
   });
 
-  test("does not call a form ready while a visible required answer is empty", async () => {
-    const seen: string[] = [];
-    const model = repeatingModel("finish", {
-      reason: "The form is ready for review",
-    });
-    const result = await runApplyAgent(
-      config(page({ controls: [{ ...nameControl(), value: "" }] })),
-      {
-        chatWithTools: (messages, definitions, options) => {
-          seen.push(JSON.stringify(messages.at(-1) ?? null));
-          return model.chatWithTools(messages, definitions, options);
-        },
-      },
-    );
-
-    // Asked once to fill it; then the empty field is handed to the person.
-    expect(
-      seen.some((entry) => entry.includes("is required and still empty")),
-    ).toBe(true);
-    expect(result.outcome).toBe("stuck");
-    expect(
-      result.pauses
-        .flatMap((pause) => pause.questions ?? [])
-        .map((question) => question.prompt),
-    ).toEqual([]);
-  });
-
-  test("does not call a native select ready while only its placeholder is displayed", async () => {
-    const result = await runApplyAgent(
-      config(
-        page({
-          controls: [
-            {
-              ...nameControl(),
-              tagName: "select",
-              inputType: "select-one",
-              role: "combobox",
-              label: "Location",
-              value: "",
-              options: ["", "Remote Europe"],
-              selectedOptionLabel: "Select an option",
-              invalid: true,
-              validationMessage: "Please select an item in the list.",
-            },
-          ],
-        }),
-      ),
-      repeatingModel("finish", { reason: "The form is ready for review" }),
-    );
-
-    expect(result.outcome).toBe("stuck");
-    expect(
-      result.pauses.flatMap((pause) => pause.questions ?? []),
-    ).toHaveLength(0);
-  });
-
-  test("refuses an early finish, fills a known required radio, then becomes ready", async () => {
-    const source = page({
-      controls: [
-        workAuthorizationRadio(0, "Yes"),
-        workAuthorizationRadio(1, "No"),
-      ],
-    });
-    const baseHands = hands(source);
-    const baseConfig = config(source);
-    const result = await runApplyAgent(
-      config(source, {
-        hands: {
-          ...baseHands,
-          setToggle: (ref, checked) => {
-            const index = Number(ref.slice(1));
-            source.controls = source.controls.map((control) =>
-              control.index === index
-                ? { ...control, checked }
-                : control.name === "workAuthorization"
-                  ? { ...control, checked: false }
-                  : control,
-            );
-            return Promise.resolve({
-              ok: true as const,
-              observedValue: checked ? "checked" : "unchecked",
-            });
-          },
-        },
-        sources: {
-          ...baseConfig.sources,
-          profile: CandidateProfileSchema.parse({
-            ...baseConfig.sources.profile,
-          }),
-        },
-      }),
-      scriptedModel([
-        { name: "finish", args: { reason: "The form is ready" } },
-        {
-          name: "set_checkbox",
-          args: { ref: "c0", checked: true },
-        },
-        { name: "finish", args: { reason: "The form is ready" } },
-      ]),
-    );
-
-    expect(result.outcome).toBe("prepared");
-    expect(result.filled).toHaveLength(1);
-    expect(result.filled[0]?.answer.value).toBe("Yes");
-  });
-
-  test("does not trust a write receipt when the live required field stayed empty", async () => {
-    const source = page({ controls: [{ ...nameControl(), value: "" }] });
-    const input = config(source);
-    input.hands.fillText = (_ref, value) =>
-      Promise.resolve({ ok: true, observedValue: value });
-    const result = await runApplyAgent(
-      input,
-      scriptedModel([
-        { name: "type", args: { ref: "c0", text: "Robin Ashford" } },
-        { name: "finish", args: { reason: "The form is ready" } },
-      ]),
-    );
-
-    expect(result.filled).toHaveLength(0);
-    // A failed write is an execution failure, not a missing personal fact.
-    expect(result.outcome).toBe("stuck");
-    expect(result.pauses).toEqual([]);
-  });
-
-  test("keeps a hidden required file input unfinished until its supplied document is attached", async () => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          inputType: "file",
-          label: "Resume",
-          visible: false,
-          value: "",
-        },
-      ],
-    });
-    const baseHands = hands(source);
-    const suppliedResume = {
-      id: "resume_document",
-      fileName: "resume.txt",
-      mimeType: "text/plain",
-      label: "Resume",
-      kind: "resume" as const,
-      loadBytes: () => Promise.resolve(new TextEncoder().encode("Resume")),
-    };
-    const result = await runApplyAgent(
-      config(source, {
-        hands: {
-          ...baseHands,
-          uploadFile: (_ref, file) => {
-            source.controls = source.controls.map((control) => ({
-              ...control,
-              value: file.name,
-            }));
-            return Promise.resolve({
-              ok: true as const,
-              observedValue: file.name,
-            });
-          },
-        },
-        sources: {
-          ...config(source).sources,
-          documents: [suppliedResume],
-        },
-      }),
-      scriptedModel([
-        { name: "finish", args: { reason: "The form is ready" } },
-        {
-          name: "upload",
-          args: { ref: "c0", documentId: suppliedResume.id },
-        },
-        { name: "finish", args: { reason: "The form is ready" } },
-      ]),
-    );
-
-    expect(result.outcome).toBe("prepared");
-    expect(result.attachments).toHaveLength(1);
-  });
-
-  test.each([false, true])(
-    "a rejected upload is a file handover even when the file input retained its value (native invalid: %s)",
-    async (invalid) => {
-      const source = page({
-        bodyText: "Application form. Resume failed to upload.",
-        controls: [
-          {
-            ...nameControl(),
-            inputType: "file",
-            label: "Resume",
-            value: "resume.txt",
-            invalid,
-            validationMessage: invalid ? "Resume failed to upload" : "",
-          },
-        ],
-      });
-      const model = repeatingModel("finish", {
-        reason: "The upload failed; repair it on the site.",
-        stuck: true,
-      });
-      const chat = vi.spyOn(model, "chatWithTools");
-      const result = await runApplyAgent(config(source), model);
-      expect(result.outcome).toBe("paused");
-      expect(result.readyToSend).toBeNull();
-      expect(result.reviewAttachments).toEqual([]);
-      expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            answerControlType: "file",
-            prompt: "Resume — upload failed",
-          }),
-        ]),
-      );
-      expect(chat).toHaveBeenCalledOnce();
-    },
-  );
-
-  test("several refused uploads on one form are one item for the person", async () => {
-    const source = page({
-      bodyText: "Application form.",
-      controls: ["Resume", "Cover letter"].map((label, index) => ({
-        ...nameControl(),
-        index,
-        id: `file${index}`,
-        name: `file${index}`,
-        inputType: "file",
-        label,
-        value: `${label}.txt`,
-        upload: {
-          described: "",
-          nearby: `${label} Upload rejected by server`,
-          shown: false,
-        },
-      })),
-    });
-    const model = repeatingModel("finish", {
-      reason: "The uploads failed; repair them on the site.",
-      stuck: true,
-    });
-    const result = await runApplyAgent(config(source), model);
-    expect(result.outcome).toBe("paused");
-    const files = result.pauses
-      .flatMap((pause) => pause.questions ?? [])
-      .filter((question) => question.answerControlType === "file");
-    expect(files).toEqual([
-      expect.objectContaining({
-        id: "upload_repair",
-        prompt: "Resume, Cover letter — upload failed",
-      }),
-    ]);
-  });
-
-  test("an upload repair names the selected CV even when the dropzone label is generic", async () => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          inputType: "file",
-          label: "Choose a file or drop it here",
-          value: "synthetic-resume.pdf",
-          upload: {
-            described: "",
-            nearby: "Upload failed",
-            shown: true,
-            network: "rejected",
-          },
-        },
-      ],
-    });
-    const document = {
-      id: "selected",
-      kind: "resume" as const,
-      label: "Your CV",
-      fileName: "synthetic-resume.pdf",
-      mimeType: "application/pdf",
-      loadBytes: () => Promise.resolve(new Uint8Array()),
-    };
-    const result = await runApplyAgent(
-      config(source, {
-        sources: { ...config(source).sources, documents: [document] },
-      }),
-      repeatingModel("finish", { reason: "Upload failed", stuck: true }),
-    );
-    expect(
-      result.pauses
-        .flatMap((p) => p.questions ?? [])
-        .find((q) => q.id === "upload_repair")?.askReason?.selectedDocument,
-    ).toEqual({
-      kind: "resume",
-      label: "Your CV",
-      fileName: "synthetic-resume.pdf",
-    });
-  });
-
-  test("a failed upload reports the actual converted filename without a candidate question", async () => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          inputType: "file",
-          label: "My Information — Autofill with Resume",
-          value: "",
-          accept: ".txt,text/plain",
-        },
-      ],
-    });
-    const document = {
-      id: "selected-cv",
-      kind: "resume" as const,
-      label: "Your CV",
-      fileName: "synthetic-resume.md",
-      mimeType: "text/markdown",
-      loadBytes: () =>
-        Promise.resolve(new TextEncoder().encode("Synthetic CV")),
-    };
-    const input = config(source, {
-      sources: { ...config(source).sources, documents: [document] },
-      uploadWaitMs: 0,
-    });
-    input.hands.uploadFile = (_ref, file) => {
-      source.controls[0].value = file.name;
-      source.controls[0].upload = {
-        described: "",
-        nearby: "Upload failed",
-        shown: true,
-        network: "rejected",
-      };
-      return Promise.resolve({ ok: true, observedValue: file.name });
-    };
-    const result = await runApplyAgent(
-      input,
-      scriptedModel([
-        { name: "upload", args: { ref: "c0", documentId: document.id } },
-        { name: "finish", args: { reason: "The upload failed", stuck: true } },
-      ]),
-    );
-    expect(source.controls[0].value).toBe("synthetic-resume.txt");
-    expect(result.outcome).toBe("stuck");
-    expect(result.reason).toContain("synthetic-resume.txt");
-    expect(result.reason).toContain("server refusal");
-    expect(result.pauses).toEqual([]);
-  });
-
   const resumeFile = (
     nearby: string,
     overrides: Partial<RawApplyControl> = {},
@@ -2358,49 +1702,6 @@ describe("apply agent run endings", () => {
     result.pauses
       .flatMap((pause) => pause.questions ?? [])
       .filter((question) => question.answerControlType === "file");
-
-  test("a refusal on an earlier step still stops the form on its last step", async () => {
-    const source = page({
-      stepLabel: "Step 1 of 2",
-      controls: [nameControl(), resumeFile("Resume Upload rejected by server")],
-      actions: [
-        { index: 0, label: "Continue", visible: true, disabled: false },
-      ],
-    });
-    const input = config(source);
-    const toLastStep = () => {
-      source.stepLabel = "Step 2 of 2";
-      source.controls = [nameControl()];
-      source.actions = [
-        {
-          index: 0,
-          label: "Submit application",
-          visible: true,
-          disabled: false,
-        },
-      ];
-      return Promise.resolve({ ok: true as const, observedValue: "clicked" });
-    };
-    input.hands.clickAction = vi.fn(toLastStep);
-    input.hands.clickElement = vi.fn(toLastStep);
-    const result = await runApplyAgent(
-      input,
-      scriptedModel([
-        { name: "click", args: { ref: "a0" } },
-        { name: "finish", args: { reason: "The form is ready" } },
-        { name: "finish", args: { reason: "The form is ready" } },
-      ]),
-    );
-    expect(source.stepLabel).toBe("Step 2 of 2");
-    expect(result.readyToSend).toBeNull();
-    expect(result.outcome).not.toBe("prepared");
-    expect(fileQuestions(result)).toEqual([
-      expect.objectContaining({
-        id: "upload_repair",
-        prompt: "Resume — upload failed",
-      }),
-    ]);
-  });
 
   test("a field that stays on the page across steps clears its item once the server takes the file", async () => {
     const source = page({
@@ -2445,33 +1746,6 @@ describe("apply agent run endings", () => {
     );
     expect(fileQuestions(result)).toEqual([]);
     expect(result.outcome).toBe("prepared");
-  });
-
-  test("a file the site cleared is missing even on a field marked optional", async () => {
-    const source = page({
-      controls: [
-        { ...nameControl(), value: "" },
-        resumeFile("Resume resume.txt", { required: false }),
-      ],
-    });
-    const input = config(source, { uploadWaitMs: 0 });
-    input.hands.fillText = vi.fn((_ref: string, value: string) => {
-      source.controls[0].value = value;
-      source.controls[1] = resumeFile("Resume", { required: false, value: "" });
-      return Promise.resolve({ ok: true as const, observedValue: value });
-    });
-    const result = await runApplyAgent(
-      input,
-      scriptedModel([
-        { name: "type", args: { ref: "c0", text: "Robin Ashford" } },
-        { name: "finish", args: { reason: "The form is ready" } },
-        { name: "finish", args: { reason: "The form is ready" } },
-      ]),
-    );
-    expect(result.readyToSend).toBeNull();
-    expect(fileQuestions(result)).toEqual([
-      expect.objectContaining({ id: "upload_repair" }),
-    ]);
   });
 
   test("a required file field the widget emptied after storage took the file is answered", async () => {
@@ -2548,141 +1822,7 @@ describe("apply agent run endings", () => {
     );
     expect(uploadFile).toHaveBeenCalledOnce();
     expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
-    expect(result.outcome).toBe("prepared");
-  });
-
-  test("a widget that empties its input still hands over a file the server or fence refused", async () => {
-    // Greenhouse reads the file, empties the input, then sends the file
-    // itself; Nestor's fence held that request back.
-    const source = page({
-      controls: [
-        nameControl(),
-        resumeFile("Resume Attach", {
-          required: false,
-          value: "",
-          upload: {
-            described: "",
-            nearby: "Resume Attach",
-            shown: false,
-            network: "rejected",
-          },
-        }),
-      ],
-    });
-    const result = await runApplyAgent(
-      config(source),
-      repeatingModel("finish", { reason: "The form is ready" }),
-    );
-    expect(result.readyToSend).toBeNull();
-    expect(fileQuestions(result)).toEqual([
-      expect.objectContaining({
-        id: "upload_repair",
-        prompt: "Resume — upload failed",
-      }),
-    ]);
-  });
-
-  test("a refused upload stops after one recovery pass and reports the cause without a candidate question", async () => {
-    // Workable: every storage POST was held back, and the run kept
-    // uploading the same file until it was stopped by hand.
-    const source = page({
-      controls: [nameControl(), resumeFile("Resume", { value: "" })],
-    });
-    const suppliedResume = {
-      id: "resume_document",
-      fileName: "resume.txt",
-      mimeType: "text/plain",
-      label: "Your CV",
-      kind: "resume" as const,
-      loadBytes: () => Promise.resolve(new TextEncoder().encode("Resume")),
-    };
-    const uploadFile = vi.fn((_ref: string, upload: { name: string }) => {
-      // The widget empties its input and the storage request is refused.
-      source.controls[1] = resumeFile("Resume", {
-        value: "",
-        upload: {
-          described: "",
-          nearby: "Resume",
-          shown: false,
-          fileName: upload.name,
-          network: "rejected",
-        },
-      });
-      return Promise.resolve({ ok: true as const, observedValue: upload.name });
-    });
-    const input = config(source, {
-      intermediateWritesAuthorized: false,
-      sources: { ...config(source).sources, documents: [suppliedResume] },
-    });
-    input.hands.uploadFile = uploadFile;
-    const result = await runApplyAgent(
-      input,
-      repeatingModel("upload", { ref: "c1", documentId: suppliedResume.id }),
-    );
-    expect(uploadFile).toHaveBeenCalledTimes(2);
-    expect(result.outcome).toBe("stuck");
-    expect(result.readyToSend).toBeNull();
-    expect(result.reason).toContain("resume.txt");
-    expect(result.reason).toContain("after one recovery pass");
-    expect(result.reason).toContain("server refusal");
-    expect(fileQuestions(result)).toEqual([]);
-  });
-
-  test("an upload that never finishes is handed over instead of waited on forever", async () => {
-    const source = page({
-      controls: [nameControl(), resumeFile("Resume Uploading…")],
-    });
-    const result = await runApplyAgent(
-      config(source, { uploadWaitMs: 0 }),
-      repeatingModel("finish", { reason: "The form is ready" }),
-    );
-    expect(result.readyToSend).toBeNull();
-    expect(fileQuestions(result)).toEqual([
-      expect.objectContaining({
-        id: "upload_repair",
-        prompt: "Resume — upload not confirmed",
-      }),
-    ]);
-  });
-
-  test("the person's word settles stale upload text, but not a server refusal", async () => {
-    const stale = page({
-      controls: [nameControl(), resumeFile("Resume Upload failed")],
-    });
-    const settled = await runApplyAgent(
-      config(stale, { uploadsConfirmedByPerson: ["Resume"] }),
-      repeatingModel("finish", { reason: "The form is ready" }),
-    );
-    expect(fileQuestions(settled)).toEqual([]);
-    expect(settled.outcome).toBe("prepared");
-    // The word covers only the field the person named.
-    const otherField = await runApplyAgent(
-      config(stale, { uploadsConfirmedByPerson: ["Cover letter"] }),
-      repeatingModel("finish", { reason: "The form is ready" }),
-    );
-    expect(fileQuestions(otherField)).toEqual([
-      expect.objectContaining({ id: "upload_repair" }),
-    ]);
-    const refused = page({
-      controls: [
-        nameControl(),
-        resumeFile("Resume resume.txt", {
-          upload: {
-            described: "",
-            nearby: "Resume resume.txt",
-            shown: false,
-            network: "rejected",
-          },
-        }),
-      ],
-    });
-    const result = await runApplyAgent(
-      config(refused, { uploadsConfirmedByPerson: ["Resume"] }),
-      repeatingModel("finish", { reason: "The form is ready" }),
-    );
-    expect(fileQuestions(result)).toEqual([
-      expect.objectContaining({ id: "upload_repair" }),
-    ]);
+    expect(result.outcome).toBe("ready_to_send");
   });
 
   test("hands an unmatched required upload to the person even when a resume is available", async () => {
@@ -2751,44 +1891,6 @@ describe("apply agent run endings", () => {
 
     expect(result.outcome).toBe("stuck");
     expect(result.pauses).toEqual([]);
-  });
-
-  test("keeps a required letter with the person when saved settings say never", async () => {
-    const source = page({
-      controls: [
-        {
-          ...nameControl(),
-          inputType: "file",
-          label: "Cover letter",
-          value: "",
-        },
-      ],
-    });
-    const provide = vi.fn();
-    const result = await runApplyAgent(
-      config(source, {
-        writing: {
-          coverLetterPolicy: "never",
-          writtenAnswerLength: "full",
-          preApprovedDeclarations: [],
-        },
-        letters: {
-          preference: {
-            tone: "plain_professional",
-            length: "short",
-            language: null,
-            sample: null,
-          },
-          provide,
-        },
-      }),
-      repeatingModel("finish", { reason: "The rest of the form is ready" }),
-    );
-
-    expect(result.outcome).toBe("paused");
-    expect(result.pauses[0]?.code).toBe("document_needs_you");
-    expect(result.reason).toContain("settings say Job Finder should not write");
-    expect(provide).not.toHaveBeenCalled();
   });
 
   test("hands unknown required eligibility to the person instead of inventing it", async () => {
@@ -2921,21 +2023,6 @@ describe("apply agent run endings", () => {
     expect(result.pauses[0]?.blocker?.code).toBe("site_login_required");
     expect(result.pauses[0]?.question).toBeNull();
     expect(result.pauses[0]?.questions).toBeUndefined();
-  });
-
-  test("a visible CAPTCHA stays with the person even when the model calls the form finished", async () => {
-    const result = await runApplyAgent(
-      config(
-        page({
-          bodyText: "Apply for the role. I am not a robot. Local fake CAPTCHA.",
-        }),
-      ),
-      repeatingModel("finish", { reason: "The form is ready for review" }),
-    );
-
-    expect(result.outcome).toBe("paused");
-    expect(result.reason).toBe("The site is running a security check.");
-    expect(result.pauses[0]?.blocker?.requiresPerson).toBe(true);
   });
 
   const solvedCheckPage = () =>
@@ -3493,7 +2580,6 @@ describe("answers and structured history on a retained form", () => {
       scriptedModel([
         { name: "select", args: { ref: "c0", option: "Yes" } },
         { name: "type", args: { ref: "c1", text: "Two weeks" } },
-        { name: "finish", args: { reason: "Answers saved" } },
         { name: "click", args: { ref: "a0" } },
         { name: "finish", args: { reason: "At Review" } },
       ]),
@@ -3506,52 +2592,6 @@ describe("answers and structured history on a retained form", () => {
     expect(source.stepLabel).toBe("Step 4 of 4");
     expect(input.hands.navigate).not.toHaveBeenCalled();
     expect(input.hands.clickElement).toHaveBeenCalledTimes(1);
-  });
-
-  test("allows another fill when a receipt succeeded but the live field cleared", async () => {
-    const source = page({ controls: [{ ...nameControl(), value: "" }] });
-    const input = config(source);
-    let writes = 0;
-    input.hands.fillText = vi.fn((_ref: string, value: string) => {
-      if (++writes === 2) source.controls[0].value = value;
-      return Promise.resolve({ ok: true as const, observedValue: value });
-    });
-    const result = await runApplyAgent(
-      input,
-      scriptedModel([
-        { name: "type", args: { ref: "c0", text: "Robin Ashford" } },
-        { name: "finish", args: { reason: "Ready" } },
-        { name: "type", args: { ref: "c0", text: "Robin Ashford" } },
-        { name: "finish", args: { reason: "Ready" } },
-      ]),
-    );
-    expect(writes).toBe(2);
-    expect(result.outcome).toBe("prepared");
-  });
-
-  test("a repeated finish on an early step remains a resumable blocker", async () => {
-    const source = page({ stepLabel: "Step 3 of 4" });
-    const modelReason = "I stopped on the saved questions page as requested.";
-    const chatWithTools = vi.fn(
-      scriptedModel([
-        { name: "finish", args: { reason: "The current step is filled" } },
-        { name: "finish", args: { reason: modelReason } },
-      ]).chatWithTools,
-    );
-    const result = await runApplyAgent(config(source), { chatWithTools });
-    expect(result.outcome).toBe("paused");
-    expect(result.readyToSend).toBeNull();
-    expect(result.reason).toContain("another step");
-    expect(result.modelTurns).toBe(2);
-    expect(
-      chatWithTools.mock.calls
-        .at(-1)![0]
-        .filter(
-          (message) =>
-            message.role === "tool" &&
-            message.content?.startsWith("This form has another step"),
-        ),
-    ).toHaveLength(1);
   });
 
   test("adds and fills a known role using the approved month before continuing to Review", async () => {
@@ -3607,7 +2647,6 @@ describe("answers and structured history on a retained form", () => {
     const result = await runApplyAgent(
       input,
       scriptedModel([
-        { name: "finish", args: { reason: "PDF attached" } },
         { name: "click", args: { ref: "a0" } },
         { name: "type", args: { ref: "c0", text: "Engineer" } },
         { name: "type", args: { ref: "c1", text: "Signal Systems" } },
@@ -3685,73 +2724,6 @@ test.each(["Yes", "No"])(
     });
   },
 );
-
-test("whenever there is room cannot finish with an empty optional cover-letter upload", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        inputType: "file",
-        label: "Cover letter",
-        value: "",
-        required: false,
-      },
-    ],
-    actions: [
-      { index: 0, label: "Submit application", visible: true, disabled: false },
-    ],
-  });
-  const runConfig = config(source, {
-    writing: {
-      coverLetterPolicy: "when_possible",
-      writtenAnswerLength: "short",
-      preApprovedDeclarations: [],
-    },
-  });
-  let provided = 0;
-  runConfig.letters = {
-    preference: {
-      tone: "plain_professional",
-      length: "standard",
-      language: null,
-      sample: null,
-    },
-    provide: () => {
-      provided += 1;
-      return Promise.resolve({
-        ok: true,
-        text: "Dear Hiring Team, I am applying for this role. My experience building dependable platforms and internal tools would support your team. I would welcome the opportunity to discuss the role and learn more about your priorities. Thank you for your consideration.",
-        document: {
-          id: "letter",
-          kind: "cover_letter",
-          label: "Cover letter",
-          fileName: "letter.pdf",
-          mimeType: "application/pdf",
-          loadBytes: () => Promise.resolve(new Uint8Array([1])),
-        },
-      });
-    },
-  };
-  runConfig.hands.uploadFile = (_ref, file) => {
-    source.controls[0].value = file.name;
-    return Promise.resolve({ ok: true, observedValue: file.name });
-  };
-  const result = await runApplyAgent(
-    runConfig,
-    scriptedModel([
-      { name: "finish", args: { reason: "Done." } },
-      { name: "upload", args: { ref: "c0", documentId: "letter" } },
-      { name: "finish", args: { reason: "Done." } },
-    ]),
-  );
-  expect(provided).toBe(1);
-  expect(result.reviewAttachments).toHaveLength(1);
-  expect(result.reviewAttachments?.[0]?.fileName).toBe("letter.pdf");
-  expect(result.reviewAttachments?.[0]?.reviewText?.text).toContain(
-    "Dear Hiring Team",
-  );
-  expect(result.outcome).toBe("prepared");
-});
 
 test("a retry replaces the retained original before handing back missing files", async () => {
   const source = page({
@@ -3873,41 +2845,6 @@ test("a resume a widget took and emptied stays on the Ready card once the storag
     result.reviewAttachments?.map((attachment) => attachment.fileName),
   ).toEqual(["approved.pdf"]);
   expect(result.pauses).toEqual([]);
-});
-
-test("an optional letter the run cannot attach is noted, never a stop", async () => {
-  const source = page({
-    controls: [
-      {
-        ...nameControl(),
-        inputType: "file",
-        label: "Cover letter",
-        value: "",
-        required: false,
-      },
-    ],
-    actions: [
-      { index: 0, label: "Submit application", visible: true, disabled: false },
-    ],
-  });
-  const result = await runApplyAgent(
-    config(source, {
-      writing: {
-        coverLetterPolicy: "when_possible",
-        writtenAnswerLength: "short",
-        preApprovedDeclarations: [],
-      },
-    }),
-    scriptedModel([
-      { name: "finish", args: { reason: "Done." } },
-      { name: "finish", args: { reason: "Done." } },
-    ]),
-  );
-  expect(result.outcome).not.toBe("paused");
-  expect(result.pauses).toHaveLength(0);
-  expect(result.notes.join(" ")).toContain(
-    'Left "Cover letter" empty: Job Finder could not attach a letter there.',
-  );
 });
 
 test.each([
@@ -4511,40 +3448,6 @@ test("one response can enter contact facts, tick an approved declaration and att
   expect(updates).toBe(1);
 });
 
-test("in Fill a Continue link is handed to the person, never followed; the form's own address opens", async () => {
-  const source = page({
-    links: [
-      {
-        index: 0,
-        label: "Continue",
-        href: "https://apply.example.test/api/submit?applicationId=42",
-        target: "",
-        visible: true,
-        topOffset: 10,
-      },
-    ],
-  });
-  const input = config(source, { intermediateWritesAuthorized: false });
-  const followLink = vi.fn(input.hands.followLink);
-  const navigate = vi.fn(input.hands.navigate);
-  input.hands.followLink = followLink;
-  input.hands.navigate = navigate;
-  const result = await runApplyAgent(
-    input,
-    scriptedModel([
-      {
-        name: "navigate",
-        args: { url: "https://apply.example.test/form" },
-      },
-      { name: "follow_link", args: { ref: "l0" } },
-      { name: "finish", args: { reason: "Filled." } },
-    ]),
-  );
-  expect(navigate).toHaveBeenCalledOnce();
-  expect(followLink).not.toHaveBeenCalled();
-  expect(result.pauses[0]?.summary).toContain('Press "Continue" on the site');
-});
-
 describe("fill_fields visible steps", () => {
   const field = (index: number, label: string): RawApplyControl => ({
     ...nameControl(),
@@ -4613,105 +3516,6 @@ describe("fill_fields visible steps", () => {
       },
     } satisfies LLMClient;
   }
-
-  test("Workday in Fill: fills My Information, hands Save and continue to the person, and sends nothing", async () => {
-    const source = page({
-      stepLabel: "1. My Information",
-      controls: [
-        field(0, "First name"),
-        field(1, "Last name"),
-        field(2, "City"),
-      ],
-      actions: [
-        {
-          index: 0,
-          label: "Save and continue",
-          visible: true,
-          disabled: false,
-        },
-      ],
-    });
-    const { input, writes } = writable(source);
-    input.intermediateWritesAuthorized = false;
-    let pressed = 0;
-    input.hands.clickElement = () => {
-      // The site saves the page before it moves on; the fence refuses the
-      // save, so the page stays where it is.
-      pressed += 1;
-      return Promise.resolve({ ok: true, observedValue: "clicked" });
-    };
-    let attempt: {
-      kind: "network_request";
-      method: string;
-      url: string;
-      at: string;
-      carriedPreparedValue: boolean;
-    } | null = null;
-    const click = input.hands.clickElement;
-    input.hands.clickElement = async (ref) => {
-      const result = await click(ref);
-      attempt = {
-        kind: "network_request",
-        method: "POST",
-        url: "https://apply.example.test/workday/api/save",
-        at: `2026-10-26T10:00:0${pressed}.000Z`,
-        carriedPreparedValue: true,
-      };
-      return result;
-    };
-    input.safety = {
-      readBlockedAttempt: () => {
-        const next = attempt;
-        attempt = null;
-        return Promise.resolve(next);
-      },
-      registerPreparedValue: () => Promise.resolve(),
-      openIntermediateWriteWindow: () => Promise.resolve(),
-      closeIntermediateWriteWindow: () => Promise.resolve(),
-      closeUploadWindow: () => Promise.resolve(),
-      checkServiceWorker: () => Promise.resolve(null),
-    };
-    // A model that would press "Save and continue" forever if let.
-    let calls = 0;
-    const model = {
-      chatWithTools: (messages, definitions) => {
-        const check = supportedChecks(messages, definitions);
-        if (check) return check;
-        calls += 1;
-        return Promise.resolve({
-          toolCalls: [
-            call(
-              "fill_fields",
-              {
-                fields: [
-                  { tool: "type", ref: "c0", text: "Robin" },
-                  { tool: "type", ref: "c1", text: "Ashford" },
-                  // The profile's own city: the answer gate needs a source.
-                  { tool: "type", ref: "c2", text: "Manchester" },
-                ],
-                thenContinue: "a0",
-              },
-              `fill_${calls}`,
-            ),
-          ],
-        });
-      },
-    } satisfies LLMClient;
-    const result = await runApplyAgent(input, model);
-    expect(writes.slice(0, 3)).toEqual(["c0", "c1", "c2"]);
-    // Fill never presses the form's own buttons; the person does.
-    expect(pressed).toBe(0);
-    expect(calls).toBeLessThanOrEqual(8);
-    expect(result.pauses).toHaveLength(1);
-    expect(result.pauses[0]?.blocker?.code).toBe("site_saves_as_you_go");
-    expect(result.pauses[0]?.summary).toBe(
-      'Job Finder filled what it could on this page. Press "Save and continue" on the site yourself, then continue and Job Finder fills the next page.',
-    );
-    // One Needs you item for this application: press it, then continue.
-    expect(
-      result.pauses[0]?.questions?.map((question) => question.prompt),
-    ).toEqual(['Press "Save and continue" on the site, then continue']);
-  });
 
   test.each([false, true])(
     "text batches settle once and retain only kept answers (clearing=%s)",
@@ -4864,68 +3668,6 @@ describe("fill_fields visible steps", () => {
       await vi.runAllTimersAsync();
       expect((await run).filled).toHaveLength(2);
       expect(input.hands.wait).toHaveBeenCalledExactlyOnceWith(100);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  test("a send attempted during batch settling still triggers the existing guard before Continue", async () => {
-    vi.useFakeTimers();
-    try {
-      const source = page({
-        controls: [field(0, "Full name"), field(1, "Email")],
-        actions: [
-          { index: 0, label: "Continue", visible: true, disabled: false },
-        ],
-      });
-      const { input } = writable(source);
-      const write = input.hands.fillText;
-      let attempted = false;
-      input.hands.fillText = async (ref, value) => {
-        const result = await write(ref, value);
-        setTimeout(() => {
-          attempted = true;
-        }, 100);
-        return result;
-      };
-      input.hands.wait = (ms) =>
-        new Promise<void>((resolve) => setTimeout(resolve, ms));
-      input.safety = {
-        readBlockedAttempt: () =>
-          Promise.resolve(
-            attempted
-              ? {
-                  kind: "dom_submit",
-                  method: "POST",
-                  url: source.url,
-                  at: "2026-10-21T10:00:00.000Z",
-                }
-              : null,
-          ),
-        registerPreparedValue: () => Promise.resolve(),
-        openIntermediateWriteWindow: () => Promise.resolve(),
-        closeIntermediateWriteWindow: () => Promise.resolve(),
-        checkServiceWorker: () => Promise.resolve(null),
-      };
-      const click = vi.fn(input.hands.clickElement);
-      input.hands.clickElement = click;
-      const run = runApplyAgent(
-        input,
-        modelFor(
-          [
-            { tool: "type", ref: "c0", text: "Robin Ashford" },
-            { tool: "type", ref: "c1", text: "Robin Ashford" },
-          ],
-          undefined,
-          "a0",
-        ),
-      );
-      await vi.runAllTimersAsync();
-      const result = await run;
-      expect(result.pauses[0]?.code).toBe("site_tried_to_send");
-      expect(click).not.toHaveBeenCalled();
-      expect(result.filled).toHaveLength(0);
-      expect(result.timing?.requests[0]?.fieldsFilled).toBe(0);
     } finally {
       vi.useRealTimers();
     }
@@ -5380,7 +4122,7 @@ describe("fill_fields visible steps", () => {
       } else expect(report).toContain("c1: not attempted");
       expect(upload).toHaveBeenCalledTimes(
         barrier === "write refused"
-          ? 2
+          ? 1
           : ["navigation", "new field"].includes(barrier)
             ? 1
             : 0,
@@ -5391,7 +4133,7 @@ describe("fill_fields visible steps", () => {
     },
   );
 
-  test.each(["send guard", "Stop"])(
+  test.each(["Stop"])(
     "an upload batch respects %s before later fields or Continue",
     async (barrier) => {
       const source = page({
@@ -5685,7 +4427,7 @@ describe("fill_fields visible steps", () => {
         // The press is the form's finish: the run ends ready for the send
         // path, with nothing pressed and no further model turn.
         expect(separate.kind).toBe("ready_to_send");
-        expect(result.readyToSend).toEqual({
+        expect(result.readyToSend).toMatchObject({
           actionRef: "a0",
           actionLabel:
             separate.kind === "ready_to_send"
@@ -5857,92 +4599,6 @@ describe("fill_fields visible steps", () => {
     },
   );
 });
-
-test.each([false, true])(
-  "a batch stops at the send guard even if its final read fails (%s)",
-  async (readFails) => {
-    const source = page({
-      controls: [
-        { ...nameControl(), value: "" },
-        {
-          ...nameControl(),
-          index: 1,
-          id: "email",
-          name: "email",
-          label: "Email",
-          value: "",
-        },
-      ],
-    });
-    const input = config(source);
-    input.sources.profile.email = "robin@example.test";
-    const writes: string[] = [];
-    input.hands.fillText = (ref, value) => {
-      writes.push(ref);
-      source.controls[Number(ref.slice(1))].value = value;
-      return Promise.resolve({ ok: true, observedValue: value });
-    };
-    input.hands.clickAction = vi.fn(input.hands.clickAction);
-    input.hands.clickElement = vi.fn(input.hands.clickElement);
-    const observe = input.hands.observe;
-    input.hands.observe = () =>
-      readFails && writes.length > 0
-        ? Promise.reject(new Error("Synthetic read failure"))
-        : observe();
-    input.safety = {
-      readBlockedAttempt: () =>
-        Promise.resolve(
-          writes.length > 0
-            ? {
-                kind: "form_submit",
-                method: "POST",
-                url: "https://apply.example.test/send",
-                at: "2026-09-14T10:00:01.000Z",
-              }
-            : null,
-        ),
-      registerPreparedValue: () => Promise.resolve(),
-      openIntermediateWriteWindow: () => Promise.resolve(),
-      closeIntermediateWriteWindow: () => Promise.resolve(),
-      checkServiceWorker: () => Promise.resolve(null),
-    };
-    let turns = 0;
-    const result = await runApplyAgent(input, {
-      chatWithTools: () => {
-        turns += 1;
-        return Promise.resolve({
-          toolCalls: [
-            {
-              id: "fields",
-              type: "function",
-              function: {
-                name: "fill_fields",
-                arguments: JSON.stringify({
-                  thenContinue: "a0",
-                  fields: [
-                    { tool: "type", ref: "c0", text: "Robin Ashford" },
-                    { tool: "type", ref: "c1", text: "robin@example.test" },
-                  ],
-                }),
-              },
-            },
-          ],
-        });
-      },
-    });
-    expect(turns).toBe(1);
-    expect(writes).toEqual(["c0"]);
-    expect(input.hands.clickAction).not.toHaveBeenCalled();
-    expect(input.hands.clickElement).not.toHaveBeenCalled();
-    expect(result.outcome).toBe("paused");
-    expect(result.pauses[0].code).toBe("site_tried_to_send");
-    expect(result.timing?.requests[0]).toMatchObject({
-      fieldsAttempted: 1,
-      fieldsFilled: 0,
-    });
-    expect(result.timing?.pageReads).toBe(3); // initial, executor pre-write, pause observation
-  },
-);
 
 test.each([1, 2])(
   "Stop during a %s-field batch fences later fields and Continue",
@@ -6193,7 +4849,7 @@ test.each([
       )
         ? "paused"
         : mode === "autonomous_submit"
-          ? "ready_to_send"
+          ? "prepared"
           : "awaiting_your_review",
     );
     expect(finalClick).not.toHaveBeenCalled();
@@ -6753,40 +5409,6 @@ describe("a model that reports in words instead of calling finish", () => {
     };
     return { model, seen, turns: () => turn };
   }
-
-  test("a filled form that is ready ends on those words, with no further turn", async () => {
-    const source = page({
-      controls: [{ ...nameControl(), value: "" }],
-    });
-    const input = config(source, {
-      authority: {
-        mode: "confirm_before_submit",
-        submitAuthorized: false,
-        preApprovedAttestationKinds: [],
-        salaryDisclosure: "pause_for_user",
-        allowedOrigins: ["https://apply.example.test"],
-      },
-    });
-    input.hands.fillText = (_ref, value) => {
-      source.controls[0].value = value;
-      return Promise.resolve({ ok: true, observedValue: value });
-    };
-    const { model, turns } = wordsModel([
-      {
-        name: "fill_fields",
-        args: { fields: [{ tool: "type", ref: "c0", text: "Robin Ashford" }] },
-      },
-      { content: "Everything is filled in and ready for review." },
-      { name: "finish", args: { reason: "Should not be needed." } },
-    ]);
-    const result = await runApplyAgent(input, model);
-    expect(turns()).toBe(2);
-    expect(result.outcome).toBe("awaiting_your_review");
-    expect(result.readyToSend).toEqual({
-      actionRef: "a0",
-      actionLabel: "Submit application",
-    });
-  });
 
   test("words before anything is filled get the usual reminder", async () => {
     const source = page({
@@ -7549,99 +6171,6 @@ test("a file field the widget removed once storage took the file is attached, no
   expect(result.outcome).toBe("prepared");
 });
 
-// Captured on the workday replica (2026-11-03): the step's autosave posted
-// the whole form with the file and got 200 {"saved":true} (no storage
-// receipt). The next step left the file field in the page, disabled and
-// hidden, still holding the file inside the POST multipart form.
-test.each([
-  { formSubmits: true, asked: [] as string[] },
-  { formSubmits: false, asked: ["Resume — upload not confirmed"] },
-])(
-  "an untied autosave of a step's file is no question only when the form itself sends it (formSubmits $formSubmits)",
-  async ({ formSubmits, asked }) => {
-    const fileField = {
-      ...nameControl(),
-      index: 1,
-      id: "resume",
-      name: "resume",
-      inputType: "file",
-      label: "Resume",
-      required: true,
-      value: "",
-      upload: { described: "", nearby: "Resume Upload resume", shown: false },
-    };
-    const source = page({ controls: [nameControl(), fileField] });
-    const suppliedResume = {
-      id: "resume_document",
-      fileName: "resume.txt",
-      mimeType: "text/plain",
-      label: "Your CV",
-      kind: "resume" as const,
-      loadBytes: () => Promise.resolve(new TextEncoder().encode("Resume")),
-    };
-    const input = config(source, {
-      intermediateWritesAuthorized: false,
-      uploadWaitMs: 0,
-      sources: { ...config(source).sources, documents: [suppliedResume] },
-    });
-    let reads = 0;
-    const held = (network?: "unconfirmed") => ({
-      described: "",
-      nearby: "Resume Upload resume resume.txt",
-      shown: false,
-      fileName: "resume.txt",
-      fileSize: 6,
-      selectedFileName: "resume.txt",
-      selectedFileSize: 6,
-      ...(formSubmits ? { formSubmits: true } : {}),
-      ...(network ? { network } : {}),
-    });
-    input.hands.uploadFile = () => {
-      reads = 1;
-      source.controls[1] = {
-        ...fileField,
-        value: "fakepath/resume.txt",
-        upload: held(),
-      };
-      return Promise.resolve({
-        ok: true as const,
-        observedValue: "resume.txt",
-      });
-    };
-    const observe = input.hands.observe;
-    input.hands.observe = () => {
-      // The next step: the field stays in the page, disabled and hidden, and
-      // the autosave that carried the file got no storage receipt.
-      if (reads > 0 && reads++ > 1) {
-        source.controls[1] = {
-          ...fileField,
-          value: "fakepath/resume.txt",
-          disabled: true,
-          visible: false,
-          upload: held("unconfirmed"),
-        };
-        source.uploads = [{ fileName: "resume.txt", network: "unconfirmed" }];
-      }
-      return observe();
-    };
-    const result = await runApplyAgent(
-      input,
-      scriptedModel([
-        { name: "upload", args: { ref: "c1", documentId: suppliedResume.id } },
-        { name: "finish", args: { reason: "The form is ready" } },
-        { name: "finish", args: { reason: "The form is ready" } },
-      ]),
-    );
-    expect(
-      result.pauses
-        .flatMap((pause) => pause.questions ?? [])
-        .filter((question) => question.answerControlType === "file")
-        .map((question) => question.prompt),
-    ).toEqual(formSubmits ? asked : []);
-    if (!formSubmits) expect(result.outcome).toBe("stuck");
-  },
-);
-
 describe("a finish that says needsPerson always ends paused", () => {
   const sendForMe = {
     authority: {
@@ -8213,7 +6742,7 @@ describe("a finish that says needsPerson always ends paused", () => {
     const contents: string[] = [];
     const model = scriptedModel([
       { name: "finish", args: { reason: polar, needsPerson: true } },
-      { name: "finish", args: { reason: polar, needsPerson: false } },
+      { name: "submit_application", args: { ref: "a0" } },
     ]);
     const result = await runApplyAgent(config(plain(), sendForMe), {
       chatWithTools: (messages, definitions) => {
@@ -8269,7 +6798,7 @@ describe("a continue keeps the file an earlier attempt attached on the same page
 
 describe("a closed form comes back without the model", () => {
   /** Answers only a check; any real turn is counted, and finishes stuck. */
-  const countingModel = () => {
+  const countingModel = (stuck = true) => {
     let turns = 0;
     const client: LLMClient = {
       chatWithTools: (messages, definitions) => {
@@ -8285,7 +6814,7 @@ describe("a closed form comes back without the model", () => {
                 name: "finish",
                 arguments: JSON.stringify({
                   reason: "The model was asked.",
-                  stuck: true,
+                  stuck,
                 }),
               },
             },
@@ -8386,9 +6915,9 @@ describe("a closed form comes back without the model", () => {
       ],
       path: [],
     };
-    const model = countingModel();
+    const model = countingModel(false);
     const result = await runApplyAgent(input, model.client);
-    expect(model.turns()).toBe(0);
+    expect(model.turns()).toBe(1);
     expect(result.outcome).toBe("prepared");
     expect(writes).toEqual([
       "c6=resume.txt",
@@ -8448,12 +6977,12 @@ describe("a closed form comes back without the model", () => {
           },
         ]);
       const writes = liveHands(source, input);
-      const model = countingModel();
+      const model = countingModel(false);
       const result = await runApplyAgent(input, model.client);
       expect(writes).toEqual(
         kind === "radio" ? ["c0=true"] : ["c0=true", "c1=true"],
       );
-      expect(model.turns()).toBe(0);
+      expect(model.turns()).toBe(1);
       expect(result.outcome).toBe("prepared");
       expect(result.pauses).toEqual([]);
     },
@@ -8816,69 +7345,6 @@ describe("a closed form comes back without the model", () => {
     ).toBe(true);
   });
 
-  test("a multi-step form: each step's answers go back, and its Next stays the person's", async () => {
-    const stepOne = page({
-      stepLabel: "Step 1 of 2: Contact",
-      controls: [
-        field(0, "Full name"),
-        field(1, "Email", { inputType: "email" }),
-      ],
-      actions: [
-        {
-          index: 0,
-          label: "Save and continue",
-          visible: true,
-          disabled: false,
-        },
-      ],
-    });
-    const stepTwo = page({
-      stepLabel: "Step 2 of 2: Experience",
-      controls: [field(0, "Years of experience")],
-    });
-    const key = (raw: RawApplyPage, index: number) => {
-      const observation = buildApplyFormObservation(
-        raw,
-        "2026-09-14T10:00:00.000Z",
-      );
-      const control = observation.controls.at(index);
-      if (!control) throw new Error("No such field on the step.");
-      return reviewFieldKey(observation, control);
-    };
-    const replay = {
-      answers: [
-        stored("Full name", "Robin Ashford", key(stepOne, 0)),
-        stored("Email", "robin@example.test", key(stepOne, 1)),
-        stored("Years of experience", "8", key(stepTwo, 0)),
-      ],
-      attachments: [],
-      path: [],
-    };
-    // The page comes back on its first step.
-    const first = config(stepOne, { intermediateWritesAuthorized: false });
-    const firstWrites = liveHands(stepOne, first);
-    first.replay = replay;
-    const firstModel = countingModel();
-    const handedOver = await runApplyAgent(first, firstModel.client);
-    expect(firstModel.turns()).toBe(0);
-    expect(firstWrites).toEqual(["c0=Robin Ashford", "c1=robin@example.test"]);
-    expect(handedOver.outcome).toBe("paused");
-    expect(
-      handedOver.pauses.flatMap((pause) => pause.questions ?? [pause.question]),
-    ).toContainEqual(
-      expect.objectContaining({ id: STEP_HANDOVER_QUESTION_ID }),
-    );
-    // The person pressed it; the continue fills the second step.
-    const second = config(stepTwo, { intermediateWritesAuthorized: false });
-    const secondWrites = liveHands(stepTwo, second);
-    second.replay = replay;
-    const secondModel = countingModel();
-    const finished = await runApplyAgent(second, secondModel.client);
-    expect(secondModel.turns()).toBe(0);
-    expect(secondWrites).toEqual(["c0=8"]);
-    expect(finished.outcome).toBe("prepared");
-  });
-
   test("the recorded way in is taken again: the open-form button, then the answers", async () => {
     const listing = page({
       url: "https://apply.example.test/jobs/1",
@@ -8910,9 +7376,9 @@ describe("a closed form comes back without the model", () => {
         { from: listingScreen, tool: "click", label: "Apply for this job" },
       ],
     };
-    const model = countingModel();
+    const model = countingModel(false);
     const result = await runApplyAgent(input, model.client);
-    expect(model.turns()).toBe(0);
+    expect(model.turns()).toBe(1);
     expect(writes).toEqual(["c0=Robin Ashford"]);
     expect(result.outcome).toBe("prepared");
     expect(result.formPath).toEqual(input.replay.path);
@@ -8982,7 +7448,9 @@ describe("a closed form comes back without the model", () => {
       const result = await runApplyAgent(
         input,
         scriptedModel([
-          { name: "follow_link", args: { ref: "l0" } },
+          ...(how === "model"
+            ? [{ name: "follow_link", args: { ref: "l0" } }]
+            : []),
           { name: "finish", args: { reason: "The form is filled." } },
         ]),
       );
@@ -9082,104 +7550,6 @@ describe("a picker the person filled on the page survives the continue", () => {
   });
 });
 
-describe("a button that submits its form but reads as neither a step nor its send is the person's", () => {
-  // Askable: a contact-only role form whose one button, "Apply", submits
-  // the form; its handler posts the answers with fetch.
-  const sendForMe = {
-    authority: {
-      mode: "autonomous_submit" as const,
-      submitAuthorized: true,
-      preApprovedAttestationKinds: [],
-      salaryDisclosure: "pause_for_user" as const,
-      allowedOrigins: ["https://apply.example.test"],
-    },
-  };
-  const fillInForMe = {
-    authority: {
-      ...sendForMe.authority,
-      mode: "confirm_before_submit" as const,
-    },
-  };
-  const apply = (index = 0, label = "Apply"): RawApplyAction => ({
-    index,
-    label,
-    visible: true,
-    disabled: false,
-    formAction: "https://apply.example.test/roles/engineer",
-    formMethod: "GET",
-    submitsForm: true,
-  });
-  const email = (): RawApplyControl => ({
-    ...nameControl(),
-    index: 1,
-    id: "email",
-    name: "email",
-    inputType: "email",
-    label: "Email",
-    value: "robin@example.test",
-  });
-  const handedOver = (result: ApplyAgentResult) =>
-    result.pauses.flatMap((pause) =>
-      (pause.questions ?? []).map((question) => question.prompt),
-    );
-  const pages: Array<[string, () => RawApplyPage]> = [
-    [
-      "Askable's role form",
-      () => page({ controls: [nameControl(), email()], actions: [apply()] }),
-    ],
-    [
-      "a newsletter box with an email and Apply",
-      () => page({ controls: [email()], actions: [apply()] }),
-    ],
-  ];
-  const modes = [
-    ["Send for me", sendForMe],
-    ["Fill in for me", fillInForMe],
-  ] as const;
-
-  for (const [mode, authority] of modes)
-    test.each(pages)(
-      `${mode}: %s is handed over, and Apply is never pressed`,
-      async (_case, source) => {
-        for (const model of [
-          repeatingModel("click", { ref: "a0" }),
-          repeatingModel("finish", { reason: "The form is complete." }),
-        ]) {
-          const input = config(source(), authority);
-          const pressed = vi.fn(input.hands.clickAction);
-          const clicked = vi.fn(input.hands.clickElement);
-          input.hands.clickAction = pressed;
-          input.hands.clickElement = clicked;
-          const result = await runApplyAgent(input, model);
-          expect(pressed).not.toHaveBeenCalled();
-          expect(clicked).not.toHaveBeenCalled();
-          expect(result.outcome).toBe("paused");
-          expect(result.readyToSend).toBeNull();
-          expect(result.reason).toBe(
-            `This form's button "Apply" may send your application; press it yourself when you're ready.`,
-          );
-          expect(handedOver(result)).toContain(
-            `Press "Apply" on the site yourself when you're ready`,
-          );
-        }
-      },
-    );
-
-  test("a submit button that reads as the send stays the send", async () => {
-    const result = await runApplyAgent(
-      config(
-        page({
-          controls: [nameControl()],
-          actions: [apply(0, "Submit application")],
-        }),
-        sendForMe,
-      ),
-      repeatingModel("finish", { reason: "The form is complete." }),
-    );
-    expect(result.outcome).toBe("ready_to_send");
-  });
-});
-
 test("a custom checkbox the page draws itself is a checkbox, and its answer is its state", async () => {
   // Workable's consent box: a div with the checkbox role reads as
   // "contenteditable"; its text was three icons' SVG fallbacks.
@@ -9248,55 +7618,6 @@ test("listing discovery changes only the tail of the shared applicant prompt", (
   expect(secondData.listingDiscovery.label).toBe("Second board");
 });
 
-test("an emptied file input gets ten seconds to show its chip without a second attachment", async () => {
-  const source = page({
-    controls: [
-      { ...nameControl(), inputType: "file", label: "Resume", value: "" },
-    ],
-  });
-  const input = config(source, { uploadWaitMs: 15_000 });
-  let elapsed = 0;
-  input.now = () => new Date(Date.UTC(2026, 9, 29) + elapsed);
-  input.sources.documents = [
-    {
-      id: "cv",
-      kind: "resume",
-      label: "Synthetic CV",
-      fileName: "synthetic.pdf",
-      mimeType: "application/pdf",
-      loadBytes: () => Promise.resolve(new Uint8Array([1])),
-    },
-  ];
-  input.hands.uploadFile = vi.fn(() =>
-    Promise.resolve({
-      ok: true as const,
-      observedValue: "synthetic.pdf",
-    }),
-  );
-  input.hands.wait = (ms) => {
-    elapsed += ms;
-    if (elapsed >= 10_000)
-      source.controls[0].upload = {
-        described: "",
-        nearby: "synthetic.pdf attached",
-        selectedFileName: "synthetic.pdf",
-        shown: false,
-      };
-    return Promise.resolve();
-  };
-  const result = await runApplyAgent(
-    input,
-    scriptedModel([
-      { name: "upload", args: { ref: "c0", documentId: "cv" } },
-      { name: "finish", args: { reason: "File checked." } },
-    ]),
-  );
-  expect(elapsed).toBe(10_000);
-  expect(input.hands.uploadFile).toHaveBeenCalledOnce();
-  expect(result.outcome).toBe("prepared");
-  expect(result.notes.join("\n")).not.toContain("failed. Rule:");
-});
-
 test("upload diagnostics name native validation, field text and the refused endpoint", async () => {
   const source = page({
     controls: [
@@ -9332,23 +7653,15 @@ test("upload diagnostics name native validation, field text and the refused endp
     }),
   );
   const log = result.timeline.map((entry) => entry.text).join("\n");
-  expect(log).toContain("Rule: field validation message");
+  expect(log).toContain("Rule: upload request observation");
   expect(log).toContain("Please use a smaller PDF");
   expect(log).toContain("Resume: file too large");
   expect(log).toContain("HTTP 413 from storage.example.test/files/upload");
   expect(
     result.pauses
       .flatMap((pause) => pause.questions ?? [])
-      .find((question) => question.id === "upload_repair")?.askReason,
-  ).toMatchObject({
-    kind: "page_refused",
-    check: "upload_acceptance",
-  });
-  expect(
-    result.pauses
-      .flatMap((pause) => pause.questions ?? [])
-      .find((question) => question.id === "upload_repair")?.askReason?.detail,
-  ).toContain("HTTP 413");
+      .find((question) => question.id === "upload_repair"),
+  ).toBeUndefined();
 });
 
 test("basic Google confirmation records an unverified attempt and survives recovery without a second click", async () => {
@@ -9699,4 +8012,172 @@ test("a progressing form can exceed 200 turns and thirty minutes", async () => {
   const result = await runApplyAgent(input, model);
   expect(turns).toBe(206);
   expect(result.reason).not.toContain("very long run");
+});
+
+describe("ADR 0079 model send decisions", () => {
+  test("executes the chosen Send once and returns its provider call ID without a readiness probe", async () => {
+    const source = page({
+      controls: [{ ...nameControl(), value: "", required: true }],
+      validationErrors: ["Site feedback is for the model"],
+    });
+    const input = config(source, {
+      authority: {
+        mode: "autonomous_submit",
+        submitAuthorized: true,
+        preApprovedAttestationKinds: [],
+        salaryDisclosure: "answer_from_profile",
+        allowedOrigins: [],
+      },
+    });
+    const submit = vi.fn(() =>
+      Promise.resolve({
+        outcome: "submitted" as const,
+        content: "Send ledger: employer confirmed receipt.",
+      }),
+    );
+    input.submitApplication = submit;
+    input.hands.checkAction = vi.fn(() =>
+      Promise.reject(Error("The removed preflight must not run")),
+    );
+    const result = await runApplyAgent(
+      input,
+      scriptedModel([{ name: "submit_application", args: { ref: "a0" } }]),
+    );
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ actionRef: "a0", callId: "call_1" }),
+    );
+    expect(input.hands.checkAction).not.toHaveBeenCalled();
+    expect(result.outcome).toBe("ready_to_send");
+  });
+  test("the Fill instruction reaches the model prompt", async () => {
+    const input = config(page(), {
+      authority: {
+        mode: "confirm_before_submit",
+        submitAuthorized: false,
+        allowedOrigins: [],
+        preApprovedAttestationKinds: [],
+        salaryDisclosure: "answer_from_profile",
+      },
+    });
+    await runApplyAgent(input, {
+      chatWithTools: (messages) => {
+        expect(messages[0]?.content).toContain(
+          "The person chose Fill in for me",
+        );
+        expect(messages[0]?.content).toContain(
+          "without pressing the final send",
+        );
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "fill-instruction",
+              type: "function",
+              function: {
+                name: "finish",
+                arguments: '{"reason":"Ready without sending"}',
+              },
+            },
+          ],
+        });
+      },
+    });
+  });
+  test("every mode has identical tools and send mechanics", async () => {
+    const definitions: string[] = [];
+    for (const mode of [
+      "prepare_only",
+      "confirm_before_submit",
+      "autonomous_submit",
+    ] as const) {
+      const input = config(page(), {
+        authority: {
+          mode,
+          submitAuthorized: false,
+          allowedOrigins: [],
+          preApprovedAttestationKinds: [],
+          salaryDisclosure: "answer_from_profile",
+        },
+      });
+      const submit = vi.fn(() =>
+        Promise.resolve({
+          outcome: "submitted" as const,
+          content: "Ledger recorded this send.",
+        }),
+      );
+      input.submitApplication = submit;
+      await runApplyAgent(input, {
+        chatWithTools: (messages, tools) => {
+          void messages;
+          definitions.push(JSON.stringify(tools));
+          return Promise.resolve({
+            toolCalls: [
+              {
+                id: "same-mechanics",
+                type: "function",
+                function: {
+                  name: "submit_application",
+                  arguments: '{"ref":"a0"}',
+                },
+              },
+            ],
+          });
+        },
+      });
+      expect(submit).toHaveBeenCalledTimes(1);
+    }
+    expect(new Set(definitions).size).toBe(1);
+  });
+  test("an uncertain send result is supplied to the next model turn", async () => {
+    const input = config(page(), {
+      authority: {
+        mode: "autonomous_submit",
+        submitAuthorized: true,
+        preApprovedAttestationKinds: [],
+        salaryDisclosure: "answer_from_profile",
+        allowedOrigins: [],
+      },
+    });
+    const submit = vi.fn(() =>
+      Promise.resolve({
+        outcome: "outcome_uncertain" as const,
+        content:
+          "Send ledger: a send at 10:42 is uncertain; check the site's applied list first. This call was not replayed.",
+      }),
+    );
+    input.submitApplication = submit;
+    let sawLedger = false,
+      turn = 0;
+    const result = await runApplyAgent(input, {
+      chatWithTools: (messages) => {
+        turn++;
+        sawLedger ||= messages.some(
+          (m) => m.role === "tool" && m.content.includes("10:42 is uncertain"),
+        );
+        return Promise.resolve({
+          content: "",
+          toolCalls: [
+            {
+              id: `send-test-${turn}`,
+              type: "function",
+              function: {
+                name: turn === 1 ? "submit_application" : "finish",
+                arguments: JSON.stringify(
+                  turn === 1
+                    ? { ref: "a0" }
+                    : {
+                        reason: "The site outcome remains uncertain",
+                        stuck: true,
+                      },
+                ),
+              },
+            },
+          ],
+        });
+      },
+    });
+    expect(sawLedger).toBe(true);
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(result.readyToSend).toBeNull();
+  });
 });

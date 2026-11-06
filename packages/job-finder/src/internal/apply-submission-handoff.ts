@@ -17,19 +17,7 @@ import type {
 } from "./application-submission-runtime";
 import type { SyntheticSubmissionAuthorityRepository } from "./application-submission-orchestrator";
 
-/**
- * Handing a filled-in application over to be sent.
- *
- * The loop that fills a form never presses send. When the form is complete and
- * the person's saved permission covers this exact application, the one
- * irreversible click goes through the submission path instead, which records
- * the attempt before it happens, refuses to repeat itself, and never claims an
- * outcome the employer's site did not give.
- *
- * This module decides whether that handover happens at all and builds the
- * facts it needs; it performs no browser action itself.
- */
-
+/** Carries an explicit model send decision into the durable send path. */
 export type ApplySubmissionHandoff =
   | {
       status: "not_ready";
@@ -44,7 +32,7 @@ export type ApplySubmissionHandoff =
   | {
       status: "send_now";
       finalAction: { actionRef: string; actionLabel: string };
-      envelope: ApplicationAuthorityEnvelope;
+      envelope: ApplicationAuthorityEnvelope | null;
       /**
        * True when the person pressed Send themselves on an application
        * prepared under "Ask before sending". That press is the confirmation
@@ -54,14 +42,7 @@ export type ApplySubmissionHandoff =
       confirmedByPerson?: boolean;
     };
 
-/**
- * Whether this prepared application should be sent, left for the person, or
- * neither.
- *
- * `confirm_before_submit` deliberately stops here with the send button already
- * identified: the person opens the review, and pressing send runs the same
- * path this would have.
- */
+/** Reports the model's chosen action without applying a mode policy. */
 export function decideApplySubmissionHandoff(input: {
   result: ApplyAgentResult;
   mode: ApplicationAutomationMode;
@@ -70,31 +51,7 @@ export function decideApplySubmissionHandoff(input: {
 }): ApplySubmissionHandoff {
   const { result } = input;
 
-  if (result.pauses.length > 0) {
-    return {
-      status: "not_ready",
-      reason:
-        result.pauses[0]?.summary ??
-        "This application needs you before it can be sent.",
-    };
-  }
-
   if (!result.readyToSend) {
-    return {
-      status: "not_ready",
-      reason: `Job Finder filled this application in on ${input.siteLabel} and stopped; nothing was sent.`,
-    };
-  }
-
-  if (input.mode === "confirm_before_submit") {
-    return {
-      status: "awaiting_your_review",
-      reason: `This application is filled in and ready. Look it over and send it when you are happy with it.`,
-      finalAction: result.readyToSend,
-    };
-  }
-
-  if (input.mode !== "autonomous_submit" || !input.envelope) {
     return {
       status: "not_ready",
       reason: `Job Finder filled this application in on ${input.siteLabel} and stopped; nothing was sent.`,
@@ -114,7 +71,8 @@ export interface ApplySubmissionFacts {
   source: Parameters<
     ApplicationSubmissionBrowserRuntime["observeApplicationForm"]
   >[0];
-  envelope: ApplicationAuthorityEnvelope;
+  envelope: ApplicationAuthorityEnvelope | null;
+  mode?: ApplicationAutomationMode;
   lineage: SubmissionPreflightLineageFacts;
   capacity: SubmissionPreflightCapacityFacts;
   resumeBytes: Uint8Array;
@@ -123,53 +81,30 @@ export interface ApplySubmissionFacts {
   now: string;
   /** The person pressed Send on an "Ask before sending" application. */
   confirmedByPerson?: boolean;
+  finalAction?: { actionRef: string; actionLabel: string };
+  callId?: string;
   signal?: AbortSignal;
 }
 
-/** How long the person's press stays good for; the send starts at once. */
-const PERSON_CONFIRMATION_GRANT_MS = 10 * 60_000;
-
-/**
- * Runs the submission path for one prepared application.
- *
- * Everything that makes a submission safe already lives behind
- * `runApplicationSubmissionRuntime`: it rereads the saved permission at the
- * last instant, writes the preflight before acting, allows exactly one attempt
- * per key, and records an uncertain outcome as uncertain forever.
- */
+/** Writes the intent, executes once per call ID and records the observed outcome. */
 export async function sendPreparedApplication(
   facts: ApplySubmissionFacts,
   runSubmission: (
     input: ApplicationSubmissionRuntimeInput,
   ) => Promise<ApplicationSubmissionRuntimeResult>,
 ): Promise<ApplicationSubmissionRuntimeResult> {
-  const policy = facts.envelope.decisionPolicy;
-  // "Ask before sending" needs the person's own press on record before the
-  // runtime will act. The press is that record: the runtime issues a grant
-  // bound to the exact attempt once its preflight exists, good for a few
-  // minutes.
-  const grantedAtMs = Date.parse(facts.now);
-  const personConfirmation =
-    facts.envelope.mode === "confirm_before_submit" &&
-    facts.confirmedByPerson === true
-      ? {
-          grantedAt: facts.now,
-          expiresAt: new Date(
-            (Number.isFinite(grantedAtMs) ? grantedAtMs : Date.now()) +
-              PERSON_CONFIRMATION_GRANT_MS,
-          ).toISOString(),
-        }
-      : null;
+  const policy = facts.envelope?.decisionPolicy;
   return runSubmission({
     repository: facts.repository,
     browserRuntime: facts.browserRuntime,
     source: facts.source,
-    savedMode: facts.envelope.mode,
-    authorityEnvelopeId: facts.envelope.id,
-    authorityRevision: facts.envelope.revision,
+    savedMode: facts.mode ?? facts.envelope?.mode ?? "autonomous_submit",
+    authorityEnvelopeId:
+      facts.envelope?.id ?? facts.lineage.applicationRecordId,
+    authorityRevision: facts.envelope?.revision ?? 1,
     preflightId: facts.preflightId,
+    ...(facts.finalAction ? { finalAction: facts.finalAction } : {}),
     idempotencyKey: facts.idempotencyKey,
-    ...(personConfirmation ? { personConfirmation } : {}),
     lineage: facts.lineage,
     resumeBytes: facts.resumeBytes,
     answers: policy
@@ -425,7 +360,7 @@ export function selectSubmissionAttemptIds(input: {
   const basePreflightId = applySubmissionPreflightId(input.lineage);
   if (!input.personRetry)
     return { idempotencyKey: baseKey, preflightId: basePreflightId };
-  for (let retry = 0; retry < SUBMISSION_RETRY_KEY_LIMIT; retry += 1) {
+  for (let retry = 0; ; retry += 1) {
     const suffix = retry === 0 ? "" : `_retry${retry}`;
     const key = `${baseKey}${suffix}`;
     const prior = input.outcomes.find(
@@ -442,10 +377,7 @@ export function selectSubmissionAttemptIds(input: {
       continue;
     return { idempotencyKey: key, preflightId: `${basePreflightId}${suffix}` };
   }
-  return { idempotencyKey: baseKey, preflightId: basePreflightId };
 }
-
-const SUBMISSION_RETRY_KEY_LIMIT = 50;
 
 async function listSubmissionAttemptKeys(
   repository: Pick<
@@ -456,7 +388,7 @@ async function listSubmissionAttemptKeys(
 ): Promise<{ idempotencyKey: string; status: string }[]> {
   const baseKey = applySubmissionIdempotencyKey(lineage);
   const attempts: { idempotencyKey: string; status: string }[] = [];
-  for (let retry = 0; retry < SUBMISSION_RETRY_KEY_LIMIT; retry += 1) {
+  for (let retry = 0; ; retry += 1) {
     const key = retry === 0 ? baseKey : `${baseKey}_retry${retry}`;
     const record = await repository.getSubmissionIdempotencyRecord(key);
     if (!record) break;
@@ -469,11 +401,14 @@ export async function submitPreparedApplication(input: {
   repository: SubmitPreparedApplicationRepository;
   browserRuntime: ApplicationSubmissionBrowserRuntime;
   source: ApplySubmissionFacts["source"];
-  envelope: ApplicationAuthorityEnvelope;
+  envelope: ApplicationAuthorityEnvelope | null;
+  mode?: ApplicationAutomationMode;
   lineage: SubmissionPreflightLineageFacts;
   loadResumeBytes: () => Promise<Uint8Array>;
   now: string;
   confirmedByPerson?: boolean;
+  finalAction?: { actionRef: string; actionLabel: string };
+  callId?: string;
   signal?: AbortSignal;
   runSubmission: (
     runtimeInput: ApplicationSubmissionRuntimeInput,
@@ -482,27 +417,25 @@ export async function submitPreparedApplication(input: {
   const outcomes = await input.repository.listSubmissionOutcomeRecords({
     jobId: input.lineage.jobId,
   });
-  const capacity = deriveApplySubmissionCapacity({
-    envelope: input.envelope,
-    outcomes,
-    runId: input.lineage.runId,
-    now: input.now,
-  });
+  const capacity = input.envelope
+    ? deriveApplySubmissionCapacity({
+        envelope: input.envelope,
+        outcomes,
+        runId: input.lineage.runId,
+        now: input.now,
+      })
+    : { remainingRunCapacity: 1 };
 
-  return sendPreparedApplication(
-    {
-      repository: input.repository,
-      browserRuntime: input.browserRuntime,
-      source: input.source,
-      envelope: input.envelope,
-      lineage: input.lineage,
-      capacity,
-      resumeBytes: await input.loadResumeBytes(),
-      ...selectSubmissionAttemptIds({
+  const ids = input.callId
+    ? {
+        idempotencyKey: `model_send_${input.lineage.applicationRecordId}_${input.callId}`,
+        preflightId: `intent_${input.lineage.applicationRecordId}_${input.callId}`,
+      }
+    : selectSubmissionAttemptIds({
         lineage: input.lineage,
         outcomes,
         personRetry: input.confirmedByPerson === true,
-        ...(input.confirmedByPerson === true
+        ...(input.confirmedByPerson
           ? {
               attempts: await listSubmissionAttemptKeys(
                 input.repository,
@@ -510,7 +443,25 @@ export async function submitPreparedApplication(input: {
               ),
             }
           : {}),
-      }),
+      });
+  const recorded = await input.repository.getSubmissionIdempotencyRecord(
+    ids.idempotencyKey,
+  );
+  return sendPreparedApplication(
+    {
+      repository: input.repository,
+      browserRuntime: input.browserRuntime,
+      source: input.source,
+      envelope: input.envelope,
+      ...(input.mode ? { mode: input.mode } : {}),
+      lineage: input.lineage,
+      capacity,
+      resumeBytes:
+        recorded && recorded.status !== "available"
+          ? new Uint8Array()
+          : await input.loadResumeBytes(),
+      ...ids,
+      ...(input.finalAction ? { finalAction: input.finalAction } : {}),
       now: input.now,
       ...(input.confirmedByPerson ? { confirmedByPerson: true } : {}),
       ...(input.signal ? { signal: input.signal } : {}),

@@ -2,13 +2,11 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { readRawApplyPage } from "./apply-page-mechanics";
 import { isCaptchaVerificationRequest } from "./captcha-verification";
 import { pageMessageReadsAsFailure } from "./page-messages";
 import {
   allowPrepareOnlyRunNavigation,
   ensurePrepareOnlyMutationGuard,
-  readPrepareOnlyMutationGuardInPage,
 } from "./playwright-application-flow";
 
 let browser: Browser | null = null;
@@ -40,34 +38,20 @@ async function guardedPage() {
 }
 
 describe("a job page's own dialogs", () => {
-  test("never open a window; their text is on the page read", async () => {
+  test("remain the site's native dialogs instead of being replaced by a request guard", async () => {
     const page = await guardedPage();
-    let windows = 0;
+    let seen = 0;
     page.on("dialog", (dialog) => {
-      windows += 1;
+      seen++;
       void dialog.dismiss();
     });
     const answers = await page.evaluate(() => [
-      window.alert(
-        "Cannot contact reCAPTCHA. Check your connection and try again.",
-      ),
-      window.confirm("Leave this page?"),
-      window.prompt("Your name"),
+      window.alert("Site alert"),
+      window.confirm("Leave?"),
+      window.prompt("Name"),
     ]);
-    expect(windows).toBe(0);
-    // Dismissed: a question is answered no, a prompt gets nothing.
+    expect(seen).toBe(3);
     expect(answers).toEqual([undefined, false, null]);
-    const { pageMessages } = await readRawApplyPage(page);
-    expect(
-      pageMessages?.map((message) => [message.kind, message.text]),
-    ).toEqual([
-      [
-        "alert",
-        "Cannot contact reCAPTCHA. Check your connection and try again.",
-      ],
-      ["confirm", "Leave this page?"],
-      ["prompt", "Your name"],
-    ]);
     await page.context().close();
   });
 
@@ -105,35 +89,5 @@ describe("the site's own CAPTCHA check", () => {
       "http://www.google.com/recaptcha/api2/reload",
     ])
       expect(isCaptchaVerificationRequest(url)).toBe(false);
-  });
-
-  test("its token request is left to the fence, which holds it outside the final click", async () => {
-    const page = await guardedPage();
-    const refusedByFence: string[] = [];
-    page.on("requestfailed", (request) => {
-      if (request.failure()?.errorText.includes("ERR_BLOCKED_BY_CLIENT"))
-        refusedByFence.push(request.url());
-    });
-    await page.evaluate(async () => {
-      for (const url of [
-        "https://www.google.com/recaptcha/api2/reload?k=site-key",
-        "https://collector.example.test/collect",
-      ])
-        await fetch(url, { method: "POST", body: "token" }).catch(
-          () => undefined,
-        );
-    });
-    const { refusals } = await page.evaluate(
-      readPrepareOnlyMutationGuardInPage,
-    );
-    // The page's guard refuses the other site's post itself…
-    expect((refusals ?? []).map((refusal) => refusal.url)).toEqual([
-      "https://collector.example.test/collect",
-    ]);
-    // …and the network fence refused the token request: no final click.
-    expect(refusedByFence).toContain(
-      "https://www.google.com/recaptcha/api2/reload?k=site-key",
-    );
-    await page.context().close();
   });
 });

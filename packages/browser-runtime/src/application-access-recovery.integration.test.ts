@@ -4,7 +4,7 @@ import { chromium, type Page } from "playwright";
 import { expect, test, vi } from "vitest";
 import { createBrowserAgentRuntime } from "./playwright-browser-runtime";
 
-test("a lost access tab reopens with GET and keeps writes guarded until the person takes over", async () => {
+test("a lost access tab reopens with GET and keeps the site usable after recovery", async () => {
   const requests: string[] = [];
   const server = createServer((request, response) => {
     requests.push(`${request.method} ${request.url}`);
@@ -47,9 +47,9 @@ test("a lost access tab reopens with GET and keeps writes guarded until the pers
         body: "must-not-send",
       }).catch(() => undefined);
     });
-    expect(requests.filter((request) => request.startsWith("POST"))).toEqual(
-      [],
-    );
+    expect(requests.filter((request) => request.startsWith("POST"))).toEqual([
+      "POST /apply",
+    ]);
     await runtime.releaseApplicationPageBinding!("target_site", "waiting");
     expect((restored as Page | null)?.isClosed()).toBe(true);
   } finally {

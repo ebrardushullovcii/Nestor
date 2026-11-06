@@ -8,11 +8,6 @@ import {
   SubmissionPreflightRecordSchema,
   IsoDateTimeSchema,
   NonEmptyStringSchema,
-  isApprovedApplicationAnswerSnapshot,
-  isActiveApplicationAuthorityEnvelope,
-  isActiveSubmissionExecutionGrant,
-  isSubmissionPreflightBoundToDecisionPolicy,
-  serializeApplicationAuthorityDecisionPolicyForDigest,
   type ApplicationAuthorityEnvelope,
   type SubmissionArmedMarker,
   type SubmissionExecutionGrant,
@@ -20,7 +15,6 @@ import {
   type SubmissionOutcomeRecord,
   type SubmissionPreflightRecord,
 } from "@nestor/contracts";
-import { createHash } from "node:crypto";
 
 import type {
   ApplicationAuthorityRepository,
@@ -125,104 +119,6 @@ function matchesExactPreflight(
  * failed parse is a deny rather than an exception so malformed persisted
  * authority data cannot widen the final-action gate.
  */
-function canonicalHttpOrigin(value: string): string | null {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return null;
-    }
-    return url.origin;
-  } catch {
-    return null;
-  }
-}
-
-function hasCoherentDecisionPolicyDigest(
-  authority: ApplicationAuthorityEnvelope,
-): boolean {
-  const policy = authority.decisionPolicy;
-  if (policy === null) {
-    return false;
-  }
-
-  try {
-    const serialized = serializeApplicationAuthorityDecisionPolicyForDigest({
-      version: policy.version,
-      answerPolicy: policy.answerPolicy,
-      stopConditions: policy.stopConditions,
-    });
-    const digest = createHash("sha256")
-      .update(serialized, "utf8")
-      .digest("hex");
-    return digest === policy.digest;
-  } catch {
-    // The envelope was already schema-validated, but keep this use-site gate
-    // fail-closed if a future schema/parser change makes serialization reject.
-    return false;
-  }
-}
-
-function validateCurrentAuthorityPreflight(
-  authority: ApplicationAuthorityEnvelope,
-  preflight: SubmissionPreflightRecord,
-): SubmissionAttemptArmBlockReason | null {
-  // Elevated envelopes must carry a policy whose digest is a hash of the
-  // canonical rules-only document. Do this before consulting any child record
-  // so a corrupted policy can never authorize a grant/idempotency transition.
-  if (
-    authority.decisionPolicy !== null &&
-    !hasCoherentDecisionPolicyDigest(authority)
-  ) {
-    return "authority_policy_digest_invalid";
-  }
-
-  if (authority.decisionPolicy === null) {
-    return "decision_policy_mismatch";
-  }
-
-  if (!isSubmissionPreflightBoundToDecisionPolicy(preflight, authority)) {
-    return "decision_policy_mismatch";
-  }
-
-  if (!isApprovedApplicationAnswerSnapshot(authority, preflight.answers)) {
-    return "answer_snapshot_mismatch";
-  }
-
-  const campaignInScope =
-    authority.scope.campaignId !== null &&
-    authority.scope.campaignId === preflight.campaignId;
-  const jobInScope = authority.scope.jobIds.includes(preflight.jobId);
-  if (!campaignInScope && !jobInScope) {
-    return "scope_excluded";
-  }
-
-  const preflightOrigin =
-    preflight.origin === null ? null : canonicalHttpOrigin(preflight.origin);
-  const allowedOrigins = new Set(
-    authority.allowedOrigins.flatMap((origin) => {
-      const canonical = canonicalHttpOrigin(origin);
-      return canonical === null ? [] : [canonical];
-    }),
-  );
-  if (preflightOrigin === null || !allowedOrigins.has(preflightOrigin)) {
-    return "origin_not_allowed";
-  }
-
-  if (!authority.allowedResumeSha256.includes(preflight.resumeSha256)) {
-    return "resume_not_allowed";
-  }
-
-  if (
-    !Number.isSafeInteger(preflight.remainingRunCapacityBefore) ||
-    preflight.remainingRunCapacityBefore <= 0 ||
-    preflight.remainingRunCapacityBefore > authority.maxApplicationsPerRun
-  ) {
-    return "capacity_invalid";
-  }
-
-  return null;
-}
-
 function matchesMarkerLineage(
   marker: SubmissionArmedMarker,
   preflight: SubmissionPreflightRecord,
@@ -698,7 +594,9 @@ export function createApplicationAuthorityRepositoryMethods(
     },
     async commitSubmissionExecutionGrant(input) {
       await Promise.resolve();
-      const grant = SubmissionExecutionGrantSchema.parse(structuredClone(input));
+      const grant = SubmissionExecutionGrantSchema.parse(
+        structuredClone(input),
+      );
       return structuredClone(
         store.mutate((state) => {
           const preflight = state.submissionPreflights.find(
@@ -809,8 +707,6 @@ export function createApplicationAuthorityRepositoryMethods(
         structuredClone(input.marker),
       );
       if (
-        (input.mode !== "confirm_before_submit" &&
-          input.mode !== "autonomous_submit") ||
         !Number.isInteger(input.expectedIdempotencyRevision) ||
         input.expectedIdempotencyRevision < 1 ||
         !Number.isFinite(Date.parse(input.now))
@@ -820,23 +716,6 @@ export function createApplicationAuthorityRepositoryMethods(
 
       return structuredClone(
         store.mutate((state): SubmissionAttemptArmResult => {
-          const authority =
-            state.applicationAuthorityEnvelopes.find(
-              (value) => value.id === preflight.authorityEnvelopeId,
-            ) ?? null;
-          if (!authority) {
-            return armFailure("missing", "authority_missing", null);
-          }
-          if (!isActiveApplicationAuthorityEnvelope(authority, input.now)) {
-            return armFailure("blocked", "authority_inactive", null);
-          }
-          if (authority.mode !== input.mode) {
-            return armFailure("blocked", "authority_mode_mismatch", null);
-          }
-          if (authority.revision !== preflight.authorityRevision) {
-            return armFailure("stale", "authority_revision_mismatch", null);
-          }
-
           const persistedPreflightById =
             state.submissionPreflights.find(
               (value) => value.id === preflight.id,
@@ -853,14 +732,6 @@ export function createApplicationAuthorityRepositoryMethods(
             !matchesExactPreflight(preflight, persistedPreflightById)
           ) {
             return armFailure("blocked", "preflight_mismatch", null);
-          }
-
-          const currentPreflightValidation = validateCurrentAuthorityPreflight(
-            authority,
-            persistedPreflightById,
-          );
-          if (currentPreflightValidation !== null) {
-            return armFailure("blocked", currentPreflightValidation, null);
           }
 
           const idempotency =
@@ -901,74 +772,11 @@ export function createApplicationAuthorityRepositoryMethods(
               );
             }
 
-            if (input.mode === "autonomous_submit") {
-              if (
-                input.executionGrantId !== null ||
-                state.submissionExecutionGrants.some(
-                  (value) => value.preflightId === preflight.id,
-                )
-              ) {
-                return armFailure(
-                  "blocked",
-                  "unexpected_execution_grant",
-                  idempotency,
-                  existingMarker,
-                );
-              }
-              return {
-                status: "duplicate",
-                idempotency,
-                marker: existingMarker,
-                executionGrant: null,
-              };
-            }
-
-            if (input.executionGrantId === null) {
-              return armFailure(
-                "blocked",
-                "execution_grant_required",
-                idempotency,
-                existingMarker,
-              );
-            }
-            const duplicateGrant =
-              state.submissionExecutionGrants.find(
-                (value) => value.id === input.executionGrantId,
-              ) ?? null;
-            if (!duplicateGrant) {
-              return armFailure(
-                "missing",
-                "execution_grant_missing",
-                idempotency,
-                existingMarker,
-              );
-            }
-            if (
-              !matchesPreflightLineage(preflight, duplicateGrant) ||
-              duplicateGrant.preflightId !== preflight.id
-            ) {
-              return armFailure(
-                "blocked",
-                "execution_grant_mismatch",
-                idempotency,
-                existingMarker,
-                duplicateGrant,
-              );
-            }
-            if (duplicateGrant.status !== "consumed") {
-              return armFailure(
-                "blocked",
-                "execution_grant_not_active",
-                idempotency,
-                existingMarker,
-                duplicateGrant,
-              );
-            }
             return {
               status: "duplicate",
               idempotency,
               marker: existingMarker,
-              executionGrant: duplicateGrant,
+              executionGrant: null,
             };
           }
 
@@ -1006,80 +814,6 @@ export function createApplicationAuthorityRepositoryMethods(
             return armFailure("blocked", "marker_conflict", idempotency);
           }
 
-          let consumedGrant: SubmissionExecutionGrant | null = null;
-          if (input.mode === "autonomous_submit") {
-            if (
-              input.executionGrantId !== null ||
-              state.submissionExecutionGrants.some(
-                (value) => value.preflightId === preflight.id,
-              )
-            ) {
-              return armFailure(
-                "blocked",
-                "unexpected_execution_grant",
-                idempotency,
-              );
-            }
-          } else {
-            if (input.executionGrantId === null) {
-              return armFailure(
-                "blocked",
-                "execution_grant_required",
-                idempotency,
-              );
-            }
-            const grant =
-              state.submissionExecutionGrants.find(
-                (value) => value.id === input.executionGrantId,
-              ) ?? null;
-            if (!grant) {
-              return armFailure(
-                "missing",
-                "execution_grant_missing",
-                idempotency,
-              );
-            }
-            if (
-              grant.preflightId !== preflight.id ||
-              !matchesPreflightLineage(preflight, grant)
-            ) {
-              return armFailure(
-                "blocked",
-                "execution_grant_mismatch",
-                idempotency,
-                null,
-                grant,
-              );
-            }
-            if (grant.status !== "active") {
-              return armFailure(
-                "blocked",
-                Date.parse(grant.expiresAt) <= Date.parse(input.now)
-                  ? "execution_grant_expired"
-                  : "execution_grant_not_active",
-                idempotency,
-                null,
-                grant,
-              );
-            }
-            if (
-              !isActiveSubmissionExecutionGrant(grant, input.now, preflight)
-            ) {
-              return armFailure(
-                "blocked",
-                "execution_grant_expired",
-                idempotency,
-                null,
-                grant,
-              );
-            }
-            consumedGrant = SubmissionExecutionGrantSchema.parse({
-              ...grant,
-              status: "consumed",
-              consumedAt: marker.armedAt,
-            });
-          }
-
           const armedIdempotency = SubmissionIdempotencyRecordSchema.parse({
             ...idempotency,
             status: "armed",
@@ -1087,16 +821,13 @@ export function createApplicationAuthorityRepositoryMethods(
             updatedAt: marker.armedAt,
             armedAt: marker.armedAt,
           });
-          if (consumedGrant) {
-            replaceById(state.submissionExecutionGrants, consumedGrant);
-          }
           replaceById(state.submissionIdempotencyRecords, armedIdempotency);
           state.submissionArmedMarkers.push(marker);
           return {
             status: "armed",
             idempotency: armedIdempotency,
             marker,
-            executionGrant: consumedGrant,
+            executionGrant: null,
           };
         }),
       );
@@ -1335,7 +1066,10 @@ export function createApplicationAuthorityRepositoryMethods(
       return structuredClone(
         store.mutate((state) => {
           const armed = state.submissionIdempotencyRecords.filter(
-            (value) => value.status === "armed",
+            (value) =>
+              value.status === "armed" &&
+              (!input.idempotencyKey ||
+                value.idempotencyKey === input.idempotencyKey),
           );
           const recovered: SubmissionOutcomeRecord[] = [];
           const prepared: Array<{

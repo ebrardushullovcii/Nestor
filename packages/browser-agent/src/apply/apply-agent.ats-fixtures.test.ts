@@ -447,7 +447,7 @@ function createHarnessModel(
     const send = seen.actions.find(
       (action) => action.visible && /submit|send/i.test(action.label),
     );
-    if (send && !done.has(`${here}:send`)) {
+    if (send && sendAllowed && !done.has(`${here}:send`)) {
       done.add(`${here}:send`);
       return { toolCalls: [call("submit_application", { ref: send.ref })] };
     }
@@ -456,8 +456,12 @@ function createHarnessModel(
     };
   };
 
+  let sendAllowed = true;
   return {
     chatWithTools: (_messages, _tools, options) => {
+      sendAllowed = !String(_messages[0]?.content).includes(
+        "The person chose Fill in for me",
+      );
       if (_tools[0]?.function.name === "report_answer_checks") {
         const asked = JSON.parse(String(_messages[1]?.content ?? "{}")) as {
           applicant: {

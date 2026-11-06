@@ -1,3 +1,4 @@
+import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { withNavigationLiveness } from "./browser-navigation";
 import { tracePageHands, tracePage } from "./trace-page";
 import { selfLimitTimeout, selfLimitSlice } from "@nestor/core";
@@ -128,7 +129,7 @@ function mutationCounter(page: Page): { count: number } {
   return counter;
 }
 
-export async function readRawApplyPage(page: Page): Promise<RawApplyPage> {
+async function collectRawApplyPage(page: Page): Promise<RawApplyPage> {
   watchPageSelfLimits(page);
   const counter = mutationCounter(page);
   const raw = await readRawApplyPageContent(page);
@@ -3601,4 +3602,9 @@ export function createPlaywrightApplyPageSession(input: {
     },
     mechanics: createPlaywrightApplyPageMechanics,
   });
+}
+
+/** Reads use the shared browser connection liveness; navigation is a tool error. */
+export function readRawApplyPage(page: Page): Promise<RawApplyPage> {
+  return withBrowserReadLiveness(page, () => collectRawApplyPage(page));
 }

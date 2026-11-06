@@ -369,8 +369,6 @@ function googleHandoff(
   )
     return "Enter your Google password yourself on the website, then continue.";
   if (page.accountWindow?.refusal) return page.accountWindow.refusal.detail;
-  if (page.accountWindow && page.accountWindow.actionsLeft <= 0)
-    return "Nestor's allowance for this Google step ran out before it finished. Finish the Google step yourself, then continue.";
   if (ctx.entry !== "basic" && googleConsentPath(page))
     return `Nestor cannot prove this request is limited to your name, email and profile picture. Review the Google access request yourself.${entryShape ? ` Recorded entry: ${entryShape}.` : ""}`;
   if (!ctx.intendedEmail && !ctx.selectedEmail)
@@ -475,12 +473,7 @@ export function withBrowserPermissions(
     if (!hands.renewAccountWindow) return;
     const after = await hands.observe();
     const surface = after.accountWindow;
-    if (
-      !surface ||
-      surface.refusal ||
-      surface.actionsLeft <= 0 ||
-      stepShape(after) === stepShape(before)
-    )
+    if (!surface || surface.refusal || stepShape(after) === stepShape(before))
       return;
     const fresh = await context();
     if (

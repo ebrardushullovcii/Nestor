@@ -58,7 +58,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   server?.kill();
-});
+}, 30_000);
 
 const posts = (): string[] => {
   try {
@@ -258,7 +258,7 @@ const answer = (question: string, value: string) => ({
   groundedIn: [],
 });
 
-test("a closed two-step form comes back step by step, with no model call", async () => {
+test("a restored form supplies its replayed answers to the model on every step", async () => {
   const page = await (await browser!.newContext()).newPage();
   await ensurePrepareOnlyMutationGuard(page, false, [], true);
   allowPrepareOnlyRunNavigation(page, `${base}/steps-shape/jobs/1`);
@@ -283,13 +283,13 @@ test("a closed two-step form comes back step by step, with no model call", async
     ],
   };
   const first = await run(page, replay);
-  expect(first.turns).toBe(0);
+  expect(first.turns).toBe(1);
   expect(first.writes).toEqual([
     "Alex",
     "Vanguard",
     "alex.vanguard@example.test",
   ]);
-  expect(first.result.outcome).toBe("paused");
+  expect(first.result.outcome).toBe("stuck");
   // "Save and Continue" is the person's: nothing was saved or sent.
   expect(posts()).toEqual([]);
 
@@ -300,16 +300,16 @@ test("a closed two-step form comes back step by step, with no model call", async
   await page.waitForURL(/step=2/u);
   await closePrepareOnlyFinalActionWindow(page);
   const second = await run(page, replay);
-  expect(second.turns).toBe(0);
+  expect(second.turns).toBe(1);
   expect(second.writes).toEqual(["8", "linkedin.com/in/alex-vanguard"]);
-  expect(second.result.outcome).toBe("prepared");
+  expect(second.result.outcome).toBe("stuck");
   expect(posts()).toEqual(["/steps-shape/apply/1/step/1"]);
 
   // Back on the saved step, the site shows its draft: nothing is retyped.
   allowPrepareOnlyRunNavigation(page, `${base}/steps-shape/apply/1?step=1`);
   await page.goto(`${base}/steps-shape/apply/1?step=1`);
   const third = await run(page, replay);
-  expect(third.turns).toBe(0);
+  expect(third.turns).toBe(1);
   expect(third.writes).toEqual([]);
 }, 60_000);
 

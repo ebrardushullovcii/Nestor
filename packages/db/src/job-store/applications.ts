@@ -556,18 +556,19 @@ export function createApplicationStore(store: JobStore) {
     },
 
     /** The state is written before the existing guarded send can be armed. */
-    beginSubmission(id: number, attempt: number): boolean {
+    beginSubmission(
+      id: number,
+      attempt: number,
+      options?: { newSendDecision?: boolean },
+    ): boolean {
       return store.transaction(() => {
         const row =
           sql(`UPDATE applications SET state = 'submitting', updated_at = ?
-          WHERE id = ? AND attempt = ? AND state IN ('running', 'ready')
-            AND NOT EXISTS (
-            SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
-            WHERE n.application_id = applications.id AND t.kind = 'question'
-              AND t.input = 'file' AND t.resolved_at IS NULL) RETURNING job_id`).get(
+          WHERE id = ? AND attempt = ? AND (state IN ('running', 'ready') OR (state = 'uncertain' AND ? = 1)) RETURNING job_id`).get(
             Date.now(),
             id,
             attempt,
+            options?.newSendDecision ? 1 : 0,
           ) as { job_id: number } | undefined;
         if (row) changed([row.job_id]);
         return !!row;

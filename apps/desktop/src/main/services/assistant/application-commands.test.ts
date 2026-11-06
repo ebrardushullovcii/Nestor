@@ -36,7 +36,7 @@ vi.mock("../job-finder/test-api", () => ({
 vi.mock("../applications", () => ({
   getApplicationService: () =>
     Promise.resolve({
-      sendPrepared: (id: number) => send(id),
+      sendPrepared: (id: number, callId?: string) => send(id, callId),
       open: (id: number) => open(id),
       stopApplication: (id: number) => Promise.resolve(applications.stop(id)),
     }),
@@ -55,7 +55,10 @@ let jobs: ReturnType<typeof openJobStore>;
 let applications: ReturnType<typeof createApplicationStore>;
 let mode: ApplicationApplyMode;
 let paused: boolean;
-const send = vi.fn((id: number) => Promise.resolve(id < 0));
+const send = vi.fn((id: number, callId?: string) => {
+  void callId;
+  return Promise.resolve(id < 0);
+});
 const open = vi.fn((id: number) => Promise.resolve(id > 0));
 const browser = vi.fn(() => Promise.resolve());
 beforeEach(() => {
@@ -285,7 +288,7 @@ function unapprove(id: number, state: "ready" | "writing" = "ready") {
   jobs.setStage([id], "shortlisted");
 }
 
-it("requires a send instruction in Fill mode; Open and Stop use the work id and never send", async () => {
+it("a model Send reaches the common executor in every mode; Open and Stop use the work id", async () => {
   const ids = add(1);
   const { ctx } = context(ids);
   const tools = assistantApplicationCommands();
@@ -295,16 +298,18 @@ it("requires a send instruction in Fill mode; Open and Stop use the work id and 
     .execute({ selection: { ids } }, ctx);
   const target = { id: applications.forJobs(ids)[0]!.id };
   const sendTool = tools.find((t) => t.name === "send_application")!;
-  await expect(sendTool.execute(target, ctx)).rejects.toThrow("Fill in for me");
+  Object.assign(ctx.session, { callId: "provider-sidebar-send-1" });
+  await sendTool.execute(target, ctx);
   mode = "autonomous_submit";
-  await expect(sendTool.execute(target, ctx)).rejects.toThrow("Fill in for me");
-  expect(send).not.toHaveBeenCalled();
+  await sendTool.execute(target, ctx);
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send).toHaveBeenCalledWith(target.id, "provider-sidebar-send-1");
   await tools.find((t) => t.name === "open_application")!.execute(target, ctx);
   expect(open).toHaveBeenCalledWith(target.id);
   expect(browser).not.toHaveBeenCalled(); // The service owns the exact page (or queues its refill).
   await record(ctx, { ids }, "prepare_and_send");
   await sendTool.execute(target, ctx);
-  expect(send).toHaveBeenCalledOnce();
+  expect(send).toHaveBeenCalledTimes(3);
   await tools.find((t) => t.name === "stop_application")!.execute(target, ctx);
   expect(applications.getApplication(target.id)?.state).toBe("stopped");
 });
