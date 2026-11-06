@@ -73,6 +73,11 @@ function hands(source: RawApplyPage): ApplyPageHands {
       const control = source.controls.find(
         (entry) => (entry.ref ?? `c${entry.index}`) === ref,
       );
+      if (!control)
+        return Promise.resolve({
+          ok: false,
+          error: "Stale control; observe again.",
+        });
       if (control) control.value = value;
       return Promise.resolve({ ok: true, observedValue: value });
     },
@@ -169,6 +174,55 @@ function model(
   };
 }
 const done = { name: "finish", args: { reason: "Finished", forPerson: [] } };
+test.each(["prepare_only", "autonomous_submit"] as const)(
+  "%s passes a closed-root site-check ref directly to click and checkbox hands",
+  async (mode) => {
+    const source = page({
+      clickables: [
+        {
+          ref: "s42",
+          index: 0,
+          label: "Verify you are human",
+          role: "checkbox",
+          tagName: "input",
+          visible: true,
+          disabled: false,
+          topOffset: 0,
+        },
+      ],
+      actions: [
+        {
+          index: 0,
+          label: "Submit Application",
+          visible: true,
+          disabled: true,
+        },
+      ],
+    });
+    const input = config(source);
+    input.authority.mode = mode;
+    const click = vi.fn((ref: string) => {
+      expect(ref).toBe("s42");
+      source.actions[0].disabled = false;
+      return Promise.resolve({ ok: true as const, observedValue: "clicked" });
+    });
+    input.hands.clickElement = click;
+    const toggle = vi.fn(input.hands.setToggle);
+    input.hands.setToggle = toggle;
+    const result = await runApplyAgent(
+      input,
+      model([
+        { name: "click", args: { ref: "s42" } },
+        { name: "set_checkbox", args: { ref: "s42", checked: true } },
+        done,
+      ]),
+    );
+    expect(click).toHaveBeenCalledOnce();
+    expect(toggle).toHaveBeenCalledWith("s42", true);
+    expect(source.actions[0]?.disabled).toBe(false);
+    expect(result.pauses).toEqual([]);
+  },
+);
 test("an empty required eligibility field and an optional portfolio never create code-originated Needs you", async () => {
   const source = page({
     controls: [
@@ -359,7 +413,7 @@ test("fill_fields writes every planned field despite value and step-shape change
   ]);
   expect(result.filled).toHaveLength(3);
 });
-test("a planned ref changing identity stops the rest of fill_fields", async () => {
+test("a label change on a resolving ref does not stop fill_fields", async () => {
   const source = page({
     controls: [0, 1].map((index) => ({
       ...nameControl(),
@@ -390,8 +444,8 @@ test("a planned ref changing identity stops the rest of fill_fields", async () =
       done,
     ]),
   );
-  expect(result.filled).toHaveLength(1);
-  expect(source.controls[1]?.value).toBe("");
+  expect(result.filled).toHaveLength(2);
+  expect(source.controls[1]?.value).toBe("Second");
 });
 test.each(["prepare_only", "autonomous_submit"] as const)(
   "%s executes security, submit-shaped, cookie and history clicks without a policy veto",
@@ -851,7 +905,7 @@ test("What was sent excludes a search widget in another native form on the same 
   ]);
 });
 
-test("fill_fields stops when a remaining ref gets a different native identity even with the same label", async () => {
+test("a changed HTML id does not veto a write to a resolving DOM ref", async () => {
   const source = page({
     controls: [
       { ...nameControl(), index: 0, value: "" },
@@ -887,5 +941,5 @@ test("fill_fields stops when a remaining ref gets a different native identity ev
       done,
     ]),
   );
-  expect(source.controls[1]?.value).toBe("");
+  expect(source.controls[1]?.value).toBe("Employer");
 });

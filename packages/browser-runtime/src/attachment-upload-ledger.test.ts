@@ -458,7 +458,7 @@ test("two distinct attachments retain their own identity when a new input shifts
   });
 });
 
-test("an identical file held by two inputs after the rows move is not claimed for either", async () => {
+test("an uploaded file stays with its original DOM input after rows move, even when another holds identical bytes", async () => {
   const site = await startServer(`<!doctype html>
 <form method="post" action="/apply" enctype="multipart/form-data">
   <div id="rows"></div>
@@ -494,8 +494,12 @@ test("an identical file held by two inputs after the rows move is not claimed fo
       );
   });
   const read = await session.readPage();
-  for (const id of ["resume", "copy"])
-    expect(
-      read.controls.find((entry) => entry.id === id)?.upload?.selectedFileName,
-    ).toBeUndefined();
+  expect(
+    read.controls.find((entry) => entry.id === "resume")?.upload
+      ?.selectedFileName,
+  ).toBe(file.name);
+  expect(
+    read.controls.find((entry) => entry.id === "copy")?.upload
+      ?.selectedFileName,
+  ).toBeUndefined();
 });

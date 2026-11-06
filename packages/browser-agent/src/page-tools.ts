@@ -20,9 +20,9 @@ import type { ApplyFormObservation, ApplyPageHands } from "./apply/types";
  * in front of it.
  *
  * What is added is only what the harness can see and the model cannot: a
- * tab the page opened is brought into the working tab and reported; a page
- * that changed since the model last looked is refused once and shown again;
- * navigation and page facts are returned for the model to judge.
+ * tab the page opened is brought into the working tab and reported;
+ * navigation and page facts are returned for the model to judge. The browser
+ * resolves the actual control; unrelated page changes do not veto an action.
  */
 
 export interface PageToolPolicy {
@@ -100,18 +100,6 @@ export function createPageTools(
       `${notes.join(" ")}\n\nThe page now:\n\n${describe(observation)}`,
       true,
     );
-  };
-
-  const refuseIfMoved = async (
-    seenSignature: string,
-  ): Promise<AgentLoopToolOutcome | null> => {
-    const current = await observe();
-    if (seenSignature && current.signature !== seenSignature) {
-      return ok(
-        `The page changed since you last looked, so that step was not taken. Decide again from the page as it is now:\n\n${describe(current)}`,
-      );
-    }
-    return null;
   };
 
   const tools: AgentLoopTool[] = [
@@ -283,8 +271,6 @@ export function createPageTools(
         const ref = asString(args.ref);
         if (!ref) return ok("click needs the handle of what to press in ref.");
         const seen = state.observation;
-        const moved = await refuseIfMoved(seen?.signature ?? "");
-        if (moved) return moved;
         const label =
           seen?.actions.find((entry) => entry.ref === ref)?.label ??
           seen?.links.find((entry) => entry.ref === ref)?.label ??
@@ -354,8 +340,6 @@ export function createPageTools(
         if (!hands.pressKey) {
           return ok("This browser cannot press keyboard keys yet.");
         }
-        const moved = await refuseIfMoved(state.observation?.signature ?? "");
-        if (moved) return moved;
         const pressed = await hands.pressKey(ref ?? undefined, key);
         if (!pressed.ok) {
           return ok(`The ${key} key would not respond: ${pressed.error}`);
@@ -384,8 +368,6 @@ export function createPageTools(
         const ref = asString(args.ref);
         const text = typeof args.text === "string" ? args.text : null;
         if (!ref || text === null) return ok("type needs ref and text.");
-        const moved = await refuseIfMoved(state.observation?.signature ?? "");
-        if (moved) return moved;
         const written = await hands.fillText(ref, text);
         if (!written.ok) {
           return ok(`The field would not take that: ${written.error}`);
@@ -426,8 +408,6 @@ export function createPageTools(
         const ref = asString(args.ref);
         const option = asString(args.option);
         if (!ref || !option) return ok("select needs ref and option.");
-        const moved = await refuseIfMoved(state.observation?.signature ?? "");
-        if (moved) return moved;
         const chosen = await hands.chooseOption(ref, option);
         if (!chosen.ok) {
           return ok(
@@ -460,8 +440,6 @@ export function createPageTools(
         const args = parseToolArguments(raw);
         const ref = asString(args.ref);
         if (!ref) return ok("set_checkbox needs ref.");
-        const moved = await refuseIfMoved(state.observation?.signature ?? "");
-        if (moved) return moved;
         const set = await hands.setToggle(ref, args.checked !== false);
         if (!set.ok) return ok(`The box would not change: ${set.error}`);
         return ok(

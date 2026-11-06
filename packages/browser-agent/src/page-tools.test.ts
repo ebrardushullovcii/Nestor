@@ -183,22 +183,23 @@ describe("page tools", () => {
     expect(outcome.kind).toBe("ok");
   });
 
-  test("a write against a page that moved on is refused once and the new page shown", async () => {
+  test("page changes do not veto a click on a resolving ref", async () => {
     const pages = { current: rawPage({ controls: [] }) };
-    const tools = createPageTools(hands(pages));
+    const pageHands = hands(pages);
+    const click = vi.spyOn(pageHands, "clickElement");
+    const tools = createPageTools(pageHands);
     await tools.observe();
     pages.current = rawPage({
       url: "https://jobs.example.test/other",
       title: "Other",
     });
 
-    const outcome = await run(tools, "type", { ref: "c0", text: "hello" });
+    const outcome = await run(tools, "click", { ref: "a0" });
 
     expect(outcome.kind).toBe("ok");
     if (outcome.kind === "ok") {
-      expect(outcome.content).toContain(
-        "The page changed since you last looked",
-      );
+      expect(click).toHaveBeenCalledWith("a0");
+      expect(outcome.content).toContain('Pressed "Apply"');
       expect(outcome.content).toContain("https://jobs.example.test/other");
     }
   });

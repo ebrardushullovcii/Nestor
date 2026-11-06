@@ -18,6 +18,88 @@ type Message = {
 };
 const resources: Array<() => void> = [];
 
+test("raw CDP sessions inspect owned pages and descendants without detaching their automation", async () => {
+  const { transport, debuggerEvents, calls } = await fixture();
+  const client = await connect(transport);
+  await client.send("Target.setAutoAttach", { autoAttach: true });
+  const parent = String(
+    client.messages.find(
+      (message) => message.method === "Target.attachedToTarget",
+    )?.params?.sessionId,
+  );
+  debuggerEvents.emit("message", {}, "Target.attachedToTarget", {
+    sessionId: "native-frame",
+    targetInfo: {
+      targetId: "frame-target",
+      type: "iframe",
+      url: "https://frame.example.test/",
+    },
+    waitingForDebugger: false,
+  });
+  const browserSession = String(
+    (await client.send("Target.attachToBrowserTarget")).result?.sessionId,
+  );
+  const pageTarget = (
+    (await client.send("Target.getTargets")).result?.targetInfos as Array<{
+      targetId: string;
+    }>
+  )[0]!.targetId;
+  for (const targetId of [pageTarget, "frame-target"]) {
+    const raw = String(
+      (
+        await client.send(
+          "Target.attachToTarget",
+          { targetId, flatten: true },
+          browserSession,
+        )
+      ).result?.sessionId,
+    );
+    expect(
+      (await client.send("DOM.getDocument", { depth: -1, pierce: true }, raw))
+        .error,
+    ).toBeUndefined();
+    await client.send(
+      "Target.detachFromTarget",
+      { sessionId: raw },
+      browserSession,
+    );
+    expect(
+      client.messages.filter(
+        (message) =>
+          message.method === "Target.detachedFromTarget" &&
+          message.params?.sessionId === raw,
+      ),
+    ).toEqual([expect.objectContaining({ sessionId: browserSession })]);
+  }
+  expect(
+    calls.some(
+      (call) =>
+        call.method === "DOM.getDocument" && call.sessionId === "native-frame",
+    ),
+  ).toBe(true);
+  expect(calls.some((call) => call.method === "Target.detachFromTarget")).toBe(
+    false,
+  );
+  expect(
+    (
+      await client.send(
+        "Target.attachToTarget",
+        { targetId: "unrelated-renderer" },
+        browserSession,
+      )
+    ).error?.message,
+  ).toContain("not owned");
+  expect(
+    (
+      await client.send(
+        "Runtime.evaluate",
+        { expression: "document.title" },
+        parent,
+      )
+    ).error,
+  ).toBeUndefined();
+});
+
 test("a quick page read wakes without focus or a delayed focus request", async () => {
   const activity = vi.fn();
   const { transport } = await fixture({ onAutomationCommand: activity });

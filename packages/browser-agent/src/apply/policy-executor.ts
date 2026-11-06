@@ -1,8 +1,8 @@
-import { refIdentity } from "./control-identity";
 import type {
   ApplyPersonRequest,
   ApplicationAttemptQuestion,
   StoredApplyPickerAttempt,
+  ApplyWriteResult,
 } from "@nestor/contracts";
 import { meaningHash, meaningTargetHash } from "./answer-meaning";
 import { normalizeSignal } from "./control-classification";
@@ -352,28 +352,9 @@ export async function executeApplyProposal(
   });
   const control =
     "ref" in proposal
-      ? observation.controls.find((c) => c.ref === proposal.ref)
+      ? (observation.controls.find((c) => c.ref === proposal.ref) ??
+        deps.seenObservation?.controls.find((c) => c.ref === proposal.ref))
       : undefined;
-  if (
-    "ref" in proposal &&
-    proposal.ref &&
-    !control &&
-    ![
-      ...observation.actions,
-      ...observation.links,
-      ...observation.clickables,
-    ].some((c) => c.ref === proposal.ref)
-  )
-    return failed("That control is stale or missing; observe again.");
-  if (
-    "ref" in proposal &&
-    proposal.ref &&
-    proposal.tool !== "read_text" &&
-    deps.seenObservation &&
-    refIdentity(deps.seenObservation, proposal.ref) !==
-      refIdentity(observation, proposal.ref)
-  )
-    return failed("That control changed identity; observe again.");
   const at = deps.now().toISOString();
   if (proposal.tool === "observe") return { kind: "observed", observation };
   if (proposal.tool === "read_text")
@@ -400,8 +381,56 @@ export async function executeApplyProposal(
     proposal.tool === "set_checkbox" ||
     proposal.tool === "upload"
   ) {
-    if (!control)
-      return failed("That field is stale or missing; observe again.");
+    // A ref can name a live control exposed as a clickable (for example a
+    // closed-root checkbox). Its browser result decides whether the call works.
+    if (!control) {
+      let result: ApplyWriteResult;
+      if (proposal.tool === "upload") {
+        const document = config.sources.documents.find(
+          (item) => item.id === proposal.documentId,
+        );
+        if (!document)
+          return failed(
+            `No document with id ${proposal.documentId} is available. Inspect list_application_documents or create a document.`,
+            true,
+          );
+        const bytes = await document.loadBytes();
+        config.signal?.throwIfAborted();
+        result = await config.hands.uploadFile(proposal.ref, {
+          name: document.fileName,
+          mimeType: document.mimeType,
+          bytes,
+          ...(proposal.method ? { method: proposal.method } : {}),
+        });
+      } else {
+        config.signal?.throwIfAborted();
+        result =
+          proposal.tool === "type"
+            ? await config.hands.fillText(proposal.ref, proposal.text)
+            : proposal.tool === "select"
+              ? await config.hands.chooseOption(proposal.ref, proposal.option)
+              : await config.hands.setToggle(proposal.ref, proposal.checked);
+      }
+      const after = await config.hands.observe();
+      if (!result.ok)
+        return {
+          ...failed(
+            result.error +
+              (result.offeredOptions?.length
+                ? ` Offered options: ${JSON.stringify(result.offeredOptions)}.`
+                : ""),
+            proposal.tool === "upload",
+          ),
+          observation: after,
+        };
+      deps.guardState.hasWritten = true;
+      return {
+        kind: "moved",
+        note: `Completed ${proposal.tool}: ${result.observedValue}.`,
+        observation: after,
+        progress: observation.signature !== after.signature,
+      };
+    }
     if (
       control.credentialRole === "password" ||
       control.credentialRole === "one_time_code"

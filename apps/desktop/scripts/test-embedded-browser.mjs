@@ -11,6 +11,7 @@ const require = createRequire(join(desktop, "package.json"));
 const output = await mkdtemp(join(tmpdir(), "nestor-embedded-browser-test-"));
 const discoveryCleanup = process.argv.includes("--discovery-cleanup");
 const pageApi = process.argv.includes("--page-api");
+const siteChecks = process.argv.includes("--site-checks");
 await build({
   configFile: false,
   root: desktop,
@@ -45,11 +46,13 @@ await build({
   build: {
     ssr: join(
       desktop,
-      discoveryCleanup
-        ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
-        : pageApi
-          ? "scripts/fixtures/embedded-browser-page-api.ts"
-          : "scripts/fixtures/embedded-browser.ts",
+      siteChecks
+        ? "scripts/fixtures/embedded-browser-site-checks.ts"
+        : discoveryCleanup
+          ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
+          : pageApi
+            ? "scripts/fixtures/embedded-browser-page-api.ts"
+            : "scripts/fixtures/embedded-browser.ts",
     ),
     outDir: output,
     emptyOutDir: false,

@@ -376,7 +376,7 @@ export interface ApplyRawPageHands {
   navigate: (url: string) => Promise<ApplyNavigationResult>;
   /** Presses anything on the page, whatever it is made of. */
   clickElement: (ref: string) => Promise<ApplyWriteResult>;
-  /** Exact local press under a persistent read-only fence; no send window. */
+  /** Compatibility entry point: press the DOM control identified by this ref. */
   clickWithoutWrites?: (input: {
     ref: string;
     label: string;
@@ -384,10 +384,8 @@ export interface ApplyRawPageHands {
     stepLabel: string | null;
   }) => Promise<ApplyWriteResult>;
   /**
-   * One press of the exact control a fresh read showed: same page, step
-   * label, label, owning frame, visible and enabled. An explicit nativeForm
-   * binds one native POST; otherwise only existing write authority applies. A changed
-   * binding is refused with `binding_changed` before anything is pressed.
+   * Compatibility entry point: press the DOM control identified by this ref.
+   * Legacy page/label/form metadata stays accepted but does not veto the call.
    */
   clickBoundAction?: (input: {
     ref: string;
