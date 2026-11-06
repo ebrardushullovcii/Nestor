@@ -159,3 +159,18 @@ test("privacy notice acknowledgement is a declaration, never a notice period", (
     }),
   ).toBe("notice_period");
 });
+
+test("option matching preserves umlauts and letters in every script", async () => {
+  const { normalizeSignal } = await import("./control-classification");
+  const { matchOption } = await import("./option-match");
+  for (const options of [
+    ["Groß", "Größer"],
+    ["是", "否"],
+    ["نعم", "لا"],
+    ["Да", "Нет"],
+  ]) {
+    expect(new Set(options.map(normalizeSignal)).size).toBe(options.length);
+    expect(matchOption(options, options[1])).toBe(options[1]);
+  }
+  expect(normalizeSignal("Gru\u0308ße")).toBe(normalizeSignal("Grüße"));
+});

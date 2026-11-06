@@ -553,7 +553,7 @@ test("shares one classification for concurrent decisions and changed values on t
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test("reuses across steps and native required changes but reads new wording and options", async () => {
+test("reuses across steps but reads changed wording, options and native requirements", async () => {
   const client = clientReplying([
     { index: 0, asksAboutPay: true, declarationKind: null },
   ]);
@@ -563,7 +563,7 @@ test("reuses across steps and native required changes but reads new wording and 
   await classify(controls("Rate"), "step2");
   await classify(controls("Rate", ["Hourly"]), "step2");
   await classify(controls("Rate", ["Hourly"], true), "step2");
-  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
 });
 
 test("retries a failed classification once before returning the reading", async () => {
@@ -925,7 +925,7 @@ test("shared meaning distinguishes question options, requirements and AI-client 
   await createQuestionClassifier({ client, cacheScope: {}, readContext })(
     controls(),
   );
-  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(5);
 });
 
 test("incomplete, failed and cancelled reads never become reusable model decisions", async () => {
@@ -1126,7 +1126,7 @@ test("settled readings are offered only once every question has come back", asyn
   expect(classify.settled(controls("Rate"))).toBeUndefined();
 });
 
-test("typed readings bind instructions and invalidate changed source evidence", async () => {
+test("typed readings bind instructions and reuse meaning when only source values change", async () => {
   const client = clientReplying([]);
   vi.mocked(client.chatWithTools).mockImplementation(() =>
     Promise.resolve({
@@ -1168,15 +1168,15 @@ test("typed readings bind instructions and invalidate changed source evidence", 
   );
   expect(client.chatWithTools).toHaveBeenCalledTimes(2);
   value = "Edited text";
-  expect(classify.settled(page, context)).toBeUndefined();
+  expect(classify.settled(page, context)).toBeDefined();
   await classify(page, context);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
   expect(
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[0][0]),
   ).toContain("Write this yourself");
   page[0].groupLabel = "Employment";
   await classify(page, context);
-  expect(client.chatWithTools).toHaveBeenCalledTimes(4);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
 });
 test("duplicate or malformed tags never become an answer permission", async () => {
   const client = clientReplying([]);
@@ -1422,7 +1422,7 @@ test.each([
   },
 );
 
-test("a changed applicant rereads contacts and cannot recover the earlier source selection", async () => {
+test("changed applicant values retain contact meaning and use current facts", async () => {
   const client = clientReplyingSparse({
     plainIndexes: [0],
     flagged: [],
@@ -1454,7 +1454,7 @@ test("a changed applicant rereads contacts and cannot recover the earlier source
     "profile.phone",
   );
   sources[0].value = "Another Applicant";
-  expect(classify.settled(page)).toBeUndefined();
+  expect(classify.settled(page)).toBeDefined();
   vi.mocked(client.chatWithTools).mockResolvedValue({
     toolCalls: [
       {
@@ -1471,11 +1471,13 @@ test("a changed applicant rereads contacts and cannot recover the earlier source
       },
     ],
   });
-  expect((await classify(page)).get("Phone")?.answerTags?.sourceId).toBeNull();
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect((await classify(page)).get("Phone")?.answerTags?.sourceId).toBe(
+    "profile.phone",
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test("a profile change during a pending read cannot borrow its source selection", async () => {
+test("a value change during a pending read preserves semantic source selection", async () => {
   const report = (sourceId: string | null) => ({
     toolCalls: [
       {
@@ -1523,8 +1525,10 @@ test("a profile change during a pending read cannot borrow its source selection"
   await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
   sources[0].value = "Another Applicant";
   finish(report("profile.phone"));
-  expect((await result).get("Phone")?.answerTags?.sourceId).toBeNull();
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect((await result).get("Phone")?.answerTags?.sourceId).toBe(
+    "profile.phone",
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
 test("cached legal meaning rebinds country and evidence without inheriting permission", async () => {
@@ -1659,7 +1663,7 @@ test("another form root's help text is scoped to its controls; global own-word r
   ).toContain("Write this yourself");
 });
 
-test("residence-relative work permission rereads changed residence, even for a regional posting", async () => {
+test("residence-relative work permission rebinds changed residence without rereading, even for a regional posting", async () => {
   const client = clientReplyingSparse({
     plainIndexes: [],
     flagged: [
@@ -1704,10 +1708,10 @@ test("residence-relative work permission rereads changed residence, even for a r
   expect(
     (await classify(question)).get(question[0].label)?.answerTags,
   ).toMatchObject({ country: "FR", sourceId: null });
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test("classification cache uses all evidence and resolved recipient/permission/authority context without field-value churn", async () => {
+test("classification cache uses descriptors and posting location, not values, page URLs or authority", async () => {
   const client = clientReplyingSparse({
     plainIndexes: [0],
     flagged: [],
@@ -1764,7 +1768,7 @@ test("classification cache uses all evidence and resolved recipient/permission/a
   reviewed[0].answered = true;
   await make()(reviewed);
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
-  for (const change of [
+  for (const [index, change] of [
     () => {
       evidence = evidence.map((source) =>
         source.id === "resume.text"
@@ -1790,7 +1794,8 @@ test("classification cache uses all evidence and resolved recipient/permission/a
       contextInput.sources.posting.company = "Other recipient";
     },
     () => {
-      contextInput.application.startingUrl = "https://other.example.test/job/1";
+      contextInput.application.startingUrl =
+        "https://other.example.test/job/1?step=2&tracking=changed";
     },
     () => {
       contextInput.payDisclosed = true;
@@ -1798,12 +1803,18 @@ test("classification cache uses all evidence and resolved recipient/permission/a
     () => {
       contextInput.approvedAttestations.push("truthfulness_certification");
     },
-  ]) {
+  ].entries()) {
     const before = vi.mocked(client.chatWithTools).mock.calls.length;
     change();
     await make()(reviewed);
-    expect(client.chatWithTools).toHaveBeenCalledTimes(before + 1);
+    expect(client.chatWithTools).toHaveBeenCalledTimes(
+      before + (index === 1 ? 1 : 0),
+    );
   }
+  const beforeLocation = vi.mocked(client.chatWithTools).mock.calls.length;
+  contextInput.sources.posting.location = "France";
+  await make()(reviewed);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(beforeLocation + 1);
   const unresolved = () =>
     createQuestionClassifier({ client, cacheScope, sources: () => evidence });
   const count = vi.mocked(client.chatWithTools).mock.calls.length;
@@ -1815,7 +1826,7 @@ test("classification cache uses all evidence and resolved recipient/permission/a
       ...contextInput,
       browserPermissions: undefined,
     }),
-  ).toBeNull();
+  ).not.toBeNull();
 });
 
 test("question reads keep going beyond three rounds while coverage improves", async () => {
@@ -1831,4 +1842,328 @@ test("question reads keep going beyond three rounds while coverage improves", as
     false,
   );
   expect(vi.mocked(client.chatWithTools).mock.calls.length).toBeGreaterThan(9);
+});
+
+test("the page model reads German button purposes once as the form is filled", async () => {
+  const page = buildApplyFormObservation(
+    {
+      url: "https://example.test/apply?step=1",
+      title: "Bewerbung",
+      bodyText: "Bewerbung\nGröße\nWeiter\nAbsenden",
+      headings: [],
+      controls: [],
+      links: [],
+      clickables: [],
+      openedTabs: [],
+      loading: false,
+      validationErrors: [],
+      stepLabel: null,
+      actions: [
+        {
+          index: 0,
+          label: "Weiter",
+          visible: true,
+          disabled: false,
+          submitsForm: true,
+          formMethod: "POST",
+        },
+        {
+          index: 1,
+          label: "Absenden",
+          visible: true,
+          disabled: false,
+          submitsForm: true,
+          formMethod: "POST",
+        },
+      ],
+    },
+    new Date().toISOString(),
+  );
+  page.controls = controls("Größe", ["Groß", "Größer", "是", "否"]);
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [{ index: 0, kind: "other", country: null, sourceId: null }],
+    pageReading: {
+      actions: [
+        { ref: "a0", purpose: "save" },
+        { ref: "a1", purpose: "submit" },
+      ],
+      securityControlRefs: [],
+      blocker: null,
+    },
+  });
+  const classify = createQuestionClassifier({
+    client,
+    observation: () => page,
+    sources: () => [],
+  });
+  await classify(page.controls, questionReadContext(page));
+  expect(page.actions.map((action) => action.kind)).toEqual([
+    "advance",
+    "final",
+  ]);
+  page.controls[0].value = "Größer";
+  page.controls[0].answered = true;
+  page.url = "https://example.test/apply?step=1&tracking=changed";
+  await classify(page.controls, questionReadContext(page));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  const messages = vi.mocked(client.chatWithTools).mock.calls[0][0];
+  expect(messages[0].content).toContain("native form facts");
+  expect(messages[2].content).toContain('"submitsForm":true');
+});
+
+test("the model can override an English button hint and informational security wording", async () => {
+  const page = buildApplyFormObservation(
+    {
+      url: "https://example.test",
+      title: "Review",
+      bodyText: "Security check completed. Continue",
+      headings: [],
+      controls: [],
+      links: [],
+      clickables: [],
+      openedTabs: [],
+      loading: false,
+      validationErrors: [],
+      stepLabel: null,
+      actions: [
+        {
+          index: 0,
+          label: "Continue",
+          visible: true,
+          disabled: false,
+          submitsForm: true,
+        },
+      ],
+    },
+    new Date().toISOString(),
+  );
+  expect(page.actions[0].kind).toBe("advance");
+  expect(page.blocker?.code).toBe("security_challenge");
+  const client = clientReplyingSparse({
+    plainIndexes: [],
+    flagged: [],
+    tags: [],
+    pageReading: {
+      actions: [{ ref: "a0", purpose: "submit" }],
+      securityControlRefs: [],
+      blocker: null,
+    },
+  });
+  await createQuestionClassifier({ client, observation: () => page })(
+    page.controls,
+    questionReadContext(page),
+  );
+  expect(page.actions[0].kind).toBe("final");
+  expect(page.blocker).toBeNull();
+});
+
+test("a slider check is read from its purpose without site-specific wording", async () => {
+  const page = buildApplyFormObservation(
+    {
+      url: "https://example.test",
+      title: "Sicherheitsprüfung",
+      bodyText: "Bewegen Sie den Regler bis zum Schloss, um fortzufahren.",
+      headings: [],
+      controls: [],
+      actions: [],
+      links: [],
+      clickables: [
+        {
+          index: 0,
+          label: "Regler",
+          role: "slider",
+          tagName: "div",
+          visible: true,
+          disabled: false,
+          topOffset: 0,
+        },
+      ],
+      openedTabs: [],
+      loading: false,
+      validationErrors: [],
+      stepLabel: null,
+    },
+    new Date().toISOString(),
+  );
+  const client = clientReplyingSparse({
+    plainIndexes: [],
+    flagged: [],
+    tags: [],
+    pageReading: {
+      actions: [],
+      securityControlRefs: [],
+      blocker: {
+        code: "security_challenge",
+        requiresPerson: true,
+        summary: "The site asks for a human verification slider.",
+        detail: "Complete the slider in the browser.",
+        nextActionLabel: "Open the security check",
+      },
+    },
+  });
+  await createQuestionClassifier({ client, observation: () => page })(
+    page.controls,
+    questionReadContext(page),
+  );
+  expect(page.blocker).toMatchObject({
+    code: "security_challenge",
+    requiresPerson: true,
+  });
+  expect(
+    JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[0][0]),
+  ).toContain("Regler");
+});
+
+test("a completed human challenge clears its cached blocker without rereading questions", async () => {
+  const page = buildApplyFormObservation(
+    {
+      url: "https://example.test",
+      title: "Check",
+      bodyText: "Confirm you are a person",
+      headings: [],
+      controls: [],
+      actions: [],
+      links: [],
+      clickables: [],
+      openedTabs: [],
+      loading: false,
+      validationErrors: [],
+      stepLabel: null,
+    },
+    new Date().toISOString(),
+  );
+  page.controls = [
+    {
+      ...controls("Confirm you are a person", [])[0],
+      ref: "check",
+      kind: "checkbox",
+    },
+  ];
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    tags: [],
+    pageReading: {
+      actions: [],
+      securityControlRefs: ["check"],
+      blocker: {
+        code: "security_challenge",
+        requiresPerson: true,
+        summary: "Human check",
+        detail: "Complete it",
+        nextActionLabel: "Open browser",
+      },
+    },
+  });
+  const classify = createQuestionClassifier({
+    client,
+    observation: () => page,
+  });
+  await classify(page.controls, questionReadContext(page));
+  expect(page.blocker?.requiresPerson).toBe(true);
+  page.controls[0].checked = true;
+  await classify(page.controls, questionReadContext(page));
+  expect(page.blocker).toBeNull();
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+});
+
+test("the apply prompt includes links and custom clickables past the old caps", async () => {
+  const { describeObservation } = await import("./apply-prompts");
+  const page = buildApplyFormObservation(
+    {
+      url: "https://example.test",
+      title: "Jobs",
+      bodyText: "",
+      headings: [],
+      controls: [],
+      actions: [],
+      links: Array.from({ length: 90 }, (_, index) => ({
+        index,
+        label: `Job ${index}`,
+        href: `https://example.test/job/${index}`,
+        target: "",
+        visible: true,
+        topOffset: index,
+      })),
+      clickables: Array.from({ length: 60 }, (_, index) => ({
+        index,
+        label: `Apply ${index}`,
+        role: "",
+        tagName: "span",
+        visible: true,
+        disabled: false,
+        topOffset: index,
+      })),
+      openedTabs: [],
+      loading: false,
+      validationErrors: [],
+      stepLabel: null,
+    },
+    new Date().toISOString(),
+  );
+  const prompt = describeObservation(page);
+  expect(prompt).toContain("l89: Job 89");
+  expect(prompt).toContain("e59: Apply 59");
+});
+
+test("a shared pending page read binds button purposes to the latest observation", async () => {
+  let page = buildApplyFormObservation(
+    {
+      url: "https://example.test",
+      title: "Bewerbung",
+      bodyText: "Weiter",
+      headings: [],
+      controls: [],
+      actions: [
+        {
+          index: 0,
+          label: "Weiter",
+          visible: true,
+          disabled: false,
+          submitsForm: true,
+        },
+      ],
+      links: [],
+      clickables: [],
+      openedTabs: [],
+      loading: false,
+      validationErrors: [],
+      stepLabel: null,
+    },
+    new Date().toISOString(),
+  );
+  const reply = clientReplyingSparse({
+    plainIndexes: [],
+    flagged: [],
+    tags: [],
+    pageReading: {
+      actions: [{ ref: "a0", purpose: "next" }],
+      securityControlRefs: [],
+      blocker: null,
+    },
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const client: LLMClient = {
+    chatWithTools: vi.fn<LLMClient["chatWithTools"]>(async (...args) => {
+      await gate;
+      return reply.chatWithTools(...args);
+    }),
+  };
+  const classify = createQuestionClassifier({
+    client,
+    observation: () => page,
+  });
+  const first = classify(page.controls, questionReadContext(page));
+  await vi.waitFor(() => expect(client.chatWithTools).toHaveBeenCalledTimes(1));
+  page = structuredClone(page);
+  const second = classify(page.controls, questionReadContext(page));
+  release();
+  await Promise.all([first, second]);
+  expect(page.actions[0].kind).toBe("advance");
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });

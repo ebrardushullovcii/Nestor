@@ -900,6 +900,71 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
+  test("non-Latin picker labels keep separate cached option lists", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent(
+        PAGE.replace(
+          "Are you subject to any employment agreements?",
+          "同意しますか",
+        ).replace(
+          "What is your current country of residence?",
+          "現在の居住国は？",
+        ),
+      );
+      for (let read = 0; read < 2; read += 1) {
+        const raw = await readRawApplyPage(page);
+        expect(
+          raw.controls.find((control) => control.id === "agreements")?.options,
+        ).toEqual(["Yes", "No"]);
+        expect(
+          raw.controls.find((control) => control.id === "country")?.options,
+        ).toEqual(["Afghanistan", "Albania", "Algeria"]);
+      }
+    } finally {
+      await page.close();
+    }
+  });
+
+  test("keeps late interactive controls in the main document and child frames", async () => {
+    const page = await browser.newPage();
+    try {
+      const inventory = `
+        ${Array.from({ length: 410 }, (_, index) => `<a hidden href="/hidden-${index}">Hidden ${index}</a>`).join("")}
+        ${Array.from({ length: 310 }, () => `<span data-testid="empty" tabindex="0"></span>`).join("")}
+        ${Array.from({ length: 90 }, (_, index) => `<a href="/job-${index}">Job ${index}</a>`).join("")}
+        ${Array.from({ length: 60 }, (_, index) => `<span tabindex="0" onclick="document.body.dataset.chosen='${index}'">Apply ${index}</span>`).join("")}
+      `;
+      await page.setContent(
+        inventory + '<iframe title="Child application"></iframe>',
+      );
+      const frame = page
+        .frames()
+        .find((candidate) => candidate !== page.mainFrame())!;
+      await frame.setContent(inventory);
+      const raw = await readRawApplyPage(page);
+      expect(
+        raw.links.filter((link) => link.visible && link.label === "Job 89"),
+      ).toHaveLength(2);
+      const late = raw.clickables.filter(
+        (entry) => entry.visible && entry.label === "Apply 59",
+      );
+      expect(late).toHaveLength(2);
+      const mechanics = createPlaywrightApplyPageMechanics(page);
+      for (const entry of late) {
+        expect(
+          await mechanics.clickElement(entry.ref ?? `e${entry.index}`),
+        ).toMatchObject({ ok: true });
+      }
+      expect(await page.locator("body").getAttribute("data-chosen")).toBe("59");
+      expect(await frame.locator("body").getAttribute("data-chosen")).toBe(
+        "59",
+      );
+    } finally {
+      await page.close();
+    }
+  });
+
   afterAll(async () => {
     await browser?.close();
   });

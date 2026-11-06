@@ -8,6 +8,8 @@ import type {
   ApplyActionKind,
   ApplyControlKind,
   ApplyFormControl,
+  ApplyFormAction,
+  ApplyBlocker,
 } from "./types";
 
 /**
@@ -20,9 +22,10 @@ import type {
 
 export function normalizeSignal(value: string): string {
   return value
+    .normalize("NFKC")
     .toLowerCase()
     .replace(/[‘’“”]/gu, "'")
-    .replace(/[^a-z0-9]+/gu, " ")
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, " ")
     .trim();
 }
 
@@ -395,5 +398,156 @@ export function isControlAnswered(control: ApplyFormControl): boolean {
       return control.value.trim().length > 0;
     default:
       return control.value.trim().length > 0;
+  }
+}
+
+/** Meaning supplied by the page-reading model, independent of the button's language. */
+export const PAGE_READING_PARAMETERS = {
+  type: "object",
+  properties: {
+    actions: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          ref: { type: "string" },
+          purpose: {
+            type: "string",
+            enum: ["next", "save", "submit", "back", "sign_in", "other"],
+          },
+        },
+        required: ["ref", "purpose"],
+        additionalProperties: false,
+      },
+    },
+    securityControlRefs: { type: "array", items: { type: "string" } },
+    blocker: {
+      type: ["object", "null"],
+      properties: {
+        code: {
+          type: "string",
+          enum: [
+            "browser_blocked",
+            "site_login_required",
+            "account_creation_required",
+            "security_challenge",
+            "multi_factor_required",
+            "application_closed",
+          ],
+        },
+        requiresPerson: { type: "boolean" },
+        summary: { type: "string" },
+        detail: { type: "string" },
+        nextActionLabel: { type: "string" },
+      },
+      required: [
+        "code",
+        "requiresPerson",
+        "summary",
+        "detail",
+        "nextActionLabel",
+      ],
+      additionalProperties: false,
+    },
+  },
+  required: ["actions", "securityControlRefs", "blocker"],
+  additionalProperties: false,
+} as const;
+
+export const PAGE_READING_INSTRUCTIONS = [
+  "Read pageReading from the page's meaning and native form facts, in every language. Report every visible action ref once: next (advance/review), save (save and continue), submit (final application send), back, sign_in, or other. Native submitsForm alone does not tell an intermediate save from a final send. For example Weiter can advance and Absenden can send; use the whole page, not a word list. Tabs select a panel, not a form step.",
+  "Report a blocker only when the page actually prevents progress: browser refusal, sign-in, required account creation, an active human security challenge, an automatic browser check, MFA, or a closed application. Routine security/privacy wording, footer sign-in links, completed checks, hidden CAPTCHA scripts and resume-upload status are not blockers. A puzzle or slider asking to prove a human is present is security_challenge regardless of wording. An automatic check has requiresPerson false: wait for it. A human challenge has requiresPerson true. MFA always needs the person. List the refs of fields belonging to a human security check in securityControlRefs, never ordinary consent fields. Do not treat these controls as applicant questions. These are meaning reads only: existing browser permissions, final-send authority and outcome checks still decide every action.",
+].join(" ");
+
+export interface ApplyPageReading {
+  actions: {
+    ref: string;
+    purpose: "next" | "save" | "submit" | "back" | "sign_in" | "other";
+  }[];
+  securityControlRefs: string[];
+  blocker: ApplyBlocker | null;
+}
+
+export function parseApplyPageReading(value: unknown): ApplyPageReading | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    !Array.isArray(raw.actions) ||
+    !Array.isArray(raw.securityControlRefs) ||
+    !raw.securityControlRefs.every((ref) => typeof ref === "string")
+  )
+    return null;
+  const actions: ApplyPageReading["actions"] = [];
+  for (const item of raw.actions) {
+    if (!item || typeof item !== "object") return null;
+    const action = item as Record<string, unknown>;
+    const purpose = action.purpose;
+    if (
+      typeof action.ref !== "string" ||
+      (purpose !== "next" &&
+        purpose !== "save" &&
+        purpose !== "submit" &&
+        purpose !== "back" &&
+        purpose !== "sign_in" &&
+        purpose !== "other") ||
+      actions.some((entry) => entry.ref === action.ref)
+    )
+      return null;
+    actions.push({ ref: action.ref, purpose });
+  }
+  let blocker: ApplyPageReading["blocker"] = null;
+  if (raw.blocker !== null) {
+    if (!raw.blocker || typeof raw.blocker !== "object") return null;
+    const entry = raw.blocker as Record<string, unknown>;
+    const code = entry.code;
+    if (
+      code !== "browser_blocked" &&
+      code !== "site_login_required" &&
+      code !== "account_creation_required" &&
+      code !== "security_challenge" &&
+      code !== "multi_factor_required" &&
+      code !== "application_closed"
+    )
+      return null;
+    if (
+      typeof entry.requiresPerson !== "boolean" ||
+      typeof entry.summary !== "string" ||
+      typeof entry.detail !== "string" ||
+      typeof entry.nextActionLabel !== "string"
+    )
+      return null;
+    blocker = {
+      code,
+      requiresPerson: code === "multi_factor_required" || entry.requiresPerson,
+      summary: entry.summary,
+      detail: entry.detail,
+      nextActionLabel: entry.nextActionLabel,
+    };
+  }
+  return {
+    actions,
+    securityControlRefs: raw.securityControlRefs,
+    blocker,
+  };
+}
+
+export function applyActionReading(
+  actions: ApplyFormAction[],
+  reading: ApplyPageReading,
+): void {
+  for (const action of actions) {
+    const purpose = reading.actions.find(
+      (entry) => entry.ref === action.ref,
+    )?.purpose;
+    action.kind =
+      action.role === "tab"
+        ? "other"
+        : purpose === "next" || purpose === "save"
+          ? "advance"
+          : purpose === "submit"
+            ? "final"
+            : purpose === "back"
+              ? "back"
+              : "other";
   }
 }

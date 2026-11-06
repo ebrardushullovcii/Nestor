@@ -249,7 +249,7 @@ async function includeChildFrameContent(
   if (frames.length === 0) return root;
 
   const snapshots = await Promise.all(
-    frames.slice(0, 16).map((frame, index) => readApplyFrame(frame, index)),
+    frames.map((frame, index) => readApplyFrame(frame, index)),
   );
   const readable = snapshots.filter(
     (snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== null,
@@ -788,7 +788,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
       ),
       frame.locator(APPLY_LINK_SELECTOR).evaluateAll(
         (elements, prefix): RawApplyLink[] =>
-          elements.slice(0, 400).map((element, index) => {
+          elements.map((element, index) => {
             const html = element as HTMLElement;
             const anchor =
               element instanceof HTMLAnchorElement ? element : null;
@@ -816,7 +816,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
       ),
       frame.locator(APPLY_CLICKABLE_SELECTOR).evaluateAll(
         (elements, [prefix, owned]): RawApplyClickable[] =>
-          elements.slice(0, 300).flatMap((element, index) => {
+          elements.flatMap((element, index) => {
             // A button already has its own ref, with its form's action:
             // neither it nor anything inside it (a label span, an icon),
             // across shadow roots, is a second name to press it under.
@@ -1976,7 +1976,7 @@ export function collectApplyDocumentSnapshot(
   const clickables = safe(
     () =>
       ((elements: Element[]): RawApplyClickable[] =>
-        elements.slice(0, 300).flatMap((element, index) => {
+        elements.flatMap((element, index) => {
           // A button already has its own ref, with its form's action:
           // neither it nor anything inside it (a label span, an icon),
           // across shadow roots, is a second name to press it under.
@@ -2188,8 +2188,9 @@ const comboboxMenuOwners = new WeakMap<Page, Map<string, string>>();
  */
 function comboboxMemoKey(url: string, control: RawApplyControl): string {
   const words = `${control.groupLabel} ${control.label}`
+    .normalize("NFKC")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, " ")
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, " ")
     .trim();
   return `${url}|${words}|${control.tagName}|${control.inputType}|${control.role}`;
 }

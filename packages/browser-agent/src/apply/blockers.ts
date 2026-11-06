@@ -55,11 +55,6 @@ const AUTOMATIC_CHECK_SIGNALS = [
   "needs to review the security of your connection",
 ];
 
-const SLIDER_CHALLENGE_SIGNALS = [
-  "slide right to secure your access",
-  "slide to verify",
-  "drag the slider to verify",
-];
 const CHALLENGE_SIGNALS = [
   "verify you are human",
   "verify you are a human",
@@ -70,7 +65,6 @@ const CHALLENGE_SIGNALS = [
   "unusual traffic",
   "complete the challenge",
   "prove you are not a robot",
-  ...SLIDER_CHALLENGE_SIGNALS,
 ];
 
 /** A model may describe a challenge read in a child frame but omit the
@@ -83,11 +77,6 @@ export function reportedSecurityChallenge(reason: string): ApplyBlocker | null {
     `(?:review|solve|complete|finish|retry) (?:the |a )?${challenge}\\b|\\b${challenge}\\b.{0,140}(?:please try again|needs (?:you|a person)|requires (?:human|manual)|waiting for (?:you|a person))`,
     "u",
   ).test(text);
-  const slider =
-    contains(text, SLIDER_CHALLENGE_SIGNALS) &&
-    /\b(?:complete|finish|solve|slide|drag|verification required)\b/u.test(
-      text,
-    );
   const robot = contains(text, [
     "i am not a robot",
     "i m not a robot",
@@ -96,7 +85,7 @@ export function reportedSecurityChallenge(reason: string): ApplyBlocker | null {
     "verify you are a human",
     "prove you are not a robot",
   ]);
-  if (!asksForPerson && !slider && !robot) return null;
+  if (!asksForPerson && !robot) return null;
   return {
     code: "security_challenge",
     requiresPerson: true,
@@ -243,19 +232,28 @@ function isAccountChoiceWall(input: {
  * are human"). Only the person answers these; Job Finder never touches them,
  * and must not undo an answer the person already gave.
  */
+const securityReadings = new WeakMap<object, boolean>();
+
+export function setSecurityChallengeReading(
+  control: ApplyFormControl,
+  challenge: boolean,
+): void {
+  securityReadings.set(control, challenge);
+}
+
 export function isSecurityChallengeControl(
   control: Pick<
     ApplyFormControl,
     "label" | "groupLabel" | "placeholder" | "credentialRole"
   >,
 ): boolean {
+  if (control.credentialRole === "one_time_code") return true;
+  const reading = securityReadings.get(control);
+  if (reading !== undefined) return reading;
   const signal = normalizeSignal(
     `${control.label} ${control.groupLabel} ${control.placeholder}`,
   );
-  return (
-    control.credentialRole === "one_time_code" ||
-    contains(signal, CHALLENGE_SIGNALS)
-  );
+  return contains(signal, CHALLENGE_SIGNALS);
 }
 
 function hasResolvedChallengeControl(

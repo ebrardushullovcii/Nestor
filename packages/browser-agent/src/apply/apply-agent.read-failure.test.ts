@@ -18,7 +18,9 @@ const EMAIL = "Email";
 const SALARY =
   "What are your salary expectations? (Please specify the currency)";
 const CODING = "How/when did you start coding?";
+const COUNTRY = "Current country of residence";
 const SOURCES: Record<string, string> = {
+  [COUNTRY]: "profile.currentCountry",
   [FIRST]: "profile.firstName",
   [LAST]: "profile.lastName",
   [EMAIL]: "profile.email",
@@ -55,8 +57,8 @@ function setup() {
     url: "https://replica.example.test/apply",
     title: "Application",
     bodyText: "Apply for this job",
-    controls: [FIRST, LAST, EMAIL, SALARY, CODING].map((label, index) =>
-      field(index, label),
+    controls: [FIRST, LAST, EMAIL, SALARY, CODING, COUNTRY].map(
+      (label, index) => field(index, label),
     ),
     actions: [
       { index: 0, label: "Submit application", visible: true, disabled: false },
@@ -136,6 +138,7 @@ function setup() {
 function client(stalls: readonly string[]) {
   const reads: string[][] = [];
   let turn = 0;
+  let recoveryReads = 0;
   const call = (name: string, args: unknown) =>
     Promise.resolve({
       toolCalls: [
@@ -172,6 +175,34 @@ function client(stalls: readonly string[]) {
         return call(name, { sourceId: null });
       if (name === "report_answer_checks")
         return Promise.reject(new Error("No answer check is expected here."));
+      const recoveryMessage = messages.at(-1)?.content ?? "";
+      if (
+        recoveryMessage.startsWith(
+          "The specialist question reader was unavailable.",
+        )
+      ) {
+        recoveryReads += 1;
+        const data = JSON.parse(
+          recoveryMessage.slice(recoveryMessage.indexOf("\n") + 1),
+        ) as { questions: { index: number; question: string }[] };
+        return call("read_application_page", {
+          plainIndexes: data.questions.map((q) => q.index),
+          flagged: [],
+          tags: data.questions.map((q) => ({
+            index: q.index,
+            kind: q.question === COUNTRY ? "residence_country" : "other",
+            country: null,
+            sourceId: SOURCES[q.question] ?? null,
+          })),
+          pageReading: {
+            actions: [{ ref: "a0", purpose: "submit" }],
+            securityControlRefs: [],
+            blocker: null,
+          },
+        });
+      }
+      // The first proposal overlaps the specialist read and can be discarded.
+      if (!recoveryReads && stalls.length) return call("observe", {});
       turn += 1;
       // The model offers a value for every field, including the unread ones.
       return turn === 1
@@ -197,6 +228,12 @@ function client(stalls: readonly string[]) {
               },
               { tool: "type", ref: "c3", text: "90000 EUR" },
               { tool: "type", ref: "c4", text: "At school." },
+              {
+                tool: "type",
+                ref: "c5",
+                text: "Germany",
+                storedFactId: SOURCES[COUNTRY],
+              },
             ],
           })
         : call("finish", {
@@ -218,110 +255,65 @@ function askedFor(result: Awaited<ReturnType<typeof runApplyAgent>>) {
   );
 }
 
-test("stalled reads of other questions do not hand stored name and email to the person", async () => {
-  const { raw, input } = setup();
-  const { model, reads } = client([SALARY, CODING]);
-  const result = await runApplyAgent(input, model);
-  // Whole page, three groups, then each remaining question on its own.
-  expect(reads.map((group) => group.length)).toEqual([
-    5,
-    2,
-    2,
-    ...Array<number>(10).fill(1),
-  ]);
-  expect(raw.controls.map((control) => control.value)).toEqual([
-    "Jamie",
-    "Rivers",
-    "jamie@example.test",
-    "",
-    "",
-  ]);
-  // Council D6: a partial outage fills what it can read, then ends as
-  // Nestor's retained technical failure; it never asks per-field questions.
-  expect(askedFor(result).size).toBe(0);
-  expect(result.outcome).toBe("stuck");
-  expect(result.readyToSend).toBeNull();
-  expect(result.technicalFailure).toEqual({
-    code: "question_classification_unavailable",
-    retryable: true,
-    pageDisposition: "retain",
-  });
-});
+test.each([
+  [SALARY, CODING],
+  [FIRST, SALARY, COUNTRY],
+  [FIRST, LAST, EMAIL, SALARY, CODING, COUNTRY],
+])(
+  "the main model recovers unread fields and asks only for missing facts: %j",
+  async (...stalls) => {
+    const { raw, input } = setup();
+    const { model } = client(stalls);
+    const requests = vi.spyOn(model, "chatWithTools");
+    const result = await runApplyAgent(input, model);
+    expect(raw.controls.map((control) => control.value)).toEqual([
+      "Jamie",
+      "Rivers",
+      "jamie@example.test",
+      "",
+      "",
+      "Germany",
+    ]);
+    expect([...askedFor(result).keys()].sort()).toEqual(
+      [SALARY, CODING].sort(),
+    );
+    expect(result.technicalFailure).toBeUndefined();
+    expect(result.outcome).toBe("paused");
+    expect(requests.mock.results.length).toBeGreaterThan(1);
+    expect(input.hands.clickAction).not.toHaveBeenCalled();
+  },
+);
 
-// Council D3 (2026-11-03): a reading outage is Nestor's problem, not a
-// question for a fact Profile holds. An exact applicant-identity binding
-// fills without a reading; an unread pay question still does not.
-test("an unread first-name question fills from its exact Profile fact; unread pay is not written", async () => {
-  const { raw, input } = setup();
-  const { model } = client([FIRST, SALARY]);
-  const result = await runApplyAgent(input, model);
-  expect(raw.controls.slice(0, 4).map((control) => control.value)).toEqual([
-    "Jamie",
-    "Rivers",
-    "jamie@example.test",
-    "",
-  ]);
-  // Unread pay remains technical. The separately readable, genuinely missing
-  // personal preference survives instead of being discarded with that fault.
-  expect([...askedFor(result).keys()]).toEqual([CODING]);
-  expect(result.outcome).toBe("paused");
-  expect(result.technicalFailure?.code).toBe(
-    "question_classification_unavailable",
-  );
-});
-
-test("a page with no readable question discards the overlapping decision before any write", async () => {
-  const { raw, input } = setup();
-  const { model, reads } = client([FIRST, LAST, EMAIL, SALARY, CODING]);
-  const fill = vi.spyOn(model, "chatWithTools");
-  const result = await runApplyAgent(input, model);
-  // Nine question reads and one overlapping decision; that decision is
-  // discarded, its request aborted, and none of its proposed writes execute.
-  expect(reads).toHaveLength(9);
-  expect(fill).toHaveBeenCalledTimes(10);
-  expect(
-    fill.mock.calls.find(
-      ([, tools]) => tools[0]?.function.name !== "report_question_kinds",
-    )?.[2]?.signal?.aborted,
-  ).toBe(true);
-  expect(raw.controls.every((control) => control.value === "")).toBe(true);
-  // Council B10/D6: a full outage is Nestor's technical failure, with no
-  // personal question; the page is kept for one ordinary Retry.
-  expect(askedFor(result).size).toBe(0);
-  expect(result.filled).toEqual([]);
-  expect(result.outcome).toBe("stuck");
-  expect(result.technicalFailure).toEqual({
-    code: "question_classification_unavailable",
-    retryable: true,
-    pageDisposition: "retain",
-  });
-});
-
-test("a partial read refuses navigation even when a decision ignores the restricted tools", async () => {
+test("classifier recovery does not restrict ordinary navigation", async () => {
   const { raw, input } = setup();
   const { model } = client([SALARY, CODING]);
   const navigate = vi.spyOn(input.hands, "navigate");
+  let moved = false;
   const result = await runApplyAgent(input, {
-    chatWithTools: (messages, tools, options) =>
-      tools[0]?.function.name === "report_question_kinds"
-        ? model.chatWithTools(messages, tools, options)
-        : Promise.resolve({
-            toolCalls: [
-              {
-                id: "forbidden-navigation",
-                type: "function",
-                function: {
-                  name: "navigate",
-                  arguments: JSON.stringify({ url: raw.url }),
-                },
+    chatWithTools: (messages, tools, options) => {
+      const latest = messages.at(-1)?.content ?? "";
+      if (
+        !moved &&
+        latest.startsWith("The specialist question reader was unavailable.")
+      ) {
+        moved = true;
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "navigate",
+              type: "function",
+              function: {
+                name: "navigate",
+                arguments: JSON.stringify({ url: raw.url }),
               },
-            ],
-          }),
+            },
+          ],
+        });
+      }
+      return model.chatWithTools(messages, tools, options);
+    },
   });
-  expect(navigate).not.toHaveBeenCalled();
-  expect(result.outcome).toBe("stuck");
-  expect(result.readyToSend).toBeNull();
-  expect(result.technicalFailure?.code).toBe(
-    "question_classification_unavailable",
-  );
+  expect(navigate).toHaveBeenCalled();
+  expect(result.technicalFailure).toBeUndefined();
+  expect(input.hands.clickAction).not.toHaveBeenCalled();
 });

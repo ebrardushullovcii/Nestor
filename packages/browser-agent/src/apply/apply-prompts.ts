@@ -263,7 +263,7 @@ export function describeObservation(
       : null,
     links.length > 0
       ? `Links:\n${links
-          .slice(0, options.linkLimit ?? 80)
+          .slice(0, options.linkLimit)
           .map(
             (link) =>
               `- ${link.ref}: ${link.label} → ${link.href}${link.opensNewWindow ? " (opens a new tab; follow_link opens it here)" : ""}${link.frame ? ` (frame: ${link.frame.origin})` : ""}`,
@@ -272,7 +272,6 @@ export function describeObservation(
       : null,
     clickables.length > 0
       ? `Other clickable things:\n${clickables
-          .slice(0, 40)
           .map(
             (entry) =>
               `- ${entry.ref}: ${entry.label}${entry.disabled ? " (disabled)" : ""}${entry.frame ? ` (frame: ${entry.frame.origin})` : ""}`,

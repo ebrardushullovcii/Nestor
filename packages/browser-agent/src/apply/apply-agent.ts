@@ -109,6 +109,7 @@ import {
   createQuestionClassifier,
   applicationQuestionClassificationContext,
   QuestionReadUnavailableError,
+  QUESTION_READING_TOOLS,
   modelQuestionKind,
   questionClassificationKey,
   type ApplyQuestionClassification,
@@ -267,19 +268,6 @@ const DEFAULT_TIME_BUDGET_MS = Number.POSITIVE_INFINITY;
 const DEFAULT_NO_PROGRESS_STEP_LIMIT = 120;
 // Writing and then checking a high-effort letter can exceed a page tool's 90s.
 const DOCUMENT_TOOL_TIMEOUT_MS = APPLY_MODEL_TIMEOUT_MS;
-
-/** What a partial classifier outage still allows: reads and field writes. */
-const PARTIAL_OUTAGE_TOOLS = new Set([
-  "observe",
-  "read_text",
-  "scroll",
-  "wait",
-  "fill_fields",
-  "type",
-  "select",
-  "set_checkbox",
-  "upload",
-]);
 
 const PAGE_TOOL_NAMES = new Set([
   "observe",
@@ -759,6 +747,7 @@ async function runMeasuredApplyAgent(
         client: llmClient,
         signal: config.signal,
         cacheScope: config.questionReadCacheScope,
+        observation: () => pageTools.state.observation,
         readContext: async () =>
           applicationQuestionClassificationContext({
             sources: runConfig.sources,
@@ -1912,7 +1901,20 @@ async function runMeasuredApplyAgent(
 
   const pageViews = new Set<string>();
   const describePage = (observation: ApplyFormObservation): string => {
-    const text = describeObservation(observation);
+    const confirmed =
+      !classifyQuestions ||
+      classifyQuestions.hasPageReading?.(
+        observation.controls,
+        questionReadContext(observation),
+      );
+    const mechanical =
+      observation.blocker &&
+      ["application_page_unreachable", "site_saves_as_you_go"].includes(
+        observation.blocker.code,
+      );
+    const text = describeObservation(
+      confirmed || mechanical ? observation : { ...observation, blocker: null },
+    );
     pageViews.add(text);
     return text;
   };
@@ -3699,6 +3701,36 @@ async function runMeasuredApplyAgent(
   };
 
   const domainTools: AgentLoopTool[] = [];
+  if (classifyQuestions?.recover)
+    domainTools.push({
+      definition: {
+        ...QUESTION_READING_TOOLS[0],
+        function: {
+          ...QUESTION_READING_TOOLS[0].function,
+          name: "read_application_page",
+          description:
+            "If the specialist question reader is unavailable, read the current page yourself. Report question meaning, tags and button purposes with this tool, then propose answers from the saved facts. This does not grant permission to write or send: all normal grounding, declaration, pay and submission checks still run. Use the question indexes in the recovery data supplied with the current page.",
+        },
+      },
+      execute: (raw) => {
+        const page = pageTools.state.observation;
+        if (!page)
+          return Promise.resolve({
+            kind: "ok",
+            content: "Observe the current page first.",
+          });
+        const report = parseToolArguments(raw);
+        const count = classifyQuestions.recover!(
+          page.controls,
+          questionReadContext(page),
+          report,
+        );
+        return Promise.resolve({
+          kind: "ok",
+          content: `Read ${count} questions. Propose supported answers; leave only genuinely missing facts for the person.\n${renderObservation(page)}`,
+        });
+      },
+    });
   const handledPickerRules = new Set<string>();
   const completedControlWrites = new Set<string>();
   const controlWriteKey = (proposal: ApplyProposal): string | null => {
@@ -3731,15 +3763,46 @@ async function runMeasuredApplyAgent(
     const current = pageTools.state.observation;
     if (
       current &&
-      partialOutageTurns > 0 &&
-      !["type", "select", "set_checkbox", "upload"].includes(proposal.tool)
-    )
-      return {
-        kind: "refused",
-        reason:
-          "The page is not fully readable. Only field writes are allowed until it can be read.",
-        observation: current,
-      };
+      proposal.tool === "click" &&
+      classifyQuestions?.recoveryData
+    ) {
+      const ref = proposal.ref;
+      const action = current.actions.find((entry) => entry.ref === ref);
+      if (
+        action?.submitsForm &&
+        action.kind === "other" &&
+        action.role !== "tab" &&
+        !classifyQuestions.hasPageReading?.(
+          current.controls,
+          questionReadContext(current),
+        )
+      )
+        return {
+          kind: "refused",
+          reason: `Read this button's purpose with read_application_page before pressing it. Use the page and its native form facts.\n${classifyQuestions.recoveryData(current.controls, questionReadContext(current))}`,
+          observation: current,
+        };
+    }
+    if (
+      current &&
+      "ref" in proposal &&
+      ["type", "select", "set_checkbox"].includes(proposal.tool)
+    ) {
+      const ref = proposal.ref;
+      const control = current.controls.find((entry) => entry.ref === ref);
+      const reading =
+        control &&
+        classifyQuestions
+          ?.settled(current.controls, questionReadContext(current))
+          ?.get(questionClassificationKey(control, current.controls));
+      if (reading?.readFailed)
+        return {
+          kind: "refused",
+          reason:
+            "The question reader was unavailable. Read this question yourself with read_application_page, then propose the answer using the current facts. The normal grounding check will decide whether it is supported.",
+          observation: current,
+        };
+    }
     if (
       current &&
       proposal.tool === "click" &&
@@ -4816,7 +4879,6 @@ async function runMeasuredApplyAgent(
         pauses.length === 0 &&
         checkFormReadiness(finalPage).ok;
       if (
-        partialOutageTurns === 0 &&
         (parsed.finishWhenReady || completedKnownPage) &&
         !stopped &&
         !leftAnswerForPerson
@@ -5110,9 +5172,9 @@ async function runMeasuredApplyAgent(
             selectedTools,
             { ...options, ...(signal ? { signal } : {}) },
           );
-        // Reading question meaning and choosing the next action are independent.
-        // No proposed action leaves this boundary until the read has succeeded.
-        // A failed/partial read still owns the same no-press/no-send restriction.
+        // Read meaning and choose the next action in parallel. If the specialist
+        // cannot read a question, the main model supplies the missing meaning;
+        // the normal evidence and authority checks still run before execution.
         const decisionAbort = new AbortController();
         const signal = options?.signal
           ? AbortSignal.any([options.signal, decisionAbort.signal])
@@ -5132,30 +5194,31 @@ async function runMeasuredApplyAgent(
         void decision.catch(() => undefined);
         try {
           const readings = [...((await reading)?.values() ?? [])];
-          if (readings.some((reading) => reading.readFailed)) {
-            if (
-              partialOutageTurns > 0 ||
-              readings.every((reading) => reading.readFailed)
-            )
-              throw new QuestionReadUnavailableError(
-                "Nestor could not read this page: the remaining questions stayed unread after repeated attempts. Your page and answers are kept. Retry this application when Nestor is available.",
-              );
-            partialOutageTurns += 1;
-            const reply = await decision;
-            if (
-              reply.toolCalls?.some(
-                (call) => !PARTIAL_OUTAGE_TOOLS.has(call.function.name),
+          if (
+            readings.some((reading) => reading.readFailed) &&
+            observation &&
+            classifyQuestions?.recoveryData
+          ) {
+            // The main model sees the same page and facts. It can supply meaning;
+            // the existing independent grounding check still decides every answer.
+            await decision;
+            const recovery = classifyQuestions.recoveryData(
+              observation.controls,
+              questionReadContext(observation),
+            );
+            return llmClient
+              .chatWithTools(
+                [
+                  ...currentMessages,
+                  {
+                    role: "user",
+                    content: `The specialist question reader was unavailable. Read these questions yourself with read_application_page, then propose answers from the current facts. Do not ask the person merely because that reader failed. All normal grounding, pay, declaration, browser and send checks still apply.\n${recovery}`,
+                  },
+                ],
+                tools,
+                options,
               )
-            ) {
-              decisionAbort.abort();
-              return request(
-                tools.filter((tool) =>
-                  PARTIAL_OUTAGE_TOOLS.has(tool.function.name),
-                ),
-                options?.signal,
-              );
-            }
-            return reply;
+              .then(recordReply);
           }
           return await decision;
         } catch (error) {
@@ -5798,8 +5861,6 @@ async function runMeasuredApplyAgent(
     );
   };
   let technicalFailure: ApplyAgentResult["technicalFailure"];
-  let partialOutageTurns = 0;
-  let groundingFailureReason: string | null = null;
   const loop = await runAgentLoop({
     // What stays the same for every application this person makes leads:
     // the instructions, then their facts. The job, its resume and its page
@@ -5954,16 +6015,6 @@ async function runMeasuredApplyAgent(
     ].map<AgentLoopTool>((tool) => ({
       ...tool,
       execute: (arguments_, context) => {
-        if (
-          partialOutageTurns > 0 &&
-          !PARTIAL_OUTAGE_TOOLS.has(tool.definition.function.name)
-        )
-          return Promise.resolve({
-            kind: "ok",
-            status: "refused",
-            content:
-              "The page is not fully readable. Only reads and field writes are allowed.",
-          });
         const record = progressGuard.start(
           tool.definition.function.name,
           arguments_,
@@ -6023,9 +6074,7 @@ async function runMeasuredApplyAgent(
         };
       if (technicalFailure)
         return {
-          reason:
-            groundingFailureReason ??
-            "Nestor could not finish checking this application.",
+          reason: "Nestor could not finish checking this application.",
           needsPerson: false,
           stuck: true,
           data: {},
@@ -6476,35 +6525,6 @@ async function runMeasuredApplyAgent(
   };
   // A finish that says needsPerson always ends paused, never ready to send:
   // what it names joins whatever the page left, in the same handover.
-  // Council D6: a run that met a partial classifier outage filled only what
-  // it could read (and exact identity), then ends as a retained technical
-  // failure, however the loop itself ended.
-  if (!technicalFailure && !skipReason && partialOutageTurns > 0) {
-    technicalFailure = {
-      code: "question_classification_unavailable",
-      retryable: true,
-      pageDisposition: "retain",
-    };
-    groundingFailureReason =
-      "Nestor could not read this page: the remaining questions stayed unread after repeated attempts. Your page and answers are kept. Retry this application when Nestor is available.";
-    note(groundingFailureReason);
-  }
-  if (technicalFailure?.code === "question_classification_unavailable") {
-    const page = pageTools.state.observation;
-    const controls = page?.controls ?? [];
-    const readings = page
-      ? classifyQuestions?.settled(controls, questionReadContext(page))
-      : undefined;
-    for (const control of controls) {
-      const reading =
-        readings?.get(questionClassificationKey(control, controls)) ??
-        readings?.get(questionPrompt(control));
-      if (reading?.readFailed)
-        unavailableQuestions.add(
-          normalizeFormQuestionPrompt(questionPrompt(control)),
-        );
-    }
-  }
   const finishNeedsPerson =
     !skipReason &&
     (needsPersonFinishPending || loop.finish?.needsPerson === true);
@@ -6625,7 +6645,7 @@ async function runMeasuredApplyAgent(
     pauses.length === 0
   ) {
     outcome = "stuck";
-    reason = groundingFailureReason ?? loop.reason;
+    reason = loop.reason;
   } else if (pauses.length > 0) {
     outcome = "paused";
     reason = pauses[0]?.summary ?? loop.reason;
