@@ -2779,48 +2779,55 @@ describe("a site that saves as you go", () => {
   });
 
   test.each([
-    ["https://apply.example.test/api/submit?applicationId=42", 0],
-    ["https://apply.example.test/form/step-2", 0],
-    // The form it was started on, and this same page, are its own to open.
-    ["https://apply.example.test/form#questions", 1],
-  ])("in Fill, a link to %s is pressed %i times", async (href, presses) => {
-    const page = rawPage({
-      links: [
+    "https://apply.example.test/form/step-1",
+    "https://apply.example.test/form/step-2",
+    "https://apply.example.test/form#questions",
+  ])(
+    "in Fill, an observed application link uses read-only navigation: %s",
+    async (href) => {
+      const page = rawPage({
+        links: [
+          {
+            index: 0,
+            label: "Continue",
+            href,
+            target: "",
+            visible: true,
+            topOffset: 10,
+          },
+        ],
+      });
+      let pressed = 0;
+      const followed = vi.fn(() =>
+        Promise.resolve({ ok: true as const, url: href }),
+      );
+      const { config } = configFor(page, {
+        hands: {
+          followLink: followed,
+          clickElement: () => {
+            pressed += 1;
+            return Promise.resolve({ ok: true, observedValue: "clicked" });
+          },
+        },
+      });
+      const outcome = await executeApplyProposal(
+        { tool: "click", ref: "l0" },
+        observationOf(page).signature,
         {
-          index: 0,
-          label: "Continue",
-          href,
-          target: "",
-          visible: true,
-          topOffset: 10,
+          config: {
+            ...config,
+            intermediateWritesAuthorized: false,
+            safety: safetyThatBlocksOneSave(),
+          },
+          now,
+          guardState: createApplyGuardState(),
         },
-      ],
-    });
-    let pressed = 0;
-    const { config } = configFor(page, {
-      hands: {
-        clickElement: () => {
-          pressed += 1;
-          return Promise.resolve({ ok: true, observedValue: "clicked" });
-        },
-      },
-    });
-    const outcome = await executeApplyProposal(
-      { tool: "click", ref: "l0" },
-      observationOf(page).signature,
-      {
-        config: {
-          ...config,
-          intermediateWritesAuthorized: false,
-          safety: safetyThatBlocksOneSave(),
-        },
-        now,
-        guardState: createApplyGuardState(),
-      },
-    );
-    expect(pressed).toBe(presses);
-    if (!presses) expect(outcome.kind).toBe("paused");
-  });
+      );
+      expect(pressed).toBe(0);
+      expect(followed).toHaveBeenCalledOnce();
+      expect(outcome.kind).toBe("moved");
+    },
+  );
 
   test("in Fill, a picker's option is still pressed: it answers a field", async () => {
     const page = rawPage({

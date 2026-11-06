@@ -63,6 +63,8 @@ import { normalizeSignal } from "./control-classification";
 import {
   localStepPreflight,
   localStepAdvanced,
+  localBackPreflight,
+  localStepWentBack,
   numberedStepAdvanced,
   numberedStepPreflight,
   unconfirmedStepText,
@@ -1980,6 +1982,10 @@ export function fillStepPress(
   page: ApplyFormObservation,
   ref: string,
 ) {
+  if (config.hands.clickBoundAction || config.hands.clickWithoutWrites) {
+    const back = localBackPreflight(page, ref);
+    if (back) return { kind: "back" as const, ...back };
+  }
   if (pressesFormButtons(config)) return null;
   if (
     config.intermediateWritesAuthorized === true &&
@@ -2405,6 +2411,19 @@ export async function executeApplyProposal(
 
   switch (proposal.tool) {
     case "click": {
+      const link = observation.links.find(
+        (item) => item.ref === proposal.ref && item.destination === "page",
+      );
+      if (link)
+        return executeApplyProposal(
+          {
+            tool: "follow_link",
+            ref: link.ref,
+            ...(proposal.reason ? { reason: proposal.reason } : {}),
+          },
+          observation.signature,
+          deps,
+        );
       const submits = observation.actions.find(
         (action) => action.ref === proposal.ref,
       );
@@ -2486,6 +2505,64 @@ export async function executeApplyProposal(
       const stepPress = fillPress
         ? null
         : fillStepPress(config, observation, proposal.ref);
+      const backStep = stepPress?.kind === "back" ? stepPress : null;
+      if (backStep) {
+        const livePage = await config.hands.observe();
+        if (
+          livePage.signature !== observation.signature ||
+          !localBackPreflight(livePage, proposal.ref)
+        )
+          return {
+            kind: "refused",
+            reason:
+              "The step changed. Read the current page before going back.",
+            observation: livePage,
+          };
+        await config.safety?.closeIntermediateWriteWindow();
+        await config.safety?.closeUploadWindow?.();
+        if (await config.safety?.checkServiceWorker())
+          return {
+            kind: "refused",
+            reason:
+              "The browser could not establish a read-only Back press. Inspect the page and use its application navigation.",
+            observation: livePage,
+          };
+        // The bound non-submit press opens no request window. Keep the current
+        // document's existing grants available for a later authorized Save;
+        // clickWithoutWrites permanently fences a document for read-only Fill.
+        const pressed = config.hands.clickBoundAction
+          ? await config.hands.clickBoundAction(backStep)
+          : await config.hands.clickWithoutWrites!(backStep);
+        const after = await config.hands.observe();
+        const guard = await reviewGuard(deps, after.url);
+        if (guard.pause) return { kind: "paused", pause: guard.pause };
+        if (
+          !pressed.ok ||
+          guard.openedWindowUrl ||
+          !localStepWentBack(livePage, after)
+        )
+          return {
+            kind: "refused",
+            reason: !pressed.ok
+              ? pressed.error
+              : "Back did not reveal an earlier application section. Inspect the current page before continuing.",
+            observation: after,
+          };
+        deps.guardState.lastOnSiteUrl = after.url;
+        return {
+          kind: "moved",
+          note: `Pressed "${backStep.label}" and returned to the earlier application section.`,
+          observation: after,
+          progress: true,
+        };
+      }
+      if (clicked && "kind" in clicked && clicked.kind === "back")
+        return {
+          kind: "refused",
+          reason:
+            "This Back control could not be bound as a read-only press. Observe the page and use a non-submitting Back control or application link.",
+          observation,
+        };
       const localStep = stepPress?.kind === "local" ? stepPress : null;
       const numberedStep = stepPress?.kind === "numbered" ? stepPress : null;
       const stepReceipt = stepPress

@@ -2249,3 +2249,47 @@ test("upload filenames in nearby button text do not reread the same page", async
   await classify(page.controls, questionReadContext(page));
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
+
+test("checkbox group checks and native values reuse meaning, but changed option labels and instructions reread", async () => {
+  const group = ["React", "TypeScript"].map((label, index) => ({
+    ...controls(label, ["React", "TypeScript"])[0],
+    ref: `skill${index}`,
+    kind: "checkbox" as const,
+    answerControlType: "multi_choice" as const,
+    groupLabel: "Which technologies have you used?",
+    choiceGroupKey: "skills",
+    label,
+    value: "on",
+    checked: false,
+  }));
+  const client = clientReplyingSparse({ plainIndexes: [0], flagged: [] });
+  const classify = createQuestionClassifier({ client });
+  const context = () =>
+    JSON.stringify({
+      instructions: `Which technologies have you used?\n${group.map((control) => control.label).join("\n")}`,
+    });
+  await classify(group, context());
+  group[0].checked = true;
+  group[0].answered = true;
+  group[0].value = "checked";
+  await classify(group, context());
+  group[1].checked = true;
+  group[1].answered = true;
+  await classify(group, context());
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  group[1].label = "Vue";
+  group.forEach((control) => {
+    control.options = ["React", "Vue"];
+  });
+  await classify(group, context());
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(
+    JSON.parse(vi.mocked(client.chatWithTools).mock.calls[1][0][1].content)[0]
+      .options,
+  ).toEqual(["React", "Vue"]);
+  await classify(
+    group,
+    JSON.stringify({ instructions: "Explain your choice in your own words" }),
+  );
+  expect(client.chatWithTools).toHaveBeenCalledTimes(3);
+});

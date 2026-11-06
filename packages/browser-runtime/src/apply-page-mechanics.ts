@@ -2119,7 +2119,7 @@ async function readOpenedTabs(page: Page): Promise<RawApplyOpenedTab[]> {
   try {
     const others = await listTaskOwnedPopups(page);
     return await Promise.all(
-      others.slice(0, 8).map(async (candidate, index) => ({
+      others.map(async (candidate, index) => ({
         index,
         url: candidate.url(),
         title: await candidate.title().catch(() => ""),
@@ -2148,7 +2148,7 @@ async function listTaskOwnedPopups(root: Page): Promise<Page[]> {
   for (const candidate of candidates) {
     let current: Page | null = candidate;
     const seen = new Set<Page>();
-    for (let depth = 0; current && depth < 8; depth += 1) {
+    while (current) {
       if (seen.has(current)) break;
       seen.add(current);
       const opener: Page | null = await current.opener().catch(() => null);

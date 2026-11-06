@@ -622,18 +622,26 @@ function parseQuestionReadings(
   return result;
 }
 
+function questionReadOptions(
+  control: ApplyFormControl,
+  siblings: readonly ApplyFormControl[],
+) {
+  const group = control.choiceGroupKey
+    ? siblings.filter(
+        (candidate) => candidate.choiceGroupKey === control.choiceGroupKey,
+      )
+    : [];
+  return group.length
+    ? group.map((candidate) => candidate.label || candidate.value)
+    : control.options;
+}
+
 /** A question's meaning does not change when its handle, value or wizard step changes. */
 export function questionClassificationKey(
   control: ApplyFormControl,
   siblings: readonly ApplyFormControl[] = [],
 ): string {
-  const options = control.choiceGroupKey
-    ? siblings
-        .filter(
-          (candidate) => candidate.choiceGroupKey === control.choiceGroupKey,
-        )
-        .map((candidate) => candidate.value || candidate.label)
-    : control.options;
+  const options = questionReadOptions(control, siblings);
   return JSON.stringify([
     questionPrompt(control),
     control.groupLabel,
@@ -668,7 +676,7 @@ function classifiableQuestions(controls: readonly ApplyFormControl[]) {
                 kind: control.urlInput ? "url" : control.kind,
                 hint: questionMeaningHint(control),
                 placeholder: control.placeholder,
-                options: [...control.options],
+                options: [...questionReadOptions(control, controls)],
                 required: control.required,
                 sectionPath: control.sectionPath ?? [],
               },

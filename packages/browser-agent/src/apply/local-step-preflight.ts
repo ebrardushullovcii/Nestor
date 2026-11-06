@@ -59,6 +59,63 @@ export function localStepAdvanced(
   );
 }
 
+/** Returning to correct an earlier answer must also work with open/invalid fields. */
+export function localBackPreflight(page: ApplyFormObservation, ref: string) {
+  const action = page.actions.find((item) => item.ref === ref);
+  if (
+    !page.url ||
+    page.loading ||
+    page.blocker?.requiresPerson ||
+    !action ||
+    action.kind !== "back" ||
+    !action.visible ||
+    action.disabled ||
+    action.submitsForm !== false ||
+    (page.step.index !== null && page.step.index <= 1)
+  )
+    return null;
+  return {
+    ref: action.ref,
+    label: action.label,
+    url: page.url,
+    stepLabel: page.step.label,
+    frame: action.frame ?? null,
+  };
+}
+
+export function localStepWentBack(
+  before: ApplyFormObservation,
+  after: ApplyFormObservation,
+): boolean {
+  if (
+    before.url !== after.url ||
+    after.loading ||
+    after.blocker?.requiresPerson
+  )
+    return false;
+  if (before.step.index !== null && after.step.index !== null)
+    return (
+      after.step.index === before.step.index - 1 &&
+      after.step.total === before.step.total &&
+      before.signature !== after.signature
+    );
+  const section = (page: ApplyFormObservation) =>
+    JSON.stringify([
+      page.step.label,
+      page.headings,
+      page.controls
+        .filter((control) => control.visible)
+        .map((control) => [
+          control.kind,
+          control.label,
+          control.groupLabel,
+          control.sectionPath,
+          control.options,
+        ]),
+    ]);
+  return section(before) !== section(after);
+}
+
 /** Wording a non-final step control never carries, whatever its kind says. */
 const FINAL_WORDING = /\b(?:submit|send|finish|complete|apply)\b/iu;
 /** A review or summary screen is the last one before the send. */

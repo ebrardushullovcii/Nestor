@@ -5080,13 +5080,13 @@ test("one response can enter contact facts, tick an approved declaration and att
   expect(updates).toBe(1);
 });
 
-test("in Fill a Continue link is handed to the person, never followed; the form's own address opens", async () => {
+test("Fill follows an observed application navigation link without asking the person", async () => {
   const source = page({
     links: [
       {
         index: 0,
         label: "Continue",
-        href: "https://apply.example.test/api/submit?applicationId=42",
+        href: "https://apply.example.test/form/step-2",
         target: "",
         visible: true,
         topOffset: 10,
@@ -5110,8 +5110,12 @@ test("in Fill a Continue link is handed to the person, never followed; the form'
     ]),
   );
   expect(navigate).toHaveBeenCalledOnce();
-  expect(followLink).not.toHaveBeenCalled();
-  expect(result.pauses[0]?.summary).toContain('Press "Continue" on the site');
+  expect(followLink).toHaveBeenCalledOnce();
+  expect(
+    result.pauses
+      .flatMap((pause) => pause.questions ?? [])
+      .some((question) => question.prompt.includes("Press")),
+  ).toBe(false);
 });
 
 describe("fill_fields visible steps", () => {

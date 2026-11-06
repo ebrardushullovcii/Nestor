@@ -89,7 +89,6 @@ import {
   executeApplyProposal,
   guardStop,
   fileFieldHoldsOtherFile,
-  pressOnSitePause,
   formSendPause,
   unrecognizedSubmit,
   pressesFormButtons,
@@ -133,7 +132,6 @@ import {
   UPLOAD_REPAIR_QUESTION_ID,
   type FileUploadProblem,
 } from "./submit-preflight";
-import { fillMayOpen } from "./fill-presses";
 import {
   nextPathStep,
   planReplay,
@@ -3136,8 +3134,10 @@ async function runMeasuredApplyAgent(
           !deferredPress?.formSend &&
           pendingQuestions.size === 0 &&
           !outcome.stuck
-            ? observation.actions.find((action) =>
-                fillStepPress(runConfig, observation, action.ref),
+            ? observation.actions.find(
+                (action) =>
+                  action.kind === "advance" &&
+                  fillStepPress(runConfig, observation, action.ref),
               )
             : undefined;
         if (
@@ -5902,8 +5902,8 @@ async function runMeasuredApplyAgent(
         .map<AgentLoopTool>((tool) => ({
           ...tool,
           execute: async (rawArguments, context) => {
-            // Fill opens ordinary application entry links as well as this
-            // application's known pages; later ambiguous navigation is held.
+            // Read-only navigation stays with the model. The existing URL
+            // review and browser request fence still govern the move.
             const name = tool.definition.function.name;
             if (name === "read_text") {
               const args = parseToolArguments(rawArguments);
@@ -5923,64 +5923,6 @@ async function runMeasuredApplyAgent(
                       total: control.options.length,
                     }),
                   };
-              }
-            }
-            if (
-              (name === "follow_link" || name === "navigate") &&
-              !pressesFormButtons(config)
-            ) {
-              let args: Record<string, unknown> = {};
-              try {
-                args = JSON.parse(rawArguments || "{}") as Record<
-                  string,
-                  unknown
-                >;
-              } catch {
-                args = {};
-              }
-              const seen = pageTools.state.observation;
-              const link =
-                name === "follow_link"
-                  ? seen?.links.find((entry) => entry.ref === args.ref)
-                  : seen?.links.find((entry) => entry.href === args.url);
-              const href =
-                name === "navigate"
-                  ? typeof args.url === "string"
-                    ? args.url
-                    : ""
-                  : (link?.href ?? "");
-              const accessKind =
-                seen && name === "follow_link" && typeof args.ref === "string"
-                  ? browserInteractionKind(
-                      seen,
-                      args.ref,
-                      await googleIdentityContext(config, config.hands),
-                    )
-                  : null;
-              const browserPermissions =
-                await currentBrowserPermissions(config);
-              const enabledAccessLink =
-                (accessKind === "signIn" ||
-                  accessKind === "createAccounts" ||
-                  accessKind === "googleSignIn") &&
-                browserPermissions[accessKind];
-              if (
-                !enabledAccessLink &&
-                !fillMayOpen(
-                  config,
-                  seen?.url ?? null,
-                  href,
-                  seen ? { observation: seen, state: guardState } : undefined,
-                )
-              ) {
-                const pause = pressOnSitePause(
-                  link?.label && !/^https?:/iu.test(link.label.trim())
-                    ? `"${link.label}"`
-                    : "the link to the next page",
-                  now(),
-                );
-                if (deferredPress) return handOverPress(pause);
-                return { kind: "ok", content: deferPress(pause) };
               }
             }
             if (name === "follow_link" || name === "navigate") {
@@ -6123,8 +6065,10 @@ async function runMeasuredApplyAgent(
         )
       ) {
         const emptyStep = current;
-        const advance = emptyStep.actions.find((action) =>
-          fillStepPress(runConfig, emptyStep, action.ref),
+        const advance = emptyStep.actions.find(
+          (action) =>
+            action.kind === "advance" &&
+            fillStepPress(runConfig, emptyStep, action.ref),
         );
         if (!advance) break;
         const outcome = await runProposal(

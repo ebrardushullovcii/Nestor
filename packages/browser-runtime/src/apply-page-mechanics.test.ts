@@ -926,6 +926,98 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
+  test("Back with closed write windows blocks a POST and later authorized saves still work", async () => {
+    const page = await browser.newPage();
+    let posts = 0;
+    const server = createServer((request, response) => {
+      if (request.method === "POST") {
+        posts += 1;
+        request.resume();
+        response.end("saved");
+        return;
+      }
+      response.setHeader("content-type", "text/html");
+      response.end(`<form><h1 id="step">Step 2 of 3</h1><input required><button type="button" id="back">Back</button><button type="submit">Send</button></form><script>
+        document.getElementById('back').onclick = () => {
+          document.getElementById('step').textContent = 'Step 1 of 3';
+          fetch('/save', {method:'POST',body:'draft=changed'}).catch(() => {document.body.dataset.blocked = 'yes';});
+        };
+      </script>`);
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("Missing fixture address");
+    const url = `http://127.0.0.1:${address.port}/application`;
+    try {
+      await page.goto(url);
+      expect(
+        await page
+          .locator("input")
+          .evaluate(
+            (input) =>
+              input instanceof HTMLInputElement && input.checkValidity(),
+          ),
+      ).toBe(false);
+      const session = createPlaywrightApplyPageSession({ page });
+      await session.installPrepareOnlyGuard({
+        intermediateMutationsAuthorized: true,
+        attachmentUploadsAuthorized: false,
+        allowedOrigins: [new URL(url).origin],
+      });
+      await session.openIntermediateWriteWindow();
+      const raw = await session.readPage();
+      const action = raw.actions.find((action) => action.label === "Back")!;
+      await session.closeIntermediateWriteWindow();
+      const pressed = await session.clickBoundAction!({
+        ref: action.ref ?? `a${action.index}`,
+        label: action.label,
+        url,
+        stepLabel: raw.stepLabel,
+        frame: null,
+      });
+      expect(pressed).toMatchObject({ ok: true });
+      expect(await page.locator("h1").innerText()).toBe("Step 1 of 3");
+      await expect
+        .poll(() => page.locator("body").getAttribute("data-blocked"))
+        .toBe("yes");
+      expect(posts).toBe(0);
+      await session.registerPreparedValue("Jamie");
+      await session.openIntermediateWriteWindow();
+      const status = await page.evaluate(
+        async () =>
+          (await fetch("/save", { method: "POST", body: "name=Jamie" })).status,
+      );
+      expect(status).toBe(200);
+      expect(posts).toBe(1);
+    } finally {
+      await page.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("reports every task-owned popup through a long opener chain", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setContent("<h1>Root application</h1>");
+      let opener = page;
+      for (let index = 0; index < 9; index += 1) {
+        const opened = page.context().waitForEvent("page");
+        await opener.evaluate((index) => {
+          window.open(`about:blank#application-${index}`);
+        }, index);
+        opener = await opened;
+      }
+      const raw = await readRawApplyPage(page);
+      expect(raw.openedTabs).toHaveLength(9);
+      expect(raw.openedTabs.at(-1)?.url).toBe("about:blank#application-8");
+    } finally {
+      await page.close();
+    }
+  });
+
   test("keeps late interactive controls in the main document and child frames", async () => {
     const page = await browser.newPage();
     try {

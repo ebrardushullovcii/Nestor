@@ -849,3 +849,100 @@ test("German step and send purposes survive the executor's fresh page reads", as
   expect(result.reason).toContain("not authorized to send");
   expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
 });
+
+test("reads an earlier step with Back despite an invalid current field, then fills and continues", async () => {
+  const w = wizard("saves", { startStep: 2 });
+  const values = new Map([
+    [1, "Robin Ashford"],
+    [2, ""],
+    [3, "Robin Ashford"],
+  ]);
+  w.hands.observe = () => {
+    w.source.stepLabel = `Step ${w.state.step} of 3`;
+    w.source.headings = [{ level: 1, text: `Section ${w.state.step}` }];
+    const value = values.get(w.state.step) ?? "";
+    w.source.controls = [
+      {
+        ...field(),
+        value,
+        invalid: !value,
+        validationMessage: value ? "" : "Fill this field",
+      },
+    ];
+    w.source.actions = [
+      {
+        index: 0,
+        label: w.state.step === 3 ? "Submit application" : "Save and Continue",
+        visible: true,
+        disabled: false,
+        inForm: true,
+        submitsForm: w.state.step === 3,
+      },
+    ];
+    if (w.state.step > 1)
+      w.source.actions.push({
+        index: 1,
+        label: "Back",
+        visible: true,
+        disabled: false,
+        inForm: true,
+        submitsForm: false,
+      });
+    return Promise.resolve(
+      buildApplyFormObservation(w.source, "2026-11-03T10:00:00.000Z"),
+    );
+  };
+  const advance = w.hands.clickBoundAction;
+  w.hands.clickBoundAction = vi.fn<
+    NonNullable<ApplyPageHands["clickWithoutWrites"]>
+  >((expected) => {
+    if (expected.label === "Back") {
+      expect(w.state.windowOpen).toBe(false);
+      w.state.step -= 1;
+      return Promise.resolve({ ok: true as const, observedValue: "clicked" });
+    }
+    return advance(expected);
+  });
+  w.hands.fillText = (_ref, value) => {
+    values.set(w.state.step, value);
+    return Promise.resolve({ ok: true, observedValue: value });
+  };
+  let readEarlier = false;
+  const result = await runApplyAgent(
+    w.config,
+    model(() => {
+      if (w.state.step === 2 && !readEarlier) {
+        readEarlier = true;
+        return { name: "click", args: { ref: "a1" } };
+      }
+      if (w.state.step === 1) return { name: "click", args: { ref: "a0" } };
+      if (w.state.step === 2)
+        return {
+          name: "fill_fields",
+          args: {
+            fields: [
+              {
+                tool: "type",
+                ref: "c0",
+                text: "Robin Ashford",
+                storedFactId: "profile.fullName",
+              },
+            ],
+            thenContinue: "a0",
+          },
+        };
+      return {
+        name: "finish",
+        args: { reason: "Re-read the earlier step and completed the form." },
+      };
+    }),
+  );
+  expect(w.hands.clickWithoutWrites).not.toHaveBeenCalled();
+  expect(w.hands.clickBoundAction).toHaveBeenCalledTimes(3);
+  expect(values.get(2)).toBe("Robin Ashford");
+  expect(w.state.saves).toEqual([1, 2]);
+  expect(w.state.step).toBe(3);
+  expect(w.state.finalPresses).toBe(0);
+  expect(result.pauses).toEqual([]);
+  expect(result.outcome).toBe("prepared");
+});
