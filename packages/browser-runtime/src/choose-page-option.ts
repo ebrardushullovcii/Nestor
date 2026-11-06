@@ -173,14 +173,20 @@ interface ListState {
 }
 
 /** Enumerate actual DOM rows, including open shadow roots. */
-function optionNodes(element: Element): Element[] {
+function optionNodes(
+  element: Element,
+  visitRoot?: (root: Element | ShadowRoot) => void,
+): Element[] {
   const nodes = new Set<Element>([element]);
   const roots: Array<Element | ShadowRoot> = [element];
-  for (const root of roots)
+  if (element.shadowRoot) roots.push(element.shadowRoot);
+  for (const root of roots) {
+    visitRoot?.(root);
     for (const node of root.querySelectorAll("*")) {
       nodes.add(node);
       if (node.shadowRoot) roots.push(node.shadowRoot);
     }
+  }
   return [...nodes];
 }
 
@@ -283,85 +289,144 @@ export async function readWholeList(
           node instanceof HTMLElement &&
           node.scrollHeight > node.clientHeight + 4 &&
           /auto|scroll/u.test(getComputedStyle(node).overflowY);
-        const scroller =
-          nodes(element).find(scrollable) ??
-          [
-            element.parentElement,
-            element.parentElement?.parentElement ?? null,
-          ].find(scrollable) ??
-          null;
-        const seen = new Map<string, string>();
-        const choices = new Map<string, string>();
-        const collect = (): string | null => {
-          let found: string | null = null;
-          for (const option of nodes(element).filter((node) =>
-            node.matches("[role='option']"),
-          )) {
-            if (option.getClientRects().length === 0) continue;
-            const text = label.call(option);
-            if (!text || loadingRow.test(text)) continue;
-            const key = normalize(text);
-            if (!seen.has(key)) seen.set(key, text);
-            if (
-              placeholder.test(text) ||
-              option.closest("[aria-disabled='true'], [disabled]") !== null
-            )
-              continue;
-            if (!choices.has(key)) choices.set(key, text);
-            if (key === input.wanted) found ??= text;
-          }
-          return found;
+        // Scrolling a fully mounted list does not change its names. Reuse its
+        // DOM inventory and composed labels until a mutation changes them,
+        // rather than resolving every row's styles once per scroll position.
+        let changed = true;
+        let revision = 0;
+        let descendants: Element[] = [];
+        let rows: Element[] = [];
+        let labels = new WeakMap<Element, string>();
+        const observers = new Map<Node, MutationObserver>();
+        const watch = (root: Node) => {
+          if (observers.has(root)) return;
+          const observer = new MutationObserver(() => {
+            changed = true;
+          });
+          observer.observe(root, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            characterData: true,
+          });
+          observers.set(root, observer);
         };
-        // A list that draws only some of its rows says how many it has
-        // (aria-setsize) or where a row sits (aria-posinset).
-        const windowed = () =>
-          nodes(element)
-            .filter((node) => node.matches("[role='option']"))
-            .some(
+        // Linked labels, ancestor state and stylesheet text can live outside
+        // the list. Shadow roots need their own observer.
+        watch(element.ownerDocument);
+        watch(element.getRootNode());
+        const refresh = () => {
+          for (const observer of observers.values())
+            if (observer.takeRecords().length) changed = true;
+          // Attaching a shadow root itself emits no mutation record.
+          if (
+            !changed &&
+            descendants.some(
+              (node) => node.shadowRoot && !observers.has(node.shadowRoot),
+            )
+          )
+            changed = true;
+          if (!changed) return;
+          descendants = nodes(element, watch);
+          rows = descendants.filter((node) => node.matches("[role='option']"));
+          labels = new WeakMap<Element, string>();
+          revision++;
+          changed = false;
+        };
+        const rowLabel = (option: Element) => {
+          let text = labels.get(option);
+          if (text === undefined) {
+            text = label.call(option);
+            labels.set(option, text);
+          }
+          return text;
+        };
+        try {
+          refresh();
+          const scroller =
+            descendants.find(scrollable) ??
+            [
+              element.parentElement,
+              element.parentElement?.parentElement ?? null,
+            ].find(scrollable) ??
+            null;
+          const seen = new Map<string, string>();
+          const choices = new Map<string, string>();
+          let collectedRevision = -1;
+          let lastFound: string | null = null;
+          const collect = (): string | null => {
+            refresh();
+            if (collectedRevision === revision) return lastFound;
+            collectedRevision = revision;
+            let found: string | null = null;
+            for (const option of rows) {
+              if (option.getClientRects().length === 0) continue;
+              const text = rowLabel(option);
+              if (!text || loadingRow.test(text)) continue;
+              const key = normalize(text);
+              if (!seen.has(key)) seen.set(key, text);
+              if (
+                placeholder.test(text) ||
+                option.closest("[aria-disabled='true'], [disabled]") !== null
+              )
+                continue;
+              if (!choices.has(key)) choices.set(key, text);
+              if (key === input.wanted) found ??= text;
+            }
+            lastFound = found;
+            return found;
+          };
+          // A list that draws only some of its rows says how many it has
+          // (aria-setsize) or where a row sits (aria-posinset).
+          const windowed = () =>
+            rows.some(
               (option) =>
                 Number(option.getAttribute("aria-setsize") ?? 0) > seen.size ||
                 Number(option.getAttribute("aria-posinset") ?? 0) > seen.size,
             );
-        const done = (complete: boolean, found: string | null) => ({
-          options: [...choices.values()],
-          complete: found !== null || (complete && !windowed()),
-          found,
-        });
-        let found = collect();
-        if (found !== null || !scroller) return done(true, found);
-        scroller.scrollTop = 0;
-        await wait(120);
-        while (true) {
-          found = collect();
-          if (found !== null) return done(true, found);
-          const atEnd =
-            scroller.scrollTop + scroller.clientHeight >=
-            scroller.scrollHeight - 2;
-          if (atEnd) {
-            // A list that loads more at its end gets a moment to do so.
-            const height = scroller.scrollHeight;
-            const size = seen.size;
-            for (let waited = 0; waited < 1_000; waited += 200) {
-              await wait(200);
-              found = collect();
-              if (found !== null) return done(true, found);
-              if (scroller.scrollHeight > height || seen.size > size) break;
-            }
-            if (scroller.scrollHeight <= height && seen.size <= size) {
-              const loading = nodes(element)
-                .filter((node) => node.matches("[role='option']"))
-                .some((option) => loadingRow.test(label.call(option)));
-              return done(!loading, null);
-            }
-          }
-          const beforeScroll = scroller.scrollTop;
-          scroller.scrollTop += Math.max(scroller.clientHeight * 0.8, 40);
+          const done = (complete: boolean, found: string | null) => ({
+            options: [...choices.values()],
+            complete: found !== null || (complete && !windowed()),
+            found,
+          });
+          let found = collect();
+          if (found !== null || !scroller) return done(true, found);
+          scroller.scrollTop = 0;
           await wait(120);
-          if (scroller.scrollTop === beforeScroll) {
-            // The requested scroll did not move. Return the observed options
-            // as incomplete so the model can choose another interaction.
-            return done(false, collect());
+          while (true) {
+            found = collect();
+            if (found !== null) return done(true, found);
+            const atEnd =
+              scroller.scrollTop + scroller.clientHeight >=
+              scroller.scrollHeight - 2;
+            if (atEnd) {
+              // A list that loads more at its end gets a moment to do so.
+              const height = scroller.scrollHeight;
+              const size = seen.size;
+              for (let waited = 0; waited < 1_000; waited += 200) {
+                await wait(200);
+                found = collect();
+                if (found !== null) return done(true, found);
+                if (scroller.scrollHeight > height || seen.size > size) break;
+              }
+              if (scroller.scrollHeight <= height && seen.size <= size) {
+                const loading = rows.some((option) =>
+                  loadingRow.test(rowLabel(option)),
+                );
+                return done(!loading, null);
+              }
+            }
+            const beforeScroll = scroller.scrollTop;
+            scroller.scrollTop += Math.max(scroller.clientHeight * 0.8, 40);
+            await wait(120);
+            if (scroller.scrollTop === beforeScroll) {
+              // The requested scroll did not move. Return the observed options
+              // as incomplete so the model can choose another interaction.
+              return done(false, collect());
+            }
           }
+        } finally {
+          for (const observer of observers.values()) observer.disconnect();
         }
       },
     ),
