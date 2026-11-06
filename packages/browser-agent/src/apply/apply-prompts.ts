@@ -192,8 +192,10 @@ function describeControl(
   }
   if (control.upload)
     parts.push(`upload facts: ${JSON.stringify(control.upload)}`);
-  if (control.invalid && control.validationMessage) {
-    parts.push(`the page says: ${control.validationMessage}`);
+  if (control.invalid) {
+    parts.push(
+      `the page says: ${control.validationMessage || "This control is invalid."}`,
+    );
   }
   if (!control.visible) {
     parts.push("not on screen");

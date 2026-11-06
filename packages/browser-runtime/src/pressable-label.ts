@@ -4,6 +4,7 @@ export function pressableLabel(this: Element): string {
     if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
     if (node instanceof Element) {
       if (node.matches("script,style,template,noscript")) return "";
+      if (node.getAttribute("aria-hidden") === "true") return "";
       const style = getComputedStyle(node);
       if (style.display === "none" || style.visibility === "hidden") return "";
       if (node instanceof HTMLSlotElement) {

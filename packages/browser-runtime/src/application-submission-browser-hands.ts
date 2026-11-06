@@ -1,6 +1,7 @@
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { createHash } from "node:crypto";
 import {
+  describeBrowserError,
   SubmissionFinalControlIdentitySchema,
   SubmissionObservationIdentitySchema,
   type SubmissionFinalControlIdentity,
@@ -809,6 +810,13 @@ export async function executeExactlyOneFinalAction(
       page.off("requestfailed", onFailure);
     }
     const pageAfter = readSafePageUrl(page.url());
+    if (actionError)
+      siteMessage = [
+        describeBrowserError(actionError, "The control could not be pressed."),
+        siteMessage,
+      ]
+        .filter(Boolean)
+        .join("\n");
     return {
       outcome: "outcome_uncertain",
       reason: actionError === null ? "action_issued" : "action_error",

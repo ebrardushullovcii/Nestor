@@ -1,6 +1,8 @@
 import type { Frame, Page, Locator } from "playwright";
 import { randomUUID } from "node:crypto";
 import { pressableLabel } from "./pressable-label";
+import { readPressability, readFieldValidation } from "./element-state";
+import { visiblePageText } from "./visible-page-text";
 
 type Kind = "c" | "a" | "l" | "e";
 interface Binding {
@@ -73,6 +75,9 @@ export function controlSnapshot(
           for(const entry of entries){
             const element=matched[entry.index];
             if(element){
+              const interaction=(${readPressability.toString()})(element);
+              entry.disabled ||= interaction.disabled || interaction.inert;
+              if(kind==='c')Object.assign(entry,(${readFieldValidation.toString()})(element,${visiblePageText.toString()}));
               if(kind!=='c')entry.label=(${pressableLabel.toString()}).call(element);
               entry.ref=(entry.ref??kind+entry.index)+':'+identify(element);
               const scope=element.form??element.closest('form,[role="form"],[role="dialog"],dialog');
@@ -92,6 +97,12 @@ export function controlSnapshot(
                   zeroSize:rect.width===0||rect.height===0,ariaHidden,cssHidden};
               }
             }
+          }
+        }
+        if(!Array.isArray(result)&&Array.isArray(result.validationErrors)){
+          for(const element of elements.filter(element=>element.matches('[role="alert"],[aria-live="assertive"]'))){
+            const text=(${visiblePageText.toString()})(element).trim();
+            if(text&&!result.validationErrors.includes(text))result.validationErrors.push(text);
           }
         }
         return result;

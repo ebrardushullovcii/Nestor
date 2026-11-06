@@ -707,7 +707,9 @@ export async function runAgentLoop(
             const cause =
               error instanceof Error && error.name === "AbortError"
                 ? endSentence(error.message)
-                : null;
+                : tool.describeError
+                  ? endSentence(tool.describeError(error))
+                  : null;
             await note(
               `${toolCall.function.name} → tool failure${cause ? `: ${cause}` : ""}`,
             );

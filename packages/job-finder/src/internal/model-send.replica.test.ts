@@ -129,6 +129,16 @@ test.each([
         mimeType: "text/plain",
         buffer: Buffer.from(resume),
       });
+      if (shape === "native")
+        await page.evaluate(() => {
+          const unrelated = document.createElement("form");
+          unrelated.innerHTML =
+            '<button type="submit">Unrelated action</button>';
+          unrelated.onsubmit = (event) => {
+            event.preventDefault();
+          };
+          document.body.prepend(unrelated);
+        });
       if (shape === "frame")
         await page.evaluate(() => {
           const form = document.querySelector("form")!;

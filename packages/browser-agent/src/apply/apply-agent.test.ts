@@ -723,6 +723,65 @@ test("submit returns page and ledger facts, then the model records its observed 
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1]?.[0]),
   ).toContain("POST employer.example.test/api/apply 200");
 });
+test.each([
+  {
+    args: { sendCallId: "send", evidence: "The form stayed open" },
+    missing: "outcome",
+  },
+  {
+    args: { outcome: "uncertain", evidence: "The form stayed open" },
+    missing: "sendCallId",
+  },
+  { args: { sendCallId: "send", outcome: "uncertain" }, missing: "evidence" },
+  {
+    args: {
+      sendCallId: "send",
+      outcome: "unknown",
+      evidence: "The form stayed open",
+    },
+    missing: "outcome",
+  },
+])(
+  "send outcome contract errors name $missing instead of hiding the failure",
+  async ({ args, missing }) => {
+    const input = config(page());
+    input.recordSendOutcome = vi.fn(() =>
+      Promise.resolve({ recorded: true, content: "Recorded" }),
+    );
+    const client = model([{ name: "record_send_outcome", args }, done]);
+    await runApplyAgent(input, client);
+    const returned = JSON.stringify(
+      vi.mocked(client.chatWithTools).mock.calls[1]?.[0],
+    );
+    expect(returned).toContain(`record_send_outcome contract: ${missing}`);
+    expect(input.recordSendOutcome).not.toHaveBeenCalled();
+  },
+);
+
+test("a send ledger exception returns its specific cause to the model", async () => {
+  const input = config(page());
+  input.recordSendOutcome = () =>
+    Promise.reject(Error("Ledger storage unavailable"));
+  const client = model([
+    {
+      name: "record_send_outcome",
+      args: {
+        sendCallId: "send",
+        outcome: "uncertain",
+        evidence: "No request or page change",
+      },
+    },
+    done,
+  ]);
+  const result = await runApplyAgent(input, client);
+  expect(
+    JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[1]?.[0]),
+  ).toContain(
+    "The send ledger could not record the outcome: Ledger storage unavailable",
+  );
+  expect(result.pauses).toEqual([]);
+});
+
 test("tool failures return to the model and never create questions", async () => {
   const input = config(page());
   input.hands.uploadFile = () =>

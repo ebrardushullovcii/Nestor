@@ -1,4 +1,5 @@
 import { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
+import { readPressability } from "./element-state";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { withNavigationLiveness } from "./browser-navigation";
 import { tracePageHands, tracePage } from "./trace-page";
@@ -143,6 +144,7 @@ async function collectRawApplyPage(page: Page): Promise<RawApplyPage> {
     `${APPLY_CONTROL_SELECTOR}, ${APPLY_ACTION_SELECTOR}, ${APPLY_LINK_SELECTOR}, ${APPLY_CLICKABLE_SELECTOR}`,
   );
   raw.clickables.push(...closed.clickables);
+  raw.validationErrors.push(...closed.validationErrors);
   if (closed.bodyText)
     raw.bodyText = [raw.bodyText, closed.bodyText].filter(Boolean).join("\n\n");
   // A dropzone's inner input often says only "Choose a file". Its actual
@@ -2444,7 +2446,9 @@ function describeWriteFailure(error: unknown, fallback: string): string {
 async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
   if ((await locator.count()) === 0)
     throw new Error("Stale control; observe again.");
-  if (!(await locator.isEnabled())) throw new Error("The control is disabled.");
+  const interaction = await locator.evaluate(readPressability);
+  if (interaction.disabled) throw new Error("The control is disabled.");
+  if (interaction.inert) throw new Error("The control is inert.");
   await locator.scrollIntoViewIfNeeded({ timeout: 0 }).catch(() => undefined);
   try {
     await locator.click({ timeout: 0 });

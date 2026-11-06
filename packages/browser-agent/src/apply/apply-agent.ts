@@ -833,12 +833,18 @@ export async function runApplyAgent(
         },
       },
     },
+    describeError: (error) =>
+      `The send ledger could not record the outcome: ${error instanceof Error ? error.message : "Unknown storage error"}`,
     execute: async (raw) => {
       const parsed = ApplySendOutcomeDecisionSchema.safeParse(
         parseToolArguments(raw),
       );
       if (!parsed.success)
-        return { kind: "ok", status: "failed", content: parsed.error.message };
+        return {
+          kind: "ok",
+          status: "failed",
+          content: `record_send_outcome contract: ${parsed.error.issues.map((issue) => `${issue.path.join(".") || "arguments"}: ${issue.message}`).join("; ")}`,
+        };
       if (!config.recordSendOutcome)
         return {
           kind: "ok",
@@ -853,7 +859,11 @@ export async function runApplyAgent(
         possibleSends.delete(parsed.data.sendCallId);
         updateSendOutcome(parsed.data.sendCallId, parsed.data.outcome);
       }
-      return { kind: "ok", content: result.content };
+      return {
+        kind: "ok",
+        status: result.recorded ? "done" : "failed",
+        content: result.content,
+      };
     },
   });
 

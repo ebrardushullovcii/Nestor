@@ -1328,7 +1328,7 @@ describe("applications on the job store", () => {
     expect(() =>
       applications.recordSubmission(first.id, first.attempt, {
         ...receipt,
-        resultId: "another_attempt",
+        applicationRecordId: "another_application",
       }),
     ).toThrow("another application attempt");
     expect(jobs.getJob(first.jobId)?.stage).toBe("resume");

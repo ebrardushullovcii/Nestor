@@ -639,8 +639,7 @@ export function createApplicationStore(store: JobStore) {
         if (
           receipt.jobId !== String(current.jobId) ||
           receipt.applicationRecordId !== `application_${id}` ||
-          receipt.runId !== `application_run_${id}` ||
-          receipt.resultId !== `application_${id}_attempt_${attempt}`
+          receipt.runId !== `application_run_${id}`
         )
           throw new Error(
             "The submission receipt belongs to another application attempt.",
