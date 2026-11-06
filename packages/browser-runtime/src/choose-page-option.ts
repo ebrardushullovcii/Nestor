@@ -2,7 +2,6 @@ import { reportSelfLimitHit } from "@nestor/core";
 import type { ApplyWriteResult } from "@nestor/contracts";
 import type { Frame, Locator, Page, Request } from "playwright";
 import { pressableLabel } from "./pressable-label";
-import { withNavigationLiveness } from "./browser-navigation";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
 
 import { replaceFieldText } from "./replace-field-text";
@@ -77,11 +76,9 @@ export async function choosePageOption(
     const native = await locator.evaluate(
       (element) => element.tagName === "SELECT",
     );
-    return await withNavigationLiveness(page, () =>
-      native
-        ? chooseNativeOption(locator, label, progressAt)
-        : chooseCustomOption(page, locator, label, progressAt),
-    );
+    return await (native
+      ? chooseNativeOption(locator, label, progressAt)
+      : chooseCustomOption(page, locator, label, progressAt));
   } finally {
     page.off?.("request", requestStarted);
     page.off?.("response", response);
