@@ -26,6 +26,7 @@ export interface ModelTurn {
 }
 export interface ModelTape {
   corpusDigest: string;
+  assessmentDate?: string;
   route: Record<string, string>;
   turns: ModelTurn[];
   runs?: Array<{ durationMs: number; freshCalls: number }>;
@@ -314,12 +315,23 @@ export async function runSearchRelevance(input: {
           sightings: [],
         }),
       );
-      const fits = await fitJobs({
+      const fits: JobFitUpdate[] = [];
+      await fitJobs({
         client,
         jobs,
         profile: persona.profile,
         goals: persona.goals,
         request: persona.request,
+        ...(input.tape.assessmentDate
+          ? { assessmentDate: input.tape.assessmentDate }
+          : {}),
+        onBatch: (updates) => {
+          fits.push(...updates);
+        },
+      }).catch((error: unknown) => {
+        errors.push(
+          `${persona.id}/${board.source.id}/fit: ${error instanceof Error ? error.message : String(error)}`,
+        );
       });
       const rows = labels.map((label) => {
         const job = jobs.find((job) => job.url === label.url),

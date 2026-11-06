@@ -36,3 +36,5 @@ export { createMoveReviewer, describeSearchGoal, type MoveReview } from './searc
 export { createSearchResultCache, readCachedSearchResult } from "./search/search-result-cache";
 
 export { withBrowserPermissions, browserStepReadyForAgent, type BrowserPermissionPolicy } from "./browser-permission-policy";
+
+export { buildListingFitPerson } from "./search/listing-fit-person";
