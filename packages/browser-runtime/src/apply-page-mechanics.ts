@@ -2063,6 +2063,15 @@ export function collectApplyDocumentSnapshot(
         parent;
         parent = parent.parentElement
       ) {
+        // Structural landmarks are page facts, including unnamed ones.
+        // Consumers can distinguish footer/navigation/search controls from
+        // the fields in the main document without guessing from their labels.
+        const landmark = parent.matches(
+          "footer, nav, [role='contentinfo'], [role='navigation'], [role='search']",
+        )
+          ? parent.getAttribute("role") || parent.tagName.toLowerCase()
+          : null;
+        if (landmark && !names.includes(landmark)) names.unshift(landmark);
         const name = parent.matches("fieldset")
           ? labelText(parent.querySelector(":scope > legend"))
           : parent.matches(

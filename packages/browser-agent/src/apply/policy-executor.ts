@@ -1024,7 +1024,13 @@ async function decideAnswer(input: {
     input.controls,
     deps.now(),
   );
-  const retainedDate = hasStartDateValue(control) ? control.value : null;
+  const retainedDate = hasStartDateValue(
+    control,
+    deps.now(),
+    config.sources.profile,
+  )
+    ? control.value
+    : null;
   const value = formatProfileUrlAnswer(
     control,
     formatGithubAnswer(
@@ -1068,7 +1074,7 @@ async function decideAnswer(input: {
       control,
       controls: input.controls,
       tags: control.answerTags,
-      candidateSourceId: input.storedFactId,
+      candidateSourceId: start?.id ?? input.storedFactId,
       sources: config.sources,
       answer: value,
       pageInstructions: input.pageText,

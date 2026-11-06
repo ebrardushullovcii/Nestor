@@ -694,3 +694,119 @@ describe("agent task runtime", () => {
     expect(result.receipt.stopReason).toBe("completed");
   });
 });
+
+test("a detached tool abort keeps its cause and does not cancel the typed task", async () => {
+  const controller = new AbortController();
+  let turns = 0;
+  const result = await runAgentTask({
+    taskId: "child-abort",
+    capability: "resume_generation",
+    systemPrompt: "Read and finish.",
+    state: {},
+    initialDraft: {},
+    signal: controller.signal,
+    model: {
+      chat: () =>
+        Promise.resolve({
+          toolCalls: [
+            {
+              id: String(++turns),
+              type: "function",
+              function: {
+                name: turns === 1 ? "read" : "finish_task",
+                arguments: "{}",
+              },
+            },
+          ],
+        }),
+    },
+    tools: [
+      {
+        name: "read",
+        description: "Read",
+        inputSchema: z.object({}),
+        parameters: { type: "object", properties: {} },
+        permission: "read",
+        execute: () => {
+          throw new DOMException(
+            "The child connection was reset",
+            "AbortError",
+          );
+        },
+      },
+      {
+        name: "finish_task",
+        description: "Finish",
+        inputSchema: z.object({}),
+        parameters: { type: "object", properties: {} },
+        permission: "read",
+        execute: () => ({ summary: "Done", finish: true }),
+      },
+    ],
+    validate: () => [],
+    buildContext: () => ({}),
+  });
+  expect(result.receipt.stopReason).toBe("completed");
+  expect(result.receipt.toolReceipts[0]?.failureKind).toBe("transient_network");
+  expect(
+    result.receipt.toolReceipts[0]?.validationIssues[0]?.message,
+  ).toContain("child connection was reset");
+  expect(turns).toBe(2);
+});
+
+test("Stop interrupts an uncooperative typed-task tool and starts no later step", async () => {
+  const controller = new AbortController();
+  const after = vi.fn(() => ({ summary: "Must not run" }));
+  const result = await runAgentTask({
+    taskId: "stop",
+    capability: "resume_generation",
+    systemPrompt: "Read.",
+    state: {},
+    initialDraft: {},
+    signal: controller.signal,
+    model: {
+      chat: () =>
+        Promise.resolve({
+          toolCalls: [
+            {
+              id: "read",
+              type: "function",
+              function: { name: "read", arguments: "{}" },
+            },
+            {
+              id: "after",
+              type: "function",
+              function: { name: "after", arguments: "{}" },
+            },
+          ],
+        }),
+    },
+    tools: [
+      {
+        name: "read",
+        description: "Read",
+        inputSchema: z.object({}),
+        parameters: { type: "object", properties: {} },
+        permission: "read",
+        execute: () =>
+          new Promise<never>(() => {
+            controller.abort(
+              new DOMException("The person pressed Stop", "AbortError"),
+            );
+          }),
+      },
+      {
+        name: "after",
+        description: "After",
+        inputSchema: z.object({}),
+        parameters: { type: "object", properties: {} },
+        permission: "read",
+        execute: after,
+      },
+    ],
+    validate: () => [],
+    buildContext: () => ({}),
+  });
+  expect(result.receipt.stopReason).toBe("cancelled");
+  expect(after).not.toHaveBeenCalled();
+});

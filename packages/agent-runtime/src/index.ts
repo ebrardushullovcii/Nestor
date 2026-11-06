@@ -1,3 +1,4 @@
+export { isAgentRunAborted, runWithAgentRunCancellation } from "./cancellation";
 export * from "./agent-loop";
 export * from "./context-budget";
 export * from "./conversation-turn";

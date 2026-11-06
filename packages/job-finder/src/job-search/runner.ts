@@ -17,7 +17,6 @@ import {
   type JobSearchProgress,
 } from "@nestor/contracts";
 import { abortable, concurrency, errorMessage } from "./async";
-import { reportSelfLimitHit } from "@nestor/core";
 import { createFitQueue } from "./fit-queue";
 import { fitContextFingerprint } from "./fit-input";
 import { createSearchPipeline } from "./pipeline";
@@ -289,7 +288,11 @@ export function createJobSearchRunner(
     const failedSource = (source: SourceWork, message: string) => {
       if (!current(source)) return;
       source.row.state = "failed";
-      source.notes.push(message);
+      source.row.message = message;
+      source.notes = [
+        message,
+        ...source.notes.filter((note) => note !== message),
+      ];
       siteRows.record(
         Number(source.target.id),
         {
@@ -322,24 +325,7 @@ export function createJobSearchRunner(
             source.row.phase = "browser";
           }
           write(source);
-          const timeLimit =
-            settings.depth === "quick" && !source.full ? 25000 : 45000;
-          const timeout = new AbortController();
-          const timer = setTimeout(() => {
-            reportSelfLimitHit({
-              limit: "browser_source_time",
-              kind: "timeout",
-              value: timeLimit,
-              where: "job-finder/search/browserTask",
-            });
-            timeout.abort(new DOMException("Timed out", "TimeoutError"));
-          }, timeLimit);
-          const deadline = AbortSignal.any([signal, timeout.signal]);
-          try {
-            await abortable(work(deadline), deadline);
-          } finally {
-            clearTimeout(timer);
-          }
+          await abortable(work(signal), signal);
         })
         .catch((error: unknown) => {
           if (!current(source)) return;
@@ -410,20 +396,7 @@ export function createJobSearchRunner(
       };
       // HTTP collection has no model of its own. Stop paging, while accepted
       // cards finish their already-running screening/reading/fit on run.signal.
-      const timer =
-        settings.depth === "quick" && !source.full && lane === "http"
-          ? setTimeout(() => {
-              reportSelfLimitHit({
-                limit: "quick_source_time",
-                kind: "timeout",
-                value: 180000,
-                where: "job-finder/search/collect",
-              });
-              source.quickStopReason ??=
-                "Quick's three-minute look at this site ran out.";
-              stopCollection();
-            }, 180000)
-          : null;
+
       try {
         const inventory = await abortable(
           deps.engine.collectSource({
@@ -440,7 +413,11 @@ export function createJobSearchRunner(
               readSignal.throwIfAborted();
             },
             message: (message) => {
-              if (current(source)) {
+              if (
+                current(source) &&
+                !source.counted &&
+                !settledState(source.row.state)
+              ) {
                 source.row.message = message;
                 write(source);
               }
@@ -456,7 +433,7 @@ export function createJobSearchRunner(
         source.accessBlocked = inventory.complete
           ? false
           : source.accessBlocked || Boolean(inventory.accessBlocked);
-        source.notes = inventory.notes;
+        source.notes = [...new Set([...source.notes, ...inventory.notes])];
         source.row.lane = inventory.lane ?? lane;
         if (lane === "http" && inventory.requiresBrowser) {
           browserTask(source, async (browserSignal) => {
@@ -513,8 +490,6 @@ export function createJobSearchRunner(
           source.row.state = "partial";
         write(source);
         markDone(source);
-      } finally {
-        if (timer) clearTimeout(timer);
       }
     };
     const enqueue = (
@@ -553,6 +528,7 @@ export function createJobSearchRunner(
             if (!current(source)) return;
             source.notes = [
               `HTTP reading did not finish: ${errorMessage(error)}`,
+              ...source.notes,
             ];
             browserTask(source, async (browserSignal) => {
               await collect(source, "browser", browserSignal);
@@ -565,6 +541,7 @@ export function createJobSearchRunner(
             source.processed = source.row.cards;
             source.row.state = "failed";
             source.row.message = errorMessage(error);
+            source.notes.push(source.row.message);
             markDone(source);
           }
         });

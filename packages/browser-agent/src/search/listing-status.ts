@@ -7,6 +7,12 @@ export function listingClosedReason(
 ): string | null {
   const normalized = text.replace(/\s+/gu, " ").trim();
   if (
+    /\b(?:(?:this|the) (?:job|position|role|vacancy|posting) (?:is |was |has been )?(?:no longer available|no longer taking applications|not found|removed|deleted)|(?:job|position|posting) (?:not found|no longer taking applications)|no longer accepting applications)\b/iu.test(
+      normalized,
+    )
+  )
+    return "Closed: this posting was removed or is no longer accepting applications.";
+  if (
     /\bno longer (?:recruiting|hiring|accepting applications) for (?:this|the) (?:job|position|role|vacancy)\b/iu.test(
       normalized,
     )

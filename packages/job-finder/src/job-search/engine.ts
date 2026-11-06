@@ -318,7 +318,7 @@ export function createListingSearchEngine(deps: {
                       sourceIds: [target.id],
                     },
                     targetJobCount: Number.MAX_SAFE_INTEGER,
-                    maxSteps: settings.depth === "quick" ? 8 : 16,
+                    maxSteps: Number.MAX_SAFE_INTEGER,
                     signal,
                     onProgress: (progress) => {
                       if (progress.message) input.message(progress.message);

@@ -236,6 +236,20 @@ CREATE TABLE IF NOT EXISTS job_sightings (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS job_sightings_by_site ON job_sightings (job_id, site);
 
+-- Posting availability is independent of the person's application history.
+CREATE TABLE IF NOT EXISTS job_availability_checks (
+  id INTEGER PRIMARY KEY,
+  job_id INTEGER NOT NULL REFERENCES jobs (id) ON DELETE CASCADE,
+  checked_at INTEGER NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('open','closed')),
+  reason TEXT NOT NULL,
+  previous_stage TEXT NOT NULL,
+  previous_stage_at INTEGER NOT NULL,
+  previous_stage_note TEXT,
+  previous_hide_owner TEXT
+);
+CREATE INDEX IF NOT EXISTS job_availability_by_job ON job_availability_checks (job_id, id DESC);
+
 -- Identity keys: a found job that shares a key with a saved one is that job.
 CREATE TABLE IF NOT EXISTS job_keys (
   key TEXT PRIMARY KEY,

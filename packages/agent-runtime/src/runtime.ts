@@ -1,3 +1,4 @@
+import { isAgentRunAborted, runWithAgentRunCancellation } from "./cancellation";
 import {
   ModelTurnTimeoutError,
   runModelTurn,
@@ -164,10 +165,14 @@ export class AgentTaskNonRetryableProviderError extends Error {
   override readonly name = "AgentTaskNonRetryableProviderError";
 }
 
-export function classifyAgentTaskFailure(error: unknown): AgentTaskFailureKind {
+export function classifyAgentTaskFailure(
+  error: unknown,
+  signal?: AbortSignal,
+): AgentTaskFailureKind {
+  if (isAgentRunAborted(signal)) return "cancelled";
   if (error instanceof AgentTaskNonRetryableProviderError) return "permanent";
-  if (error instanceof DOMException && error.name === "AbortError") {
-    return "cancelled";
+  if (error instanceof Error && error.name === "AbortError") {
+    return "transient_network";
   }
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (/timeout|timed out|429|rate limit|overload|temporar/.test(message)) {
@@ -418,7 +423,7 @@ export async function runAgentTask<TState, TDraft>(
   };
 
   for (let cycle = 0; cycle < emergencyCeiling; cycle += 1) {
-    if (options.signal?.aborted) {
+    if (isAgentRunAborted(options.signal)) {
       stopReason = "cancelled";
       break;
     }
@@ -537,7 +542,10 @@ export async function runAgentTask<TState, TDraft>(
         );
         break;
       } catch (error) {
-        if (options.signal?.aborted) throw error;
+        if (isAgentRunAborted(options.signal)) {
+          stopReason = "cancelled";
+          break;
+        }
         if (error instanceof ModelTurnTimeoutError) {
           if (error.kind === "idle" && attempt === 0) continue;
           emitProgress(
@@ -551,7 +559,7 @@ export async function runAgentTask<TState, TDraft>(
           stopReason = "time_budget";
           break;
         }
-        const failureKind = classifyAgentTaskFailure(error);
+        const failureKind = classifyAgentTaskFailure(error, options.signal);
         if (!shouldRetry(failureKind) || attempt === 2) {
           if (shouldRetry(failureKind) && attempt === 2)
             reportSelfLimitHit({
@@ -651,12 +659,16 @@ export async function runAgentTask<TState, TDraft>(
             repairAttempts += 1;
             toolContent = { ok: false, validationIssues: issues };
           } else if (parsed) {
-            const execution = await tool.execute(parsed.data, {
-              state: options.state,
-              draft,
-              results,
-              ...(options.signal ? { signal: options.signal } : {}),
-            });
+            const execution = await runWithAgentRunCancellation(
+              () =>
+                tool.execute(parsed.data, {
+                  state: options.state,
+                  draft,
+                  results,
+                  ...(options.signal ? { signal: options.signal } : {}),
+                }),
+              options.signal,
+            );
             if (execution.draft !== undefined) draft = execution.draft;
             progressMade = execution.progressMade ?? false;
             issues = execution.validationIssues ?? [];
@@ -683,7 +695,7 @@ export async function runAgentTask<TState, TDraft>(
           }
         } catch (error) {
           outcome = "failed";
-          failureKind = classifyAgentTaskFailure(error);
+          failureKind = classifyAgentTaskFailure(error, options.signal);
           const errorMessage =
             error instanceof Error && error.message.trim()
               ? error.message
@@ -730,8 +742,13 @@ export async function runAgentTask<TState, TDraft>(
     const receiptStart = toolReceipts.length;
     const readProgress = await Promise.all(parallelReads.map(executeCall));
     const orderedProgress: boolean[] = [];
-    for (const call of orderedCalls)
+    for (const call of orderedCalls) {
+      if (isAgentRunAborted(options.signal)) {
+        stopReason = "cancelled";
+        break;
+      }
       orderedProgress.push(await executeCall(call));
+    }
     const madeProgress = [...readProgress, ...orderedProgress].some(Boolean);
     validationIssues = [...options.validate(draft)];
     consecutiveNoProgress = madeProgress ? 0 : consecutiveNoProgress + 1;

@@ -2,7 +2,7 @@ import {
   describeBrowserPermissions,
   type BrowserPermissionPolicy,
 } from "../browser-permission-policy";
-import { parseToolArguments } from "@nestor/agent-runtime";
+import { parseToolArguments, isAgentRunAborted } from "@nestor/agent-runtime";
 
 import type { LLMClient } from "../agent/contracts";
 import type { AgentConfig } from "../types";
@@ -109,16 +109,15 @@ export function createMoveReviewer(
         input.signal ? { signal: input.signal } : {},
       );
     } catch (error) {
-      if (
-        (error instanceof DOMException && error.name === "AbortError") ||
-        input.signal?.aborted
-      ) {
+      if (isAgentRunAborted(input.signal)) {
         throw error;
       }
       return {
         allowed: false,
         verdict:
-          "The review could not be made right now; stay on the site for this step and try again later if it still matters.",
+          error instanceof Error && error.name === "AbortError"
+            ? `The review could not be made: ${error.message}. Stay on the site and retry this review if needed.`
+            : "The review could not be made right now; stay on the site for this step and try again later if it still matters.",
       };
     }
     const call = (response.toolCalls ?? []).find(

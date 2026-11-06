@@ -6,6 +6,7 @@ import {
 } from "@nestor/contracts";
 import {
   parseToolArguments,
+  isAgentRunAborted,
   runModelTurn,
   ModelTurnTimeoutError,
   isModelOutputLimit,
@@ -945,6 +946,7 @@ export async function runJobSearchAgent(
               unreadParts: 0,
               remainingParts: 0,
               rereadOnly: false,
+              failureReasons: [],
             }
           : await readResultsPage(observation, pageText, read))();
       const unread = pageRead.unreadParts + pageRead.remainingParts;
@@ -1054,7 +1056,7 @@ export async function runJobSearchAgent(
           ? `${savedListingsSkipped} already-saved listing${savedListingsSkipped === 1 ? " was" : "s were"} skipped before the page reader; only new listings need reading. Continue through the remaining pages for new jobs.`
           : null,
         pageRead.unreadParts > 0
-          ? `${pageRead.unreadParts} part${pageRead.unreadParts === 1 ? "" : "s"} of this page could not be read this time; reading the page again tries ${pageRead.unreadParts === 1 ? "it" : "them"} again.`
+          ? `${pageRead.unreadParts} part${pageRead.unreadParts === 1 ? "" : "s"} of this page could not be read this time: ${pageRead.failureReasons.join("; ")}. Reading the page again tries ${pageRead.unreadParts === 1 ? "it" : "them"} again.`
           : null,
         pageRead.remainingParts > 0
           ? `This page is long: ${pageRead.remainingParts} more part${pageRead.remainingParts === 1 ? " is" : "s are"} still unread. Call extract_jobs again on this page to read ${pageRead.remainingParts === 1 ? "it" : "them"} before moving on.`
@@ -1714,6 +1716,7 @@ export async function runJobSearchAgent(
     unreadParts: number;
     remainingParts: number;
     rereadOnly: boolean;
+    failureReasons: string[];
   }> {
     const links = observation.links.filter((link) => link.visible);
     const pageUrl = observation.url ?? "";
@@ -1832,15 +1835,18 @@ ${part.text}`),
           !pageReadCache.has(`${pageUrl}
 ${part.text}`),
       ).length - failures.length;
-    const aborted = failures.find(
-      (reason) =>
-        (reason instanceof DOMException && reason.name === "AbortError") ||
-        input.signal?.aborted,
-    );
-    if (aborted !== undefined)
-      throw aborted instanceof Error
-        ? aborted
-        : new DOMException("The run was stopped.", "AbortError");
+    if (isAgentRunAborted(input.signal)) input.signal!.throwIfAborted();
+    const failureReasons = [
+      ...new Set(
+        failures.map((reason) =>
+          reason instanceof Error ? reason.message : String(reason),
+        ),
+      ),
+    ];
+    for (const reason of failureReasons) {
+      const note = `A part of ${pageUrl} could not be read: ${reason}`;
+      if (!notes.includes(note)) notes.push(note);
+    }
     const seen = new Set<string>();
     const found: ExtractedJobs = [];
     for (const entry of settled) {
@@ -1858,6 +1864,7 @@ ${part.text}`),
       found,
       unreadParts: failures.length,
       remainingParts,
+      failureReasons,
       rereadOnly:
         freshReads === 0 && failures.length === 0 && remainingParts === 0,
     };

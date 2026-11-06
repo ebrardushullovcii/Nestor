@@ -1513,3 +1513,13 @@ test("completed browser coverage replaces the initial load-more warning", async 
     "Every observed forward control was exhausted.",
   ]);
 });
+
+test("an unreadable directory delegates its choices instead of crawling every location and page", async () => {
+  const readPage=vi.fn((url:string)=>Promise.resolve({finalUrl:url,html:'<main><h2>Jobs by location</h2><ul><li><a href="/jobs/europe">Europe 120</a></li><li><a href="/jobs/asia">Asia 200</a></li></ul><a href="?page=2" rel="next">Next page</a></main>'}));
+  const navigateFallback=vi.fn(()=>Promise.resolve({cards:[card("Backend Engineer")],pagesRead:1,complete:true,notes:["The browser chose the relevant search"]}));
+  const result=await collectSource({source,readPage,lane:"browser",navigateFallback});
+  expect(readPage).toHaveBeenCalledOnce();
+  expect(navigateFallback).toHaveBeenCalledOnce();
+  expect(result.cards[0]?.title).toBe("Backend Engineer");
+  expect(result.complete).toBe(true);
+});

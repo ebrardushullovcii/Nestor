@@ -523,6 +523,7 @@ export type ApplyAgentOutcome =
   | "ready_to_send"
   | "awaiting_your_review"
   | "paused"
+  | "closed"
   | "stuck";
 
 export interface ApplyAgentResult {

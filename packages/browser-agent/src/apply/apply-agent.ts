@@ -1950,6 +1950,12 @@ async function runMeasuredApplyAgent(
       observedControlValue(control, page.controls),
     ]);
   const syncObservation = (next: ApplyFormObservation): void => {
+    if (next.blocker?.code === "application_closed") {
+      pageTools.state.observation = next;
+      pendingQuestions.clear();
+      readyToSend = null;
+      return;
+    }
     for (const control of next.controls) {
       if (unsupportedExistingAnswers.has(existingAnswerKey(next, control)))
         control.answerUnverified = true;
@@ -6003,6 +6009,14 @@ async function runMeasuredApplyAgent(
     // Once every remaining field is held for the person, another model turn
     // cannot fill anything. This includes answer refusals, not just pickers.
     beforeModelTurn: async () => {
+      const closed = pageTools.state.observation?.blocker;
+      if (closed?.code === "application_closed")
+        return {
+          reason: closed.summary,
+          needsPerson: false,
+          stuck: false,
+          data: {},
+        };
       if (progressGuard.stuck) {
         const record = progressGuard.start(
           "observe",
@@ -6612,7 +6626,21 @@ async function runMeasuredApplyAgent(
       : null;
   let outcome: ApplyAgentResult["outcome"];
   let reason: string;
-  if (skipReason) {
+  const closedPosting =
+    pageTools.state.observation?.blocker?.code === "application_closed"
+      ? pageTools.state.observation.blocker
+      : null;
+  if (closedPosting) {
+    pauses.splice(0, pauses.length, {
+      code: "page_blocked",
+      summary: closedPosting.summary,
+      question: null,
+      blocker: closedPosting,
+    });
+    outcome = "closed";
+    reason = closedPosting.summary;
+    readyToSend = null;
+  } else if (skipReason) {
     outcome = "paused";
     reason = skipReason;
     readyToSend = null;
@@ -6629,18 +6657,6 @@ async function runMeasuredApplyAgent(
   } else if (pauses.length > 0) {
     outcome = "paused";
     reason = pauses[0]?.summary ?? loop.reason;
-  } else if (
-    pageTools.state.observation?.blocker?.code === "application_closed"
-  ) {
-    const blocker = pageTools.state.observation.blocker;
-    pauses.push({
-      code: "page_blocked",
-      summary: blocker.summary,
-      question: null,
-      blocker,
-    });
-    outcome = "stuck";
-    reason = blocker.summary;
   } else if (personOwnedBlocker) {
     const pause: ApplyPause = {
       code: "page_blocked",

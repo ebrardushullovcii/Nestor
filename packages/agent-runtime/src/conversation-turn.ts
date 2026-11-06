@@ -1,3 +1,4 @@
+import { isAgentRunAborted } from "./cancellation";
 import {
   ModelOutputLimitError,
   isModelOutputLimit,
@@ -248,13 +249,6 @@ function addUsage(
   total.reasoningTokens += next.reasoningTokens;
 }
 
-function isAbortError(error: unknown): boolean {
-  return (
-    (error instanceof DOMException && error.name === "AbortError") ||
-    (error instanceof Error && error.name === "AbortError")
-  );
-}
-
 /**
  * Runs one tool call with its own abort controller. The deadline aborts the
  * controller, so a cooperative tool stops its work instead of finishing in
@@ -370,7 +364,7 @@ export async function runConversationTurn(
   };
 
   while (modelCalls < maxModelCalls) {
-    if (options.signal?.aborted) return result("aborted");
+    if (isAgentRunAborted(options.signal)) return result("aborted");
     if (!current()) return result("superseded");
     if (now() - startedAt >= timeBudgetMs) return result("timed_out");
     await readSteering();
@@ -415,7 +409,7 @@ export async function runConversationTurn(
         }
         break;
       } catch (error) {
-        if (options.signal?.aborted) return result("aborted");
+        if (isAgentRunAborted(options.signal)) return result("aborted");
         if (isModelOutputLimit(error) && outputRetries++ === 0) {
           // Existing explicit caps can grow. With no cap the route already
           // supplies its maximum; retry once without changing any history.
@@ -509,7 +503,7 @@ export async function runConversationTurn(
         });
         continue;
       }
-      if (options.signal?.aborted || !current()) {
+      if (isAgentRunAborted(options.signal) || !current()) {
         turnMessages.push({
           role: "tool",
           toolCallId: toolCall.id,
@@ -575,7 +569,7 @@ export async function runConversationTurn(
         );
       } catch (error) {
         batchSucceeded = false;
-        if (options.signal?.aborted || isAbortError(error)) {
+        if (isAgentRunAborted(options.signal)) {
           turnMessages.push({
             role: "tool",
             toolCallId: toolCall.id,
@@ -589,14 +583,16 @@ export async function runConversationTurn(
             outcome: "cancelled",
             summary: "Stopped",
           });
-          if (options.signal?.aborted) return result("aborted");
+          if (isAgentRunAborted(options.signal)) return result("aborted");
           continue;
         }
         const text =
           error instanceof ToolCallDeadlineError
             ? `${error.message} Look again before deciding what to do next.`
             : (tool.describeError?.(error) ??
-              "That tool could not complete this step. Try a different approach, or say what remains.");
+              (error instanceof Error && error.name === "AbortError"
+                ? `That step failed: ${error.message}. Try again or use a different approach.`
+                : "That tool could not complete this step. Try a different approach, or say what remains."));
         turnMessages.push({
           role: "tool",
           toolCallId: toolCall.id,

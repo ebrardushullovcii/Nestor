@@ -113,6 +113,11 @@ import {
   resolveActiveSourceInstructionArtifact,
 } from "../internal/workspace-helpers";
 import { uniqueStrings } from "../internal/shared";
+import { createDefaultListingHtmlFetcher } from "../internal/listing-detail-enrichment";
+import {
+  readPostingAvailability,
+  type PostingAvailability,
+} from "./posting-availability";
 
 /** A country-free legacy legal answer has no jurisdiction to apply elsewhere. */
 function generalSavedAnswer(answer: CandidateReusableAnswer): boolean {
@@ -184,6 +189,10 @@ export interface ApplicationServiceDeps {
     personClicked?: boolean;
   }): Promise<ApplicationAuthorityEnvelope | null>;
   concurrency?: number | (() => number);
+  checkPostingAvailability?(
+    job: JobDetail,
+    signal: AbortSignal,
+  ): Promise<PostingAvailability>;
   instructionMode?(input: {
     conversationId: string;
     jobId: number;
@@ -234,6 +243,27 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   };
   const resumes = createResumeStore(jobs);
   const active = new Map<number, AbortController>();
+  const checkedForBatch = new Map<number, PostingAvailability>();
+  const fetchPosting = createDefaultListingHtmlFetcher();
+  const checkPosting = async (job: JobDetail, signal: AbortSignal) => {
+    const result = await (deps.checkPostingAvailability?.(job, signal) ??
+      readPostingAvailability({
+        job,
+        aiClient: deps.aiClient,
+        fetchHtml: fetchPosting,
+        signal,
+        ...(browser.readRenderedPage
+          ? {
+              readRenderedPage: (url, options) =>
+                browser.readRenderedPage!(url, options),
+            }
+          : {}),
+      }));
+    signal.throwIfAborted();
+    if (result.state === "closed") jobs.markClosed([job.id], result.reason);
+    else if (result.state === "open") jobs.markOpen([job.id]);
+    return result;
+  };
   const waiting = new Map<number, number>();
   /** When each waiting page is read next, and until when it is read closely. */
   const watchPlan = new Map<number, { next: number; closeUntil: number }>();
@@ -479,6 +509,22 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       !approved.approvedAt
     )
       throw new Error("Approve this job's resume before applying.");
+    const batchCheck = checkedForBatch.get(job.id);
+    checkedForBatch.delete(job.id);
+    const availability =
+      batchCheck && Date.now() - batchCheck.checkedAt < 60_000
+        ? batchCheck
+        : await checkPosting(job, signal);
+    if (availability.state === "closed") {
+      applications.finishPreparation({
+        id: row.id,
+        attempt: row.attempt,
+        state: "failed",
+        error: availability.reason,
+      });
+      await closePage(row.id, row.attempt);
+      return;
+    }
     const knownBlock = applications.needsYou.blockedSite(
       new URL(job.applyUrl ?? job.url).origin,
     );
@@ -1174,6 +1220,20 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       })
     )
       return;
+    if (result.blocker?.code === "application_closed") {
+      jobs.markClosed(
+        [job.id],
+        result.blocker.detail || result.blocker.summary,
+      );
+      applications.finishPreparation({
+        id: row.id,
+        attempt: row.attempt,
+        state: "failed",
+        error: result.blocker.summary,
+      });
+      await closePage(row.id, row.attempt);
+      return;
+    }
     const retainedTechnicalFailure = shouldRetainFailedApplicationPage(result);
     const finishTechnicalFailure = async () => {
       // Only this live, cancelled-checked attempt may retain its owned binding.
@@ -2660,6 +2720,35 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   }
 
   return {
+    /** The chosen batch is checked before any of its applications are queued. */
+    async checkPostings(ids: readonly number[]) {
+      const pending = [...new Set(ids)];
+      const results = new Map<number, PostingAvailability>();
+      await Promise.all(
+        Array.from(
+          { length: Math.min(capacity(), pending.length) },
+          async () => {
+            while (pending.length) {
+              const id = pending.shift()!;
+              const job = jobs.getJob(id);
+              if (
+                !job ||
+                job.stage !== "resume" ||
+                !resumes.get(id)?.approvedAt
+              )
+                continue;
+              const result = await checkPosting(
+                job,
+                new AbortController().signal,
+              );
+              checkedForBatch.set(id, result);
+              results.set(id, result);
+            }
+          },
+        ),
+      );
+      return results;
+    },
     async start() {
       if (!stopped) return;
       await deps.authorityRepository.recoverArmedSubmissionAttempts({

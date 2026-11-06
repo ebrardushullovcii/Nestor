@@ -75,6 +75,9 @@ export function createSearchPipeline(input: {
       searchId: input.searchId,
       jobs: kept,
     });
+    deps.store.markOpen(
+      saved.ids.filter((_id, index) => !kept[index]?.hiddenReason),
+    );
     deps.store.closeFoundUrls(
       kept
         .filter((job) => job.hiddenReason?.startsWith("Closed:"))

@@ -34,6 +34,8 @@ const RELEASED_COLUMNS: Record<string, string> = {
   job_details:
     "job_id description summary seniority employment_type salary_min salary_max salary_currency facts_json fit_json",
   job_keys: "key job_id",
+  job_availability_checks:
+    "id job_id checked_at state reason previous_stage previous_stage_at previous_stage_note previous_hide_owner",
   job_move_items: "move_id job_id from_stage from_stage_at from_stage_note",
   job_moves: "id at to_stage",
   job_sightings: "job_id url site source_id source_label apply_url seen_at",
