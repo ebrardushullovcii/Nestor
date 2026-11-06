@@ -22,6 +22,20 @@ import {
 const NOW = "2026-09-05T10:00:00.000Z";
 afterEach(() => vi.unstubAllGlobals());
 
+it("reads every selected listing beyond the former sixty-page ceiling", async () => {
+  const jobs = Array.from({ length: 65 }, (_, index) => cardOnlyJob({ id: `job_${index}`, canonicalUrl: `https://jobs.example.test/${index}` }));
+  const fetchHtml = vi.fn((url: string) => Promise.resolve({ status: 200, html: RECORD_PAGE, finalUrl: url }));
+  const result = await enrichSavedJobListingDetails({ jobs, fetchHtml, assess, now: () => NOW });
+  expect(result.summary.attempted).toBe(65);
+  expect(fetchHtml).toHaveBeenCalledTimes(65);
+});
+
+it("shortlisting bypasses our failed-read backoff while a site's Retry-After still applies", () => {
+  const job = cardOnlyJob({ status: "approved", listingDetailFetch: { attemptedAt: NOW, outcome: "fetch_failed", method: null, detail: "Temporary network failure" } });
+  expect(jobNeedsListingDetail(job, NOW)).toBe(true);
+  expect(jobNeedsListingDetail({ ...job, listingDetailFetch: { ...job.listingDetailFetch!, retryAfterAt: "2026-09-05T11:00:00.000Z" } }, NOW)).toBe(false);
+});
+
 it("stops consuming an oversized response rather than buffering its entire body", async () => {
   let pulls = 0;
   const cancel = vi.fn();

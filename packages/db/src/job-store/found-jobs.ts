@@ -162,7 +162,10 @@ export function writeFoundJobs(
   );
   const refreshDetails = sql(
     `UPDATE job_details SET
-       description = CASE WHEN length(?) > length(description) THEN ? ELSE description END,
+       description = CASE WHEN ? THEN ?
+         WHEN coalesce(json_extract(facts_json, '$.fullListingRead'), 0) = 0 AND length(?) > length(description) THEN ?
+         ELSE description END,
+       facts_json = CASE WHEN ? THEN json_patch(facts_json, ?) ELSE facts_json END,
        summary = coalesce(summary, ?),
        seniority = coalesce(seniority, ?),
        employment_type = coalesce(employment_type, ?),
@@ -251,8 +254,12 @@ export function writeFoundJobs(
         id,
       );
       refreshDetails.run(
+        job.facts?.fullListingRead === true ? 1 : 0,
         job.description,
         job.description,
+        job.description,
+        job.facts?.fullListingRead === true ? 1 : 0,
+        JSON.stringify(job.facts ?? {}),
         job.summary,
         job.seniority,
         job.employmentType,

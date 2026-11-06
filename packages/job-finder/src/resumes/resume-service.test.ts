@@ -36,6 +36,7 @@ function found(n: number): FoundJob {
     sourceId: "board",
     sourceLabel: "Example Board",
     sourceJobId: String(n),
+    facts: { fullListingRead: true },
     postedAt: null,
     salaryText: null,
     salaryMin: null,
@@ -108,6 +109,38 @@ const waitFor = (assertion: () => void) =>
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it("reads a long card once before writing, then reuses the saved complete posting", async () => {
+    const seed = createSeed();
+    const body = "Actual complete requirements, including accessibility and design systems.";
+    const read = vi.fn(() => Promise.resolve([{ ...seed.savedJobs[0]!, title: found(2).title, company: found(2).company, description: body }]));
+    const fetchListingHtml = vi.fn((url: string) => Promise.resolve({ html: "<main>The complete posting</main>", status: 200, finalUrl: url }));
+    const { store, service } = setup({ aiClient: { ...createDeterministicJobFinderAiClient(), extractJobsFromPage: read }, fetchListingHtml });
+    const [id] = store.saveFoundJobs({ searchId: null, jobs: [{ ...found(2), facts: {} }] }).added;
+    expect(store.getJob(id!)!.description.length).toBeGreaterThan(400);
+    store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
+    await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
+    expect(store.getJob(id!)?.description).toBe(body);
+    expect(store.getJob(id!)?.facts.fullListingRead).toBe(true);
+    service.rewrite(id!);
+    await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
+    expect(fetchListingHtml).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a failed full read retryable instead of writing from the card", async () => {
+    const fetchListingHtml = vi.fn(() => Promise.reject(new Error("Posting unavailable")));
+    const base = createDeterministicJobFinderAiClient();
+    const write = vi.fn((input: Parameters<typeof base.createResumeDraft>[0]) => base.createResumeDraft(input));
+    const { store, service } = setup({ aiClient: { ...createDeterministicJobFinderAiClient(), createResumeDraft: write }, fetchListingHtml });
+    const [id] = store.saveFoundJobs({ searchId: null, jobs: [{ ...found(2), facts: {} }] }).added;
+    store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
+    await waitFor(() => expect(service.get(id!).resume?.state).toBe("failed"));
+    expect(write).not.toHaveBeenCalled();
+    expect(store.getJob(id!)?.facts.fullListingRead).toBeUndefined();
+    service.rewrite(id!);
+    await waitFor(() => expect(fetchListingHtml).toHaveBeenCalledTimes(2));
+  });
+
   it("reads and paginates the whole Shortlisted screen, with approved as a subset", () => {
     const { store, id } = setup();
     const added = store.saveFoundJobs({

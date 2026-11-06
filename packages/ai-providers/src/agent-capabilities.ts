@@ -2167,7 +2167,7 @@ export async function runResumeEditAgentTask(input: {
   // finish; a run that still stops mid-rewording keeps the newest set of
   // changes that passed the check.
   const editStartedAtMs = Date.now();
-  const editBudgetMs = 180_000;
+  const editBudgetMs = 60 * 60_000;
   let flaggedCheckCount = 0;
   let lastCleanPatches: ResumeDraftPatch[] | null = null;
   const describeEditStall = (): string | null => {
@@ -2777,7 +2777,10 @@ export async function runResumeEditAgentTask(input: {
     // A few tool turns plus one or two repairs after the approval check;
     // each turn has its own timeout, this bounds the whole request.
     timeBudgetMs: editBudgetMs,
-    noProgressLimit: 4,
+    modelTurnTimeoutMs: Infinity,
+    providerCallBudget: Infinity,
+    emergencyCeiling: Infinity,
+    noProgressLimit: 120,
   });
 
   const keptCleanPatches: ResumeDraftPatch[] | null = lastCleanPatches;

@@ -885,6 +885,7 @@ async function performModelRequestAttempts(
   };
 
   let lastError: unknown = null;
+  let idleRetries = 0;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (input.signal?.aborted) {
@@ -1039,6 +1040,12 @@ async function performModelRequestAttempts(
                 ? "network"
                 : "other";
 
+      if (
+        normalized instanceof ModelRequestTimeoutError &&
+        normalized.kind === "idle" &&
+        idleRetries++ >= 1
+      )
+        throw normalized;
       const retry = classifyRetry(normalized);
       if (!retry || attempt === maxAttempts - 1) {
         throw toError(normalized);

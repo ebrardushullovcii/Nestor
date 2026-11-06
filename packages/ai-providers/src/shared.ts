@@ -693,6 +693,9 @@ export interface ResumeClaimCheckResult {
 }
 
 export interface ExtractJobsFromPageInput {
+  /** URLs already returned from this same page part. */
+  excludedCanonicalUrls?: readonly string[];
+  onStreamEvent?: (event: ModelStreamEvent) => void;
   pageText: string;
   pageUrl: string;
   pageType: "search_results" | "job_detail";

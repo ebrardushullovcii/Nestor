@@ -512,6 +512,12 @@ async function createJobFinderRuntime(
     aiClient,
     documentManager,
     fetchListingHtml,
+    ...(browserRuntime.readRenderedPage
+      ? {
+          readRenderedPage: (url: string, options: { signal?: AbortSignal }) =>
+            browserRuntime.readRenderedPage!(url, options),
+        }
+      : {}),
     repository,
   });
   const applicationService = await startApplicationService({

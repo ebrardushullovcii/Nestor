@@ -612,7 +612,7 @@ describe("job extraction with openai-compatible client", () => {
     }
   });
 
-  test("uses lighter request limits for search-results extraction to reduce first-pass stalls", async () => {
+  test("keeps complete results text and permits up to sixty jobs in one extraction", async () => {
     const originalFetch = globalThis.fetch;
     let capturedBody: unknown = null;
 
@@ -649,13 +649,13 @@ describe("job extraction with openai-compatible client", () => {
         pageText: "x".repeat(15000),
         pageUrl: "https://jobs.example.com/search",
         pageType: "search_results",
-        maxJobs: 20,
+        maxJobs: 100,
       });
 
       expect(capturedBody).not.toBeNull();
       assertCapturedRequestBody(capturedBody);
       const messages = capturedBody.messages ?? [];
-      expect(messages[0]?.content).toContain("Return at most 12 jobs.");
+      expect(messages[0]?.content).toContain("Return at most 60 jobs.");
       expect(messages[0]?.content).toContain(
         "card's own role text, including any requirements or restrictions",
       );
@@ -668,7 +668,7 @@ describe("job extraction with openai-compatible client", () => {
           : undefined;
       expect(
         typeof pageText === "string" ? pageText.length : 0,
-      ).toBeLessThanOrEqual(8000);
+      ).toBe(15000);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -714,9 +714,9 @@ describe("job extraction with openai-compatible client", () => {
       const rejected = expect(extractionPromise).rejects.toThrow(
         "Model request timed out",
       );
-      // 240s is the total budget for search-results extraction; the idle
-      // clock retries once inside it before the total deadline ends the run.
-      await vi.advanceTimersByTimeAsync(240_001);
+      // No absolute clock cuts off a working read. Two silent 180s attempts
+      // (plus retry backoff) report a technical failure.
+      await vi.advanceTimersByTimeAsync(365_000);
 
       await rejected;
       expect(errorSpy).toHaveBeenCalledWith(
@@ -763,7 +763,7 @@ test("returns model rejection categories and reasons so inspected jobs are accou
       pageText: "Warehouse Lead",
       pageUrl: "https://jobs.example.test",
       pageType: "search_results",
-      maxJobs: 20,
+      maxJobs: 100,
       selectionContext: "Product design only",
     });
     expect(jobs[0]?.searchRejection).toEqual({

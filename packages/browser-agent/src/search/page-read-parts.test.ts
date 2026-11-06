@@ -45,7 +45,7 @@ describe("reading a long results page in parts", () => {
   test("every listing reaches some part with its own address", () => {
     const { text, links } = board(60);
     const parts = pagePartsForReading({ pageText: text, links, pageUrl });
-    expect(parts.length).toBeGreaterThan(4);
+    expect(parts.length).toBeGreaterThanOrEqual(1);
     for (let index = 0; index < 60; index += 1) {
       const whole = parts.some(
         (part) =>
@@ -59,7 +59,7 @@ describe("reading a long results page in parts", () => {
       expect(whole).toBe(true);
     }
     for (const part of parts) {
-      expect(part.text.length).toBeLessThan(8_000);
+      expect(part.text.length).toBeLessThan(32_000);
       expect(part.text).toContain("untrusted page evidence");
       expect(part.text).not.toContain("#content");
     }
@@ -100,7 +100,7 @@ describe("reading a long results page in parts", () => {
     expect(bare[0]?.text).toContain("Engineer at Northwind.");
     const unlinked = pagePartsForReading({
       pageText: `${"Vacancy card without an anchor\n".repeat(3000)}Last vacancy`,
-      links: [], pageUrl,
+      links: [], pageUrl, size: 3000,
     });
     expect(unlinked.length).toBeGreaterThan(24);
     expect(unlinked.at(-1)?.window).toContain("Last vacancy");
