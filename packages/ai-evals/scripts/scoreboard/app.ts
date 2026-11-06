@@ -189,8 +189,12 @@ export class App {
     await this.ctx.click(`/^${mode}/`, { role: "radio" });
     await this.ctx.sleep(350);
   }
-  /** Fixed listings, never fabricated successful application state. */
-  async fixture(site: string, id: number): Promise<Job> {
+  /**
+   * Fixed listings, never fabricated successful application state. The
+   * Original resume is approved through the app unless `approve` is false:
+   * Apply takes a ready resume either way.
+   */
+  async fixture(site: string, id: number, approve = true): Promise<Job> {
     const url = this.replica(`${site}/jobs/${id}`);
     const apply = this.replica(
       `${site === "board" ? "employer-a" : site}/apply/${id}`,
@@ -278,6 +282,7 @@ export class App {
       url,
       apply,
     });
+    if (!approve) return job;
     const pane = await this.selectResume(job, false);
     this.log("approve Original resume in app", { job: job.id });
     await pane
@@ -325,8 +330,15 @@ export class App {
     );
     return pane;
   }
+  /** Presses Apply on the job's resume, in To review or Approved. */
   async queue(job: Job) {
-    const pane = await this.selectResume(job, true);
+    const approved = Boolean(
+      this.read<{ approved_at: number | null }>(
+        "SELECT approved_at FROM resumes WHERE job_id=?",
+        job.id,
+      )[0]?.approved_at,
+    );
+    const pane = await this.selectResume(job, approved);
     this.log("Apply", { job: job.id });
     await pane.getByRole("button", { name: "Apply", exact: true }).click();
     await this.until(() => this.application(job), 20, "application queued");
