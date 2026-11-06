@@ -1,4 +1,5 @@
 import type { LLMClient } from "@nestor/browser-agent";
+import * as browserAgent from "@nestor/browser-agent";
 import {
   ApplicationAuthorityEnvelopeSchema,
   AiBehaviorPreferenceSchema,
@@ -2495,3 +2496,37 @@ test("every model call of one person's applications shares one conversation", as
     applyingConversationKey({ id: "candidate_1" }),
   );
 });
+
+test.each([196_000, null])(
+  "the apply seam forwards the route window (%s) and published output maximum",
+  async (contextWindow) => {
+    const run = vi.spyOn(browserAgent, "runApplyAgent");
+    try {
+      const prepare = createApplyFormPreparer({
+        executionInput: executionInput(),
+        aiClient: {
+          getStatus: () => ({
+            label: "Synthetic route",
+            model: "synthetic",
+            modelContextWindowTokens: contextWindow,
+            modelMaxOutputTokens: 131_072,
+          }),
+          chatWithTools: modelThatFinishes().chatWithTools,
+        },
+        siteLabel: "the careers site",
+      });
+      await prepare({
+        session: session(),
+        currentUrl: PAGE_URL,
+        startedAt: "2026-09-14T10:00:00.000Z",
+      });
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(run.mock.calls[0]?.[0].modelContextWindowTokens).toBe(
+        contextWindow ?? undefined,
+      );
+      expect(run.mock.calls[0]?.[0].modelMaxOutputTokens).toBe(131_072);
+    } finally {
+      run.mockRestore();
+    }
+  },
+);

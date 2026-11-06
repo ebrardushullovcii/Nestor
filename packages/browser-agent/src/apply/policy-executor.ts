@@ -335,12 +335,12 @@ function recordPickerFailure(
     tried: [
       ...(previous?.tried ?? []).filter((value) => value !== tried),
       tried,
-    ].slice(-20),
+    ],
     notOffered: [
       ...(previous?.notOffered ?? []).filter((value) => value !== tried),
       // A refusal proves absence only with the list it showed instead.
       ...(offeredOptions?.length ? [tried] : []),
-    ].slice(-20),
+    ],
     offeredOptions: offeredOptions?.length
       ? offeredOptions.slice(0, 500)
       : (previous?.offeredOptions ?? []),

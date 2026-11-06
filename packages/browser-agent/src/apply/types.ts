@@ -626,6 +626,8 @@ export interface ApplyAgentConfig extends BrowserPermissionPolicy {
   hands: ApplyPageHands;
   /** Route context window, when supplied by the host (64k conservative fallback). */
   modelContextWindowTokens?: number;
+  /** Published route output maximum; absent routes let the provider choose. */
+  modelMaxOutputTokens?: number;
   /**
    * The model classifies each page's questions (ADR 0041): which ask about
    * pay and which are declarations. Off in scripted tests, where the keyword

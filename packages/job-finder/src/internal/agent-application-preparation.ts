@@ -86,6 +86,8 @@ export interface AgentApplicationPreparationInput {
   applicationRecordId?: string;
   searchPreferences?: JobSearchPreferences | undefined;
   llmClient: LLMClient;
+  modelContextWindowTokens?: number;
+  modelMaxOutputTokens?: number;
   questionReadCacheScope?: object;
   initialQuestionContexts?: Parameters<
     typeof runApplyAgent
@@ -635,6 +637,12 @@ export async function runAgentApplicationPreparation(
   );
   const outcome = await runApplyAgentSafely(input, {
     hands,
+    ...(input.modelContextWindowTokens
+      ? { modelContextWindowTokens: input.modelContextWindowTokens }
+      : {}),
+    ...(input.modelMaxOutputTokens
+      ? { modelMaxOutputTokens: input.modelMaxOutputTokens }
+      : {}),
     safety: {
       ...input.session,
       openIntermediateWriteWindow: async () => {
@@ -916,7 +924,12 @@ export function resolveApplySiteLabel(input: {
  */
 export function toApplyLlmClient(
   aiClient: {
-    getStatus?: () => { label: string; model: string | null };
+    getStatus?: () => {
+      label: string;
+      model: string | null;
+      modelContextWindowTokens?: number | null;
+      modelMaxOutputTokens?: number | null;
+    };
     chatWithTools?: (
       messages: Parameters<LLMClient["chatWithTools"]>[0],
       tools: Parameters<LLMClient["chatWithTools"]>[1],
@@ -1032,6 +1045,12 @@ export function createApplyFormPreparer(input: {
         : {}),
       searchPreferences: input.searchPreferences,
       llmClient,
+      ...(status?.modelContextWindowTokens
+        ? { modelContextWindowTokens: status.modelContextWindowTokens }
+        : {}),
+      ...(status?.modelMaxOutputTokens
+        ? { modelMaxOutputTokens: status.modelMaxOutputTokens }
+        : {}),
       questionReadCacheScope: input.aiClient,
       ...(input.reusableAnswers
         ? { reusableAnswers: input.reusableAnswers }
