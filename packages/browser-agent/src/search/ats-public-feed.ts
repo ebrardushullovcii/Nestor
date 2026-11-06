@@ -5,6 +5,7 @@ import type {
 } from "@nestor/contracts";
 import { fingerprint } from "./listing-html";
 import { htmlToPlainText } from "./listing-detail-extraction";
+import { reportSelfLimitHit } from "@nestor/core";
 type Data = Record<string, unknown>;
 export const ATS_FEED_PAGE_LIMIT = 250;
 type Address = { board: string; endpoint: string; detail: string | null };
@@ -270,10 +271,17 @@ export async function collectAtsFeed(
     offset += rows.length;
     if (total === null || offset >= total || !rows.length || !fresh.length)
       break;
-    if (pagesRead === ATS_FEED_PAGE_LIMIT)
+    if (pagesRead === ATS_FEED_PAGE_LIMIT) {
+      reportSelfLimitHit({
+        limit: "ats_feed_pages",
+        kind: "pages",
+        value: ATS_FEED_PAGE_LIMIT,
+        where: "browser-agent/collectAtsFeed",
+      });
       issues.add(
         `Pagination stopped at the ${ATS_FEED_PAGE_LIMIT}-page limit.`,
       );
+    }
   }
   if (total === null)
     issues.add(

@@ -1,3 +1,4 @@
+import { reportSelfLimitHit, forwardPageSelfLimitHit } from "@nestor/core";
 import {
   APPLY_PAGE_SELECTORS,
   collectApplyDocumentSnapshot,
@@ -1080,10 +1081,15 @@ export class EmbeddedBrowser {
           ? frame.executeJavaScript(script, false)
           : page.contents.executeJavaScript(script, false),
         new Promise((_resolve, reject) => {
-          deadline = setTimeout(
-            () => reject(new Error("The page did not answer.")),
-            3_000,
-          );
+          deadline = setTimeout(() => {
+            reportSelfLimitHit({
+              limit: "embedded_page_read",
+              kind: "timeout",
+              value: 3_000,
+              where: "embedded-browser/readTab",
+            });
+            reject(new Error("The page did not answer."));
+          }, 3_000);
         }),
       ])) as T;
       return { url, value };
@@ -1504,6 +1510,23 @@ export class EmbeddedBrowser {
     );
   }
 
+  private reportTabLimit(): void {
+    if (this.pageMap.size >= MAX_TOTAL_TABS)
+      reportSelfLimitHit({
+        limit: "browser_total_tabs",
+        kind: "concurrency",
+        value: MAX_TOTAL_TABS,
+        where: "desktop/EmbeddedBrowser/hasTabCapacity",
+      });
+    if (this.workingTabCount() >= MAX_TABS)
+      reportSelfLimitHit({
+        limit: "browser_working_tabs",
+        kind: "concurrency",
+        value: MAX_TABS,
+        where: "desktop/EmbeddedBrowser/hasTabCapacity",
+      });
+  }
+
   assertAutomationSafe(): void {
     if (
       Object.keys(this.getSession().serviceWorkers.getAllRunning()).length > 0
@@ -1528,8 +1551,10 @@ export class EmbeddedBrowser {
       );
     if (!this.window || this.window.isDestroyed())
       throw new Error("The app window is not available.");
-    if (!this.hasTabCapacity())
+    if (!this.hasTabCapacity()) {
+      this.reportTabLimit();
       throw new Error("The browser is full. Close an unused tab to continue.");
+    }
     const destination = normalizeBrowserNavigation(url);
     const view = new WebContentsView({
       ...popupOptions,
@@ -1659,6 +1684,7 @@ export class EmbeddedBrowser {
     page.contents.on("dom-ready", installPageMessages);
     page.contents.on("did-frame-finish-load", installPageMessages);
     page.contents.on("console-message", (details) => {
+      if (forwardPageSelfLimitHit(details.message)) return;
       if (details.message === submitNoticeToken) this.noteUnboundSend(page.id);
       else if (details.message.startsWith(boundSendToken)) {
         try {
@@ -1794,6 +1820,12 @@ export class EmbeddedBrowser {
     // Return a WebContentsView directly: popups remain in this window and session.
     // No app-level CDP auto-attach pauses Electron's synchronous createWindow path.
     page.contents.setWindowOpenHandler((details) => {
+      if (
+        !this.closing &&
+        isBrowserNavigationAllowed(details.url) &&
+        !this.hasTabCapacity()
+      )
+        this.reportTabLimit();
       if (
         !isBrowserNavigationAllowed(details.url) ||
         !this.hasTabCapacity() ||

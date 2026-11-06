@@ -1,4 +1,6 @@
+import { selfLimitTimeout } from "@nestor/core/self-limit";
 import assert from "node:assert/strict";
+import { reportSelfLimitHit } from "@nestor/core/self-limit";
 import type { ApplyJobsInput, ApplyJobsResult } from "@nestor/contracts";
 import type { App } from "./app.ts";
 import { genuineQuestion } from "./report.ts";
@@ -102,7 +104,11 @@ async function replicaAccount(app: App, job: Job) {
     await form
       .getByRole("button", { name: "Create account", exact: true })
       .click();
-    await form.locator("#workday-form").waitFor({ timeout: 20000 });
+    await selfLimitTimeout(
+      form.locator("#workday-form").waitFor({ timeout: 20000 }),
+      20000,
+      "packages/ai-evals/scripts/scoreboard/applications.ts:107",
+    );
   }
   await (await app.ctx.page).keyboard.press("Escape");
 }
@@ -134,9 +140,13 @@ async function answerWorkday(app: App, need: Need) {
     .first()
     .click();
   const pane = p.getByRole("region", { name: "Task details" });
-  await pane
-    .getByRole("heading", { name: need.prompt, exact: true })
-    .waitFor({ state: "visible", timeout: 15000 });
+  await selfLimitTimeout(
+    pane
+      .getByRole("heading", { name: need.prompt, exact: true })
+      .waitFor({ state: "visible", timeout: 15000 }),
+    15000,
+    "packages/ai-evals/scripts/scoreboard/applications.ts:143",
+  );
   const remember = pane.getByRole("checkbox", {
     name: /Save this answer|Remember/,
   });
@@ -215,6 +225,23 @@ export async function multistep(app: App, r: Result) {
   app.capture();
   const finalApplication = app.application(job);
   if (
+    Date.now() >= end &&
+    ![
+      "ready",
+      "needs_you",
+      "failed",
+      "stopped",
+      "uncertain",
+      "submitted",
+    ].includes(finalApplication.state)
+  )
+    reportSelfLimitHit({
+      limit: "workday_scenario_deadline",
+      kind: "timeout",
+      value: app.timeout * 1000,
+      where: "scoreboard/multistep",
+    });
+  if (
     ["failed", "stopped", "uncertain", "submitted"].includes(
       finalApplication.state,
     )
@@ -262,7 +289,7 @@ export async function captcha(app: App, r: Result) {
   await p.keyboard.press("Escape");
   await app.until(
     () => app.application(job)?.state !== "needs_you",
-    Math.min(app.timeout, 90),
+    app.timeout,
     "CAPTCHA resumes without Continue",
   );
   r.metrics.resumeSeconds = (Date.now() - solved) / 1000;
@@ -291,7 +318,7 @@ export async function security(app: App, r: Result) {
   );
   try {
     db.prepare("UPDATE jobs SET apply_url=? WHERE id=?").run(
-      new URL("gatekeeper/security/1", app.ctx.sites.url).href,
+      app.replica("gatekeeper/security/1"),
       job.id,
     );
   } finally {
@@ -331,7 +358,7 @@ export async function restart(app: App, r: Result) {
   // Opening a lost form may refill asynchronously. Wait for its actual values.
   await app.until(
     async () => JSON.stringify(await fields(form)) === JSON.stringify(before),
-    Math.min(app.timeout, 120),
+    app.timeout,
     "same filled fields return after restart",
   );
   const rows = app.read<{ id: number }>(
@@ -370,7 +397,7 @@ export async function batch(app: App, r: Result) {
   for (const job of jobs) await app.queue(job);
   r.metrics.queueSeconds = (Date.now() - t) / 1000;
   try {
-    await app.settle(jobs, Math.max(app.timeout, 420));
+    await app.settle(jobs);
   } catch (error) {
     app.log("batch deadline", String(error));
   }

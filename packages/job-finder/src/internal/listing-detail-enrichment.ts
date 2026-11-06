@@ -1,3 +1,4 @@
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import {
   JobPostingSchema,
   assessJobPostingDetailQuality,
@@ -237,6 +238,12 @@ export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
             bytesRead >= MAX_RESPONSE_BYTES ||
             text.length >= MAX_RESPONSE_CHARACTERS
           ) {
+            reportSelfLimitHit({
+              limit: "listing_response_bytes",
+              kind: "input",
+              value: MAX_RESPONSE_BYTES,
+              where: "job-finder/createDefaultListingHtmlFetcher",
+            });
             await reader.cancel();
             break;
           }
@@ -252,7 +259,12 @@ export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
       status: response.status,
       html:
         text.length > MAX_RESPONSE_CHARACTERS
-          ? text.slice(0, MAX_RESPONSE_CHARACTERS)
+          ? selfLimitSlice(
+              text,
+              0,
+              MAX_RESPONSE_CHARACTERS,
+              "packages/job-finder/src/internal/listing-detail-enrichment.ts:262",
+            )
           : text,
       finalUrl: response.url || url,
       ...(response.status === 429
@@ -383,6 +395,13 @@ export function jobNeedsListingDetail(
     attempt.outcome === "fetch_failed" || attempt.outcome === "blocked"
       ? RETRY_AFTER_FAILED_ATTEMPT_MS
       : RETRY_AFTER_SUCCESSFUL_ATTEMPT_MS;
+  if (since < retryAfter)
+    reportSelfLimitHit({
+      limit: "listing_retry_backoff",
+      kind: "timeout",
+      value: retryAfter,
+      where: "job-finder/jobNeedsListingDetail",
+    });
   return since >= retryAfter;
 }
 
@@ -774,6 +793,13 @@ export async function enrichSavedJobListingDetails(
   let providerAccessError: unknown;
   const rateLimit = input.rateLimitState ?? createListingReadRateLimitState();
   const registerRateLimit = (response: ListingHtmlFetchResult): number => {
+    if ((response.retryAfterMs ?? 0) > MAX_DEFERRED_RATE_LIMIT_MS)
+      reportSelfLimitHit({
+        limit: "listing_retry_after",
+        kind: "timeout",
+        value: MAX_DEFERRED_RATE_LIMIT_MS,
+        where: "job-finder/registerRateLimit",
+      });
     const pauseMs = Math.min(
       MAX_DEFERRED_RATE_LIMIT_MS,
       Math.max(0, response.retryAfterMs ?? DEFAULT_RATE_LIMIT_PAUSE_MS),
@@ -788,6 +814,12 @@ export async function enrichSavedJobListingDetails(
       (Number.isFinite(responseAtMs) ? responseAtMs : Date.now()) + pauseMs,
     );
     if (pauseMs > MAX_RATE_LIMIT_PAUSE_MS) {
+      reportSelfLimitHit({
+        limit: "listing_rate_limit_pause",
+        kind: "timeout",
+        value: MAX_RATE_LIMIT_PAUSE_MS,
+        where: "job-finder/enrichSavedJobListingDetails",
+      });
       rateLimit.deferRemaining = true;
     }
     return pauseMs;
@@ -813,7 +845,19 @@ export async function enrichSavedJobListingDetails(
     }
     return needs;
   });
-  const capped = queue.slice(0, maxJobs);
+  const capped = selfLimitSlice(
+    queue,
+    0,
+    maxJobs,
+    "packages/job-finder/src/internal/listing-detail-enrichment.ts:848",
+  );
+  if (capped.length > concurrency)
+    reportSelfLimitHit({
+      limit: "listing_read_concurrency",
+      kind: "concurrency",
+      value: concurrency,
+      where: "job-finder/enrichSavedJobListingDetails",
+    });
   summary.skipped += queue.length - capped.length;
 
   let completed = 0;
@@ -914,6 +958,30 @@ export async function enrichSavedJobListingDetails(
             rateLimit.retriesLeft <= 0 ||
             !(await waitForSharedRateLimit())
           ) {
+            if (
+              Date.now() + pauseMs - rateLimit.firstRateLimitAtMs >
+              RATE_LIMIT_WAIT_BUDGET_MS
+            )
+              reportSelfLimitHit({
+                limit: "listing_rate_limit_wait",
+                kind: "timeout",
+                value: RATE_LIMIT_WAIT_BUDGET_MS,
+                where: "job-finder/enrichSavedJobListingDetails",
+              });
+            if (retriesForJob >= RATE_LIMIT_RETRIES_PER_JOB)
+              reportSelfLimitHit({
+                limit: "listing_retries_per_job",
+                kind: "retry",
+                value: RATE_LIMIT_RETRIES_PER_JOB,
+                where: "job-finder/enrichSavedJobListingDetails",
+              });
+            if (rateLimit.retriesLeft <= 0)
+              reportSelfLimitHit({
+                limit: "listing_retries_per_pass",
+                kind: "retry",
+                value: RATE_LIMIT_RETRIES_PER_PASS,
+                where: "job-finder/enrichSavedJobListingDetails",
+              });
             break;
           }
           retriesForJob += 1;

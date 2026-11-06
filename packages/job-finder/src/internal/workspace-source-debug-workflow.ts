@@ -1,3 +1,4 @@
+import { reportSelfLimitHit } from "@nestor/core";
 import { intendedAccountEmail } from "@nestor/contracts";
 import { browserAgentPermissionsOf } from "@nestor/contracts";
 import { jobSiteTarget } from "@nestor/contracts";
@@ -318,6 +319,12 @@ export async function runSourceDebugWorkflow(
     targetId: normalizedTarget.id,
     onProgress: (event) => {
       if (progressEvents.length >= MAX_PROGRESS_EVENTS) {
+        reportSelfLimitHit({
+          limit: "source_debug_progress_events",
+          kind: "count",
+          value: MAX_PROGRESS_EVENTS,
+          where: "job-finder/runSourceDebugWorkflow",
+        });
         progressEvents.shift();
       }
       progressEvents.push(event);

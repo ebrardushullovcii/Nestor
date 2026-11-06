@@ -1,3 +1,4 @@
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import type {
   ExtractedListingDetail,
   ExtractListingDetailInput,
@@ -97,7 +98,12 @@ export function extractListingDetailFromHtml(
 ): ExtractedListingDetail | null {
   const html =
     input.html.length > MAX_HTML_LENGTH
-      ? input.html.slice(0, MAX_HTML_LENGTH)
+      ? selfLimitSlice(
+          input.html,
+          0,
+          MAX_HTML_LENGTH,
+          "packages/browser-agent/src/search/listing-detail-extraction.ts:101",
+        )
       : input.html;
 
   return extractJobPostingFromJsonLd(html, input);
@@ -188,6 +194,13 @@ function collectJobPostingNodes(blocks: readonly unknown[]): JsonRecord[] {
       }
     }
   }
+  if (queue.length > 0)
+    reportSelfLimitHit({
+      limit: "json_ld_nodes",
+      kind: "steps",
+      value: MAX_JSON_LD_NODES,
+      where: "browser-agent/collectJobPostingNodes",
+    });
   return found;
 }
 
@@ -280,7 +293,9 @@ function readLocation(node: JsonRecord): {
       .map((entry) => readString(entry))
       .filter((entry): entry is string => Boolean(entry));
     if (regions.length > 0) {
-      places.push(`Remote (${regions.slice(0, 3).join(", ")})`);
+      places.push(
+        `Remote (${selfLimitSlice(regions, 0, 3, "packages/browser-agent/src/search/listing-detail-extraction.ts:297").join(", ")})`,
+      );
     } else {
       places.push("Remote");
     }
@@ -296,7 +311,15 @@ function readLocation(node: JsonRecord): {
       ),
   );
   return {
-    location: unique.length > 0 ? unique.slice(0, 3).join(" · ") : null,
+    location:
+      unique.length > 0
+        ? selfLimitSlice(
+            unique,
+            0,
+            3,
+            "packages/browser-agent/src/search/listing-detail-extraction.ts:316",
+          ).join(" · ")
+        : null,
     workModeHints: hints,
   };
 }
@@ -548,7 +571,14 @@ const recentPageText: { html: string; text: string }[] = [];
 
 function convertListingPageText(html: string): string {
   const capped =
-    html.length > MAX_HTML_LENGTH ? html.slice(0, MAX_HTML_LENGTH) : html;
+    html.length > MAX_HTML_LENGTH
+      ? selfLimitSlice(
+          html,
+          0,
+          MAX_HTML_LENGTH,
+          "packages/browser-agent/src/search/listing-detail-extraction.ts:575",
+        )
+      : html;
   const stripped = capped
     .replace(/<script\b[\s\S]*?<\/script\s*>/giu, " ")
     .replace(/<style\b[\s\S]*?<\/style\s*>/giu, " ")
@@ -573,7 +603,19 @@ function convertListingPageText(html: string): string {
   const available = MAX_PAGE_TEXT_LENGTH - marker.length;
   const head = Math.floor((available * 2) / 3);
   return (
-    text.slice(0, head) + marker + text.slice(text.length - (available - head))
+    selfLimitSlice(
+      text,
+      0,
+      head,
+      "packages/browser-agent/src/search/listing-detail-extraction.ts:606",
+    ) +
+    marker +
+    selfLimitSlice(
+      text,
+      text.length - (available - head),
+      undefined,
+      "packages/browser-agent/src/search/listing-detail-extraction.ts:613",
+    )
   );
 }
 
@@ -782,6 +824,16 @@ export function decodeHtmlEntities(value: string): string {
     }
     decoded = next;
   }
+  if (
+    ENTITY_PATTERN.test(decoded) &&
+    decodeHtmlEntitiesOnce(decoded) !== decoded
+  )
+    reportSelfLimitHit({
+      limit: "entity_decode_passes",
+      kind: "retry",
+      value: MAX_ENTITY_DECODE_PASSES,
+      where: "browser-agent/decodeHtmlEntities",
+    });
   return decoded;
 }
 

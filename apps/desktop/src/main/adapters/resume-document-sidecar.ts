@@ -1,3 +1,4 @@
+import { reportSelfLimitHit } from "@nestor/core";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFileSync } from "node:fs";
@@ -140,8 +141,7 @@ export function _resetSidecarAvailabilityLogged(): void {
 }
 
 function getBundledSidecarBinaryPath(): string | null {
-  const override =
-    process.env.NESTOR_RESUME_PARSER_SIDECAR_BINARY_PATH?.trim();
+  const override = process.env.NESTOR_RESUME_PARSER_SIDECAR_BINARY_PATH?.trim();
   const candidates = uniquePaths([
     override ?? "",
     ...getGeneratedSidecarRootCandidates().map((root) =>
@@ -401,6 +401,13 @@ function isMissingCommandError(error: unknown): boolean {
 
 function appendSidecarOutput(current: string, chunk: Buffer | string): string {
   const next = current + chunk.toString();
+  if (next.length > MAX_SIDECAR_OUTPUT_BYTES)
+    reportSelfLimitHit({
+      limit: "resume_parser_output",
+      kind: "input",
+      value: MAX_SIDECAR_OUTPUT_BYTES,
+      where: "desktop/appendSidecarOutput",
+    });
   return next.length > MAX_SIDECAR_OUTPUT_BYTES
     ? next.slice(next.length - MAX_SIDECAR_OUTPUT_BYTES)
     : next;
@@ -414,6 +421,12 @@ export function appendBoundedSidecarOutputForTest(
   const next = current + chunk.toString();
 
   if (next.length > maxBytes) {
+    reportSelfLimitHit({
+      limit: "resume_vision_output_bytes",
+      kind: "input",
+      value: maxBytes,
+      where: "desktop/appendBoundedSidecarOutput",
+    });
     throw new Error(
       `Python resume parser sidecar output exceeded ${maxBytes} bytes.`,
     );
@@ -451,6 +464,12 @@ async function invokeSidecarCandidate<TResult>(input: {
     };
 
     const timer = setTimeout(() => {
+      reportSelfLimitHit({
+        limit: "resume_parser_time",
+        kind: "timeout",
+        value: input.timeoutMs,
+        where: "desktop/runResumeDocumentSidecar",
+      });
       child.kill();
       finish(() => {
         reject(

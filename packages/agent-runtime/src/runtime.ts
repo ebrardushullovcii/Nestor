@@ -19,6 +19,7 @@ import {
   type ModelContinuation,
 } from "@nestor/contracts";
 import type { z } from "zod";
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 
 import { AgentTaskResultStore } from "./result-store";
 
@@ -149,7 +150,12 @@ function takeProtocolSafeRecentMessages(
       if (candidate?.role !== "tool") break;
     }
   }
-  return messages.slice(start);
+  return selfLimitSlice(
+    messages,
+    start,
+    undefined,
+    "agent-runtime/recent_messages",
+  );
 }
 
 /** A provider adapter that already owns retries can use this to avoid nesting
@@ -223,6 +229,134 @@ function issueFromZod(error: z.ZodError): AgentTaskValidationIssue[] {
   }));
 }
 
+/** A tool's local bounds must be present in the schema the model receives. */
+function reportUnadvertisedBounds(
+  error: z.ZodError,
+  parameters: Record<string, unknown>,
+  toolName: string,
+  input: unknown,
+): void {
+  const record = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const resolve = (value: unknown): Record<string, unknown> => {
+    let schema = record(value);
+    const visited = new Set<unknown>();
+    while (
+      typeof schema.$ref === "string" &&
+      schema.$ref.startsWith("#/") &&
+      !visited.has(schema)
+    ) {
+      visited.add(schema);
+      schema = record(
+        schema.$ref
+          .slice(2)
+          .split("/")
+          .reduce<unknown>(
+            (node, key) =>
+              record(node)[key.replace(/~1/gu, "/").replace(/~0/gu, "~")],
+            parameters,
+          ),
+      );
+    }
+    return schema;
+  };
+  const patternAccepts = (pattern: string, value: unknown): boolean => {
+    if (typeof value !== "string") return false;
+    try {
+      return new RegExp(pattern, "u").test(value);
+    } catch {
+      return false;
+    }
+  };
+  for (const issue of error.issues) {
+    let schema: Record<string, unknown> = resolve(parameters);
+    let received: unknown = input;
+    for (const part of issue.path) {
+      received =
+        typeof part === "number"
+          ? Array.isArray(received)
+            ? received[part]
+            : undefined
+          : record(received)[part];
+      schema = resolve(
+        typeof part === "number"
+          ? schema.items
+          : record(schema.properties)[part],
+      );
+    }
+    if (issue.code === "too_big") {
+      const key =
+        issue.type === "string"
+          ? "maxLength"
+          : issue.type === "array"
+            ? "maxItems"
+            : "maximum";
+      if (
+        typeof schema[key] !== "number" ||
+        schema[key] > Number(issue.maximum)
+      )
+        reportSelfLimitHit({
+          limit: "unadvertised_validator_bound",
+          kind: "validator",
+          value: Number(issue.maximum),
+          where: `agent-runtime/tool/${toolName}`,
+        });
+    }
+    if (issue.code === "too_small") {
+      const key =
+        issue.type === "string"
+          ? "minLength"
+          : issue.type === "array"
+            ? "minItems"
+            : "minimum";
+      if (
+        typeof schema[key] !== "number" ||
+        schema[key] < Number(issue.minimum)
+      )
+        reportSelfLimitHit({
+          limit: "unadvertised_validator_minimum",
+          kind: "validator",
+          value: Number(issue.minimum),
+          where: `agent-runtime/tool/${toolName}`,
+        });
+    }
+    if (
+      issue.code === "invalid_enum_value" &&
+      (!Array.isArray(schema.enum) || schema.enum.includes(issue.received))
+    )
+      reportSelfLimitHit({
+        limit: "unadvertised_validator_enum",
+        kind: "validator",
+        value: "enum",
+        where: `agent-runtime/tool/${toolName}`,
+      });
+    if (
+      issue.code === "invalid_string" &&
+      issue.validation === "regex" &&
+      (typeof schema.pattern !== "string" ||
+        patternAccepts(schema.pattern, received))
+    )
+      reportSelfLimitHit({
+        limit: "unadvertised_validator_pattern",
+        kind: "validator",
+        value: "regex",
+        where: `agent-runtime/tool/${toolName}`,
+      });
+    if (
+      issue.code === "unrecognized_keys" &&
+      schema.additionalProperties !== false
+    )
+      reportSelfLimitHit({
+        limit: "unadvertised_validator_keys",
+        kind: "validator",
+        value: "additionalProperties",
+        where: `agent-runtime/tool/${toolName}`,
+      });
+  }
+}
+
 export async function runAgentTask<TState, TDraft>(
   options: AgentTaskRunOptions<TState, TDraft>,
 ): Promise<AgentTaskRunResult<TDraft>> {
@@ -289,14 +423,32 @@ export async function runAgentTask<TState, TDraft>(
       break;
     }
     if (budgetElapsedMs() >= timeBudgetMs) {
+      reportSelfLimitHit({
+        limit: "task_time",
+        kind: "timeout",
+        value: timeBudgetMs,
+        where: "agent-runtime/runAgentTask",
+      });
       stopReason = "time_budget";
       break;
     }
     if (providerCalls >= providerCallBudget) {
+      reportSelfLimitHit({
+        limit: "provider_calls",
+        kind: "budget",
+        value: providerCallBudget,
+        where: "agent-runtime/runAgentTask",
+      });
       stopReason = "cost_budget";
       break;
     }
     if (consecutiveNoProgress >= noProgressLimit) {
+      reportSelfLimitHit({
+        limit: "no_progress",
+        kind: "turns",
+        value: noProgressLimit,
+        where: "agent-runtime/runAgentTask",
+      });
       stopReason = "no_progress";
       break;
     }
@@ -352,6 +504,12 @@ export async function runAgentTask<TState, TDraft>(
     let response: Awaited<ReturnType<AgentTaskModel["chat"]>> | null = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (providerCalls >= providerCallBudget) {
+        reportSelfLimitHit({
+          limit: "provider_calls",
+          kind: "budget",
+          value: providerCallBudget,
+          where: "agent-runtime/runAgentTask/retry",
+        });
         stopReason = "cost_budget";
         break;
       }
@@ -394,7 +552,16 @@ export async function runAgentTask<TState, TDraft>(
           break;
         }
         const failureKind = classifyAgentTaskFailure(error);
-        if (!shouldRetry(failureKind) || attempt === 2) throw error;
+        if (!shouldRetry(failureKind) || attempt === 2) {
+          if (shouldRetry(failureKind) && attempt === 2)
+            reportSelfLimitHit({
+              limit: "provider_retries",
+              kind: "retry",
+              value: 3,
+              where: "agent-runtime/runAgentTask",
+            });
+          throw error;
+        }
         await waitForBackoff(attempt, options.signal);
       }
     }
@@ -472,6 +639,12 @@ export async function runAgentTask<TState, TDraft>(
             repairAttempts += 1;
             toolContent = { ok: false, validationIssues: issues };
           } else if (parsed && !parsed.success) {
+            reportUnadvertisedBounds(
+              parsed.error,
+              tool.parameters,
+              tool.name,
+              rawArgs.value,
+            );
             outcome = "rejected";
             failureKind = "validation";
             issues = issueFromZod(parsed.error);
@@ -632,6 +805,13 @@ export async function runAgentTask<TState, TDraft>(
   }
 
   const completedAtMs = Date.now();
+  if (stopReason === "emergency_ceiling")
+    reportSelfLimitHit({
+      limit: "emergency_ceiling",
+      kind: "turns",
+      value: emergencyCeiling,
+      where: "agent-runtime/runAgentTask",
+    });
   return {
     draft,
     receipt: AgentTaskExecutionReceiptSchema.parse({

@@ -1,4 +1,5 @@
 import type { AgentTaskResultReference } from "@nestor/contracts";
+import { reportSelfLimitHit } from "@nestor/core";
 
 interface StoredResult {
   readonly summary: string;
@@ -39,6 +40,13 @@ export class AgentTaskResultStore {
     if (!stored) return null;
     const offset = Math.max(0, Number.parseInt(input.cursor ?? "0", 10) || 0);
     const limit = Math.min(50, Math.max(1, input.limit ?? 10));
+    if ((input.limit ?? 10) > 50)
+      reportSelfLimitHit({
+        limit: "result_read_items",
+        kind: "count",
+        value: 50,
+        where: "agent-runtime/AgentTaskResultStore.read",
+      });
     const items = stored.items.slice(offset, offset + limit);
     const nextOffset = offset + items.length;
 

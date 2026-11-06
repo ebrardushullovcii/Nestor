@@ -2,6 +2,7 @@ import type { ListingCard, SourceInventory } from "@nestor/contracts";
 import type { Page } from "playwright";
 import type { ApplyPageHands } from "../apply/types";
 import { readInventoryHtml } from "./listing-html";
+import { reportSelfLimitHit } from "@nestor/core";
 
 /** The same observed pagination labels used by the HTTP inventory reader. */
 export const moreListingsLabel = (label: string): boolean =>
@@ -93,10 +94,17 @@ export async function collectRenderedInventory(input: {
         }
         await input.hands.wait(500);
       }
-      if (!changed)
+      if (!changed) {
+        reportSelfLimitHit({
+          limit: "rendered_batch_waits",
+          kind: "retry",
+          value: 20,
+          where: "browser-agent/collectRenderedInventory",
+        });
         return partial(
           "Nestor's wait for the next batch ended before new cards appeared.",
         );
+      }
       continue;
     }
     const next = pending.values().next().value;
@@ -117,5 +125,11 @@ export async function collectRenderedInventory(input: {
       ],
     };
   }
+  reportSelfLimitHit({
+    limit: "rendered_pages",
+    kind: "pages",
+    value: input.maxPages,
+    where: "browser-agent/collectRenderedInventory",
+  });
   return partial("Nestor reached its bounded browser batch limit.");
 }

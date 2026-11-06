@@ -1,5 +1,6 @@
 import type { ListingCard } from "@nestor/contracts";
 import { abortable } from "./async";
+import { reportSelfLimitHit } from "@nestor/core";
 
 /** Bounded, serial waves per source; a slow source must not hold healthy ones. */
 export function createCardWaves(
@@ -43,6 +44,13 @@ export function createCardWaves(
       releaseCheckpoints();
       return;
     }
+    if (pending.length && active.size >= limit)
+      reportSelfLimitHit({
+        limit: "card_wave_concurrency",
+        kind: "concurrency",
+        value: limit,
+        where: "job-finder/createCardWaves",
+      });
     while (active.size < limit) {
       const source = pending.find(
         (card) => !active.has(card.sourceId),
@@ -90,6 +98,12 @@ export function createCardWaves(
         signal.throwIfAborted();
         checkError();
         while (pending.length >= 2000) {
+          reportSelfLimitHit({
+            limit: "card_wave_pending",
+            kind: "count",
+            value: 2000,
+            where: "job-finder/createCardWaves",
+          });
           await abortable(
             new Promise<void>((resolve) => space.push(resolve)),
             signal,

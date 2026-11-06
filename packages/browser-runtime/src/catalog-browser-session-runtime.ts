@@ -1,3 +1,4 @@
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import {
   ApplyExecutionResultSchema,
   ApplyVisualCheckpointSchema,
@@ -40,6 +41,13 @@ function filterCatalogDiscoveryJobs(
 ) {
   return jobs.filter((job) => {
     if (job.applyPath !== "easy_apply" || !job.easyApplyEligible) {
+      reportSelfLimitHit({
+        limit: "catalog_apply_path_veto",
+        kind: "veto",
+        value: "easy_apply only",
+        where:
+          "packages/browser-runtime/src/catalog-browser-session-runtime.ts",
+      });
       return false;
     }
 
@@ -70,6 +78,14 @@ function filterCatalogDiscoveryJobs(
       searchPreferences.compensation,
     );
 
+    if (!matchesRole || !matchesLocation)
+      reportSelfLimitHit({
+        limit: "catalog_keyword_veto",
+        kind: "veto",
+        value: "title/location phrase match",
+        where:
+          "packages/browser-runtime/src/catalog-browser-session-runtime.ts",
+      });
     return (
       matchesRole &&
       matchesLocation &&
@@ -83,9 +99,16 @@ function filterCatalogAgentDiscoveryJobs(
   jobs: readonly JobPosting[],
   options: AgentDiscoveryOptions,
 ) {
-  return jobs
-    .filter((job) => {
+  return selfLimitSlice(
+    jobs.filter((job) => {
       if (job.applyPath !== "easy_apply" || !job.easyApplyEligible) {
+        reportSelfLimitHit({
+          limit: "catalog_apply_path_veto",
+          kind: "veto",
+          value: "easy_apply only",
+          where:
+            "packages/browser-runtime/src/catalog-browser-session-runtime.ts",
+        });
         return false;
       }
 
@@ -97,9 +120,20 @@ function filterCatalogAgentDiscoveryJobs(
         job.location,
         options.searchPreferences.locations,
       );
+      if (!matchesRole || !matchesLocation)
+        reportSelfLimitHit({
+          limit: "catalog_keyword_veto",
+          kind: "veto",
+          value: "title/location phrase match",
+          where:
+            "packages/browser-runtime/src/catalog-browser-session-runtime.ts",
+        });
       return matchesRole && matchesLocation;
-    })
-    .slice(0, options.targetJobCount);
+    }),
+    0,
+    options.targetJobCount,
+    "packages/browser-runtime/src/catalog-browser-session-runtime.ts:102",
+  );
 }
 
 function getStartingUrl(options: AgentDiscoveryOptions): string {

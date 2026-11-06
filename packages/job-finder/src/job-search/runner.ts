@@ -17,6 +17,7 @@ import {
   type JobSearchProgress,
 } from "@nestor/contracts";
 import { abortable, concurrency, errorMessage } from "./async";
+import { reportSelfLimitHit } from "@nestor/core";
 import { createFitQueue } from "./fit-queue";
 import { fitContextFingerprint } from "./fit-input";
 import { createSearchPipeline } from "./pipeline";
@@ -321,13 +322,24 @@ export function createJobSearchRunner(
             source.row.phase = "browser";
           }
           write(source);
-          const deadline = AbortSignal.any([
-            signal,
-            AbortSignal.timeout(
-              settings.depth === "quick" && !source.full ? 25000 : 45000,
-            ),
-          ]);
-          await abortable(work(deadline), deadline);
+          const timeLimit =
+            settings.depth === "quick" && !source.full ? 25000 : 45000;
+          const timeout = new AbortController();
+          const timer = setTimeout(() => {
+            reportSelfLimitHit({
+              limit: "browser_source_time",
+              kind: "timeout",
+              value: timeLimit,
+              where: "job-finder/search/browserTask",
+            });
+            timeout.abort(new DOMException("Timed out", "TimeoutError"));
+          }, timeLimit);
+          const deadline = AbortSignal.any([signal, timeout.signal]);
+          try {
+            await abortable(work(deadline), deadline);
+          } finally {
+            clearTimeout(timer);
+          }
         })
         .catch((error: unknown) => {
           if (!current(source)) return;
@@ -401,6 +413,12 @@ export function createJobSearchRunner(
       const timer =
         settings.depth === "quick" && !source.full && lane === "http"
           ? setTimeout(() => {
+              reportSelfLimitHit({
+                limit: "quick_source_time",
+                kind: "timeout",
+                value: 180000,
+                where: "job-finder/search/collect",
+              });
               source.quickStopReason ??=
                 "Quick's three-minute look at this site ran out.";
               stopCollection();

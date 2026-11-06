@@ -1,3 +1,4 @@
+import { selfLimitSlice } from "@nestor/core";
 import { browserAgentPermissionsOf } from "@nestor/contracts";
 import { resolveListingCountry } from "../applications/questions";
 import {
@@ -1190,14 +1191,22 @@ export function buildApplyLetterDependencies(input: {
                   { payDisclosed: false },
                 ),
                 resume:
-                  input.profile.baseResume.textContent
-                    ?.trim()
-                    .slice(0, 8_000) ?? null,
+                  selfLimitSlice(
+                    input.profile.baseResume.textContent?.trim(),
+                    0,
+                    8_000,
+                    "packages/job-finder/src/internal/agent-application-preparation.ts:1194",
+                  ) ?? null,
                 postingContextOnly: {
                   title: input.job.title,
                   company: input.job.company,
                   location: input.job.location,
-                  description: input.job.description.slice(0, 6_000),
+                  description: selfLimitSlice(
+                    input.job.description,
+                    0,
+                    6_000,
+                    "packages/job-finder/src/internal/agent-application-preparation.ts:1204",
+                  ),
                 },
               }),
               "Grounded application context:",
@@ -1219,8 +1228,12 @@ export function buildApplyLetterDependencies(input: {
             profile: input.profile,
             preferences: input.searchPreferences,
             resumeText:
-              input.profile.baseResume.textContent?.trim().slice(0, 8_000) ??
-              null,
+              selfLimitSlice(
+                input.profile.baseResume.textContent?.trim(),
+                0,
+                8_000,
+                "packages/job-finder/src/internal/agent-application-preparation.ts:1231",
+              ) ?? null,
             posting: input.job,
             reusableAnswers: input.reusableAnswers ?? [],
             documents: [],
@@ -1348,11 +1361,12 @@ export function buildApplyReviewCard(input: {
       : `${trimmed.slice(0, max - 1).trimEnd()}…`;
   };
   const clampGrounding = (notes: readonly string[]): string[] =>
-    notes
-      .map((note) => note.trim())
-      .filter((note) => note.length > 0)
-      .slice(0, 8)
-      .map((note) => clamp(note, 240));
+    selfLimitSlice(
+      notes.map((note) => note.trim()).filter((note) => note.length > 0),
+      0,
+      8,
+      "packages/job-finder/src/internal/agent-application-preparation.ts:1364",
+    ).map((note) => clamp(note, 240));
 
   return ApplicationReviewCardSchema.parse({
     siteLabel: clamp(input.siteLabel, 240),
@@ -1590,7 +1604,12 @@ export function mergeApplyReviewCards(
       : {}),
     ...(retainEarlier && current.observedFieldKeys
       ? {
-          observedFieldKeys: [...observedFieldKeys].slice(0, 500),
+          observedFieldKeys: selfLimitSlice(
+            [...observedFieldKeys],
+            0,
+            500,
+            "packages/job-finder/src/internal/agent-application-preparation.ts:1607",
+          ),
         }
       : {}),
     answers: [

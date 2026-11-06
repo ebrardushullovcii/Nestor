@@ -34,7 +34,7 @@ export async function setup(app: App) {
   app.log("set seven replica sources and target");
   await ctx.fill(
     "Job site URLs",
-    SOURCES.map((s) => new URL(s, ctx.sites.url).href).join("\n"),
+    SOURCES.map((s) => app.replica(s)).join("\n"),
   );
   await ctx.click("Add and turn on");
   await ctx.waitFor("/^Added and turned on 7/", 20);

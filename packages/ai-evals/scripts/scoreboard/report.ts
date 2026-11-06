@@ -11,6 +11,7 @@ export const SCENARIOS = [
   ["batch", "Ten approved applications"],
   ["send", "Send once and retry"],
   ["needs-you", "Needs you quality"],
+  ["self-limits", "Our own limits"],
   ["search", "Seven-source search recovery"],
   ["google", "Google sign-in (on and off)"],
   ["saved-sign-in", "Saved-password sign-in"],
@@ -161,7 +162,9 @@ export function markDuplicates(questions: Question[]) {
 export function auditQuestions(run: Run) {
   const quality = run.results.find((r) => r.id === "needs-you");
   if (!quality) return;
-  const cases = run.results.filter((r) => r.id !== "needs-you");
+  const cases = run.results.filter(
+    (r) => r.id !== "needs-you" && r.id !== "self-limits",
+  );
   const questions = new Map<string, Question>();
   for (const r of cases)
     for (const q of r.questions)
@@ -185,7 +188,7 @@ export function auditQuestions(run: Run) {
       : observed.length
         ? "pass"
         : "not run";
-  quality.metrics.summary = `${quality.questions.length} items; profile answered=${known}; duplicate asks=${duplicates}; coverage=${observed.length}/${SCENARIOS.length - 1} scenarios`;
+  quality.metrics.summary = `${quality.questions.length} items; profile answered=${known}; duplicate asks=${duplicates}; coverage=${observed.length}/${SCENARIOS.length - 2} scenarios`;
   quality.metrics.coverage = observed.map((r) => r.id);
   quality.metrics.unmeasured = unmeasured.map((r) => r.id);
   delete quality.failure;

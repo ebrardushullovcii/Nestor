@@ -1,3 +1,4 @@
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 /**
  * A results page, cut into parts the page reader can read whole.
  *
@@ -31,7 +32,14 @@ function labelKey(label: string): string | null {
       .split("\n")
       .map((part) => part.trim())
       .find((part) => part.length > 0) ?? "";
-  const key = squash(line).slice(0, 120);
+  const key = selfLimitSlice(squash(line), 0, 120, "browser-agent/labelKey");
+  if (key.length > 0 && key.length < MIN_LABEL_CHARS)
+    reportSelfLimitHit({
+      limit: "short_link_label_veto",
+      kind: "veto",
+      value: MIN_LABEL_CHARS,
+      where: "browser-agent/labelKey",
+    });
   return key.length >= MIN_LABEL_CHARS && /\p{L}/u.test(key) ? key : null;
 }
 
@@ -108,7 +116,15 @@ export function linksInText(
         .split("\n")
         .map((part) => part.trim())
         .find((part) => part.length > 0) ?? "";
-    found.push({ label: label.slice(0, 120), href: link.href });
+    found.push({
+      label: selfLimitSlice(
+        label,
+        0,
+        120,
+        "packages/browser-agent/src/search/page-read-parts.ts:120",
+      ),
+      href: link.href,
+    });
   }
   return found;
 }
@@ -122,7 +138,15 @@ export function formatPagePart(
   let used = 0;
   for (const link of links) {
     const line = `- ${link.label} → ${link.href}`;
-    if (used + line.length + 1 > PART_LINK_CHARS) break;
+    if (used + line.length + 1 > PART_LINK_CHARS) {
+      reportSelfLimitHit({
+        limit: "page_part_link_evidence",
+        kind: "input",
+        value: PART_LINK_CHARS,
+        where: "browser-agent/formatPagePart",
+      });
+      break;
+    }
     lines.push(line);
     used += line.length + 1;
   }
@@ -230,6 +254,13 @@ export async function mapWithLimit<T, R>(
   work: (item: T, index: number) => Promise<R>,
 ): Promise<Array<PromiseSettledResult<R>>> {
   const results: Array<PromiseSettledResult<R>> = [];
+  if (items.length > limit)
+    reportSelfLimitHit({
+      limit: "page_read_concurrency",
+      kind: "concurrency",
+      value: limit,
+      where: "browser-agent/mapWithLimit",
+    });
   const queue = items.map((item, index) => ({ item, index }));
   const lane = async () => {
     for (let next = queue.shift(); next; next = queue.shift()) {

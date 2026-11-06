@@ -1,3 +1,4 @@
+import { reportSelfLimitHit } from "@nestor/core";
 export type ModelTurnStreamEvent =
   | { type: "attempt_started"; attempt: number }
   | { type: "text_delta"; text: string }
@@ -52,7 +53,15 @@ export async function runModelTurn<T>(
     resetIdle();
     if (options.timeoutMs !== undefined && Number.isFinite(options.timeoutMs))
       absoluteTimer = setTimeout(
-        () => controller.abort(new ModelTurnTimeoutError("absolute")),
+        () => {
+          reportSelfLimitHit({
+            limit: "model_turn_time",
+            kind: "timeout",
+            value: options.timeoutMs!,
+            where: "agent-runtime/runModelTurn",
+          });
+          controller.abort(new ModelTurnTimeoutError("absolute"));
+        },
         Math.max(1, options.timeoutMs),
       );
     const aborted = new Promise<never>((_resolve, reject) => {

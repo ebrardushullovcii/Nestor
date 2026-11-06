@@ -1,4 +1,4 @@
-import { yieldToEventLoop } from "@nestor/core";
+import { reportSelfLimitHit, yieldToEventLoop } from "@nestor/core";
 import { isDeepStrictEqual } from "node:util";
 import {
   readDiscoveryPreparation,
@@ -1587,7 +1587,17 @@ function createProviderApiQuietTimeout(quietMs: number, totalMs: number) {
   const end = () => {
     if (!finished) controller.abort();
   };
-  const totalTimer = setTimeout(end, totalMs);
+  const totalTimer = setTimeout(() => {
+    if (!finished && !controller.signal.aborted) {
+      reportSelfLimitHit({
+        limit: "provider_feed_total_time",
+        kind: "timeout",
+        value: totalMs,
+        where: "job-finder/createProviderApiQuietTimeout",
+      });
+      end();
+    }
+  }, totalMs);
   const arm = (delay: number) => {
     quietTimer = setTimeout(check, delay);
   };
@@ -1989,10 +1999,28 @@ export async function collectPublicProviderJobs(input: {
             delay === undefined ||
             !isPassingProviderFailure(error, attempt)
           ) {
+            if (
+              !input.signal?.aborted &&
+              delay === undefined &&
+              isPassingProviderFailure(error, attempt)
+            )
+              reportSelfLimitHit({
+                limit: "provider_feed_retries",
+                kind: "retry",
+                value: retryDelaysMs.length,
+                where: "job-finder/collectPublicProviderJobs",
+              });
             throw error;
           }
           const retryAfter =
             error instanceof ProviderApiStatusError ? error.retryAfterMs : null;
+          if ((retryAfter ?? 0) > PROVIDER_API_MAX_RETRY_AFTER_MS)
+            reportSelfLimitHit({
+              limit: "provider_feed_retry_after",
+              kind: "timeout",
+              value: PROVIDER_API_MAX_RETRY_AFTER_MS,
+              where: "job-finder/collectPublicProviderJobs",
+            });
           await waitBeforeRetry(
             Math.min(
               Math.max(delay, retryAfter ?? 0),

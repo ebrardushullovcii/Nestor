@@ -1,3 +1,4 @@
+import { selfLimitSlice } from '@nestor/core'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -135,11 +136,13 @@ function collectSidecarDocxIdentityLines(input: {
   sidecarText: string | null | undefined
   embeddedText: string | null | undefined
 }): string[] {
-  const sidecarLines = (input.sidecarText ?? '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 12)
+  const sidecarLines = selfLimitSlice(
+    (input.sidecarText ?? '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+    0, 12, 'resume-document/sidecar_identity_lines',
+  )
   const firstContactIndex = sidecarLines.findIndex(isDocxContactLine)
   const lastContactIndex = sidecarLines.reduce(
     (lastIndex, line, index) => (isDocxContactLine(line) ? index : lastIndex),

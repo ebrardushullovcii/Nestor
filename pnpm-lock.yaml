@@ -186,6 +186,9 @@ importers:
       '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@nestor/core':
+        specifier: workspace:*
+        version: link:../core
       zod:
         specifier: ^3.24.2
         version: 3.25.76
@@ -204,6 +207,9 @@ importers:
       '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@nestor/core':
+        specifier: workspace:*
+        version: link:../core
       '@nestor/db':
         specifier: workspace:*
         version: link:../db
@@ -241,6 +247,9 @@ importers:
       '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@nestor/core':
+        specifier: workspace:*
+        version: link:../core
       parse5:
         specifier: ^7.3.0
         version: 7.3.0
@@ -266,12 +275,22 @@ importers:
       '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@nestor/core':
+        specifier: workspace:*
+        version: link:../core
       graphql:
         specifier: ^16
         version: 16.14.2
       playwright:
         specifier: ^1.63.0
         version: 1.63.0
+    devDependencies:
+      '@types/jsdom':
+        specifier: ^21.1.7
+        version: 21.1.7
+      jsdom:
+        specifier: ^26.1.0
+        version: 26.1.0
 
   packages/contracts:
     dependencies:
@@ -349,6 +368,9 @@ importers:
       '@mozilla/readability':
         specifier: ^0.5.0
         version: 0.5.0
+      '@nestor/core':
+        specifier: workspace:*
+        version: link:../core
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0
@@ -365,6 +387,9 @@ importers:
       '@nestor/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@nestor/core':
+        specifier: workspace:*
+        version: link:../core
       '@nestor/os-integration':
         specifier: workspace:*
         version: link:../os-integration

@@ -1,3 +1,5 @@
+import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core";
+
 import {
   trackAccountFlowEntry,
   readAccountFlowEntry,
@@ -1289,6 +1291,7 @@ export async function reserveEmbeddedApplicationTab(
   const startedAt = Date.now();
   const deadline = startedAt + 20_000;
   let toldWaiting = false;
+  let reportedCapacity = false;
   while (true) {
     signal?.throwIfAborted();
     const release = takeEmbeddedApplicationTab(
@@ -1302,13 +1305,33 @@ export async function reserveEmbeddedApplicationTab(
     // An empty tab nobody uses (the browser's startup tab) is not worth a
     // form: close it before waiting on the person.
     if (closeIdlePage && (await closeIdlePage())) continue;
+    if (!reportedCapacity) {
+      reportedCapacity = true;
+      reportSelfLimitHit({
+        limit: "application_tabs",
+        kind: "concurrency",
+        value: hostHasCapacity
+          ? "host capacity"
+          : hostWorkingTabCount
+            ? "7 working / 15 total"
+            : 7,
+        where: "browser-runtime/reserveEmbeddedApplicationTab",
+      });
+    }
     if (onWaiting) {
       if (!toldWaiting && Date.now() - startedAt >= 2_000) {
         toldWaiting = true;
         onWaiting();
       }
-    } else if (Date.now() >= deadline)
+    } else if (Date.now() >= deadline) {
+      reportSelfLimitHit({
+        limit: "application_tab_wait",
+        kind: "timeout",
+        value: 20000,
+        where: "browser-runtime/reserveEmbeddedApplicationTab",
+      });
       throw new Error("Close a browser tab before opening another one.");
+    }
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         signal?.removeEventListener("abort", onAbort);
@@ -2075,6 +2098,12 @@ export function createBrowserAgentRuntime(
       }
     }
 
+    reportSelfLimitHit({
+      limit: "browser_connect_retries",
+      kind: "retry",
+      value: 3,
+      where: "browser-runtime/connectBrowser",
+    });
     throw lastError instanceof Error
       ? new Error(
           `Chrome exposed the debugging endpoint on port ${activeDebugPort}, but CDP attach still failed: ${lastError.message}`,
@@ -2898,10 +2927,14 @@ export function createBrowserAgentRuntime(
           page = await context.newPage();
           await ensurePrepareOnlyMutationGuard(page, false);
           allowPrepareOnlyRunNavigation(page, applicationUrl);
-          await page.goto(applicationUrl, {
-            waitUntil: "domcontentloaded",
-            timeout: 15_000,
-          });
+          await selfLimitTimeout(
+            page.goto(applicationUrl, {
+              waitUntil: "domcontentloaded",
+              timeout: 15_000,
+            }),
+            15_000,
+            "packages/browser-runtime/src/playwright-browser-runtime.ts:2930",
+          );
           bindPreparedApplicationPage(pageBindingKey, page);
           await options.onApplicationPageRestored?.(pageBindingKey, page);
           return;
@@ -2915,10 +2948,14 @@ export function createBrowserAgentRuntime(
       }
       // Re-enter with GET; never replay a credential, challenge or application POST.
       allowPrepareOnlyRunNavigation(page, applicationUrl ?? page.url());
-      await page.goto(applicationUrl ?? page.url(), {
-        waitUntil: "domcontentloaded",
-        timeout: 15_000,
-      });
+      await selfLimitTimeout(
+        page.goto(applicationUrl ?? page.url(), {
+          waitUntil: "domcontentloaded",
+          timeout: 15_000,
+        }),
+        15_000,
+        "packages/browser-runtime/src/playwright-browser-runtime.ts:2951",
+      );
     },
     async armApplicationFormAction(_source, input) {
       await rebindPreparedApplicationPage(input.pageBindingKey);
@@ -3036,10 +3073,17 @@ export function createBrowserAgentRuntime(
           await applicationSitePacing.waitForReady(page, lease, signal);
           if (applicationSiteKey(page.url()) === applicationSiteKey(currentUrl))
             break;
-          if (attempt === 2)
+          if (attempt === 2) {
+            reportSelfLimitHit({
+              limit: "prepared_page_site_retries",
+              kind: "retry",
+              value: 3,
+              where: "browser-runtime/submitPreparedApplication",
+            });
             throw new Error(
               "The prepared application page moved while waiting for its site.",
             );
+          }
         }
         signal?.throwIfAborted();
         const result = await operation();

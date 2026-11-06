@@ -1,3 +1,4 @@
+import { selfLimitSlice } from "@nestor/core";
 import type {
   InterviewCapabilityCheck,
   InterviewAudioTranscriptionInput,
@@ -358,7 +359,15 @@ function createOverlaySnapshot(input: {
         .find((batch) => batch.clearedAt === null)
     : null;
   const latestCue = input.session?.cueCards.at(-1) ?? null;
-  const transcriptSegments = input.session?.transcriptSegments.slice(-8) ?? [];
+  const transcriptSegments =
+    (input.session
+      ? selfLimitSlice(
+          input.session.transcriptSegments,
+          -8,
+          undefined,
+          "live-assistant/context_transcript",
+        )
+      : undefined) ?? [];
   const statusLabel = input.session
     ? input.session.status === "active"
       ? input.session.listening
@@ -624,11 +633,18 @@ function buildCueDisclosure(input: {
   triggerSource: InterviewCueInputDisclosure["triggerSource"];
   visualBatch: InterviewCueVisualBatch | null;
 }): InterviewCueInputDisclosure {
-  const usedSegments = input.session.transcriptSegments.slice(-6);
-  const degradedCapabilityIds = input.session.diagnostics
-    .filter((event) => event.severity !== "info")
-    .slice(-4)
-    .map((event) => event.kind);
+  const usedSegments = selfLimitSlice(
+    input.session.transcriptSegments,
+    -6,
+    undefined,
+    "live-assistant/diagnostic_transcript",
+  );
+  const degradedCapabilityIds = selfLimitSlice(
+    input.session.diagnostics.filter((event) => event.severity !== "info"),
+    -4,
+    undefined,
+    "live-assistant/degraded_capability_context",
+  ).map((event) => event.kind);
 
   return {
     transcriptWindow: `${usedSegments.length} recent segment${usedSegments.length === 1 ? "" : "s"}`,
@@ -893,7 +909,12 @@ export function createLiveAssistantService(
       question: getLatestQuestion(session.transcriptSegments),
       targetLabel: session.targetContext.label,
       targetContextKind: session.targetContext.kind,
-      transcriptSegments: session.transcriptSegments.slice(-8),
+      transcriptSegments: selfLimitSlice(
+        session.transcriptSegments,
+        -8,
+        undefined,
+        "live-assistant/recent_transcript",
+      ),
       visualObservations: visualBatch?.observations ?? [],
       disclosure,
       createdAt: currentNow,
@@ -937,7 +958,12 @@ export function createLiveAssistantService(
       cueCards: [...session.cueCards, normalizedCue],
     });
     const cueContextSegmentIds = new Set(
-      session.transcriptSegments.slice(-8).map((segment) => segment.id),
+      selfLimitSlice(
+        session.transcriptSegments,
+        -8,
+        undefined,
+        "live-assistant/recent_transcript",
+      ).map((segment) => segment.id),
     );
     const transcriptSegments = session.transcriptSegments.map((segment) =>
       cueContextSegmentIds.has(segment.id)
@@ -1369,11 +1395,16 @@ export function createLiveAssistantService(
       },
     });
     const existingConversation = activeSession.chatConversation;
-    const conversationMessages = [
-      ...(existingConversation?.messages ?? []),
-      turn.userMessage,
-      turn.assistantMessage,
-    ].slice(-interviewChatLimits.maxConversationMessages);
+    const conversationMessages = selfLimitSlice(
+      [
+        ...(existingConversation?.messages ?? []),
+        turn.userMessage,
+        turn.assistantMessage,
+      ],
+      -interviewChatLimits.maxConversationMessages,
+      undefined,
+      "live-assistant/conversation_messages",
+    );
     nextSession = InterviewLiveSessionSchema.parse({
       ...nextSession,
       chatConversation: InterviewChatConversationSchema.parse({

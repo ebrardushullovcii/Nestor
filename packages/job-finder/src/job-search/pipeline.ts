@@ -8,6 +8,7 @@ import { settledState, type SourceWork } from "./source-work";
 import type { createFitQueue } from "./fit-queue";
 import { createCardWaves } from "./card-waves";
 import { concurrency } from "./async";
+import { reportSelfLimitHit } from "@nestor/core";
 
 /**
  * Quick reads a site while it keeps finding related jobs, and stops early
@@ -334,8 +335,15 @@ export function createSearchPipeline(input: {
           source.row.cards - source.screened >= QUICK_REVIEW_INTERVAL
         )
           await waves.checkpoint(source.target.id);
-        if (quick && source.unrelatedRun >= QUICK_REVIEW_INTERVAL)
+        if (quick && source.unrelatedRun >= QUICK_REVIEW_INTERVAL) {
+          reportSelfLimitHit({
+            limit: "quick_unrelated_listings",
+            kind: "jobs",
+            value: QUICK_REVIEW_INTERVAL,
+            where: "job-finder/searchPipeline/accept",
+          });
           source.quickStopReason = `Quick stopped after ${QUICK_REVIEW_INTERVAL} listings in a row that don't match your profile.`;
+        }
       }
     },
     drain: () => waves.drain(),

@@ -17,7 +17,12 @@
     "@nestor/ai-providers": "workspace:*",
     "@nestor/browser-agent": "workspace:*",
     "@nestor/contracts": "workspace:*",
+    "@nestor/core": "workspace:*",
     "graphql": "^16",
     "playwright": "^1.63.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "jsdom": "^26.1.0"
   }
 }

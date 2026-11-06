@@ -1,4 +1,7 @@
 import type { IpcMain } from "electron";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { expect, it, vi } from "vitest";
 
 const { runTrackerCommand } = vi.hoisted(() => ({
@@ -15,7 +18,28 @@ vi.mock("../setup/interview-overlay-windows", () => ({
   verifyInterviewOverlayCaptureProtection: vi.fn(),
 }));
 
-import { registerLiveAssistantRouteHandlers } from "./live-assistant";
+import {
+  registerLiveAssistantRouteHandlers,
+  readNativeCaptionFileText,
+} from "./live-assistant";
+
+it("reports native caption bytes omitted from the selected file", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "nestor-caption-limit-"),
+  );
+  const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    const file = path.join(directory, "synthetic.txt");
+    await writeFile(file, "caption ".repeat(300000));
+    expect((await readNativeCaptionFileText(file)).truncated).toBe(true);
+    expect(String(log.mock.calls[0]?.[0])).toContain(
+      '"limit":"native_caption_file_bytes"',
+    );
+  } finally {
+    log.mockRestore();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 function followUp() {
   const handlers = new Map<

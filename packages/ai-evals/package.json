@@ -18,6 +18,7 @@
     "@nestor/browser-agent": "workspace:*",
     "@nestor/browser-runtime": "workspace:*",
     "@nestor/contracts": "workspace:*",
+    "@nestor/core": "workspace:*",
     "@nestor/db": "workspace:*",
     "@nestor/job-finder": "workspace:*",
     "playwright": "^1.63.0",

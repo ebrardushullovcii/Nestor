@@ -1,3 +1,4 @@
+import { selfLimitTimeout } from "@nestor/core/self-limit";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -230,20 +231,17 @@ export async function google(app: App, r: Result) {
 
 /** Account creation is a declared precondition, never performed by the agent. */
 async function register(app: App) {
-  const response = await fetch(
-    new URL("workday/account/register/1", app.ctx.sites.url),
-    {
-      method: "POST",
-      redirect: "manual",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        email: LOGIN.username,
-        password: LOGIN.password,
-        verifyPassword: LOGIN.password,
-        agree: "yes",
-      }),
-    },
-  );
+  const response = await fetch(app.replica("workday/account/register/1"), {
+    method: "POST",
+    redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      email: LOGIN.username,
+      password: LOGIN.password,
+      verifyPassword: LOGIN.password,
+      agree: "yes",
+    }),
+  });
   assert.equal(
     response.status,
     303,
@@ -260,12 +258,9 @@ async function importCsv(app: App) {
   const file = path.join(app.ctx.evidenceDir, "synthetic-passwords.csv");
   writeFileSync(
     file,
-    `url,username,password\n${app.ctx.sites.url},${LOGIN.username},${LOGIN.password}\n`,
+    `url,username,password\n${new URL(app.replica("workday/")).origin},${LOGIN.username},${LOGIN.password}\n`,
   );
-  await openBrowser(
-    app,
-    new URL("workday/apply/1?stage=signin", app.ctx.sites.url).href,
-  );
+  await openBrowser(app, app.replica("workday/apply/1?stage=signin"));
   const p = await app.ctx.page;
   await p.getByRole("button", { name: "Saved passwords", exact: true }).click();
   app.ctx.pick(file);
@@ -275,7 +270,11 @@ async function importCsv(app: App) {
   const status = p
     .getByRole("status")
     .filter({ hasText: /Added \d+, updated/ });
-  await status.waitFor({ timeout: 20000 });
+  await selfLimitTimeout(
+    status.waitFor({ timeout: 20000 }),
+    20000,
+    "packages/ai-evals/scripts/scoreboard/sign-in.ts:273",
+  );
   const message = await status.innerText();
   assert.match(message, /1/);
   await p.getByRole("button", { name: "Close passwords", exact: true }).click();
@@ -357,7 +356,11 @@ export async function browserImport(app: App, r: Result) {
   // Use a normal-length private path; deep evidence directories exceed it.
   const profileDir = mkdtempSync("/tmp/nestor-scoreboard-profile-");
   try {
-    const fixture = makeProfile(profileDir, app.ctx.sites.url, session);
+    const fixture = makeProfile(
+      profileDir,
+      new URL(app.replica("workday/")).origin,
+      session,
+    );
     r.metrics.coverage =
       "Synthetic macOS Chrome schema/AES with injected fixture home and Safe Storage key; excludes real Chrome discovery and macOS Keychain consent.";
     r.metrics.expected = fixture.expected;
@@ -414,10 +417,7 @@ export async function browserImport(app: App, r: Result) {
       { home: fixture.home, key: SAFE_STORAGE },
     );
     await permission(app, "Sign in to websites", true);
-    await openBrowser(
-      app,
-      new URL("workday/apply/1?stage=signin", app.ctx.sites.url).href,
-    );
+    await openBrowser(app, app.replica("workday/apply/1?stage=signin"));
     const p = await app.ctx.page;
     await p
       .getByRole("button", { name: "More browser actions", exact: true })
@@ -428,7 +428,11 @@ export async function browserImport(app: App, r: Result) {
       .filter({ hasText: "Scoreboard synthetic" });
     await source.click();
     const result = p.locator(".browser-import-result");
-    await result.waitFor({ timeout: 20000 });
+    await selfLimitTimeout(
+      result.waitFor({ timeout: 20000 }),
+      20000,
+      "packages/ai-evals/scripts/scoreboard/sign-in.ts:431",
+    );
     const message = await result.innerText();
     r.metrics.cookieMessage = message;
     await p.getByRole("button", { name: "Done", exact: true }).click();
@@ -445,7 +449,11 @@ export async function browserImport(app: App, r: Result) {
     const passwordMessage = p
       .getByRole("status")
       .filter({ hasText: /Added \d+, updated/ });
-    await passwordMessage.waitFor({ timeout: 20000 });
+    await selfLimitTimeout(
+      passwordMessage.waitFor({ timeout: 20000 }),
+      20000,
+      "packages/ai-evals/scripts/scoreboard/sign-in.ts:452",
+    );
     r.metrics.passwordMessage = await passwordMessage.innerText();
     await p
       .getByRole("button", { name: "Manage all saved logins", exact: true })

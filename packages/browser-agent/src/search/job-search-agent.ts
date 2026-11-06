@@ -1,3 +1,4 @@
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import { intendedAccountEmail } from "@nestor/contracts";
 import {
   ListingRejectionCategorySchema,
@@ -321,6 +322,17 @@ async function readWithDeadline<T>(
     } catch (error) {
       parent?.throwIfAborted();
       if (
+        error instanceof ModelTurnTimeoutError &&
+        error.kind === "idle" &&
+        attempt > 0
+      )
+        reportSelfLimitHit({
+          limit: "page_reader_retries",
+          kind: "retry",
+          value: 2,
+          where: "browser-agent/readWithDeadline",
+        });
+      if (
         !(error instanceof ModelTurnTimeoutError) ||
         error.kind !== "idle" ||
         attempt > 0
@@ -345,7 +357,15 @@ function detailReadText(
     if (!link.visible || !/^https?:\/\//iu.test(link.href)) continue;
     const entry = { kind: "page_link", label: link.label, href: link.href };
     const size = JSON.stringify(entry).length;
-    if (evidenceChars + size > 8_000) continue;
+    if (evidenceChars + size > 8_000) {
+      reportSelfLimitHit({
+        limit: "posting_link_evidence",
+        kind: "input",
+        value: 8_000,
+        where: "browser-agent/detailReadText",
+      });
+      continue;
+    }
     evidenceChars += size;
     urlEvidence.push(entry);
   }
@@ -726,9 +746,12 @@ export async function runJobSearchAgent(
       saved.length === 0
         ? `${verb} no new postings.`
         : `${verb} ${saved.length} new posting${saved.length === 1 ? "" : "s"}${isSourceCheck ? " as samples for this check" : ""}:`,
-      ...saved
-        .slice(0, 40)
-        .map((job) => `- ${job.title} — ${job.company} (${job.location})`),
+      ...selfLimitSlice(
+        saved,
+        0,
+        40,
+        "packages/browser-agent/src/search/job-search-agent.ts:749",
+      ).map((job) => `- ${job.title} — ${job.company} (${job.location})`),
       rejected.length > 0
         ? `${rejected.length} rejected: ${rejected.map((job) => `${job.title}: ${job.searchRejection?.reason}`).join("; ")}`
         : null,
@@ -823,6 +846,13 @@ export async function runJobSearchAgent(
           !row.reason.trim() ||
           rejections.size >= 50
         ) {
+          if (rejections.size >= 50)
+            reportSelfLimitHit({
+              limit: "extraction_rejections",
+              kind: "count",
+              value: 50,
+              where: "browser-agent/extract_jobs",
+            });
           setAside.push(
             typeof row.url === "string" && row.url ? row.url : "(no address)",
           );
@@ -837,6 +867,13 @@ export async function runJobSearchAgent(
         typeof args.maxJobs === "number"
           ? Math.max(1, Math.min(50, Math.floor(args.maxJobs)))
           : 20;
+      if (typeof args.maxJobs === "number" && args.maxJobs > 50)
+        reportSelfLimitHit({
+          limit: "extract_jobs",
+          kind: "jobs",
+          value: 50,
+          where: "browser-agent/extract_jobs",
+        });
       // Navigation or a redirect can change the page between tools. Bind the
       // text, links and extraction URL to a fresh observation, not a cached
       // source page (R3-069).
@@ -901,7 +938,7 @@ export async function runJobSearchAgent(
         }, context.signal);
       emit("extract_jobs", `Reading the jobs on ${observation.url}.`);
       pendingPageReads.set(observation.url, 1);
-      const pageRead =
+      const pageRead = await (async () =>
         pageType === "job_detail"
           ? {
               found: await read(detailReadText(observation, pageText), maxJobs),
@@ -909,7 +946,7 @@ export async function runJobSearchAgent(
               remainingParts: 0,
               rereadOnly: false,
             }
-          : await readResultsPage(observation, pageText, read);
+          : await readResultsPage(observation, pageText, read))();
       const unread = pageRead.unreadParts + pageRead.remainingParts;
       if (unread > 0) pendingPageReads.set(observation.url, unread);
       else pendingPageReads.delete(observation.url);
@@ -971,6 +1008,12 @@ export async function runJobSearchAgent(
           ? describeNonPosting(posting, observation.url, pageType)
           : null;
         if (posting && notAPosting && !posting.searchRejection) {
+          reportSelfLimitHit({
+            limit: "non_posting_veto",
+            kind: "veto",
+            value: "describeNonPosting",
+            where: "browser-agent/extract_jobs",
+          });
           unreadableListings.push({
             title: posting.title,
             url: posting.canonicalUrl,
@@ -1020,7 +1063,7 @@ export async function runJobSearchAgent(
           ? "This page's listings were all read before in this search and have not changed; reading it again finds nothing new. Scrolling only helps if more listings load."
           : null,
         setAside.length > 0
-          ? `These rejections were set aside because they repeated an address or lacked a category or reason: ${setAside.slice(0, 8).join("; ")}.`
+          ? `These rejections were set aside because they repeated an address or lacked a category or reason: ${selfLimitSlice(setAside, 0, 8, "packages/browser-agent/src/search/job-search-agent.ts:1066").join("; ")}.`
           : null,
       ];
       return {
@@ -1044,10 +1087,10 @@ export async function runJobSearchAgent(
                   outsideCatalogAttempts - ignoredBefore,
                 ),
                 skipped.length > 0
-                  ? `Not saved, because they do not look like job postings: ${skipped.slice(0, 8).join("; ")}. If one is a real job, open its own page and use extract_jobs there.`
+                  ? `Not saved, because they do not look like job postings: ${selfLimitSlice(skipped, 0, 8, "packages/browser-agent/src/search/job-search-agent.ts:1090").join("; ")}. If one is a real job, open its own page and use extract_jobs there.`
                   : null,
                 unmatchedRejections.length > 0
-                  ? `These rejections matched no listing read on this page, so they were not recorded: ${unmatchedRejections.slice(0, 8).join("; ")}. Use the listing address exactly as shown on the page.`
+                  ? `These rejections matched no listing read on this page, so they were not recorded: ${selfLimitSlice(unmatchedRejections, 0, 8, "packages/browser-agent/src/search/job-search-agent.ts:1093").join("; ")}. Use the listing address exactly as shown on the page.`
                   : null,
                 ...notes,
               ]
@@ -1082,6 +1125,13 @@ export async function runJobSearchAgent(
         typeof requested === "number"
           ? Math.max(1, Math.min(200, Math.floor(requested)))
           : 40;
+      if (typeof requested === "number" && requested > 200)
+        reportSelfLimitHit({
+          limit: "saved_jobs_count",
+          kind: "jobs",
+          value: 200,
+          where: "browser-agent/saved_jobs",
+        });
       const listed = collected
         .filter((job) => !job.searchRejection)
         .slice(-limit)
@@ -1214,7 +1264,12 @@ export async function runJobSearchAgent(
         }
         requestedUrl = redirected.href;
       }
-      const body = (await response.text()).slice(0, 20_000);
+      const body = selfLimitSlice(
+        await response.text(),
+        0,
+        20_000,
+        "packages/browser-agent/src/search/job-search-agent.ts:1267",
+      );
       return {
         kind: "ok",
         content: [
@@ -1586,6 +1641,42 @@ export async function runJobSearchAgent(
     now,
   });
 
+  if (loop.ending === "ceiling")
+    reportSelfLimitHit({
+      limit: "search_steps",
+      kind: "steps",
+      value: Math.max(config.maxSteps, DEFAULT_MAX_STEPS),
+      where: "browser-agent/runJobSearchAgent",
+    });
+  if (
+    loop.ending === "timed_out" &&
+    (!loop.reason.includes("assistant") ||
+      Number.isFinite(SEARCH_MODEL_TURN_TIMEOUT_MS))
+  )
+    reportSelfLimitHit({
+      limit: "search_time",
+      kind: "timeout",
+      value: loop.reason.includes("assistant")
+        ? SEARCH_MODEL_TURN_TIMEOUT_MS
+        : (config.runControl?.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS),
+      where: "browser-agent/runJobSearchAgent",
+    });
+  if (loop.ending === "stalled")
+    reportSelfLimitHit({
+      limit: "search_no_progress",
+      kind: "steps",
+      value:
+        config.runControl?.noProgressStepLimit ??
+        DEFAULT_NO_PROGRESS_STEP_LIMIT,
+      where: "browser-agent/runJobSearchAgent",
+    });
+  if (loop.ending === "browser_failed")
+    reportSelfLimitHit({
+      limit: "search_browser_failures",
+      kind: "retry",
+      value: 3,
+      where: "browser-agent/runJobSearchAgent",
+    });
   if (!isSourceCheck && loop.ending === "stalled") {
     loop.reason = `Stopped: no new page content or listings in the last ${loop.steps - lastProgressStep} steps.`;
   }
@@ -1714,7 +1805,14 @@ export async function runJobSearchAgent(
 ${part.text}`),
     );
     pendingPageReads.set(pageUrl, unread.length);
-    const now = new Set(unread.slice(0, PAGE_READ_PARTS_PER_CALL));
+    const now = new Set(
+      selfLimitSlice(
+        unread,
+        0,
+        PAGE_READ_PARTS_PER_CALL,
+        "browser-agent/page_read_parts_per_call",
+      ),
+    );
     const settled = await mapWithLimit(
       parts.filter(
         (part) =>
@@ -1856,9 +1954,12 @@ ${part.text}`),
 
     const phaseEvidence = isSourceCheck
       ? SourceDebugPhaseEvidenceSchema.parse({
-          routeSignals: pageTools.state.visitedUrls
-            .map((url) => sanitizeUrl(url) ?? url)
-            .slice(0, 40),
+          routeSignals: selfLimitSlice(
+            pageTools.state.visitedUrls.map((url) => sanitizeUrl(url) ?? url),
+            0,
+            40,
+            "packages/browser-agent/src/search/job-search-agent.ts:1957",
+          ),
           warnings: findings?.warnings ?? [],
         })
       : null;

@@ -4,6 +4,7 @@ Local-first Electron monorepo (pnpm + turbo) with two modules: `Job Finder` and 
 
 ## Rules
 
+- The goal is that the app does the job well for the person. Anything we put in the model's way (caps, budgets, vetoes, missing context, asking the person instead of trying) has to earn its place by protecting safety, privacy or the person's own settings. When a result looks wrong or worse than expected, find the cause before moving on, and fix the same pattern everywhere, not only where it showed up.
 - Never commit, push, or create/update a PR unless the user explicitly asks. A commit request alone does not authorize a push; a requested PR includes the push needed to create or update it. If the current branch was already merged, use a new branch off `origin/main`.
 - Don't run a release-acceptance chain unless the user declares a release candidate. `docs/TESTING.md` maps changes to automated checks.
 - Never kill a process you did not start. No `pkill -f electron`, `pkill -f Nestor` or `killall Electron`: they hit the user's own `pnpm desktop:dev`. Stop only what you launched, through its handle or PID tree.

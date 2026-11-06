@@ -1,3 +1,5 @@
+import { reportSelfLimitHit } from "@nestor/core";
+
 /** Detach promptly even if an adapter ignores cancellation; consume late errors. */
 export function abortable<T>(
   work: Promise<T>,
@@ -29,6 +31,13 @@ export function concurrency(
   value: number | undefined,
   fallback: number,
 ): number {
+  if (value !== undefined && value > 32)
+    reportSelfLimitHit({
+      limit: "search_concurrency_ceiling",
+      kind: "concurrency",
+      value: 32,
+      where: "job-finder/concurrency",
+    });
   return Number.isFinite(value)
     ? Math.max(1, Math.min(32, Math.floor(value!)))
     : fallback;

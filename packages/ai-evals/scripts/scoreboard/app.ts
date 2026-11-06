@@ -1,9 +1,14 @@
+import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core/self-limit";
+
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import type { Page } from "playwright";
 import { markDuplicates, profileAnswer } from "./report.ts";
+import { scenarioTimeoutSeconds } from "./deadlines.ts";
+import { replicaUrl } from "./replicas.ts";
+
 import type {
   Application,
   Context,
@@ -22,11 +27,20 @@ export class App {
   private observed = new Map<string, Question>();
   readonly ctx: Context;
   readonly output: string;
-  readonly timeout: number;
-  constructor(ctx: Context, output: string, timeout: number) {
+  readonly timeoutOverride: number | undefined;
+  get timeout(): number {
+    return scenarioTimeoutSeconds(
+      this.active?.id ?? "setup",
+      this.timeoutOverride,
+    );
+  }
+  replica(pathname: string): string {
+    return replicaUrl(this.ctx.sites.url, pathname);
+  }
+  constructor(ctx: Context, output: string, timeout?: number) {
     this.ctx = ctx;
     this.output = output;
-    this.timeout = timeout;
+    this.timeoutOverride = timeout;
     assert.match(ctx.userDataDir, /[/\\]nestor-verify-/);
     assert.ok(
       ["127.0.0.1", "localhost"].includes(new URL(ctx.sites.url).hostname),
@@ -71,9 +85,13 @@ export class App {
         role: "button",
         within: "Job Finder sidebar destinations",
       });
-    await p
-      .getByRole("main", { name: screen, exact: true })
-      .waitFor({ state: "visible", timeout: 15000 });
+    await selfLimitTimeout(
+      p
+        .getByRole("main", { name: screen, exact: true })
+        .waitFor({ state: "visible", timeout: 15000 }),
+      15000,
+      "packages/ai-evals/scripts/scoreboard/app.ts:88",
+    );
   }
   application(job: Job) {
     return this.read<Application>(
@@ -153,8 +171,15 @@ export class App {
       this.capture();
       const found = await fn();
       if (found) return found as NonNullable<T>;
-      if (Date.now() >= end)
+      if (Date.now() >= end) {
+        reportSelfLimitHit({
+          limit: "scenario_wait",
+          kind: "timeout",
+          value: seconds * 1000,
+          where: "scoreboard/App.until",
+        });
         throw Error(`Timed out after ${seconds}s: ${step}`);
+      }
       await this.ctx.sleep(750);
     }
   }
@@ -166,11 +191,10 @@ export class App {
   }
   /** Fixed listings, never fabricated successful application state. */
   async fixture(site: string, id: number): Promise<Job> {
-    const url = new URL(`${site}/jobs/${id}`, this.ctx.sites.url).href;
-    const apply = new URL(
+    const url = this.replica(`${site}/jobs/${id}`);
+    const apply = this.replica(
       `${site === "board" ? "employer-a" : site}/apply/${id}`,
-      this.ctx.sites.url,
-    ).href;
+    );
     const html = await fetch(url).then((r) => {
       assert.equal(r.status, 200);
       return r.text();
@@ -288,7 +312,11 @@ export class App {
       exact: true,
     });
     await row.click();
-    await pane.waitFor({ timeout: 10000 });
+    await selfLimitTimeout(
+      pane.waitFor({ timeout: 10000 }),
+      10000,
+      "packages/ai-evals/scripts/scoreboard/app.ts:315",
+    );
     await this.until(
       async () =>
         (await pane.getAttribute("data-job-detail-id")) === String(job.id),
@@ -314,7 +342,11 @@ export class App {
       exact: true,
     });
     await row.click();
-    await pane.waitFor({ timeout: 10000 });
+    await selfLimitTimeout(
+      pane.waitFor({ timeout: 10000 }),
+      10000,
+      "packages/ai-evals/scripts/scoreboard/app.ts:345",
+    );
     await this.until(
       async () =>
         (await pane.getAttribute("data-job-detail-id")) === String(job.id),
@@ -350,10 +382,7 @@ export class App {
       90,
       "kept form opens",
     );
-    assert.equal(
-      new URL(form.url()).origin,
-      new URL(this.ctx.sites.url).origin,
-    );
+    assert.equal(new URL(form.url()).origin, new URL(job.apply_url).origin);
     return form;
   }
   async settle(jobs: Job[], seconds = this.timeout) {

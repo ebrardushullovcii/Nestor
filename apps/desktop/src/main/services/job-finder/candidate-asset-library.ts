@@ -1,3 +1,4 @@
+import { reportSelfLimitHit } from "@nestor/core";
 import { createHash, randomUUID } from "node:crypto";
 import {
   mkdir,
@@ -437,6 +438,13 @@ export class CandidateAssetLibrary {
       throw new CandidateAssetLibraryError("Select a readable file to import.");
     }
     if (sourceStats.size <= 0 || sourceStats.size > GLOBAL_MAX_BYTES) {
+      if (sourceStats.size > GLOBAL_MAX_BYTES)
+        reportSelfLimitHit({
+          limit: "candidate_asset_bytes",
+          kind: "input",
+          value: GLOBAL_MAX_BYTES,
+          where: "desktop/CandidateAssetLibrary.import",
+        });
       throw new CandidateAssetLibraryError(
         "The selected file must be between 1 byte and 25 MB.",
       );
@@ -459,6 +467,12 @@ export class CandidateAssetLibrary {
       );
     }
     if (bytes.byteLength > getMimeByteLimit(mime)) {
+      reportSelfLimitHit({
+        limit: "candidate_asset_mime_bytes",
+        kind: "input",
+        value: getMimeByteLimit(mime),
+        where: "desktop/CandidateAssetLibrary.import",
+      });
       throw new CandidateAssetLibraryError(
         "The selected file exceeds the size limit for its file type.",
       );

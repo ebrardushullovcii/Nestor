@@ -1,4 +1,5 @@
 import { abortable } from "./async";
+import { reportSelfLimitHit } from "@nestor/core";
 import {
   fitContextFingerprint,
   fitContextInput,
@@ -63,6 +64,12 @@ export function createFitQueue(
           true,
       };
     }
+    reportSelfLimitHit({
+      limit: "fit_context_retries",
+      kind: "retry",
+      value: 3,
+      where: "job-finder/fitQueue/liveContext",
+    });
     deferred = true;
     throw new Error(
       "Your profile is changing; fit will be checked again shortly.",
@@ -94,8 +101,15 @@ export function createFitQueue(
     if (nothingAnswered) ceiling = Math.max(1, Math.ceil(ceiling / 2));
     const final: JobDetail[] = [];
     for (const job of jobs) {
-      if (retried.has(job.id)) final.push(job);
-      else {
+      if (retried.has(job.id)) {
+        reportSelfLimitHit({
+          limit: "unanswered_fit_retries",
+          kind: "retry",
+          value: 1,
+          where: "job-finder/fitQueue/retry",
+        });
+        final.push(job);
+      } else {
         retried.add(job.id);
         pending.push(job.id);
       }
@@ -202,6 +216,12 @@ export function createFitQueue(
       }
       const cost = estimate(job);
       if (jobs.length && tokens + cost > BATCH_TOKENS) {
+        reportSelfLimitHit({
+          limit: "fit_batch_tokens",
+          kind: "input",
+          value: BATCH_TOKENS,
+          where: "job-finder/fitQueue/takeBatch",
+        });
         full = true;
         break;
       }
@@ -209,6 +229,13 @@ export function createFitQueue(
       tokens += cost;
       index++;
       if (jobs.length === BATCH_JOBS) {
+        if (index < pending.length)
+          reportSelfLimitHit({
+            limit: "fit_batch_jobs",
+            kind: "jobs",
+            value: BATCH_JOBS,
+            where: "job-finder/fitQueue/takeBatch",
+          });
         full = true;
         break;
       }
@@ -224,6 +251,13 @@ export function createFitQueue(
       pending.length = 0;
       return;
     }
+    if (pending.length && active.size >= Math.min(limit, ceiling))
+      reportSelfLimitHit({
+        limit: "fit_concurrency",
+        kind: "concurrency",
+        value: Math.min(limit, ceiling),
+        where: "job-finder/fitQueue/pump",
+      });
     while (active.size < Math.min(limit, ceiling) && pending.length) {
       const jobs = takeBatch(drainers > 0);
       if (!jobs) break;

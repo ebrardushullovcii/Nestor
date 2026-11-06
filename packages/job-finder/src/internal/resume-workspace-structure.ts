@@ -1,3 +1,4 @@
+import { selfLimitSlice, fnv1a32 } from "@nestor/core";
 import {
   filterCandidateFacingResumeKeywords,
   type TailoredResumeDraft,
@@ -24,7 +25,7 @@ import {
   buildResumeRenderHeader,
 } from "@nestor/contracts";
 export { buildResumeDraftIdentity } from "@nestor/contracts";
-import { fnv1a32 } from "@nestor/core";
+
 import {
   createBullet,
   createEntry,
@@ -526,16 +527,19 @@ function buildBoundedSourceRefs(
   values: readonly (string | null | undefined)[],
   maxRefs: number,
 ): ResumeDraftSourceRef[] {
-  return uniqueStrings(
-    values.flatMap((value) => (value ? splitBoundedEvidenceText(value) : [])),
-  )
-    .slice(0, maxRefs)
-    .flatMap((snippet) => {
-      const boundedSnippet = safeSnippet(snippet);
-      return boundedSnippet
-        ? [createSourceRef(sourceKind, sourceId, boundedSnippet)]
-        : [];
-    });
+  return selfLimitSlice(
+    uniqueStrings(
+      values.flatMap((value) => (value ? splitBoundedEvidenceText(value) : [])),
+    ),
+    0,
+    maxRefs,
+    "packages/job-finder/src/internal/resume-workspace-structure.ts:530",
+  ).flatMap((snippet) => {
+    const boundedSnippet = safeSnippet(snippet);
+    return boundedSnippet
+      ? [createSourceRef(sourceKind, sourceId, boundedSnippet)]
+      : [];
+  });
 }
 
 function buildProfileSummarySourceRefs(
@@ -1164,7 +1168,12 @@ function buildDraftSectionsFromStructuredTailoredDraft(input: {
     // removed real languages and frameworks from the export, especially in
     // Aggressive where the writer chooses harder. The cap keeps a very long
     // skills list from crowding the page; the person's own skills come first.
-    const visibleAdditionalSkills = additionalSkills.slice(0, 30);
+    const visibleAdditionalSkills = selfLimitSlice(
+      additionalSkills,
+      0,
+      30,
+      "packages/job-finder/src/internal/resume-workspace-structure.ts:1171",
+    );
     sections.push(
       createSection({
         id: "section_additional_skills",
@@ -1585,11 +1594,16 @@ export function seedResumeDraft(input: {
     }
   }
 
-  const coreSkills = uniqueStrings([
-    ...input.profile.skills,
-    ...input.profile.skillGroups.coreSkills,
-    ...input.profile.skillGroups.tools,
-  ]).slice(0, 10);
+  const coreSkills = selfLimitSlice(
+    uniqueStrings([
+      ...input.profile.skills,
+      ...input.profile.skillGroups.coreSkills,
+      ...input.profile.skillGroups.tools,
+    ]),
+    0,
+    10,
+    "packages/job-finder/src/internal/resume-workspace-structure.ts:1597",
+  );
   const additionalSkills = uniqueStrings([
     ...input.profile.skillGroups.languagesAndFrameworks,
     ...input.profile.skillGroups.highlightedSkills,

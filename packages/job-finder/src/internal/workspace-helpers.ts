@@ -1,4 +1,5 @@
 import type { JobSitesStore } from "@nestor/db/job-store";
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import {
   jobSiteTarget,
   JobFinderSettingsSchema,
@@ -41,28 +42,29 @@ export function enrichSearchPreferencesFromProfile(
   const targetRoles = [...searchPreferences.targetRoles];
 
   if (targetRoles.length === 0) {
+    const addRole = (role: string) => {
+      if (targetRoles.length < DEFAULT_MAX_TARGET_ROLES) targetRoles.push(role);
+      else
+        reportSelfLimitHit({
+          limit: "profile_target_roles",
+          kind: "context",
+          value: DEFAULT_MAX_TARGET_ROLES,
+          where: "workspace/enrichSearchPreferencesFromProfile",
+        });
+    };
     for (const role of profile.targetRoles) {
-      if (targetRoles.length < DEFAULT_MAX_TARGET_ROLES) {
-        targetRoles.push(role);
-      }
+      addRole(role);
     }
 
     for (const experience of profile.experiences) {
       const experienceTitle = experience.title?.trim() ?? "";
-      if (
-        targetRoles.length < DEFAULT_MAX_TARGET_ROLES &&
-        experienceTitle.length > 0
-      ) {
-        targetRoles.push(experienceTitle);
+      if (experienceTitle.length > 0) {
+        addRole(experienceTitle);
       }
     }
 
-    if (
-      targetRoles.length < DEFAULT_MAX_TARGET_ROLES &&
-      profile.headline &&
-      profile.headline !== PROFILE_PLACEHOLDER_HEADLINE
-    ) {
-      targetRoles.push(profile.headline);
+    if (profile.headline && profile.headline !== PROFILE_PLACEHOLDER_HEADLINE) {
+      addRole(profile.headline);
     }
   }
 
@@ -217,12 +219,15 @@ export function mergeEvents(
     merged.set(event.id, event);
   }
 
-  return [...merged.values()]
-    .sort(
+  return selfLimitSlice(
+    [...merged.values()].sort(
       (left, right) =>
         new Date(right.at).getTime() - new Date(left.at).getTime(),
-    )
-    .slice(0, MAX_APPLICATION_EVENT_HISTORY);
+    ),
+    0,
+    MAX_APPLICATION_EVENT_HISTORY,
+    "workspace/application_event_history",
+  );
 }
 
 export function toApplicationEvents(

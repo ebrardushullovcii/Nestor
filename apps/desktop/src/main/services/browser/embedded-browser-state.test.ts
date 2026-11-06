@@ -141,6 +141,34 @@ function makeContents(id: string) {
 }
 
 describe("embedded browser tab state", () => {
+  test("a native page read deadline reports without changing its rejection", async () => {
+    vi.useFakeTimers();
+    const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { browser, pages } = makeBrowser();
+      Object.assign(browser, {
+        noteAutomationCommand: () => Promise.resolve(),
+        syncTabLifecycle: () => {},
+      });
+      pages
+        .get("working")!
+        .executeJavaScript.mockImplementation(() => new Promise(() => {}));
+      const read = expect(browser.readTab("working", "true")).rejects.toThrow(
+        "The page did not answer.",
+      );
+      await vi.advanceTimersByTimeAsync(3001);
+      await read;
+      expect(
+        log.mock.calls
+          .map(([line]) => String(line))
+          .some((line) => line.includes('"limit":"embedded_page_read"')),
+      ).toBe(true);
+    } finally {
+      log.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   test("an access handoff opens its own retained page without activating the app", () => {
     const { browser, state, pages } = makeBrowser();
     const focus = vi.fn();

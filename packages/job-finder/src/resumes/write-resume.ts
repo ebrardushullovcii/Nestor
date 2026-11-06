@@ -41,6 +41,7 @@ import {
 import { looksLikeCleanRoleTitle } from "../internal/resume-workspace-structure";
 import { balanceResumePages } from "./balance-resume-pages";
 import type { JobFinderDocumentManager } from "../internal/workspace-service-contracts";
+import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 
 /** What every resume is written from: the person's profile and settings. */
 export interface ResumeWriterInputs {
@@ -234,7 +235,12 @@ const TITLE_FAMILIES: Record<string, readonly string[]> = {
     "controller",
   ],
   legal: ["lawyer", "attorney", "legal", "counsel", "paralegal"],
-  sales: ["sales", "account executive", "business development", "customer success"],
+  sales: [
+    "sales",
+    "account executive",
+    "business development",
+    "customer success",
+  ],
   people: ["hr", "human resources", "recruiter", "talent", "people"],
   product: ["product manager", "product owner", "product"],
   support: ["administrator", "admin", "support", "coordinator", "assistant"],
@@ -433,7 +439,9 @@ export function isPlausibleAggressiveHeadline(
       targetTokens.has("staff")) &&
     !ownTitles.some((title) => {
       const tokens = rawTitleTokens(title);
-      return tokens.has("lead") || tokens.has("principal") || tokens.has("staff");
+      return (
+        tokens.has("lead") || tokens.has("principal") || tokens.has("staff")
+      );
     })
   ) {
     return false;
@@ -472,7 +480,9 @@ export function isPlausibleAggressiveHeadline(
   const targetCore = coreTitleTokens(target);
   return ownTitles.some((title) => {
     const ownCore = coreTitleTokens(title);
-    const overlap = [...targetCore].filter((token) => ownCore.has(token)).length;
+    const overlap = [...targetCore].filter((token) =>
+      ownCore.has(token),
+    ).length;
     return (
       overlap >= 2 &&
       (ownLevel - targetLevel < 2 || targetLevel - ownLevel <= 1)
@@ -592,8 +602,7 @@ export async function writeResume(
                       // rather than exporting a title with no bullets. Two
                       // source bullets are enough to avoid an empty role; the
                       // page-fill pass can show more when there is room.
-                      ...(section.included === false ||
-                      entry.included === false
+                      ...(section.included === false || entry.included === false
                         ? {
                             summary: entry.summary ?? null,
                             bullets: entry.bullets.map((bullet, index) => ({
@@ -702,11 +711,17 @@ export async function writeResume(
     profile,
     stretchesAreThePersons: input.level === "aggressive",
   });
-  const settledDraft = settled ? sanitize(settled, written.coreSkills) : checked;
+  const settledDraft = settled
+    ? sanitize(settled, written.coreSkills)
+    : checked;
   const cleanedDraft =
-    input.level === "aggressive" ? trimRepeatedSummary(settledDraft) : settledDraft;
+    input.level === "aggressive"
+      ? trimRepeatedSummary(settledDraft)
+      : settledDraft;
   const polishedDraft =
-    input.level === "aggressive" ? compactPercentages(cleanedDraft) : cleanedDraft;
+    input.level === "aggressive"
+      ? compactPercentages(cleanedDraft)
+      : cleanedDraft;
   const prioritizedDraft =
     input.level === "aggressive"
       ? prioritizeMetricBullets(polishedDraft)
@@ -836,6 +851,12 @@ function alignAggressiveSummaryWithHeadline(
     .sort((left, right) => right.length - left.length)[0];
   if (!leadingTitle) return draft;
   const nextText = `${headline}${text.slice(leadingTitle.length)}`;
+  reportSelfLimitHit({
+    limit: "summary_headline_override",
+    kind: "veto",
+    value: "saved headline prefix",
+    where: "job-finder/alignAggressiveSummaryWithHeadline",
+  });
   return {
     ...draft,
     sections: draft.sections.map((section) =>
@@ -995,23 +1016,31 @@ export function addMissingListingSkills(
     skillsSection.bullets.map((bullet) => normalizeSkill(bullet.text)),
   );
   const at = new Date().toISOString();
-  const missing = skillsToAdd
-    .filter((skill) => {
+  const missing = selfLimitSlice(
+    skillsToAdd.filter((skill) => {
       const key = normalizeSkill(skill);
       return key.length > 0 && !existing.has(key) && !resumeText.includes(key);
-    })
-    .slice(0, 12)
-    .map((skill, index) => ({
-      id: `${skillsSection.id}_listing_skill_${index + 1}`,
-      text: skill,
-      origin: "ai_generated" as const,
-      locked: false,
-      included: true,
-      sourceRefs: [],
-      lastGeneratedContentHash: null,
-      updatedAt: at,
-    }));
+    }),
+    0,
+    12,
+    "job-finder/addMissingListingSkills",
+  ).map((skill, index) => ({
+    id: `${skillsSection.id}_listing_skill_${index + 1}`,
+    text: skill,
+    origin: "ai_generated" as const,
+    locked: false,
+    included: true,
+    sourceRefs: [],
+    lastGeneratedContentHash: null,
+    updatedAt: at,
+  }));
   if (missing.length === 0) return draft;
+  reportSelfLimitHit({
+    limit: "listing_skill_override",
+    kind: "veto",
+    value: "LISTING_HARD_SKILL_PHRASES",
+    where: "job-finder/addMissingListingSkills",
+  });
   return {
     ...draft,
     sections: draft.sections.map((section) =>
@@ -1121,7 +1150,16 @@ export function stripRepeatedAppendedClauseTexts(
       .slice(0, match.index ?? 0)
       .replace(/[,\s]+$/u, "")
       .trim();
-    return stripped.length >= 25 ? stripped : text;
+    if (stripped.length >= 25) {
+      reportSelfLimitHit({
+        limit: "repeated_clause_veto",
+        kind: "veto",
+        value: 3,
+        where: "job-finder/stripRepeatedAppendedClauseTexts",
+      });
+      return stripped;
+    }
+    return text;
   });
 }
 
@@ -1155,6 +1193,12 @@ export function stripGenericPurposeClauseTexts(
           .replace(/[,\s]+$/u, "")
           .trim();
         if (stripped.length >= 40 && stripped.split(/\s+/u).length >= 6) {
+          reportSelfLimitHit({
+            limit: "generic_purpose_veto",
+            kind: "veto",
+            value: "GENERIC_PURPOSE_PATTERNS",
+            where: "job-finder/stripGenericPurposeClauseTexts",
+          });
           next = `${stripped}${trailing}`;
           changed = true;
           break;
@@ -1175,7 +1219,15 @@ export function orderBulletsMetricsFirst<T extends { text: string }>(
   for (const bullet of bullets) {
     (/\d/u.test(bullet.text) ? numbered : rest).push(bullet);
   }
-  return [...numbered, ...rest];
+  const ordered = [...numbered, ...rest];
+  if (ordered.some((bullet, index) => bullet !== bullets[index]))
+    reportSelfLimitHit({
+      limit: "metric_bullet_order",
+      kind: "veto",
+      value: "numbered first",
+      where: "job-finder/orderBulletsMetricsFirst",
+    });
+  return ordered;
 }
 
 function experienceBulletTexts(draft: ResumeDraft): string[] {
@@ -1233,6 +1285,13 @@ export function summaryWithoutRepeatedBulletPhrases(
         windows.has(words.slice(index, index + minWords).join(" ")),
     );
     if (!repeated) kept.push(sentence);
+    else
+      reportSelfLimitHit({
+        limit: "summary_phrase_veto",
+        kind: "veto",
+        value: minWords,
+        where: "job-finder/summaryWithoutRepeatedBulletPhrases",
+      });
   }
   return kept.join(" ");
 }
@@ -1257,7 +1316,15 @@ function trimRepeatedSummary(draft: ResumeDraft): ResumeDraft {
 
 /** "42 percent" reads slower than "42%" on a resume. */
 export function compactPercentageText(text: string): string {
-  return text.replace(/\b(\d+(?:\.\d+)?)\s+percent\b/giu, "$1%");
+  const next = text.replace(/\b(\d+(?:\.\d+)?)\s+percent\b/giu, "$1%");
+  if (next !== text)
+    reportSelfLimitHit({
+      limit: "percentage_wording",
+      kind: "veto",
+      value: "percent to %",
+      where: "job-finder/compactPercentageText",
+    });
+  return next;
 }
 
 function compactPercentages(draft: ResumeDraft): ResumeDraft {
@@ -1294,7 +1361,9 @@ export function compressOlderRoles(
   now: Date = new Date(),
 ): ResumeDraft {
   const cutoff = now.getFullYear() - 12;
-  const endYear = (entry: ResumeDraft["sections"][number]["entries"][number]) => {
+  const endYear = (
+    entry: ResumeDraft["sections"][number]["entries"][number],
+  ) => {
     const fromEnd = /^(\d{4})/u.exec(entry.endDate ?? "")?.[1];
     if (fromEnd) return Number(fromEnd);
     const matches = [...(entry.dateRange ?? "").matchAll(/(\d{4})/gu)];
@@ -1316,6 +1385,12 @@ export function compressOlderRoles(
         const keep =
           included.find((bullet) => /\d/u.test(bullet.text)) ?? included[0]!;
         changed = true;
+        reportSelfLimitHit({
+          limit: "older_role_bullets",
+          kind: "count",
+          value: 1,
+          where: "job-finder/compressOlderRoles",
+        });
         return {
           ...entry,
           bullets: entry.bullets.map((bullet) =>

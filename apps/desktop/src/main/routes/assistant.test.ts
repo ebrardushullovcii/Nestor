@@ -2,13 +2,14 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
+import { dialog } from "electron";
 import { describe, expect, test, vi } from "vitest";
 
 vi.mock("electron", () => ({
   BrowserWindow: {
     fromWebContents: (contents: { id: number }) => ({ webContents: contents }),
   },
-  dialog: {},
+  dialog: { showOpenDialog: vi.fn() },
 }));
 vi.mock("../services/job-finder/runtime", () => ({
   getProfileService: vi.fn(),
@@ -23,6 +24,39 @@ vi.mock("../services/job-finder/candidate-asset-library-instance", () => ({
 
 import { CandidateAssetLibrary } from "../services/job-finder/candidate-asset-library";
 import { inferAssetKind, registerAssistantRouteHandlers } from "./assistant";
+import { getCandidateAssetLibrary } from "../services/job-finder/candidate-asset-library-instance";
+
+test("reports files omitted from the person's multi-selection", async () => {
+  const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const read = vi
+    .spyOn(CandidateAssetLibrary.prototype, "importFromSourcePath")
+    .mockRejectedValue(Error("synthetic unavailable file"));
+  try {
+    vi.mocked(getCandidateAssetLibrary).mockReturnValue(
+      new CandidateAssetLibrary("unused"),
+    );
+    vi.spyOn(dialog, "showOpenDialog").mockResolvedValue({
+      canceled: false,
+      filePaths: Array.from({ length: 6 }, (_, i) => `synthetic${i}.txt`),
+    });
+    const handlers = new Map<
+      string,
+      (event: IpcMainInvokeEvent, payload: unknown) => Promise<unknown>
+    >();
+    registerAssistantRouteHandlers({
+      handle: (name: string, handler: never) => handlers.set(name, handler),
+    } as unknown as IpcMain);
+    await handlers.get("job-finder:assistant:attach-file")!(
+      { sender: { id: 1 } } as unknown as IpcMainInvokeEvent,
+      {},
+    );
+    expect(read).toHaveBeenCalledTimes(5);
+    expect(String(log.mock.calls[0]?.[0])).toContain('"value":5');
+  } finally {
+    log.mockRestore();
+    read.mockRestore();
+  }
+});
 
 describe("sidebar file attachment classification", () => {
   test.each([
