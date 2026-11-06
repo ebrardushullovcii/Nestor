@@ -1462,7 +1462,6 @@ describe("a question keeps its name across runs", () => {
   });
 });
 
-
 describe("Round 2 application recovery", () => {
   test("an upload that retains another filename is not recorded as attached", async () => {
     const page = rawPage({

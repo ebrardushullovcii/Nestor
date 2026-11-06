@@ -1560,7 +1560,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             ["stopped", "failed", "submitted"].includes(latest.state)
           )
             return;
-          if (!applications.beginSubmission(row.id, row.attempt, {newSendDecision:!!callId})) return;
+          if (
+            !applications.beginSubmission(row.id, row.attempt, {
+              newSendDecision: !!callId,
+            })
+          )
+            return;
           const envelope = original;
           const runtime = {
             observeApplicationForm:

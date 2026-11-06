@@ -556,7 +556,11 @@ export function createApplicationStore(store: JobStore) {
     },
 
     /** The state is written before the existing guarded send can be armed. */
-    beginSubmission(id: number, attempt: number, options?: {newSendDecision?: boolean}): boolean {
+    beginSubmission(
+      id: number,
+      attempt: number,
+      options?: { newSendDecision?: boolean },
+    ): boolean {
       return store.transaction(() => {
         const row =
           sql(`UPDATE applications SET state = 'submitting', updated_at = ?
