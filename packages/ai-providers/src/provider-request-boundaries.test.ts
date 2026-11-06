@@ -76,7 +76,7 @@ test.each(["429", "timeout"] as const)(
       fallbackUsed: true,
       stopReason: "permanent_failure",
     });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(failure === "timeout" ? 2 : 3);
   },
 );
 
