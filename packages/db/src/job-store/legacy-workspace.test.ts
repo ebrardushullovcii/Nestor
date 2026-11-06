@@ -133,6 +133,7 @@ function fixture() {
       allowAutoSubmitOverride: false,
       applicationAutomationMode: "confirm_before_submit",
       salaryDisclosure: "pause_for_user",
+      aiBehavior: { profileAssistant: { replyStyle: "conversational" } },
     }),
   );
   const jobs = ["approved", "submitted"].map((status, i) =>
@@ -395,6 +396,10 @@ test("current edits and matching job decisions survive the first import", () => 
   expect(createPreferencesStore(store).settings.read().appearanceTheme).toBe(
     "light",
   );
+  expect(
+    createPreferencesStore(store).settings.read().aiBehavior?.profileAssistant
+      .replyStyle,
+  ).toBe("conversational");
   expect(store.getJob(ids[0]!)!.stage).toBe("hidden");
   expect(counts(store).jobs).toBe(2);
 });
@@ -455,15 +460,13 @@ test("preserves unsent CRM records and does not merge unrelated provider IDs", (
   const application = ApplicationRecordSchema.parse(
     JSON.parse(String(row.value)),
   );
-  source
-    .prepare("UPDATE application_records SET value=? WHERE id=?")
-    .run(
-      JSON.stringify({
-        ...application,
-        crm: { stage: "preparing", stageChangedAt: at, tags: ["Saved tag"] },
-      }),
-      row.id!,
-    );
+  source.prepare("UPDATE application_records SET value=? WHERE id=?").run(
+    JSON.stringify({
+      ...application,
+      crm: { stage: "preparing", stageChangedAt: at, tags: ["Saved tag"] },
+    }),
+    row.id!,
+  );
   source.close();
   const store = f.open();
   expect(counts(store).jobs).toBe(2);

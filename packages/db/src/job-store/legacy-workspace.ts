@@ -32,6 +32,28 @@ const SOURCE = "job-finder-workspace.sqlite";
 const ms = (value: string | null | undefined) =>
   value ? Date.parse(value) || 0 : 0;
 
+/** Restore saved preferences field by field, keeping newer choices. */
+function restoreDefaults(
+  current: unknown,
+  defaults: unknown,
+  incoming: unknown,
+): unknown {
+  if (incoming === undefined) return current;
+  if (JSON.stringify(current) === JSON.stringify(defaults)) return incoming;
+  const record = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (!record(current) || !record(defaults) || !record(incoming))
+    return current;
+  return Object.fromEntries(
+    [...new Set([...Object.keys(current), ...Object.keys(incoming)])].map(
+      (key) => [
+        key,
+        restoreDefaults(current[key], defaults[key], incoming[key]),
+      ],
+    ),
+  );
+}
+
 /** Schema failures must never put a person's saved values in an error log. */
 function parse<T>(schema: { parse(value: unknown): T }, value: unknown): T {
   try {
@@ -164,18 +186,28 @@ export function importLegacyWorkspace(
         JSON.stringify({ ...current, id: "" }) ===
         JSON.stringify({ ...defaults.profile, id: "" });
       if (profile && emptyProfile) personal.profile.replace(profile);
-      if (
-        goals &&
-        JSON.stringify(personal.preferences.goals.read()) ===
-          JSON.stringify(defaults.goals)
-      )
-        personal.preferences.goals.replace(goals);
-      if (
-        settings &&
-        JSON.stringify(personal.preferences.settings.read()) ===
-          JSON.stringify(defaults.settings)
-      )
-        personal.preferences.settings.replace(settings);
+      if (goals)
+        personal.preferences.goals.replace(
+          parse(
+            JobSearchPreferencesSchema,
+            restoreDefaults(
+              personal.preferences.goals.read(),
+              defaults.goals,
+              goals,
+            ),
+          ),
+        );
+      if (settings)
+        personal.preferences.settings.replace(
+          parse(
+            JobFinderSettingsSchema,
+            restoreDefaults(
+              personal.preferences.settings.read(),
+              defaults.settings,
+              settings,
+            ),
+          ),
+        );
       if (
         state("profile_setup_state") !== undefined &&
         !store.sql("SELECT 1 FROM profile_setup").get()
