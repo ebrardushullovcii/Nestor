@@ -696,6 +696,7 @@ export type QuestionClassifier = ((
     controls: readonly ApplyFormControl[],
     context?: string,
   ) => boolean;
+  bindPage?: (page: ApplyFormObservation, context?: string) => boolean;
   settled: (
     controls: readonly ApplyFormControl[],
     contextText?: string,
@@ -765,8 +766,8 @@ export function createQuestionClassifier(input: {
   const pageInput = (
     controls: readonly ApplyFormControl[],
     context?: string,
+    page = input.observation?.(),
   ) => {
-    const page = input.observation?.();
     if (!page || page.controls !== controls) return undefined;
     return {
       title: page.title,
@@ -777,12 +778,15 @@ export function createQuestionClassifier(input: {
         ref: control.ref,
         kind: control.kind,
         label: control.label,
-        groupLabel: control.groupLabel,
-        hint: questionMeaningHint(control),
-        credentialRole: control.credentialRole,
-        visible: control.visible,
-        disabled: control.disabled,
+        ...(control.groupLabel ? { groupLabel: control.groupLabel } : {}),
+        ...(control.credentialRole
+          ? { credentialRole: control.credentialRole }
+          : {}),
+        ...(!control.visible ? { visible: false } : {}),
+        ...(control.disabled ? { disabled: true } : {}),
       })),
+      // Nearby placement snippets can echo entered values and upload status.
+      // Ancestry and the sanitized instructions above already carry meaning.
       actions: page.actions.map((action) => ({
         ref: action.ref,
         label: action.label,
@@ -793,7 +797,6 @@ export function createQuestionClassifier(input: {
         formAction: action.formAction,
         formMethod: action.formMethod,
         inForm: action.inForm,
-        section: action.section,
         frame: action.frame,
       })),
       links: page.links.map(({ ref, label, href, visible, frame }) => ({
@@ -803,36 +806,36 @@ export function createQuestionClassifier(input: {
         visible,
         frame,
       })),
-      clickables: page.clickables.map(
-        ({
-          ref,
-          label,
-          role,
-          tagName,
-          visible,
-          disabled,
-          section,
-          inForm,
-          frame,
-        }) => ({
-          ref,
-          label,
-          role,
-          tagName,
-          visible,
-          disabled,
-          section,
-          inForm,
-          frame,
-        }),
-      ),
+      clickables: page.clickables
+        .filter((entry) => entry.tagName !== "label")
+        .map(
+          ({
+            ref,
+            label,
+            role,
+            tagName,
+            visible,
+            disabled,
+            inForm,
+            frame,
+          }) => ({
+            ref,
+            label,
+            role,
+            tagName,
+            visible,
+            disabled,
+            inForm,
+            frame,
+          }),
+        ),
     };
   };
   const applyPage = (
     reading: ApplyPageReading,
     controls: readonly ApplyFormControl[],
+    page = input.observation?.(),
   ) => {
-    const page = input.observation?.();
     if (!page || page.controls !== controls) return;
     applyActionReading(page.actions, reading);
     for (const control of controls)
@@ -1147,6 +1150,14 @@ export function createQuestionClassifier(input: {
     return result;
   };
   return Object.assign(classify, {
+    bindPage: (page: ApplyFormObservation, context?: string) => {
+      const reading = pageReads.get(
+        JSON.stringify(pageInput(page.controls, context, page)),
+      );
+      if (!reading) return false;
+      applyPage(reading, page.controls, page);
+      return true;
+    },
     hasPageReading: (controls: readonly ApplyFormControl[], context?: string) =>
       pageReads.has(JSON.stringify(pageInput(controls, context))),
     recoveryData: (controls: readonly ApplyFormControl[], context?: string) =>

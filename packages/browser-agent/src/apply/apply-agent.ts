@@ -729,6 +729,10 @@ async function runMeasuredApplyAgent(
             ...(guardState.pickerAttempts.get(key)?.offeredOptions ?? []),
           ];
       }
+      classifyQuestions?.bindPage?.(
+        observation,
+        questionReadContext(observation),
+      );
       stepReceipts.observe(observation);
       return observation;
     },

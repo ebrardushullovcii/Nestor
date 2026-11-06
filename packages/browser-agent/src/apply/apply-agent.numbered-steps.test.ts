@@ -787,3 +787,65 @@ test("a real fact named with the press keeps its own question", async () => {
     asked.some((question) => /notice period/iu.test(question.prompt)),
   ).toBe(true);
 });
+
+test("German step and send purposes survive the executor's fresh page reads", async () => {
+  const w = wizard("saves", { advanceLabel: "Weiter" });
+  w.config.modelQuestionClassification = true;
+  w.config.authority.mode = "confirm_before_submit";
+  const observe = w.hands.observe;
+  w.hands.observe = () => {
+    if (w.state.step === w.state.total) w.source.actions[0].label = "Absenden";
+    return observe();
+  };
+  const base = finishing();
+  const result = await runApplyAgent(w.config, {
+    chatWithTools: (messages, definitions, options) => {
+      if (definitions[0]?.function.name === "report_question_kinds") {
+        const questions = JSON.parse(messages[1].content) as {
+          index: number;
+        }[];
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: "kinds",
+              type: "function",
+              function: {
+                name: "report_question_kinds",
+                arguments: JSON.stringify({
+                  plainIndexes: questions.map((question) => question.index),
+                  flagged: [],
+                  tags: questions.map((question) => ({
+                    index: question.index,
+                    kind: "other",
+                    country: null,
+                    sourceId: "profile.fullName",
+                  })),
+                  pageReading: {
+                    actions: [
+                      {
+                        ref: "a0",
+                        purpose:
+                          w.state.step === w.state.total ? "submit" : "save",
+                      },
+                    ],
+                    securityControlRefs: [],
+                    blocker: null,
+                  },
+                }),
+              },
+            },
+          ],
+        });
+      }
+      return base.chatWithTools(messages, definitions, options);
+    },
+  });
+  expect(w.state.saves).toEqual([1, 2]);
+  expect(w.state.step).toBe(3);
+  expect(w.hands.clickBoundAction).toHaveBeenCalledTimes(2);
+  expect(w.state.finalPresses).toBe(0);
+  expect(w.source.actions[0].label).toBe("Absenden");
+  expect(result.readyToSend).toBeNull();
+  expect(result.reason).toContain("not authorized to send");
+  expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
+});

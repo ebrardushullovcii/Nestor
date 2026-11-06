@@ -2167,3 +2167,66 @@ test("a shared pending page read binds button purposes to the latest observation
   expect(page.actions[0].kind).toBe("advance");
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
+
+test("upload filenames in nearby button text do not reread the same page", async () => {
+  const page = buildApplyFormObservation(
+    {
+      url: "https://example.test",
+      title: "Application",
+      bodyText: "Resume / CV\nAttach resume\nNo file selected",
+      headings: [],
+      controls: [],
+      actions: [
+        {
+          index: 0,
+          label: "Submit",
+          visible: true,
+          disabled: false,
+          submitsForm: true,
+          section: "Resume / CV No file selected",
+        },
+      ],
+      links: [],
+      clickables: [
+        {
+          index: 0,
+          label: "Attach resume",
+          tagName: "label",
+          role: "",
+          visible: true,
+          disabled: false,
+          topOffset: 0,
+          section: "Resume / CV No file selected",
+        },
+      ],
+      openedTabs: [],
+      loading: false,
+      validationErrors: [],
+      stepLabel: null,
+    },
+    new Date().toISOString(),
+  );
+  page.controls = [
+    { ...controls("Resume / CV", [])[0], kind: "file", ref: "resume" },
+  ];
+  const client = clientReplyingSparse({
+    plainIndexes: [0],
+    flagged: [],
+    pageReading: {
+      actions: [{ ref: "a0", purpose: "submit" }],
+      securityControlRefs: [],
+      blocker: null,
+    },
+  });
+  const classify = createQuestionClassifier({
+    client,
+    observation: () => page,
+  });
+  await classify(page.controls, questionReadContext(page));
+  page.controls[0].value = "C:\\fakepath\\synthetic.pdf";
+  page.bodyTextExcerpt = "Resume / CV\nAttach resume\nsynthetic.pdf";
+  page.actions[0].section = "Resume / CV synthetic.pdf";
+  page.clickables[0].section = "Resume / CV synthetic.pdf";
+  await classify(page.controls, questionReadContext(page));
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+});
