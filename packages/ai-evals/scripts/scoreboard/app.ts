@@ -15,6 +15,7 @@ import type {
 
 export class App {
   step = "starting";
+  provider?: { configPath: string; employerOrigin: string };
   active?: Result;
   since = Date.now();
   jobIds: number[] = [];

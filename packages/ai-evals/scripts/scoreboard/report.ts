@@ -12,7 +12,9 @@ export const SCENARIOS = [
   ["send", "Send once and retry"],
   ["needs-you", "Needs you quality"],
   ["search", "Seven-source search recovery"],
-  ["v2", "Google / saved sign-in / Chrome import (v2)"],
+  ["google", "Google sign-in (on and off)"],
+  ["saved-sign-in", "Saved-password sign-in"],
+  ["browser-import", "Browser import (synthetic fallback)"],
 ] as const;
 
 export const PERSONA = {
@@ -104,6 +106,20 @@ export function profileAnswer(text: string, key = "", country = "") {
   return null;
 }
 
+/** Only explicit personal decisions and unknown-country authorization are valid pauses. */
+export function genuineQuestion(
+  q: Pick<Question, "kind" | "text" | "country" | "profileAnswers">,
+) {
+  if (q.kind !== "question" || q.profileAnswers) return false;
+  if (/press|click|save and continue|next step/i.test(q.text)) return false;
+  return (
+    (!q.country && /authori[sz]|right.to.work|legally.*work/i.test(q.text)) ||
+    /own words|why.*(?:role|company|interested)|tell us|describe|technical skills|strengths|consent|agree|terms|salary|compensation|expected pay|current pay/i.test(
+      q.text,
+    )
+  );
+}
+
 export function markDuplicates(questions: Question[]) {
   const seen = new Set<string>();
   return questions.map((q) => {
@@ -121,7 +137,7 @@ export function markDuplicates(questions: Question[]) {
 export function auditQuestions(run: Run) {
   const quality = run.results.find((r) => r.id === "needs-you");
   if (!quality) return;
-  const cases = run.results.filter((r) => !["needs-you", "v2"].includes(r.id));
+  const cases = run.results.filter((r) => r.id !== "needs-you");
   const questions = new Map<string, Question>();
   for (const r of cases)
     for (const q of r.questions)
@@ -145,7 +161,7 @@ export function auditQuestions(run: Run) {
       : observed.length
         ? "pass"
         : "not run";
-  quality.metrics.summary = `${quality.questions.length} items; profile answered=${known}; duplicate asks=${duplicates}; coverage=${observed.length}/8 scenarios`;
+  quality.metrics.summary = `${quality.questions.length} items; profile answered=${known}; duplicate asks=${duplicates}; coverage=${observed.length}/${SCENARIOS.length - 1} scenarios`;
   quality.metrics.coverage = observed.map((r) => r.id);
   quality.metrics.unmeasured = unmeasured.map((r) => r.id);
   delete quality.failure;

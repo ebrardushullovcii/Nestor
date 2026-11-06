@@ -83,7 +83,7 @@ export interface Result {
   failure?: { step: string; happened: string; likelyPackage: string };
 }
 export interface Run {
-  version: 1;
+  version: 1 | 2;
   startedAt: string;
   finishedAt?: string;
   source: { head: string; dirty: string | null };
