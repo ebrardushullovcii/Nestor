@@ -1,5 +1,6 @@
 import type { Frame, Page, Locator } from "playwright";
 import { randomUUID } from "node:crypto";
+import { pressableLabel } from "./pressable-label";
 
 type Kind = "c" | "a" | "l" | "e";
 interface Binding {
@@ -72,6 +73,7 @@ export function controlSnapshot(
           for(const entry of entries){
             const element=matched[entry.index];
             if(element){
+              if(kind!=='c')entry.label=(${pressableLabel.toString()}).call(element);
               entry.ref=(entry.ref??kind+entry.index)+':'+identify(element);
               const scope=element.form??element.closest('form,[role="form"],[role="dialog"],dialog');
               if(scope)entry.scopeKey='scope:'+identify(scope);

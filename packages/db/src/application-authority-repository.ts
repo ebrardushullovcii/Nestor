@@ -989,7 +989,8 @@ export function createApplicationAuthorityRepositoryMethods(
             alreadyResolved !== null &&
             sameValue(alreadyResolved, resolution.outcome) &&
             idempotency.outcomeId === alreadyResolved.id &&
-            idempotency.status === "resolved"
+            (idempotency.status === "resolved" ||
+              idempotency.status === "outcome_uncertain")
           ) {
             return {
               status: "duplicate",
@@ -1041,7 +1042,10 @@ export function createApplicationAuthorityRepositoryMethods(
 
           const resolvedIdempotency = SubmissionIdempotencyRecordSchema.parse({
             ...idempotency,
-            status: "resolved",
+            status:
+              resolution.outcome.outcome === "outcome_uncertain"
+                ? "outcome_uncertain"
+                : "resolved",
             revision: idempotency.revision + 1,
             updatedAt:
               resolution.outcome.verifiedAt ?? resolution.outcome.attemptedAt,

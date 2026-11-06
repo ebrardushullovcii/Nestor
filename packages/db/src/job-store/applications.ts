@@ -650,7 +650,9 @@ export function createApplicationStore(store: JobStore) {
             ? "submitted"
             : receipt.outcome === "outcome_uncertain"
               ? "uncertain"
-              : receipt.browserAction?.reason === "model_observed_outcome"
+              : receipt.browserAction?.reason === "model_observed_outcome" ||
+                  receipt.browserAction?.reason ===
+                    "model_reported_send_without_prior_intent"
                 ? "failed"
                 : "ready";
         sql(`UPDATE applications SET state = ?, submitted_at = ?, updated_at = ?,

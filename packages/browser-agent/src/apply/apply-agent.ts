@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { traceEvent, traceOurs } from "@nestor/core/run-trace";
 import {
   parseToolArguments,
@@ -12,6 +12,7 @@ import {
   describeBrowserError,
   type ApplicationAttemptQuestion,
   type ApplyPersonRequest,
+  type ApplyFinishSendOutcome,
 } from "@nestor/contracts";
 import { withReasoningTask, type LLMClient } from "../agent/contracts";
 import { createApplyTiming } from "./apply-timing";
@@ -117,6 +118,18 @@ export async function runApplyAgent(
   } | null = null;
   let page: ApplyFormObservation | null = null;
   let sendOutcome: "submitted" | "failed" | "uncertain" | null = null;
+  const sendDecisions = new Map<string, "submitted" | "failed" | "uncertain">();
+  const possibleSends = new Set<string>();
+  const updateSendOutcome = (
+    id: string,
+    outcome: "confirmed" | "failed" | "uncertain" | "not_sent",
+  ) => {
+    if (outcome === "not_sent") sendDecisions.delete(id);
+    else sendDecisions.set(id, outcome === "confirmed" ? "submitted" : outcome);
+    sendOutcome = [...sendDecisions.values()].includes("submitted")
+      ? "submitted"
+      : ([...sendDecisions.values()].at(-1) ?? null);
+  };
   let applicationClosed = false;
   let readyToSend: ApplyAgentResult["readyToSend"] = null;
   const modelCallIds = new Map<string, string[]>();
@@ -343,12 +356,70 @@ export async function runApplyAgent(
       },
     };
   };
+  const reportFinishedSend = async (
+    report: ApplyFinishSendOutcome,
+    callId: string,
+  ): Promise<string | null> => {
+    const ids =
+      report.outcome === "not_sent"
+        ? [...possibleSends]
+        : [[...sendDecisions.keys()].at(-1) ?? callId];
+    for (const sendCallId of ids) {
+      if (!config.recordSendOutcome)
+        return "The send ledger is unavailable in this run.";
+      const result = await config.recordSendOutcome({
+        ...report,
+        sendCallId,
+        pageUrl: page?.url ?? null,
+      });
+      if (!result.recorded) return result.content;
+      possibleSends.delete(sendCallId);
+      updateSendOutcome(sendCallId, report.outcome);
+      note(result.content);
+    }
+    return null;
+  };
   const runProposal = async (
     proposal: ApplyProposal,
-    callId?: string,
+    callId: string = randomUUID(),
   ): Promise<AgentLoopToolOutcome> => {
     signal.throwIfAborted();
     const before = page ?? (await readPage());
+    if (proposal.tool === "finish" && proposal.sendOutcome) {
+      const error = await reportFinishedSend(proposal.sendOutcome, callId);
+      if (error) return { kind: "ok", status: "failed", content: error };
+    }
+    if (proposal.tool === "click" && config.submitApplication) {
+      const control = [
+        ...before.actions,
+        ...before.clickables,
+        ...before.links,
+        ...before.controls,
+      ].find((entry) => entry.ref === proposal.ref);
+      const receipt = await config.submitApplication({
+        actionRef: proposal.ref,
+        actionLabel: control?.label || proposal.ref,
+        callId,
+        possibleSend: true,
+      });
+      if (receipt.outcome) {
+        const sendCallId = receipt.sendCallId ?? callId;
+        possibleSends.add(sendCallId);
+        updateSendOutcome(sendCallId, "uncertain");
+      }
+      note(receipt.content);
+      await readPage();
+      if (
+        before.url !== page?.url ||
+        JSON.stringify(before.step) !== JSON.stringify(page?.step)
+      )
+        receipts.advance(before, now().toISOString());
+      return {
+        kind: "ok",
+        content: `${receipt.content}\n\n${page ? describeObservation(page) : "Page unavailable."}`,
+        progress: true,
+      };
+    }
     if ("ref" in proposal && proposal.ref) receipts.wrote(before, proposal.ref);
     const outcome = await executeApplyProposal(proposal, before.signature, {
       config: runConfig,
@@ -434,7 +505,8 @@ export async function runApplyAgent(
         }
         const receipt = await config.submitApplication(decision);
         note(receipt.content);
-        sendOutcome = "uncertain";
+        if (receipt.outcome)
+          updateSendOutcome(receipt.sendCallId ?? callId, "uncertain");
         await readPage();
         content = receipt.content;
         break;
@@ -503,6 +575,8 @@ export async function runApplyAgent(
         const parsed = parseFillFields(raw);
         if (!parsed.ok)
           return { kind: "ok", status: "failed", content: parsed.error };
+        const batchCallId =
+          modelCallIds.get(`fill_fields|${raw}`)?.shift() ?? randomUUID();
         const steps: ApplyProposal[] = [
           ...parsed.fields,
           ...(parsed.thenContinue
@@ -548,7 +622,7 @@ export async function runApplyAgent(
             };
           }
           try {
-            const result = await runProposal(step);
+            const result = await runProposal(step, `${batchCallId}:${index}`);
             if (result.kind !== "ok") {
               const remaining = notAttempted(
                 index + 1,
@@ -585,8 +659,18 @@ export async function runApplyAgent(
             }
           }
         }
-        if (parsed.finishWhenReady)
+        if (parsed.finishWhenReady) {
+          const error = await reportFinishedSend(
+            {
+              outcome: "not_sent",
+              evidence:
+                "The model finished filling this form without sending (finishWhenReady).",
+            },
+            batchCallId,
+          );
+          if (error) return { kind: "ok", status: "failed", content: error };
           return finish("The model finished filling this form.");
+        }
         return { kind: "ok", content: lines.join("\n"), progress: true };
       }),
   });
@@ -743,14 +827,14 @@ export async function runApplyAgent(
       function: {
         name: "record_send_outcome",
         description:
-          "Record the result of a send already issued through submit_application. Decide from the current page and observed requests. For confirmed, quote the employer page evidence; for failed or uncertain, explain what you observed. This never sends or retries anything.",
+          "Record the result of any press, including click. Decide from the current page and observed requests: confirmed, failed or uncertain for a send; not_sent when the press did not send an application. Quote the page evidence. This never sends or retries anything.",
         parameters: {
           type: "object",
           properties: {
             sendCallId: { type: "string" },
             outcome: {
               type: "string",
-              enum: ["confirmed", "failed", "uncertain"],
+              enum: ["confirmed", "failed", "uncertain", "not_sent"],
             },
             evidence: { type: "string" },
           },
@@ -774,13 +858,10 @@ export async function runApplyAgent(
         ...parsed.data,
         pageUrl: page?.url ?? null,
       });
-      if (result.recorded)
-        sendOutcome =
-          parsed.data.outcome === "confirmed"
-            ? "submitted"
-            : parsed.data.outcome === "failed"
-              ? "failed"
-              : "uncertain";
+      if (result.recorded) {
+        possibleSends.delete(parsed.data.sendCallId);
+        updateSendOutcome(parsed.data.sendCallId, parsed.data.outcome);
+      }
       return { kind: "ok", content: result.content };
     },
   });

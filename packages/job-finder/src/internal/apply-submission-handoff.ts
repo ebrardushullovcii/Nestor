@@ -16,6 +16,7 @@ import type {
   ApplicationSubmissionRuntimeResult,
 } from "./application-submission-runtime";
 import type { SyntheticSubmissionAuthorityRepository } from "./application-submission-orchestrator";
+import { currentSendOutcomes } from "./current-send-outcomes";
 
 /** Carries an explicit model send decision into the durable send path. */
 export type ApplySubmissionHandoff =
@@ -325,6 +326,7 @@ export type SubmitPreparedApplicationRepository =
   SyntheticSubmissionAuthorityRepository & {
     listSubmissionOutcomeRecords: (options?: { jobId?: string }) => Promise<
       readonly {
+        id?: string;
         runId: string;
         attemptedAt: string;
         idempotencyKey: string;
@@ -414,9 +416,12 @@ export async function submitPreparedApplication(input: {
     runtimeInput: ApplicationSubmissionRuntimeInput,
   ) => Promise<ApplicationSubmissionRuntimeResult>;
 }): Promise<ApplicationSubmissionRuntimeResult> {
-  const outcomes = await input.repository.listSubmissionOutcomeRecords({
-    jobId: input.lineage.jobId,
-  });
+  const outcomes = await currentSendOutcomes(
+    input.repository,
+    await input.repository.listSubmissionOutcomeRecords({
+      jobId: input.lineage.jobId,
+    }),
+  );
   const capacity = input.envelope
     ? deriveApplySubmissionCapacity({
         envelope: input.envelope,

@@ -3,12 +3,18 @@ import { z } from "zod";
 export const ApplySendOutcomeDecisionSchema = z
   .object({
     sendCallId: z.string().min(1),
-    outcome: z.enum(["confirmed", "failed", "uncertain"]),
+    outcome: z.enum(["confirmed", "failed", "uncertain", "not_sent"]),
     evidence: z.string().min(1),
   })
   .strict();
 export type ApplySendOutcomeDecision = z.infer<
   typeof ApplySendOutcomeDecisionSchema
+>;
+export const ApplyFinishSendOutcomeSchema = ApplySendOutcomeDecisionSchema.omit(
+  { sendCallId: true },
+);
+export type ApplyFinishSendOutcome = z.infer<
+  typeof ApplyFinishSendOutcomeSchema
 >;
 
 /** A field question or an explicit model-selected handoff on the open page. */

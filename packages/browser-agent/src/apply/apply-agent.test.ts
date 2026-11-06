@@ -736,6 +736,86 @@ test("tool failures return to the model and never create questions", async () =>
   );
   expect(result.pauses).toEqual([]);
 });
+
+test.each(["confirmed", "failed", "uncertain"] as const)(
+  "finish records a reported %s send without an earlier send call",
+  async (outcome) => {
+    const input = config(page());
+    input.recordSendOutcome = vi.fn(() =>
+      Promise.resolve({
+        recorded: true,
+        content: "Recorded model report",
+      }),
+    );
+    input.submitApplication = vi.fn(() =>
+      Promise.reject(Error("A report must never send")),
+    );
+    const result = await runApplyAgent(
+      input,
+      model([
+        {
+          name: "finish",
+          id: "reported-finish",
+          args: {
+            reason: "The site showed the outcome",
+            sendOutcome: { outcome, evidence: "Employer page evidence" },
+          },
+        },
+      ]),
+    );
+    expect(result.outcome).toBe(
+      outcome === "confirmed" ? "submitted" : outcome,
+    );
+    expect(input.submitApplication).not.toHaveBeenCalled();
+    expect(input.recordSendOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sendCallId: "reported-finish",
+        outcome,
+        evidence: "Employer page evidence",
+      }),
+    );
+  },
+);
+
+test("ordinary clicks retain uncertainty until the model settles them as not sent", async () => {
+  const input = config(page());
+  input.submitApplication = vi.fn(() =>
+    Promise.resolve({
+      sendCallId: "model_send_application_press-one",
+      outcome: "outcome_uncertain" as const,
+      content: "sendCallId=press-one",
+    }),
+  );
+  input.recordSendOutcome = vi.fn(() =>
+    Promise.resolve({
+      recorded: true,
+      content: "This press opened another form step; no application was sent.",
+    }),
+  );
+  const result = await runApplyAgent(
+    input,
+    model([
+      { name: "click", id: "press-one", args: { ref: "a0" } },
+      {
+        name: "finish",
+        args: {
+          reason: "Filled without sending",
+          sendOutcome: {
+            outcome: "not_sent",
+            evidence: "Form still open; no application was sent.",
+          },
+        },
+      },
+    ]),
+  );
+  expect(result.outcome).toBe("prepared");
+  expect(input.recordSendOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({
+      sendCallId: "model_send_application_press-one",
+      outcome: "not_sent",
+    }),
+  );
+});
 test("Stop prevents the next batch write", async () => {
   const source = page({
     controls: [0, 1].map((index) => ({

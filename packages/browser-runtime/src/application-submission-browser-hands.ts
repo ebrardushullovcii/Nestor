@@ -8,8 +8,12 @@ import {
   type ApplyFinalActionTarget,
 } from "@nestor/contracts";
 import type { Page, Request, Response } from "playwright";
-import { actionLocator } from "./apply-page-mechanics";
 import { readVisibleText } from "./visible-page-text";
+import {
+  actionLocator,
+  readRawApplyPage,
+  createPlaywrightApplyPageMechanics,
+} from "./apply-page-mechanics";
 import { watchPageSelfLimits } from "./self-limit-page";
 
 export const APPLICATION_FINAL_CONTROL_SELECTOR =
@@ -161,6 +165,7 @@ export interface ExecuteExactlyOneFinalActionInput {
 }
 
 interface RawApplicationControl {
+  ref?: string;
   ordinal: number;
   kind: ApplicationFinalControlKind;
   label: string;
@@ -265,7 +270,7 @@ function buildControl(raw: RawApplicationControl): ApplicationFinalControl {
     origin: raw.actionOrigin,
     safePath: raw.actionPath,
   };
-  const ref = `final-control-${raw.ordinal}`;
+  const ref = raw.ref ?? `final-control-${raw.ordinal}`;
   const signature = sha256(
     canonicalJson({
       action,
@@ -333,6 +338,43 @@ async function readRawApplicationFormSnapshot(
 ): Promise<RawApplicationFormSnapshot> {
   watchPageSelfLimits(page);
   const binding = finalActionTargets.get(page);
+  if (binding?.targets.length) {
+    const raw = await readRawApplyPage(page);
+    const entries = [
+      ...raw.actions,
+      ...raw.links,
+      ...raw.clickables,
+      ...raw.controls,
+    ];
+    const controls: RawApplicationControl[] = [];
+    for (const target of binding.targets) {
+      const entry = entries.find((entry) => entry.ref === target.ref);
+      if (!entry) continue;
+      const destination = new URL(
+        "formAction" in entry && entry.formAction ? entry.formAction : raw.url!,
+      );
+      controls.push({
+        ref: target.ref,
+        ordinal: controls.length,
+        kind: "button",
+        label: entry.label || target.label || target.ref,
+        formIndex: "formIndex" in entry ? (entry.formIndex ?? -1) : -1,
+        actionOrigin: destination.origin,
+        actionPath: destination.pathname,
+        actionUrl: destination.href,
+        actionMethod:
+          "formMethod" in entry ? (entry.formMethod ?? "GET") : "GET",
+        actionTarget: "_self",
+      });
+    }
+    const destination = new URL(raw.url!);
+    return {
+      pageOrigin: destination.origin,
+      pagePath: destination.pathname,
+      complete: controls.length === binding.targets.length,
+      controls,
+    };
+  }
   const targets: { ordinal: number; label: string }[] = [];
   let targetsComplete = !binding || binding.url === page.url();
   for (const target of binding?.targets ?? []) {
@@ -738,10 +780,17 @@ export async function executeExactlyOneFinalAction(
     let actionCompleted = false,
       actionError: unknown = null;
     try {
-      await page
-        .locator(APPLICATION_FINAL_CONTROL_SELECTOR)
-        .nth(control.ordinal)
-        .click({ timeout: 0 });
+      if (finalActionTargets.get(page)?.targets.length) {
+        const result = await createPlaywrightApplyPageMechanics(
+          page,
+        ).clickElement(control.identity.ref);
+        if (!result.ok) throw new Error(result.error);
+      } else {
+        await page
+          .locator(APPLICATION_FINAL_CONTROL_SELECTOR)
+          .nth(control.ordinal)
+          .click({ timeout: 0 });
+      }
       actionCompleted = true;
     } catch (error) {
       actionError = error;

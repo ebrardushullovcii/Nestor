@@ -1,6 +1,7 @@
 import type { ApplyWriteResult, RawApplyClickable } from "@nestor/contracts";
 import type { CDPSession, Frame, Page } from "playwright";
 import { isVisibleFrame, visiblePageText } from "./visible-page-text";
+import { pressableLabel } from "./pressable-label";
 interface DomNode {
   nodeType: number;
   backendNodeId: number;
@@ -159,6 +160,11 @@ export async function readClosedShadowControls(
           "index" | "ref"
         > | null>(session, node, describe.toString(), [selector]);
         if (!control) continue;
+        control.label = await inNode<string>(
+          session,
+          node,
+          pressableLabel.toString(),
+        );
         const existing = [...previous].find(
           ([, target]) =>
             target.frame === frame &&
