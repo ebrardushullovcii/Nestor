@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { Script } from "node:vm";
+import { fileURLToPath } from "node:url";
 import { checkMore, checkMoreLogs } from "./check-more.mjs";
 
 const confirmation = "Thank you! Your application has been received.";
@@ -16,7 +17,7 @@ const submissionsLogPath = join(
 );
 const server = spawn(
   process.execPath,
-  [new URL("serve.mjs", directory).pathname],
+  [fileURLToPath(new URL("serve.mjs", directory))],
   {
     env: {
       ...process.env,
@@ -29,6 +30,7 @@ const server = spawn(
 const exited = once(server, "exit");
 const posts = [];
 const output = createInterface({ input: server.stdout });
+const outputClosed = once(output, "close");
 output.on("line", (line) => posts.push(JSON.parse(line)));
 let cookie = "";
 let requestCount = 0;
@@ -328,19 +330,24 @@ try {
   // Stop only this child, drain its output, then compare stdout with the on-disk log.
   server.kill("SIGTERM");
   await exited;
+  await outputClosed;
   const logged = (await readFile(submissionsLogPath, "utf8"))
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line));
   assert.equal(
     posts.length,
-    18 + more.postCount,
-    "Every POST must produce one stdout JSON line",
+    16 + more.postCount,
+    "Every non-credential POST must produce one stdout JSON line (the two account requests are intentionally unlogged)",
   );
   assert.deepEqual(
     logged.slice(-posts.length),
     posts,
     "File and stdout POST logs must match",
+  );
+  assert.equal(
+    posts.filter((post) => post.path.startsWith("/workday/account/")).length,
+    0,
   );
   for (const post of posts.filter((post) => post.path.includes("/account/")))
     assert.equal(post.fields.password, "[redacted]");

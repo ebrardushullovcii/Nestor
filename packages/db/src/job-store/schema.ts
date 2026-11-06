@@ -58,6 +58,11 @@ export interface AddedColumn {
 /** Columns added to tables after their release, in the order they came. */
 export const JOB_STORE_ADDED_COLUMNS: readonly AddedColumn[] = [
   {
+    table: "applications",
+    column: "posting_closed",
+    definition: "INTEGER NOT NULL DEFAULT 0",
+  },
+  {
     table: "jobs",
     column: "fit_stale",
     definition: "INTEGER NOT NULL DEFAULT 0",

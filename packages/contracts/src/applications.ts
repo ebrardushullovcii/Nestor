@@ -50,6 +50,7 @@ export const applicationWorkStates = [
   "blocked",
   "failed",
   "uncertain",
+  "closed",
 ] as const;
 export const ApplicationWorkStateSchema = z.enum(applicationWorkStates);
 export type ApplicationWorkState = z.infer<typeof ApplicationWorkStateSchema>;
@@ -107,8 +108,8 @@ export const ApplicationPreparationUpdateSchema = z
   .object({
     id: ApplicationIdSchema,
     attempt: z.number().int().positive(),
-    state: z.enum(["ready", "failed"]),
-    error: z.string().max(2000).optional(),
+    state: z.enum(["ready", "failed", "closed"]),
+    error: z.string().optional(),
   })
   .strict();
 export type ApplicationPreparationUpdate = z.infer<

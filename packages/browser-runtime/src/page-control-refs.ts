@@ -71,7 +71,25 @@ export function controlSnapshot(
           const entries=Array.isArray(result)?result:result[${JSON.stringify(groups)}[kind]];
           for(const entry of entries){
             const element=matched[entry.index];
-            if(element)entry.ref=(entry.ref??kind+entry.index)+':'+identify(element);
+            if(element){
+              entry.ref=(entry.ref??kind+entry.index)+':'+identify(element);
+              const scope=element.form??element.closest('form,[role="form"],[role="dialog"],dialog');
+              if(scope)entry.scopeKey='scope:'+identify(scope);
+              if(kind==='c'){
+                const rect=element.getBoundingClientRect();
+                let ariaHidden=false,cssHidden=false;
+                for(let node=element;node;node=node.parentElement??node.getRootNode().host){
+                  const style=getComputedStyle(node);
+                  ariaHidden ||= node.getAttribute('aria-hidden')==='true';
+                  cssHidden ||= style.display==='none'||style.visibility==='hidden'||style.visibility==='collapse'||style.opacity==='0';
+                }
+                entry.visibility={x:rect.x,y:rect.y,width:rect.width,height:rect.height,
+                  viewportWidth:innerWidth,viewportHeight:innerHeight,
+                  inViewport:rect.width>0&&rect.height>0&&rect.right>0&&rect.bottom>0&&rect.left<innerWidth&&rect.top<innerHeight,
+                  offCanvas:rect.right<=0||rect.bottom<=0||rect.left+scrollX>=Math.max(innerWidth,document.documentElement.scrollWidth)||rect.top+scrollY>=Math.max(innerHeight,document.documentElement.scrollHeight),
+                  zeroSize:rect.width===0||rect.height===0,ariaHidden,cssHidden};
+              }
+            }
           }
         }
         return result;

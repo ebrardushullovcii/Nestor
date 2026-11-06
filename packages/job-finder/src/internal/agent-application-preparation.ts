@@ -291,6 +291,16 @@ function toBlocker(
   result: ApplyAgentResult,
   questions: readonly ApplicationAttemptQuestion[],
 ): ApplicationAttemptBlocker | null {
+  if (result.applicationClosed)
+    return {
+      code: "application_closed",
+      userActionKind: null,
+      summary: result.reason,
+      detail: result.reason,
+      questionIds: [],
+      sourceDebugEvidenceRefIds: [],
+      url: result.finalUrl,
+    };
   const blocked = result.pauses.find((pause) => pause.blocker !== null);
   if (blocked?.blocker) {
     return {
@@ -424,6 +434,7 @@ function toModelUse(
 }
 
 function nextActionFor(result: ApplyAgentResult): string {
+  if (result.applicationClosed) return "Find another job";
   const blocked = result.pauses.find((pause) => pause.blocker !== null);
   if (blocked?.blocker) {
     if (blocked.blocker.code === "application_closed")
@@ -629,7 +640,11 @@ export async function runAgentApplicationPreparation(
         ? { listingDiscovery: executionInput.listingDiscovery }
         : {}),
       preferences: input.searchPreferences,
-      resumeText: executionInput.profile.baseResume.textContent,
+      resumeText:
+        executionInput.resumeArtifact.textContent ??
+        (executionInput.resumeArtifact.source === "original_upload"
+          ? executionInput.profile.baseResume.textContent
+          : null),
       posting: {
         title: executionInput.job.title,
         company: executionInput.job.company,
@@ -760,13 +775,15 @@ export async function runAgentApplicationPreparation(
   // them to read over and send. Recording it as "paused" put every finished
   // application in the Waiting-on-you count beside the ones that were stuck.
   const attemptState: ApplyExecutionResult["state"] =
-    questions.length > 0
-      ? "paused"
-      : result.outcome === "stuck" || blocker?.code === "application_closed"
-        ? "failed"
-        : blocker === null && questions.length === 0
-          ? "ready"
-          : "paused";
+    blocker?.code === "application_closed"
+      ? "failed"
+      : questions.length > 0
+        ? "paused"
+        : result.outcome === "stuck"
+          ? "failed"
+          : blocker === null && questions.length === 0
+            ? "ready"
+            : "paused";
 
   const prepared = buildPreparationResult({
     executionInput,
@@ -1049,6 +1066,7 @@ export function buildApplyLetterDependencies(input: {
   profile: CandidateProfile;
   reusableAnswers?: CandidateReusableAnswer[];
   settings: JobFinderSettings;
+  resumeText?: string | null;
   searchPreferences?: JobSearchPreferences | undefined;
 }): Omit<ApplicationLetterDependencies, "application" | "signal"> | undefined {
   const rawChatWithTools = input.aiClient.chatWithTools;
@@ -1110,7 +1128,7 @@ export function buildApplyLetterDependencies(input: {
                 applicant: applicationFacts(
                   {
                     profile: input.profile,
-                    resumeText: null,
+                    resumeText: input.resumeText ?? null,
                     preferences: input.searchPreferences,
                     posting: input.job,
                     reusableAnswers: input.reusableAnswers ?? [],
@@ -1118,7 +1136,9 @@ export function buildApplyLetterDependencies(input: {
                   },
                   { payDisclosed: false },
                 ),
-                resume: input.profile.baseResume.textContent?.trim() ?? null,
+                originalResume:
+                  input.profile.baseResume.textContent?.trim() ?? null,
+                attachedResume: input.resumeText ?? null,
                 postingContextOnly: {
                   title: input.job.title,
                   company: input.job.company,

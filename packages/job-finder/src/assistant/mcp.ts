@@ -6,7 +6,10 @@ import {
   CallToolResultSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { AssistantMessagePartSchema } from "@nestor/contracts";
+import {
+  AssistantMessagePartSchema,
+  withoutLegacyApprovalSettings,
+} from "@nestor/contracts";
 import { z } from "zod";
 
 import {
@@ -74,7 +77,9 @@ export async function connectAssistantMcp(
       const result = await definition.execute(input, context);
       return {
         content: [{ type: "text", text: result.summary }],
-        structuredContent: ResultSchema.parse(result),
+        structuredContent: ResultSchema.parse(
+          withoutLegacyApprovalSettings(result),
+        ),
         isError: result.status === "failed" || result.status === "refused",
       };
     } catch (error) {

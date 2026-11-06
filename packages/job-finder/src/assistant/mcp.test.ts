@@ -25,7 +25,11 @@ import { profilePatchReceipts } from "./profile-patch-receipts";
 import { guardProfileCommand } from "./profile-command-guard";
 import { connectAssistantMcp } from "./mcp";
 import { buildAssistantToolCatalog } from "./tools";
-import { toConversationTool, type AssistantToolContext } from "./tool-kit";
+import {
+  defineTool,
+  toConversationTool,
+  type AssistantToolContext,
+} from "./tool-kit";
 import {
   needsYouCommandTools,
   type RunNeedsYouCommand,
@@ -737,5 +741,37 @@ it("runs Profile and Settings field commands over MCP and protects unsaved Profi
   } finally {
     await mcp.close();
     store.close();
+  }
+});
+
+it("assistant facts keep the real send setting and omit conflicting retired preferences", async () => {
+  const tool = defineTool({
+    name: "read_test_settings",
+    group: "settings",
+    effect: "read",
+    label: () => "Settings",
+    description: "Synthetic settings read",
+    input: z.object({}),
+    parameters: { type: "object", properties: {} },
+    execute: () =>
+      Promise.resolve({
+        summary: "Settings",
+        data: {
+          settings: {
+            humanReviewRequired: true,
+            applicationAutomationMode: "autonomous_submit",
+          },
+          goals: { approvalMode: "review_before_submit" },
+        },
+      }),
+  });
+  const mcp = await connectAssistantMcp([tool], context());
+  try {
+    const reply = await mcp.tools[0]!.execute({}, context());
+    expect(JSON.stringify(reply)).toContain("autonomous_submit");
+    expect(JSON.stringify(reply)).not.toContain("humanReviewRequired");
+    expect(JSON.stringify(reply)).not.toContain("approvalMode");
+  } finally {
+    await mcp.close();
   }
 });

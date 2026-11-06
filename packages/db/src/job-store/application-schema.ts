@@ -1,5 +1,6 @@
 export const APPLICATION_SCHEMA = `
 CREATE TABLE IF NOT EXISTS applications (
+  posting_closed INTEGER NOT NULL DEFAULT 0,
   disposition TEXT CHECK (disposition IN ('skipped', 'blocked')),
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   job_id INTEGER NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,

@@ -4,6 +4,7 @@ import { withTraceScope } from "@nestor/core/run-trace";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import {
   bindTracePage,
+  traceFinalPage,
   configureTraceCapture,
   tracePage,
   type TracePageCapture,
@@ -1621,7 +1622,10 @@ export function createBrowserAgentRuntime(
     preparedApplicationPages.delete(key);
     markedPreparedApplicationKeys.delete(key);
     preparedPagesWithPerson.delete(key);
-    if (page && !page.isClosed()) await page.close().catch(() => undefined);
+    if (page && !page.isClosed()) {
+      await traceFinalPage(page);
+      await page.close().catch(() => undefined);
+    }
   }
 
   const getLivePreparedApplicationPages = (): Page[] => [

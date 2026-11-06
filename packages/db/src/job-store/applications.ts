@@ -64,7 +64,7 @@ type Row = {
   error: string | null;
 };
 
-const COLUMNS = `a.id, a.job_id, a.mode, j.title, j.company, j.location, COALESCE(a.disposition,a.state) AS state,
+const COLUMNS = `a.id, a.job_id, a.mode, j.title, j.company, j.location, CASE WHEN a.posting_closed=1 THEN 'closed' ELSE COALESCE(a.disposition,a.state) END AS state,
   a.attempt, a.queued_at, a.updated_at, a.submitted_at, a.error`;
 
 function toRow(row: Row): ApplicationRow {
@@ -207,7 +207,7 @@ export function createApplicationStore(store: JobStore) {
            SELECT j.id, ?, 'queued', ?, ? FROM jobs j WHERE ${readyWhere}
            ON CONFLICT(job_id) DO UPDATE SET
              mode = excluded.mode, state = 'queued', queued_at = excluded.queued_at,
-             updated_at = excluded.updated_at, error = NULL, disposition = NULL
+             updated_at = excluded.updated_at, error = NULL, disposition = NULL, posting_closed = 0
            WHERE applications.state IN ('stopped', 'failed')
              AND (applications.disposition IS NULL OR ? = 1)
              AND applications.submitted_at IS NULL RETURNING id`,
@@ -539,7 +539,7 @@ export function createApplicationStore(store: JobStore) {
           ))) AND submitted_at IS NULL RETURNING job_id`).get(
           Date.now(),
           Date.now(),
-          reason.slice(0, 2000),
+          reason,
           id,
           attempt,
         ) as { job_id: number } | undefined;
@@ -582,7 +582,7 @@ export function createApplicationStore(store: JobStore) {
           sql(`UPDATE applications SET state = 'failed', error = ?, updated_at = ?
           WHERE id = ? AND attempt = ? AND state IN ('running', 'ready')
           AND submitted_at IS NULL AND submission_outcome_json IS NULL RETURNING job_id`).get(
-            reason.slice(0, 2000),
+            reason,
             Date.now(),
             id,
             attempt,
@@ -598,7 +598,7 @@ export function createApplicationStore(store: JobStore) {
         const row =
           sql(`UPDATE applications SET state = 'ready', error = ?, updated_at = ?
           WHERE id = ? AND attempt = ? AND state IN ('ready', 'submitting') RETURNING job_id`).get(
-            reason.slice(0, 2000),
+            reason,
             Date.now(),
             id,
             attempt,
@@ -740,7 +740,7 @@ export function createApplicationStore(store: JobStore) {
     ): ApplicationRow[] {
       return (
         sql(`SELECT ${COLUMNS} FROM applications a JOIN jobs j ON j.id = a.job_id
-        WHERE a.state = ? ORDER BY a.updated_at, a.id LIMIT ?`).all(
+        WHERE CASE WHEN a.posting_closed=1 THEN 'closed' ELSE a.state END = ? ORDER BY a.updated_at, a.id LIMIT ?`).all(
           state,
           limit,
         ) as Row[]
@@ -752,7 +752,7 @@ export function createApplicationStore(store: JobStore) {
       return Object.fromEntries(
         (
           sql(
-            "SELECT state, COUNT(*) AS n FROM applications GROUP BY state",
+            "SELECT CASE WHEN posting_closed=1 THEN 'closed' ELSE state END AS state, COUNT(*) AS n FROM applications GROUP BY CASE WHEN posting_closed=1 THEN 'closed' ELSE state END",
           ).all() as { state: ApplicationRow["state"]; n: number }[]
         ).map((row) => [row.state, row.n]),
       );
@@ -763,7 +763,9 @@ export function createApplicationStore(store: JobStore) {
       const clauses: string[] = [];
       const params: SQLInputValue[] = [];
       if (query.state !== null) {
-        clauses.push("COALESCE(a.disposition,a.state) = ?");
+        clauses.push(
+          "CASE WHEN a.posting_closed=1 THEN 'closed' ELSE COALESCE(a.disposition,a.state) END = ?",
+        );
         params.push(query.state);
       }
       if (query.cursor !== null) {
@@ -851,13 +853,14 @@ export function createApplicationStore(store: JobStore) {
             SELECT 1 FROM application_needs_you n JOIN needs_you t ON t.id = n.task_id
             WHERE n.application_id = applications.id AND t.kind = 'question'
               AND t.input = 'file' AND t.resolved_at IS NULL) THEN 'needs_you' ELSE ? END,
-           error = ?, updated_at = ?
-           WHERE id = ? AND attempt = ? AND (state = 'running' OR (? = 'failed' AND state = 'needs_you')) RETURNING job_id, state`,
+           error = ?, updated_at = ?, posting_closed = ?
+           WHERE id = ? AND attempt = ? AND (state = 'running' OR (? IN ('failed', 'closed') AND state = 'needs_you')) RETURNING job_id, state`,
         ).get(
-          input.state,
-          input.state,
+          input.state === "closed" ? "stopped" : input.state,
+          input.state === "closed" ? "stopped" : input.state,
           input.error ?? null,
           Date.now(),
+          input.state === "closed" ? 1 : 0,
           input.id,
           input.attempt,
           input.state,

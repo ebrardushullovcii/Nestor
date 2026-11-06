@@ -3,6 +3,8 @@ import type { ApplyWriteResult } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
 
+import { replaceFieldText } from "./replace-field-text";
+
 import { watchPageSelfLimits } from "./self-limit-page";
 
 /** Silence in the observed list state before reporting that it stopped progressing. */
@@ -388,28 +390,14 @@ async function selectRow(
 ): Promise<ApplyWriteResult> {
   await clickRow(list, text);
   if (!searchable) return { ok: true, observedValue: text };
-  // Typed text is not a committed selection. Leave the search and let the
-  // widget's blur validation run before reporting what it kept.
-  await locator.blur();
-  await pause(STABLE_MS);
   const selected = (
     await locator.evaluateAll(collectCustomComboboxStates, [0])
   )[0]?.[1];
-  const retained = await locator.evaluate((element) => {
-    const input = element as HTMLInputElement;
-    return element.getAttribute("aria-invalid") === "true"
-      ? ""
-      : input.value || "";
-  });
-  const committed = selected?.selectedOptionLabel || retained;
-  if (
-    normalizeOptionLabel(committed) === normalizeOptionLabel(text) &&
-    (await locator.getAttribute("aria-invalid")) !== "true"
-  )
-    return { ok: true, observedValue: committed.replace(/\s+/gu, " ").trim() };
-  await locator.fill("", { timeout: 0 }).catch(() => undefined);
-  await locator.press("Escape").catch(() => undefined);
-  return uncertain(`The list did not keep "${text}" selected.`);
+  const retained = await locator.evaluate(
+    (element) =>
+      (element as HTMLInputElement).value ?? element.textContent ?? "",
+  );
+  return { ok: true, observedValue: selected?.selectedOptionLabel || retained };
 }
 
 /**
@@ -501,30 +489,20 @@ async function chooseCustomOption(
   label: string,
   networkProgress: () => number,
 ): Promise<ApplyWriteResult> {
+  const selected = (
+    await locator.evaluateAll(collectCustomComboboxStates, [0])
+  )[0]?.[1]?.selectedOptionLabel;
+  if (
+    selected &&
+    normalizeOptionLabel(selected) === normalizeOptionLabel(label)
+  )
+    return { ok: true, observedValue: selected };
   const searchable =
     (await locator.isEditable().catch(() => false)) &&
     (await locator.evaluate((element) =>
       element.matches("input, textarea, [contenteditable='true']"),
     ));
-  const leave = async () => {
-    // A typed search left in the box reads as an answer it is not.
-    if (searchable)
-      await locator.fill("", { timeout: 0 }).catch(() => undefined);
-    await locator.press("Escape").catch(() => undefined);
-  };
-  try {
-    return await chooseFromList(
-      page,
-      locator,
-      label,
-      searchable,
-      leave,
-      networkProgress,
-    );
-  } catch (error) {
-    await leave();
-    throw error;
-  }
+  return chooseFromList(page, locator, label, searchable, networkProgress);
 }
 
 async function chooseFromList(
@@ -532,7 +510,6 @@ async function chooseFromList(
   locator: Locator,
   label: string,
   searchable: boolean,
-  leave: () => Promise<void>,
   networkProgress: () => number,
 ): Promise<ApplyWriteResult> {
   const wanted = normalizeOptionLabel(label);
@@ -540,20 +517,13 @@ async function chooseFromList(
   // take the choice that says it. Typing first is what makes a list of two
   // hundred countries usable at all.
   await locator.click({ timeout: 0 });
-  // A box that already shows a choice (the person's, or an earlier run's)
-  // searches nothing when the same text is put in it again: the page sees no
-  // change. Empty it first, so the search runs and the choice is made again.
-  if (
-    searchable &&
-    (await locator.inputValue({ timeout: 0 }).catch(() => "")).trim()
-  )
-    await locator.fill("", { timeout: 0 }).catch(() => undefined);
-  // A list that is not a text box still jumps to what is typed at it.
-  if (searchable)
-    await locator.fill(label, { timeout: 0 }).catch(async () => {
-      await locator.type(label, { timeout: 0 });
-    });
-  else await locator.type(label, { timeout: 0 });
+  if (searchable) {
+    // Replacing identical search text otherwise produces no React change.
+    // Clear this element first, without dismissing its list or parent modal.
+    if ((await locator.inputValue({ timeout: 0 })) === label)
+      await replaceFieldText(locator, "");
+    await replaceFieldText(locator, label);
+  }
   const scope = (await controlFrame(locator)) ?? page;
   const first = await settle(
     scope,
@@ -577,7 +547,6 @@ async function chooseFromList(
         searchable,
       );
     } catch {
-      await leave();
       return uncertain(
         "The picker did not identify its option list, so its choices could not be confirmed.",
       );
@@ -595,26 +564,23 @@ async function chooseFromList(
       return selectRow(first.list, locator, read.found, searchable);
     collect(read.options);
     if (!read.complete && !searchable) {
-      await leave();
       return uncertain(
         "The option list was too long to read to its end, so its choices could not be confirmed.",
       );
     }
     if (!searchable) {
-      await leave();
       return read.options.length > 0
         ? missing(label, read.options)
         : uncertain("The list had no selectable choices to confirm.");
     }
   } else if (first.kind === "unsettled" || !searchable) {
-    await leave();
     return uncertain(
       "The option list did not finish loading, so its choices could not be confirmed.",
     );
   }
   // Preserve the existing full-list order when clearing exposes all choices.
   // Remote-search pickers may instead close or require a nonempty query.
-  await locator.fill("", { timeout: 0 }).catch(() => undefined);
+  await replaceFieldText(locator, "").catch(() => undefined);
   const listed = await settle(
     scope,
     locator,
@@ -631,7 +597,6 @@ async function chooseFromList(
   if (whole?.found && listed.kind === "settled")
     return selectRow(listed.list, locator, whole.found, searchable);
   if (whole?.complete && whole.options.length > 0) {
-    await leave();
     return missing(label, whole.options);
   }
   // A spelling variant can be visible after the full query. When that query
@@ -639,7 +604,7 @@ async function chooseFromList(
   // Only the model may decide whether a returned row means the same thing.
   if (offered.size === 0) {
     for (const query of shorterSearches(label)) {
-      await locator.fill(query, { timeout: 0 });
+      await replaceFieldText(locator, query);
       const searched = await settle(
         scope,
         locator,
@@ -659,7 +624,6 @@ async function chooseFromList(
       }
     }
   }
-  await leave();
   return offered.size > 0
     ? missing(label, [...offered.values()])
     : uncertain(

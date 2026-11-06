@@ -29,6 +29,7 @@ import type {
   CoverLetterPreference,
   JobSearchPreferences,
   RawApplyPage,
+  RawApplyControl,
   RawApplySummaryRow,
   RawApplyUpload,
   RawApplyUploadOutcome,
@@ -69,6 +70,7 @@ export type ApplyAnswerEvidencePolicy =
   | "eligibility";
 
 export interface ApplyFormControl {
+  visibility?: RawApplyControl["visibility"];
   /** Native identity behind this page-local ref. */
   nativeIdentity?: string;
   /** Native file-input identity, independent of mutable attachment labels. */
@@ -145,6 +147,7 @@ export interface ApplyFormControl {
 
 /** Where an action or clickable sits on the page; see `RawApplyPlacement`. */
 export interface ApplyPlacement {
+  scopeKey?: string;
   formIndex?: number;
   frame?: ApplyFrameOwner;
   /** The part of the page holding it: legend, dialog or section name, or nearby words. */
@@ -373,6 +376,7 @@ export interface ApplyAnswer {
 }
 
 export interface ApplyAnswerSources {
+  applicationAutomationMode?: ApplicationAutomationMode;
   /** Person-owned task/site notes, never text read from the employer page. */
   taskInstructions?: readonly string[] | undefined;
   listingDiscovery?: { label: string; url: string };
@@ -536,6 +540,8 @@ export type ApplyAgentOutcome =
   | "stuck";
 
 export interface ApplyAgentResult {
+  /** The model reported that this posting no longer accepts applications. */
+  applicationClosed?: boolean;
   /** Nestor failed to read; keep this attempt's usable page for an explicit retry. */
   technicalFailure?: {
     code:
@@ -622,6 +628,7 @@ export type ApplyProposal =
       tool: "finish";
       reason: string;
       stuck?: boolean;
+      applicationClosed?: boolean;
       needsPerson?: boolean;
       /** Each question or task for the person, apart from the reason. */
       forPerson?: ApplyPersonRequest[];

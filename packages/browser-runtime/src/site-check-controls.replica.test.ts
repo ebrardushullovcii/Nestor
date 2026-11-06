@@ -195,10 +195,17 @@ test("a list read uses the observed node when another field is inserted during o
       const observer=new MutationObserver(()=>{if(country.hasAttribute('data-nestor-control-ref')){observer.disconnect();const input=document.createElement('input');input.onclick=()=>document.body.dataset.wrongClick='true';country.parentElement.before(input)}});
       observer.observe(country,{attributes:true,attributeFilter:['data-nestor-control-ref']});
     </script>`);
-    const observation =
-      await createPlaywrightApplyPageMechanics(page).readPage();
+    const mechanics = createPlaywrightApplyPageMechanics(page);
+    const observation = await mechanics.readPage();
+    const field = observation.controls.find(
+      (control) => control.id === "country",
+    )!;
+    expect(field.options).toEqual([]);
+    await mechanics.clickElement(field.ref!);
     expect(
-      observation.controls.find((control) => control.id === "country")?.options,
+      (await mechanics.readPage()).controls.find(
+        (control) => control.id === "country",
+      )?.options,
     ).toEqual(["Alpha", "Beta"]);
     expect(
       await page.locator("body").getAttribute("data-wrong-click"),

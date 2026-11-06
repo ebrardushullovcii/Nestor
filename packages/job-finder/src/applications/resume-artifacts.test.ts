@@ -21,6 +21,7 @@ function fixture(fileName = "original.txt") {
     "Jamie Synthetic\nEmail: jamie@example.test\n\nBuilt React tools.\nKept every original line.";
   const artifact = {
     id: "approved",
+    source: "original_upload",
     fileName,
     filePath: `/synthetic/${fileName}`,
     sha256: "a".repeat(64),
@@ -92,9 +93,10 @@ describe("approved resume application formats", () => {
 
   test("keeps an already approved PDF's exact file and digest", async () => {
     const f = fixture("approved.pdf");
-    expect((await renderApplicationResume(f.input)).artifact).toEqual(
-      f.input.artifact,
-    );
+    expect((await renderApplicationResume(f.input)).artifact).toEqual({
+      ...f.input.artifact,
+      textContent: f.input.profile.baseResume.textContent,
+    });
     expect(f.renderResumeArtifact).not.toHaveBeenCalled();
   });
 
@@ -195,6 +197,7 @@ test("a ready resume nobody approved is rendered once, recorded as unapproved, a
       documentManager: f.input.documentManager,
     };
     const first = await renderReadyJobResume(input);
+    expect(first.textContent).toContain(input.profile.fullName);
     expect(first).toMatchObject({
       jobId: "7",
       source: "tailored_export",

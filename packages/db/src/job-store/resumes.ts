@@ -270,9 +270,9 @@ export function createResumeStore(store: JobStore): ResumeStore {
 
     openApplications(ids) {
       const rows = sql(
-        `SELECT a.job_id, a.id, a.state, a.error, a.updated_at FROM applications a
+        `SELECT a.job_id, a.id, CASE WHEN a.posting_closed=1 THEN 'closed' ELSE a.state END AS state, a.error, a.updated_at FROM applications a
          WHERE a.job_id IN (SELECT value FROM json_each(?))
-           AND (a.state IN ('queued','running','submitting','uncertain','ready','needs_you')
+           AND (a.posting_closed=1 OR a.state IN ('queued','running','submitting','uncertain','ready','needs_you')
              OR (a.state = 'failed' AND a.disposition IS NULL AND a.submitted_at IS NULL))
            AND a.id = (SELECT max(b.id) FROM applications b WHERE b.job_id = a.job_id)`,
       ).all(JSON.stringify(ids)) as {
@@ -285,10 +285,10 @@ export function createResumeStore(store: JobStore): ResumeStore {
       return new Map(
         rows.map((row) => [
           row.job_id,
-          row.state === "failed"
+          row.state === "failed" || row.state === "closed"
             ? {
                 id: row.id,
-                status: "failed" as const,
+                status: row.state,
                 reason: row.error,
                 triedAt: new Date(row.updated_at).toISOString(),
               }

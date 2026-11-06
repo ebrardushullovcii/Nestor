@@ -50,7 +50,7 @@ export type ResumeStatus = z.infer<typeof ResumeStatusSchema>;
  */
 export const ShortlistedApplicationSchema = z.object({
   id: z.number().int().positive(),
-  status: z.enum(["applying", "ready", "needs_you", "failed"]),
+  status: z.enum(["applying", "ready", "needs_you", "failed", "closed"]),
   /** Why Apply could not finish; only for `failed`. */
   reason: z.string().max(500).nullable().optional(),
   /** When Apply last tried it. */

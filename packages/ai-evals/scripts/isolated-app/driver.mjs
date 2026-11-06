@@ -117,6 +117,7 @@ function buildEnv() {
       NESTOR_VERIFY_STATE: stateDir,
       NESTOR_VERIFY_EVIDENCE: evidenceDir,
       NESTOR_VERIFY_NET: launch.net,
+      NESTOR_VERIFY_AI: launch.ai,
       ...(providerFixture
         ? { NESTOR_VERIFY_PROVIDER_FIXTURE: providerFixturePath }
         : {}),

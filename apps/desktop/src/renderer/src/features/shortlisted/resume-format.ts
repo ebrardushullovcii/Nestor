@@ -76,4 +76,5 @@ export const APPLICATION_BADGE: Record<
   ready: { label: "Ready to send", tone: APPLICATION_WORK_TONE.ready },
   needs_you: { label: "Needs you", tone: APPLICATION_WORK_TONE.needs_you },
   failed: { label: "Could not apply", tone: APPLICATION_WORK_TONE.failed },
+  closed: { label: "Posting closed", tone: APPLICATION_WORK_TONE.closed },
 };

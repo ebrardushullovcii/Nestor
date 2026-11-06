@@ -78,7 +78,7 @@ test.each([
   ["Yes", "<span hidden>Yes</span>", false],
   ["Yes", "Yes", true],
 ])(
-  "abbreviation does not invent country, hidden selection, or validity: %s",
+  "returns the widget's actual abbreviated value and keeps validity as a page fact: %s",
   async (label, value, invalid) => {
     const page = await browser.newPage();
     try {
@@ -88,7 +88,17 @@ test.each([
         page.getByRole("combobox"),
         label,
       );
-      expect(result.ok).toBe(false);
+      const observation = await createPlaywrightApplyPageSession({
+        page,
+      }).readPage();
+      const control = observation.controls.find(
+        (entry) => entry.id === "answer",
+      )!;
+      expect(result).toEqual({
+        ok: true,
+        observedValue: control.selectedOptionLabel || control.value,
+      });
+      expect(control.invalid).toBe(invalid);
     } finally {
       await page.close();
     }

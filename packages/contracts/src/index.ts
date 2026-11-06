@@ -84,3 +84,4 @@ export * from "./browser-passwords";
 export type { SelfLimitHit } from "./self-limit";
 
 export * from "./apply-send-outcome";
+export * from "./model-application-settings";

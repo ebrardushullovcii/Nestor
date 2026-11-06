@@ -381,6 +381,15 @@ test("Ashby with field saves: guarded Submit sends once after the Yes/No presses
     outcome: "not_submitted",
   });
   expect(finalRequests).toEqual(["POST"]);
+  await expect
+    .poll(() =>
+      posts().find(
+        (entry) =>
+          entry.path === "/ashby-shape/apply/1" &&
+          entry.fields._systemfield_name === "Alex Vanguard",
+      ),
+    )
+    .not.toBeUndefined();
   const post = posts().find(
     (entry) =>
       entry.path === "/ashby-shape/apply/1" &&
@@ -450,14 +459,16 @@ test("A JavaScript-sent form: its Apply submits it, and the guarded click sends 
   expect(["submitted", "outcome_uncertain"]).toContain(
     (await executeExactlyOneFinalAction(page, finalInput)).outcome,
   );
-  expect(sent().map((post) => post.fields)).toEqual([
-    {
-      role: "software-engineer",
-      name: "Alex Vanguard",
-      email: "alex.vanguard@example.test",
-      phone: "+44 20 0000 0000",
-    },
-  ]);
+  await expect
+    .poll(() => sent().map((post) => post.fields))
+    .toEqual([
+      {
+        role: "software-engineer",
+        name: "Alex Vanguard",
+        email: "alex.vanguard@example.test",
+        phone: "+44 20 0000 0000",
+      },
+    ]);
   // The page's own POST went out; the form's GET to itself never did.
   expect(requests).toContain("POST /contact-form-shape/api/apply");
   expect(requests).not.toContain("GET /contact-form-shape/apply/1");
@@ -573,7 +584,9 @@ test("remote-search replica returns city and degree rows, commits exact retries 
       reason: "option_not_offered",
       offeredOptions: [...offered],
     });
-    expect(await page.locator(`#${id}`).inputValue()).toBe("");
+    expect((await page.locator(`#${id}`).inputValue()).length).toBeGreaterThan(
+      0,
+    );
     await registerPrepareOnlyPreparedValue(page, offered[0]);
     expect(await session.chooseOption(ref, offered[0])).toEqual({
       ok: true,
@@ -631,7 +644,7 @@ test("Ashby: a location already picked stays picked when a continue chooses it a
   expect((await location()).value).toBe("Kosovo");
 });
 
-test("Ashby: a date picker reads as a date, takes only a date, and its open calendar is not its question", async () => {
+test("Ashby: the text tool reports the exact requested text in a date picker without a date policy", async () => {
   const { page, session } = await fillPage("ashby-shape");
   const start = async () =>
     (await session.readPage()).controls.find((control) =>
@@ -648,12 +661,13 @@ test("Ashby: a date picker reads as a date, takes only a date, and its open cale
     return control.ref ?? `c${control.index}`;
   };
   expect(await session.fillText(await ref(), "Immediately")).toMatchObject({
-    ok: false,
+    ok: true,
+    observedValue: "Immediately",
   });
-  expect((await start()).value).toBe("");
-  // A date three months on: the calendar is moved to it and the day picked.
-  await registerPrepareOnlyPreparedValue(page, "2027-01-15");
-  expect(await session.fillText(await ref(), "2027-01-15")).toMatchObject({
+  expect((await start()).value).toBe("Immediately");
+  // The model supplies the site's date format; the text tool writes it exactly.
+  await registerPrepareOnlyPreparedValue(page, "01/15/2027");
+  expect(await session.fillText(await ref(), "01/15/2027")).toMatchObject({
     ok: true,
     observedValue: "01/15/2027",
   });

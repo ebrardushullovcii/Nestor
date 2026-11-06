@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Page } from "playwright";
-import { bindTracePage, tracePageHands } from "./trace-page";
+import { bindTracePage, tracePageHands, traceFinalPage } from "./trace-page";
 
 afterEach(() => vi.unstubAllEnvs());
 test("tracing off preserves the original hands and performs no browser work", () => {
@@ -62,6 +62,10 @@ test("action capture uses the exact native-owned Page, masks secrets and never w
     expect(raw).toContain('"applicationKey":"application_1_attempt_1"');
     expect(raw).toContain('"action":"fillText"');
     expect(raw).toContain("Visible application text");
+    await traceFinalPage(page);
+    expect(readFileSync(path.join(dir, file), "utf8")).toContain(
+      '"action":"final_outcome"',
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -544,7 +544,9 @@ test.each([
       expect(await page.evaluate("window.queries.filter(Boolean)")).toEqual(
         queries,
       );
-      expect(await control.inputValue()).toBe("");
+      expect(await control.inputValue()).toBe(
+        await page.evaluate("window.queries.at(-1)"),
+      );
       expect(await control.getAttribute("data-committed")).toBe("");
       expect(await choosePageOption(page, control, offered[0]!)).toEqual({
         ok: true,
@@ -557,7 +559,7 @@ test.each([
   30_000,
 );
 
-test("an exact remote result that the field drops on blur is not a successful selection", async () => {
+test("selection reports the current value without blurring or clearing the picker", async () => {
   await withPage(async (page) => {
     await page.setContent(remotePicker({ Pristina: ["Pristina"] }, true));
     const result = await choosePageOption(
@@ -565,10 +567,7 @@ test("an exact remote result that the field drops on blur is not a successful se
       page.getByRole("combobox"),
       "Pristina",
     );
-    expect(result).toEqual({
-      ok: false,
-      error: 'The list did not keep "Pristina" selected.',
-    });
+    expect(result).toEqual({ ok: true, observedValue: "Pristina" });
   });
 });
 

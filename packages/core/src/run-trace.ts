@@ -26,6 +26,14 @@ export function traceEvent(
       path.join(dir, `events-${process.pid}.jsonl`),
       JSON.stringify(
         traceSafe({
+          ...(process.env.NESTOR_VERIFY_NET || process.env.NESTOR_VERIFY_AI
+            ? {
+                runConfiguration: {
+                  network: process.env.NESTOR_VERIFY_NET,
+                  ai: process.env.NESTOR_VERIFY_AI,
+                },
+              }
+            : {}),
           ...scope.getStore(),
           ...detail,
           event,

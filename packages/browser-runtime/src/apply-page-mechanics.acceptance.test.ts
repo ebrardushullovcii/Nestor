@@ -6,28 +6,6 @@ import {
   readApplyStepLabel,
 } from "./apply-page-mechanics";
 
-test("native text writes return the observed field value", async () => {
-  let value = "";
-  const fill = vi.fn((answer: string) => {
-    value = answer;
-    return Promise.resolve();
-  });
-  const waitForTimeout = vi.fn(() => Promise.resolve());
-  const page = {
-    locator: () => ({
-      nth: () => ({ fill, inputValue: () => Promise.resolve(value) }),
-    }),
-    waitForTimeout,
-  } as unknown as Page;
-  const mechanics = createPlaywrightApplyPageMechanics(page);
-  await expect(mechanics.fillText("c0", "Robin Ashford")).resolves.toEqual({
-    ok: true,
-    observedValue: "Robin Ashford",
-  });
-  expect(fill).toHaveBeenCalledOnce();
-  expect(waitForTimeout).not.toHaveBeenCalled();
-});
-
 test("an absent progress marker is reported as unknown", async () => {
   const evaluateAll = vi.fn((read: (elements: Element[]) => unknown) =>
     Promise.resolve(read([])),

@@ -79,6 +79,7 @@ export type ApplyExecutionOutcome =
       reason: string;
       stuck: boolean;
       needsPerson: boolean;
+      applicationClosed?: boolean;
       forPerson?: ApplyPersonRequest[];
     };
 
@@ -338,6 +339,7 @@ export async function executeApplyProposal(
       reason: proposal.reason,
       stuck: proposal.stuck === true,
       needsPerson: proposal.needsPerson === true,
+      applicationClosed: proposal.applicationClosed === true,
       forPerson: proposal.forPerson ?? [],
     };
   const observation = await config.hands.observe();
@@ -529,7 +531,10 @@ export async function executeApplyProposal(
       (a) => `answerLibrary.${a.id}` === sourceId,
     );
     const answer: ApplyAnswer = {
-      value,
+      value:
+        proposal.tool === "type" || proposal.tool === "select"
+          ? result.observedValue
+          : value,
       kind: control.questionKind,
       sourceId,
       sourceKind: saved

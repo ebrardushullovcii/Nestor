@@ -300,6 +300,11 @@ export function getApplyToolDefinitions(): ApplyToolDefinition[] {
               description: "Why you are finishing, in one plain sentence.",
             },
             stuck: { type: "boolean" },
+            applicationClosed: {
+              type: "boolean",
+              description:
+                "True when the site says this posting is closed or no longer accepts applications. Include the site's evidence in reason.",
+            },
             needsPerson: {
               type: "boolean",
               description:
@@ -505,6 +510,11 @@ export function parseApplyProposal(
         ? { ok: true, proposal: { tool: "submit_application", ref } }
         : needsRef();
     case "finish": {
+      if (
+        args.applicationClosed !== undefined &&
+        typeof args.applicationClosed !== "boolean"
+      )
+        return { ok: false, error: "applicationClosed must be a boolean." };
       const reason = asString(args.reason) ?? "Finished without saying why.";
       const rawItems = Array.isArray(args.forPerson) ? args.forPerson : [];
       const requests = rawItems.map((item) =>
@@ -522,6 +532,7 @@ export function parseApplyProposal(
           tool: "finish",
           reason,
           stuck: args.stuck === true,
+          applicationClosed: args.applicationClosed === true,
           // A named item is something waiting on the person.
           needsPerson: args.needsPerson === true || forPerson.length > 0,
           forPerson,
@@ -551,7 +562,7 @@ export const FILL_FIELDS_TOOL_DEFINITION: ApplyToolDefinition = {
         finishWhenReady: {
           type: "boolean",
           description:
-            "On the final page, finish after filling and verifying every answer. Uses the same readiness checks as finish; never presses Send.",
+            "On the final page under Fill in for me, finish after filling; never presses Send. Under Send for me, follow the submit_application instruction instead.",
         },
         fields: {
           type: "array",
