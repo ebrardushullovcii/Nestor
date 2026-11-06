@@ -33,10 +33,12 @@ the gateway after a 20-second gap without a completion event.
   `packages/ai-providers/src/model-request-transport.ts`.
 - Requests stream by default. The Responses API is asked for reasoning
   summaries; the text is discarded and only serves as a liveness signal.
-- Two clocks per request. An idle clock (default 120s of silence) presumes the
-  connection dead and retries. A total clock (per operation: 300s for
-  structured calls, agent turns and resume import stages, 600s for resume drafts, 240s
-  for search-results extraction, 600s for vision) is the most a user waits.
+- An idle clock (default 180s without model progress) presumes the connection
+  dead and retries. Ordinary structured calls, assistant turns and resume
+  proposals have no default absolute deadline; explicit operator timeouts
+  still win. Resume import stages keep their measured 300s/600s totals,
+  search-results extraction retains its extraction-specific total, and vision
+  retains its 600s total.
   Resume import stages count only model progress toward the idle clock
   (non-whitespace text, tool arguments or reasoning deltas; SSE keepalives and
   whitespace-only JSON output do not restart it). Other operations keep

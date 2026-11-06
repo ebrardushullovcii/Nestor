@@ -1,3 +1,5 @@
+import { ModelOutputLimitError } from "@nestor/agent-runtime";
+import type { ModelTurnStreamEvent } from "@nestor/agent-runtime";
 /**
  * Resilient model request transport shared by every OpenAI-compatible call
  * Job Finder makes (text, tools, vision).
@@ -40,7 +42,7 @@ import {
   recordModelRequestUsage,
 } from "./model-usage-scope";
 
-export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 120_000;
+export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 180_000;
 export const DEFAULT_MODEL_MAX_ATTEMPTS = 5;
 export const DEFAULT_MODEL_RETRY_BASE_DELAY_MS = 1_000;
 export const DEFAULT_MODEL_RETRY_MAX_DELAY_MS = 20_000;
@@ -76,11 +78,7 @@ export type ModelRequestEvent =
  * retried attempt starts with `attempt_started` and its text replaces the
  * earlier partial text rather than extending it.
  */
-export type ModelStreamEvent =
-  | { type: "attempt_started"; attempt: number }
-  | { type: "text_delta"; text: string }
-  | { type: "reasoning_delta"; text: string }
-  | { type: "tool_call_started"; index: number; name: string };
+export type ModelStreamEvent = ModelTurnStreamEvent;
 
 export interface ModelRequestResilienceOptions {
   /** Longest gap without model progress before an attempt is presumed dead. */
@@ -188,6 +186,7 @@ function rejectIncompleteOutput(payload: unknown, apiMode: ModelApiMode): void {
       typeof details?.reason === "string"
         ? details.reason
         : "unspecified reason";
+    if (reason === "max_output_tokens") throw new ModelOutputLimitError(reason);
     throw new Error(
       `The AI service returned an incomplete response: ${reason}`,
     );
@@ -201,6 +200,8 @@ function rejectIncompleteOutput(payload: unknown, apiMode: ModelApiMode): void {
     (choice.finish_reason === "length" ||
       choice.finish_reason === "content_filter")
   ) {
+    if (choice.finish_reason === "length")
+      throw new ModelOutputLimitError("length");
     throw new Error(
       `The AI service returned an incomplete response: ${choice.finish_reason}`,
     );
@@ -350,6 +351,7 @@ function foldChatCompletionsChunk(
         }
         if (typeof fn.arguments === "string") {
           entry.arguments += fn.arguments;
+          if (fn.arguments) emit?.({ type: "tool_call_delta", index });
         }
       }
       state.toolCalls.set(index, entry);
@@ -566,6 +568,23 @@ async function readStreamedPayload(
           typeof parsed.output_index === "number" ? parsed.output_index : 0,
         name: parsed.item.name,
       });
+      return;
+    }
+    if (type === "response.function_call_arguments.delta") {
+      emit?.({
+        type: "tool_call_delta",
+        index:
+          typeof parsed.output_index === "number" ? parsed.output_index : 0,
+      });
+      return;
+    }
+    if (
+      type.startsWith("response.reasoning") &&
+      type.endsWith(".delta") &&
+      typeof parsed.delta === "string" &&
+      parsed.delta
+    ) {
+      emit?.({ type: "reasoning_delta", text: parsed.delta });
       return;
     }
     if (type === "response.output_item.done" && isRecord(parsed.item)) {
@@ -894,11 +913,13 @@ async function performModelRequestAttempts(
       remainingMs,
       input.attemptTimeoutMs ?? remainingMs,
     );
-    const totalTimer = setTimeout(() => {
-      abortReason =
-        abortReason ?? (attemptBudget < remainingMs ? "attempt" : "total");
-      attemptController.abort();
-    }, attemptBudget);
+    const totalTimer = Number.isFinite(attemptBudget)
+      ? setTimeout(() => {
+          abortReason =
+            abortReason ?? (attemptBudget < remainingMs ? "attempt" : "total");
+          attemptController.abort();
+        }, attemptBudget)
+      : undefined;
     const armIdle = () => {
       if (idleTimer) {
         clearTimeout(idleTimer);

@@ -82,6 +82,46 @@ function tool(
 }
 
 describe("runConversationTurn", () => {
+  it("continues useful work past the former 80-call and 45-minute ceilings", async () => {
+    let clock = 0;
+    const replies = Array.from({ length: 90 }, (_, index) => ({
+      toolCalls: [call(`step_${index}`, "read", { index })],
+    }));
+    const result = await runConversationTurn({
+      model: scripted([...replies, { content: "Done" }]),
+      tools: [
+        tool("read", () => {
+          clock += 60_000;
+          return Promise.resolve({ kind: "ok", content: "Read another item" });
+        }),
+      ],
+      assembleMessages: (turn) => Promise.resolve([...turn]),
+      now: () => clock,
+    });
+    expect(result.ending).toBe("replied");
+    expect(result.modelCalls).toBe(91);
+  });
+
+  it("stops repeated identical tool batches without imposing a total call ceiling", async () => {
+    const result = await runConversationTurn({
+      model: scripted(
+        Array.from({ length: 20 }, (_, index) => ({
+          toolCalls: [call(`repeat_${index}`, "read")],
+        })),
+      ),
+      tools: [
+        tool("read", () =>
+          Promise.resolve({ kind: "ok", content: "No change" }),
+        ),
+      ],
+      assembleMessages: (turn) => Promise.resolve([...turn]),
+    });
+    expect(result.ending).toBe("model_failed");
+    expect(result.error).toBeInstanceOf(Error);
+    if (result.error instanceof Error)
+      expect(result.error.message).toContain("without progress");
+  });
+
   it("retries an empty model response and never reports it as a completed action", async () => {
     const model = scripted([{}, { content: "Nothing has changed; there is no queue left to pause." }]);
     const result = await runConversationTurn({ model, tools: [], assembleMessages: async turn => [...turn] });

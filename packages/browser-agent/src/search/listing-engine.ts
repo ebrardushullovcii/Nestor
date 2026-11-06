@@ -104,17 +104,16 @@ async function ask<Output, Input>(
   instruction: string,
   data: unknown,
   schema: z.ZodType<Output, z.ZodTypeDef, Input>,
-  maxOutputTokens: number,
+  _legacyOutputEstimate: number,
   reasoningTask: BrowserAgentReasoningTask,
   jsonSchema?: { name: string; schema: Record<string, unknown> },
 ): Promise<Output> {
-  // Reasoning and the JSON answer share this allowance. Tiny classification
-  // answers can still exhaust it before emitting their first visible token.
-  const initialBudget = Math.max(8_000, maxOutputTokens);
   const outputLimit = new ListingOutputLimitError(
     "The AI response reached its output limit. Try this site again to continue.",
   );
-  for (const budget of [initialBudget, initialBudget * 2]) {
+  // The provider adapter supplies the model maximum. Keep one fresh retry
+  // even at that maximum; never parse or cache a truncated judgment.
+  for (const attempt of [0, 1]) {
     model.signal?.throwIfAborted();
     let reply: Awaited<ReturnType<LLMClient["chatWithTools"]>>;
     try {
@@ -130,7 +129,6 @@ async function ask<Output, Input>(
         {
           ...(model.signal ? { signal: model.signal } : {}),
           reasoningTask,
-          maxOutputTokens: budget,
           includeUsage: true,
           // The selected Chat gateway rejects response_format=json_object.
           // The prompt requests JSON; parsing and per-row schemas still validate it.
@@ -148,12 +146,12 @@ async function ask<Output, Input>(
         )
       )
         throw error;
-      if (budget === initialBudget) continue;
+      if (attempt === 0) continue;
       throw outputLimit;
     }
     if (reply.usage) model.onUsage?.(reply.usage, reasoningTask);
     if (["length", "max_output_tokens"].includes(reply.finishReason ?? "")) {
-      if (budget === initialBudget) continue;
+      if (attempt === 0) continue;
       throw outputLimit;
     }
     const raw = (reply.content ?? "")

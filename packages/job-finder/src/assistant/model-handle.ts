@@ -36,7 +36,7 @@ export function createAssistantModelHandle(
     scripted: false,
     capabilities: {
       contextWindowTokens: route.capabilities.contextWindowTokens,
-      maxOutputTokens: route.capabilities.maxOutputTokens,
+      reservedOutputTokens: route.capabilities.reservedOutputTokens,
       images: route.capabilities.images,
     },
     createModel(conversationId) {
@@ -68,7 +68,6 @@ export function createAssistantModelHandle(
         [],
         {
           conversationKey: `assistant-summary:${conversationId}`,
-          maxOutputTokens: 3_000,
         },
       );
       return result.content ?? "";
@@ -84,7 +83,7 @@ export function createScriptedAssistantModelHandle(
     scripted: true,
     capabilities: {
       contextWindowTokens: options.contextWindowTokens ?? 64_000,
-      maxOutputTokens: 4_000,
+      reservedOutputTokens: 4_000,
       images: false,
     },
     createModel: () =>

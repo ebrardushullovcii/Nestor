@@ -22,10 +22,10 @@ assistant's capability table still refused them.
 - Default text, tools and image routes to `deepseek-v4.1-flash` via Chat
   Completions. Use the existing DeepSeek sidebar's low-effort general default;
   this is a routing baseline, not a quality conclusion from a search contrast.
-- Keep effort independent by task: bounded fit batches and title screening
-  default to none on DeepSeek; search/page/application turns stay low and claim
-  checks stay medium. Aggressive resume writing keeps high. Explicit task and
-  role overrides remain authoritative; there is no implicit model fallback.
+- Every task follows the person's main reasoning effort unless an explicit
+  task or role override is configured. Earlier lower-effort defaults were
+  measured under output caps and no longer override that choice. Aggressive
+  resume writing retains its independently configured route.
 - Declare accepted image-input transport without claiming OCR or visual-task
   accuracy. Keep local Whisper or an explicit audio model for transcription.
 - Retain full listing evidence and valid judgments when a row is malformed.

@@ -326,6 +326,9 @@ function createModelAdapter(
           [...input.tools],
           {
             ...(input.signal ? { signal: input.signal } : {}),
+            ...(input.onStreamEvent
+              ? { onStreamEvent: input.onStreamEvent }
+              : {}),
             ...(conversationKey ? { conversationKey } : {}),
             ...(options?.reasoningTask
               ? { reasoningTask: options.reasoningTask }
@@ -615,15 +618,6 @@ export async function runResumeGenerationAgentTask(input: {
     input.request.selectedTemplateId ?? input.request.settings.resumeTemplateId;
   let hasComposedProposal = false;
   let hasRenderedPreview = false;
-  const generationStartedAtMs = Date.now();
-  const generationBudgetMs = 600_000;
-  const generationElapsedMs = () => {
-    const elapsedMs = Math.max(0, Date.now() - generationStartedAtMs);
-    const excludedMs = input.request.getExcludedElapsedMs?.() ?? 0;
-    return Number.isFinite(excludedMs)
-      ? elapsedMs - Math.min(elapsedMs, Math.max(0, excludedMs))
-      : elapsedMs;
-  };
   type ToolResult = {
     draft?: Record<string, unknown>;
     value?: unknown;
@@ -712,8 +706,6 @@ export async function runResumeGenerationAgentTask(input: {
               draft: preview,
               templateId: selectedTemplateId,
               ...(signal ? { signal } : {}),
-              getRemainingBudgetMs: () =>
-                Math.max(0, generationBudgetMs - generationElapsedMs()),
             })
           : null,
       );
@@ -761,8 +753,6 @@ export async function runResumeGenerationAgentTask(input: {
             draft: completeTailoredResumeDraft(shorter, state),
             templateId: selectedTemplateId,
             ...(signal ? { signal } : {}),
-            getRemainingBudgetMs: () =>
-              Math.max(0, generationBudgetMs - generationElapsedMs()),
           });
           // Leaving lines off cannot add a claim; if a check objects to more
           // than before, the longer draft stands.
@@ -1117,15 +1107,16 @@ export async function runResumeGenerationAgentTask(input: {
             : {}),
         }),
       }),
-    timeBudgetMs: generationBudgetMs,
+    timeBudgetMs: 60 * 60_000,
+    modelTurnTimeoutMs: Infinity,
     ...(input.request.signal ? { signal: input.request.signal } : {}),
     ...(input.request.getExcludedElapsedMs
       ? { getExcludedElapsedMs: input.request.getExcludedElapsedMs }
       : {}),
-    // One call; the others only repair a proposal that did not render.
-    providerCallBudget: 3,
-    noProgressLimit: 2,
-    emergencyCeiling: 4,
+    // A clean proposal still finishes immediately. Let useful repairs finish.
+    providerCallBudget: Infinity,
+    noProgressLimit: 120,
+    emergencyCeiling: Infinity,
     // workingProposal above is the proposal; the replayed call is a note.
     draftShownInContext: true,
   });

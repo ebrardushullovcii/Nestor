@@ -1,6 +1,7 @@
 import { createOpenAiCompatibleJobFinderAiClient } from "./openai-compatible";
 import {
   DEFAULT_OPENCODE_GO_BASE_URL,
+  DEFAULT_TEXT_MODEL_REASONING_EFFORT,
   parseModelApiMode,
   parseModelReasoningEffort,
   type ModelApiMode,
@@ -15,14 +16,15 @@ import type { AgentCapableJobFinderAiClient, StringMap } from "./shared";
 /**
  * The assistant sidebar's model route (ADR 0037).
  *
- * The sidebar talks a lot and decides quickly, so it gets its own route with
- * low reasoning effort by default. Everything that shapes a request comes
+ * The sidebar follows the main reasoning effort unless explicitly overridden.
+ * Everything that shapes a request comes
  * from this table; prompts, tools and the UI never depend on a wire format.
  */
 
 export const DEFAULT_ASSISTANT_MODEL = "deepseek-v4.1-flash";
 export const DEFAULT_ASSISTANT_API_MODE: ModelApiMode = "chat_completions";
-export const DEFAULT_ASSISTANT_REASONING_EFFORT: ModelReasoningEffort = "low";
+export const DEFAULT_ASSISTANT_REASONING_EFFORT =
+  DEFAULT_TEXT_MODEL_REASONING_EFFORT;
 export const ALTERNATIVE_ASSISTANT_MODEL = "muse-spark-1.3-contributor";
 
 export interface AssistantModelCapabilities {
@@ -33,7 +35,7 @@ export interface AssistantModelCapabilities {
   /** Tokens the route accepts, prompt and output together. */
   contextWindowTokens: number;
   /** Output reserved for one answer when budgeting the prompt. */
-  maxOutputTokens: number;
+  reservedOutputTokens: number;
   images: boolean;
   /** Private state that must return to the route on later tool turns. */
   continuation: "reasoning_content" | "none";
@@ -50,7 +52,7 @@ const CAPABILITY_TABLE: Record<
     tools: true,
     streaming: true,
     contextWindowTokens: 128_000,
-    maxOutputTokens: 8_000,
+    reservedOutputTokens: 8_000,
     // Simple image input is accepted on the configured gateway route. This
     // declares transport support, not OCR or visual-task accuracy.
     images: true,
@@ -61,7 +63,7 @@ const CAPABILITY_TABLE: Record<
     tools: true,
     streaming: true,
     contextWindowTokens: 196_000,
-    maxOutputTokens: 12_000,
+    reservedOutputTokens: 12_000,
     images: true,
     continuation: "none",
   },
@@ -72,7 +74,7 @@ const CONSERVATIVE_ROW: Omit<AssistantModelCapabilities, "model" | "known"> = {
   tools: true,
   streaming: true,
   contextWindowTokens: 64_000,
-  maxOutputTokens: 6_000,
+  reservedOutputTokens: 6_000,
   images: false,
   continuation: "none",
 };
@@ -188,6 +190,7 @@ export function resolveAssistantModelRouteFromEnvironment(
       : known.apiMode);
   const reasoningEffort =
     parseModelReasoningEffort(env.NESTOR_AI_ASSISTANT_REASONING_EFFORT) ??
+    parseModelReasoningEffort(env.NESTOR_AI_REASONING_EFFORT) ??
     DEFAULT_ASSISTANT_REASONING_EFFORT;
   const contextWindowTokens = parseConfiguredPositiveInteger(
     env.NESTOR_AI_ASSISTANT_CONTEXT_WINDOW_TOKENS,

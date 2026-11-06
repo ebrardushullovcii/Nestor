@@ -118,7 +118,7 @@ test.each([
 );
 
 test.each([
-  [undefined, "none"],
+  [undefined, "low"],
   ["high", "high"],
 ] as const)(
   "bundled fit effort honors %s while a full read keeps its own effort",

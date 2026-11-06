@@ -99,7 +99,7 @@ it("recovers an empty long-chat reply without losing authorization or replaying 
         systemPrompt: "system",
         turnMessages,
         contextWindowTokens: 64000,
-        maxOutputTokens: 1000,
+        reservedOutputTokens: 1000,
         toolSchemaTokens: 0,
         calibrator: createTokenCalibrator(),
         summarize: null,

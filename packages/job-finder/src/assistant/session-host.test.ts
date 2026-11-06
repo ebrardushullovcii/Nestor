@@ -1346,7 +1346,7 @@ describe("assistant session host", () => {
       systemPrompt: "system",
       turnMessages: [],
       contextWindowTokens: 64_000,
-      maxOutputTokens: 4_000,
+      reservedOutputTokens: 4_000,
       toolSchemaTokens: 0,
       calibrator: createTokenCalibrator(),
       summarize: null,

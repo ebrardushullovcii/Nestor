@@ -235,7 +235,7 @@ const claimInput = {
   claims: [{ id: "a", section: "Experience", text: "Built SQL dashboards." }],
 };
 
-test("each task asks for its own effort; other writers keep their route effort", async () => {
+test("every task inherits the main effort unless explicitly overridden", async () => {
   const requests = captureEfforts();
   const client = createJobFinderAiClientFromEnvironment(
     createEnvironment(ownerEnvironment),
@@ -271,17 +271,9 @@ test("each task asks for its own effort; other writers keep their route effort",
     job: createJobPosting(),
   });
 
-  expect(requests.map((request) => request.effort)).toEqual([
-    "low", // search turn
-    "low", // application form turn
-    "medium", // answer fact check
-    "high", // resume writer: NESTOR_AI_REASONING_EFFORT
-    "high", // untagged tool work: NESTOR_AI_AGENT_REASONING_EFFORT
-    "low", // page read
-    "medium", // fit batch
-    "medium", // resume claim check
-    "high", // full listing read
-  ]);
+  expect(requests.map((request) => request.effort)).toEqual(
+    Array(9).fill("high"),
+  );
 });
 
 test.each([undefined, "high"])(
@@ -309,7 +301,7 @@ test.each([undefined, "high"])(
         reasoningTask ? { reasoningTask } : {},
       );
     expect(requests.map((request) => request.effort)).toEqual([
-      override ?? "medium",
+      override ?? "high",
       "high",
       "high",
     ]);
@@ -378,7 +370,7 @@ test("the aggressive route keeps its model, but its fact checks use the check ef
     ...claimInput,
     tailoringStrength: "aggressive",
   });
-  expect(requests).toEqual([{ model: "aggressive-model", effort: "medium" }]);
+  expect(requests).toEqual([{ model: "aggressive-model", effort: "max" }]);
 });
 
 test("a full listing read nobody waits on runs at the fit-check effort", async () => {
@@ -394,7 +386,7 @@ test("a full listing read nobody waits on runs at the fit-check effort", async (
   await client.assessJobFit({ ...input, background: true });
   await client.assessJobFit(input);
   expect(requests.map((request) => request.effort)).toEqual([
-    "medium", // a search refreshing an older full read
+    "high", // background work follows the same choice
     "high", // the person pressed "Judge fit"
   ]);
 });
@@ -421,8 +413,8 @@ test("card and detail extraction preserve the existing page-read effort and its 
     }
   }
   expect(requests.map((request) => request.effort)).toEqual([
-    "low",
-    "low",
+    "high",
+    "high",
     "medium",
     "medium",
   ]);

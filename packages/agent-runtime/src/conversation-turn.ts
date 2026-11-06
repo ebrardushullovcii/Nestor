@@ -1,3 +1,12 @@
+import {
+  ModelOutputLimitError,
+  isModelOutputLimit,
+} from "./model-output-error";
+import {
+  ModelTurnTimeoutError,
+  runModelTurn,
+  type ModelTurnStreamEvent,
+} from "./model-turn";
 import type {
   AgentLoopContinuation,
   AgentLoopMessage,
@@ -35,11 +44,7 @@ export interface ConversationTurnUsage {
   reasoningTokens: number;
 }
 
-export type ConversationStreamEvent =
-  | { type: "attempt_started"; attempt: number }
-  | { type: "text_delta"; text: string }
-  | { type: "reasoning_delta"; text: string }
-  | { type: "tool_call_started"; index: number; name: string };
+export type ConversationStreamEvent = ModelTurnStreamEvent;
 
 export interface ConversationModel {
   chatWithTools: (
@@ -98,6 +103,10 @@ export interface ConversationTurnCeilings {
   toolTimeoutMs?: number;
   modelCallTimeoutMs?: number;
   maxOutputTokens?: number;
+  /** Silence between model stream events, not elapsed reasoning time. */
+  modelIdleTimeoutMs?: number;
+  /** Repeated identical tool batches without progress before stopping. */
+  noProgressStepLimit?: number;
 }
 
 export interface RunConversationTurnOptions {
@@ -106,6 +115,7 @@ export interface RunConversationTurnOptions {
   /** Optional lazy catalog; execution still uses the host's validated registry. */
   getToolDefinitions?: () => readonly AgentLoopToolDefinition[];
   /** Prepare one fresh-context retry after a response with no usable output. */
+  onOutputLimitRetry?: () => void | Promise<void>;
   onEmptyReply?: (detail: {
     finishReason: string | null;
     usage: ConversationTurnUsage | null;
@@ -152,10 +162,10 @@ export interface ConversationTurnResult {
   error: unknown;
 }
 
-const DEFAULT_MAX_MODEL_CALLS = 80;
-const DEFAULT_TIME_BUDGET_MS = 45 * 60_000;
+const DEFAULT_MAX_MODEL_CALLS = Infinity;
+const DEFAULT_TIME_BUDGET_MS = Infinity;
 const DEFAULT_TOOL_TIMEOUT_MS = 180_000;
-const DEFAULT_MODEL_CALL_TIMEOUT_MS = 300_000;
+const DEFAULT_MODEL_CALL_TIMEOUT_MS = Infinity;
 const DEFAULT_TOOL_RESULT_LIMIT_CHARS = 16_000;
 const STATUS_ARGUMENT = "status";
 
@@ -321,6 +331,8 @@ export async function runConversationTurn(
   let modelCalls = 0;
   let emptyReplies = 0;
   let step = 0;
+  let lastBatch = "";
+  let repeatedBatches = 0;
 
   const emit = async (event: ConversationTurnEvent) => {
     try {
@@ -371,34 +383,65 @@ export async function runConversationTurn(
     modelCalls += 1;
     const call = modelCalls;
     await emit({ type: "model_call_started", call });
-    const callTimeout = new AbortController();
-    const timer = setTimeout(
-      () => callTimeout.abort(),
-      Math.max(
-        10,
-        Math.min(modelCallTimeoutMs, timeBudgetMs - (now() - startedAt)),
-      ),
-    );
-    const callSignal = options.signal
-      ? AbortSignal.any([options.signal, callTimeout.signal])
-      : callTimeout.signal;
     let response: Awaited<ReturnType<ConversationModel["chatWithTools"]>>;
-    try {
-      response = await options.model.chatWithTools(messages, definitions, {
-        signal: callSignal,
-        ...(options.ceilings?.maxOutputTokens
-          ? { maxOutputTokens: options.ceilings.maxOutputTokens }
-          : {}),
-        onStreamEvent: (event) => {
-          void emit({ type: "stream", call, event });
-        },
-      });
-    } catch (error) {
-      if (options.signal?.aborted) return result("aborted");
-      if (callTimeout.signal.aborted) return result("timed_out", { error });
-      return result("model_failed", { error });
-    } finally {
-      clearTimeout(timer);
+    let idleRetries = 0;
+    let outputRetries = 0;
+    let outputLimit = options.ceilings?.maxOutputTokens;
+    for (;;) {
+      try {
+        response = await runModelTurn(
+          (turnOptions) =>
+            options.model.chatWithTools(messages, definitions, {
+              ...turnOptions,
+              ...(outputLimit ? { maxOutputTokens: outputLimit } : {}),
+            }),
+          {
+            signal: options.signal,
+            timeoutMs: Math.min(
+              modelCallTimeoutMs,
+              timeBudgetMs - (now() - startedAt),
+            ),
+            idleTimeoutMs: options.ceilings?.modelIdleTimeoutMs,
+            onStreamEvent: (event) => {
+              void emit({ type: "stream", call, event });
+            },
+          },
+        );
+        if (
+          ["length", "max_output_tokens"].includes(response.finishReason ?? "")
+        ) {
+          addUsage(usage, response.usage);
+          throw new ModelOutputLimitError(response.finishReason);
+        }
+        break;
+      } catch (error) {
+        if (options.signal?.aborted) return result("aborted");
+        if (isModelOutputLimit(error) && outputRetries++ === 0) {
+          // Existing explicit caps can grow. With no cap the route already
+          // supplies its maximum; retry once without changing any history.
+          if (outputLimit !== undefined) outputLimit *= 2;
+          modelCalls += 1;
+          await options.onOutputLimitRetry?.();
+          continue;
+        }
+        if (
+          error instanceof ModelTurnTimeoutError &&
+          error.kind === "idle" &&
+          idleRetries++ === 0 &&
+          now() - startedAt < timeBudgetMs
+        ) {
+          modelCalls += 1;
+          await emit({
+            type: "stream",
+            call,
+            event: { type: "attempt_started", attempt: 1 },
+          });
+          continue;
+        }
+        if (error instanceof ModelTurnTimeoutError && error.kind === "absolute")
+          return result("timed_out", { error });
+        return result("model_failed", { error });
+      }
     }
     addUsage(usage, response.usage);
     await emit({
@@ -451,6 +494,8 @@ export async function runConversationTurn(
       await emit({ type: "commentary", text: content });
     }
 
+    const batchStart = turnMessages.length;
+    let madeProgress = false;
     let redirected = false;
     let batchSucceeded = true;
     for (const [index, toolCall] of toolCalls.entries()) {
@@ -613,6 +658,7 @@ export async function runConversationTurn(
         }
         continue;
       }
+      madeProgress ||= outcome.progress === true;
       if (outcome.status === "failed" || outcome.status === "refused")
         batchSucceeded = false;
       let content = outcome.content;
@@ -636,6 +682,22 @@ export async function runConversationTurn(
         summary: content.split("\n")[0]?.slice(0, 300) ?? "",
       });
     }
+    const batch = JSON.stringify({
+      calls: toolCalls.map(({ function: fn }) => fn),
+      results: turnMessages
+        .slice(batchStart)
+        .filter((message) => message.role === "tool")
+        .map((message) => message.content),
+    });
+    repeatedBatches =
+      !madeProgress && batch === lastBatch ? repeatedBatches + 1 : 0;
+    lastBatch = batch;
+    if (repeatedBatches >= (options.ceilings?.noProgressStepLimit ?? 12))
+      return result("model_failed", {
+        error: new Error(
+          "The assistant kept repeating the same step without progress. Try a different approach.",
+        ),
+      });
   }
   return result("ceiling");
 }

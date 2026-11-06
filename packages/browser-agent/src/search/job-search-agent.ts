@@ -168,7 +168,7 @@ export function buildExtractionSelectionContext(
 
 // Runaway protection only: productive searches routinely need hundreds of turns.
 /** How long one search turn may wait for the model before it is asked again. */
-const SEARCH_MODEL_TURN_TIMEOUT_MS = 90_000;
+const SEARCH_MODEL_TURN_TIMEOUT_MS = Infinity;
 const DEFAULT_MAX_STEPS = 10_000;
 const DEFAULT_TIME_BUDGET_MS = 60 * 60_000;
 const DEFAULT_NO_PROGRESS_STEP_LIMIT = 24;
@@ -1567,11 +1567,8 @@ export async function runJobSearchAgent(
     ceilings: {
       maxSteps: Math.max(config.maxSteps, DEFAULT_MAX_STEPS),
       timeBudgetMs: config.runControl?.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS,
-      // A turn that timed out or hit a temporary service failure ran no
-      // tools, so asking again repeats nothing. Search turns usually answer
-      // in seconds; one still silent after 90s is a stalled request, and a
-      // fresh one is faster than waiting out the old one (live turns stalled
-      // for over three minutes).
+      // A working stream may keep thinking. The shared loop retries a silent
+      // connection once; transient service failures retain their own retries.
       modelTurnTimeoutMs: SEARCH_MODEL_TURN_TIMEOUT_MS,
       modelTurnTimeoutRetries: 2,
       noProgressStepLimit:

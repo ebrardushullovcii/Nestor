@@ -91,7 +91,7 @@ export interface AssistantModelHandle {
   scripted: boolean;
   capabilities: {
     contextWindowTokens: number;
-    maxOutputTokens: number;
+    reservedOutputTokens: number;
     images: boolean;
   };
   createModel(conversationId: string): ConversationModel;
@@ -760,6 +760,13 @@ export class AssistantSessionHost {
         },
         tools,
         getToolDefinitions: definitions,
+        onOutputLimitRetry: () =>
+          this.appendNotice(
+            conversationId,
+            live.turn.id,
+            "continued",
+            "The AI response reached its output limit. Retrying with the full output allowance.",
+          ),
         onEmptyReply: async (detail) => {
           recoverEmptyReply = true;
           // A fresh provider cache key mirrors the successful new-chat path;
@@ -785,9 +792,6 @@ export class AssistantSessionHost {
         },
         signal: live.controller.signal,
         isCurrent: () => live.generation === live.turn.generation,
-        ceilings: {
-          maxOutputTokens: Math.min(handle.capabilities.maxOutputTokens, 8_000),
-        },
         storeOverflow: (toolName, content) => {
           const store = this.handleStoreFor(conversationId);
           const lines = content.split("\n");
@@ -820,7 +824,7 @@ export class AssistantSessionHost {
             currentContext,
             turnMessages,
             contextWindowTokens: handle.capabilities.contextWindowTokens,
-            maxOutputTokens: handle.capabilities.maxOutputTokens,
+            reservedOutputTokens: handle.capabilities.reservedOutputTokens,
             toolSchemaTokens: estimateJsonTokens(
               definitions().map(withStatusArgument),
             ),
@@ -1644,7 +1648,7 @@ export class AssistantSessionHost {
                       { role: "user", content: prompt },
                     ],
                     [],
-                    { signal: live.controller.signal, maxOutputTokens: 3_000 },
+                    { signal: live.controller.signal },
                   );
                 return result.content ?? "";
               },
@@ -2498,7 +2502,7 @@ export class AssistantSessionHost {
       scripted: true,
       capabilities: {
         contextWindowTokens: 1,
-        maxOutputTokens: 1,
+        reservedOutputTokens: 1,
         images: false,
       },
       createModel: () => {

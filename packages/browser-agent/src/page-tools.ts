@@ -608,6 +608,7 @@ export function createPageTools(
           },
         },
       },
+      isWait: true,
       execute: async (raw) => {
         const requested = parseToolArguments(raw).milliseconds;
         const milliseconds =

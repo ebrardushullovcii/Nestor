@@ -113,6 +113,28 @@ describe("performModelRequest after the key is rejected", () => {
 });
 
 describe("performModelRequest", () => {
+  test("an infinite total budget never arms an overflowing one-millisecond timer", async () => {
+    vi.useFakeTimers();
+    try {
+      let requestSignal: AbortSignal | undefined;
+      const pending = performModelRequest({
+        ...baseInput,
+        totalTimeoutMs: Infinity,
+        fetchImpl: (_url, init) => {
+          requestSignal = init?.signal ?? undefined;
+          return new Promise(resolve => setTimeout(() => resolve(jsonResponse({ choices: [{ message: { content: "Complete" }, finish_reason: "stop" }] })), 100));
+        },
+      });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(requestSignal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(90);
+      expect((await pending).choices?.[0]?.message?.content).toBe("Complete");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("returns complete chat output, reasoning, tool calls and final usage without waiting for EOF", async () => {
     const cancelled = vi.fn();
     const response = sseResponse(

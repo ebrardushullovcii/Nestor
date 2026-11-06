@@ -1,3 +1,4 @@
+import { modelOutputLimit } from "./model-output-limit";
 import type { ModelTokenUsage } from "@nestor/contracts";
 
 export const modelApiModes = ["responses", "chat_completions"] as const;
@@ -416,6 +417,11 @@ export function buildModelRequestBody(input: {
   /** Chat Completions only: ask for a usage chunk at the end of a stream. */
   includeStreamUsage?: boolean | undefined;
 }): Record<string, unknown> {
+  const maximum = modelOutputLimit(input.model);
+  const maxOutputTokens =
+    maximum === undefined
+      ? input.maxOutputTokens
+      : Math.min(input.maxOutputTokens ?? maximum, maximum);
   if (input.apiMode === "chat_completions") {
     return {
       ...(input.includeStreamUsage
@@ -443,8 +449,8 @@ export function buildModelRequestBody(input: {
               : { parallel_tool_calls: input.parallelToolCalls }),
           }
         : {}),
-      ...(typeof input.maxOutputTokens === "number"
-        ? { max_tokens: input.maxOutputTokens }
+      ...(typeof maxOutputTokens === "number"
+        ? { max_tokens: maxOutputTokens }
         : {}),
     };
   }
@@ -483,8 +489,8 @@ export function buildModelRequestBody(input: {
             : { parallel_tool_calls: input.parallelToolCalls }),
         }
       : {}),
-    ...(typeof input.maxOutputTokens === "number"
-      ? { max_output_tokens: input.maxOutputTokens }
+    ...(typeof maxOutputTokens === "number"
+      ? { max_output_tokens: maxOutputTokens }
       : {}),
   };
 }
@@ -521,14 +527,7 @@ export const modelReasoningTasks = [
 ] as const;
 export type ModelReasoningTask = (typeof modelReasoningTasks)[number];
 
-/**
- * Product defaults and env overrides per task. Search turns, page reads and
- * form turns are short "what next / what is on this page" decisions: low.
- * Fit batches and fact checks are verdicts that stand without a rule
- * recomputing them (ADR 0041): medium. A full listing read keeps the main
- * effort unless its own variable says otherwise. Muse resume writing uses
- * medium unless its task effort is explicitly overridden.
- */
+/** Explicit task overrides; otherwise every task follows the main effort. */
 const TASK_REASONING_EFFORT_SETTINGS: Record<
   ModelReasoningTask,
   { env: string; fallback: ModelReasoningEffort | null }
@@ -537,29 +536,27 @@ const TASK_REASONING_EFFORT_SETTINGS: Record<
     env: "NESTOR_AI_RESUME_WRITER_REASONING_EFFORT",
     fallback: null,
   },
-  // Reading a resume into typed candidates is extraction: the document is
-  // the answer, so it thinks at low effort like the other read tasks.
   resume_import: {
     env: "NESTOR_AI_RESUME_IMPORT_REASONING_EFFORT",
-    fallback: "low",
+    fallback: null,
   },
   listing_read: {
     env: "NESTOR_AI_LISTING_READ_REASONING_EFFORT",
     fallback: null,
   },
-  search: { env: "NESTOR_AI_SEARCH_REASONING_EFFORT", fallback: "low" },
-  page_read: { env: "NESTOR_AI_PAGE_READ_REASONING_EFFORT", fallback: "low" },
-  fit_batch: { env: "NESTOR_AI_FIT_REASONING_EFFORT", fallback: "medium" },
+  search: { env: "NESTOR_AI_SEARCH_REASONING_EFFORT", fallback: null },
+  page_read: { env: "NESTOR_AI_PAGE_READ_REASONING_EFFORT", fallback: null },
+  fit_batch: { env: "NESTOR_AI_FIT_REASONING_EFFORT", fallback: null },
   // Which job-board listings are worth keeping, from title and place only.
   listing_screen: {
     env: "NESTOR_AI_LISTING_SCREEN_REASONING_EFFORT",
-    fallback: "low",
+    fallback: null,
   },
   claim_check: {
     env: "NESTOR_AI_CLAIM_CHECK_REASONING_EFFORT",
-    fallback: "medium",
+    fallback: null,
   },
-  apply: { env: "NESTOR_AI_APPLY_REASONING_EFFORT", fallback: "low" },
+  apply: { env: "NESTOR_AI_APPLY_REASONING_EFFORT", fallback: null },
 };
 
 export function resolveTaskReasoningEffortsFromEnvironment(
