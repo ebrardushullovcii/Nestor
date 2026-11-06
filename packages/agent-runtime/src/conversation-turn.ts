@@ -1,4 +1,5 @@
 import { traceOurs, traceEvent, withTraceScope } from "@nestor/core/run-trace";
+import { isAgentRunAborted } from "./cancellation";
 import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 import {
   ModelOutputLimitError,
@@ -236,13 +237,6 @@ function addUsage(
   total.outputTokens += next.outputTokens;
   total.cachedInputTokens += next.cachedInputTokens;
   total.reasoningTokens += next.reasoningTokens;
-}
-
-function isAbortError(error: unknown): boolean {
-  return (
-    (error instanceof DOMException && error.name === "AbortError") ||
-    (error instanceof Error && error.name === "AbortError")
-  );
 }
 
 export async function runConversationTurn(
@@ -513,7 +507,7 @@ export async function runConversationTurn(
           );
         } catch (error) {
           batchSucceeded = false;
-          if (options.signal?.aborted || isAbortError(error)) {
+          if (isAgentRunAborted(options.signal)) {
             turnMessages.push({
               role: "tool",
               toolCallId: toolCall.id,
@@ -527,14 +521,15 @@ export async function runConversationTurn(
               outcome: "cancelled",
               summary: "Stopped",
             });
-            if (options.signal?.aborted) return result("aborted");
-            continue;
+            return result("aborted");
           }
           const text =
             error instanceof ModelTurnTimeoutError
               ? "That step stopped reporting progress. Look again before deciding what to do next."
-              : (tool.describeError?.(error) ??
-                "That tool could not complete this step. Try a different approach, or say what remains.");
+              : error instanceof Error && error.name === "AbortError"
+                ? `That step failed: ${error.message}. Try again or use a different approach.`
+                : (tool.describeError?.(error) ??
+                  "That tool could not complete this step. Try a different approach, or say what remains.");
           turnMessages.push({
             role: "tool",
             toolCallId: toolCall.id,

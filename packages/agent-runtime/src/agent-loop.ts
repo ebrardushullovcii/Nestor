@@ -1,4 +1,5 @@
 import { traceOurs, traceEvent, withTraceScope } from "@nestor/core/run-trace";
+import { isAgentRunAborted } from "./cancellation";
 import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 /**
  * The one loop every Job Finder agent runs on.
@@ -709,10 +710,7 @@ export async function runAgentLoop(
           }
         } catch (error) {
           batchStopped = options.afterToolBatch !== undefined;
-          if (
-            (error instanceof DOMException && error.name === "AbortError") ||
-            options.signal?.aborted
-          ) {
+          if (isAgentRunAborted(options.signal)) {
             ended = result(
               "aborted",
               `Job Finder stopped work on ${options.subjectLabel} before it was finished.`,
@@ -753,12 +751,17 @@ export async function runAgentLoop(
           }
           if (tool.failureKind !== "browser") {
             consecutiveBrowserFailures = 0;
-            await note(`${toolCall.function.name} → tool failure`);
+            const cause =
+              error instanceof Error && error.name === "AbortError"
+                ? endSentence(error.message)
+                : null;
+            await note(
+              `${toolCall.function.name} → tool failure${cause ? `: ${cause}` : ""}`,
+            );
             messages.push({
               role: "tool",
               toolCallId: toolCall.id,
-              content:
-                "That tool could not complete this step. Try a different approach, or finish and explain what remains.",
+              content: `That tool could not complete this step.${cause ? ` ${cause}` : ""} Try a different approach, or finish and explain what remains.`,
             });
             continue;
           }
@@ -767,7 +770,9 @@ export async function runAgentLoop(
           consecutiveBrowserFailures += 1;
           exemptFromStall();
           const failure = endSentence(
-            tool.describeError?.(error) ?? "The browser did not respond.",
+            error instanceof Error && error.name === "AbortError"
+              ? error.message
+              : (tool.describeError?.(error) ?? "The browser did not respond."),
           );
           await note(`${toolCall.function.name} → browser failure: ${failure}`);
           if (consecutiveBrowserFailures >= browserFailureLimit) {

@@ -577,22 +577,37 @@ function mergeProofBankEntries(
     ]),
   );
 
-  return extracted.map((entry, index) => {
+  const merged = [...existing];
+  const usedIds = new Set(existing.map((entry) => entry.id));
+  extracted.forEach((entry, index) => {
     const key = normalizeText(`${entry.title}|${entry.claim}`);
     const match = existingByKey.get(key);
-    return {
-      id:
-        match?.id ??
-        `proof_${index}_${normalizeText(entry.title).replaceAll(" ", "_")}`,
-      title: entry.title,
-      claim: entry.claim,
-      heroMetric: entry.heroMetric,
-      supportingContext: entry.supportingContext,
-      roleFamilies: uniqueStrings(entry.roleFamilies),
-      projectIds: uniqueStrings(entry.projectIds),
-      linkIds: uniqueStrings(entry.linkIds),
+    const baseId = `proof_${index}_${normalizeText(entry.title).replaceAll(" ", "_")}`;
+    let id = match?.id ?? baseId;
+    for (let suffix = 1; !match && usedIds.has(id); suffix += 1)
+      id = `${baseId}_${suffix}`;
+    usedIds.add(id);
+    const record = {
+      id,
+      title: match?.title ?? entry.title,
+      claim: match?.claim ?? entry.claim,
+      heroMetric: match?.heroMetric ?? entry.heroMetric,
+      supportingContext: match?.supportingContext ?? entry.supportingContext,
+      roleFamilies: uniqueStrings([
+        ...(match?.roleFamilies ?? []),
+        ...entry.roleFamilies,
+      ]),
+      projectIds: uniqueStrings([
+        ...(match?.projectIds ?? []),
+        ...entry.projectIds,
+      ]),
+      linkIds: uniqueStrings([...(match?.linkIds ?? []), ...entry.linkIds]),
     };
+    if (match) merged.splice(merged.indexOf(match), 1, record);
+    else merged.push(record);
+    existingByKey.set(key, record);
   });
+  return merged;
 }
 
 function mergeResolvedSelectionIntoWorkspace(
@@ -633,12 +648,8 @@ function mergeResolvedSelectionIntoWorkspace(
       ...(selection.scalarFields.skillGroups?.highlightedSkills ?? []),
       ...profile.skills,
     ],
-    skills: selection.scalarFields.skills?.length
-      ? uniqueStrings(selection.scalarFields.skills)
-      : profile.skills,
-    strengths: selection.scalarFields.skillGroups?.highlightedSkills.length
-      ? selection.scalarFields.skillGroups.highlightedSkills
-      : profile.professionalSummary.strengths,
+    skills: selection.scalarFields.skills ?? [],
+    strengths: selection.scalarFields.skillGroups?.highlightedSkills ?? [],
   });
   const namedLinks = [
     ["Website", "website", selection.scalarFields.personalWebsiteUrl],
@@ -664,18 +675,15 @@ function mergeResolvedSelectionIntoWorkspace(
     selection.scalarFields.applicationIdentity?.preferredLinkUrls ?? [],
   );
   const nextLinkedinUrl =
-    selection.scalarFields.linkedinUrl !== undefined
-      ? selection.scalarFields.linkedinUrl
-      : profile.linkedinUrl;
+    selection.scalarFields.linkedinUrl ?? profile.linkedinUrl;
   const rawPersonalWebsiteUrl =
-    selection.scalarFields.personalWebsiteUrl !== undefined
-      ? selection.scalarFields.personalWebsiteUrl
-      : profile.personalWebsiteUrl;
+    selection.scalarFields.personalWebsiteUrl ?? profile.personalWebsiteUrl;
   const nextPersonalWebsiteUrl =
+    selection.scalarFields.personalWebsiteUrl &&
     nextLinkedinUrl &&
     rawPersonalWebsiteUrl &&
     nextLinkedinUrl === rawPersonalWebsiteUrl
-      ? null
+      ? profile.personalWebsiteUrl
       : rawPersonalWebsiteUrl;
   const preferredLinkIds =
     preferredLinkUrls.length > 0
@@ -691,14 +699,8 @@ function mergeResolvedSelectionIntoWorkspace(
             "packages/job-finder/src/internal/resume-import-apply.ts:687",
           ).map((entry) => entry.id);
 
-  const nextEmail =
-    selection.scalarFields.email !== undefined
-      ? selection.scalarFields.email
-      : profile.email;
-  const nextPhone =
-    selection.scalarFields.phone !== undefined
-      ? selection.scalarFields.phone
-      : profile.phone;
+  const nextEmail = selection.scalarFields.email ?? profile.email;
+  const nextPhone = selection.scalarFields.phone ?? profile.phone;
   const resolvePreferredContact = (input: {
     existingPreferred: string | null;
     existingPrimary: string | null;
@@ -706,11 +708,11 @@ function mergeResolvedSelectionIntoWorkspace(
     importedPrimary: string | null | undefined;
     kind: "email" | "phone";
   }): string | null => {
-    if (input.importedPreferred !== undefined) {
+    if (input.importedPreferred != null) {
       return input.importedPreferred;
     }
 
-    if (input.importedPrimary !== undefined) {
+    if (input.importedPrimary != null) {
       const normalizeContact = (value: string | null): string =>
         input.kind === "phone"
           ? (value ?? "").replace(/\D/gu, "")
@@ -772,22 +774,21 @@ function mergeResolvedSelectionIntoWorkspace(
           : profile.yearsExperience),
       email: nextEmail,
       phone: nextPhone,
-      portfolioUrl:
-        selection.scalarFields.portfolioUrl !== undefined
-          ? selection.scalarFields.portfolioUrl
-          : profile.portfolioUrl,
+      portfolioUrl: selection.scalarFields.portfolioUrl ?? profile.portfolioUrl,
       linkedinUrl: nextLinkedinUrl,
-      githubUrl:
-        selection.scalarFields.githubUrl !== undefined
-          ? selection.scalarFields.githubUrl
-          : profile.githubUrl,
+      githubUrl: selection.scalarFields.githubUrl ?? profile.githubUrl,
       personalWebsiteUrl: nextPersonalWebsiteUrl,
       professionalSummary: {
         ...profile.professionalSummary,
         fullSummary:
           selection.scalarFields.summary ??
           profile.professionalSummary.fullSummary,
-        strengths: partitionedSkills.strengths,
+        // Partition new extraction only. Saved chips belong to the person,
+        // even when a later read also lists one as a technology or skill.
+        strengths: uniqueStrings([
+          ...profile.professionalSummary.strengths,
+          ...partitionedSkills.strengths,
+        ]),
       },
       narrative: {
         ...profile.narrative,
@@ -822,8 +823,26 @@ function mergeResolvedSelectionIntoWorkspace(
         preferredLinkIds,
       },
       skillGroups: {
-        ...profile.skillGroups,
-        ...(selection.scalarFields.skillGroups ?? {}),
+        coreSkills: uniqueStrings([
+          ...profile.skillGroups.coreSkills,
+          ...(selection.scalarFields.skillGroups?.coreSkills ?? []),
+        ]),
+        tools: uniqueStrings([
+          ...profile.skillGroups.tools,
+          ...(selection.scalarFields.skillGroups?.tools ?? []),
+        ]),
+        languagesAndFrameworks: uniqueStrings([
+          ...profile.skillGroups.languagesAndFrameworks,
+          ...(selection.scalarFields.skillGroups?.languagesAndFrameworks ?? []),
+        ]),
+        softSkills: uniqueStrings([
+          ...profile.skillGroups.softSkills,
+          ...(selection.scalarFields.skillGroups?.softSkills ?? []),
+        ]),
+        highlightedSkills: uniqueStrings([
+          ...profile.skillGroups.highlightedSkills,
+          ...(selection.scalarFields.skillGroups?.highlightedSkills ?? []),
+        ]),
       },
       targetRoles: selection.scalarFields.targetRoles?.length
         ? uniqueStrings(selection.scalarFields.targetRoles)
@@ -831,7 +850,7 @@ function mergeResolvedSelectionIntoWorkspace(
       locations: selection.scalarFields.locations?.length
         ? uniqueStrings(selection.scalarFields.locations)
         : profile.locations,
-      skills: partitionedSkills.skills,
+      skills: uniqueStrings([...profile.skills, ...partitionedSkills.skills]),
       experiences: mergeExperienceRecords(
         profile.experiences,
         selection.experiences,

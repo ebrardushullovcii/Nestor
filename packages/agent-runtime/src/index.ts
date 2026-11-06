@@ -19,3 +19,4 @@ export {
   ModelOutputLimitError,
   isModelOutputLimit,
 } from "./model-output-error";
+export { isAgentRunAborted, runWithAgentRunCancellation } from "./cancellation";

@@ -718,10 +718,7 @@ export function mergeResumeExtractionIntoWorkspace(
     ...extraction.skillGroups.highlightedSkills,
     ...extraction.skillGroups.softSkills,
   ]);
-  const mergedStrengths =
-    extraction.professionalSummary.strengths.length > 0
-      ? uniqueStrings(extraction.professionalSummary.strengths)
-      : profile.professionalSummary.strengths;
+  const mergedStrengths = extraction.professionalSummary.strengths;
   // Named technologies belong in Skills, which is what the profile tells the
   // user; relocate them instead of leaving the imported data contradicting
   // its own helper text.
@@ -736,7 +733,10 @@ export function mergeResumeExtractionIntoWorkspace(
     skills: extractedSkills,
     strengths: mergedStrengths,
   });
-  const mergedSkills = partitionedSkills.skills;
+  const mergedSkills = uniqueStrings([
+    ...profile.skills,
+    ...partitionedSkills.skills,
+  ]);
 
   return {
     profile: CandidateProfileSchema.parse({
@@ -753,10 +753,10 @@ export function mergeResumeExtractionIntoWorkspace(
       currentCountry: locationParts.currentCountry ?? profile.currentCountry,
       timeZone: extraction.timeZone ?? profile.timeZone,
       yearsExperience: extraction.yearsExperience ?? profile.yearsExperience,
-      email: extraction.email,
-      phone: extraction.phone,
-      portfolioUrl: extraction.portfolioUrl,
-      linkedinUrl: extraction.linkedinUrl,
+      email: extraction.email ?? profile.email,
+      phone: extraction.phone ?? profile.phone,
+      portfolioUrl: extraction.portfolioUrl ?? profile.portfolioUrl,
+      linkedinUrl: extraction.linkedinUrl ?? profile.linkedinUrl,
       githubUrl: extraction.githubUrl ?? profile.githubUrl,
       personalWebsiteUrl:
         extraction.personalWebsiteUrl ?? profile.personalWebsiteUrl,
@@ -769,39 +769,42 @@ export function mergeResumeExtractionIntoWorkspace(
           extraction.professionalSummary.fullSummary ??
           extraction.summary ??
           profile.professionalSummary.fullSummary,
-        careerThemes:
-          extraction.professionalSummary.careerThemes.length > 0
-            ? uniqueStrings(extraction.professionalSummary.careerThemes)
-            : profile.professionalSummary.careerThemes,
+        careerThemes: uniqueStrings([
+          ...profile.professionalSummary.careerThemes,
+          ...extraction.professionalSummary.careerThemes,
+        ]),
         leadershipSummary:
           extraction.professionalSummary.leadershipSummary ??
           profile.professionalSummary.leadershipSummary,
         domainFocusSummary:
           extraction.professionalSummary.domainFocusSummary ??
           profile.professionalSummary.domainFocusSummary,
-        strengths: partitionedSkills.strengths,
+        strengths: uniqueStrings([
+          ...profile.professionalSummary.strengths,
+          ...partitionedSkills.strengths,
+        ]),
       },
       skillGroups: {
-        coreSkills:
-          extraction.skillGroups.coreSkills.length > 0
-            ? uniqueStrings(extraction.skillGroups.coreSkills)
-            : profile.skillGroups.coreSkills,
-        tools:
-          extraction.skillGroups.tools.length > 0
-            ? uniqueStrings(extraction.skillGroups.tools)
-            : profile.skillGroups.tools,
-        languagesAndFrameworks:
-          extraction.skillGroups.languagesAndFrameworks.length > 0
-            ? uniqueStrings(extraction.skillGroups.languagesAndFrameworks)
-            : profile.skillGroups.languagesAndFrameworks,
-        softSkills:
-          extraction.skillGroups.softSkills.length > 0
-            ? uniqueStrings(extraction.skillGroups.softSkills)
-            : profile.skillGroups.softSkills,
-        highlightedSkills:
-          extraction.skillGroups.highlightedSkills.length > 0
-            ? uniqueStrings(extraction.skillGroups.highlightedSkills)
-            : profile.skillGroups.highlightedSkills,
+        coreSkills: uniqueStrings([
+          ...profile.skillGroups.coreSkills,
+          ...extraction.skillGroups.coreSkills,
+        ]),
+        tools: uniqueStrings([
+          ...profile.skillGroups.tools,
+          ...extraction.skillGroups.tools,
+        ]),
+        languagesAndFrameworks: uniqueStrings([
+          ...profile.skillGroups.languagesAndFrameworks,
+          ...extraction.skillGroups.languagesAndFrameworks,
+        ]),
+        softSkills: uniqueStrings([
+          ...profile.skillGroups.softSkills,
+          ...extraction.skillGroups.softSkills,
+        ]),
+        highlightedSkills: uniqueStrings([
+          ...profile.skillGroups.highlightedSkills,
+          ...extraction.skillGroups.highlightedSkills,
+        ]),
       },
       targetRoles: profileTargetRoles,
       locations: profileLocations,
