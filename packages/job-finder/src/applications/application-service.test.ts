@@ -592,6 +592,9 @@ async function setup(
   const directory = await mkdtemp(path.join(tmpdir(), "nestor-apply-"));
   const imported = path.join(directory, "imported.txt");
   await writeFile(imported, "Synthetic imported resume");
+  const pdfPath = path.join(directory, "resume.pdf");
+  const pdfBytes = Buffer.from("%PDF-1.4 Synthetic imported resume");
+  await writeFile(pdfPath, pdfBytes);
   const dbPath = options.onDisk
     ? path.join(directory, "job-finder.sqlite")
     : ":memory:";
@@ -700,7 +703,15 @@ async function setup(
     applications,
     browser: browser as unknown as BrowserSessionRuntime,
     aiClient: createDeterministicJobFinderAiClient(),
-    documentManager: {} as ApplicationServiceDeps["documentManager"],
+    documentManager: {
+      renderResumeArtifact: () =>
+        Promise.resolve({
+          fileName: "resume.pdf",
+          storagePath: pdfPath,
+          format: "pdf",
+          sha256: createHash("sha256").update(pdfBytes).digest("hex"),
+        }),
+    } as unknown as ApplicationServiceDeps["documentManager"],
     authorityRepository,
     readInputs: () =>
       Promise.resolve({
@@ -2150,7 +2161,9 @@ it("starts approved jobs immediately, caps preparation, and leaves Original form
   expect(
     f.applications.listApplications({ state: "queued" }).rows,
   ).toHaveLength(2);
-  expect(f.execute.mock.calls[0]![1].resumeArtifact.filePath).toBe(f.imported);
+  expect(f.execute.mock.calls[0]![1].resumeArtifact.fileName).toBe(
+    "resume.pdf",
+  );
   expect(
     f.execute.mock.calls[0]![1].intermediateMutationAllowedOrigins,
   ).toEqual([]);

@@ -41,3 +41,92 @@ describe("application document DOCX rendering", () => {
     expect(documentXml).toContain("safe &amp; useful workflow tools");
   });
 });
+
+test("renders the approved resume's identity, sections and entries as a Word resume", async () => {
+  const outputDirectory = await mkdtemp(
+    path.join(tmpdir(), "nestor-resume-docx-"),
+  );
+  const manager = createLocalJobFinderDocumentManager({ outputDirectory });
+  const result = await manager.renderResumeDocxArtifact!({
+    profile: { fullName: "Jamie Synthetic" } as never,
+    renderDocument: {
+      fullName: "Jamie Synthetic",
+      headline: "Engineer",
+      location: "Berlin",
+      contactItems: [{ field: "email", text: "jamie@example.test" }],
+      sections: [
+        {
+          id: "experience",
+          kind: "experience",
+          label: "Experience",
+          text: "Approved words & facts",
+          bullets: [],
+          entries: [
+            {
+              id: "role",
+              title: "Engineer",
+              subtitle: "Synthetic Tools",
+              location: "Remote",
+              dateRange: "2020–2026",
+              startDate: null,
+              endDate: null,
+              isCurrent: true,
+              heading: null,
+              summary: "Built interfaces",
+              bullets: [{ id: "one", text: "Kept the approved claim." }],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  expect(result).toMatchObject({
+    ok: true,
+    fileName: "jamie-synthetic-resume.docx",
+  });
+  if (!result.ok) return;
+  const bytes = await readFile(result.storagePath);
+  const zip = await JSZip.loadAsync(bytes);
+  const xml = await zip.file("word/document.xml")!.async("string");
+  for (const part of [
+    "Jamie Synthetic",
+    "jamie@example.test",
+    "Approved words &amp; facts",
+    "Synthetic Tools",
+    "2020–2026",
+    "Kept the approved claim.",
+  ])
+    expect(xml).toContain(part);
+});
+
+test("Word copies of the same approved text keep identical bytes across attempts", async () => {
+  const outputDirectory = await mkdtemp(
+    path.join(tmpdir(), "nestor-stable-docx-"),
+  );
+  const manager = createLocalJobFinderDocumentManager({ outputDirectory });
+  const input = {
+    profile: { fullName: "Jamie Synthetic" } as never,
+    renderDocument: {
+      fullName: "Jamie Synthetic",
+      headline: null,
+      location: null,
+      contactItems: [],
+      sections: [],
+    },
+  };
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date("2026-11-06T00:00:00Z"));
+    const first = await manager.renderResumeDocxArtifact!(input);
+    vi.setSystemTime(new Date("2026-11-06T01:00:00Z"));
+    const second = await manager.renderResumeDocxArtifact!(input);
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.sha256).toBe(first.sha256);
+    expect(await readFile(second.storagePath)).toEqual(
+      await readFile(first.storagePath),
+    );
+  } finally {
+    vi.useRealTimers();
+  }
+});

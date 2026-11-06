@@ -665,11 +665,13 @@ function acceptsDocument(
   const name = document.fileName.toLowerCase();
   const mime = document.mimeType.toLowerCase();
   return control.acceptedTypes.some((accepted) =>
-    accepted.startsWith(".")
-      ? name.endsWith(accepted)
-      : accepted.endsWith("/*")
-        ? mime.startsWith(accepted.slice(0, -1))
-        : accepted === mime,
+    accepted === "*/*"
+      ? true
+      : accepted.startsWith(".")
+        ? name.endsWith(accepted)
+        : accepted.endsWith("/*")
+          ? mime.startsWith(accepted.slice(0, -1))
+          : accepted === mime,
   );
 }
 
@@ -3711,6 +3713,56 @@ export async function executeApplyProposal(
             "This upload needs the person's matching file. Job Finder cannot create a substitute for it.",
           observation,
         };
+      }
+      if (document.kind === "resume") {
+        // The site may list formats beside an unrestricted native input.
+        // Read only this field's explicit format guidance, never page-wide copy.
+        const guidance = `${control.hint ?? ""} ${control.validationMessage}`;
+        const listed =
+          /(?:accept(?:ed|s)?|allow(?:ed|s)?|support(?:ed|s)?|file (?:types?|formats?)|formats?|only)[^!?\n]{0,140}/iu.exec(
+            guidance,
+          )?.[0] ?? "";
+        const formats = [
+          ...listed.matchAll(/\b(pdf|docx|doc|txt|rtf|odt)\b/giu),
+        ].map((match) => (match[1] ?? "").toLowerCase());
+        const compatible = (candidate: ApplyDocument) =>
+          acceptsDocument(control, candidate) &&
+          (!formats.length ||
+            formats.some((format) =>
+              candidate.fileName.toLowerCase().endsWith(`.${format}`),
+            ));
+        document =
+          [
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          ]
+            .map((mime) =>
+              config.sources.documents.find(
+                (candidate) =>
+                  candidate.kind === "resume" &&
+                  candidate.mimeType === mime &&
+                  compatible(candidate),
+              ),
+            )
+            .find((candidate) => candidate !== undefined) ?? document;
+        if (formats.length && !compatible(document)) {
+          return {
+            kind: "paused",
+            pause: {
+              code: "document_needs_you",
+              summary: `This form requires a resume in ${control.acceptedTypes?.join(", ") || formats.join(", ")}. Add a supported copy.`,
+              question: buildPendingQuestion({
+                control,
+                jobId: config.application.jobId,
+                detectedAt: at,
+                suggestion: null,
+                reason:
+                  "The site requires a resume format Job Finder cannot provide.",
+              }),
+              blocker: null,
+            },
+          };
+        }
       }
       if (!acceptsDocument(control, document)) {
         // A plain-text copy of an Original Markdown resume preserves every

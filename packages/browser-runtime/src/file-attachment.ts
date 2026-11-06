@@ -7,6 +7,27 @@ export async function attachFile(
   input: Locator,
   file: ApplyUploadFile,
 ): Promise<void> {
+  const accept = await input.getAttribute("accept");
+  const accepted = (accept ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+  if (
+    accepted.length &&
+    !accepted.some(
+      (type) =>
+        type === "*/*" ||
+        (type.startsWith(".")
+          ? file.name.toLowerCase().endsWith(type)
+          : type.endsWith("/*")
+            ? file.mimeType.toLowerCase().startsWith(type.slice(0, -1))
+            : type === file.mimeType.toLowerCase()),
+    )
+  ) {
+    throw new Error(
+      `This file input accepts ${accepted.join(", ")}; ${file.name} (${file.mimeType}) was not selected.`,
+    );
+  }
   const payload = {
     name: file.name,
     mimeType: file.mimeType,
@@ -40,18 +61,53 @@ export async function attachFile(
         break;
       box = node;
       if (method === "chooser") {
+        if (
+          node instanceof HTMLLabelElement &&
+          node.control === element &&
+          visible(node)
+        )
+          return node;
         const button = Array.from(
-          node.querySelectorAll('button[type="button"], [role="button"]'),
-        ).find(
-          (candidate) =>
-            visible(candidate) &&
-            !(
-              candidate instanceof HTMLButtonElement &&
-              candidate.type === "submit"
-            ),
-        );
+          node.querySelectorAll('button, [role="button"], label'),
+        )
+          .sort(
+            (left, right) =>
+              Number(left instanceof HTMLLabelElement) -
+              Number(right instanceof HTMLLabelElement),
+          )
+          .find(
+            (candidate) =>
+              visible(candidate) &&
+              !/\b(?:remove|delete|clear|cancel)\b|^[\s×✕✖x]*$/iu.test(
+                `${candidate.getAttribute("aria-label") ?? ""} ${candidate.textContent ?? ""}`,
+              ) &&
+              !(
+                candidate instanceof HTMLButtonElement &&
+                !candidate.hasAttribute("type") &&
+                !candidate.form &&
+                !/\b(?:choose|select|browse|attach|upload|drop|file|resume|cv)\b/iu.test(
+                  candidate.textContent ?? "",
+                )
+              ) &&
+              !(
+                candidate instanceof HTMLButtonElement &&
+                candidate.type === "submit" &&
+                candidate.form
+              ) &&
+              !(
+                candidate instanceof HTMLButtonElement &&
+                candidate.type === "reset"
+              ) &&
+              (!(candidate instanceof HTMLLabelElement) ||
+                candidate.control === element),
+          );
         if (button) return button;
-      } else if (node.hasAttribute("ondrop")) return node;
+      } else if (
+        visible(node) &&
+        (node.hasAttribute("ondrop") ||
+          node.matches('[role="button"], [data-drop], [data-dropzone]'))
+      )
+        return node;
     }
     if (method === "chooser" && element.id)
       return (

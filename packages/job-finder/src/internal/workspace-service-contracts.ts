@@ -54,9 +54,15 @@ export interface JobFinderDocumentManager {
     templateId: ResumeTemplateId;
     settings: JobFinderSettings;
     targetPath?: string | null;
+    purpose?: "application";
     onQueueWait?: (milliseconds: number) => void;
     signal?: AbortSignal;
   }): Promise<RenderedResumeArtifact>;
+  /** A Word fallback of the same approved content, without rewriting it. */
+  renderResumeDocxArtifact?(input: {
+    renderDocument: ResumeRenderDocument;
+    profile: CandidateProfile;
+  }): Promise<RenderedLetterArtifact>;
   /**
    * Renders a cover or motivation letter to a file, through the same path the
    * resume export uses, and puts it beside that resume.

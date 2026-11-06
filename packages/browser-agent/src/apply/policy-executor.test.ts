@@ -5873,3 +5873,63 @@ test("navigation handoffs never turn a raw URL into a question", () => {
   );
   expect(JSON.stringify(pause)).not.toContain("http://");
 });
+
+test.each([
+  ["", "", "pdf"],
+  ["*/*", "", "pdf"],
+  [".pdf,.doc,.docx", "", "pdf"],
+  ["application/pdf,application/msword", "", "pdf"],
+  [".docx", "", "docx"],
+  [
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "",
+    "docx",
+  ],
+  ["", "Accepted formats: DOCX only", "docx"],
+  [".pdf,.docx", "Supported files: .pdf, .docx", "pdf"],
+])(
+  "chooses the approved resume format for accept=%s guidance=%s",
+  async (accept, hint, expected) => {
+    const source = rawPage({
+      controls: [
+        rawControl({
+          index: 0,
+          label: "Resume Choose file",
+          inputType: "file",
+          accept,
+          hint,
+          required: true,
+        }),
+      ],
+    });
+    const { config, hands } = configFor(source);
+    config.sources.documents = [
+      ["pdf", "application/pdf"],
+      [
+        "docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      ],
+    ].map(([extension, mime]) => ({
+      id: extension,
+      kind: "resume",
+      fileName: `approved.${extension}`,
+      mimeType: mime,
+      label: "Your CV",
+      loadBytes: () => Promise.resolve(new Uint8Array([1, 2])),
+    }));
+    hands.uploadFile = vi.fn(hands.uploadFile);
+    const result = await executeApplyProposal(
+      // Even a model choosing Word must use PDF when the field supports it.
+      { tool: "upload", ref: "c0", documentId: "docx" },
+      observationOf(source).signature,
+      { config, now, guardState: createApplyGuardState() },
+    );
+    expect(result.kind).toBe("attached");
+    expect(hands.uploadFile).toHaveBeenCalledWith(
+      "c0",
+      expect.objectContaining({ name: `approved.${expected}` }),
+    );
+    if (result.kind === "attached")
+      expect(result.attachment.fileName).toBe(`approved.${expected}`);
+  },
+);
