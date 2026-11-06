@@ -20,7 +20,7 @@ import {
 } from "./job-finder-shell";
 import {
   HEADER_TOOL_COUNT_ATTENTION_CLASS,
-  HEADER_TOOL_COUNT_CLASS,
+  HEADER_TOOL_INLINE_COUNT_CLASS,
   HEADER_TOOL_COUNT_SLOT_CLASS,
   formatHeaderToolCount,
 } from "./header-tool";
@@ -121,31 +121,30 @@ describe("shell destination counts", () => {
     );
 
     // Inventory is the shared `<Count variant="inline">` figure in the row's
-    // fixed-width right column; attention is a warning-coloured pill pinned
-    // to the header tool's corner, out of the flow.
+    // fixed-width right column; attention is a warning-coloured pill in the
+    // header tool's own row, after its label.
     expect(inventoryBadge?.className).toBe(
       cn(COUNT_VARIANT_CLASS.inline, DESTINATION_COUNT_INLINE_LAYOUT_CLASS),
     );
     expect(attentionBadge?.className).toBe(
-      cn(HEADER_TOOL_COUNT_CLASS, HEADER_TOOL_COUNT_ATTENTION_CLASS),
+      cn(HEADER_TOOL_INLINE_COUNT_CLASS, HEADER_TOOL_COUNT_ATTENTION_CLASS),
     );
     expect(attentionBadge?.textContent).toBe("1");
-    // Pinned to the bell's corner, inside the button, so it takes no room
-    // and keeps clear of the window's top edge.
-    const slot = attentionBadge?.parentElement;
-    expect(slot?.className).toBe(HEADER_TOOL_COUNT_SLOT_CLASS);
-    expect(HEADER_TOOL_COUNT_SLOT_CLASS).toMatch(/\babsolute\b/);
-    expect(slot?.parentElement?.nextElementSibling?.textContent).toBe(
+    // In the button's row after the label, not on the bell's corner, so a
+    // count of any length leaves the bell visible.
+    expect(attentionBadge?.parentElement).toBe(needsYou);
+    expect(attentionBadge?.previousElementSibling?.textContent).toBe(
       "Needs you",
+    );
+    expect(needsYou.querySelector("svg")?.parentElement?.children).toHaveLength(
+      1,
     );
     expect(needsYou.getAttribute("aria-label")).toMatch(
       /^Needs you: \d+ unresolved$/,
     );
     // Both counts stay visual-only; the accessible name carries them.
     expect(inventoryBadge?.getAttribute("aria-hidden")).toBe("true");
-    expect(attentionBadge?.parentElement?.getAttribute("aria-hidden")).toBe(
-      "true",
-    );
+    expect(attentionBadge?.getAttribute("aria-hidden")).toBe("true");
   });
 
   it("draws no count at zero and keeps no room for one, and shortens big counts without changing them", () => {

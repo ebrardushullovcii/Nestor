@@ -78,7 +78,6 @@ import { installScrollActivity } from "@renderer/lib/scroll-activity";
 import {
   HEADER_TOOL_ACTIVE_CLASS,
   HEADER_TOOL_CLASS,
-  HEADER_TOOL_COUNTED_LABEL_CLASS,
   HEADER_TOOL_ICON_CLASS,
   HEADER_TOOL_LABEL_CLASS,
 } from "./header-tool";
@@ -913,8 +912,8 @@ export function JobFinderShell({
 
           {/* The header tools: quiet ghost buttons of fixed width, icons only
               below 75rem of header (1200px at default text) with the name
-              in a tooltip, counts in corner badges
-              off the glyph so nothing moves when a count appears. */}
+              in a tooltip. Activity's count is a corner badge; Needs
+              you's follows its label (header-tool.ts). */}
           <div
             aria-label="Notifications and actions"
             // Above the brand row: in a window narrower than the app's
@@ -925,8 +924,7 @@ export function JobFinderShell({
             role="group"
             style={{
               ...noDragRegionStyle,
-              // The last tool's corner count pill (6px past the button)
-              // keeps at least 8px from the window's edge.
+              // 8px between the last tool and the window's edge.
               marginInlineEnd: isWindows
                 ? WINDOWS_CAPTION_CONTROLS_INSET
                 : "0.5rem",
@@ -1005,15 +1003,17 @@ export function JobFinderShell({
                 title={`Needs you: ${needsYouBadge} unresolved`}
                 type="button"
               >
-                {/* On the bell's corner, inside the button: the pill keeps
-                    10px from the window's top edge. */}
+                {/* The count follows the label in the button's row, so
+                    the bell stays whole at any count. */}
                 <span className={HEADER_TOOL_ICON_CLASS}>
                   <BellRing aria-hidden="true" className="size-4 shrink-0" />
-                  <HeaderToolCount count={needsYouBadge} tone="attention" />
                 </span>
-                <span className={HEADER_TOOL_COUNTED_LABEL_CLASS}>
-                  Needs you
-                </span>
+                <span className={HEADER_TOOL_LABEL_CLASS}>Needs you</span>
+                <HeaderToolCount
+                  count={needsYouBadge}
+                  placement="inline"
+                  tone="attention"
+                />
               </button>
             ) : null}
           </div>
