@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { App } from "./app.ts";
+import { google, savedSignIn, browserImport } from "./sign-in.ts";
 import * as applications from "./applications.ts";
 import { setup } from "./profile.ts";
 import { search } from "./search.ts";
@@ -9,9 +10,18 @@ import type { Context, Result, Run } from "./types.ts";
 
 const handlers: Record<string, (app: App, result: Result) => Promise<void>> = {
   search,
+  google,
+  "saved-sign-in": savedSignIn,
+  "browser-import": browserImport,
   ...applications,
 };
 const likely: Record<string, string> = {
+  google:
+    "packages/browser-agent/src/google-sign-in* and apply/policy-executor.ts",
+  "saved-sign-in":
+    "apps/desktop/src/main/services/browser/embedded-browser-runtime* or packages/browser-agent/src/apply",
+  "browser-import":
+    "apps/desktop/src/main/services/browser/browser-profile-import.ts or browser-passwords routes",
   standard:
     "packages/browser-agent/src/apply (profile answer selection/checking)",
   multistep:
@@ -34,11 +44,13 @@ export default async function journey(ctx: Context) {
     scenario?: string;
     timeout: number;
     driver: string;
+    provider?: { configPath: string; employerOrigin: string };
   };
   const run = JSON.parse(
     readFileSync(path.join(config.output, "scoreboard.json"), "utf8"),
   ) as Run;
   const app = new App(ctx, config.output, config.timeout);
+  app.provider = config.provider;
   const setupStarted = Date.now();
   if (ctx.ai !== "live") throw Error("Scoreboard requires --ai live");
   try {
@@ -58,10 +70,9 @@ export default async function journey(ctx: Context) {
     const message = error instanceof Error ? error.message : String(error);
     for (const r of run.results.filter(
       (r) =>
-        r.id !== "v2" &&
-        (config.scenario === undefined ||
-          r.id === config.scenario ||
-          r.id === "needs-you"),
+        config.scenario === undefined ||
+        r.id === config.scenario ||
+        r.id === "needs-you",
     )) {
       r.status = "fail";
       r.failure = {
@@ -87,6 +98,9 @@ export default async function journey(ctx: Context) {
     "restart",
     "batch",
     "send",
+    "google",
+    "saved-sign-in",
+    "browser-import",
   ];
   for (const id of order) {
     if (
@@ -101,8 +115,8 @@ export default async function journey(ctx: Context) {
     try {
       await handlers[id](app, r);
       app.capture();
-      if (r.questions.some((q) => q.profileAnswers))
-        throw Error("Needs you asked for facts already in the profile");
+      if (r.questions.some((q) => q.profileAnswers || q.duplicate))
+        throw Error("Needs you asked known facts or repeated a question");
       r.status = "pass";
     } catch (error) {
       r.status = "fail";

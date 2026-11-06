@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 import {
   auditQuestions,
+  genuineQuestion,
   markDuplicates,
   markdown,
   profileAnswer,
@@ -91,7 +92,7 @@ test("question repeats are counted after punctuation/case normalization", () => 
   );
 });
 
-test("report keeps failures, unrun scenarios and v2 distinct from passes", () => {
+test("report keeps failures, unrun scenarios and unmeasured rows distinct from passes", () => {
   const run: Run = {
     version: 1,
     startedAt: "2026-11-05T00:00:00Z",
@@ -124,9 +125,9 @@ test("report keeps failures, unrun scenarios and v2 distinct from passes", () =>
         metrics: {},
       },
       {
-        id: "v2",
-        name: "v2",
-        status: "not built",
+        id: "google",
+        name: "Google",
+        status: "not run",
         seconds: 0,
         questions: [],
         metrics: { summary: "not built yet" },
@@ -136,7 +137,7 @@ test("report keeps failures, unrun scenarios and v2 distinct from passes", () =>
   const report = markdown(run);
   assert.match(report, /Standard \| FAIL/);
   assert.match(report, /Search \| NOT RUN/);
-  assert.match(report, /v2 \| NOT BUILT/);
+  assert.match(report, /Google \| NOT RUN/);
   assert.match(report, /site \\\| failed/);
   assert.match(report, /Checker failed.*Step: check.*browser-agent/);
   assert.doesNotMatch(report, /\| PASS \|/);
@@ -165,4 +166,110 @@ test("report keeps failures, unrun scenarios and v2 distinct from passes", () =>
   assert.equal(quality.status, "pass");
   assert.equal(quality.failure, undefined, "a new audit clears stale failures");
   assert.deepEqual(quality.metrics.coverage, ["standard"]);
+});
+
+test("standard allows genuine decisions once, but rejects known facts, step handoffs and unexplained holds", () => {
+  for (const text of [
+    "Are you authorized to work in this country?",
+    "Explain in your own words why this role interests you",
+    "Do you consent to this check?",
+    "Expected pay?",
+  ])
+    assert.ok(
+      genuineQuestion({
+        kind: "question",
+        text,
+        country: "",
+        profileAnswers: false,
+      }),
+      text,
+    );
+  for (const q of [
+    {
+      kind: "question",
+      text: "Your email?",
+      country: "",
+      profileAnswers: true,
+    },
+    {
+      kind: "question",
+      text: "Click Save and continue",
+      country: "",
+      profileAnswers: false,
+    },
+    { kind: "sign_in", text: "Sign in", country: "", profileAnswers: false },
+    {
+      kind: "question",
+      text: "Something went wrong",
+      country: "",
+      profileAnswers: false,
+    },
+  ])
+    assert.equal(genuineQuestion(q), false);
+});
+
+test("eligibility repeats share a resolved country or the same unresolved location, never different locations", () => {
+  const q: Question = {
+    id: 1,
+    kind: "question",
+    text: "Are you legally authorized to work in this country?",
+    answerKey: "question:first",
+    country: "",
+    locations: ["Remote, Worldwide"],
+    instance: "batch",
+    firstSeenAt: "2026-11-06T00:00:00Z",
+    profileAnswers: false,
+    profileFact: null,
+    duplicate: false,
+    applicationIds: [3],
+  };
+  assert.deepEqual(
+    markDuplicates([
+      q,
+      {
+        ...q,
+        id: 2,
+        answerKey: "question:second",
+        locations: ["Remote, Europe"],
+        applicationIds: [4],
+      },
+      { ...q, id: 3, locations: [" remote,  WORLDWIDE "], applicationIds: [5] },
+    ]).map((q) => q.duplicate),
+    [false, false, true],
+  );
+  assert.deepEqual(
+    markDuplicates([
+      { ...q, country: "Germany", locations: ["Berlin, Germany"] },
+      {
+        ...q,
+        id: 2,
+        country: "Germany",
+        locations: ["Hamburg, Germany"],
+        applicationIds: [4],
+      },
+    ]).map((q) => q.duplicate),
+    [false, true],
+  );
+  assert.deepEqual(
+    markDuplicates([
+      { ...q, locations: [] },
+      { ...q, id: 2, locations: [], applicationIds: [4] },
+      { ...q, id: 3, locations: [] },
+    ]).map((q) => q.duplicate),
+    [false, false, true],
+  );
+  assert.deepEqual(
+    markDuplicates([
+      { ...q, kind: "sign_in", text: "Sign in first" },
+      {
+        ...q,
+        id: 2,
+        kind: "sign_in",
+        text: "Sign in first",
+        locations: ["Remote, Europe"],
+      },
+    ]).map((q) => q.duplicate),
+    [false, true],
+    "ordinary sign-in repeats do not depend on the job location",
+  );
 });

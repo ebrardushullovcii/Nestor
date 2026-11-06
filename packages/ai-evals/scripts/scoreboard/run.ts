@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -17,6 +17,7 @@ import {
   save,
   SCENARIOS,
 } from "./report.ts";
+import { startProvider } from "./provider.ts";
 import type { Run } from "./types.ts";
 
 const root = path.resolve(import.meta.dirname, "../../../..");
@@ -39,7 +40,7 @@ const args = parseArgs({
 }).values;
 if (args.help || args.list) {
   console.log(
-    `Job Finder scenario scoreboard (Node 24+).\n\n${heavy} node packages/ai-evals/scripts/scoreboard/run.ts [--scenario ID] [--no-build] [--out PATH] [--timeout SECONDS]\n\nThe whole command must hold the shared heavy-command lock, including the build and every app session. Runs fresh isolated live-AI apps one at a time on local replicas and stops its processes. --no-build still requires a matching stamped build. Results default to ~/Projects/nestor-agent-work/functionality-hill-climb/scoreboard/YYYYMMDD-HHMM/.\n\n${SCENARIOS.map(([id, name]) => `${id.padEnd(12)} ${name}`).join("\n")}\n\nExit 0: all requested v1 scenarios pass. Exit 1: scenario failures. Exit 2: runner/setup/cleanup failure. v2 is not built and never counts as a pass.`,
+    `Job Finder scenario scoreboard (Node 24+).\n\n${heavy} --cool node packages/ai-evals/scripts/scoreboard/run.ts [--scenario ID] [--no-build] [--out PATH] [--timeout SECONDS]\n\nOn macOS sessions wait for cooling with heavy --cool; builds alone take the shared heavy slot. Runs fresh isolated live-AI apps one at a time on local replicas and stops its processes. --no-build still requires a matching stamped build. Results default to ~/Projects/nestor-agent-work/functionality-hill-climb/scoreboard/YYYYMMDD-HHMM/.\n\n${SCENARIOS.map(([id, name]) => `${id.padEnd(12)} ${name}`).join("\n")}\n\nExit 0: all requested scenarios pass. Exit 1: scenario failures. Exit 2: runner/setup/cleanup failure.`,
   );
 } else {
   if (args.scenario && !SCENARIOS.some(([id]) => id === args.scenario))
@@ -47,28 +48,43 @@ if (args.help || args.list) {
   const timeout = Number(args.timeout);
   if (!Number.isFinite(timeout) || timeout < 15 || timeout > 1800)
     throw Error("--timeout must be 15–1800 seconds");
-  // The shared one-slot wrapper records its PID. Accept its descendants, never
-  // acquire the non-reentrant lock again for the build inside this command.
-  let owner = 0;
-  let ancestor = process.ppid;
-  try {
-    owner = Number(
-      readFileSync("/tmp/nestor-heavy-1.lock/owner", "utf8").split(" ")[0],
-    );
-    for (let n = 0; n < 16 && ancestor > 1 && ancestor !== owner; n++)
-      ancestor = Number(
-        execFileSync("ps", ["-p", String(ancestor), "-o", "ppid="], {
-          encoding: "utf8",
-        }).trim(),
-      );
-  } catch {
-    /* No owned heavy slot. Refuse before creating results or starting work. */
+  // Refuse the former invocation: otherwise an internal build could wait on
+  // the slot held by its own parent for the entire scoreboard session.
+  if (process.platform === "darwin") {
+    let ancestor = process.ppid;
+    const lockFile = "/tmp/nestor-heavy-1.lock/owner";
+    if (existsSync(lockFile)) {
+      const owner = Number(readFileSync(lockFile, "utf8").split(" ")[0]);
+      for (let n = 0; n < 16 && ancestor > 1; n++) {
+        if (ancestor === owner)
+          throw Error(
+            `Use ${heavy} --cool node packages/ai-evals/scripts/scoreboard/run.ts; app sessions must not hold the build slot`,
+          );
+        try {
+          ancestor = Number(
+            execFileSync("ps", ["-p", String(ancestor), "-o", "ppid="], {
+              encoding: "utf8",
+            }).trim(),
+          );
+        } catch {
+          break;
+        }
+      }
+    }
   }
-  if (process.platform === "darwin" && (!owner || ancestor !== owner)) {
-    console.error(
-      `Run the whole scoreboard through the shared lock:\n${heavy} node packages/ai-evals/scripts/scoreboard/run.ts`,
+  // --cool execs the command, so it leaves no ancestor to inspect. Re-enter
+  // through it ourselves once. Never keep the build slot during app sessions.
+  if (process.platform === "darwin" && !process.env.NESTOR_SCOREBOARD_COOLED) {
+    const cooled = spawnSync(
+      heavy,
+      ["--cool", process.execPath, ...process.argv.slice(1)],
+      {
+        cwd: root,
+        env: { ...process.env, NESTOR_SCOREBOARD_COOLED: "1" },
+        stdio: "inherit",
+      },
     );
-    process.exit(2);
+    process.exit(cooled.status ?? 2);
   }
   const timestamp = new Date()
     .toISOString()
@@ -104,7 +120,7 @@ if (args.help || args.list) {
     NESTOR_VERIFY_WORK: output,
   };
   const run: Run = {
-    version: 1,
+    version: 2,
     startedAt: new Date().toISOString(),
     source: {
       head: execFileSync("git", ["rev-parse", "HEAD"], {
@@ -119,16 +135,16 @@ if (args.help || args.list) {
     output,
     preconditions: [
       "Applications use fixed synthetic listings inserted into this isolated job store; Original resumes are then approved through the visible app. Search does not use those seeded rows.",
-      "Resume writing, fit quality and account automation are outside v1. A person may create a made-up Workday account and answer synthetic job-source/address/postcode/start-month gaps; ordinary Save/Continue handoffs fail.",
+      "Resume writing, fit quality and account creation are outside the measured rows. A person may create a made-up Workday account and answer synthetic job-source/address/postcode/start-month gaps; ordinary Save/Continue handoffs fail.",
       "The setup-triggered search is stopped, retaining any rows it produced; its count is separate from measured search results. AI timings and questions may vary between runs.",
     ],
     results: SCENARIOS.map(([id, name]) => ({
       id,
       name,
-      status: id === "v2" ? "not built" : "not run",
+      status: "not run",
       seconds: 0,
       questions: [],
-      metrics: { summary: id === "v2" ? "not built yet" : "not run" },
+      metrics: { summary: "not run" },
     })),
   };
   save(run);
@@ -174,7 +190,15 @@ if (args.help || args.list) {
   const cleanupCodes: number[] = [];
   try {
     if (!args["no-build"]) {
-      if (await cli("build")) throw Error("Desktop build failed");
+      if (
+        await command(
+          process.platform === "darwin" ? heavy : process.execPath,
+          process.platform === "darwin"
+            ? [process.execPath, path.join(root, driver), "build"]
+            : [path.join(root, driver), "build"],
+        )
+      )
+        throw Error("Desktop build failed");
     }
     const stamp = JSON.parse(
       readFileSync(
@@ -186,20 +210,21 @@ if (args.help || args.list) {
     save(run);
     if (interrupted) throw Error("Interrupted before launch");
     const requested =
-      args.scenario && !["needs-you", "v2"].includes(args.scenario)
+      args.scenario && args.scenario !== "needs-you"
         ? [args.scenario]
-        : args.scenario === "v2"
-          ? []
-          : [
-              "search",
-              "standard",
-              "multistep",
-              "captcha",
-              "security",
-              "restart",
-              "batch",
-              "send",
-            ];
+        : [
+            "search",
+            "standard",
+            "multistep",
+            "captcha",
+            "security",
+            "restart",
+            "batch",
+            "send",
+            "google",
+            "saved-sign-in",
+            "browser-import",
+          ];
     for (const scenario of requested) {
       if (interrupted) throw Error("Interrupted");
       env.NESTOR_VERIFY_LABEL = `${label}-${scenario}`;
@@ -209,13 +234,29 @@ if (args.help || args.list) {
       );
       launched = true;
       let instanceCleanup = 0;
+      let provider: Awaited<ReturnType<typeof startProvider>> | undefined;
       try {
+        if (scenario === "google") {
+          provider = await startProvider(root, output, env.NESTOR_VERIFY_LABEL);
+          Object.assign(env, {
+            NESTOR_VERIFY_PROVIDER_FIXTURE: provider.configPath,
+          });
+        }
         if (await cli("up", "--ai", "live"))
           throw Error("Isolated app launch failed");
         if (await cli("doctor"))
           throw Error("Doctor failed; refusing to drive the instance");
         if (interrupted) throw Error("Interrupted");
-        const options = JSON.stringify({ output, scenario, timeout, driver });
+        const options = JSON.stringify({
+          output,
+          scenario,
+          timeout,
+          driver,
+          provider: provider && {
+            configPath: provider.configPath,
+            employerOrigin: provider.employerOrigin,
+          },
+        });
         if (
           await cli(
             "drive",
@@ -227,6 +268,8 @@ if (args.help || args.list) {
           throw Error("Journey driver failed; see runner.log");
       } finally {
         instanceCleanup = await cli("down");
+        provider?.stop();
+        Reflect.deleteProperty(env, "NESTOR_VERIFY_PROVIDER_FIXTURE");
         cleanupCodes.push(instanceCleanup);
         launched = false;
       }

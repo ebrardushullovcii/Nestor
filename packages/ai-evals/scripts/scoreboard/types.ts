@@ -65,6 +65,8 @@ export interface Question {
   text: string;
   answerKey: string;
   country: string;
+  /** Linked job locations; older saved runs may lack this metadata. */
+  locations?: string[];
   instance: string;
   firstSeenAt: string;
   profileAnswers: boolean;
@@ -83,7 +85,7 @@ export interface Result {
   failure?: { step: string; happened: string; likelyPackage: string };
 }
 export interface Run {
-  version: 1;
+  version: 1 | 2;
   startedAt: string;
   finishedAt?: string;
   source: { head: string; dirty: string | null };

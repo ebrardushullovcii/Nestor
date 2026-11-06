@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { ApplyJobsInput, ApplyJobsResult } from "@nestor/contracts";
 import type { App } from "./app.ts";
+import { genuineQuestion } from "./report.ts";
 import { fields } from "./app.ts";
 import type { Job, Need, Result } from "./types.ts";
 
@@ -34,7 +35,43 @@ export async function standard(app: App, r: Result) {
     before,
     "Fill mode never sends",
   );
-  ready(app, jobs, r);
+  app.capture();
+  const outcomes = jobs.map((job) => {
+    const a = app.application(job);
+    const unresolved = app.read<Need>(
+      "SELECT n.* FROM needs_you n JOIN application_needs_you l ON l.task_id=n.id WHERE l.application_id=? AND n.resolved_at IS NULL",
+      a.id,
+    );
+    const genuine =
+      a.state === "needs_you" &&
+      unresolved.length > 0 &&
+      unresolved.every((n) => {
+        const q = r.questions.find((q) => q.id === n.id);
+        return q && !q.duplicate && genuineQuestion(q);
+      });
+    return {
+      job: job.url,
+      state: a.state,
+      genuinePause: genuine,
+      error: a.error,
+    };
+  });
+  r.metrics.applications = outcomes;
+  r.metrics.summary = outcomes
+    .map(
+      (a) =>
+        `${new URL(a.job).pathname}: ${a.state}${a.genuinePause ? " (genuine question)" : ""}`,
+    )
+    .join("; ");
+  assert.ok(
+    outcomes.every((a) => a.state === "ready" || a.genuinePause),
+    JSON.stringify(outcomes),
+  );
+  assert.equal(
+    r.questions.filter((q) => q.profileAnswers || q.duplicate).length,
+    0,
+    "known-fact questions and repeats fail",
+  );
 }
 
 async function replicaAccount(app: App, job: Job) {
