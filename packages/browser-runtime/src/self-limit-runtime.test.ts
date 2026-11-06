@@ -3,7 +3,6 @@ import type { BrowserContext, Locator, Page } from "playwright";
 import { createHostQueue } from "./host-queue";
 import { createHttpPageReader } from "./http-page-reader";
 import { readRenderedPageHtml } from "./rendered-page-reader";
-import { attachFile } from "./file-attachment";
 import { choosePageOption } from "./choose-page-option";
 import { watchPageSelfLimits } from "./self-limit-page";
 
@@ -116,25 +115,7 @@ test("active navigation can continue past 20 seconds with connection progress", 
   expect(await pending).toEqual({ html: "Complete", finalUrl: page.url() });
   expect(close).toHaveBeenCalledOnce();
 });
-test("an attachment command timeout is reported at the real file tool boundary", async () => {
-  const log = vi.spyOn(console, "warn").mockImplementation(() => {}),
-    timeout = Object.assign(Error("Timeout 15000ms exceeded"), {
-      name: "TimeoutError",
-    });
-  const input = {
-    getAttribute: () => Promise.resolve(null),
-    setInputFiles: () => Promise.reject(timeout),
-  } as unknown as Locator;
-  await expect(
-    attachFile({} as Page, input, {
-      name: "synthetic.txt",
-      mimeType: "text/plain",
-      bytes: new Uint8Array([1]),
-    }),
-  ).rejects.toBe(timeout);
-  expect(hits(log).some((hit) => hit.value === 15000)).toBe(true);
-});
-test("native picker settling reports its deadline instead of inventing an absent option", async () => {
+test("a silent native picker reports idle instead of inventing an absent option", async () => {
   vi.useFakeTimers();
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
   const input = {
@@ -150,7 +131,7 @@ test("native picker settling reports its deadline instead of inventing an absent
   );
   await vi.advanceTimersByTimeAsync(5200);
   expect(await pending).toMatchObject({ ok: false });
-  expect(hits(log).some((hit) => hit.limit === "native_option_settle")).toBe(
+  expect(hits(log).some((hit) => hit.limit === "native_option_idle")).toBe(
     true,
   );
 });
@@ -170,3 +151,57 @@ test("page console forwarding attaches once and uses the shared structured event
   });
   expect(hits(log)).toMatchObject([{ limit: "test", value: 1 }]);
 });
+
+test.each(["state", "connection"])(
+  "a native picker keeps progressing through %s beyond its former total clock",
+  async (kind) => {
+    vi.useFakeTimers();
+    const started = Date.now();
+    const selected = vi.fn(() => Promise.resolve());
+    const evaluate = vi
+      .fn()
+      .mockResolvedValueOnce(true)
+      .mockImplementation(() =>
+        Promise.resolve({
+          disabled: false,
+          busy: true,
+          options: [
+            {
+              text:
+                kind === "state"
+                  ? `Loading page ${Math.floor((Date.now() - started) / 1000)}`
+                  : "Loading",
+              value: "",
+              disabled: true,
+            },
+          ],
+        }),
+      );
+    const input = { evaluate, selectOption: selected } as unknown as Locator;
+    selected.mockImplementation(() => {
+      evaluate.mockResolvedValue("Wanted");
+      return Promise.resolve();
+    });
+    const listeners = new Map<string, () => void>();
+    const page = {
+      on: (name: string, listener: () => void) => {
+        listeners.set(name, listener);
+      },
+      off: (name: string) => listeners.delete(name),
+    } as unknown as Page;
+    const pending = choosePageOption(page, input, "Wanted");
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(4_000);
+      if (kind === "connection") listeners.get("response")?.();
+    }
+    expect(selected).not.toHaveBeenCalled();
+    evaluate.mockResolvedValue({
+      disabled: false,
+      busy: false,
+      options: [{ text: "Wanted", value: "wanted", disabled: false }],
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(await pending).toMatchObject({ ok: true, observedValue: "Wanted" });
+    expect(selected).toHaveBeenCalledWith({ index: 0 }, { timeout: 0 });
+  },
+);

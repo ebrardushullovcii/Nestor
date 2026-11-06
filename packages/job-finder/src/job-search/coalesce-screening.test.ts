@@ -9,7 +9,6 @@ const messages: Parameters<Chat>[0] = [
 const options = () => ({
   signal: new AbortController().signal,
   reasoningTask: "listing_screen" as const,
-  maxOutputTokens: 8000,
 });
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -42,21 +41,21 @@ test("identical simultaneous questions share one turn and one usage report", asy
   expect(chat).toHaveBeenCalledTimes(2);
 });
 
-test("different evidence, budgets, searches and purposes remain independent", async () => {
+test("different evidence, options, searches and purposes remain independent", async () => {
   const chat = vi.fn<Chat>(() => Promise.resolve({ content: "{}" }));
   const shared = coalesceScreening(chat),
     input = options();
   await Promise.all([
     shared(messages, [], input),
     shared([{ role: "user", content: "Different duties" }], [], input),
-    shared(messages, [], { ...input, maxOutputTokens: 16000 }),
+    shared(messages, [], { ...input, parallelToolCalls: false }),
     shared(messages, [], options()),
     shared(messages, [], { ...input, reasoningTask: "page_read" }),
   ]);
   expect(chat).toHaveBeenCalledTimes(5);
 });
 
-test("a failed shared turn is discarded so the larger retry can succeed", async () => {
+test("a failed shared turn is discarded so a new request can succeed", async () => {
   const turn = deferred<Awaited<ReturnType<Chat>>>();
   const chat = vi
     .fn<Chat>()
@@ -76,6 +75,6 @@ test("a failed shared turn is discarded so the larger retry can succeed", async 
     "rejected",
     "rejected",
   ]);
-  await shared(messages, [], { ...input, maxOutputTokens: 16000 });
+  await shared(messages, [], { ...input, parallelToolCalls: false });
   expect(chat).toHaveBeenCalledTimes(2);
 });

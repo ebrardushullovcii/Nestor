@@ -27,7 +27,7 @@ export function installMutationResponseBodyObserver(): void {
           ? body.toString()
           : null;
     let bodyKey: string;
-    if (text !== null && text.length <= 64_000) bodyKey = `text:${text}`;
+    if (text !== null) bodyKey = `text:${text}`;
     else if (body instanceof FormData) {
       const files = [...body]
         .filter(
@@ -37,7 +37,6 @@ export function installMutationResponseBodyObserver(): void {
       bodyKey = JSON.stringify(
         files.length ? ["files", files] : ["fields", [...body]],
       );
-      if (bodyKey.length > 64_000) return null;
     } else if (body instanceof File)
       bodyKey = JSON.stringify(["files", [["", body.name, body.size]]]);
     else if (body instanceof Blob) bodyKey = `bytes:${body.size}`;
@@ -62,7 +61,6 @@ export function installMutationResponseBodyObserver(): void {
       text: null,
     };
     entries.push(entry);
-    entries.splice(0, Math.max(0, entries.length - 32));
     return entry;
   };
   const fetch = window.fetch.bind(window);
@@ -85,18 +83,12 @@ export function installMutationResponseBodyObserver(): void {
         const reader = copy.body?.getReader();
         if (!reader) return;
         const decoder = new TextDecoder();
-        let text = "",
-          bytes = 0;
+        let text = "";
         try {
           while (true) {
             const chunk = await reader.read();
             if (chunk.done) {
               entry.text = text + decoder.decode();
-              return;
-            }
-            bytes += chunk.value.byteLength;
-            if (bytes > 64_000) {
-              await reader.cancel();
               return;
             }
             text += decoder.decode(chunk.value, { stream: true });
@@ -140,7 +132,7 @@ export function installMutationResponseBodyObserver(): void {
                 : this.responseType === "" || this.responseType === "text"
                   ? this.responseText
                   : null;
-            if (text !== null && text.length <= 64_000) entry.text = text;
+            if (text !== null) entry.text = text;
           } catch {
             /* An unreadable body stays unconfirmed. */
           }
@@ -155,7 +147,7 @@ const requestTokens = new WeakMap<Response, string>();
 
 async function requestBodyKeys(request: PageRequest): Promise<string[]> {
   const bytes = request.postDataBuffer();
-  if (!bytes || bytes.byteLength > 50 * 1024 * 1024) return [];
+  if (!bytes) return [];
   const keys = [`bytes:${bytes.byteLength}`];
   const contentType = request.headers()["content-type"] ?? "";
   if (/\bmultipart\/form-data\b/iu.test(contentType)) {
@@ -178,7 +170,7 @@ async function requestBodyKeys(request: PageRequest): Promise<string[]> {
     }
   } else {
     const text = request.postData();
-    if (text !== null && text.length <= 64_000) keys.push(`text:${text}`);
+    if (text !== null) keys.push(`text:${text}`);
   }
   return keys;
 }

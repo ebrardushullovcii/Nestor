@@ -155,9 +155,7 @@ function describeAnswered(
           ? "chosen"
           : ""
         : (control.selectedOptionLabel || control.value).trim();
-  return shown
-    ? `answered: ${JSON.stringify(shown.length > 80 ? `${shown.slice(0, 80)}…` : shown)}`
-    : "already answered";
+  return shown ? `answered: ${JSON.stringify(shown)}` : "already answered";
 }
 
 function describeControl(
@@ -181,15 +179,9 @@ function describeControl(
   if (control.inputConstraints)
     parts.push(`format: ${JSON.stringify(control.inputConstraints)}`);
   if (control.options.length > 0) {
-    // A country list is 240 entries long. Sending all of them costs the person
-    // seconds of waiting on every turn and tells the model nothing it needs:
-    // the deterministic matcher works from the full list either way.
-    const shown = control.options.slice(0, 12);
-    const remaining = control.options.length - shown.length;
-    parts.push(
-      `choices: ${shown.join(" | ")}${remaining > 0 ? ` | ${remaining} more; call read_text with ref ${control.ref} for all choices` : ""}`,
-    );
+    parts.push(`choices: ${control.options.join(" | ")}`);
   }
+
   if (control.attestationKind) {
     parts.push(
       "a declaration: use set_checkbox to carry out your decision from the person's declaration settings and facts",
@@ -210,10 +202,7 @@ function describeControl(
 }
 
 /** The page, written out for the model. Nothing here is a DOM handle. */
-export function describeObservation(
-  observation: ApplyFormObservation,
-  options: { linkLimit?: number } = {},
-): string {
+export function describeObservation(observation: ApplyFormObservation): string {
   const step =
     observation.step.index !== null && observation.step.total !== null
       ? `Step ${observation.step.index} of ${observation.step.total}.`
@@ -252,13 +241,11 @@ export function describeObservation(
       : null,
     observation.headings.length > 0
       ? `Headings:\n${observation.headings
-          .slice(0, 20)
           .map((heading) => `- ${heading.text}`)
           .join("\n")}`
       : null,
     observation.validationErrors.length > 0
       ? `The page is showing problems:\n${observation.validationErrors
-          .slice(0, 8)
           .map((error) => `- ${error}`)
           .join("\n")}`
       : null,
@@ -275,7 +262,6 @@ export function describeObservation(
       : null,
     links.length > 0
       ? `Links:\n${links
-          .slice(0, options.linkLimit ?? 80)
           .map(
             (link) =>
               `- ${link.ref}: ${link.label} → ${link.href}${link.opensNewWindow ? " (opens a new tab; follow_link opens it here)" : ""}${link.frame ? ` (frame: ${link.frame.origin})` : ""}`,
@@ -284,7 +270,6 @@ export function describeObservation(
       : null,
     clickables.length > 0
       ? `Other clickable things:\n${clickables
-          .slice(0, 40)
           .map(
             (entry) =>
               `- ${entry.ref}: ${entry.label}${entry.disabled ? " (disabled)" : ""}${entry.frame ? ` (frame: ${entry.frame.origin})` : ""}`,
@@ -292,7 +277,7 @@ export function describeObservation(
           .join("\n")}`
       : null,
     observation.bodyTextExcerpt.trim()
-      ? `Page text (excerpt; read_text gets the rest):\n${observation.bodyTextExcerpt.slice(0, 2_500)}`
+      ? `Page text:\n${observation.bodyTextExcerpt}`
       : null,
   ]
     .filter((line): line is string => line !== null)

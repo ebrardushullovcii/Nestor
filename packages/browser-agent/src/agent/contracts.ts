@@ -22,7 +22,6 @@ export interface LLMClient {
     options?: {
       signal?: AbortSignal
       parallelToolCalls?: boolean
-      maxOutputTokens?: number
       onStreamEvent?: (event: ModelTurnStreamEvent) => void
       reasoningTask?: BrowserAgentReasoningTask
       includeUsage?: boolean

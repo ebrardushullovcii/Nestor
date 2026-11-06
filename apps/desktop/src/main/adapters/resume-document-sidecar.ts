@@ -13,8 +13,6 @@ import {
   type ResumeParserWorkerResponse,
 } from "@nestor/contracts";
 
-const MAX_SIDECAR_OUTPUT_BYTES = 512_000;
-const MAX_VISION_IMAGE_OUTPUT_BYTES = 64_000_000;
 const SIDECAR_BINARY_NAME =
   process.platform === "win32"
     ? "resume_parser_sidecar.exe"
@@ -399,46 +397,13 @@ function isMissingCommandError(error: unknown): boolean {
 }
 
 function appendSidecarOutput(current: string, chunk: Buffer | string): string {
-  const next = current + chunk.toString();
-  if (next.length > MAX_SIDECAR_OUTPUT_BYTES)
-    reportSelfLimitHit({
-      limit: "resume_parser_output",
-      kind: "input",
-      value: MAX_SIDECAR_OUTPUT_BYTES,
-      where: "desktop/appendSidecarOutput",
-    });
-  return next.length > MAX_SIDECAR_OUTPUT_BYTES
-    ? next.slice(next.length - MAX_SIDECAR_OUTPUT_BYTES)
-    : next;
-}
-
-export function appendBoundedSidecarOutputForTest(
-  current: string,
-  chunk: Buffer | string,
-  maxBytes: number,
-): string {
-  const next = current + chunk.toString();
-
-  if (next.length > maxBytes) {
-    reportSelfLimitHit({
-      limit: "resume_vision_output_bytes",
-      kind: "input",
-      value: maxBytes,
-      where: "desktop/appendBoundedSidecarOutput",
-    });
-    throw new Error(
-      `Python resume parser sidecar output exceeded ${maxBytes} bytes.`,
-    );
-  }
-
-  return next;
+  return current + chunk.toString();
 }
 
 async function invokeSidecarCandidate<TResult>(input: {
   candidate: SidecarCommandCandidate;
   request: ResumeParserWorkerRequest | Record<string, unknown>;
   timeoutMs: number | undefined;
-  maxOutputBytes?: number;
   parseOutput: (output: unknown) => TResult;
 }): Promise<TResult> {
   return await new Promise<TResult>((resolve, reject) => {
@@ -462,57 +427,40 @@ async function invokeSidecarCandidate<TResult>(input: {
       callback();
     };
 
-    const timer =
-      input.timeoutMs === undefined
-        ? undefined
-        : setTimeout(() => {
-            reportSelfLimitHit({
-              limit: "resume_parser_time",
-              kind: "timeout",
-              value: input.timeoutMs!,
-              where: "desktop/runResumeDocumentSidecar",
-            });
-            child.kill();
-            finish(() => {
-              reject(
-                new Error(
-                  `Python resume parser sidecar timed out after ${input.timeoutMs}ms (${input.candidate.label}).`,
-                ),
-              );
-            });
-          }, input.timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const progress = () => {
+      clearTimeout(timer);
+      if (input.timeoutMs !== undefined)
+        timer = setTimeout(() => {
+          reportSelfLimitHit({
+            limit: "resume_parser_idle",
+            kind: "idle",
+            value: input.timeoutMs!,
+            where: "desktop/runResumeDocumentSidecar",
+          });
+          child.kill();
+          finish(() =>
+            reject(
+              new Error(
+                `Python resume parser stopped reporting progress (${input.candidate.label}).`,
+              ),
+            ),
+          );
+        }, input.timeoutMs);
+    };
+    progress();
 
     child.once("error", (error) => {
       finish(() => reject(error));
     });
 
     child.stdout.on("data", (chunk: Buffer | string) => {
-      if (input.maxOutputBytes) {
-        try {
-          stdout = appendBoundedSidecarOutputForTest(
-            stdout,
-            chunk,
-            input.maxOutputBytes,
-          );
-        } catch (error) {
-          child.kill();
-          finish(() =>
-            reject(
-              error instanceof Error
-                ? error
-                : new Error(
-                    "Python resume parser sidecar output exceeded the configured limit.",
-                  ),
-            ),
-          );
-        }
-        return;
-      }
-
+      progress();
       stdout = appendSidecarOutput(stdout, chunk);
     });
 
     child.stderr.on("data", (chunk: Buffer | string) => {
+      progress();
       stderr = appendSidecarOutput(stderr, chunk);
     });
 
@@ -743,7 +691,6 @@ export async function runResumeVisionImageSidecar(input: {
         candidate,
         request,
         timeoutMs: input.timeoutMs,
-        maxOutputBytes: MAX_VISION_IMAGE_OUTPUT_BYTES,
         parseOutput: parseVisionImageSidecarResponse,
       });
       return response;

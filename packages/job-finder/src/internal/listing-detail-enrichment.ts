@@ -1,8 +1,4 @@
-import {
-  createConnectionIdleTimeout,
-  reportSelfLimitHit,
-  selfLimitSlice,
-} from "@nestor/core";
+import { createConnectionIdleTimeout, reportSelfLimitHit } from "@nestor/core";
 import {
   JobPostingSchema,
   assessJobPostingDetailQuality,
@@ -182,10 +178,6 @@ const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_RATE_LIMIT_PAUSE_MS = 1_000;
 /** Exported so the run log can say how many of the candidates this pass reads. */
 export const LISTING_DETAIL_READS_PER_RUN = Infinity;
-const RETRY_AFTER_SUCCESSFUL_ATTEMPT_MS = 24 * 60 * 60 * 1000;
-const RETRY_AFTER_FAILED_ATTEMPT_MS = 60 * 60 * 1000;
-const MAX_RESPONSE_CHARACTERS = 1_500_000;
-const MAX_RESPONSE_BYTES = MAX_RESPONSE_CHARACTERS * 4;
 const SUMMARY_MAX_LENGTH = 420;
 
 const BROWSER_LIKE_HEADERS = {
@@ -219,7 +211,6 @@ export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
           };
           signal.addEventListener("abort", cancel, { once: true });
           if (signal.aborted) cancel();
-          let bytesRead = 0;
           const decoder = new TextDecoder();
           try {
             while (true) {
@@ -230,25 +221,7 @@ export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
                 break;
               }
               idle.progress();
-              const accepted = value.subarray(
-                0,
-                MAX_RESPONSE_BYTES - bytesRead,
-              );
-              bytesRead += accepted.byteLength;
-              text += decoder.decode(accepted, { stream: true });
-              if (
-                bytesRead >= MAX_RESPONSE_BYTES ||
-                text.length >= MAX_RESPONSE_CHARACTERS
-              ) {
-                reportSelfLimitHit({
-                  limit: "listing_response_bytes",
-                  kind: "input",
-                  value: MAX_RESPONSE_BYTES,
-                  where: "job-finder/createDefaultListingHtmlFetcher",
-                });
-                await reader.cancel();
-                break;
-              }
+              text += decoder.decode(value, { stream: true });
             }
           } catch (error) {
             await reader.cancel(error).catch(() => undefined);
@@ -264,15 +237,7 @@ export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
         );
         return {
           status: response.status,
-          html:
-            text.length > MAX_RESPONSE_CHARACTERS
-              ? selfLimitSlice(
-                  text,
-                  0,
-                  MAX_RESPONSE_CHARACTERS,
-                  "packages/job-finder/src/internal/listing-detail-enrichment.ts:262",
-                )
-              : text,
+          html: text,
           finalUrl: response.url || url,
           ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
         };
@@ -382,25 +347,7 @@ export function jobNeedsListingDetail(
     // saying when to come back.
     return Date.parse(nowIso) >= Date.parse(attempt.retryAfterAt);
   }
-  // A person choosing this job needs its body now; background retry delays
-  // must not turn a failed read into the resume's permanent source.
-  if (job.status === "approved") return true;
-  const since = Date.parse(nowIso) - Date.parse(attempt.attemptedAt);
-  if (!Number.isFinite(since)) {
-    return true;
-  }
-  const retryAfter =
-    attempt.outcome === "fetch_failed" || attempt.outcome === "blocked"
-      ? RETRY_AFTER_FAILED_ATTEMPT_MS
-      : RETRY_AFTER_SUCCESSFUL_ATTEMPT_MS;
-  if (since < retryAfter)
-    reportSelfLimitHit({
-      limit: "listing_retry_backoff",
-      kind: "timeout",
-      value: retryAfter,
-      where: "job-finder/jobNeedsListingDetail",
-    });
-  return since >= retryAfter;
+  return true;
 }
 
 /**

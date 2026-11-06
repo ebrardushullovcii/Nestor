@@ -1,4 +1,3 @@
-import { selfLimitSlice } from "@nestor/core";
 import { parseToolArguments, type AgentLoopTool } from "@nestor/agent-runtime";
 import {
   JobPostingSchema,
@@ -72,12 +71,7 @@ export function createSearchCatalogTools(input: {
               postedAt: job.postedAt,
               postedAtText: job.postedAtText,
               providerUpdatedAt: job.providerUpdatedAt,
-              summary: selfLimitSlice(
-                job.summary ?? job.description,
-                0,
-                400,
-                "packages/browser-agent/src/search/job-search-catalog-tools.ts:75",
-              ),
+              summary: job.summary ?? job.description,
             })),
           }),
           progress: hasUnreadJobs,

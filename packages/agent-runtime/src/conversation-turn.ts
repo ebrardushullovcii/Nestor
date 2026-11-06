@@ -1,4 +1,4 @@
-import { traceOurs, traceEvent, withTraceScope } from "@nestor/core/run-trace";
+import { traceEvent, withTraceScope } from "@nestor/core/run-trace";
 import { isAgentRunAborted } from "./cancellation";
 import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 import {
@@ -55,7 +55,6 @@ export interface ConversationModel {
     tools: AgentLoopToolDefinition[],
     options?: {
       signal?: AbortSignal;
-      maxOutputTokens?: number;
       onStreamEvent?: (event: ConversationStreamEvent) => void;
     },
   ) => Promise<{
@@ -99,7 +98,6 @@ export type ConversationTurnEvent =
   | { type: "steering_read"; count: number };
 
 export interface ConversationTurnCeilings {
-  maxOutputTokens?: number;
   /** Silence while a tool is running; progress restarts this clock. */
   toolIdleTimeoutMs?: number;
   /** Silence between model stream events, not elapsed reasoning time. */
@@ -132,10 +130,6 @@ export interface RunConversationTurnOptions extends RuntimeObservers {
   signal?: AbortSignal;
   onEvent?: (event: ConversationTurnEvent) => void | Promise<void>;
   ceilings?: ConversationTurnCeilings;
-  /** Longest tool result handed back verbatim. */
-  toolResultLimitChars?: number;
-  /** Stores a result that is too long and returns the note that replaces its tail. */
-  storeOverflow?: (toolName: string, content: string) => Promise<string>;
   now?: () => number;
 }
 
@@ -159,7 +153,6 @@ export interface ConversationTurnResult {
   error: unknown;
 }
 
-const DEFAULT_TOOL_RESULT_LIMIT_CHARS = 16_000;
 const STATUS_ARGUMENT = "status";
 
 function parseArguments(raw: string): Record<string, unknown> {
@@ -237,8 +230,6 @@ function addUsage(
 export async function runConversationTurn(
   options: RunConversationTurnOptions,
 ): Promise<ConversationTurnResult> {
-  const resultLimit =
-    options.toolResultLimitChars ?? DEFAULT_TOOL_RESULT_LIMIT_CHARS;
   const toolsByName = new Map(
     options.tools.map((tool) => [tool.definition.function.name, tool]),
   );
@@ -296,19 +287,14 @@ export async function runConversationTurn(
     const call = modelCalls;
     await emit({ type: "model_call_started", call });
     let response: Awaited<ReturnType<ConversationModel["chatWithTools"]>>;
-    let outputLimit = options.ceilings?.maxOutputTokens;
     for (;;) {
       try {
         response = await runModelTurn(
           (turnOptions) =>
-            observeModel(
-              options,
-              { messages, tools: definitions, maxOutputTokens: outputLimit },
-              () =>
-                options.model.chatWithTools(messages, definitions, {
-                  ...turnOptions,
-                  ...(outputLimit ? { maxOutputTokens: outputLimit } : {}),
-                }),
+            observeModel(options, { messages, tools: definitions }, () =>
+              options.model.chatWithTools(messages, definitions, {
+                ...turnOptions,
+              }),
             ),
           {
             signal: options.signal,
@@ -328,10 +314,7 @@ export async function runConversationTurn(
       } catch (error) {
         if (options.signal?.aborted) return result("aborted");
         if (isModelOutputLimit(error)) {
-          // Existing explicit caps can grow. With no cap the route already
-          // supplies its maximum; recover without dropping the action history.
-          if (outputLimit !== undefined) outputLimit *= 2;
-          else {
+          {
             turnMessages.push({
               role: "user",
               content:
@@ -585,18 +568,7 @@ export async function runConversationTurn(
         }
         if (outcome.status === "failed" || outcome.status === "refused")
           batchSucceeded = false;
-        let content = outcome.content;
-        if (content.length > resultLimit) {
-          const note = options.storeOverflow
-            ? await options.storeOverflow(toolCall.function.name, content)
-            : "The rest was cut to save room.";
-          traceOurs(
-            "packages/agent-runtime/src/conversation-turn.ts:runConversationTurn",
-            "rewritten",
-            `Tool result shortened to ${resultLimit} characters`,
-          );
-          content = `${content.slice(0, resultLimit)}\n… ${note}`;
-        }
+        const content = outcome.content;
         turnMessages.push({
           role: "tool",
           toolCallId: toolCall.id,

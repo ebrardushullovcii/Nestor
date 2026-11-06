@@ -3,7 +3,6 @@ import {
   applicationFacts,
   createApplyPageHands,
   runApplyAgent,
-  UNCONFIRMED_STEP_LABEL,
   type ApplyAgentResult,
   type ApplyAuthority,
   type ApplyDocument,
@@ -15,7 +14,6 @@ import {
   type ExecuteApplicationFlowInput,
 } from "@nestor/browser-runtime";
 import { browserAgentPermissionsOf } from "@nestor/contracts";
-import { selfLimitSlice } from "@nestor/core";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolveListingCountry } from "../applications/questions";
@@ -84,7 +82,6 @@ export interface AgentApplicationPreparationInput {
   searchPreferences?: JobSearchPreferences | undefined;
   llmClient: LLMClient;
   modelContextWindowTokens?: number;
-  modelMaxOutputTokens?: number;
   questionReadCacheScope?: object;
   initialQuestionContexts?: Parameters<
     typeof runApplyAgent
@@ -373,29 +370,14 @@ function toCheckpoints(
     result.timeline.length > 0
       ? result.timeline
       : result.notes.map((text) => ({ at: startedAt, text }));
-  // Receipts a continued run reads to avoid repeating an uncertain action.
-  const selections = lines.filter(
-    (line) =>
-      line.label === "Google account selected" ||
-      line.label === "Google sign-in confirmed" ||
-      line.label === UNCONFIRMED_STEP_LABEL,
-  );
-  const retained = new Set([
-    ...selections,
-    ...lines
-      .filter((line) => !selections.includes(line))
-      .slice(0, Math.max(0, 40 - selections.length)),
-  ]);
-  return lines
-    .filter((line) => retained.has(line))
-    .map((line, index) => ({
-      id: `checkpoint_${jobId}_agent_${index + 1}`,
-      at: line.at,
-      label: line.label ?? "Working through the form",
-      detail: line.text,
-      state: "in_progress" as const,
-      visualEvidence: [],
-    }));
+  return lines.map((line, index) => ({
+    id: `checkpoint_${jobId}_agent_${index + 1}`,
+    at: line.at,
+    label: line.label ?? "Working through the form",
+    detail: line.text,
+    state: "in_progress" as const,
+    visualEvidence: [],
+  }));
 }
 
 /** What the run wrote on the site, for the receipt: each field, each file. */
@@ -598,9 +580,6 @@ export async function runAgentApplicationPreparation(
       : {}),
     ...(input.modelContextWindowTokens
       ? { modelContextWindowTokens: input.modelContextWindowTokens }
-      : {}),
-    ...(input.modelMaxOutputTokens
-      ? { modelMaxOutputTokens: input.modelMaxOutputTokens }
       : {}),
     safety: input.session,
     ...(input.questionReadCacheScope
@@ -814,7 +793,7 @@ export async function runAgentApplicationPreparation(
     ...(result.formPath?.length ? { formPath: result.formPath } : {}),
     // Send evidence for this attempt only (council D1).
     ...(result.stepReceipts?.length
-      ? { stepReceipts: result.stepReceipts.slice(-40) }
+      ? { stepReceipts: result.stepReceipts }
       : {}),
     ...(result.skipReason ? { skipReason: result.skipReason } : {}),
   };
@@ -853,7 +832,6 @@ export function toApplyLlmClient(
       label: string;
       model: string | null;
       modelContextWindowTokens?: number | null;
-      modelMaxOutputTokens?: number | null;
     };
     chatWithTools?: (
       messages: Parameters<LLMClient["chatWithTools"]>[0],
@@ -992,9 +970,6 @@ export function createApplyFormPreparer(input: {
           llmClient,
           ...(status?.modelContextWindowTokens
             ? { modelContextWindowTokens: status.modelContextWindowTokens }
-            : {}),
-          ...(status?.modelMaxOutputTokens
-            ? { modelMaxOutputTokens: status.modelMaxOutputTokens }
             : {}),
           questionReadCacheScope: input.aiClient,
           ...(input.reusableAnswers
@@ -1247,28 +1222,15 @@ export function buildApplyReviewCard(input: {
   const reviewDraft = input.result.pauses.find(
     (pause) => pause.reviewDraft,
   )?.reviewDraft;
-  // The card's schema caps every string. The run's own text (a grounding
-  // note that quotes a resume line, a long field label) can run past a cap,
-  // and an over-long note used to make this parse throw after the form had
-  // been filled in, so the run ended as "stopped safely" and nothing was
-  // sent. Text is clamped to what the card can hold; the record keeps the
-  // full run trail.
-  const clamp = (text: string, max: number): string => {
-    const trimmed = text.trim() ? text : "-";
-    return trimmed.length <= max
-      ? trimmed
-      : `${trimmed.slice(0, max - 1).trimEnd()}…`;
-  };
+  const fullText = (text: string): string => (text.trim() ? text : "-");
   const clampGrounding = (notes: readonly string[]): string[] =>
-    selfLimitSlice(
-      notes.map((note) => note.trim()).filter((note) => note.length > 0),
-      0,
-      8,
-      "packages/job-finder/src/internal/agent-application-preparation.ts:1364",
-    ).map((note) => clamp(note, 240));
+    notes
+      .map((note) => note.trim())
+      .filter((note) => note.length > 0)
+      .map((note) => fullText(note));
 
   return ApplicationReviewCardSchema.parse({
-    siteLabel: clamp(input.siteLabel, 240),
+    siteLabel: fullText(input.siteLabel),
     pageUrl: input.result.finalUrl,
     ...(input.intermediateSaved ? { intermediateSaved: true } : {}),
     ...(input.result.reviewObservedFieldKeys
@@ -1278,37 +1240,33 @@ export function buildApplyReviewCard(input: {
       ...new Map(
         filled.map((entry) => [entry.fieldKey ?? entry.label, entry]),
       ).values(),
-    ]
-      .slice(0, 200)
-      .map((entry) => ({
-        ...(entry.fieldKey ? { fieldKey: entry.fieldKey } : {}),
-        question: clamp(entry.label, 2_000),
-        answer: clamp(entry.answer.value, 12_000),
-        source: clamp(entry.answer.provenanceLabel, 240),
-        sourceId: entry.answer.sourceId,
-        written: entry.answer.sourceKind === "generated",
-        groundedIn: clampGrounding(entry.answer.groundedIn),
-      })),
+    ].map((entry) => ({
+      ...(entry.fieldKey ? { fieldKey: entry.fieldKey } : {}),
+      question: fullText(entry.label),
+      answer: fullText(entry.answer.value),
+      source: fullText(entry.answer.provenanceLabel),
+      sourceId: entry.answer.sourceId,
+      written: entry.answer.sourceKind === "generated",
+      groundedIn: clampGrounding(entry.answer.groundedIn),
+    })),
     attachments: [
       ...new Map(
         attached.map((entry) => [entry.fieldKey ?? entry.controlLabel, entry]),
       ).values(),
-    ]
-      .slice(0, 20)
-      .map((attachment) => ({
-        ...(attachment.fieldKey ? { fieldKey: attachment.fieldKey } : {}),
-        label: clamp(attachment.label, 240),
-        fileName: clamp(attachment.fileName, 240),
-        field: clamp(attachment.controlLabel, 2_000),
-        ...(attachment.savedSha256
-          ? { savedSha256: attachment.savedSha256 }
-          : {}),
-      })),
+    ].map((attachment) => ({
+      ...(attachment.fieldKey ? { fieldKey: attachment.fieldKey } : {}),
+      label: fullText(attachment.label),
+      fileName: fullText(attachment.fileName),
+      field: fullText(attachment.controlLabel),
+      ...(attachment.savedSha256
+        ? { savedSha256: attachment.savedSha256 }
+        : {}),
+    })),
     letter: reviewDraft
       ? {
-          text: clamp(reviewDraft.text, 12_000),
+          text: fullText(reviewDraft.text),
           groundedIn: clampGrounding(reviewDraft.groundedIn),
-          reviewReason: clamp(reviewDraft.reason, 2_000),
+          reviewReason: fullText(reviewDraft.reason),
         }
       : letterEntry
         ? {
@@ -1320,7 +1278,7 @@ export function buildApplyReviewCard(input: {
                 .filter((entry) => entry.reviewText)
                 .map((entry) => entry.controlLabel),
             ],
-            text: clamp(letterEntry.answer.value, 12_000),
+            text: fullText(letterEntry.answer.value),
             groundedIn: clampGrounding(letterEntry.answer.groundedIn),
           }
         : attachedLetter
@@ -1328,14 +1286,13 @@ export function buildApplyReviewCard(input: {
               fields: attached
                 .filter((entry) => entry.reviewText)
                 .map((entry) => entry.controlLabel),
-              text: clamp(attachedLetter.text, 12_000),
+              text: fullText(attachedLetter.text),
               groundedIn: clampGrounding(attachedLetter.groundedIn),
             }
           : null,
     waitingOnYou: input.result.pauses
       .map((pause) => pause.summary)
-      .slice(0, 20)
-      .map((summary) => clamp(summary, 2_000)),
+      .map((summary) => fullText(summary)),
     preparedAt: input.preparedAt,
   });
 }
@@ -1503,12 +1460,7 @@ export function mergeApplyReviewCards(
       : {}),
     ...(retainEarlier && current.observedFieldKeys
       ? {
-          observedFieldKeys: selfLimitSlice(
-            [...observedFieldKeys],
-            0,
-            500,
-            "packages/job-finder/src/internal/agent-application-preparation.ts:1607",
-          ),
+          observedFieldKeys: [...observedFieldKeys],
         }
       : {}),
     answers: [

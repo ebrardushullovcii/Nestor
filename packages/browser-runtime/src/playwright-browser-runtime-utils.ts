@@ -90,7 +90,7 @@ async function listChromeProcessCommandLines(): Promise<string[]> {
         {
           windowsHide: true,
           maxBuffer: 5 * 1024 * 1024,
-          timeout: 3_000,
+          timeout: 0,
         },
       );
 

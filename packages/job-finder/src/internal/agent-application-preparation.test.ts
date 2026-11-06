@@ -914,7 +914,7 @@ describe("the preparer the browser layer is handed", () => {
 });
 
 describe("the review card shown before you press send", () => {
-  test("a grounding note longer than the card allows is clamped, not a crash", () => {
+  test("the review retains every full grounding note", () => {
     const longNote = `Resume line: ${"x".repeat(400)}`;
     const card = buildApplyReviewCard({
       preparedAt: "2026-09-14T10:05:00.000Z",
@@ -960,9 +960,9 @@ describe("the review card shown before you press send", () => {
       },
     });
 
-    expect(card.letter?.groundedIn).toHaveLength(8);
-    expect(card.letter?.groundedIn[0]?.length).toBeLessThanOrEqual(240);
-    expect(card.answers[0]?.groundedIn[0]?.endsWith("…")).toBe(true);
+    expect(card.letter?.groundedIn).toHaveLength(10);
+    expect(card.letter?.groundedIn[0]).toBe(longNote);
+    expect(card.answers[0]?.groundedIn[0]).toBe(longNote);
   });
 
   test("shows every answer, where it came from, and what is still waiting on you", () => {
@@ -2498,7 +2498,6 @@ test.each([196_000, null])(
             label: "Synthetic route",
             model: "synthetic",
             modelContextWindowTokens: contextWindow,
-            modelMaxOutputTokens: 131_072,
           }),
           chatWithTools: modelThatFinishes().chatWithTools,
         },
@@ -2513,7 +2512,7 @@ test.each([196_000, null])(
       expect(run.mock.calls[0]?.[0].modelContextWindowTokens).toBe(
         contextWindow ?? undefined,
       );
-      expect(run.mock.calls[0]?.[0].modelMaxOutputTokens).toBe(131_072);
+      expect(run.mock.calls[0]?.[0]).not.toHaveProperty("modelMaxOutputTokens");
     } finally {
       run.mockRestore();
     }

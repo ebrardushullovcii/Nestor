@@ -846,7 +846,6 @@ export function createOpenAiCompatibleJobFinderAiClient(
                 parameters: tool.function.parameters,
               },
             })),
-            maxOutputTokens: options?.maxOutputTokens,
             parallelToolCalls: options?.parallelToolCalls,
           }),
           apiMode,

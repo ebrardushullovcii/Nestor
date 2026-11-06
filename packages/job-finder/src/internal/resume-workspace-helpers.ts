@@ -1,4 +1,4 @@
-import { reportSelfLimitHit, selfLimitSlice, fnv1a32 } from "@nestor/core";
+import { fnv1a32 } from "@nestor/core";
 import { resumeComparisonNeedsRefresh } from "@nestor/contracts";
 import {
   resumeFactIsCovered,
@@ -6,8 +6,6 @@ import {
 } from "./resume-content-comparison";
 import {
   buildCandidateSkillBank,
-  buildResumeSkillContextFilter,
-  isSpokenLanguageResumeChrome,
   looksLikeSpokenLanguageSkillEntry,
   skillsAreEquivalent,
   type ResumeGenerationEvidenceItem,
@@ -67,10 +65,7 @@ import {
   isGeneratedClassResumeOrigin,
   seedResumeDraft as seedStructuredResumeDraft,
 } from "./resume-workspace-structure";
-import {
-  buildResumeEntryDateQualityIssues,
-  normalizeResumeDraftEntryOrdering,
-} from "./resume-entry-ordering";
+import { buildResumeEntryDateQualityIssues } from "./resume-entry-ordering";
 import { applyPatchToResumeDraft as applyResumeDraftPatch } from "./resume-workspace-patches";
 import { projectWorkHistoryReviewSuggestionIdentities } from "./resume-work-history-review-identity";
 import {
@@ -95,16 +90,6 @@ export interface ResumeWorkspaceResearchContext {
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function matchesWholePhrase(candidate: string, phrase: string): boolean {
-  const desiredTokens = tokenize(phrase);
-  if (desiredTokens.length === 0) return false;
-  if (desiredTokens.length === 1)
-    return new Set(tokenize(candidate)).has(desiredTokens[0] ?? "");
-  return new RegExp(`(^|\\s)${escapeRegex(normalizeText(phrase))}($|\\s)`).test(
-    normalizeText(candidate),
-  );
 }
 
 function createWholePhraseMatcher(candidate: string) {
@@ -186,41 +171,6 @@ export function resolveResumeTemplateLabel(input: {
 function isSkillsResumeSection(draft: ResumeDraft, sectionId: string): boolean {
   const section = draft.sections.find((entry) => entry.id === sectionId);
   return section?.kind === "skills" || section?.kind === "keywords";
-}
-
-function buildCandidateLanguageBank(
-  profile: CandidateProfile | null | undefined,
-): string[] {
-  if (!profile) {
-    return [];
-  }
-
-  return uniqueStrings(
-    profile.spokenLanguages.flatMap((entry) =>
-      [
-        entry.language,
-        [entry.language, entry.proficiency].filter(Boolean).join(" — "),
-      ].filter((value): value is string => Boolean(value && value.trim())),
-    ),
-  );
-}
-
-function isGroundedVisibleLanguage(
-  content: string,
-  candidateLanguageBank: readonly string[],
-): boolean {
-  const normalized = normalizeText(content);
-
-  if (!normalized) {
-    return false;
-  }
-
-  return candidateLanguageBank.some((language) => {
-    return (
-      matchesWholePhrase(language, content) ||
-      matchesWholePhrase(content, language)
-    );
-  });
 }
 
 function isLanguageSection(
@@ -492,15 +442,10 @@ function splitCandidateEvidence(
   value: string,
   minimumTokenCount = 2,
 ): string[] {
-  return selfLimitSlice(
-    value
-      .split(/\r?\n|(?<=[.!?])\s+(?=[A-Z0-9])/u)
-      .map((part) => part.trim())
-      .filter((part) => tokenize(part).length >= minimumTokenCount),
-    0,
-    500,
-    "packages/job-finder/src/internal/resume-workspace-helpers.ts:495",
-  );
+  return value
+    .split(/\r?\n|(?<=[.!?])\s+(?=[A-Z0-9])/u)
+    .map((part) => part.trim())
+    .filter((part) => tokenize(part).length >= minimumTokenCount);
 }
 
 export function buildResumeClaimEvidenceBank(
@@ -534,12 +479,7 @@ export function buildResumeClaimEvidenceBank(
           id: `claim_evidence_${sourceKind}_${sourceId}_${index + 1}`,
           sourceKind,
           sourceId,
-          snippet: selfLimitSlice(
-            text,
-            0,
-            320,
-            "packages/job-finder/src/internal/resume-workspace-helpers.ts:537",
-          ),
+          snippet: text,
         },
       });
     }
@@ -872,279 +812,13 @@ function hasVisibleEntryContent(input: {
   );
 }
 
-// Visible content must keep letters from every script. The matching normalizer
-// used elsewhere is ASCII-only and turns non-Latin achievements into empty keys.
-function normalizeVisibleResumeText(value: string): string {
-  return value
-    .normalize("NFC")
-    .replace(/(^|[^a-z0-9])c\s*\+\s*\+(?=$|[^a-z0-9])/gi, "$1cplusplus")
-    .replace(/(^|[^a-z0-9])c\s*#(?=$|[^a-z0-9])/gi, "$1csharp")
-    .toLowerCase()
-    .replace(/[^\p{L}\p{M}\p{N}]+/gu, " ")
-    .trim();
-}
-
-function removeBulletDuplicatesFromSummary(
-  summary: string,
-  bullets: readonly { included: boolean; text: string }[],
-): string | null {
-  const visibleBulletLines = bullets
-    .filter((bullet) => bullet.included)
-    .map((bullet) => bullet.text);
-  const sentences = summary
-    .split(/(?<=[.!?])\s+(?=[A-Z])/u)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-  const uniqueSentences = sentences.filter(
-    (sentence) => !resumeFactIsCovered(sentence, visibleBulletLines),
-  );
-  if (uniqueSentences.length < sentences.length)
-    reportSelfLimitHit({
-      limit: "summary_fact_deduplication",
-      kind: "veto",
-      value: "resumeFactIsCovered",
-      where: "job-finder/removeBulletDuplicatesFromSummary",
-    });
-
-  return uniqueSentences.length > 0 ? uniqueSentences.join(" ") : null;
-}
-
-const EMPLOYMENT_END_SENTENCE_PATTERN =
-  /\b(?:laid off|lay-?offs?|reduction in force|company-wide reduction|workforce reduction|position (?:was )?(?:ended|eliminated)|role (?:was )?(?:ended|eliminated)|let go|terminated|made redundant|redundancy)\b/i;
-
-/** Drops sentences that narrate how a job ended; a summary is not the place for them. */
-export function stripEmploymentEndSentences(text: string): string {
-  const next = text
-    .trim()
-    .split(/(?<=[.!?])\s+/)
-    .filter((sentence) => !EMPLOYMENT_END_SENTENCE_PATTERN.test(sentence))
-    .join(" ")
-    .trim();
-  if (next !== text.trim())
-    reportSelfLimitHit({
-      limit: "employment_end_wording",
-      kind: "veto",
-      value: "EMPLOYMENT_END_SENTENCE_PATTERN",
-      where: "job-finder/stripEmploymentEndSentences",
-    });
-  return next;
-}
-
 export function sanitizeResumeDraft(input: {
   draft: ResumeDraft;
   job: SavedJob;
   profile?: CandidateProfile;
   sourceSkills?: readonly string[];
 }): ResumeDraft {
-  const isCompetency = buildResumeSkillContextFilter(input.job, input.profile);
-  const candidateLanguageBank = buildCandidateLanguageBank(input.profile);
-  const seenLines = new Set<string>();
-
-  const orderedDraft = normalizeResumeDraftEntryOrdering(input.draft);
-  const nextSections = orderedDraft.sections.map((section) => {
-    const normalizedSectionText = normalizeVisibleResumeText(
-      section.text ?? "",
-    );
-    // A summary the generator wrote badly is replaced by the person's own,
-    // never dropped: an export that starts at Experience with no summary is
-    // worse than the summary they already approved on their profile.
-    const profileSummaryFallback = (): string | null => {
-      if (section.kind !== "summary") return null;
-      const fallback = input.profile?.summary?.trim() || null;
-      if (!fallback || seenLines.has(normalizeVisibleResumeText(fallback)))
-        return null;
-      seenLines.add(normalizeVisibleResumeText(fallback));
-      return fallback;
-    };
-    const nextText = (() => {
-      if (!section.text?.trim()) {
-        return profileSummaryFallback();
-      }
-      if (section.locked) {
-        seenLines.add(normalizedSectionText);
-        return section.text;
-      }
-      const canSuppressGeneratedSummary =
-        section.kind === "summary" &&
-        (section.origin === "ai_generated" ||
-          section.origin === "assistant_edited" ||
-          section.origin === "deterministic_fallback");
-      if (canSuppressGeneratedSummary) {
-        // A summary is the pitch. Generators copy "Position ended in a
-        // company-wide reduction" from the imported resume into it, which a
-        // candidate would never lead with; the work history keeps the dates.
-        const withoutEmploymentEnd = stripEmploymentEndSentences(section.text);
-        if (withoutEmploymentEnd !== section.text.trim()) {
-          if (!withoutEmploymentEnd) {
-            return profileSummaryFallback();
-          }
-          seenLines.add(normalizeVisibleResumeText(withoutEmploymentEnd));
-          return withoutEmploymentEnd;
-        }
-      }
-      if (seenLines.has(normalizedSectionText)) {
-        return null;
-      }
-      seenLines.add(normalizedSectionText);
-      return section.text;
-    })();
-
-    const sanitizeBullets = (
-      bullets: typeof section.bullets,
-      contextText?: string | null,
-    ) =>
-      bullets.filter((bullet) => {
-        const normalized = normalizeVisibleResumeText(bullet.text);
-        if (!normalized) {
-          return false;
-        }
-        // A place or work-authorization phrase is not a skill (N-046). A line
-        // the person locked is theirs and stays.
-        if (
-          (section.kind === "skills" || section.kind === "keywords") &&
-          !isLanguageSection(section) &&
-          !bullet.locked &&
-          isGeneratedResumeClaimOrigin(bullet.origin) &&
-          !isCompetency(bullet.text)
-        ) {
-          reportSelfLimitHit({
-            limit: "skill_keyword_veto",
-            kind: "veto",
-            value: "buildResumeSkillContextFilter",
-            where: "job-finder/sanitizeResumeDraft",
-          });
-          return false;
-        }
-        if (bullet.locked) {
-          seenLines.add(normalized);
-          return true;
-        }
-        if (
-          contextText &&
-          normalizeVisibleResumeText(contextText) === normalized
-        ) {
-          return false;
-        }
-        if (seenLines.has(normalized)) {
-          reportSelfLimitHit({
-            limit: "duplicate_bullet_veto",
-            kind: "veto",
-            value: "normalized text",
-            where: "job-finder/sanitizeResumeDraft",
-          });
-          return false;
-        }
-        if (section.kind === "skills" || section.kind === "keywords") {
-          if (isLanguageSection(section)) {
-            if (
-              !bullet.sourceRefs.some((ref) =>
-                input.profile?.spokenLanguages.some(
-                  (language) => ref.sourceId === `language:${language.id}`,
-                ),
-              ) &&
-              (isSpokenLanguageResumeChrome(bullet.text) ||
-                (!input.draft.writtenLanguage &&
-                  !isGroundedVisibleLanguage(
-                    bullet.text,
-                    candidateLanguageBank,
-                  )))
-            ) {
-              return false;
-            }
-          } else if (looksLikeSpokenLanguageSkillEntry(bullet.text)) {
-            return false;
-          }
-          // A skill the profile does not show stays: the model's fact check
-          // says whether the person's evidence backs it (ADR 0041).
-        }
-        seenLines.add(normalized);
-        return true;
-      });
-
-    const nextEntries = section.entries
-      .filter(
-        (entry) =>
-          !input.profile?.experiences.some(
-            (record) =>
-              record.isDraft &&
-              (entry.profileRecordId
-                ? entry.profileRecordId === record.id
-                : entry.title === record.title &&
-                  entry.subtitle === record.companyName),
-          ),
-      )
-      .map((entry) => {
-        if (entry.locked) {
-          if (entry.summary) {
-            seenLines.add(normalizeVisibleResumeText(entry.summary));
-          }
-          for (const bullet of entry.bullets) {
-            const normalizedBullet = normalizeVisibleResumeText(bullet.text);
-            if (normalizedBullet) {
-              seenLines.add(normalizedBullet);
-            }
-          }
-          return entry;
-        }
-
-        const deduplicatedSummary = entry.summary
-          ? removeBulletDuplicatesFromSummary(entry.summary, entry.bullets)
-          : null;
-        const nextSummary = (() => {
-          if (!deduplicatedSummary?.trim()) {
-            return null;
-          }
-          const normalized = normalizeVisibleResumeText(deduplicatedSummary);
-          if (seenLines.has(normalized)) {
-            return null;
-          }
-          seenLines.add(normalized);
-          return deduplicatedSummary;
-        })();
-
-        const nextBullets = sanitizeBullets(entry.bullets, nextSummary);
-
-        if (
-          !hasVisibleEntryContent({
-            ...entry,
-            summary: nextSummary,
-            bullets: nextBullets,
-          })
-        ) {
-          return null;
-        }
-
-        return {
-          ...entry,
-          summary: nextSummary,
-          bullets: nextBullets,
-        };
-      })
-      .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-
-    const nextBullets = sanitizeBullets(section.bullets, nextText);
-    const hasVisibleContent =
-      Boolean(nextText) || nextBullets.length > 0 || nextEntries.length > 0;
-    const nextIncluded =
-      section.kind === "keywords"
-        ? false
-        : section.locked
-          ? true
-          : hasVisibleContent && section.included;
-
-    return {
-      ...section,
-      text: nextText,
-      bullets: nextBullets,
-      entries: nextEntries,
-      included: nextIncluded,
-    };
-  });
-
-  return {
-    ...orderedDraft,
-    sections: nextSections,
-  };
+  return input.draft;
 }
 
 const candidateResumeEvidenceSourceKinds = new Set([
@@ -1947,27 +1621,8 @@ export function buildResumeProposalReplyContent(input: {
   return `I prepared ${input.changeCount} grounded resume edit${plural}${scope} for your review. Nothing changed yet; select the changes you want and accept them explicitly.${note}`;
 }
 
-const ASSISTANT_NOTE_MAX_LENGTH = 420;
-const ASSISTANT_NOTE_BOILERPLATE =
-  /^(?:i (?:am|'m) reviewing|i prepared|i (?:have )?(?:proposed|updated|added|drafted)[^.]*\.?$|done\.?$|ok(?:ay)?\.?$)/iu;
-
 function selectAssistantNote(note: string | null | undefined): string {
-  const trimmed = note?.replace(/\s+/g, " ").trim() ?? "";
-  if (!trimmed) return "";
-  if (ASSISTANT_NOTE_BOILERPLATE.test(trimmed)) {
-    reportSelfLimitHit({
-      limit: "assistant_note_wording_veto",
-      kind: "veto",
-      value: "boilerplate pattern",
-      where: "resume-workspace/selectAssistantNote",
-    });
-    return "";
-  }
-  const clipped =
-    trimmed.length > ASSISTANT_NOTE_MAX_LENGTH
-      ? `${selfLimitSlice(trimmed, 0, ASSISTANT_NOTE_MAX_LENGTH, "resume-workspace/assistant_note").replace(/\s+\S*$/u, "")}…`
-      : trimmed;
-  return ` ${clipped}`;
+  return note?.trim() ? ` ${note.trim()}` : "";
 }
 
 function compareResumeTextSets(
@@ -2696,30 +2351,20 @@ export function collectResumeWorkspaceEvidence(input: {
   research: readonly ResumeResearchArtifact[];
 }): ResumeWorkspaceEvidence {
   const index = createLocalKnowledgeIndex();
-  const candidateSummaryEvidence = selfLimitSlice(
-    uniqueStrings([
-      input.profile.professionalSummary.fullSummary ?? "",
-      input.profile.professionalSummary.shortValueProposition ?? "",
-      input.profile.summary ?? "",
-      input.profile.narrative.professionalStory ?? "",
-      input.profile.narrative.nextChapterSummary ?? "",
-      input.profile.narrative.careerTransitionSummary ?? "",
-      ...input.profile.narrative.differentiators,
-      ...input.profile.experiences
-        .map((experience) => experience.summary ?? "")
-        .filter(Boolean),
-    ]),
-    0,
-    4,
-    "packages/job-finder/src/internal/resume-workspace-helpers.ts:2699",
-  );
+  const candidateSummaryEvidence = uniqueStrings([
+    input.profile.professionalSummary.fullSummary ?? "",
+    input.profile.professionalSummary.shortValueProposition ?? "",
+    input.profile.summary ?? "",
+    input.profile.narrative.professionalStory ?? "",
+    input.profile.narrative.nextChapterSummary ?? "",
+    input.profile.narrative.careerTransitionSummary ?? "",
+    ...input.profile.narrative.differentiators,
+    ...input.profile.experiences
+      .map((experience) => experience.summary ?? "")
+      .filter(Boolean),
+  ]);
 
-  const highlightedProofs = selfLimitSlice(
-    input.profile.proofBank,
-    0,
-    6,
-    "packages/job-finder/src/internal/resume-workspace-helpers.ts:2717",
-  );
+  const highlightedProofs = input.profile.proofBank;
 
   if (input.profile.baseResume.textContent) {
     index.addDocument(
@@ -2905,16 +2550,11 @@ export function collectResumeWorkspaceEvidence(input: {
         },
       )
       .map((entry: { text: string }) => entry.text),
-    keywords: selfLimitSlice(
-      uniqueStrings([
-        ...buildPriorityJobTerms(input.job),
-        ...input.research.flatMap((artifact) => artifact.domainVocabulary),
-        ...highlightedProofs.flatMap((proof) => proof.roleFamilies),
-      ]),
-      0,
-      8,
-      "packages/job-finder/src/internal/resume-workspace-helpers.ts:2908",
-    ),
+    keywords: uniqueStrings([
+      ...buildPriorityJobTerms(input.job),
+      ...input.research.flatMap((artifact) => artifact.domainVocabulary),
+      ...highlightedProofs.flatMap((proof) => proof.roleFamilies),
+    ]),
   };
 }
 
@@ -2922,25 +2562,14 @@ export function collectResearchContext(
   research: readonly ResumeResearchArtifact[],
 ): ResumeWorkspaceResearchContext {
   return {
-    companyNotes: selfLimitSlice(
-      research
-        .map((artifact) => artifact.companyNotes)
-        .filter((value): value is string => Boolean(value)),
-      0,
-      3,
-      "packages/job-finder/src/internal/resume-workspace-helpers.ts:2925",
+    companyNotes: research
+      .map((artifact) => artifact.companyNotes)
+      .filter((value): value is string => Boolean(value)),
+    domainVocabulary: uniqueStrings(
+      research.flatMap((artifact) => artifact.domainVocabulary),
     ),
-    domainVocabulary: selfLimitSlice(
-      uniqueStrings(research.flatMap((artifact) => artifact.domainVocabulary)),
-      0,
-      8,
-      "packages/job-finder/src/internal/resume-workspace-helpers.ts:2933",
-    ),
-    priorityThemes: selfLimitSlice(
-      uniqueStrings(research.flatMap((artifact) => artifact.priorityThemes)),
-      0,
-      6,
-      "packages/job-finder/src/internal/resume-workspace-helpers.ts:2939",
+    priorityThemes: uniqueStrings(
+      research.flatMap((artifact) => artifact.priorityThemes),
     ),
   };
 }

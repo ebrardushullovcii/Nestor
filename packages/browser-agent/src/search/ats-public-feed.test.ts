@@ -1,10 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { collectSource, readListings } from "./listing-engine";
-import {
-  ATS_FEED_PAGE_LIMIT,
-  collectAtsFeed,
-  readAtsListing,
-} from "./ats-public-feed";
+import { collectAtsFeed, readAtsListing } from "./ats-public-feed";
 const client = {
   chatWithTools: vi.fn(() => Promise.reject(new Error("No model needed"))),
 };
@@ -187,30 +183,31 @@ const workday = {
   label: "Synthetic",
   url: "https://synthetic.wd1.myworkdayjobs.com/Careers",
 };
-test("a growing feed stops at the page cap and reports incomplete coverage", async () => {
+test("a feed continues beyond the former page cap without dropping listings", async () => {
   const readPage = vi.fn(
     (url: string, options: { jsonQuery?: Record<string, unknown> }) =>
       Promise.resolve({
         finalUrl: url,
         html: JSON.stringify({
-          total: 100000,
+          total: 260,
           jobPostings: [
             {
               title: "Engineer",
-              externalPath: "/job/Engineer_" + String(options.jsonQuery?.offset),
+              externalPath:
+                "/job/Engineer_" + String(options.jsonQuery?.offset),
             },
           ],
         }),
       }),
   );
   const result = await collectAtsFeed({ source: workday, readPage });
-  expect(readPage).toHaveBeenCalledTimes(ATS_FEED_PAGE_LIMIT);
+  expect(readPage).toHaveBeenCalledTimes(260);
   expect(result).toMatchObject({
-    pagesRead: ATS_FEED_PAGE_LIMIT,
-    complete: false,
-    requiresBrowser: true,
+    pagesRead: 260,
+    complete: true,
+    requiresBrowser: false,
   });
-  expect(result?.notes.join(" ")).toContain("page limit");
+  expect(result?.cards).toHaveLength(260);
 });
 
 test("a shrinking Workday total stays incomplete even when all initially reported rows arrive", async () => {
@@ -224,7 +221,8 @@ test("a shrinking Workday total stays incomplete even when all initially reporte
           jobPostings: [
             {
               title: "Engineer",
-              externalPath: "/job/Engineer_" + String(options.jsonQuery?.offset),
+              externalPath:
+                "/job/Engineer_" + String(options.jsonQuery?.offset),
             },
           ],
         }),

@@ -52,7 +52,9 @@ test.each(["length", "max_output_tokens", "transport"])(
     expect(result.failed).toEqual([]);
     expect(result.seen).toEqual([]);
     expect(
-      chatWithTools.mock.calls.map((call) => call[2]?.maxOutputTokens),
+      chatWithTools.mock.calls.map(
+        (call) => Reflect.get(call[2] ?? {}, "maxOutputTokens") as unknown,
+      ),
     ).toEqual([undefined, undefined]);
   },
 );
@@ -220,7 +222,9 @@ test("listing metadata also retries truncation and accounts for both model turns
   expect(result.failures).toEqual([]);
   expect(result.jobs[0]?.description).toContain("Build accessible TypeScript");
   expect(
-    chatWithTools.mock.calls.map((call) => call[2]?.maxOutputTokens),
+    chatWithTools.mock.calls.map(
+      (call) => Reflect.get(call[2] ?? {}, "maxOutputTokens") as unknown,
+    ),
   ).toEqual([undefined, undefined]);
   expect(onUsage).toHaveBeenCalledTimes(2);
 });

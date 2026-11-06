@@ -1,4 +1,3 @@
-import { selfLimitSlice } from "@nestor/core";
 import type {
   ResumeDraftBullet,
   ResumeDraftEntry,
@@ -211,9 +210,7 @@ export function createEntry(input: {
 
 export function safeSnippet(value: string | null | undefined): string | null {
   const normalized = normalizeNullableText(value);
-  return normalized
-    ? selfLimitSlice(normalized, 0, 220, "job-finder/safeSnippet")
-    : null;
+  return normalized;
 }
 
 export function buildJobContextText(job: SavedJob): string {

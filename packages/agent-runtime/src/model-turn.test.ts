@@ -138,7 +138,7 @@ for (const kind of ["agent", "conversation"] as const) {
 }
 
 test.each(["length", "max_output_tokens", "transport"])(
-  "output truncation (%s) retries with more room and the same history",
+  "provider output truncation (%s) retries without an app cap and preserves history",
   async (kind) => {
     const seen: unknown[] = [];
     const limits: Array<number | undefined> = [];
@@ -148,7 +148,9 @@ test.each(["length", "max_output_tokens", "transport"])(
       model: {
         chatWithTools: (messages, _tools, options) => {
           seen.push(messages);
-          limits.push(options?.maxOutputTokens);
+          limits.push(
+            Reflect.get(options ?? {}, "maxOutputTokens") as number | undefined,
+          );
           if (++calls === 1) {
             if (kind === "transport")
               return Promise.reject(
@@ -165,14 +167,13 @@ test.each(["length", "max_output_tokens", "transport"])(
         },
       },
       tools: [],
-      ceilings: { maxOutputTokens: 8000 },
       assembleMessages: () =>
         Promise.resolve([{ role: "user", content: "Keep all prior evidence" }]),
       onEmptyReply: empty,
     });
     expect((await pending).reply).toBe("Complete answer");
-    expect(limits).toEqual([8000, 16000]);
-    expect(seen[1]).toBe(seen[0]);
+    expect(limits).toEqual([undefined, undefined]);
+    expect(seen[1]).toEqual(seen[0]);
     expect(empty).not.toHaveBeenCalled();
   },
 );

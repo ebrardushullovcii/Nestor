@@ -1,12 +1,12 @@
-import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core";
+import { reportSelfLimitHit } from "@nestor/core";
 import type { ApplyWriteResult } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
 
 import { watchPageSelfLimits } from "./self-limit-page";
 
-/** How long a list may take to load or settle before it counts as uncertain. */
-const SETTLE_MS = 5_000;
+/** Silence in the observed list state before reporting that it stopped progressing. */
+const IDLE_MS = 5_000;
 /** A list unchanged this long, and not loading, has finished drawing. */
 const STABLE_MS = 700;
 const POLL_MS = 150;
@@ -51,12 +51,23 @@ export async function choosePageOption(
   label: string,
 ): Promise<ApplyWriteResult> {
   watchPageSelfLimits(page);
-  const native = await locator.evaluate(
-    (element) => element.tagName === "SELECT",
-  );
-  return native
-    ? chooseNativeOption(locator, label)
-    : chooseCustomOption(page, locator, label);
+  let lastNetworkProgress = Date.now();
+  const networkProgress = () => {
+    lastNetworkProgress = Date.now();
+  };
+  page.on?.("response", networkProgress);
+  page.on?.("requestfinished", networkProgress);
+  try {
+    const native = await locator.evaluate(
+      (element) => element.tagName === "SELECT",
+    );
+    return await (native
+      ? chooseNativeOption(locator, label, () => lastNetworkProgress)
+      : chooseCustomOption(page, locator, label, () => lastNetworkProgress));
+  } finally {
+    page.off?.("response", networkProgress);
+    page.off?.("requestfinished", networkProgress);
+  }
 }
 
 interface NativeState {
@@ -68,9 +79,9 @@ interface NativeState {
 async function chooseNativeOption(
   locator: Locator,
   label: string,
+  networkProgress: () => number,
 ): Promise<ApplyWriteResult> {
   const wanted = normalizeOptionLabel(label);
-  const deadline = Date.now() + SETTLE_MS;
   let lastKey = "";
   let stableSince = Date.now();
   for (;;) {
@@ -91,11 +102,7 @@ async function chooseNativeOption(
         !option.disabled && normalizeOptionLabel(option.text) === wanted,
     );
     if (index >= 0 && !state.disabled) {
-      await selfLimitTimeout(
-        locator.selectOption({ index }, { timeout: 5_000 }),
-        5_000,
-        "packages/browser-runtime/src/choose-page-option.ts:94",
-      );
+      await locator.selectOption({ index }, { timeout: 0 });
       const chosen = await locator.evaluate(
         (element) =>
           (element as HTMLSelectElement).selectedOptions[0]?.text ?? "",
@@ -126,11 +133,11 @@ async function chooseNativeOption(
       Date.now() - stableSince >= STABLE_MS
     )
       return missing(label, real);
-    if (Date.now() >= deadline) {
+    if (Date.now() - Math.max(stableSince, networkProgress()) >= IDLE_MS) {
       reportSelfLimitHit({
-        limit: "native_option_settle",
-        kind: "timeout",
-        value: SETTLE_MS,
+        limit: "native_option_idle",
+        kind: "idle",
+        value: IDLE_MS,
         where: "browser-runtime/chooseNativeOption",
       });
       return uncertain(
@@ -353,14 +360,10 @@ function exactName(text: string): RegExp {
  * it scrolls puts a different choice at the same position.
  */
 async function clickRow(list: Locator, text: string): Promise<string> {
-  await selfLimitTimeout(
-    list
-      .getByRole("option", { name: exactName(text) })
-      .first()
-      .click({ timeout: 5_000 }),
-    5_000,
-    "packages/browser-runtime/src/choose-page-option.ts:386",
-  );
+  await list
+    .getByRole("option", { name: exactName(text) })
+    .first()
+    .click({ timeout: 0 });
   return text;
 }
 
@@ -404,11 +407,7 @@ async function selectRow(
     (await locator.getAttribute("aria-invalid")) !== "true"
   )
     return { ok: true, observedValue: committed.replace(/\s+/gu, " ").trim() };
-  await selfLimitTimeout(
-    locator.fill("", { timeout: 2_000 }),
-    2_000,
-    "packages/browser-runtime/src/choose-page-option.ts:437",
-  ).catch(() => undefined);
+  await locator.fill("", { timeout: 0 }).catch(() => undefined);
   await locator.press("Escape").catch(() => undefined);
   return uncertain(`The list did not keep "${text}" selected.`);
 }
@@ -416,16 +415,17 @@ async function selectRow(
 /**
  * Waits for the list to show the choice or finish drawing without it. After a
  * search, rows that do not answer it may be the previous results still on
- * screen, so they count as settled only once the whole budget has passed; a
- * search that leaves the list open and empty for that long is "empty".
+ * screen, so they count as settled after the list and its connection stop
+ * changing. A search that leaves the list open and empty is "empty".
  */
 async function settle(
   scope: Frame | Page,
   locator: Locator,
   wanted: string,
-  budgetMs: number,
+  idleMs: number,
   searched: boolean,
   query = wanted,
+  networkProgress: () => number = () => 0,
 ): Promise<
   | { kind: "found"; list: Locator; text: string }
   | { kind: "settled"; list: Locator; state: ListState }
@@ -433,7 +433,6 @@ async function settle(
   | { kind: "unbound" }
   | { kind: "unsettled" }
 > {
-  const deadline = Date.now() + budgetMs;
   let lastKey = "";
   let stableSince = Date.now();
   let bound = false;
@@ -448,7 +447,7 @@ async function settle(
       if (text && state.visible) return { kind: "found", list, text };
       const busy =
         state.loading || (await locator.getAttribute("aria-busy")) === "true";
-      const key = JSON.stringify(state);
+      const key = JSON.stringify({ state, busy });
       if (key !== lastKey) {
         lastKey = key;
         stableSince = Date.now();
@@ -465,7 +464,8 @@ async function settle(
         !busy &&
         (state.options.length > 0 || state.noResults) &&
         Date.now() - stableSince >= STABLE_MS &&
-        (answersSearch || Date.now() >= deadline)
+        (answersSearch ||
+          Date.now() - Math.max(stableSince, networkProgress()) >= idleMs)
       )
         return { kind: "settled", list, state };
       if (
@@ -474,15 +474,19 @@ async function settle(
         !busy &&
         state.options.length === 0 &&
         Date.now() - stableSince >= STABLE_MS &&
-        Date.now() >= deadline
+        Date.now() - Math.max(stableSince, networkProgress()) >= idleMs
       )
         return { kind: "empty" };
     }
-    if (Date.now() >= deadline) {
+    if (!state && lastKey !== "null") {
+      lastKey = "null";
+      stableSince = Date.now();
+    }
+    if (Date.now() - Math.max(stableSince, networkProgress()) >= idleMs) {
       reportSelfLimitHit({
-        limit: "custom_option_settle",
-        kind: "timeout",
-        value: budgetMs,
+        limit: "custom_option_idle",
+        kind: "idle",
+        value: idleMs,
         where: "browser-runtime/settle",
       });
       return bound ? { kind: "unsettled" } : { kind: "unbound" };
@@ -495,6 +499,7 @@ async function chooseCustomOption(
   page: Page,
   locator: Locator,
   label: string,
+  networkProgress: () => number,
 ): Promise<ApplyWriteResult> {
   const searchable =
     (await locator.isEditable().catch(() => false)) &&
@@ -504,15 +509,18 @@ async function chooseCustomOption(
   const leave = async () => {
     // A typed search left in the box reads as an answer it is not.
     if (searchable)
-      await selfLimitTimeout(
-        locator.fill("", { timeout: 2_000 }),
-        2_000,
-        "packages/browser-runtime/src/choose-page-option.ts:537",
-      ).catch(() => undefined);
+      await locator.fill("", { timeout: 0 }).catch(() => undefined);
     await locator.press("Escape").catch(() => undefined);
   };
   try {
-    return await chooseFromList(page, locator, label, searchable, leave);
+    return await chooseFromList(
+      page,
+      locator,
+      label,
+      searchable,
+      leave,
+      networkProgress,
+    );
   } catch (error) {
     await leave();
     throw error;
@@ -525,55 +533,37 @@ async function chooseFromList(
   label: string,
   searchable: boolean,
   leave: () => Promise<void>,
+  networkProgress: () => number,
 ): Promise<ApplyWriteResult> {
   const wanted = normalizeOptionLabel(label);
   // Open it, type enough of the answer for the list to narrow to it, then
   // take the choice that says it. Typing first is what makes a list of two
   // hundred countries usable at all.
-  await selfLimitTimeout(
-    locator.click({ timeout: 5_000 }),
-    5_000,
-    "packages/browser-runtime/src/choose-page-option.ts:563",
-  );
+  await locator.click({ timeout: 0 });
   // A box that already shows a choice (the person's, or an earlier run's)
   // searches nothing when the same text is put in it again: the page sees no
   // change. Empty it first, so the search runs and the choice is made again.
   if (
     searchable &&
-    (
-      await selfLimitTimeout(
-        locator.inputValue({ timeout: 1_000 }),
-        1_000,
-        "packages/browser-runtime/src/choose-page-option.ts:574",
-      ).catch(() => "")
-    ).trim()
+    (await locator.inputValue({ timeout: 0 }).catch(() => "")).trim()
   )
-    await selfLimitTimeout(
-      locator.fill("", { timeout: 2_000 }),
-      2_000,
-      "packages/browser-runtime/src/choose-page-option.ts:581",
-    ).catch(() => undefined);
+    await locator.fill("", { timeout: 0 }).catch(() => undefined);
   // A list that is not a text box still jumps to what is typed at it.
   if (searchable)
-    await selfLimitTimeout(
-      locator.fill(label, { timeout: 2_000 }),
-      2_000,
-      "packages/browser-runtime/src/choose-page-option.ts:588",
-    ).catch(async () => {
-      await selfLimitTimeout(
-        locator.type(label, { timeout: 2_000 }),
-        2_000,
-        "packages/browser-runtime/src/choose-page-option.ts:593",
-      );
+    await locator.fill(label, { timeout: 0 }).catch(async () => {
+      await locator.type(label, { timeout: 0 });
     });
-  else
-    await selfLimitTimeout(
-      locator.type(label, { timeout: 2_000 }),
-      2_000,
-      "packages/browser-runtime/src/choose-page-option.ts:600",
-    );
+  else await locator.type(label, { timeout: 0 });
   const scope = (await controlFrame(locator)) ?? page;
-  const first = await settle(scope, locator, wanted, SETTLE_MS, searchable);
+  const first = await settle(
+    scope,
+    locator,
+    wanted,
+    IDLE_MS,
+    searchable,
+    wanted,
+    networkProgress,
+  );
   if (first.kind === "found")
     return selectRow(first.list, locator, first.text, searchable);
   if (first.kind === "unbound") {
@@ -624,12 +614,16 @@ async function chooseFromList(
   }
   // Preserve the existing full-list order when clearing exposes all choices.
   // Remote-search pickers may instead close or require a nonempty query.
-  await selfLimitTimeout(
-    locator.fill("", { timeout: 2_000 }),
-    2_000,
-    "packages/browser-runtime/src/choose-page-option.ts:657",
-  ).catch(() => undefined);
-  const listed = await settle(scope, locator, wanted, 3_000, false);
+  await locator.fill("", { timeout: 0 }).catch(() => undefined);
+  const listed = await settle(
+    scope,
+    locator,
+    wanted,
+    3_000,
+    false,
+    wanted,
+    networkProgress,
+  );
   if (listed.kind === "found")
     return selectRow(listed.list, locator, listed.text, searchable);
   const whole =
@@ -645,18 +639,15 @@ async function chooseFromList(
   // Only the model may decide whether a returned row means the same thing.
   if (offered.size === 0) {
     for (const query of shorterSearches(label)) {
-      await selfLimitTimeout(
-        locator.fill(query, { timeout: 2_000 }),
-        2_000,
-        "packages/browser-runtime/src/choose-page-option.ts:678",
-      );
+      await locator.fill(query, { timeout: 0 });
       const searched = await settle(
         scope,
         locator,
         wanted,
-        SETTLE_MS,
+        IDLE_MS,
         true,
         normalizeOptionLabel(query),
+        networkProgress,
       );
       if (searched.kind === "found")
         return selectRow(searched.list, locator, searched.text, searchable);

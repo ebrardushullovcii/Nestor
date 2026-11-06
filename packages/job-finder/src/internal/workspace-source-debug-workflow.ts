@@ -1,4 +1,3 @@
-import { reportSelfLimitHit } from "@nestor/core";
 import { intendedAccountEmail } from "@nestor/contracts";
 import { browserAgentPermissionsOf } from "@nestor/contracts";
 import { jobSiteTarget } from "@nestor/contracts";
@@ -59,8 +58,6 @@ import {
 } from "./source-debug-timing";
 import { runPublicProviderSourceCheck } from "./workspace-public-provider-source-check";
 import { inferSourceIntelligenceFromTarget } from "./workspace-source-intelligence";
-
-const MAX_PROGRESS_EVENTS = 1000;
 
 function buildSourceDebugVisualEvidenceSummary(
   finding: SourceDebugVisualFinding,
@@ -318,15 +315,6 @@ export async function runSourceDebugWorkflow(
     runId,
     targetId: normalizedTarget.id,
     onProgress: (event) => {
-      if (progressEvents.length >= MAX_PROGRESS_EVENTS) {
-        reportSelfLimitHit({
-          limit: "source_debug_progress_events",
-          kind: "count",
-          value: MAX_PROGRESS_EVENTS,
-          where: "job-finder/runSourceDebugWorkflow",
-        });
-        progressEvents.shift();
-      }
       progressEvents.push(event);
       onProgress?.(event);
     },

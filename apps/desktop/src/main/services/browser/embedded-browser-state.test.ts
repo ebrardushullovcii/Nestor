@@ -141,30 +141,30 @@ function makeContents(id: string) {
 }
 
 describe("embedded browser tab state", () => {
-  test("a native page read deadline reports without changing its rejection", async () => {
+  test("a native page read can finish beyond its former fixed deadline", async () => {
     vi.useFakeTimers();
-    const log = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const { browser, pages } = makeBrowser();
       Object.assign(browser, {
         noteAutomationCommand: () => Promise.resolve(),
         syncTabLifecycle: () => {},
       });
-      pages
-        .get("working")!
-        .executeJavaScript.mockImplementation(() => new Promise(() => {}));
-      const read = expect(browser.readTab("working", "true")).rejects.toThrow(
-        "The page did not answer.",
+      let finish!: () => void;
+      pages.get("working")!.executeJavaScript.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = () =>
+              resolve({ title: "working", bodyText: "Complete evidence" });
+          }),
       );
-      await vi.advanceTimersByTimeAsync(3001);
-      await read;
-      expect(
-        log.mock.calls
-          .map(([line]) => String(line))
-          .some((line) => line.includes('"limit":"embedded_page_read"')),
-      ).toBe(true);
+      const read = browser.readTab("working", "true");
+      await vi.advanceTimersByTimeAsync(10_000);
+      finish();
+      expect(await read).toEqual({
+        url: "https://jobs.example/working",
+        value: { title: "working", bodyText: "Complete evidence" },
+      });
     } finally {
-      log.mockRestore();
       vi.useRealTimers();
     }
   });

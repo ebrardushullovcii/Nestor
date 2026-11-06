@@ -8,7 +8,7 @@ import {
   tracePage,
   type TracePageCapture,
 } from "./trace-page";
-import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core";
+import { reportSelfLimitHit } from "@nestor/core";
 
 import {
   trackAccountFlowEntry,
@@ -867,7 +867,7 @@ async function navigatePageToTarget(input: {
   await withNavigationLiveness(input.page, () =>
     input.page.goto(input.targetUrl, {
       waitUntil: "domcontentloaded",
-      ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
+      ...(input.timeout !== undefined ? { timeout: 0 } : {}),
     }),
   );
 
@@ -1019,9 +1019,7 @@ async function prepareAutomationPageForTarget(
       navigatedToTarget = await navigatePageToTarget({
         page,
         targetUrl: options.targetUrl,
-        ...(options.navigationTimeoutMs !== undefined
-          ? { timeout: options.navigationTimeoutMs }
-          : {}),
+        ...(options.navigationTimeoutMs !== undefined ? { timeout: 0 } : {}),
         ...(options.requireExactTarget !== undefined
           ? { requireExactTarget: options.requireExactTarget }
           : {}),
@@ -1118,9 +1116,8 @@ export async function reserveEmbeddedApplicationTab(
   closeIdlePage?: () => Promise<boolean>,
   /**
    * Told once when the browser is full and this application waits for a
-   * tab. Without it the wait is bounded and ends in "close a tab" (old
-   * callers); with it the application waits until a tab frees or it is
-   * stopped, and the caller says so on the application.
+   * tab. The application waits until a tab frees or it is stopped; the
+   * callback lets the caller show that wait on the application.
    */
   onWaiting?: () => void,
   /** The host's own count of open tabs, when it has tabs automation cannot see. */
@@ -1133,7 +1130,6 @@ export async function reserveEmbeddedApplicationTab(
   // Reserve atomically before creating a page. Native hosts account for their
   // own working/retained tabs; older hosts retain the conservative fallback.
   const startedAt = Date.now();
-  const deadline = startedAt + 20_000;
   let toldWaiting = false;
   let reportedCapacity = false;
   while (true) {
@@ -1167,14 +1163,6 @@ export async function reserveEmbeddedApplicationTab(
         toldWaiting = true;
         onWaiting();
       }
-    } else if (Date.now() >= deadline) {
-      reportSelfLimitHit({
-        limit: "application_tab_wait",
-        kind: "timeout",
-        value: 20000,
-        where: "browser-runtime/reserveEmbeddedApplicationTab",
-      });
-      throw new Error("Close a browser tab before opening another one.");
     }
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -1925,7 +1913,7 @@ export function createBrowserAgentRuntime(
           const endpoint =
             (await getDebuggerWebSocketUrl(activeDebugPort)) ??
             `http://127.0.0.1:${activeDebugPort}`;
-          return chromium.connectOverCDP(endpoint, { timeout: 5_000 });
+          return chromium.connectOverCDP(endpoint, { timeout: 0 });
         },
       }),
     );
@@ -2197,7 +2185,7 @@ export function createBrowserAgentRuntime(
     const screenshotBuffer = await page.screenshot({
       type: "png",
       animations: "disabled",
-      timeout: 10_000,
+      timeout: 0,
       fullPage: normalizedRequest.mode === "full_page",
       ...(normalizedRequest.mode === "region" && normalizedRequest.region
         ? {
@@ -2757,14 +2745,10 @@ export function createBrowserAgentRuntime(
           page = await context.newPage();
           await ensurePrepareOnlyMutationGuard(page, false);
           allowPrepareOnlyRunNavigation(page, applicationUrl);
-          await selfLimitTimeout(
-            page.goto(applicationUrl, {
-              waitUntil: "domcontentloaded",
-              timeout: 15_000,
-            }),
-            15_000,
-            "packages/browser-runtime/src/playwright-browser-runtime.ts:2930",
-          );
+          await page.goto(applicationUrl, {
+            waitUntil: "domcontentloaded",
+            timeout: 0,
+          });
           bindPreparedApplicationPage(pageBindingKey, page);
           await options.onApplicationPageRestored?.(pageBindingKey, page);
           return;
@@ -2778,14 +2762,10 @@ export function createBrowserAgentRuntime(
       }
       // Re-enter with GET; never replay a credential, challenge or application POST.
       allowPrepareOnlyRunNavigation(page, applicationUrl ?? page.url());
-      await selfLimitTimeout(
-        page.goto(applicationUrl ?? page.url(), {
-          waitUntil: "domcontentloaded",
-          timeout: 15_000,
-        }),
-        15_000,
-        "packages/browser-runtime/src/playwright-browser-runtime.ts:2951",
-      );
+      await page.goto(applicationUrl ?? page.url(), {
+        waitUntil: "domcontentloaded",
+        timeout: 0,
+      });
     },
     async armApplicationFormAction(_source, input) {
       await rebindPreparedApplicationPage(input.pageBindingKey);

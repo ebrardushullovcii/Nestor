@@ -2,7 +2,6 @@ import { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { withNavigationLiveness } from "./browser-navigation";
 import { tracePageHands, tracePage } from "./trace-page";
-import { selfLimitTimeout } from "@nestor/core";
 
 import { watchPageSelfLimits } from "./self-limit-page";
 import {
@@ -110,16 +109,12 @@ export const APPLY_CLICKABLE_SELECTOR =
 
 /**
  * Lets a page that is mid-navigation finish before it is read.
- *
- * Bounded: a page that never settles is read as it is. Short, because this
- * runs before every read and a run is made of many reads.
+ * Network activity keeps the existing idle clock alive.
  */
-async function settlePage(page: Page, timeout = 4_000): Promise<void> {
-  await selfLimitTimeout(
-    page.waitForLoadState("domcontentloaded", { timeout }),
-    timeout,
-    "packages/browser-runtime/src/apply-page-mechanics.ts:110",
-  ).catch(() => undefined);
+async function settlePage(page: Page): Promise<void> {
+  await page
+    .waitForLoadState("domcontentloaded", { timeout: 0 })
+    .catch(() => undefined);
 }
 
 const mutationCounts = new WeakMap<Page, { count: number }>();
@@ -251,7 +246,7 @@ async function readRawApplyPageContent(page: Page): Promise<RawApplyPage> {
   }
   // The page moved on while it was being read. Wait for where it went and
   // read that: a second failure is genuinely the page's, and is said plainly.
-  await settlePage(page, 8_000);
+  await settlePage(page);
   try {
     return withAttachmentUploadOutcomes(
       page,
@@ -344,9 +339,6 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
       snapshot
         .locator(APPLY_CONTROL_SELECTOR, "c")
         .evaluateAll((elements, prefix): RawApplyControl[] => {
-          // This callback is serialized into the page; only fixed limit metadata returns
-          // over its console channel. The host records it through reportSelfLimitHit.
-
           const labelText = (element: Element | null): string => {
             if (!element) return "";
             const clone = element.cloneNode(true) as Element;
@@ -829,9 +821,6 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
       snapshot
         .locator(APPLY_LINK_SELECTOR, "l")
         .evaluateAll((elements, prefix): RawApplyLink[] => {
-          // This callback is serialized into the page; only fixed limit metadata returns
-          // over its console channel. The host records it through reportSelfLimitHit.
-
           return elements.map((element, index) => {
             const html = element as HTMLElement;
             const anchor =
@@ -859,9 +848,6 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
         }, `f${frameIndex}`),
       snapshot.locator(APPLY_CLICKABLE_SELECTOR, "e").evaluateAll(
         (elements, [prefix, owned]): RawApplyClickable[] => {
-          // This callback is serialized into the page; only fixed limit metadata returns
-          // over its console channel. The host records it through reportSelfLimitHit.
-
           return elements.flatMap((element, index) => {
             // A button already has its own ref, with its form's action:
             // neither it nor anything inside it (a label span, an icon),
@@ -907,9 +893,6 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
       frame
         .locator("h1, h2, h3, [role='heading']")
         .evaluateAll((elements): RawApplyHeading[] => {
-          // This callback is serialized into the page; only fixed limit metadata returns
-          // over its console channel. The host records it through reportSelfLimitHit.
-
           return elements.flatMap((element) => {
             const text = (element as HTMLElement).innerText.trim();
             if (!text) return [];
@@ -923,17 +906,13 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             ];
           });
         }),
-      selfLimitTimeout(
-        frame.locator("body").innerText({ timeout: 3_000 }),
-        3_000,
-        "packages/browser-runtime/src/apply-page-mechanics.ts:1119",
-      ).catch(() => ""),
+      frame
+        .locator("body")
+        .innerText({ timeout: 0 })
+        .catch(() => ""),
       frame
         .locator("[role='alert'], [aria-live='assertive']")
         .evaluateAll((elements) => {
-          // This callback is serialized into the page; only fixed limit metadata returns
-          // over its console channel. The host records it through reportSelfLimitHit.
-
           return elements
             .map((element) => (element as HTMLElement).innerText.trim())
             .filter((text) => text.length > 0);
@@ -993,9 +972,6 @@ export async function readApplyStepLabel(
       "[aria-current='step'], [role='progressbar'], [aria-label*='step' i]",
     )
     .evaluateAll((elements) => {
-      // This callback is serialized into the page; only fixed limit metadata returns
-      // over its console channel. The host records it through reportSelfLimitHit.
-
       const current = elements.find((element) =>
         element.matches("[aria-current='step']"),
       );
@@ -1030,9 +1006,6 @@ export async function readApplyStepLabel(
 export function readApplySummaryRows(
   elements: Element[],
 ): { label: string; value: string }[] {
-  // This callback is serialized into the page; only fixed limit metadata returns
-  // over its console channel. The host records it through reportSelfLimitHit.
-
   const shown = (element: Element) => {
     const style = getComputedStyle(element);
     return (
@@ -1090,9 +1063,6 @@ export const APPLY_PAGE_SELECTORS = {
  * `collectApplyDocumentSnapshot` keeps the same reading for the top page.
  */
 export function readApplyPlacements(elements: Element[]): RawApplyPlacement[] {
-  // This callback is serialized into the page; only fixed limit metadata returns
-  // over its console channel. The host records it through reportSelfLimitHit.
-
   return elements.map((element) => {
     const words = (node: Element | null | undefined): string =>
       (node?.textContent ?? "").replace(/\s+/gu, " ").trim();
@@ -1204,9 +1174,6 @@ export function collectApplyDocumentSnapshot(
   selectors: typeof APPLY_PAGE_SELECTORS,
   redactCredentials = false,
 ) {
-  // This callback is serialized into the page; only fixed limit metadata returns
-  // over its console channel. The host records it through reportSelfLimitHit.
-
   const matching = (selector: string) =>
     elements.filter((element) => element.matches(selector));
   const fieldDescriptions = matching(selectors.controls).flatMap((control) => {
@@ -2334,11 +2301,9 @@ async function readClosedComboboxOptions(
       // dismisses someone else's flyout reads as a list with no choices, and
       // the question then reaches the person as a bare text box.
       await page.keyboard.press("Escape").catch(() => undefined);
-      await selfLimitTimeout(
-        locator.scrollIntoViewIfNeeded({ timeout: 1_500 }),
-        1_500,
-        "packages/browser-runtime/src/apply-page-mechanics.ts:2859",
-      ).catch(() => undefined);
+      await locator
+        .scrollIntoViewIfNeeded({ timeout: 0 })
+        .catch(() => undefined);
       const menuRead = await locator.evaluateHandle((element) => {
         const ownedMenu = () => {
           const ids = (
@@ -2378,18 +2343,10 @@ async function readClosedComboboxOptions(
       });
       let options: string[] = [];
       try {
-        await locator.focus({ timeout: 1500 }).catch(() => undefined);
-        await selfLimitTimeout(
-          locator.press("ArrowDown", { timeout: 1500 }),
-          1500,
-          "packages/browser-runtime/src/apply-page-mechanics.ts:2904",
-        ).catch(() => undefined);
+        await locator.focus({ timeout: 0 }).catch(() => undefined);
+        await locator.press("ArrowDown", { timeout: 0 }).catch(() => undefined);
         if ((await locator.getAttribute("aria-expanded")) !== "true")
-          await selfLimitTimeout(
-            locator.click({ timeout: 1500 }),
-            1500,
-            "packages/browser-runtime/src/apply-page-mechanics.ts:2910",
-          );
+          await locator.click({ timeout: 0 });
         const owner = keyFor(control);
         const observed = await menuRead.evaluate(
           async (state, context) => {
@@ -2591,11 +2548,7 @@ async function pressToggleButton(
         )
           element.type = "button";
       });
-      await selfLimitTimeout(
-        locator.click({ timeout: 5_000 }),
-        5_000,
-        "packages/browser-runtime/src/apply-page-mechanics.ts:3116",
-      );
+      await locator.click({ timeout: 0 });
     }
     return (await pressed()) === checked
       ? { ok: true, observedValue: checked ? "pressed" : "not pressed" }
@@ -2672,17 +2625,9 @@ async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
   if ((await locator.count()) === 0)
     throw new Error("Stale control; observe again.");
   if (!(await locator.isEnabled())) throw new Error("The control is disabled.");
-  await selfLimitTimeout(
-    locator.scrollIntoViewIfNeeded({ timeout: 2_000 }),
-    2_000,
-    "packages/browser-runtime/src/apply-page-mechanics.ts:3190",
-  ).catch(() => undefined);
+  await locator.scrollIntoViewIfNeeded({ timeout: 0 }).catch(() => undefined);
   try {
-    await selfLimitTimeout(
-      locator.click({ timeout: 10_000 }),
-      10_000,
-      "packages/browser-runtime/src/apply-page-mechanics.ts:3196",
-    );
+    await locator.click({ timeout: 0 });
   } catch (error) {
     // Something is drawn over it, or it sits under a sticky header. A person
     // would still get the click in; so does a click aimed straight at it.
@@ -2693,17 +2638,11 @@ async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
     ) {
       throw error;
     }
-    await selfLimitTimeout(
-      locator.click({ timeout: 5_000, force: true }),
-      5_000,
-      "packages/browser-runtime/src/apply-page-mechanics.ts:3211",
-    );
+    await locator.click({ timeout: 0, force: true });
   }
-  await selfLimitTimeout(
-    page.waitForLoadState("domcontentloaded", { timeout: 3_000 }),
-    3_000,
-    "packages/browser-runtime/src/apply-page-mechanics.ts:3217",
-  ).catch(() => undefined);
+  await page
+    .waitForLoadState("domcontentloaded", { timeout: 0 })
+    .catch(() => undefined);
 }
 
 /** The live-page implementation of the apply mechanics. */
@@ -2748,59 +2687,52 @@ export function createPlaywrightApplyPageMechanics(
       if (!locator)
         return { ok: false, error: `No action named ${ref} on this page.` };
       try {
-        return await selfLimitTimeout(
-          locator.evaluate(
-            (element): ApplyWriteResult => {
-              // This callback is serialized into the page; only fixed limit metadata returns
-              // over its console channel. The host records it through reportSelfLimitHit.
-
-              if (
-                !(element instanceof HTMLElement) ||
-                element.matches(":disabled, [aria-disabled='true']")
-              )
-                return {
-                  ok: false,
-                  error: "The intended button is disabled or unavailable.",
-                };
-              element.scrollIntoView({
-                block: "center",
-                inline: "center",
-                behavior: "instant",
-              });
-              const rect = element.getBoundingClientRect();
-              const root = element.getRootNode();
-              const hit = (
-                root instanceof ShadowRoot ? root : document
-              ).elementFromPoint(
-                rect.x + rect.width / 2,
-                rect.y + rect.height / 2,
-              );
-              if (
-                rect.width > 0 &&
-                rect.height > 0 &&
-                hit &&
-                (hit === element || element.contains(hit))
-              )
-                return {
-                  ok: true,
-                  observedValue: "The intended button is reachable.",
-                };
-              const covering =
-                hit?.closest("[role='dialog'], [role='alertdialog'], aside") ??
-                hit;
-              const text = (covering?.textContent ?? "")
-                .replace(/\s+/gu, " ")
-                .trim();
+        return await locator.evaluate(
+          (element): ApplyWriteResult => {
+            if (
+              !(element instanceof HTMLElement) ||
+              element.matches(":disabled, [aria-disabled='true']")
+            )
               return {
                 ok: false,
-                error: `The intended button is covered or outside the visible page.${text ? ` In front of it: ${text}` : ""}`,
+                error: "The intended button is disabled or unavailable.",
               };
-            },
-            undefined,
-            { timeout: 5_000 },
-          ),
-          5_000,
-          "packages/browser-runtime/src/apply-page-mechanics.ts:3266",
+            element.scrollIntoView({
+              block: "center",
+              inline: "center",
+              behavior: "instant",
+            });
+            const rect = element.getBoundingClientRect();
+            const root = element.getRootNode();
+            const hit = (
+              root instanceof ShadowRoot ? root : document
+            ).elementFromPoint(
+              rect.x + rect.width / 2,
+              rect.y + rect.height / 2,
+            );
+            if (
+              rect.width > 0 &&
+              rect.height > 0 &&
+              hit &&
+              (hit === element || element.contains(hit))
+            )
+              return {
+                ok: true,
+                observedValue: "The intended button is reachable.",
+              };
+            const covering =
+              hit?.closest("[role='dialog'], [role='alertdialog'], aside") ??
+              hit;
+            const text = (covering?.textContent ?? "")
+              .replace(/\s+/gu, " ")
+              .trim();
+            return {
+              ok: false,
+              error: `The intended button is covered or outside the visible page.${text ? ` In front of it: ${text}` : ""}`,
+            };
+          },
+          undefined,
+          { timeout: 0 },
         );
       } catch (error) {
         return {
@@ -2821,18 +2753,10 @@ export function createPlaywrightApplyPageMechanics(
         // A calendar's text box takes a date, picked from its calendar.
         const picked = await pickCalendarDate(page, locator, value);
         if (picked) return picked;
-        await selfLimitTimeout(
-          locator.fill(value, { timeout: 5_000 }),
-          5_000,
-          "packages/browser-runtime/src/apply-page-mechanics.ts:3381",
-        );
+        await locator.fill(value, { timeout: 0 });
         // Check immediate acceptance here. The apply workflow checks retention
         // after 300 ms, sharing that window across a batch of typed answers.
-        const observedValue = await selfLimitTimeout(
-          locator.inputValue({ timeout: 2_000 }),
-          2_000,
-          "packages/browser-runtime/src/apply-page-mechanics.ts:3388",
-        );
+        const observedValue = await locator.inputValue({ timeout: 0 });
         if (value.trim().length > 0 && observedValue.trim().length === 0) {
           return {
             ok: false,
@@ -2923,7 +2847,7 @@ export function createPlaywrightApplyPageMechanics(
             .catch(() => false);
         if (!(await activateNative(true))) {
           try {
-            await locator.setChecked(checked, { timeout: 5_000 });
+            await locator.setChecked(checked, { timeout: 0 });
           } catch (actionabilityError) {
             // Preserve the fallback if the page changed after the hit test.
             if (!(await activateNative(false))) throw actionabilityError;
@@ -3007,19 +2931,13 @@ export function createPlaywrightApplyPageMechanics(
           return { ok: false, error: `No element named ${ref} on this page.` };
         }
         if (locator) {
-          await selfLimitTimeout(
-            locator.press(key, { timeout: 5_000 }),
-            5_000,
-            "packages/browser-runtime/src/apply-page-mechanics.ts:3566",
-          );
+          await locator.press(key, { timeout: 0 });
         } else {
           await page.keyboard.press(key);
         }
-        await selfLimitTimeout(
-          page.waitForLoadState("domcontentloaded", { timeout: 3_000 }),
-          3_000,
-          "packages/browser-runtime/src/apply-page-mechanics.ts:3574",
-        ).catch(() => undefined);
+        await page
+          .waitForLoadState("domcontentloaded", { timeout: 0 })
+          .catch(() => undefined);
         return { ok: true, observedValue: key };
       } catch (error) {
         return {
@@ -3038,17 +2956,13 @@ export function createPlaywrightApplyPageMechanics(
       }
       let href = "";
       try {
-        href = await selfLimitTimeout(
-          locator.evaluate(
-            (element) =>
-              (element as HTMLAnchorElement).href ||
-              element.getAttribute("href") ||
-              "",
-            undefined,
-            { timeout: 5_000 },
-          ),
-          5_000,
-          "packages/browser-runtime/src/apply-page-mechanics.ts:3597",
+        href = await locator.evaluate(
+          (element) =>
+            (element as HTMLAnchorElement).href ||
+            element.getAttribute("href") ||
+            "",
+          undefined,
+          { timeout: 0 },
         );
       } catch (error) {
         return {
@@ -3197,11 +3111,9 @@ export function createPlaywrightApplyPageMechanics(
           error:
             "An account window belongs to its original application and cannot be adopted.",
         };
-      await selfLimitTimeout(
-        opened.waitForLoadState("domcontentloaded", { timeout: 5_000 }),
-        5_000,
-        "packages/browser-runtime/src/apply-page-mechanics.ts:3784",
-      ).catch(() => undefined);
+      await opened
+        .waitForLoadState("domcontentloaded", { timeout: 0 })
+        .catch(() => undefined);
       const url = opened.url();
       if (!/^https?:/iu.test(url)) {
         await opened.close().catch(() => undefined);
@@ -3226,11 +3138,7 @@ export function createPlaywrightApplyPageMechanics(
     },
     readText: async (ref) => {
       if (!ref) {
-        return selfLimitTimeout(
-          page.locator("body").innerText({ timeout: 5_000 }),
-          5_000,
-          "packages/browser-runtime/src/apply-page-mechanics.ts:3815",
-        );
+        return page.locator("body").innerText({ timeout: 0 });
       }
       const locator =
         controlLocator(page, ref) ??
@@ -3240,11 +3148,7 @@ export function createPlaywrightApplyPageMechanics(
       if (!locator) {
         return "";
       }
-      return selfLimitTimeout(
-        locator.innerText({ timeout: 5_000 }),
-        5_000,
-        "packages/browser-runtime/src/apply-page-mechanics.ts:3829",
-      );
+      return locator.innerText({ timeout: 0 });
     },
   });
 }

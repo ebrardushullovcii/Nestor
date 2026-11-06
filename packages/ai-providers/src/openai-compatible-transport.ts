@@ -405,7 +405,6 @@ export function buildModelRequestBody(input: {
   /** Responses only; callers must verify strict schema support on the route. */
   jsonSchema?: { name: string; schema: Record<string, unknown> } | undefined;
   tools?: readonly CompatibleTool[];
-  maxOutputTokens?: number | undefined;
   parallelToolCalls?: boolean | undefined;
   /**
    * Ask the Responses API for reasoning summaries. The text is ignored; the
@@ -417,11 +416,7 @@ export function buildModelRequestBody(input: {
   /** Chat Completions only: ask for a usage chunk at the end of a stream. */
   includeStreamUsage?: boolean | undefined;
 }): Record<string, unknown> {
-  const maximum = modelOutputLimit(input.model);
-  const maxOutputTokens =
-    maximum === undefined
-      ? input.maxOutputTokens
-      : Math.min(input.maxOutputTokens ?? maximum, maximum);
+  const maxOutputTokens = modelOutputLimit(input.model);
   if (input.apiMode === "chat_completions") {
     return {
       ...(input.includeStreamUsage

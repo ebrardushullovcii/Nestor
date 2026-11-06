@@ -56,11 +56,10 @@ function receiptControls(observation: ApplyFormObservation) {
     seen.add(fieldKey);
     out.push({ control, fieldKey, value });
   }
-  return out.slice(0, 200);
+  return out;
 }
 
-const cut = (value: string | undefined, max: number) =>
-  (value ?? "").slice(0, max);
+const fullText = (value: string | undefined) => value ?? "";
 
 /**
  * Send evidence for one attempt: which fields Nestor wrote, the value each
@@ -121,17 +120,17 @@ export function createStepReceiptTracker(
               ...(control.inputConstraints
                 ? { inputConstraints: control.inputConstraints }
                 : {}),
-              label: cut(questionPrompt(control), 2_000),
-              groupLabel: cut(control.groupLabel, 2_000),
-              sectionPath: (control.sectionPath ?? [])
-                .slice(0, 12)
-                .map((part) => cut(part, 500)),
-              hint: cut(control.hint, 2_000),
-              placeholder: cut(control.placeholder, 500),
+              label: fullText(questionPrompt(control)),
+              groupLabel: fullText(control.groupLabel),
+              sectionPath: (control.sectionPath ?? []).map((part) =>
+                fullText(part),
+              ),
+              hint: fullText(control.hint),
+              placeholder: fullText(control.placeholder),
               kind: control.kind === "file" ? "other" : control.kind,
               answerControlType: control.answerControlType,
               choiceGroupKey: control.choiceGroupKey
-                ? cut(control.choiceGroupKey, 500)
+                ? fullText(control.choiceGroupKey)
                 : null,
               options: (control.choiceGroupKey &&
               ["radio", "checkbox"].includes(control.kind)
@@ -142,23 +141,21 @@ export function createStepReceiptTracker(
                     )
                     .map((entry) => entry.label || entry.value)
                 : control.options
-              )
-                .slice(0, 200)
-                .map((o) => cut(o, 500)),
+              ).map((o) => fullText(o)),
               required: control.required,
               readOnly: control.readOnly,
               questionKind: control.questionKind,
               attestationKind: control.attestationKind,
               repeatedQuestion: control.repeatedQuestion
                 ? {
-                    prompt: cut(control.repeatedQuestion.prompt, 2_000),
-                    step: cut(control.repeatedQuestion.step, 2_000),
+                    prompt: fullText(control.repeatedQuestion.prompt),
+                    step: fullText(control.repeatedQuestion.step),
                   }
                 : null,
               telInput: control.telInput === true,
               urlInput: control.urlInput === true,
-              nativeValue: cut(control.value, 12_000),
-              value: cut(value, 12_000),
+              nativeValue: fullText(control.value),
+              value: fullText(value),
               provenance: provenance(fieldKey, value),
             }),
           );
@@ -176,13 +173,13 @@ export function createStepReceiptTracker(
       stepIndex: observation.step.index,
       stepTotal: observation.step.total,
       stepLabel: observation.step.label
-        ? cut(observation.step.label, 500)
+        ? fullText(observation.step.label)
         : null,
       frame:
         frames.size === 1 && frame
           ? (JSON.parse(frame) as { origin: string; pathname: string })
           : null,
-      instructions: cut(observation.bodyTextExcerpt, 4_000),
+      instructions: fullText(observation.bodyTextExcerpt),
       fields,
       at,
     };
@@ -208,7 +205,7 @@ export function createStepReceiptTracker(
     },
     /** A step Nestor confirmed it advanced, from the exact pre-press page. */
     advance(prePress: ApplyFormObservation, at: string): void {
-      if (receipts.length < 39) receipts.push(receipt("advance", prePress, at));
+      receipts.push(receipt("advance", prePress, at));
     },
     /** A press whose result the page did not confirm: no earlier step binds. */
     unconfirmed(page: ApplyFormObservation, at: string): void {

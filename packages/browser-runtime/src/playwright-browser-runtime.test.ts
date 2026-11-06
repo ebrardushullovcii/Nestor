@@ -801,7 +801,7 @@ describe("playwright browser runtime", () => {
       );
       expect(connectOverCDPMock).toHaveBeenCalledWith(
         `ws://127.0.0.1:${debugPort}/devtools/browser/test`,
-        { timeout: 5_000 },
+        { timeout: 0 },
       );
       expect(spawnMock.mock.calls[0]?.[1]).toContain(
         "--disable-session-crashed-bubble",
@@ -913,7 +913,7 @@ describe("playwright browser runtime", () => {
       expect(launchedChromeProcess.exitCode).toBe(0);
       expect(connectOverCDPMock).toHaveBeenCalledWith(
         `ws://127.0.0.1:${debugPort}/devtools/browser/test`,
-        { timeout: 5_000 },
+        { timeout: 0 },
       );
     } finally {
       await rm(userDataDir, { recursive: true, force: true });
@@ -1000,7 +1000,7 @@ describe("playwright browser runtime", () => {
       expect(fakePage.screenshot).toHaveBeenCalledWith({
         type: "png",
         animations: "disabled",
-        timeout: 10_000,
+        timeout: 0,
         fullPage: false,
       });
     } finally {
@@ -2388,7 +2388,7 @@ describe("playwright browser runtime", () => {
 
       expect(fakePage.goto).toHaveBeenCalledWith(
         "https://example.com/jobs/sign-in",
-        { timeout: 8_000, waitUntil: "domcontentloaded" },
+        { timeout: 0, waitUntil: "domcontentloaded" },
       );
       expect(fakePage.bringToFront).toHaveBeenCalled();
     } finally {
@@ -2468,7 +2468,7 @@ describe("playwright browser runtime", () => {
 
       expect(fakePage.goto).toHaveBeenCalledWith(
         "https://example.com/jobs/sign-in",
-        { timeout: 8_000, waitUntil: "domcontentloaded" },
+        { timeout: 0, waitUntil: "domcontentloaded" },
       );
       expect(fakePage.bringToFront).toHaveBeenCalled();
       expect(fakeContext.newPage).toHaveBeenCalledOnce();
@@ -2550,7 +2550,7 @@ describe("playwright browser runtime", () => {
 
       expect(fakeContext.newPage).not.toHaveBeenCalled();
       expect(blankPage.goto).toHaveBeenCalledWith("https://example.com/jobs", {
-        timeout: 8_000,
+        timeout: 0,
         waitUntil: "domcontentloaded",
       });
       expect(blankPage.bringToFront).toHaveBeenCalled();
@@ -2696,7 +2696,7 @@ describe("playwright browser runtime", () => {
       ).resolves.toEqual(expect.objectContaining({ status: "ready" }));
       expect(fakePage.goto).toHaveBeenCalledWith(
         "https://example.com/jobs/sign-in",
-        { timeout: 8_000, waitUntil: "domcontentloaded" },
+        { timeout: 0, waitUntil: "domcontentloaded" },
       );
     } finally {
       await rm(userDataDir, { recursive: true, force: true });
@@ -3696,7 +3696,7 @@ describe("managed context active service worker gate", () => {
         onWaitingForBrowserTab: onWaiting,
       });
       await vi.waitFor(() => expect(onWaiting).toHaveBeenCalledOnce(), {
-        timeout: 5000,
+        timeout: 5_000,
       });
       expect(harness.fakeContext.newPage).not.toHaveBeenCalled();
       occupied = 6;
@@ -4397,7 +4397,7 @@ describe("managed context active service worker gate", () => {
       expect(harness.fakeContext.newPage).toHaveBeenCalledOnce();
       expect(harness.secondaryPage.goto).toHaveBeenCalledWith(
         "https://example.com/jobs/second",
-        { timeout: 8_000, waitUntil: "domcontentloaded" },
+        { timeout: 0, waitUntil: "domcontentloaded" },
       );
       expect(harness.fakePage.goto).not.toHaveBeenCalled();
       expect(harness.fakePage.close).not.toHaveBeenCalled();

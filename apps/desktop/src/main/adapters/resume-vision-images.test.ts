@@ -5,14 +5,6 @@ afterEach(() => {
 });
 
 describe("resume vision image generation", () => {
-  test("rejects oversized sidecar image payloads instead of truncating JSON", async () => {
-    const { appendBoundedSidecarOutputForTest } = await import("./resume-document-sidecar");
-
-    expect(() => appendBoundedSidecarOutputForTest("12345", "67890", 9)).toThrow(
-      "Python resume parser sidecar output exceeded 9 bytes.",
-    );
-  });
-
   test("normalizes sidecar artifacts and temporary retention metadata", async () => {
     const sidecarModule = await import("./resume-document-sidecar");
     const sidecarSpy = vi
@@ -50,7 +42,8 @@ describe("resume vision image generation", () => {
         warnings: ["rendered"],
         errorMessage: null,
       });
-    const { generateResumeVisionImages } = await import("./resume-vision-images");
+    const { generateResumeVisionImages } =
+      await import("./resume-vision-images");
 
     const result = await generateResumeVisionImages({
       filePath: "resume.pdf",
@@ -119,7 +112,8 @@ describe("resume vision image generation", () => {
         warnings: [],
         errorMessage: null,
       });
-    const { generateResumeVisionImages } = await import("./resume-vision-images");
+    const { generateResumeVisionImages } =
+      await import("./resume-vision-images");
 
     const result = await generateResumeVisionImages({
       filePath: "resume.md",
@@ -131,11 +125,13 @@ describe("resume vision image generation", () => {
       },
     });
 
-    expect(sidecarSpy).toHaveBeenCalledWith(expect.objectContaining({
-      fileKind: "markdown",
-      retention: "debug_retained",
-      timeoutMs: 12_000,
-    }));
+    expect(sidecarSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileKind: "markdown",
+        retention: "debug_retained",
+        timeoutMs: 12_000,
+      }),
+    );
     expect(result.artifact.retained).toBe("debug_retained");
     expect(result.artifact.pages[0]?.dataUrl).toBeNull();
     expect(result.artifact.pages[0]?.storagePath).toBe("debug/page-1.png");

@@ -117,11 +117,11 @@ export function buildProfileDigest(
     `Years of experience: ${profile.yearsExperience ?? "not set"}`,
     `Target roles: ${preferences.targetRoles.join(", ") || "not set"}`,
     `Locations: ${preferences.locations.join(", ") || "not set"}; work modes: ${preferences.workModes.join(", ") || "any"}`,
-    `Eligibility: ${JSON.stringify(eligibility).slice(0, 300)}`,
-    `Top skills: ${profile.skills.slice(0, 20).join(", ") || "none saved"}`,
+    `Eligibility: ${JSON.stringify(eligibility)}`,
+    `Top skills: ${profile.skills.join(", ") || "none saved"}`,
     `Work history: ${
       profile.experiences
-        .slice(0, 6)
+
         .map((entry) => `${entry.title ?? "?"} at ${entry.companyName ?? "?"}`)
         .join("; ") || "none saved"
     }`,
@@ -210,7 +210,7 @@ function describeList(
   const displayed = byLabel("screen_displayed");
   if (selected && selected.itemIds.length > 0)
     lines.push(
-      `Rows the person ticked ("these", "the ones I ticked"): result set ${selected.id} (${selected.itemIds.length}): ${selected.itemIds.slice(0, 12).join(", ")}.`,
+      `Rows the person ticked ("these", "the ones I ticked"): result set ${selected.id} (${selected.itemIds.length}): ${selected.itemIds.join(", ")}.`,
     );
   else
     lines.push(
@@ -259,7 +259,7 @@ export function buildContextBlock(input: {
       lines.push(
         context.editor.dirtyFields.length > 0
           ? `Profile editor has unsaved edits in: ${context.editor.dirtyFields
-              .slice(0, 20)
+
               .map((field) => `${plainFieldName(field)} (${field})`)
               .join(
                 ", ",
@@ -282,7 +282,7 @@ export function buildContextBlock(input: {
         (selection.sectionId || selection.bulletIds.length || selection.text)
       ) {
         lines.push(
-          `Selected in the resume: section ${selection.sectionId ?? "?"}${selection.entryId ? `, entry ${selection.entryId}` : ""}${selection.bulletIds.length ? `, bullets ${selection.bulletIds.join(", ")}` : ""}${selection.text ? `, text "${selection.text.slice(0, 600)}"` : ""}`,
+          `Selected in the resume: section ${selection.sectionId ?? "?"}${selection.entryId ? `, entry ${selection.entryId}` : ""}${selection.bulletIds.length ? `, bullets ${selection.bulletIds.join(", ")}` : ""}${selection.text ? `, text "${selection.text}"` : ""}`,
         );
       }
     }
@@ -296,7 +296,7 @@ export function buildContextBlock(input: {
       );
     }
     if (context.selectedText) {
-      lines.push(`Selected text: "${context.selectedText.slice(0, 1_500)}"`);
+      lines.push(`Selected text: "${context.selectedText}"`);
     }
     for (const mention of context.mentions) {
       lines.push(

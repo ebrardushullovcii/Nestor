@@ -780,7 +780,6 @@ export interface ChatWithToolsOptions {
   includeUsage?: boolean;
   signal?: AbortSignal;
   parallelToolCalls?: boolean;
-  maxOutputTokens?: number;
   /** Which product conversation this turn continues; see model-request-identity. */
   conversationKey?: string;
   /** Normalized deltas while the answer streams (assistant sidebar). */

@@ -1,4 +1,3 @@
-import { selfLimitSlice } from "@nestor/core";
 import {
   parseToolArguments,
   type AgentLoopTool,
@@ -414,7 +413,7 @@ export function createPageTools(
         const chosen = await hands.chooseOption(ref, option);
         if (!chosen.ok) {
           return ok(
-            `The list did not take "${option}": ${chosen.error}${chosen.offeredOptions?.length ? ` It offers: ${selfLimitSlice(chosen.offeredOptions, 0, 40, "packages/browser-agent/src/page-tools.ts:532").join(", ")}.` : ""}`,
+            `The list did not take "${option}": ${chosen.error}${chosen.offeredOptions?.length ? ` It offers: ${chosen.offeredOptions.join(", ")}.` : ""}`,
           );
         }
         return ok(

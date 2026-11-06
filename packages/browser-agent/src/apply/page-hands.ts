@@ -504,7 +504,7 @@ export function buildApplyFormObservation(
     origin,
     title: raw.title,
     step: readStepPosition(raw.stepLabel, raw.bodyText),
-    bodyTextExcerpt: raw.bodyText.slice(0, 6_000),
+    bodyTextExcerpt: raw.bodyText,
     ...(raw.bodyText.length > 6_000
       ? { bodyTextForQuestions: raw.bodyText }
       : {}),

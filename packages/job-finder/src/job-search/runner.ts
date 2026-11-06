@@ -372,10 +372,7 @@ export function createJobSearchRunner(
       lane: "http" | "browser",
       parentSignal: AbortSignal,
     ) => {
-      const controller = new AbortController();
-      const readSignal = AbortSignal.any([parentSignal, controller.signal]);
-      const stopCollection = () =>
-        controller.abort(new Error(source.quickStopReason));
+      const readSignal = parentSignal;
       const recordAccess = (count: number) => {
         if (
           !count ||
@@ -403,102 +400,88 @@ export function createJobSearchRunner(
         );
         siteDirty = true;
       };
-      try {
-        const inventory = await abortable(
-          deps.engine.collectSource({
-            target: source.target,
-            lane,
-            context,
-            settings,
-            signal: readSignal,
-            knownUrls: (urls) => deps.store.findKnownUrls(urls),
-            onCards: async (cards) => {
-              await pipeline.accept(source, cards);
-              recordAccess(cards.length);
-              if (source.quickStopReason) stopCollection();
-              readSignal.throwIfAborted();
-            },
-            message: (message) => {
-              if (
-                current(source) &&
-                !source.counted &&
-                !settledState(source.row.state)
-              ) {
-                source.row.message = message;
-                write(source);
-              }
-            },
-          }),
-          readSignal,
-        );
-        readSignal.throwIfAborted();
-        await pipeline.accept(source, inventory.cards);
-        recordAccess(inventory.cards.length);
-        if (source.quickStopReason) stopCollection();
-        readSignal.throwIfAborted();
-        source.accessBlocked = inventory.complete
-          ? false
-          : source.accessBlocked || Boolean(inventory.accessBlocked);
-        // This is the current collection outcome, replacing the earlier HTTP
-        // attempt when browser navigation recovered the source.
-        source.notes = inventory.notes;
-        source.row.lane = inventory.lane ?? lane;
-        if (lane === "http" && inventory.requiresBrowser) {
-          browserTask(source, async (browserSignal) => {
-            await collect(source, "browser", browserSignal);
-          });
-          return;
-        }
-        source.collected = true;
-        if (inventory.needsYou)
-          needsAccess(
-            source,
-            `${source.target.label}: ${inventory.notes.join(" ") || "The site's sign-in or verification attempt still needs you on the open page."}`,
-          );
-        else if (!inventory.complete)
-          failedSource(
-            source,
-            inventory.cards.length
-              ? "Some listings could not be read completely."
-              : "No listings found; this site could not be read completely.",
-          );
-        else if (
-          source.row.state !== "needs_you" &&
-          source.row.state !== "failed"
-        ) {
-          source.completeAccess = () => {
-            const signedIn =
-              access.pending(Number(source.target.id)) ||
-              siteRows.get(Number(source.target.id))?.signInState ===
-                "signed_in";
-            access.complete(Number(source.target.id));
-            siteRows.record(
-              Number(source.target.id),
-              {
-                lastSearchedAt: new Date().toISOString(),
-                health: "healthy",
-                lane: inventory.lane ?? lane,
-                signInState:
-                  lane === "browser" && signedIn ? "signed_in" : "not_required",
-                ...(inventory.provider ? { provider: inventory.provider } : {}),
-              },
-              false,
-            );
-            siteDirty = true;
-          };
-        }
-        write(source);
-        markDone(source);
-      } catch (error) {
-        if (!current(source) || !source.quickStopReason) throw error;
-        source.collected = true;
-        source.notes.push(source.quickStopReason);
-        // A deliberate Quick stop on a healthy site: more to read, not a failure.
-        if (source.row.state !== "needs_you" && source.row.state !== "failed")
-          source.row.state = "partial";
-        write(source);
-        markDone(source);
+      const inventory = await abortable(
+        deps.engine.collectSource({
+          target: source.target,
+          lane,
+          context,
+          settings,
+          signal: readSignal,
+          knownUrls: (urls) => deps.store.findKnownUrls(urls),
+          onCards: async (cards) => {
+            await pipeline.accept(source, cards);
+            recordAccess(cards.length);
+            readSignal.throwIfAborted();
+          },
+          message: (message) => {
+            if (
+              current(source) &&
+              !source.counted &&
+              !settledState(source.row.state)
+            ) {
+              source.row.message = message;
+              write(source);
+            }
+          },
+        }),
+        readSignal,
+      );
+      readSignal.throwIfAborted();
+      await pipeline.accept(source, inventory.cards);
+      recordAccess(inventory.cards.length);
+      readSignal.throwIfAborted();
+      source.accessBlocked = inventory.complete
+        ? false
+        : source.accessBlocked || Boolean(inventory.accessBlocked);
+      // This is the current collection outcome, replacing the earlier HTTP
+      // attempt when browser navigation recovered the source.
+      source.notes = inventory.notes;
+      source.row.lane = inventory.lane ?? lane;
+      if (lane === "http" && inventory.requiresBrowser) {
+        browserTask(source, async (browserSignal) => {
+          await collect(source, "browser", browserSignal);
+        });
+        return;
       }
+      source.collected = true;
+      if (inventory.needsYou)
+        needsAccess(
+          source,
+          `${source.target.label}: ${inventory.notes.join(" ") || "The site's sign-in or verification attempt still needs you on the open page."}`,
+        );
+      else if (!inventory.complete)
+        failedSource(
+          source,
+          inventory.cards.length
+            ? "Some listings could not be read completely."
+            : "No listings found; this site could not be read completely.",
+        );
+      else if (
+        source.row.state !== "needs_you" &&
+        source.row.state !== "failed"
+      ) {
+        source.completeAccess = () => {
+          const signedIn =
+            access.pending(Number(source.target.id)) ||
+            siteRows.get(Number(source.target.id))?.signInState === "signed_in";
+          access.complete(Number(source.target.id));
+          siteRows.record(
+            Number(source.target.id),
+            {
+              lastSearchedAt: new Date().toISOString(),
+              health: "healthy",
+              lane: inventory.lane ?? lane,
+              signInState:
+                lane === "browser" && signedIn ? "signed_in" : "not_required",
+              ...(inventory.provider ? { provider: inventory.provider } : {}),
+            },
+            false,
+          );
+          siteDirty = true;
+        };
+      }
+      write(source);
+      markDone(source);
     };
     const enqueue = (
       target: JobDiscoveryTarget,

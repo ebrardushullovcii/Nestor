@@ -8,7 +8,6 @@ import {
   buildResumeClaimEvidenceBank,
   collectResearchContext,
   collectResumeWorkspaceEvidence,
-  stripEmploymentEndSentences,
   buildResumeProposalReplyContent,
 } from "./resume-workspace-helpers";
 import { seedResumeDraft } from "./resume-workspace-structure";
@@ -21,17 +20,10 @@ import {
   enrichSearchPreferencesFromProfile,
   mergeEvents,
 } from "./workspace-helpers";
-import {
-  compactPercentageText,
-  stripGenericPurposeClauseTexts,
-  stripRepeatedAppendedClauseTexts,
-  summaryWithoutRepeatedBulletPhrases,
-  orderBulletsMetricsFirst,
-} from "../resumes/write-resume";
 
 afterEach(() => vi.restoreAllMocks());
 
-test("profile roles, retained events and the model's proposal note report omitted content", () => {
+test("profile roles, retained events and the model's proposal note preserve content", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {}),
     seed = createSeed();
   enrichSearchPreferencesFromProfile(
@@ -58,13 +50,7 @@ test("profile roles, retained events and the model's proposal note report omitte
     changeCount: 1,
     assistantNote: "Evidence is missing. ".repeat(30),
   });
-  expect(hits(log).map((hit) => hit.limit)).toEqual(
-    expect.arrayContaining([
-      "profile_target_roles",
-      "evidence_window",
-      "assistant_note_wording_veto",
-    ]),
-  );
+  expect(hits(log)).toEqual([]);
 });
 function hits(log: ReturnType<typeof vi.spyOn>) {
   return log.mock.calls.flatMap(([line]) =>
@@ -73,7 +59,7 @@ function hits(log: ReturnType<typeof vi.spyOn>) {
       : [],
   );
 }
-test("resume evidence, summary, research and retrieval windows report actual omissions", () => {
+test("resume evidence, summary, research and retrieval preserve the complete record", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {}),
     seed = createSeed();
   seed.profile.baseResume.textContent = Array.from(
@@ -111,13 +97,11 @@ test("resume evidence, summary, research and retrieval windows report actual omi
     research,
   });
   const context = collectResearchContext(research);
-  expect(context.companyNotes).toHaveLength(3);
-  expect(context.domainVocabulary).toHaveLength(8);
-  expect(context.priorityThemes).toHaveLength(6);
-  expect(safeSnippet("x".repeat(300))).toHaveLength(220);
-  expect(hits(log).map((hit) => hit.value)).toEqual(
-    expect.arrayContaining([500, 320, 4, 6, 8, 3, 220]),
-  );
+  expect(context.companyNotes).toHaveLength(10);
+  expect(context.domainVocabulary).toHaveLength(20);
+  expect(context.priorityThemes).toHaveLength(10);
+  expect(safeSnippet("x".repeat(300))).toHaveLength(300);
+  expect(hits(log).every((hit) => [3, 6].includes(hit.value))).toBe(true);
 });
 test("literal resume header windows are visible even when extraction succeeds", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -146,50 +130,16 @@ test("literal resume header windows are visible even when extraction succeeds", 
   expect(hits(log).some((hit) => hit.value === 8)).toBe(true);
   expect(hits(log).some((hit) => hit.value === 12)).toBe(true);
 });
-test("local prose edits, keyword vetos and metric reordering report the model override", () => {
-  const log = vi.spyOn(console, "warn").mockImplementation(() => {});
-  expect(
-    stripEmploymentEndSentences("Built useful tools. Position was eliminated."),
-  ).toBe("Built useful tools.");
-  stripGenericPurposeClauseTexts([
-    "Built a reliable data processing platform used across the company to improve performance.",
-  ]);
-  stripRepeatedAppendedClauseTexts([
-    "Built internal APIs with SQL and automated tests",
-    "Led the migration to a new billing platform with SQL and automated tests",
-    "Improved release reliability with SQL and automated tests",
-  ]);
-  summaryWithoutRepeatedBulletPhrases(
-    "Built useful tools. Led React and TypeScript platform used by teams.",
-    ["Led React and TypeScript platform used by teams."],
-  );
-  expect(compactPercentageText("Improved by 20 percent")).toContain("20%");
-  orderBulletsMetricsFirst([
-    { text: "Built tools" },
-    { text: "Saved 20 hours" },
-  ]);
-  expect(hits(log).map((hit) => hit.limit)).toEqual(
-    expect.arrayContaining([
-      "employment_end_wording",
-      "generic_purpose_veto",
-      "repeated_clause_veto",
-      "summary_phrase_veto",
-      "percentage_wording",
-      "metric_bullet_order",
-    ]),
-  );
-});
-test("hidden source-intelligence validation and warning-word vetoes report", () => {
+test("source-intelligence validation reports its schema error while warning facts stay visible", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
   parseSourceInstructionReviewOverride({
     intelligence: { collection: { preferredMethod: "made-up-method" } },
   });
   expect(
     filterSourceDebugWarnings(["Agent runtime failed on this page"]),
-  ).toEqual([]);
+  ).toEqual(["Agent runtime failed on this page"]);
   expect(hits(log).map((hit) => hit.limit)).toEqual([
     "source_intelligence_validator",
-    "source_warning_keyword_veto",
   ]);
 });
 test("removed translation caps stay quiet", async () => {

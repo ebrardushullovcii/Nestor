@@ -1164,16 +1164,7 @@ function buildDraftSectionsFromStructuredTailoredDraft(input: {
     ...draftSkills.additionalSkills,
   ]);
   if (additionalSkills.length > 0) {
-    // Every saved skill stays visible. Hiding the ones the writer did not pick
-    // removed real languages and frameworks from the export, especially in
-    // Aggressive where the writer chooses harder. The cap keeps a very long
-    // skills list from crowding the page; the person's own skills come first.
-    const visibleAdditionalSkills = selfLimitSlice(
-      additionalSkills,
-      0,
-      30,
-      "packages/job-finder/src/internal/resume-workspace-structure.ts:1171",
-    );
+    const visibleAdditionalSkills = additionalSkills;
     sections.push(
       createSection({
         id: "section_additional_skills",

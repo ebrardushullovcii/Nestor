@@ -1119,6 +1119,10 @@ describe("job search agent", () => {
 
   test("a source check returns the model's structured findings", async () => {
     const pages = { current: rawPage() };
+    const visited = Array.from(
+      { length: 45 },
+      (_, index) => `https://jobs.example.test/route/${index}`,
+    );
     const result = await runJobSearchAgent({
       hands: hands(pages),
       config: config({
@@ -1135,6 +1139,7 @@ describe("job search agent", () => {
         },
       }),
       llmClient: scripted([
+        ...visited.map((url) => ({ name: "navigate", args: { url } })),
         {
           name: "extract_jobs",
           args: { pageType: "search_results", maxJobs: 2 },
@@ -1160,6 +1165,9 @@ describe("job search agent", () => {
     ]);
     expect(result.phaseEvidence?.routeSignals).toContain(
       "https://jobs.example.test/search",
+    );
+    expect(result.phaseEvidence?.routeSignals).toEqual(
+      expect.arrayContaining(visited),
     );
   });
 

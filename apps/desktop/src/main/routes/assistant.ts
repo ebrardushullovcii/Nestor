@@ -1,4 +1,3 @@
-import { selfLimitSlice } from "@nestor/core";
 import { BrowserWindow, dialog } from "electron";
 import type { IpcMain, IpcMainInvokeEvent } from "electron";
 import {
@@ -245,12 +244,7 @@ export function registerAssistantRouteHandlers(ipcMain: IpcMain): void {
             message: null,
           });
         }
-        filePaths = selfLimitSlice(
-          picked.filePaths,
-          0,
-          5,
-          "assistant/file_picker_attachments",
-        );
+        filePaths = picked.filePaths;
       }
       const attached: {
         documentId: string;

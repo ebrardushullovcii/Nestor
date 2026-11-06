@@ -196,7 +196,6 @@ describe("Responses API transport", () => {
           },
         },
       ],
-      maxOutputTokens: 2_000,
     });
 
     expect(body).toMatchObject({
@@ -221,7 +220,6 @@ describe("Responses API transport", () => {
           description: "Inspect one source.",
         },
       ],
-      max_output_tokens: 2_000,
     });
   });
 

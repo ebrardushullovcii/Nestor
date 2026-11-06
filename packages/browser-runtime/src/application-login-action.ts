@@ -1,4 +1,3 @@
-import { selfLimitTimeout } from "@nestor/core";
 import { randomUUID } from "node:crypto";
 import type { ApplyRawPageHands, ApplyWriteResult } from "@nestor/contracts";
 import type { Locator, Page } from "playwright";
@@ -129,25 +128,6 @@ export async function clickPreparedLoginAction(
     try {
       signal?.throwIfAborted();
       await click();
-      // The window belongs to this press, not to the site's origin. Give its
-      // bounded asynchronous handler time to answer before revoking it.
-      await owningFrame
-        .waitForFunction(
-          () =>
-            ![
-              ...document.querySelectorAll<HTMLInputElement>(
-                'input[type="password"]',
-              ),
-            ].some((item) => item.getClientRects().length),
-          undefined,
-          { timeout: 10_000 },
-        )
-        .catch(() => undefined);
-      await selfLimitTimeout(
-        page.waitForLoadState("networkidle", { timeout: 1500 }),
-        1500,
-        "packages/browser-runtime/src/application-login-action.ts:146",
-      ).catch(() => undefined);
       signal?.throwIfAborted();
       return {
         ok: true,

@@ -78,7 +78,7 @@ test("the serialized snapshot preserves full body, headings, clickables, alerts,
   expect(hits(log), JSON.stringify(hits(log))).toEqual([]);
 });
 
-test("summary rows retain every row while access-signal scanning reports its existing boundary", () => {
+test("summary rows and access-signal scanning retain the whole page", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
   const page = dom(
     `<dl>${Array.from({ length: 205 }, () => `<dt>${"label".repeat(110)}</dt><dd>${"value ".repeat(2100)}</dd>`).join("")}</dl><fieldset><legend>${"section ".repeat(40)}</legend><input></fieldset>${"<button>Sign in</button>".repeat(1010)}`,
@@ -93,22 +93,26 @@ test("summary rows retain every row while access-signal scanning reports its exi
     `(${readApplyPlacements.toString()})(Array.from(document.querySelectorAll("input")))`,
   );
   page.window.eval(`(${collectVisibleAccessSignals.toString()})()`);
-  expect(hits(log).map((hit) => hit.value)).toEqual(
-    expect.arrayContaining([1000]),
-  );
+  expect(hits(log)).toEqual([]);
   expect(hits(log).some((hit) => hit.limit === "summary_rows")).toBe(false);
 });
 
-test("serialized page messages report text/history limits while keeping dialogs dismissed", () => {
+test("serialized page messages preserve full text and history while keeping dialogs dismissed", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
   const page = dom("<body>Form</body>");
   page.window.eval(`(${installPageMessageRecorderInPage.toString()})()`);
   for (let i = 0; i < 21; i++)
     page.window.alert("synthetic message ".repeat(40));
-  expect(hits(log).some((hit) => hit.value === 500)).toBe(true);
-  expect(hits(log).some((hit) => hit.limit === "page_message_history")).toBe(
-    true,
-  );
+  const messages = page.window.eval("window.__nestorPageMessages") as {
+    text: string;
+  }[];
+  expect(messages).toHaveLength(21);
+  expect(
+    messages.every(
+      (entry) => entry.text === "synthetic message ".repeat(40).trim(),
+    ),
+  ).toBe(true);
+  expect(hits(log)).toEqual([]);
   expect(page.window.confirm("continue?")).toBe(false);
   expect(page.window.prompt("value?")).toBeNull();
 });

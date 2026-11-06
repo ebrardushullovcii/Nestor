@@ -2318,9 +2318,7 @@ export type ApplyFormPathStep = z.infer<typeof ApplyFormPathStepSchema>;
  * attempt only: never write, replay, reclaim or continuation authority.
  */
 export const ApplyStepReceiptFieldSchema = z.object({
-  frame: z
-    .object({ origin: z.string().max(500), pathname: z.string().max(2000) })
-    .optional(),
+  frame: z.object({ origin: z.string(), pathname: z.string() }).optional(),
   inputConstraints: z
     .object({
       type: z.enum(["number", "date", "month"]),
@@ -2336,16 +2334,16 @@ export const ApplyStepReceiptFieldSchema = z.object({
       targetHash: z.string().regex(/^[a-f0-9]{64}$/u),
       instructionsHash: z.string().regex(/^[a-f0-9]{64}$/u),
       valueHash: z.string().regex(/^[a-f0-9]{64}$/u),
-      reason: z.string().max(600),
+      reason: z.string(),
     })
     .optional(),
   /** The review card's key for this field (screen, question key and prompt). */
-  fieldKey: z.string().min(1).max(2_000),
-  label: z.string().max(2_000),
-  groupLabel: z.string().max(2_000).default(""),
-  sectionPath: z.array(z.string().max(500)).max(12).default([]),
-  hint: z.string().max(2_000).default(""),
-  placeholder: z.string().max(500).default(""),
+  fieldKey: z.string().min(1),
+  label: z.string(),
+  groupLabel: z.string().default(""),
+  sectionPath: z.array(z.string()).default([]),
+  hint: z.string().default(""),
+  placeholder: z.string().default(""),
   kind: z.enum([
     "text",
     "long_text",
@@ -2357,22 +2355,22 @@ export const ApplyStepReceiptFieldSchema = z.object({
     "other",
   ]),
   answerControlType: ApplicationQuestionControlTypeSchema,
-  choiceGroupKey: z.string().max(500).nullable().default(null),
-  options: z.array(z.string().max(500)).max(200).default([]),
+  choiceGroupKey: z.string().nullable().default(null),
+  options: z.array(z.string()).default([]),
   required: z.boolean(),
   readOnly: z.boolean(),
   questionKind: ApplicationQuestionKindSchema,
   attestationKind: ApplicationAttestationKindSchema.nullable(),
   repeatedQuestion: z
-    .object({ prompt: z.string().max(2_000), step: z.string().max(2_000) })
+    .object({ prompt: z.string(), step: z.string() })
     .nullable()
     .default(null),
   telInput: z.boolean().default(false),
   urlInput: z.boolean().default(false),
   /** Native submitted value, retained separately from the card's display label. */
-  nativeValue: z.string().max(12_000).optional(),
+  nativeValue: z.string().optional(),
   /** The value the page showed, derived as the review card derives it. */
-  value: z.string().max(12_000),
+  value: z.string(),
   /**
    * `executor_write`: Nestor wrote this field in this attempt (even if the
    * site later refused it). `site_unchanged`: first seen with this exact value
@@ -2393,20 +2391,20 @@ export type ApplyStepReceiptField = z.infer<typeof ApplyStepReceiptFieldSchema>;
  */
 export const ApplyStepReceiptSchema = z.object({
   kind: z.enum(["advance", "final", "unconfirmed"]),
-  resultId: z.string().min(1).max(500),
+  resultId: z.string().min(1),
   /** Address without query or fragment. */
-  url: z.string().max(4_096),
-  origin: z.string().max(500),
+  url: z.string(),
+  origin: z.string(),
   stepIndex: z.number().int().positive().nullable(),
   stepTotal: z.number().int().positive().nullable(),
-  stepLabel: z.string().max(500).nullable(),
+  stepLabel: z.string().nullable(),
   frame: z
-    .object({ origin: z.string().max(500), pathname: z.string().max(2_000) })
+    .object({ origin: z.string(), pathname: z.string() })
     .nullable()
     .default(null),
-  /** Bounded page-instructions excerpt the step's questions were read with. */
-  instructions: z.string().max(4_000).default(""),
-  fields: z.array(ApplyStepReceiptFieldSchema).max(200).default([]),
+  /** Page instructions the step's questions were read with. */
+  instructions: z.string().default(""),
+  fields: z.array(ApplyStepReceiptFieldSchema).default([]),
   at: IsoDateTimeSchema,
 });
 export type ApplyStepReceipt = z.infer<typeof ApplyStepReceiptSchema>;
@@ -2414,15 +2412,9 @@ export type ApplyStepReceipt = z.infer<typeof ApplyStepReceiptSchema>;
 export type StoredApplyPickerAttempt = z.input<typeof ApplyPickerAttemptSchema>;
 
 export const ApplyExecutionResultSchema = z.object({
-  pickerAttempts: optionalStoredField(
-    z.array(ApplyPickerAttemptSchema).max(200),
-    [],
-  ),
-  formPath: optionalStoredField(z.array(ApplyFormPathStepSchema).max(40), []),
-  stepReceipts: optionalStoredField(
-    z.array(ApplyStepReceiptSchema).max(40),
-    [],
-  ),
+  pickerAttempts: optionalStoredField(z.array(ApplyPickerAttemptSchema), []),
+  formPath: optionalStoredField(z.array(ApplyFormPathStepSchema), []),
+  stepReceipts: optionalStoredField(z.array(ApplyStepReceiptSchema), []),
   skipReason: optionalStoredField(z.string().min(1).max(2000).nullable(), null),
   applyUsageTotals: optionalStoredField(
     ApplicationApplyUsageTotalsSchema.nullable(),

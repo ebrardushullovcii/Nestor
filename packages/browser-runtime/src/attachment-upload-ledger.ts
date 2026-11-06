@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { reportSelfLimitHit } from "@nestor/core";
 import type { Page, Request, Response } from "playwright";
 import type { RawApplyPage, RawApplyUpload } from "@nestor/contracts";
 
@@ -96,9 +95,6 @@ export function rememberAttachedFile(
 /** Answers in the order they arrived; milliseconds tie too often. */
 let answered = 0;
 let sequence = 0;
-/** Kept per kind, so chatty autosaves cannot push the uploads out. */
-const MAX_PER_KIND = 60;
-const MAX_TEXT = 64_000;
 
 function decodeFilename(raw: string, extended: boolean): string {
   const value = raw.trim().replace(/^"|"$/gu, "");
@@ -128,18 +124,6 @@ function fileNamesIn(body: Buffer): string[] {
 function add(records: UploadRecord[], record: UploadRecord): UploadRecord {
   record.sequence = ++sequence;
   records.push(record);
-  const sameKind = records.filter(
-    (entry) => entry.carriesFile === record.carriesFile,
-  );
-  if (sameKind.length > MAX_PER_KIND) {
-    reportSelfLimitHit({
-      limit: "upload_ledger_records",
-      kind: "count",
-      value: MAX_PER_KIND,
-      where: "browser-runtime/uploadLedger/add",
-    });
-    records.splice(records.indexOf(sameKind[0]!), 1);
-  }
   return record;
 }
 
@@ -183,20 +167,12 @@ function track(records: UploadRecord[], request: Request): UploadRecord | null {
     type.includes("x-www-form-urlencoded") ||
     type.startsWith("text/")
   ) {
-    // A long body is still read for the file's name, up to the limit.
-    if (body.length > MAX_TEXT)
-      reportSelfLimitHit({
-        limit: "upload_response_text",
-        kind: "input",
-        value: MAX_TEXT,
-        where: "browser-runtime/uploadLedger/track",
-      });
     return add(records, {
       ...base,
       carriesFile: false,
       names: [],
       size: null,
-      text: body.subarray(0, MAX_TEXT).toString("utf8").toLowerCase(),
+      text: body.toString("utf8").toLowerCase(),
     });
   }
   return add(records, {
@@ -256,7 +232,6 @@ function tokensIn(
   depth = 0,
   field: string | null = null,
 ): string[] {
-  if (depth > 4 || into.length > 40) return into;
   if (typeof value === "string") {
     const text = value.trim();
     if (looksLikeToken(text, field)) {
@@ -390,6 +365,15 @@ export function watchAttachmentUploads(page: Page): void {
       if (tracked.has(request)) return;
       const from = request.redirectedFrom();
       const followed = from ? tracked.get(from) : undefined;
+      // Search pages have no selected attachment. Only watch their actual
+      // multipart uploads; ordinary POST traffic cannot be evidence for a file
+      // that was never selected. Once a file is selected, retain its entire
+      // request chain, including presign/register requests without file bytes.
+      const body = request.postDataBuffer();
+      const hasFile =
+        request.headers()["content-type"]?.includes("multipart/form-data") ||
+        (body && fileNamesIn(body).length > 0);
+      if (!followed && !given.get(page)?.size && !hasFile) return;
       const record = followed ?? track(records, request);
       if (record) {
         const raw = request.postDataBuffer();
@@ -490,7 +474,7 @@ function attachmentUploadEvidence(
       !record.blocked || carriers.includes(record) || linked.includes(record),
   );
   if (!group.length) return undefined;
-  const requests = group.slice(-6).map((record) => {
+  const requests = group.map((record) => {
     return {
       endpoint: record.endpoint,
       status: record.httpStatus ?? null,

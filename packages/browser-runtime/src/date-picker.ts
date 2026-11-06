@@ -1,5 +1,3 @@
-import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core";
-
 import type { ApplyWriteResult } from "@nestor/contracts";
 import type { Locator, Page } from "playwright";
 
@@ -124,16 +122,11 @@ export async function pickCalendarDate(
         "This field takes a date from its calendar, not words. Give the date itself, such as 2026-10-27.",
     };
   const target = Date.UTC(wanted.year, wanted.month, wanted.day);
-  await selfLimitTimeout(
-    locator.click({ timeout: 5_000 }),
-    5_000,
-    "packages/browser-runtime/src/date-picker.ts:127",
-  );
+  await locator.click({ timeout: 0 });
   const days = page.locator(
     "[role='option'][aria-label], [role='gridcell'][aria-label], [role='button'][aria-label][class*='day' i]",
   );
-  let moves = 0;
-  for (; moves < 36; moves += 1) {
+  for (;;) {
     const named = await days
       .evaluateAll((elements) =>
         elements.map((element) => ({
@@ -154,16 +147,8 @@ export async function pickCalendarDate(
       (entry) => entry.usable && entry.at === target,
     );
     if (index >= 0) {
-      await selfLimitTimeout(
-        days.nth(index).click({ timeout: 5_000 }),
-        5_000,
-        "packages/browser-runtime/src/date-picker.ts:157",
-      );
-      const observedValue = await selfLimitTimeout(
-        locator.inputValue({ timeout: 2_000 }),
-        2_000,
-        "packages/browser-runtime/src/date-picker.ts:162",
-      );
+      await days.nth(index).click({ timeout: 0 });
+      const observedValue = await locator.inputValue({ timeout: 0 });
       return observedValue.trim()
         ? { ok: true, observedValue }
         : {
@@ -184,32 +169,13 @@ export async function pickCalendarDate(
       })
       .first();
     if (!(await step.isVisible().catch(() => false))) break;
-    await selfLimitTimeout(
-      step.click({ timeout: 2_000 }),
-      2_000,
-      "packages/browser-runtime/src/date-picker.ts:187",
-    );
+    await step.click({ timeout: 0 });
   }
-  if (moves === 36)
-    reportSelfLimitHit({
-      limit: "calendar_months",
-      kind: "steps",
-      value: 36,
-      where: "browser-runtime/pickCalendarDate",
-    });
   // No calendar to pick from: type it the way the box asks for it.
-  await selfLimitTimeout(
-    locator.fill(typedDate(wanted, placeholder), { timeout: 5_000 }),
-    5_000,
-    "packages/browser-runtime/src/date-picker.ts:201",
-  );
+  await locator.fill(typedDate(wanted, placeholder), { timeout: 0 });
   // Tab, never Enter: Enter in a form's text box submits the form.
   await locator.press("Tab").catch(() => undefined);
-  const observedValue = await selfLimitTimeout(
-    locator.inputValue({ timeout: 2_000 }),
-    2_000,
-    "packages/browser-runtime/src/date-picker.ts:208",
-  );
+  const observedValue = await locator.inputValue({ timeout: 0 });
   return observedValue.trim()
     ? { ok: true, observedValue }
     : { ok: false, error: "The date box did not keep the date." };

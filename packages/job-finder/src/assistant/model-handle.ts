@@ -23,9 +23,6 @@ export function createAssistantModelHandle(
     (messages, tools, options) =>
       target.client.chatWithTools(messages, tools, {
         ...(options?.signal ? { signal: options.signal } : {}),
-        ...(options?.maxOutputTokens
-          ? { maxOutputTokens: options.maxOutputTokens }
-          : {}),
         ...(options?.onStreamEvent
           ? { onStreamEvent: options.onStreamEvent }
           : {}),

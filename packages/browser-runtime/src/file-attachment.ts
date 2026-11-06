@@ -1,6 +1,6 @@
-import { selfLimitTimeout } from "@nestor/core";
+import { withNavigationLiveness } from "./browser-navigation";
 import type { ApplyUploadFile } from "@nestor/contracts";
-import type { Locator, Page } from "playwright";
+import type { FileChooser, Locator, Page } from "playwright";
 
 /** One attachment gesture. The caller owns ordering, retries and authorization. */
 export async function attachFile(
@@ -35,11 +35,7 @@ export async function attachFile(
     buffer: Buffer.from(file.bytes),
   };
   if (!file.method || file.method === "input") {
-    await selfLimitTimeout(
-      input.setInputFiles(payload, { timeout: 15_000 }),
-      15_000,
-      "packages/browser-runtime/src/file-attachment.ts:38",
-    );
+    await input.setInputFiles(payload, { timeout: 0 });
     return;
   }
   // Bind to this input's own field, including a frame or open shadow root.
@@ -145,36 +141,30 @@ export async function attachFile(
     if (!element)
       throw new Error("This field has no reachable attachment target.");
     if (file.method === "chooser") {
-      // Register before the click; consume the timeout even if the click fails.
-      const choosing = selfLimitTimeout(
-        page.waitForEvent("filechooser", { timeout: 2_000 }),
-        2_000,
-        "packages/browser-runtime/src/file-attachment.ts:149",
-      ).catch(() => null);
+      // Register before clicking and detach even when the page goes silent.
+      // The idle clock follows real connection activity, with no total deadline.
+      let receive!: (chooser: FileChooser) => void;
+      const choosing = new Promise<FileChooser>((resolve) => {
+        receive = resolve;
+      });
+      page.on("filechooser", receive);
       try {
-        await selfLimitTimeout(
-          element.click({ timeout: 2_000 }),
-          2_000,
-          "packages/browser-runtime/src/file-attachment.ts:155",
-        );
-        const chooser = await choosing;
-        if (
-          !chooser ||
-          !(await chooser
-            .element()
-            .evaluate(
-              (node, original) => node === original,
-              await input.elementHandle(),
-            ))
-        )
-          throw new Error("The field did not open its own file chooser.");
-        await selfLimitTimeout(
-          chooser.setFiles(payload, { timeout: 15_000 }),
-          15_000,
-          "packages/browser-runtime/src/file-attachment.ts:171",
-        );
+        await withNavigationLiveness(page, async () => {
+          await element.click({ timeout: 0 });
+          const chooser = await choosing;
+          if (
+            !(await chooser
+              .element()
+              .evaluate(
+                (node, original) => node === original,
+                await input.elementHandle(),
+              ))
+          )
+            throw new Error("The field did not open its own file chooser.");
+          await chooser.setFiles(payload, { timeout: 0 });
+        });
       } finally {
-        await choosing;
+        page.off("filechooser", receive);
       }
       return;
     }
