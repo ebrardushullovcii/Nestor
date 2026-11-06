@@ -74,7 +74,7 @@ export function step(line) {
   mkdirSync(evidenceDir, { recursive: true });
   appendFileSync(
     path.join(evidenceDir, "steps.log"),
-    `${new Date().toISOString()}  ${line}\n`,
+    `${new Date().toISOString()}  ${redact(/\b(?:password|mfa|otp|one.time.code)\b/i.test(line) && /\bfill\b/i.test(line) ? "[secret fill omitted]" : line, process.env)}\n`,
   );
 }
 
@@ -349,4 +349,17 @@ export function redact(text, env) {
 export function fail(message, code = 1) {
   console.error(message);
   process.exit(code);
+}
+
+/** Snapshot only recorded roots whose birth time still matches, plus their children. */
+export function ownedProcessTree(records) {
+  const owned = new Map();
+  for (const [pid, started] of records) {
+    if (!stillOurs(pid, started)) continue;
+    for (const child of descendants(pid)) {
+      const born = startTime(child);
+      if (born) owned.set(child, born);
+    }
+  }
+  return owned;
 }

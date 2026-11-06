@@ -1,3 +1,4 @@
+import { tracePageHands, tracePage } from "./trace-page";
 import {
   selfLimitTimeout,
   reportSelfLimitHit,
@@ -3227,7 +3228,7 @@ export function createPlaywrightApplyPageMechanics(
 ): ApplyRawPageHands {
   // Before any file is attached, so the request that carries it is seen.
   watchAttachmentUploads(page);
-  return {
+  return tracePageHands(page, {
     clickAuthorizedFormAction: async (ref) => {
       const locator = actionLocator(page, ref);
       if (!locator)
@@ -3832,7 +3833,7 @@ export function createPlaywrightApplyPageMechanics(
         "packages/browser-runtime/src/apply-page-mechanics.ts:3829",
       );
     },
-  };
+  });
 }
 
 /**
@@ -3872,7 +3873,13 @@ export function createPlaywrightApplyPageSession(input: {
         page,
         locator,
         grant,
-        () => clickAndSettle(page, locator),
+        async () => {
+          try {
+            return await clickAndSettle(page, locator);
+          } finally {
+            await tracePage(page, "login_action");
+          }
+        },
         input.signal,
       );
     },
@@ -4128,7 +4135,13 @@ export function createPlaywrightApplyPageSession(input: {
       actionLocator(page, ref) ??
       linkLocator(page, ref) ??
       clickableLocator(page, ref),
-    click: (locator) => clickAndSettle(page, locator),
+    click: async (locator) => {
+      try {
+        return await clickAndSettle(page, locator);
+      } finally {
+        await tracePage(page, "account_action");
+      }
+    },
     mechanics: createPlaywrightApplyPageMechanics,
   });
 }

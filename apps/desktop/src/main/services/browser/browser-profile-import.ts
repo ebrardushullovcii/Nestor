@@ -1,3 +1,4 @@
+import { traceEvent } from "@nestor/core/run-trace";
 import { execFile } from "node:child_process";
 import { createDecipheriv, createHash, pbkdf2Sync } from "node:crypto";
 import {
@@ -970,12 +971,11 @@ export async function importSignInsFromBrowser(
     message: string,
     cookieCount = 0,
     siteCount = 0,
-  ): DesktopBrowserImportResult => ({
-    status,
-    message,
-    cookieCount,
-    siteCount,
-  });
+  ): DesktopBrowserImportResult => {
+    const output = { status, message, cookieCount, siteCount };
+    traceEvent("browser_import_result", output);
+    return output;
+  };
   const source = (await resolveSources(env)).find(
     (candidate) => candidate.id === input.sourceId,
   );
@@ -1045,6 +1045,12 @@ export async function importSignInsFromBrowser(
   } finally {
     await snapshot.dispose().catch(() => undefined);
   }
+  traceEvent("browser_import_inventory", {
+    browser: source.browserLabel,
+    diagnostics,
+    eligibleCookieCount: cookies.length,
+    eligibleHosts: [...new Set(cookies.map((c) => new URL(c.url).hostname))],
+  });
   const skippedMessage = diagnostics
     ? `Found ${diagnostics.found} cookies. ${diagnostics.appBound} blocked by app-bound encryption; ${diagnostics.unsupportedEncryption} use unsupported encryption; ${diagnostics.decryptFailed} could not be decrypted; ${diagnostics.filtered} expired, partitioned or invalid.`
     : "";
@@ -1065,6 +1071,11 @@ export async function importSignInsFromBrowser(
       /* Do not log cookie material, including values embedded in exceptions. */
     }
   }
+  traceEvent("browser_import_written", {
+    importedCookieCount: imported,
+    importedHosts: [...sites],
+    signInVerified: false,
+  });
   try {
     await cookieStore.flushStore();
   } catch {

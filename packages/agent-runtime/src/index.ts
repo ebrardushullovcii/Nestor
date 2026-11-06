@@ -3,6 +3,11 @@ export * from "./context-budget";
 export * from "./conversation-turn";
 export * from "./result-store";
 export * from "./runtime";
+export type {
+  RuntimeObservers,
+  ModelTurnObservation,
+  ToolCallObservation,
+} from "./observers";
 
 export {
   runModelTurn,

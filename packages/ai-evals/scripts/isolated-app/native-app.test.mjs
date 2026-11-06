@@ -279,7 +279,9 @@ test("graceful native quit waits for the app's own exit before any signal", asyn
   assert.equal(await exited, 0);
 });
 
-function patchedGuard(mode, authorized) {
+function patchedGuard(mode, authorized, profileKind = "unknown") {
+  let provenance = { kind: profileKind };
+  const handlers = new Map();
   const events = new Map();
   const logs = [];
   class Window {
@@ -300,6 +302,7 @@ function patchedGuard(mode, authorized) {
   const embedded = makeSession();
   const defaultSession = makeSession();
   const electron = {
+    ipcMain: { handle: (channel, listener) => handlers.set(channel, listener) },
     BrowserWindow: Window,
     Menu,
     dialog: {},
@@ -307,7 +310,13 @@ function patchedGuard(mode, authorized) {
     app: { on: (event, fn) => events.set(event, fn) },
     session: { defaultSession, fromPartition: () => embedded },
   };
-  const fs = { appendFileSync: (_file, text) => logs.push(JSON.parse(text)) };
+  const fs = {
+    appendFileSync: (_file, text) => logs.push(JSON.parse(text)),
+    readFileSync: () => JSON.stringify(provenance),
+    writeFileSync: (_file, text) => {
+      provenance = JSON.parse(text);
+    },
+  };
   vm.runInNewContext(
     readFileSync(new URL("./instance-patch.cjs", import.meta.url), "utf8"),
     {
@@ -348,7 +357,14 @@ function patchedGuard(mode, authorized) {
     );
     return result.cancel === true;
   };
-  return { sessions: [defaultSession, embedded, popup], request, logs };
+  return {
+    sessions: [defaultSession, embedded, popup],
+    request,
+    logs,
+    register: electron.ipcMain.handle,
+    invoke: (channel) => handlers.get(channel)(),
+    provenance: () => provenance,
+  };
 }
 
 test("unchanged guards cover all sessions: external writes/redirect targets blocked, replica POST allowed", () => {
@@ -425,4 +441,17 @@ test("CLI refuses live mode without authorization before starting an instance", 
     result.stderr,
     /--net live requires NESTOR_LIVE_APPLY_AUTHORIZED=1/,
   );
+});
+
+test("test API seeding is durably synthetic and live startup refuses it; app setup remains accepted", async () => {
+  const replica = patchedGuard("replica", undefined, "app_setup");
+  let seeded = false;
+  replica.register("job-finder:test-load-applications-store-demo", () => {
+    seeded = true;
+  });
+  await replica.invoke("job-finder:test-load-applications-store-demo");
+  assert.equal(seeded, true);
+  assert.equal(replica.provenance().kind, "synthetic");
+  assert.throws(() => patchedGuard("live", "1", "synthetic"), /seeded/);
+  assert.doesNotThrow(() => patchedGuard("live", "1", "app_setup"));
 });

@@ -48,6 +48,17 @@ async function fixture(t) {
   );
   mkdirSync(path.dirname(helper), { recursive: true });
   copyFileSync(new URL("./common.mjs", import.meta.url), helper);
+  git("add", ".");
+  git(
+    "-c",
+    "user.name=Synthetic Helper Test",
+    "-c",
+    "user.email=helper@example.invalid",
+    "commit",
+    "--quiet",
+    "-m",
+    "include tested helper",
+  );
   // The exact helper bytes run in a disposable checkout; no real source or stamp changes.
   const { sourceFingerprint } = await import(pathToFileURL(helper).href);
   return { root, git, write, sourceFingerprint };

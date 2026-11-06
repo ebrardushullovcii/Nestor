@@ -1,3 +1,5 @@
+import { traceOurs, traceEvent, withTraceScope } from "@nestor/core/run-trace";
+import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 /**
  * The one loop every Job Finder agent runs on.
  *
@@ -154,7 +156,7 @@ export interface AgentLoopCeilings {
   toolIdleTimeoutMs?: number;
 }
 
-export interface AgentLoopOptions {
+export interface AgentLoopOptions extends RuntimeObservers {
   /** System prompt, opening messages, and anything a resumed run already had. */
   messages: AgentLoopMessage[];
   model: AgentLoopModel;
@@ -456,26 +458,34 @@ export async function runAgentLoop(
       finish?: AgentLoopFinish;
       stop?: { reason: string; data?: unknown };
     } = {},
-  ): AgentLoopResult => ({
-    ending,
-    reason,
-    finish: extra.finish ?? null,
-    stop: extra.stop ?? null,
-    steps,
-    progressSteps,
-    turnNotes,
-    // The live model history is private. Hosts receive only the public transcript.
-    messages: messages.map((message) =>
-      message.role === "assistant"
-        ? {
-            role: message.role,
-            content: message.content,
-            ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
-          }
-        : message,
-    ),
-    timing: { totalMs: elapsed(), modelMs, toolMs, modelTurns },
-  });
+  ): AgentLoopResult => {
+    if (["timed_out", "ceiling", "stalled"].includes(ending))
+      traceOurs(
+        "packages/agent-runtime/src/agent-loop.ts:runAgentLoop",
+        ending === "timed_out" ? "timed_out" : "capped",
+        reason,
+      );
+    return {
+      ending,
+      reason,
+      finish: extra.finish ?? null,
+      stop: extra.stop ?? null,
+      steps,
+      progressSteps,
+      turnNotes,
+      // The live model history is private. Hosts receive only the public transcript.
+      messages: messages.map((message) =>
+        message.role === "assistant"
+          ? {
+              role: message.role,
+              content: message.content,
+              ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
+            }
+          : message,
+      ),
+      timing: { totalMs: elapsed(), modelMs, toolMs, modelTurns },
+    };
+  };
   const markProgress = (): void => {
     progressSteps += 1;
     lastProgressStep = steps;
@@ -533,15 +543,25 @@ export async function runAgentLoop(
       try {
         response = await runModelTurn(
           (turnOptions) =>
-            options.model.chatWithTools(messages, definitions, {
-              ...turnOptions,
-              ...(options.parallelToolCalls === undefined
-                ? {}
-                : { parallelToolCalls: options.parallelToolCalls }),
-              ...(options.modelMaxOutputTokens
-                ? { maxOutputTokens: options.modelMaxOutputTokens }
-                : {}),
-            }),
+            observeModel(
+              options,
+              {
+                messages,
+                tools: definitions,
+                maxOutputTokens: options.modelMaxOutputTokens,
+                parallelToolCalls: options.parallelToolCalls,
+              },
+              () =>
+                options.model.chatWithTools(messages, definitions, {
+                  ...turnOptions,
+                  ...(options.parallelToolCalls === undefined
+                    ? {}
+                    : { parallelToolCalls: options.parallelToolCalls }),
+                  ...(options.modelMaxOutputTokens
+                    ? { maxOutputTokens: options.modelMaxOutputTokens }
+                    : {}),
+                }),
+            ),
           {
             signal: options.signal,
             idleTimeoutMs: options.ceilings?.modelIdleTimeoutMs,
@@ -633,77 +653,26 @@ export async function runAgentLoop(
     let ended: AgentLoopResult | null = null;
     let exemptedThisStep = false;
     const exemptFromStall = () => {
-      if (!exemptedThisStep) { stallExemptSteps += 1; exemptedThisStep = true; }
+      if (!exemptedThisStep) {
+        stallExemptSteps += 1;
+        exemptedThisStep = true;
+      }
     };
     let batchStopped = false;
     for (const toolCall of toolCalls) {
-      if (ended || batchStopped) {
-        messages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content: ended
-            ? "The run ended before this step was reached."
-            : "This batch stopped before this call. Decide again from the fresh page observation.",
-        });
-        continue;
-      }
-      if (options.signal?.aborted) {
-        ended = result(
-          "aborted",
-          `Job Finder stopped work on ${options.subjectLabel} before it was finished.`,
-        );
-        messages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content: "The run was stopped before this step was reached.",
-        });
-        continue;
-      }
-      const tool = toolsByName.get(toolCall.function.name);
-      if (!tool) {
-        batchStopped = options.afterToolBatch !== undefined;
-        messages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content: `There is no tool called ${toolCall.function.name}.`,
-        });
-        await note(`asked for unknown tool ${toolCall.function.name}`);
-        continue;
-      }
-
-      const toolStartedAt = now().getTime();
-      let outcome: AgentLoopToolOutcome;
+      const observedToolStart = Date.now();
       try {
-        try {
-          outcome = await runModelTurn(
-            (turnOptions) =>
-              tool.execute(toolCall.function.arguments, {
-                step: steps,
-                signal: turnOptions.signal,
-                onProgress: () =>
-                  turnOptions.onStreamEvent({
-                    type: "tool_call_delta",
-                    index: 0,
-                  }),
-              }),
-            {
-              signal: options.signal,
-              idleTimeoutMs: options.ceilings?.toolIdleTimeoutMs,
-            },
-          );
-        } catch (error) {
-          if (error instanceof ModelTurnTimeoutError) throw new ToolIdleError();
-          throw error;
+        if (ended || batchStopped) {
+          messages.push({
+            role: "tool",
+            toolCallId: toolCall.id,
+            content: ended
+              ? "The run ended before this step was reached."
+              : "This batch stopped before this call. Decide again from the fresh page observation.",
+          });
+          continue;
         }
-        if (tool.failureKind === "browser") {
-          consecutiveBrowserFailures = 0;
-        }
-      } catch (error) {
-        batchStopped = options.afterToolBatch !== undefined;
-        if (
-          (error instanceof DOMException && error.name === "AbortError") ||
-          options.signal?.aborted
-        ) {
+        if (options.signal?.aborted) {
           ended = result(
             "aborted",
             `Job Finder stopped work on ${options.subjectLabel} before it was finished.`,
@@ -711,138 +680,214 @@ export async function runAgentLoop(
           messages.push({
             role: "tool",
             toolCallId: toolCall.id,
-            content: "The run was stopped during this step.",
+            content: "The run was stopped before this step was reached.",
           });
           continue;
         }
-        if (error instanceof ToolIdleError) {
-          // A hung step is reported as a fact and counted like a dead page:
-          // repeated silence ends the run in plain words instead of a freeze.
-          consecutiveBrowserFailures += 1;
-          exemptFromStall();
-          const failure =
-            "That step stopped reporting progress and was given up.";
-          await note(`${toolCall.function.name} → took too long`);
-          if (consecutiveBrowserFailures >= browserFailureLimit) {
+        const tool = toolsByName.get(toolCall.function.name);
+        if (!tool) {
+          batchStopped = options.afterToolBatch !== undefined;
+          messages.push({
+            role: "tool",
+            toolCallId: toolCall.id,
+            content: `There is no tool called ${toolCall.function.name}.`,
+          });
+          await note(`asked for unknown tool ${toolCall.function.name}`);
+          continue;
+        }
+
+        const toolStartedAt = now().getTime();
+        traceEvent("tool_call_started", {
+          id: toolCall.id,
+          name: toolCall.function.name,
+          arguments: toolCall.function.arguments,
+        });
+        let outcome: AgentLoopToolOutcome;
+        try {
+          try {
+            outcome = await runModelTurn(
+              (turnOptions) =>
+                withTraceScope({ toolCallId: toolCall.id }, () =>
+                  tool.execute(toolCall.function.arguments, {
+                    step: steps,
+                    signal: turnOptions.signal,
+                    onProgress: () =>
+                      turnOptions.onStreamEvent({
+                        type: "tool_call_delta",
+                        index: 0,
+                      }),
+                  }),
+                ),
+              {
+                signal: options.signal,
+                idleTimeoutMs: options.ceilings?.toolIdleTimeoutMs,
+              },
+            );
+          } catch (error) {
+            if (error instanceof ModelTurnTimeoutError)
+              throw new ToolIdleError();
+            throw error;
+          }
+          if (tool.failureKind === "browser") {
+            consecutiveBrowserFailures = 0;
+          }
+        } catch (error) {
+          batchStopped = options.afterToolBatch !== undefined;
+          if (
+            (error instanceof DOMException && error.name === "AbortError") ||
+            options.signal?.aborted
+          ) {
             ended = result(
-              "browser_failed",
-              `Job Finder stopped on ${options.subjectLabel} because the page kept taking too long to answer. Everything it did so far is kept.`,
+              "aborted",
+              `Job Finder stopped work on ${options.subjectLabel} before it was finished.`,
             );
             messages.push({
               role: "tool",
               toolCallId: toolCall.id,
-              content: failure,
+              content: "The run was stopped during this step.",
+            });
+            continue;
+          }
+          if (error instanceof ToolIdleError) {
+            // A hung step is reported as a fact and counted like a dead page:
+            // repeated silence ends the run in plain words instead of a freeze.
+            consecutiveBrowserFailures += 1;
+            exemptFromStall();
+            const failure =
+              "That step stopped reporting progress and was given up.";
+            await note(`${toolCall.function.name} → took too long`);
+            if (consecutiveBrowserFailures >= browserFailureLimit) {
+              ended = result(
+                "browser_failed",
+                `Job Finder stopped on ${options.subjectLabel} because the page kept taking too long to answer. Everything it did so far is kept.`,
+              );
+              messages.push({
+                role: "tool",
+                toolCallId: toolCall.id,
+                content: failure,
+              });
+              continue;
+            }
+            messages.push({
+              role: "tool",
+              toolCallId: toolCall.id,
+              content: `${failure} Look at the page again before deciding what to do next; if this keeps happening, finish and say what happened.`,
+            });
+            continue;
+          }
+          if (tool.failureKind !== "browser") {
+            consecutiveBrowserFailures = 0;
+            await note(`${toolCall.function.name} → tool failure`);
+            messages.push({
+              role: "tool",
+              toolCallId: toolCall.id,
+              content:
+                "That tool could not complete this step. Try a different approach, or finish and explain what remains.",
+            });
+            continue;
+          }
+          // Only a page tool can increment the dead-browser counter. Its own
+          // descriptor removes library internals before the model or person sees it.
+          consecutiveBrowserFailures += 1;
+          exemptFromStall();
+          const failure = endSentence(
+            tool.describeError?.(error) ?? "The browser did not respond.",
+          );
+          await note(`${toolCall.function.name} → browser failure: ${failure}`);
+          if (consecutiveBrowserFailures >= browserFailureLimit) {
+            ended = result(
+              "browser_failed",
+              `Job Finder stopped on ${options.subjectLabel} because the browser page stopped responding. ${failure} Everything it did so far is kept.`,
+            );
+            messages.push({
+              role: "tool",
+              toolCallId: toolCall.id,
+              content: `That step did not complete: ${failure}`,
             });
             continue;
           }
           messages.push({
             role: "tool",
             toolCallId: toolCall.id,
-            content: `${failure} Look at the page again before deciding what to do next; if this keeps happening, finish and say what happened.`,
+            content: `That step did not complete: ${failure} Look at the page again before deciding what to do next; if this keeps happening, finish and say what happened.`,
           });
           continue;
-        }
-        if (tool.failureKind !== "browser") {
-          consecutiveBrowserFailures = 0;
-          await note(`${toolCall.function.name} → tool failure`);
-          messages.push({
-            role: "tool",
-            toolCallId: toolCall.id,
-            content:
-              "That tool could not complete this step. Try a different approach, or finish and explain what remains.",
+        } finally {
+          const durationMs = Math.max(0, now().getTime() - toolStartedAt);
+          toolMs += durationMs;
+          options.onToolTiming?.({
+            toolName: toolCall.function.name,
+            durationMs,
           });
-          continue;
         }
-        // Only a page tool can increment the dead-browser counter. Its own
-        // descriptor removes library internals before the model or person sees it.
-        consecutiveBrowserFailures += 1;
-        exemptFromStall();
-        const failure = endSentence(
-          tool.describeError?.(error) ?? "The browser did not respond.",
-        );
-        await note(`${toolCall.function.name} → browser failure: ${failure}`);
-        if (consecutiveBrowserFailures >= browserFailureLimit) {
-          ended = result(
-            "browser_failed",
-            `Job Finder stopped on ${options.subjectLabel} because the browser page stopped responding. ${failure} Everything it did so far is kept.`,
-          );
-          messages.push({
-            role: "tool",
-            toolCallId: toolCall.id,
-            content: `That step did not complete: ${failure}`,
-          });
-          continue;
-        }
-        messages.push({
-          role: "tool",
-          toolCallId: toolCall.id,
-          content: `That step did not complete: ${failure} Look at the page again before deciding what to do next; if this keeps happening, finish and say what happened.`,
-        });
-        continue;
-      } finally {
-        const durationMs = Math.max(0, now().getTime() - toolStartedAt);
-        toolMs += durationMs;
-        options.onToolTiming?.({
-          toolName: toolCall.function.name,
-          durationMs,
-        });
-      }
 
-      switch (outcome.kind) {
-        case "ok": {
-          if (tool.isWait || tool.definition.function.name === "wait") exemptFromStall();
-          batchStopped =
-            outcome.stopBatch === true ||
-            outcome.status === "refused" ||
-            outcome.status === "failed";
-          if (outcome.progress) {
-            markProgress();
+        switch (outcome.kind) {
+          case "ok": {
+            if (tool.isWait || tool.definition.function.name === "wait")
+              exemptFromStall();
+            batchStopped =
+              outcome.stopBatch === true ||
+              outcome.status === "refused" ||
+              outcome.status === "failed";
+            if (outcome.progress) {
+              markProgress();
+            }
+            messages.push({
+              role: "tool",
+              toolCallId: toolCall.id,
+              content: outcome.content,
+            });
+            await note(
+              `${toolCall.function.name} → ${outcome.content.split("\n")[0]?.slice(0, 160) ?? "ok"}`,
+            );
+            break;
           }
-          messages.push({
-            role: "tool",
-            toolCallId: toolCall.id,
-            content: outcome.content,
-          });
-          await note(
-            `${toolCall.function.name} → ${outcome.content.split("\n")[0]?.slice(0, 160) ?? "ok"}`,
-          );
-          break;
+          case "finish": {
+            messages.push({
+              role: "tool",
+              toolCallId: toolCall.id,
+              content: "Finished.",
+            });
+            await note(
+              `finished${outcome.finish.stuck ? " as stuck" : ""}${outcome.finish.needsPerson ? " (needs the person)" : ""}: ${outcome.finish.reason}`,
+            );
+            ended = result("finished", endSentence(outcome.finish.reason), {
+              finish: outcome.finish,
+            });
+            break;
+          }
+          case "stop": {
+            messages.push({
+              role: "tool",
+              toolCallId: toolCall.id,
+              content: `Job Finder stopped the run: ${outcome.reason}`,
+            });
+            await note(`stopped: ${outcome.reason}`);
+            ended = result("stopped", endSentence(outcome.reason), {
+              stop: {
+                reason: outcome.reason,
+                ...(outcome.data !== undefined ? { data: outcome.data } : {}),
+              },
+            });
+            break;
+          }
+          default: {
+            const exhaustive: never = outcome;
+            throw new Error(
+              `Unhandled tool outcome: ${JSON.stringify(exhaustive)}`,
+            );
+          }
         }
-        case "finish": {
-          messages.push({
-            role: "tool",
-            toolCallId: toolCall.id,
-            content: "Finished.",
-          });
-          await note(
-            `finished${outcome.finish.stuck ? " as stuck" : ""}${outcome.finish.needsPerson ? " (needs the person)" : ""}: ${outcome.finish.reason}`,
-          );
-          ended = result("finished", endSentence(outcome.finish.reason), {
-            finish: outcome.finish,
-          });
-          break;
-        }
-        case "stop": {
-          messages.push({
-            role: "tool",
-            toolCallId: toolCall.id,
-            content: `Job Finder stopped the run: ${outcome.reason}`,
-          });
-          await note(`stopped: ${outcome.reason}`);
-          ended = result("stopped", endSentence(outcome.reason), {
-            stop: {
-              reason: outcome.reason,
-              ...(outcome.data !== undefined ? { data: outcome.data } : {}),
-            },
-          });
-          break;
-        }
-        default: {
-          const exhaustive: never = outcome;
-          throw new Error(
-            `Unhandled tool outcome: ${JSON.stringify(exhaustive)}`,
-          );
-        }
+      } finally {
+        const message = [...messages]
+          .reverse()
+          .find((m) => m.role === "tool" && m.toolCallId === toolCall.id);
+        observeTool(
+          options,
+          toolCall,
+          message?.content ?? null,
+          observedToolStart,
+        );
       }
     }
     if (ended) {
@@ -873,6 +918,7 @@ export async function runAgentLoop(
     }
     if (observation) messages.push({ role: "user", content: observation });
     if (staleToolResultChars !== null) {
+      const unshortened = messages;
       messages = shortenStaleToolResults(
         messages,
         openingCount,
@@ -880,6 +926,12 @@ export async function runAgentLoop(
         staleToolResultKeepRecent,
         staleToolResultBatchSize,
       );
+      if (messages !== unshortened)
+        traceOurs(
+          "packages/agent-runtime/src/agent-loop.ts:shortenStaleToolResults",
+          "rewritten",
+          "Older tool messages shortened before the next model request",
+        );
     }
     const beforeCompaction = messages;
     messages = compactMessages(
@@ -889,6 +941,11 @@ export async function runAgentLoop(
       compactionMaxChars,
     );
     if (messages !== beforeCompaction) {
+      traceOurs(
+        "packages/agent-runtime/src/agent-loop.ts:compactMessages",
+        "rewritten",
+        "Older conversation turns replaced by turn notes",
+      );
       const context = options.onHistoryCompacted?.();
       if (context) messages.push({ role: "user", content: context });
     }

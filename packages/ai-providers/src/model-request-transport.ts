@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { runTraceEnabled, traceEvent, traceOurs } from "@nestor/core/run-trace";
 import { ModelOutputLimitError } from "@nestor/agent-runtime";
 import type { ModelTurnStreamEvent } from "@nestor/agent-runtime";
 /**
@@ -424,6 +426,7 @@ async function readStreamedPayload(
   emit?: (event: ModelStreamEvent) => void,
   observeUsage?: (payload: unknown) => void,
   progressOnly = false,
+  observeTracePayload?: (payload: unknown) => void,
 ): Promise<ChatCompletionsPayload> {
   const body = response.body;
   if (!body) {
@@ -648,6 +651,15 @@ async function readStreamedPayload(
       }
       flushEvent();
     }
+  } catch (error) {
+    if (apiMode === "chat_completions")
+      observeTracePayload?.(buildChatPayloadFromStream(chat));
+    else
+      observeTracePayload?.({
+        output_text: responses.text,
+        output: responses.toolCalls,
+      });
+    throw error;
   } finally {
     signal.removeEventListener("abort", cancelOnAbort);
     // A protocol completion marker ends the response, even when a gateway
@@ -658,6 +670,13 @@ async function readStreamedPayload(
   }
 
   if (signal.aborted) {
+    if (apiMode === "chat_completions")
+      observeTracePayload?.(buildChatPayloadFromStream(chat));
+    else
+      observeTracePayload?.({
+        output_text: responses.text,
+        output: responses.toolCalls,
+      });
     // A cancelled reader ends with `done`; never hand back a truncated
     // message as if it were the model's answer.
     throw createAbortError();
@@ -672,6 +691,7 @@ async function readStreamedPayload(
     const payload = buildChatPayloadFromStream(chat);
     // A truncated Chat answer may send usage after its finish_reason chunk.
     // Reject the answer only after the terminal usage has been collected.
+    observeTracePayload?.(payload);
     rejectIncompleteOutput(payload, "chat_completions");
     return payload;
   }
@@ -903,6 +923,56 @@ async function performModelRequestAttempts(
     let httpStatus: number | undefined;
     let failureKind: ModelRequestUsage["failureKind"];
 
+    const traceId = runTraceEnabled() ? randomUUID() : null;
+    const traceStarted = Date.now();
+    if (traceId)
+      traceEvent("provider_request", {
+        id: traceId,
+        endpoint: input.url,
+        purpose: input.purpose,
+        apiMode: input.apiMode,
+        attempt,
+        request: JSON.parse(requestBody),
+      });
+    let reportedSignature = "";
+    const observeTraceResponse = (payload: unknown) => {
+      if (traceId && isRecord(payload)) {
+        const signature = JSON.stringify({
+          model: payload.model,
+          effort: payload.reasoning_effort ?? payload.reasoning,
+        });
+        if (
+          (payload.model || payload.reasoning_effort || payload.reasoning) &&
+          signature !== reportedSignature
+        ) {
+          reportedSignature = signature;
+          traceEvent("provider_reported", {
+            id: traceId,
+            model: payload.model ?? null,
+            effort:
+              payload.reasoning_effort ??
+              (isRecord(payload.reasoning) ? payload.reasoning.effort : null) ??
+              null,
+          });
+        }
+        const choice: unknown = Array.isArray(payload.choices)
+          ? payload.choices[0]
+          : null;
+        if (
+          (isRecord(choice) && choice.message) ||
+          payload.output ||
+          payload.output_text
+        )
+          traceEvent("provider_response_raw", {
+            id: traceId,
+            response: payload,
+          });
+      }
+    };
+    const observedResponse = (payload: unknown) => {
+      usage.observe(payload);
+      observeTraceResponse(payload);
+    };
     const attemptController = new AbortController();
     let abortReason: "idle" | "total" | "caller" | null = null;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -951,7 +1021,7 @@ async function performModelRequestAttempts(
         } catch {
           parsed = null;
         }
-        usage.observe(parsed);
+        observedResponse(parsed);
         throw new ModelRequestHttpError(
           readErrorMessage(parsed) ??
             `Model request failed with status ${response.status}`,
@@ -970,9 +1040,16 @@ async function performModelRequestAttempts(
           armIdle,
           attemptController.signal,
           input.onStreamEvent,
-          usage.observe,
+          observedResponse,
           input.idleOnModelProgressOnly,
+          traceId ? observeTraceResponse : undefined,
         );
+        if (traceId)
+          traceEvent("provider_response", {
+            id: traceId,
+            response: payload,
+            durationMs: Date.now() - traceStarted,
+          });
         outcome = "completed";
         return { ...payload, usage: usage.finish(outcome).payload };
       }
@@ -990,7 +1067,7 @@ async function performModelRequestAttempts(
         rawPayload = null;
         usage.observeText(rawBody);
       }
-      usage.observe(rawPayload);
+      observedResponse(rawPayload);
       if (!isRecord(rawPayload)) {
         throw new Error("Model returned a non-JSON response");
       }
@@ -1003,9 +1080,28 @@ async function performModelRequestAttempts(
         rawPayload as ChatCompletionsPayload | ResponsesPayload,
         input.apiMode,
       );
+      if (traceId)
+        traceEvent("provider_response", {
+          id: traceId,
+          response: rawPayload,
+          durationMs: Date.now() - traceStarted,
+        });
       outcome = "completed";
       return { ...payload, usage: usage.finish(outcome).payload };
     } catch (error) {
+      if (traceId)
+        traceEvent("provider_error", {
+          id: traceId,
+          error,
+          abortReason,
+          durationMs: Date.now() - traceStarted,
+        });
+      if (abortReason === "total" || abortReason === "attempt")
+        traceOurs(
+          "packages/ai-providers/src/model-request-transport.ts:performModelRequestAttempts",
+          "timed_out",
+          `${String(abortReason)} request deadline`,
+        );
       if (abortReason === "caller" || input.signal?.aborted) {
         outcome = "cancelled";
         failureKind = "cancelled";
@@ -1064,6 +1160,13 @@ async function performModelRequestAttempts(
       }
       input.signal?.removeEventListener("abort", onCallerAbort);
       const { event } = usage.finish(outcome);
+      if (traceId)
+        traceEvent("provider_finished", {
+          id: traceId,
+          outcome,
+          usage: event,
+          durationMs: Date.now() - traceStarted,
+        });
       if (httpStatus !== undefined) event.httpStatus = httpStatus;
       if (failureKind !== undefined) event.failureKind = failureKind;
       recordModelRequestUsage(event);

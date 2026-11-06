@@ -7,8 +7,21 @@ interface SelfLimitHit {
   readonly where: string;
 }
 
+let observeSelfLimit: ((hit: SelfLimitHit) => void) | undefined;
+/** Main-process tracing installs this without adding Node imports to core. */
+export function setSelfLimitObserver(
+  observer: (hit: SelfLimitHit) => void,
+): void {
+  observeSelfLimit = observer;
+}
+
 /** One JSON record per hit, captured by the ordinary app/step logs. */
 export function reportSelfLimitHit(hit: SelfLimitHit): void {
+  try {
+    observeSelfLimit?.(hit);
+  } catch {
+    /* Observation only. */
+  }
   console.warn(
     `[self_limit_hit] ${JSON.stringify({ event: "self_limit_hit", limit: hit.limit, kind: hit.kind, value: hit.value, where: hit.where })}`,
   );

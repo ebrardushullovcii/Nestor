@@ -1,3 +1,4 @@
+import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 import {
   ModelTurnTimeoutError,
   runModelTurn,
@@ -87,7 +88,7 @@ export interface AgentTaskCheckpointStore {
   save(checkpoint: AgentTaskCheckpoint): Promise<void>;
 }
 
-export interface AgentTaskRunOptions<TState, TDraft> {
+export interface AgentTaskRunOptions<TState, TDraft> extends RuntimeObservers {
   readonly taskId: string;
   readonly capability: string;
   readonly systemPrompt: string;
@@ -490,18 +491,33 @@ export async function runAgentTask<TState, TDraft>(
         providerCalls += 1;
         response = await runModelTurn(
           (turnOptions) =>
-            options.model.chat({
-              messages,
-              tools: options.tools.map((tool) => ({
-                type: "function",
-                function: {
-                  name: tool.name,
-                  description: tool.description,
-                  parameters: tool.parameters,
-                },
-              })),
-              ...turnOptions,
-            }),
+            observeModel(
+              options,
+              {
+                messages,
+                tools: options.tools.map((tool) => ({
+                  type: "function",
+                  function: {
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters,
+                  },
+                })),
+              },
+              () =>
+                options.model.chat({
+                  messages,
+                  tools: options.tools.map((tool) => ({
+                    type: "function",
+                    function: {
+                      name: tool.name,
+                      description: tool.description,
+                      parameters: tool.parameters,
+                    },
+                  })),
+                  ...turnOptions,
+                }),
+            ),
           {
             signal: options.signal,
           },
@@ -683,6 +699,7 @@ export async function runAgentTask<TState, TDraft>(
         toolCallId: call.id,
         content: JSON.stringify(toolContent),
       });
+      observeTool(options, call, JSON.stringify(toolContent), started);
       return progressMade;
     };
 
