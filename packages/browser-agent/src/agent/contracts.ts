@@ -59,6 +59,8 @@ export function withReasoningTask(
 
 export interface JobExtractor {
   extractJobsFromPage: (input: {
+    excludedCanonicalUrls?: readonly string[]
+    onStreamEvent?: (event: ModelTurnStreamEvent) => void
     pageText: string
     pageUrl: string
     pageType: AgentExtractorPageType

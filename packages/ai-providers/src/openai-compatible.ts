@@ -130,10 +130,8 @@ const DEFAULT_RESUME_IMPORT_STAGE_TIMEOUT_MS: Record<
   experience: 300_000,
   background: 300_000,
 };
-const SEARCH_RESULTS_EXTRACTION_TIMEOUT_MS = 240_000;
-const SEARCH_RESULTS_EXTRACTION_PAGE_TEXT_LIMIT = 8_000;
-const JOB_DETAIL_EXTRACTION_PAGE_TEXT_LIMIT = 12_000;
-const SEARCH_RESULTS_MAX_MODEL_JOBS = 12;
+const SEARCH_RESULTS_EXTRACTION_TIMEOUT_MS = Infinity;
+const SEARCH_RESULTS_MAX_MODEL_JOBS = 60;
 const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 196_000;
 
 /** Sampling support was verified on this route, not on arbitrary models. */
@@ -307,6 +305,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
     options?: {
       timeoutMs?: number;
       signal?: AbortSignal;
+      onStreamEvent?: ChatWithToolsOptions["onStreamEvent"];
       /** Which conversation this request continues; see model-request-identity. */
       conversationKey?: string;
       /** Overrides the client's effort for this one request. */
@@ -399,6 +398,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
           ? { idleTimeoutMs: 30_000 }
           : {}),
         signal: options?.signal,
+        onStreamEvent: options?.onStreamEvent,
       });
       return extractModelJsonFromPayload(payload);
     } catch (error) {
@@ -763,15 +763,13 @@ export function createOpenAiCompatibleJobFinderAiClient(
           return "the configured job site";
         }
       })();
-      const systemPrompt = buildJobsExtractionPrompt({
-        pageHostLabel,
-        pageType: input.pageType,
-        effectiveMaxJobs,
-      });
-      const pageTextLimit =
-        input.pageType === "search_results"
-          ? SEARCH_RESULTS_EXTRACTION_PAGE_TEXT_LIMIT
-          : JOB_DETAIL_EXTRACTION_PAGE_TEXT_LIMIT;
+      const systemPrompt =
+        buildJobsExtractionPrompt({
+          pageHostLabel,
+          pageType: input.pageType,
+          effectiveMaxJobs,
+        }) +
+        " When excludedCanonicalUrls is supplied, those jobs were already read from this same page. Return only remaining jobs, without repeating those URLs. Return fewer than the limit when no more remain.";
       const timeoutMs =
         validatedOptions?.requestTimeoutMs ??
         (input.pageType === "search_results"
@@ -783,10 +781,10 @@ export function createOpenAiCompatibleJobFinderAiClient(
         systemPrompt,
         {
           pageUrl: input.pageUrl,
-          pageText:
-            input.pageType === "job_detail"
-              ? input.pageText
-              : input.pageText.slice(0, pageTextLimit),
+          pageText: input.pageText,
+          ...(input.excludedCanonicalUrls?.length
+            ? { excludedCanonicalUrls: input.excludedCanonicalUrls }
+            : {}),
           ...(input.selectionContext
             ? { selectionContext: input.selectionContext }
             : {}),
@@ -795,6 +793,9 @@ export function createOpenAiCompatibleJobFinderAiClient(
           timeoutMs,
           ...(input.signal ? { signal: input.signal } : {}),
           conversationKey: modelConversationKeys.pageExtraction(input.pageUrl),
+          ...(input.onStreamEvent
+            ? { onStreamEvent: input.onStreamEvent }
+            : {}),
           reasoningEffort: reasoningEffortFor("page_read"),
         },
       );

@@ -25,7 +25,9 @@ import {
   createDefaultListingHtmlFetcher,
   createModelListingPageReader,
   readListingDetail,
+  namesDifferentRole,
   type ListingHtmlFetcher,
+  type RenderedListingPageReader,
 } from "../internal/listing-detail-enrichment";
 import { normalizeResumeDraftEntryOrdering } from "../internal/resume-entry-ordering";
 import { buildResumeRenderDocument } from "../internal/resume-workspace-helpers";
@@ -43,8 +45,6 @@ const MAX_WRITERS = 6;
 const AUTOMATIC_START_DELAY_MS = 1_500;
 /** How long a write the AI turned away waits before the queue tries again. */
 const BUSY_RETRY_MS = 30_000;
-/** Below this the listing is a card, and the resume reads the posting first. */
-const THIN_LISTING_CHARS = 400;
 
 /** Identity alone cannot ground a replacement for an existing tailored draft. */
 function hasResumeWriterEvidence(profile: CandidateProfile): boolean {
@@ -78,6 +78,7 @@ export interface ResumeServiceDeps extends ResumeWriterDeps {
   /** The person's profile and settings, read fresh for each write. */
   readInputs(): Promise<ResumeWriterInputs>;
   fetchListingHtml?: ListingHtmlFetcher;
+  readRenderedPage?: RenderedListingPageReader;
 }
 
 export type ResumeView = ResumeCommandOutputs["get_resume"];
@@ -114,37 +115,51 @@ export function createResumeService(deps: ResumeServiceDeps) {
 
   /** A card-only job gets its posting read once, with no fit check. */
   async function withListing(job: JobDetail, signal: AbortSignal) {
-    if (job.description.trim().length >= THIN_LISTING_CHARS) return job;
-    try {
-      const page = await fetchHtml(job.url, { signal });
-      signal.throwIfAborted();
-      if (page.status >= 400) return job;
-      const detail =
-        (await readListingDetail({
-          html: page.html,
-          url: page.finalUrl,
-          expectedTitle: job.title,
-          readPage,
-          signal,
-        })) ?? null;
-      if (!detail || detail.description.length <= job.description.length) {
-        return job;
-      }
-      const facts = {
-        ...job.facts,
-        keySkills: detail.keySkills ?? job.facts.keySkills,
-        responsibilities: detail.responsibilities ?? job.facts.responsibilities,
-        minimumQualifications:
-          detail.minimumQualifications ?? job.facts.minimumQualifications,
-        preferredQualifications:
-          detail.preferredQualifications ?? job.facts.preferredQualifications,
-      };
-      resumes.saveListing(job.id, detail.description, facts);
-      return { ...job, description: detail.description, facts };
-    } catch (error) {
-      if (signal.aborted) throw error;
-      return job;
+    if (job.facts.fullListingRead === true) return job;
+    const page = await fetchHtml(job.url, {
+      signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+    });
+    signal.throwIfAborted();
+    if (page.status >= 400)
+      throw new Error(
+        `The full listing could not be read (HTTP ${page.status}). Try writing the resume again when the posting is available.`,
+      );
+    const detail =
+      (await readListingDetail({
+        html: page.html,
+        url: page.finalUrl,
+        expectedTitle: job.title,
+        readPage,
+        ...(deps.readRenderedPage
+          ? { readRenderedPage: deps.readRenderedPage }
+          : {}),
+        signal,
+      })) ?? null;
+    if (
+      !detail ||
+      detail.descriptionLikelyTruncated ||
+      !detail.description.trim()
+    ) {
+      throw new Error(
+        "The full listing could not be read. Try writing the resume again when the posting is available.",
+      );
     }
+    if (detail.title && namesDifferentRole(job.title, detail.title))
+      throw new Error(
+        "The listing opened a different role. Check the job link before writing its resume.",
+      );
+    const facts = {
+      ...job.facts,
+      fullListingRead: true,
+      keySkills: detail.keySkills ?? job.facts.keySkills,
+      responsibilities: detail.responsibilities ?? job.facts.responsibilities,
+      minimumQualifications:
+        detail.minimumQualifications ?? job.facts.minimumQualifications,
+      preferredQualifications:
+        detail.preferredQualifications ?? job.facts.preferredQualifications,
+    };
+    resumes.saveListing(job.id, detail.description, facts);
+    return { ...job, description: detail.description, facts };
   }
 
   async function write(jobId: number, controller: AbortController) {

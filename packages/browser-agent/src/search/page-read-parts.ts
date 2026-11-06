@@ -11,9 +11,9 @@
  * is chosen by what the text says (ADR 0041).
  */
 
-export const PART_TEXT_CHARS = 3_000;
+export const PART_TEXT_CHARS = 16_000;
 const PART_OVERLAP_CHARS = 300;
-const PART_LINK_CHARS = 3_500;
+const PART_LINK_CHARS = 16_000;
 const MIN_LABEL_CHARS = 4;
 
 export interface PageLink {
@@ -137,7 +137,7 @@ export function formatPagePart(
 }
 
 const MIN_PART_TEXT_CHARS = 1_500;
-const LINKS_PER_PART = 10;
+const LINKS_PER_PART = 60;
 
 /** Keep the runtime's semantic HTML items whole when they fit in one read. */
 function splitLinkedPageText(text: string, size: number): string[] {
@@ -169,8 +169,8 @@ function splitLinkedPageText(text: string, size: number): string[] {
 }
 
 /**
- * How much text one part holds: about ten of the page's own links' worth, so
- * a dense board's part stays under the reader's dozen postings while a
+ * How much text one part holds: about sixty of the page's own links' worth, so
+ * a dense board fits the reader's batch while a
  * sparse page is read in few parts. Menus and tag links count as links too,
  * which only makes parts smaller.
  */
@@ -185,7 +185,10 @@ export function partSizeFor(
   return Math.round(
     Math.min(
       PART_TEXT_CHARS,
-      Math.max(MIN_PART_TEXT_CHARS, perLink * LINKS_PER_PART),
+      Math.max(
+        MIN_PART_TEXT_CHARS,
+        perLink * LINKS_PER_PART + PART_OVERLAP_CHARS,
+      ),
     ),
   );
 }

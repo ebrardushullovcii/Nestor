@@ -1463,6 +1463,28 @@ describe("tool-using AI capabilities", () => {
     expect(reply.executionReceipt?.stopReason).toBe("completed");
   });
 
+  test("Guided Edits can finish useful work after the former three-minute clock", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const scripted = createToolClient([
+        { toolCalls: [{ id: "read", type: "function", function: { name: "read_resume_context", arguments: "{}" } }] },
+        { toolCalls: [
+          { id: "reply", type: "function", function: { name: "set_response_content", arguments: JSON.stringify({ content: "The saved wording is supported; no edit is needed." }) } },
+          { id: "finish", type: "function", function: { name: "finish_task", arguments: "{}" } },
+        ] },
+      ]);
+      const client: AgentCapableJobFinderAiClient = { ...scripted, chatWithTools: (...args) => {
+        vi.setSystemTime(Date.now() + 200_000);
+        return scripted.chatWithTools(...args);
+      } };
+      const draft = ResumeDraftSchema.parse({ id: "slow_edit", jobId: "job", templateId: "classic_ats", status: "draft", sections: [], createdAt: "2026-11-06T00:00:00.000Z", updatedAt: "2026-11-06T00:00:00.000Z" });
+      const reply = await runResumeEditAgentTask({ client, request: { draft, job: createJobPosting(), request: "Check this wording" } });
+      expect(reply.executionReceipt?.stopReason).toBe("completed");
+      expect(reply.executionReceipt?.providerCalls).toBe(2);
+    } finally { vi.useRealTimers(); }
+  });
+
   test("Guided Edits lets the model replace section text without manufacturing patch metadata", async () => {
     const client = createToolClient([
       {

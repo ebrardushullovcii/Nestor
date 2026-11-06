@@ -55,6 +55,18 @@ afterEach(() => {
 });
 
 describe("job store", () => {
+  it("keeps complete posting provenance through merges and never replaces its body with a longer card", () => {
+    const store = open();
+    const { added } = store.saveFoundJobs({ searchId: null, jobs: [found(1, { description: "Card excerpt ".repeat(80) })] });
+    store.saveFoundJobs({ searchId: null, jobs: [found(1, { description: "The complete posting is shorter.", facts: { fullListingRead: true } })] });
+    expect(store.getJob(added[0]!)?.facts.fullListingRead).toBe(true);
+    expect(store.getJob(added[0]!)?.description).toBe("The complete posting is shorter.");
+    store.saveFoundJobs({ searchId: null, jobs: [found(1, { description: "Later card excerpt ".repeat(100) })] });
+    store.releaseMemory();
+    expect(store.getJob(added[0]!)?.facts.fullListingRead).toBe(true);
+    expect(store.getJob(added[0]!)?.description).toBe("The complete posting is shorter.");
+  });
+
   it("tells where a job was first seen and why it sits in its stage, as getJob does", () => {
     const store = open();
     const { added } = store.saveFoundJobs({

@@ -39,8 +39,8 @@ import { reconcileSalaryTextWithListingBody } from "./matching-compensation";
  * with the same scorer the search used. It is source-generic (ADR 0007): it
  * knows HTML, not boards.
  *
- * Bounded on every axis: per-request timeout, capped concurrency, capped
- * count, one attempt per job per day. A failed read is
+ * Read every selected listing with bounded concurrency and per-request idle
+ * protection. A failed read is
  * recorded on the job so the product can say "tried, no text" instead of
  * pretending the listing was never opened.
  */
@@ -183,7 +183,7 @@ export interface EnrichSavedJobListingDetailsResult {
 }
 
 const DEFAULT_CONCURRENCY = 4;
-const DEFAULT_PER_REQUEST_TIMEOUT_MS = 8_000;
+const DEFAULT_PER_REQUEST_TIMEOUT_MS = 60_000;
 const DEFAULT_RATE_LIMIT_PAUSE_MS = 1_000;
 const MAX_RATE_LIMIT_PAUSE_MS = 30_000;
 const MAX_DEFERRED_RATE_LIMIT_MS = 24 * 60 * 60 * 1_000;
@@ -194,7 +194,7 @@ const RATE_LIMIT_RETRIES_PER_PASS = 40;
 /** Nor waits on rate limits for longer than this in total. */
 const RATE_LIMIT_WAIT_BUDGET_MS = 90_000;
 /** Exported so the run log can say how many of the candidates this pass reads. */
-export const LISTING_DETAIL_READS_PER_RUN = 60;
+export const LISTING_DETAIL_READS_PER_RUN = Infinity;
 const DEFAULT_MAX_JOBS = LISTING_DETAIL_READS_PER_RUN;
 const RETRY_AFTER_SUCCESSFUL_ATTEMPT_MS = 24 * 60 * 60 * 1000;
 const RETRY_AFTER_FAILED_ATTEMPT_MS = 60 * 60 * 1000;
@@ -372,6 +372,9 @@ export function jobNeedsListingDetail(
     // saying when to come back.
     return Date.parse(nowIso) >= Date.parse(attempt.retryAfterAt);
   }
+  // A person choosing this job needs its body now; background retry delays
+  // must not turn a failed read into the resume's permanent source.
+  if (job.status === "approved") return true;
   const since = Date.parse(nowIso) - Date.parse(attempt.attemptedAt);
   if (!Number.isFinite(since)) {
     return true;
@@ -472,7 +475,7 @@ export async function readListingDetail(input: {
   if (!posting || !posting.description.trim() || posting.needsRenderedPage) {
     if (input.readRenderedPage) {
       const rendered = await input.readRenderedPage(input.url, {
-        ...(input.signal ? { signal: input.signal } : {}),
+        signal: combineSignals(input.signal, DEFAULT_PER_REQUEST_TIMEOUT_MS),
       });
       return readListingDetail({
         html: rendered.html,

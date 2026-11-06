@@ -5,6 +5,10 @@ import {
 } from "@nestor/contracts";
 import {
   parseToolArguments,
+  runModelTurn,
+  ModelTurnTimeoutError,
+  isModelOutputLimit,
+  type ModelTurnStreamEvent,
   runAgentLoop,
   type AgentLoopFinish,
   type AgentLoopMessage,
@@ -171,7 +175,7 @@ export function buildExtractionSelectionContext(
 const SEARCH_MODEL_TURN_TIMEOUT_MS = Infinity;
 const DEFAULT_MAX_STEPS = 10_000;
 const DEFAULT_TIME_BUDGET_MS = 60 * 60_000;
-const DEFAULT_NO_PROGRESS_STEP_LIMIT = 24;
+const DEFAULT_NO_PROGRESS_STEP_LIMIT = 120;
 
 function jobKey(
   job: Pick<JobPosting, "canonicalUrl" | "sourceJobId" | "source">,
@@ -297,48 +301,34 @@ type ExtractedJobs = Awaited<ReturnType<JobExtractor["extractJobsFromPage"]>>;
  * results page). A part that comes back full may hold more, so it is read
  * again in halves.
  */
-const PART_MAX_JOBS = 12;
-const PART_SPLIT_DEPTH = 2;
+const PART_MAX_JOBS = 60;
 const PART_MIN_SPLIT_CHARS = 600;
-const PART_SPLIT_BEFORE_MS = 30_000;
 const PAGE_READ_CONCURRENCY = 8;
 /** New parts one extract_jobs call reads: one round, well inside the 90-second tool deadline. */
 const PAGE_READ_PARTS_PER_CALL = 8;
-const PAGE_PART_TIMEOUT_MS = 45_000;
 
 /** A timed-out part must not hold successful siblings past the tool deadline. */
 async function readWithDeadline<T>(
-  read: (signal: AbortSignal) => Promise<T>,
+  read: (options: {
+    signal: AbortSignal;
+    onStreamEvent: (event: ModelTurnStreamEvent) => void;
+  }) => Promise<T>,
   parent?: AbortSignal,
 ): Promise<T> {
-  const deadline = new AbortController();
-  const signal = parent
-    ? AbortSignal.any([parent, deadline.signal])
-    : deadline.signal;
-  signal.throwIfAborted();
-  const timer = setTimeout(() => deadline.abort(), PAGE_PART_TIMEOUT_MS);
-  let abort: () => void = () => undefined;
-  try {
-    return await Promise.race([
-      read(signal),
-      new Promise<never>((_resolve, reject) => {
-        abort = () => {
-          const reason: unknown = parent?.reason;
-          reject(
-            parent?.aborted && reason instanceof Error
-              ? reason
-              : new Error(
-                  "This part took too long to read. Read the page again to retry only its unread parts.",
-                ),
-          );
-        };
-        signal.addEventListener("abort", abort, { once: true });
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-    signal.removeEventListener("abort", abort);
+  for (const attempt of [0, 1]) {
+    try {
+      return await runModelTurn(read, { signal: parent });
+    } catch (error) {
+      parent?.throwIfAborted();
+      if (
+        !(error instanceof ModelTurnTimeoutError) ||
+        error.kind !== "idle" ||
+        attempt > 0
+      )
+        throw error;
+    }
   }
+  throw new Error("The page reader stopped responding.");
 }
 
 /** A posting's own page, read whole: its links first, then its text. */
@@ -888,23 +878,27 @@ export async function runJobSearchAgent(
             })),
           )
         : null;
-      const readDeadline = AbortSignal.timeout(65_000);
-      const readSignal = context.signal
-        ? AbortSignal.any([context.signal, readDeadline])
-        : readDeadline;
-      const read = (pageText: string, jobs: number) =>
-        readWithDeadline(
-          (signal) =>
-            input.jobExtractor.extractJobsFromPage({
-              pageText,
-              pageUrl: observation.url!,
-              pageType,
-              maxJobs: jobs,
-              ...(selectionContext ? { selectionContext } : {}),
-              signal,
-            }),
-          readSignal,
-        );
+      const read = (
+        pageText: string,
+        jobs: number,
+        excludedCanonicalUrls: readonly string[] = [],
+      ) =>
+        readWithDeadline((turnOptions) => {
+          context.onProgress?.();
+          return input.jobExtractor.extractJobsFromPage({
+            pageText,
+            pageUrl: observation.url!,
+            pageType,
+            maxJobs: jobs,
+            excludedCanonicalUrls,
+            ...(selectionContext ? { selectionContext } : {}),
+            signal: turnOptions.signal,
+            onStreamEvent: (event) => {
+              turnOptions.onStreamEvent(event);
+              context.onProgress?.();
+            },
+          });
+        }, context.signal);
       emit("extract_jobs", `Reading the jobs on ${observation.url}.`);
       pendingPageReads.set(observation.url, 1);
       const pageRead =
@@ -1619,7 +1613,11 @@ export async function runJobSearchAgent(
   async function readResultsPage(
     observation: ApplyFormObservation,
     pageText: string,
-    read: (text: string, maxJobs: number) => Promise<ExtractedJobs>,
+    read: (
+      text: string,
+      maxJobs: number,
+      excludedCanonicalUrls?: readonly string[],
+    ) => Promise<ExtractedJobs>,
   ): Promise<{
     found: ExtractedJobs;
     unreadParts: number;
@@ -1628,12 +1626,11 @@ export async function runJobSearchAgent(
   }> {
     const links = observation.links.filter((link) => link.visible);
     const pageUrl = observation.url ?? "";
-    const startedAt = Date.now();
     let freshReads = 0;
-    const readPart = async (
-      part: { text: string; window: string },
-      depth: number,
-    ): Promise<ExtractedJobs> => {
+    const readPart = async (part: {
+      text: string;
+      window: string;
+    }): Promise<ExtractedJobs> => {
       const key = `${pageUrl}\n${part.text}`;
       const cached = pageReadCache.get(key);
       if (cached) return cached;
@@ -1652,21 +1649,26 @@ export async function runJobSearchAgent(
         return linkedRead;
       }
       freshReads += 1;
-      let jobs = await read(part.text, PART_MAX_JOBS);
-      const contentKey = `${new URL(pageUrl).origin}\n${part.text}`;
-      if (!seenPartContent.has(contentKey)) {
-        seenPartContent.add(contentKey);
-        readContentRevision += 1;
-      }
-      const full =
-        jobs.length >= PART_MAX_JOBS &&
-        depth < PART_SPLIT_DEPTH &&
-        part.window.length >= PART_MIN_SPLIT_CHARS;
-      // Halves read one after the other. Late in a call they are left for
-      // the next call on this page: the full part is not kept, so it counts
-      // as unread and is read again, in halves, then.
-      if (full && Date.now() - startedAt >= PART_SPLIT_BEFORE_MS) return jobs;
-      if (full) {
+      let jobs: ExtractedJobs = [];
+      const returned = new Set<string>();
+      try {
+        for (;;) {
+          const batch = await read(part.text, PART_MAX_JOBS, [...returned]);
+          const fresh = batch.filter((job) => !returned.has(job.canonicalUrl));
+          jobs.push(...fresh);
+          for (const job of fresh) returned.add(job.canonicalUrl);
+          if (batch.length < PART_MAX_JOBS) break;
+          if (!fresh.length)
+            throw new Error(
+              "The page reader repeated the same full batch. Read this page again to finish the remaining listings.",
+            );
+        }
+      } catch (error) {
+        if (
+          !isModelOutputLimit(error) ||
+          part.window.length < PART_MIN_SPLIT_CHARS
+        )
+          throw error;
         const halves = pagePartsForReading({
           pageText: part.window,
           links,
@@ -1674,12 +1676,18 @@ export async function runJobSearchAgent(
           size: Math.ceil(part.window.length / 2),
           inlineLinks: Boolean(hands.readLinkedText),
         });
-        if (halves.length > 1) {
-          const more: ExtractedJobs = [];
-          for (const half of halves)
-            more.push(...(await readPart(half, depth + 1)));
-          jobs = [...jobs, ...more];
-        }
+        if (
+          halves.length < 2 ||
+          halves.some((half) => half.window.length >= part.window.length)
+        )
+          throw error;
+        jobs = [];
+        for (const half of halves) jobs.push(...(await readPart(half)));
+      }
+      const contentKey = `${new URL(pageUrl).origin}\n${part.text}`;
+      if (!seenPartContent.has(contentKey)) {
+        seenPartContent.add(contentKey);
+        readContentRevision += 1;
       }
       pageReadCache.set(key, jobs);
       if (
@@ -1715,7 +1723,7 @@ ${part.text}`),
 ${part.text}`),
       ),
       PAGE_READ_CONCURRENCY,
-      (part) => readPart(part, 0),
+      (part) => readPart(part),
     );
     const failures = settled.flatMap((entry) =>
       entry.status === "rejected" ? [entry.reason as unknown] : [],

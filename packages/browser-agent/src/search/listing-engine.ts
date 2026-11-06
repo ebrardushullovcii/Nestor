@@ -968,6 +968,7 @@ export async function readListings(
           read.card.postedAt ??
           null,
         description: read.body.text,
+        facts: { fullListingRead: !read.publishedOnly || !read.structured?.descriptionLikelyTruncated },
         summary: null,
         salaryMin: null,
         salaryMax: null,

@@ -4,6 +4,7 @@ import {
   type RawApplyPage,
 } from "@nestor/contracts";
 import { describe, expect, test, vi } from "vitest";
+import { ModelOutputLimitError } from "@nestor/agent-runtime";
 
 import type { JobExtractor, LLMClient } from "../agent/contracts";
 import { buildApplyFormObservation } from "../apply/page-hands";
@@ -2386,7 +2387,7 @@ describe("reading pages for less", () => {
     });
   }
 
-  /** A page reader that returns the postings whose links it was handed, a dozen at most. */
+  /** A page reader that returns the postings whose links it was handed, up to the requested limit. */
   function linkReader() {
     return vi.fn<JobExtractor["extractJobsFromPage"]>((input) => {
       const ids = [
@@ -2394,11 +2395,42 @@ describe("reading pages for less", () => {
       ].map((match) => match[1] ?? "");
       return Promise.resolve(
         ids
-          .slice(0, Math.min(12, input.maxJobs))
+          .filter(id => !input.excludedCanonicalUrls?.includes(`https://jobs.example.test/jobs/${id}`))
+          .slice(0, input.maxJobs)
           .map((id) => posting(`Platform Engineer ${id}`, `Employer ${id}`, id)),
       );
     });
   }
+
+  test("a full sixty-job response continues without splitting or duplicating listings", async () => {
+    const reader = linkReader();
+    const result = await runJobSearchAgent({
+      hands: hands({ current: longBoard(60) }), config: config({ retainAllFound: true }),
+      llmClient: scripted([{ name: "extract_jobs", args: { pageType: "search_results" } }, { name: "finish", args: { reason: "Read all jobs" } }]),
+      jobExtractor: { extractJobsFromPage: reader },
+    });
+    expect(result.jobs).toHaveLength(60);
+    expect(reader).toHaveBeenCalledTimes(2);
+    expect(reader.mock.calls[1]?.[0].pageText).toBe(reader.mock.calls[0]?.[0].pageText);
+    expect(reader.mock.calls[1]?.[0].excludedCanonicalUrls).toHaveLength(60);
+  });
+
+  test("only actual output truncation splits a dense part, without a two-level ceiling", async () => {
+    const reader = linkReader();
+    let cutoffs = 0;
+    const extractor: JobExtractor = { extractJobsFromPage: input => {
+      const links = [...input.pageText.matchAll(/→ https:\/\/jobs\.example\.test\/jobs\/\d+/gu)];
+      if (links.length > 10) { cutoffs += 1; return Promise.reject(new ModelOutputLimitError()); }
+      return reader(input);
+    } };
+    const result = await runJobSearchAgent({
+      hands: hands({ current: longBoard(40) }), config: config({ retainAllFound: true }),
+      llmClient: scripted([{ name: "extract_jobs", args: { pageType: "search_results" } }, { name: "finish", args: { reason: "Read all jobs" } }]),
+      jobExtractor: extractor,
+    });
+    expect(result.jobs).toHaveLength(40);
+    expect(cutoffs).toBeGreaterThan(3);
+  });
 
   test("a long results page is read in parts, so listings past the first dozen are read", async () => {
     const reader = linkReader();
@@ -2412,15 +2444,14 @@ describe("reading pages for less", () => {
       jobExtractor: { extractJobsFromPage: reader },
     });
     expect(result.jobs).toHaveLength(45);
-    expect(reader.mock.calls.length).toBeGreaterThan(3);
-    expect(reader.mock.calls.length).toBeLessThan(15);
+    expect(reader).toHaveBeenCalledTimes(1);
     for (const [call] of reader.mock.calls) {
-      expect(call.pageText.length).toBeLessThan(8_000);
-      expect(call.maxJobs).toBe(12);
+      expect(call.pageText.length).toBeLessThan(32_000);
+      expect(call.maxJobs).toBe(60);
     }
   });
 
-  test("a timed-out part keeps successful reads and retries only the missing part before finishing", async () => {
+  test("a silent part retries once without dropping successful siblings", async () => {
     vi.useFakeTimers();
     try {
       const reader = linkReader();
@@ -2453,12 +2484,12 @@ describe("reading pages for less", () => {
           return model.chatWithTools(messages, tools, options);
         } },
       });
-      await vi.advanceTimersByTimeAsync(45_001);
+      await vi.advanceTimersByTimeAsync(360_001);
       const result = await running;
       expect(slowSignal?.aborted).toBe(true);
       expect(result.jobs).toHaveLength(45);
       expect(attempts).toBe(2);
-      expect(answers.some((answer) => answer.includes("could not be read this time"))).toBe(true);
+      expect(answers.some((answer) => answer.includes("could not be read this time"))).toBe(false);
       const counts = new Map<string, number>();
       for (const [call] of wrapped.mock.calls) counts.set(call.pageText, (counts.get(call.pageText) ?? 0) + 1);
       for (const [text, count] of counts) expect(count).toBe(text === slowText ? 2 : 1);

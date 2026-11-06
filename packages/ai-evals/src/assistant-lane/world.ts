@@ -349,6 +349,8 @@ function laneJobStore(): { store: JobStore; ids: Map<string, number> } {
       employmentType: null,
       summary: job.summary,
       description: job.description,
+      // This offline lane supplies the complete synthetic posting body.
+      facts: { fullListingRead: true },
     })),
   });
   store.setFit(

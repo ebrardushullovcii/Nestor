@@ -37,8 +37,8 @@ the gateway after a 20-second gap without a completion event.
   dead and retries. Ordinary structured calls, assistant turns and resume
   proposals have no default absolute deadline; explicit operator timeouts
   still win. Resume import stages keep their measured 300s/600s totals,
-  search-results extraction retains its extraction-specific total, and vision
-  retains its 600s total.
+  and vision retains its 600s total. Search-results extraction uses the idle
+  clock too.
   Resume import stages count only model progress toward the idle clock
   (non-whitespace text, tool arguments or reasoning deltas; SSE keepalives and
   whitespace-only JSON output do not restart it). Other operations keep
