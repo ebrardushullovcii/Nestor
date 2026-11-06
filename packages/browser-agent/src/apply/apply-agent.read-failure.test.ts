@@ -317,3 +317,60 @@ test("classifier recovery does not restrict ordinary navigation", async () => {
   expect(result.technicalFailure).toBeUndefined();
   expect(input.hands.clickAction).not.toHaveBeenCalled();
 });
+
+test("the main model reads an empty page and acts in one turn without a specialist call", async () => {
+  const { raw, input } = setup();
+  raw.controls = [];
+  raw.stepLabel = "Step 2 of 2";
+  raw.bodyText = "Review your application";
+  raw.actions = [
+    {
+      index: 0,
+      label: "Absenden",
+      visible: true,
+      disabled: false,
+      submitsForm: true,
+      inForm: true,
+    },
+  ];
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(
+    (_messages, tools) => {
+      expect(tools[0].function.name).not.toBe("report_question_kinds");
+      return Promise.resolve({
+        toolCalls: [
+          {
+            id: "page-reading",
+            type: "function",
+            function: {
+              name: "read_application_page",
+              arguments: JSON.stringify({
+                plainIndexes: [],
+                flagged: [],
+                tags: [],
+                pageReading: {
+                  actions: [{ ref: "a0", purpose: "submit" }],
+                  securityControlRefs: [],
+                  blocker: null,
+                },
+              }),
+            },
+          },
+          {
+            id: "finish",
+            type: "function",
+            function: {
+              name: "finish",
+              arguments: JSON.stringify({
+                reason: "The form is ready for review.",
+              }),
+            },
+          },
+        ],
+      });
+    },
+  );
+  const result = await runApplyAgent(input, { chatWithTools });
+  expect(chatWithTools).toHaveBeenCalledTimes(1);
+  expect(input.hands.clickAction).not.toHaveBeenCalled();
+  expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
+});

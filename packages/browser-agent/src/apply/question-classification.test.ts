@@ -1941,7 +1941,7 @@ test("the model can override an English button hint and informational security w
   );
   expect(page.actions[0].kind).toBe("advance");
   expect(page.blocker?.code).toBe("security_challenge");
-  const client = clientReplyingSparse({
+  const report = {
     plainIndexes: [],
     flagged: [],
     tags: [],
@@ -1950,16 +1950,20 @@ test("the model can override an English button hint and informational security w
       securityControlRefs: [],
       blocker: null,
     },
+  };
+  const client = clientReplyingSparse(report);
+  const classify = createQuestionClassifier({
+    client,
+    observation: () => page,
   });
-  await createQuestionClassifier({ client, observation: () => page })(
-    page.controls,
-    questionReadContext(page),
-  );
+  await classify(page.controls, questionReadContext(page));
+  expect(client.chatWithTools).not.toHaveBeenCalled();
+  classify.recover!(page.controls, questionReadContext(page), report);
   expect(page.actions[0].kind).toBe("final");
   expect(page.blocker).toBeNull();
 });
 
-test("a slider check is read from its purpose without site-specific wording", async () => {
+test("a slider check is read without site-specific wording and its numeric value does not resolve it", async () => {
   const page = buildApplyFormObservation(
     {
       url: "https://example.test",
@@ -1988,12 +1992,12 @@ test("a slider check is read from its purpose without site-specific wording", as
     new Date().toISOString(),
   );
   const client = clientReplyingSparse({
-    plainIndexes: [],
+    plainIndexes: [0],
     flagged: [],
     tags: [],
     pageReading: {
       actions: [],
-      securityControlRefs: [],
+      securityControlRefs: ["slider"],
       blocker: {
         code: "security_challenge",
         requiresPerson: true,
@@ -2003,10 +2007,20 @@ test("a slider check is read from its purpose without site-specific wording", as
       },
     },
   });
-  await createQuestionClassifier({ client, observation: () => page })(
-    page.controls,
-    questionReadContext(page),
-  );
+  page.controls = [
+    {
+      ...controls("Regler", [])[0],
+      ref: "slider",
+      kind: "other",
+      value: "0",
+      answered: true,
+    },
+  ];
+  const classify = createQuestionClassifier({
+    client,
+    observation: () => page,
+  });
+  await classify(page.controls, questionReadContext(page));
   expect(page.blocker).toMatchObject({
     code: "security_challenge",
     requiresPerson: true,
@@ -2014,6 +2028,10 @@ test("a slider check is read from its purpose without site-specific wording", as
   expect(
     JSON.stringify(vi.mocked(client.chatWithTools).mock.calls[0][0]),
   ).toContain("Regler");
+  page.controls[0].value = "100";
+  await classify(page.controls, questionReadContext(page));
+  expect(page.blocker?.requiresPerson).toBe(true);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
 test("a completed human challenge clears its cached blocker without rereading questions", async () => {
@@ -2134,8 +2152,9 @@ test("a shared pending page read binds button purposes to the latest observation
     },
     new Date().toISOString(),
   );
+  page.controls = controls("Email", []);
   const reply = clientReplyingSparse({
-    plainIndexes: [],
+    plainIndexes: [0],
     flagged: [],
     tags: [],
     pageReading: {

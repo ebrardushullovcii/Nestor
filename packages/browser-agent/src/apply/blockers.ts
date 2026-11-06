@@ -267,11 +267,17 @@ function hasResolvedChallengeControl(
   });
   return (
     challengeControls.length > 0 &&
-    challengeControls.every(
-      (control) =>
-        control.checked ||
-        (control.answered && control.value.trim().length > 0),
-    )
+    challengeControls.every(securityControlAnswered)
+  );
+}
+
+/** A range/slider's default numeric value is not a completed human check. */
+export function securityControlAnswered(control: ApplyFormControl): boolean {
+  return (
+    control.checked ||
+    (control.kind !== "other" &&
+      control.answered &&
+      control.value.trim().length > 0)
   );
 }
 

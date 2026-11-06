@@ -30,7 +30,10 @@ import {
   applyActionReading,
   type ApplyPageReading,
 } from "./control-classification";
-import { setSecurityChallengeReading } from "./blockers";
+import {
+  setSecurityChallengeReading,
+  securityControlAnswered,
+} from "./blockers";
 
 /**
  * What a form question asks, as the model reads it (ADR 0041). Two of the
@@ -331,7 +334,7 @@ function fieldDataLineMatcher(values: readonly string[]) {
   };
 }
 
-export const QUESTION_READING_TOOLS: AgentLoopToolDefinition[] = [
+export const QUESTION_READING_TOOLS: [AgentLoopToolDefinition] = [
   {
     type: "function",
     function: {
@@ -697,6 +700,10 @@ export type QuestionClassifier = ((
     context?: string,
   ) => boolean;
   bindPage?: (page: ApplyFormObservation, context?: string) => boolean;
+  needsMainPageRead?: (
+    controls: readonly ApplyFormControl[],
+    context?: string,
+  ) => boolean;
   settled: (
     controls: readonly ApplyFormControl[],
     contextText?: string,
@@ -849,12 +856,7 @@ export function createQuestionClassifier(input: {
         control.visible && reading.securityControlRefs.includes(control.ref),
     );
     const solved =
-      challenges.length > 0 &&
-      challenges.every(
-        (control) =>
-          control.checked ||
-          (control.answered && control.value.trim().length > 0),
-      );
+      challenges.length > 0 && challenges.every(securityControlAnswered);
     // Mechanical transport/autosave blockers remain owned by the runtime.
     if (
       !page.blocker ||
@@ -1017,7 +1019,10 @@ export function createQuestionClassifier(input: {
         !(question.reusable && shared?.has(question.cacheIdentity)) &&
         !pending.has(question.cacheIdentity),
     );
-    if (missing.length || (page && !attemptedPages.has(pageKey))) {
+    if (
+      missing.length ||
+      (questions.length > 0 && page && !attemptedPages.has(pageKey))
+    ) {
       attemptedPages.add(pageKey);
       if (process.env.NESTOR_APPLY_PROFILE === "1") {
         const causes: Record<string, number> = {};
@@ -1150,6 +1155,12 @@ export function createQuestionClassifier(input: {
     return result;
   };
   return Object.assign(classify, {
+    needsMainPageRead: (
+      controls: readonly ApplyFormControl[],
+      context?: string,
+    ) =>
+      classifiableQuestions(controls).length === 0 &&
+      !pageReads.has(JSON.stringify(pageInput(controls, context))),
     bindPage: (page: ApplyFormObservation, context?: string) => {
       const reading = pageReads.get(
         JSON.stringify(pageInput(page.controls, context, page)),
