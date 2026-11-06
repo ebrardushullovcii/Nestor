@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   PROFILE_SETUP_PLACEHOLDER_HEADLINE,
   PROFILE_SETUP_PLACEHOLDER_SUMMARY,
+  createFreshStartCandidateProfile,
 } from "@nestor/contracts";
 
 import {
@@ -1919,7 +1920,10 @@ Preferred location: Remote worldwide or Berlin, Germany`;
           // Legacy first-run workspace: the instructional headline and summary
           // strings were persisted before the fresh-start seed stopped writing
           // them, so this import must still replace them.
-          ...createFreshStartSeedProfile(),
+          // Use the actual empty first-run profile. The test seed helper
+          // retains Alex's saved links, education and skills; a newly read
+          // URL for someone else must not silently replace those facts.
+          ...createFreshStartCandidateProfile(),
           headline: PROFILE_SETUP_PLACEHOLDER_HEADLINE,
           summary: PROFILE_SETUP_PLACEHOLDER_SUMMARY,
           experiences: [],
@@ -1979,6 +1983,9 @@ Preferred location: Remote worldwide or Berlin, Germany`;
       "10+ years of experience building secure, scalable healthcare and SaaS platforms",
     );
     expect(snapshot.profile.currentLocation).toBe("Cedar Park, TX 78613");
+    expect(snapshot.profile.linkedinUrl).toBe(
+      "https://linkedin.com/in/noah-brenner-example",
+    );
     expect(snapshot.profile.yearsExperience).toBe(10);
     expect(snapshot.profile.experiences).toEqual([
       expect.objectContaining({
@@ -2002,6 +2009,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
     ]);
     expect(snapshot.searchPreferences.locations.length).toBeGreaterThan(0);
     expect(pendingTargetingKeys).not.toContain("targetRoles");
+    expect(snapshot.latestResumeImportReviewCandidates).toEqual([]);
     expect(snapshot.latestResumeImportRun?.status).toBe("applied");
     expect(
       snapshot.profileSetupState.reviewItems.map((item) => item.label),
