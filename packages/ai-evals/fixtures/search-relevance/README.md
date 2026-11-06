@@ -58,7 +58,7 @@ in the existing recording format, update checksums, then review every sampled
 full description and both labels before running AI. Keep past baseline reports
 so changes can be compared; record the engine commit and model route each time.
 
-The 2026-10-26 corpus has 59 labelled vacancies (23 broad positives, nine close
+The 2026-10-26 corpus has 59 labelled vacancies (22 broad positives, eight close
 positives): Grafana/Greenhouse, Metabase/Lever, Linear, Resend, PostHog and
 Ashby on Ashby, Genesys/Workday, Runware/Workable, and plain careers pages at
 Automattic and 37signals. 37signals explicitly had no vacancies. Provider feeds
@@ -70,24 +70,37 @@ the provider-published full description, not a summary.
 
 The committed tapes and reports use gzip. The CLI reads JSON or JSON.gz and
 writes readable JSON reports. The [original baseline](baseline-2026-10-26.md)
-preserves the earlier results. `fit-quality-report.json.gz` records the current
-engine: 100% recall for both personas; high-volume top ten 10/10, close-matches
-9/10 (previously 7/10). The 18 fit calls were refreshed, with unchanged screen
-and metadata requests replayed. Labels and public page recordings are unchanged.
+preserves the earlier results. New tapes pin `assessmentDate`, so replay uses the
+same eligibility date rather than silently changing the fit request each day.
 
-On the same ten boards (including the empty board), provider input plus output
-tokens per persona/search are:
+The 2026-11-06 fit refresh uses the same frozen listings, personas, labels and
+screen/read replies before and after the fit change. The configured route was
+OpenCode Go / Muse Spark Contributor, Responses API, with the default low fit
+effort. Only the 18 fit calls were refreshed. No listing or label was changed.
+
+| Persona       | Before recall | After recall | Before relevant in top 10 | After relevant in top 10 |
+| ------------- | ------------- | ------------ | ------------------------- | ------------------------ |
+| High-volume   | 21/22 (95.5%) | 22/22 (100%) | 8/10                      | 9/10                     |
+| Close-matches | 7/8 (87.5%)   | 8/8 (100%)   | 6/10                      | 8/10                     |
+
+These numbers hold for screening/fit and end-to-end collection. Coverage honesty
+was 10/10 before and after. The old fit response schema allowed values such as
+`annually` and `salary` that its validator rejected; the refreshed contract gives
+every status, interval and pay basis its actual allowed values. Invalid rows get
+one repair with their validation issues. Repeated response truncation is an error,
+not an empty or partially accepted answer. Fit still uses model judgment, not a
+rule scorer.
+
+Provider input plus output tokens per persona/search, including the same recorded
+screen/read calls and all fit repairs, were:
 
 | Persona       | Before median/board | After median/board | Before total | After total |
 | ------------- | ------------------: | -----------------: | -----------: | ----------: |
-| High-volume   |             7,848.5 |              7,702 |       85,872 |      84,400 |
-| Close-matches |               5,436 |              5,211 |       63,851 |      64,400 |
+| High-volume   |            16,311.5 |             16,108 |      209,376 |     202,926 |
+| Close-matches |              15,627 |           15,451.5 |      271,918 |     202,402 |
 
-Both medians meet the 10k target. The earlier 149,723 total combines two searches,
-not one. The schema change has no independently demonstrated large cost saving.
-At the observed cohort mean, 897 sites project to **7,570,680** high-volume tokens
-or **5,776,680** close-match tokens. These are projections from a small stratified
-sample; the actual 897-site total will be measured later during the owner's full
-search in the real hunt. Live retries and a different listing volume can change it.
+These include the empty board. The current medians exceed the former 10k target;
+the earlier 2026-10 medians used older prompts and route settings. A small
+stratified cohort is not a cost projection for all configured job sources.
 
-Label correction (2026-10-29): the PostHog Product Engineer posting has USA address metadata, but its text does not state an Americas/Europe hiring area. Grafana 6130907004 specifies US/Canada candidates with an EST-time-zone qualification; Chicago is Central and the text does not offer hours overlap as an alternative. It needs clarification for these personas. The default fit-quality tape was rebound to the corrected label manifest; its 51 model turns and route are unchanged. Location-guard changes replay those exact answers without fresh AI calls.
+Label correction (2026-10-29): the PostHog Product Engineer posting has USA address metadata, but its text does not state an Americas/Europe hiring area. Grafana 6130907004 specifies US/Canada candidates with an EST-time-zone qualification; Chicago is Central and the text does not offer hours overlap as an alternative. It needs clarification for these personas. The label manifest retains that correction. The 2026-11-06 refresh replaces fit replies; the public page recordings and labels remain unchanged.

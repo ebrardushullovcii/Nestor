@@ -1,9 +1,10 @@
+import { buildListingFitPerson } from "@nestor/browser-agent";
 import { createHash } from "node:crypto";
 import { toJobSearchGoals, type JobDetail } from "@nestor/contracts";
 import type { JobSearchContext } from "./types";
 
 // Retires previous judgments when the listing-fit instructions change.
-export const LISTING_FIT_SCORER_VERSION = 7;
+export const LISTING_FIT_SCORER_VERSION = 8;
 const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
@@ -14,26 +15,7 @@ export function fitContextInput(context: JobSearchContext, request = "") {
     permissionDate: p.workEligibility.limitedWorkPermissions?.length
       ? new Date().toISOString().slice(0, 10)
       : undefined,
-    person: {
-      headline: p.headline,
-      summary: p.summary,
-      location: p.currentLocation,
-      currentCity: p.currentCity,
-      currentRegion: p.currentRegion,
-      currentCountry: p.currentCountry,
-      yearsExperience: p.yearsExperience,
-      workEligibility: p.workEligibility,
-      skills: p.skills,
-      skillGroups: p.skillGroups,
-      experiences: p.experiences,
-      education: p.education,
-      projects: p.projects,
-      spokenLanguages: p.spokenLanguages,
-      resume:
-        p.experiences.length || p.skills.length
-          ? undefined
-          : p.baseResume.textContent,
-    },
+    person: buildListingFitPerson(p),
     goals: toJobSearchGoals({
       ...context.searchPreferences,
       remoteCountsAsAnyLocation: context.remoteCountsAsAnyLocation ?? true,

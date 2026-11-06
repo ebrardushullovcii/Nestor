@@ -77,7 +77,12 @@ export async function runSearchRelevanceCli(args: string[], root: string) {
         ),
       ),
     };
-    tape = { corpusDigest: corpus.digest, route, turns: [] };
+    tape = {
+      corpusDigest: corpus.digest,
+      assessmentDate: new Date().toISOString().slice(0, 10),
+      route,
+      turns: [],
+    };
   } else {
     const bytes = await readFile(tapePath);
     tape = JSON.parse(

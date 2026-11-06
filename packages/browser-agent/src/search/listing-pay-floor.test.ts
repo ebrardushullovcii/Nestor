@@ -185,8 +185,15 @@ test("borrowed pay evidence leaves only that row retryable and retains a valid s
       }),
     ),
   };
-  const fits = await fitJobs({ profile, goals, jobs, client });
-  expect(fits.map((f) => f.id)).toEqual([1]);
+  const onBatch = vi.fn<(fits: Array<{ id: number }>) => void>();
+  await expect(
+    fitJobs({ profile, goals, jobs, client, onBatch }),
+  ).rejects.toThrow("could not finish fit scores");
+  expect(
+    onBatch.mock.calls.flatMap(([fits]) =>
+      fits.map((f: { id: number }) => f.id),
+    ),
+  ).toEqual([1]);
   expect(client.chatWithTools.mock.calls.length).toBeGreaterThan(1);
 });
 
@@ -219,7 +226,7 @@ test("Chat receives the required pay contract and repairs only the omitted sibli
         ) as { properties: { fits: { items: { required: string[] } } } };
         expect(schema.properties.fits.items.required).toContain("pay");
         expect(instruction).toContain(
-          '"h":["met|conflict|unknown|not_requested","mandatory requirements reason"],"pay":',
+          '"h":{"status":"met|conflict|unknown|not_requested","reason":"mandatory requirements reason"},"pay":',
         );
         const input = JSON.parse(String(messages[1].content)) as {
           listings: { id: number }[];
@@ -246,34 +253,35 @@ test("Chat receives the required pay contract and repairs only the omitted sibli
 
 test("pay repair identifies an ungrounded quote and keeps the grounding gate", async () => {
   const issues: string[][] = [];
-  const fits = await fitJobs({
-    profile,
-    goals,
-    jobs: [job(1, "Remote within Germany. EUR 27 per hour. SQL reporting.")],
-    client: {
-      chatWithTools: (messages) => {
-        const input = JSON.parse(String(messages[1].content)) as {
-          listings: { id: number }[];
-          repair?: { id: number; issues: string[] }[];
-        };
-        if (input.repair) issues.push(input.repair[0].issues);
-        return Promise.resolve({
-          content: JSON.stringify({
-            fits: [
-              verdict(1, {
-                minimum: 27,
-                maximum: 27,
-                currency: "EUR",
-                interval: "hour",
-                basis: "base",
-                quote: "EUR 27/hour",
-              }),
-            ],
-          }),
-        });
+  await expect(
+    fitJobs({
+      profile,
+      goals,
+      jobs: [job(1, "Remote within Germany. EUR 27 per hour. SQL reporting.")],
+      client: {
+        chatWithTools: (messages) => {
+          const input = JSON.parse(String(messages[1].content)) as {
+            listings: { id: number }[];
+            repair?: { id: number; issues: string[] }[];
+          };
+          if (input.repair) issues.push(input.repair[0].issues);
+          return Promise.resolve({
+            content: JSON.stringify({
+              fits: [
+                verdict(1, {
+                  minimum: 27,
+                  maximum: 27,
+                  currency: "EUR",
+                  interval: "hour",
+                  basis: "base",
+                  quote: "EUR 27/hour",
+                }),
+              ],
+            }),
+          });
+        },
       },
-    },
-  });
+    }),
+  ).rejects.toThrow("could not finish fit scores");
   expect(issues).toEqual([["pay_quote_not_verbatim_or_bounds_reversed"]]);
-  expect(fits).toEqual([]);
 });

@@ -38,7 +38,9 @@ import {
 import { blockedByCheck } from "./bot-check";
 import { collectPublicFeed } from "./public-board-feed";
 import { readAtsListing } from "./ats-public-feed";
-import { assessFitWorkLocation, fitLocationKinds } from "./fit-work-location";
+import { assessFitWorkLocation } from "./fit-work-location";
+import { buildListingFitPerson } from "./listing-fit-person";
+import { fitSchema, fitResponseSchema } from "./listing-fit-response";
 import { fitCountryCodes } from "./fit-country-codes";
 
 export interface ListingEngineModel {
@@ -95,6 +97,8 @@ function batches<T>(
   return result;
 }
 
+class ListingOutputLimitError extends Error {}
+
 async function ask<Output, Input>(
   model: ListingEngineModel,
   instruction: string,
@@ -107,7 +111,7 @@ async function ask<Output, Input>(
   // Reasoning and the JSON answer share this allowance. Tiny classification
   // answers can still exhaust it before emitting their first visible token.
   const initialBudget = Math.max(8_000, maxOutputTokens);
-  const outputLimit = new Error(
+  const outputLimit = new ListingOutputLimitError(
     "The AI response reached its output limit. Try this site again to continue.",
   );
   for (const budget of [initialBudget, initialBudget * 2]) {
@@ -1142,54 +1146,13 @@ export async function readListings(
   return { jobs, failures };
 }
 
-const explanation = z.tuple([z.string(), z.string()]);
 const FIT_WORK_ELIGIBILITY = [
-  "Judge location and work permission BEFORE scoring. Return e first: [compatible|review|blocked, verbatim short location/eligibility quote from this listing, onsite|hybrid|country_remote|broader_remote|offered_list|unknown, comma-separated ISO country codes inferred from the published work location, or empty when no country is established]. Resolve a published city to its country. The published role location is a work location, not merely the employer's office address.",
+  "Judge location and work permission BEFORE scoring. Return e first as {status:compatible|review|blocked, quote:verbatim short location/eligibility quote from this listing, kind:onsite|hybrid|country_remote|broader_remote|offered_list|unknown, countries:comma-separated ISO country codes inferred from the published work location, or empty when no country is established}. Resolve a published city to its country. The published role location is a work location, not merely the employer's office address.",
   "A foreign city/country alone gives review at best: never invent remote flexibility from the person's goals. Missing work permission means review, not blocked. Compare limitedWorkPermissions conditions with the actual job: hours, employment type, permitted work, dates and future sponsorship. A conditional permit is compatible when this job meets its stated conditions, blocked only when the job clearly contradicts them, and review when material conditions cannot be checked. Do not invent student or country rules. Current permission and future sponsorship are separate. Relocation assistance pays for a move; it does not grant work authorization. A broader_remote verdict needs a verbatim quote explicitly permitting a broader work region, not a company market, customer location, generic benefit or the word remote alone. For offered_list, quote the offered choices and report their country codes. Keep e's quote verbatim and under 12 words; use an empty quote if no supporting passage exists.",
   "Compare the listing's hiring location, residence restrictions and work-authorization requirements with currentCountry, currentCity, currentRegion, location and workEligibility. Remote does not mean worldwide. Remote-US, US residents only, or another exclusive hiring region excludes someone working from outside it, even when the skills are an exact match. An employer's office address alone is not a hiring restriction; explicit worldwide hiring includes the person.",
   "A saved countryOptionFallbacks rule applies only to an explicit offered country list: prefer primary when offered; otherwise accept fallback only when offered. Neither choice offered is a conflict. Never hard-code a country substitution, treat Europe as EU/EEA, or infer citizenship or work authorization from residence or a fallback choice.",
   "Set blocked only for a listing restriction contradicted by saved facts, naming that restriction. A missing authorization country is unknown, not proof of no permission. Unresolved required authorization, sponsorship, permit conditions or hiring region means review, not a confirmed conflict. A useful role may still be Good or Strong with an explicit uncertainty note; a fit label never grants work permission. Set compatible only when no material place or eligibility restriction remains unresolved. Worldwide remote without a specific authorization requirement needs no invented permit check. A schedule-overlap request alone does not impose residence. Relocation willingness and permission to work are separate.",
 ].join(" ");
-const fitSchema = z.object({
-  id: z.number().int().positive(),
-  s: z.number().int().min(0).max(100),
-  why: z.string(),
-  /** The why in a few words, for a narrow row (JobRow.fitShort). */
-  w: z.string().default(""),
-  r: explanation,
-  p: explanation,
-  c: explanation,
-  pay: z
-    .object({
-      minimum: z.number().nonnegative().nullable(),
-      maximum: z.number().nonnegative().nullable(),
-      currency: z.string().nullable(),
-      interval: z.enum(["hour", "day", "week", "month", "year"]).nullable(),
-      basis: z.enum(["base", "total_ote"]).nullable(),
-      quote: z.string(),
-    })
-    .optional(),
-  h: z
-    .tuple([
-      z.enum(["met", "conflict", "unknown", "not_requested"]),
-      z.string().min(1),
-    ])
-    .optional(),
-  e: z
-    .tuple([
-      z.enum(["compatible", "review", "blocked"]),
-      z.string(),
-      z.enum(fitLocationKinds),
-      z.string(),
-    ])
-    .default([
-      "review",
-      "Your work location or permission needs checking.",
-      "unknown",
-      "",
-    ]),
-});
-
 /** Words a short reason may hold: "UI overlap; Go not listed". */
 const FIT_SHORT_WORDS = 5;
 
@@ -1213,66 +1176,6 @@ export function shortFitReason(short: string, why: string): string | null {
   if (parts.length > 2 || parts.some((part) => !part)) return null;
   if (text.length >= why.trim().length) return null;
   return text;
-}
-
-// Keep batch ids and sizes out of the provider's cached schema prefix.
-function fitResponseSchema() {
-  const pair = {
-    type: "array",
-    items: { type: "string" },
-    minItems: 2,
-    maxItems: 2,
-  };
-  const verdict = {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      id: { type: "integer", minimum: 1 },
-      e: { type: "array", items: { type: "string" }, minItems: 4, maxItems: 4 },
-      s: { type: "integer", minimum: 0, maximum: 100 },
-      why: { type: "string" },
-      w: { type: "string" },
-      r: pair,
-      p: pair,
-      c: pair,
-      h: pair,
-      pay: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          minimum: { type: ["number", "null"] },
-          maximum: { type: ["number", "null"] },
-          currency: { type: ["string", "null"] },
-          interval: { type: ["string", "null"] },
-          basis: { type: ["string", "null"] },
-          quote: { type: "string" },
-        },
-        required: [
-          "minimum",
-          "maximum",
-          "currency",
-          "interval",
-          "basis",
-          "quote",
-        ],
-      },
-    },
-    required: ["id", "s", "why", "w", "r", "p", "c", "e", "h", "pay"],
-  };
-  return {
-    name: "job_fits",
-    schema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["fits"],
-      properties: {
-        fits: {
-          type: "array",
-          items: verdict,
-        },
-      },
-    },
-  };
 }
 
 const storageFields = new Set([
@@ -1303,34 +1206,14 @@ function compactFacts(value: unknown): unknown {
 
 /** Caller passes merged rows with no fit. One complete judgment, reused by shortlist and resume writing. */
 export async function fitJobs(
-  input: ListingEngineModel & SearchFitInput,
+  input: ListingEngineModel & SearchFitInput & { assessmentDate?: string },
 ): Promise<JobFitUpdate[]> {
   const { profile } = input;
-  const person = {
-    headline: profile.headline,
-    summary: profile.summary,
-    location: profile.currentLocation,
-    currentCity: profile.currentCity,
-    currentRegion: profile.currentRegion,
-    currentCountry: profile.currentCountry,
-    yearsExperience: profile.yearsExperience,
-    workEligibility: profile.workEligibility,
-    skills: profile.skills,
-    skillGroups: profile.skillGroups,
-    experiences: profile.experiences,
-    education: profile.education,
-    projects: profile.projects,
-    spokenLanguages: profile.spokenLanguages,
-    // Parsed facts already contain the resume evidence and take precedence over
-    // the original file. Only an unparsed profile needs that fallback body.
-    resume:
-      profile.experiences.length || profile.skills.length
-        ? undefined
-        : profile.baseResume.textContent,
-  };
+  const person = buildListingFitPerson(profile);
   // Keep candidate evidence ahead of batch-specific text, including retries.
   const context = {
-    assessmentDate: new Date().toISOString().slice(0, 10),
+    assessmentDate:
+      input.assessmentDate ?? new Date().toISOString().slice(0, 10),
     person: compactFacts(person),
     goals: input.goals,
     ...(input.countryOptionFallbacks?.length
@@ -1372,7 +1255,7 @@ export async function fitJobs(
         }));
         const answer = await ask(
           input,
-          `${FIT_WORK_ELIGIBILITY} ${payInstruction}Judge each job from the complete listing and candidate evidence. Each listing's description is its complete unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : ""} Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known hard conflict worth applying or a strong match. Unknown permission, missing or incomparable pay and uncertain terms must remain explicit uncertainties, not automatic below-Good limits; judge their significance alongside the actual work and evidence. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":["compatible|review|blocked","verbatim scope quote","location kind","ISO country codes"],"s":score,"why":"short overall reason","w":"the why in 5 words or fewer: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":["strong|related|stretch|unrelated|unknown","role reason"],"p":["aligned|mixed|conflict|unknown","preferences reason"],"c":["strong|partial|unknown","candidate evidence"],"h":["met|conflict|unknown|not_requested","mandatory requirements reason"],"pay":{"minimum":null,"maximum":null,"currency":null,"interval":null,"basis":null,"quote":""}}]}. The pay object is required: replace its null example values with published own-listing facts when present. If the input includes repair issues, correct only those contract failures using the same listing evidence; never invent a missing fact. Include every id exactly once, including low scores. Keep each explanation under 12 words without repeating sentences.`,
+          `${FIT_WORK_ELIGIBILITY} ${payInstruction}Judge each job independently from its own complete listing and confirmed candidate evidence. Other listings, their order, salaries, technologies and requirements are never evidence for this listing. Compare concrete duties and essential requirements with specific saved experience, projects, certifications and resume facts before choosing the score. Distinguish required qualifications from preferred qualifications, benefits and tools the person can learn. Missing evidence is not a proven lack of ability; explicit contradictory facts are a conflict. A broad stack request welcomes the stated willingness to learn; a missing preferred language alone must not outweigh demonstrated core duties. Do not invent an exclusion, a requirement, proficiency, years of specialty experience or a claim that all requirements match. Total yearsExperience does not establish that many years with each tool or specialty; cite the actual role or project evidence instead. Explain the decisive match or gap using facts from this listing and this profile, addressed as you/your. Never put an unsupported positive claim in why or w, or let a short label contradict the caveat in why. Each listing's description is its complete unabridged text. The person's request determines what counts as a close match: compare the core daily work, not incidental technologies or a shared title. For a narrow specialist request, transferable but different work must not outrank matching core work just because its title or seniority is exact. Explicit exclusions matter, including backend/infrastructure, professional visual-design, management or sales duties when the person excludes them. For a broad request, welcome transferable stacks and related work. Assess seniority from demonstrated scope and ownership; a staff title alone is not a disqualification. Unknown facts are uncertainty, not invented blockers. Remote hiring/residency regions restrict physical work location; citizenship or a foreign office does not satisfy them. Worldwide includes the person. Distinguish schedule overlap from mandatory residency: a nearby timezone alone does not prove inability to work the stated hours. Preserve explicit location and hours restrictions. Respect part-time/student hours, current work permission and future sponsorship separately.${input.goals.remoteCountsAsAnyLocation === false ? " The person turned off counting remote jobs as any location: remote alone does not match a preferred place. Assess the listing against their saved places even when it is remote; a different place is a preferences conflict and lowers an otherwise matching job score. Preserve hiring and residency restrictions in all cases." : ""} Structured profile edits take priority over the resume. Separately judge explicit mandatory requirements in h: met, conflict, unknown or not_requested, with an evidence-based reason. A saved minimum pay is a floor, not a soft preference; compare the stated pay basis, interval and currency without invented exchange rates or hours. A fully stated range entirely below that floor conflicts; missing or incomparable pay is unknown, never assumed compliant or below. Distinguish an overlapping range from an offer that cannot reach the minimum. Explicit non-negotiable requirements cannot be outweighed by attractive role duties. Do not call a known hard conflict worth applying or a strong match. Unknown permission, missing or incomparable pay and uncertain terms must remain explicit uncertainties, not automatic below-Good limits; judge their significance alongside the actual work and evidence. Scores: ${JOB_FIT_BANDS.strong}-100 strong realistic choice, ${JOB_FIT_BANDS.good}-${JOB_FIT_BANDS.strong - 1} worth applying, ${JOB_FIT_BANDS.stretch}-${JOB_FIT_BANDS.good - 1} stretch or material tradeoff, 0-${JOB_FIT_BANDS.stretch - 1} poor choice or explicit blocker. Use judgment, never a fixed formula. Return {"fits":[{"id":123,"e":{"status":"compatible|review|blocked","quote":"verbatim scope quote","kind":"location kind","countries":"ISO country codes"},"s":score,"why":"short overall reason","w":"the why in 5 words or fewer: its comparison first, then its material caveat after a semicolon when both fit, e.g. UI overlap; Go not listed, or Less frontend than you want","r":{"status":"strong|related|stretch|unrelated|unknown","reason":"role reason"},"p":{"status":"aligned|mixed|conflict|unknown","reason":"preferences reason"},"c":{"status":"strong|partial|unknown","reason":"candidate evidence"},"h":{"status":"met|conflict|unknown|not_requested","reason":"mandatory requirements reason"},"pay":{"minimum":null,"maximum":null,"currency":null,"interval":null,"basis":null,"quote":""}}]}. The pay object is required: replace its null example values with published own-listing facts when present. If the input includes repair issues, correct only those contract failures using the same listing evidence; never invent a missing fact. Include every id exactly once, including low scores. Keep why to one concise sentence that names the decisive work comparison and material caveat. Keep each dimension reason under 20 words; avoid generic labels such as perfect match. A high score needs demonstrated core work; an exact title alone is insufficient. Use the full 0-100 range consistently across batches without grading on a curve.`,
           {
             ...context,
             listings,
@@ -1388,11 +1271,12 @@ export async function fitJobs(
           // Validate rows independently: one malformed judgment must not
           // discard other complete judgments from the same response.
           z.object({ fits: z.array(z.unknown()) }),
-          Math.max(8000, batch.length * 350),
+          Math.max(32_000, batch.length * 1_000),
           "fit_batch",
           fitResponseSchema(),
-        ).catch(() => {
+        ).catch((error: unknown) => {
           input.signal?.throwIfAborted();
+          if (error instanceof ListingOutputLimitError) throw error;
           for (const job of batch)
             repairIssues.set(job.id, ["unusable_response_json_or_request"]);
           return null;
@@ -1401,8 +1285,9 @@ export async function fitJobs(
         const ids = new Set(batch.map((job) => String(job.id)));
         const rows = answer.fits.flatMap((row) => {
           const parsed = fitSchema.safeParse(row);
-          const job = parsed.success
-            ? batch.find((job) => job.id === parsed.data.id)
+          const rowId = z.object({ id: z.number() }).safeParse(row);
+          const job = rowId.success
+            ? batch.find((job) => job.id === rowId.data.id)
             : undefined;
           const pay = parsed.success ? parsed.data.pay : undefined;
           const payEvidence =
@@ -1425,7 +1310,12 @@ export async function fitJobs(
             ids.has(String(parsed.data.id));
           if (job && !valid)
             repairIssues.set(job.id, [
-              ...(parsed.success ? [] : ["invalid_judgment_fields"]),
+              ...(parsed.success
+                ? []
+                : parsed.error.issues.map(
+                    (issue) =>
+                      `invalid_field:${issue.path.join(".")}:${issue.code}`,
+                  )),
               ...(parsed.success && parsed.data.h === undefined
                 ? ["missing_hard_requirements"]
                 : []),
@@ -1568,14 +1458,26 @@ export async function fitJobs(
       const missing = await judge(batch);
       // Preserve valid judgments. An omitted job has no fit to reuse; retry only that job,
       // in smaller groups, once. The runner leaves any remaining omissions unscored.
-      await mapConcurrent(
-        batches(
-          missing,
-          Math.min(8, Math.max(1, Math.floor(batch.length / 2))),
-        ),
-        1,
-        judge,
-      );
+      const unresolved = (
+        await mapConcurrent(
+          batches(
+            missing,
+            Math.min(8, Math.max(1, Math.floor(batch.length / 2))),
+          ),
+          1,
+          judge,
+        )
+      ).flat();
+      if (unresolved.length)
+        throw new Error(
+          `The AI could not finish fit scores for ${unresolved.length} jobs. Try fit again.`,
+          {
+            cause: unresolved.map((job) => ({
+              id: job.id,
+              issues: repairIssues.get(job.id),
+            })),
+          },
+        );
     },
   );
   return output;
