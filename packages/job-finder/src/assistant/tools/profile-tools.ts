@@ -1166,27 +1166,44 @@ export const listDocumentsTool = defineTool({
   name: "list_documents",
   group: "files",
   description:
-    "Lists the person's files (resumes, cover letters, portfolios, transcripts) with ids. Refer to files only by these ids, never by path. original_resume is the imported resume (what Original sends); approved_resume_<jobId> is the approved resume for that one job. Files the person attached in this chat or added under Documents are used by applications: when Job Finder fills a form, it uploads the matching file (portfolio, transcript, cover letter, other) to that form's file field, so no extra step is needed to use them.",
-  parameters: json.object({}),
-  input: z.object({}).passthrough(),
+    "Lists the person's files (resumes, cover letters, portfolios, transcripts) with ids. Refer to files only by these ids, never by path. original_resume is the imported resume (what Original sends); approved_resume_<jobId> is the approved resume for that one job. Follow nextRead until null to see all files; omittedCount counts the remaining tail. Files the person attached in this chat or added under Documents are used by applications: when Job Finder fills a form, it uploads the matching file (portfolio, transcript, cover letter, other) to that form's file field, so no extra step is needed to use them.",
+  parameters: json.object({
+    offset: json.number("Zero-based file offset, from nextRead; default 0."),
+    limit: json.number("Files per page, 1 to 60; default 60."),
+  }),
+  input: z.object({
+    offset: z.number().int().min(0).optional(),
+    limit: z.number().int().min(1).max(60).optional(),
+  }),
   label: () => "Listing your files",
   effect: "read",
-  async execute(_input, { ports }) {
+  async execute(input, { ports }) {
     const documents = await ports.listDocuments();
+    const offset = input.offset ?? 0;
+    const limit = input.limit ?? 60;
+    const page = documents.slice(offset, offset + limit);
+    const next = Math.min(documents.length, offset + page.length);
+    const omittedCount = Math.max(0, documents.length - next);
     return {
-      summary: `${plural(documents.length, "file")}. Applications upload the matching one to a form's file field (portfolio, transcript, cover letter), so these can be used for an application without any other step.`,
-      data: documents.slice(0, 60).map((document) => ({
-        id: document.id,
-        kind: document.kind,
-        name: document.originalName,
-        bytes: document.byteSize,
-        addedAt: document.createdAt,
-        ...(document.forJob
-          ? {
-              forJob: `${document.forJob.title} at ${document.forJob.company} (job ${document.forJob.jobId}); only for that job`,
-            }
-          : {}),
-      })),
+      summary: `Showing ${page.length} of ${plural(documents.length, "file")}; ${omittedCount} more. Applications upload the matching one to a form's file field (portfolio, transcript, cover letter), so these can be used for an application without any other step.`,
+      data: {
+        offset,
+        total: documents.length,
+        omittedCount,
+        nextRead: omittedCount ? { offset: next, limit } : null,
+        documents: page.map((document) => ({
+          id: document.id,
+          kind: document.kind,
+          name: document.originalName,
+          bytes: document.byteSize,
+          addedAt: document.createdAt,
+          ...(document.forJob
+            ? {
+                forJob: `${document.forJob.title} at ${document.forJob.company} (job ${document.forJob.jobId}); only for that job`,
+              }
+            : {}),
+        })),
+      },
     };
   },
 });
@@ -1195,9 +1212,22 @@ export const readDocumentTool = defineTool({
   name: "read_document",
   group: "files",
   description:
-    "Reads the text of one of the person's files by id (bounded). Resume import supports PDF, DOCX, TXT and Markdown. Scanned image PDFs have no readable text; visual extraction may be available in read_profile section review, but is not guaranteed. Standalone PNG/JPG images are not supported resume imports; recommend a text-based file, pasted text or manual entry when unreadable.",
-  parameters: json.object({ documentId: json.string() }, ["documentId"]),
-  input: z.object({ documentId: Id }),
+    "Reads the text of one of the person's files by id in character-offset pages. Follow nextRead until null to read the rest; omittedCount counts the remaining tail. Resume import supports PDF, DOCX, TXT and Markdown. Scanned image PDFs have no readable text; visual extraction may be available in read_profile section review, but is not guaranteed. Standalone PNG/JPG images are not supported resume imports; recommend a text-based file, pasted text or manual entry when unreadable.",
+  parameters: json.object(
+    {
+      documentId: json.string(),
+      offset: json.number(
+        "Zero-based character offset from nextRead; default 0.",
+      ),
+      length: json.number("Characters per read, 1 to 12000; default 12000."),
+    },
+    ["documentId"],
+  ),
+  input: z.object({
+    documentId: Id,
+    offset: z.number().int().min(0).optional(),
+    length: z.number().int().min(1).max(12000).optional(),
+  }),
   label: () => "Reading a file",
   effect: "read",
   async execute(input, { ports }) {
@@ -1208,9 +1238,23 @@ export const readDocumentTool = defineTool({
         "That file has no readable text. For an imported scanned PDF, inspect read_profile section review for extracted values and visual evidence. Resume import supports PDF, DOCX, TXT and Markdown; standalone PNG/JPG images are unsupported. If no usable extraction exists, use a supported file or pasted text.",
       );
     }
+    const offset = input.offset ?? 0;
+    const length = input.length ?? 12_000;
+    const content = text.slice(offset, offset + length);
+    const next = Math.min(text.length, offset + content.length);
+    const omittedCount = Math.max(0, text.length - next);
     return {
-      summary: `Read ${text.length} characters.`,
-      data: { text: text.slice(0, 12_000), truncated: text.length > 12_000 },
+      summary: `Read ${content.length} of ${text.length} characters; ${omittedCount} remain.`,
+      data: {
+        text: content,
+        offset,
+        totalCharacters: text.length,
+        omittedCount,
+        truncated: omittedCount > 0,
+        nextRead: omittedCount
+          ? { documentId: input.documentId, offset: next, length }
+          : null,
+      },
     };
   },
 });
