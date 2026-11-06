@@ -766,12 +766,8 @@ test("an upload that replaces the form with an error is a technical stop, not a 
                     }),
                   }
                 : {
-                    name: "finish",
-                    arguments: JSON.stringify({
-                      reason: "The page failed.",
-                      needsPerson: true,
-                      forPerson: ["Go to homepage"],
-                    }),
+                    name: "follow_link",
+                    arguments: JSON.stringify({ ref: "l0" }),
                   },
           },
         ],

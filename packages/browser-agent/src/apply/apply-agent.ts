@@ -579,9 +579,28 @@ async function runMeasuredApplyAgent(
    * with it, the person's questions first (their answers belong on this
    * page, so the press waits for the next run).
    */
-  const handOverPress = (
-    pause: ApplyPause,
-  ): { kind: "stop"; reason: string; data: ApplyPause } => {
+  const handOverPress = (pause: ApplyPause): AgentLoopToolOutcome => {
+    if (
+      exhaustedUploads.size &&
+      !pageTools.state.observation?.controls.some(
+        (control) =>
+          control.visible && !control.disabled && control.kind !== "file",
+      )
+    ) {
+      // A failed upload can replace the form with an error page whose only
+      // control is Home/Back. That navigation is not a candidate question.
+      needsPersonFinishPending = false;
+      forPerson = [];
+      return {
+        kind: "finish",
+        finish: {
+          reason: [...exhaustedUploads.values()].join(" "),
+          stuck: true,
+          needsPerson: pendingQuestions.size > 0,
+          data: {},
+        },
+      };
+    }
     const handover = collectedQuestionsPause() ?? pause;
     pauses.push(handover);
     note(handover.summary);
