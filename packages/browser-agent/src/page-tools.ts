@@ -31,6 +31,8 @@ export interface PageToolPolicy {
    * host can send a leaner one or say a view is unchanged.
    */
   describe?: (observation: ApplyFormObservation) => string;
+  /** Explicit observe always provides a complete, independently readable view. */
+  describeFull?: (observation: ApplyFormObservation) => string;
 }
 
 export interface PageToolsState {
@@ -134,7 +136,8 @@ export function createPageTools(
           parameters: { type: "object", properties: {} },
         },
       },
-      execute: async () => ok(describe(await observe())),
+      execute: async () =>
+        ok((policy.describeFull ?? describe)(await observe())),
     },
     {
       definition: {

@@ -205,12 +205,17 @@ test("an unusual title is judged with full duties once and its page is reused", 
     chatWithTools: (messages) => {
       const data = JSON.parse(String(messages[1].content)) as {
         titles?: unknown[][];
+        evidenceBlocks: string[];
         listings: { id: number; title: string }[];
       };
       if (data.titles) {
         calls++;
         for (const row of data.titles)
-          expect(row[3]).toContain("Analyse revenue with SQL joins");
+          expect(
+            (row[3] as number[])
+              .map((id) => data.evidenceBlocks[id])
+              .join("\n"),
+          ).toContain("Analyse revenue with SQL joins");
         return Promise.resolve({
           content: JSON.stringify({
             keep: { 0: 1, 1: 1 },

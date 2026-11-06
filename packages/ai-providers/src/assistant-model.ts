@@ -51,7 +51,8 @@ const CAPABILITY_TABLE: Record<
     apiMode: "chat_completions",
     tools: true,
     streaming: true,
-    contextWindowTokens: 128_000,
+    // OpenCode's paid route exposes the full model window (models.opencode.ai).
+    contextWindowTokens: 1_000_000,
     reservedOutputTokens: 8_000,
     // Simple image input is accepted on the configured gateway route. This
     // declares transport support, not OCR or visual-task accuracy.

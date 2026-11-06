@@ -6,6 +6,7 @@ import { traceEvent, withTraceScope } from "@nestor/core/run-trace";
 import {
   professionEvidence,
   professionInstructions,
+  encodeScreeningEvidence,
 } from "./listing-screening";
 import { z } from "zod";
 import {
@@ -483,17 +484,19 @@ export async function screenCards(
     try {
       const raw = await ask(
         input,
-        `${professionInstructions()} Each titles row is [index, title, cardEvidence, fullListingDutyEvidence]. Preserve the two-stage screening gate: first judge only the title and card evidence. A broader profession that can contain the requested specialty stays ambiguous unless the card explicitly identifies incompatible work. Missing specialty keywords, generic duties, location or rank do not prove a different profession. Never infer pure management from rank alone when the advertised duties are unknown. Keep a requested, substantially overlapping or genuinely ambiguous card even if its full listing would receive a low fit score. Full listing duties can rescue a card that otherwise looks clearly unrelated; they cannot revoke a keep from the card gate. Return 0 only when the card is clearly a different profession and the full duties, when supplied, do not rescue it. Fit is judged separately after saving.`,
+        `${professionInstructions()} Each titles row is [index, title, cardEvidence, fullListingDutyEvidence]. Evidence fields are arrays of ids into evidenceBlocks: reconstruct each field by joining those exact block strings with a newline, preserving order and repeats. Null means not supplied. Published vacancy duties are identified separately from additional visible page evidence; site navigation and a read failure are not job duties. Preserve the two-stage screening gate: first judge only the title and card evidence. A broader profession that can contain the requested specialty stays ambiguous unless the card explicitly identifies incompatible work. Missing specialty keywords, generic duties, location or rank do not prove a different profession. Never infer pure management from rank alone when the advertised duties are unknown. Keep a requested, substantially overlapping or genuinely ambiguous card even if its full listing would receive a low fit score. Full listing duties can rescue a card that otherwise looks clearly unrelated; they cannot revoke a keep from the card gate. Return 0 only when the card is clearly a different profession and the full duties, when supplied, do not rescue it. Fit is judged separately after saving.`,
         {
           goals: input.goals,
-          titles: titles.map((key, index) => [
-            index,
-            key.split("\n")[0],
-            cardEvidence.get(key) || undefined,
-            evidence.get(key) === cardEvidence.get(key)
-              ? undefined
-              : evidence.get(key),
-          ]),
+          ...encodeScreeningEvidence(
+            titles.map((key, index) => [
+              index,
+              key.split("\n")[0] ?? "",
+              cardEvidence.get(key) || undefined,
+              evidence.get(key) === cardEvidence.get(key)
+                ? undefined
+                : evidence.get(key),
+            ]),
+          ),
         },
         z.unknown(),
         2000,
@@ -598,8 +601,8 @@ export async function screenCards(
         const group = groups.get(key)!;
         if (!input.readPage && group.some((card) => !card.listingText))
           return null;
+        const bodies: string[] = [];
         try {
-          const bodies: string[] = [];
           for (const card of group) {
             if (card.listingText) {
               bodies.push(card.listingText);
@@ -664,7 +667,19 @@ export async function screenCards(
               listingPage: page,
               listingText: body.text,
             });
-            bodies.push(body.text);
+            const published = extractListingDetailFromHtml({
+              html: page.html,
+              url: page.finalUrl,
+              expectedTitle: card.title,
+            });
+            // The body fallback can include an unmarked site menu. Use this
+            // vacancy's published description for duties, keeping every visible
+            // page fact separately rather than presenting navigation as duties.
+            bodies.push(
+              published?.description
+                ? `Published vacancy duties:\n${published.description}\n\nAdditional visible page evidence:\n${body.text}`
+                : `Visible listing page evidence (may include site navigation):\n${body.text}`,
+            );
           }
           evidence.set(
             key,
@@ -677,7 +692,7 @@ export async function screenCards(
           // model the card and the failure; full reads can use the browser.
           evidence.set(
             key,
-            `${cardEvidence.get(key) ?? ""}\nFull listing read did not finish: ${error instanceof Error ? error.message : String(error)}`,
+            `${bodies.join("\n\n---\n\n")}\n${cardEvidence.get(key) ?? ""}\nFull listing read did not finish: ${error instanceof Error ? error.message : String(error)}`,
           );
           return key;
         }

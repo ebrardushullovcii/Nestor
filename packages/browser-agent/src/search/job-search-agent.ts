@@ -79,6 +79,7 @@ import {
  */
 
 export interface JobSearchAgentInput {
+  modelContextWindowTokens?: number | undefined;
   resultCache?: SearchResultCache;
   hands: ApplyPageHands;
   /** The live page, for posting links handed to the extractor. Optional in tests. */
@@ -507,10 +508,7 @@ export async function runJobSearchAgent(
 
   const notes: string[] = [...collectionNotes];
   let observationRevision = 0;
-  // Tool answers given so far, so a view the model still has in full is not
-  // sent again (see createSearchViewDescriber).
-  let toolAnswers = 0;
-  const views = createSearchViewDescriber(() => toolAnswers);
+  const views = createSearchViewDescriber();
   const pageTools = createPageTools(
     {
       ...hands,
@@ -555,6 +553,7 @@ export async function runJobSearchAgent(
     },
     {
       describe: (observation) => views.describe(observation),
+      describeFull: (observation) => views.pinView(observation),
     },
   );
   const trackBotCheck = createBotCheckTracker();
@@ -1548,7 +1547,7 @@ export async function runJobSearchAgent(
   const loop = await runAgentLoop({
     messages,
     model: llmClient,
-    tools: (isSourceCheck
+    tools: isSourceCheck
       ? tools
       : tools.map(
           (tool): AgentLoopTool => ({
@@ -1575,23 +1574,17 @@ export async function runJobSearchAgent(
               return { ...outcome, progress: madeProgress };
             },
           }),
-        )
-    ).map(
-      (tool): AgentLoopTool => ({
-        ...tool,
-        execute: async (raw, context) => {
-          try {
-            return await tool.execute(raw, context);
-          } finally {
-            toolAnswers += 1;
-          }
-        },
-      }),
-    ),
+        ),
     subjectLabel: siteLabel,
     // Keep action history and observations intact; recover context at the
     // provider boundary if the selected model reaches its context limit.
-    staleToolResultKeepRecent: Number.POSITIVE_INFINITY,
+    staleToolResultChars: null,
+    compactionMaxChars: Math.floor(
+      (input.modelContextWindowTokens ?? 64_000) * 3.6 * 0.8,
+    ),
+    retainCompactedHistory: true,
+    onHistoryCompacted: (retained) =>
+      views.restoreContext(retained, pageTools.state.observation),
     onStep: ({ step, note }) => {
       steps = step;
       emit("thinking", describeStepForPerson(note));
