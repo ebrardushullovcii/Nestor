@@ -779,7 +779,7 @@ test("a source timeout explains retry without creating a sign-in ticket", async 
   expect(status.search?.state).toBe("failed");
   expect(status.progress).toMatchObject({ failed: 2, needsYou: 0 });
   for (const row of createSearchSourcesStore(store).list({}).rows)
-    expect(row.message).toContain("Nestor's reading time limit");
+    expect(row.message).toContain("The page or model stopped responding");
   expect(store.sql("SELECT count(*) AS n FROM source_needs_you").get()?.n).toBe(
     0,
   );
@@ -1080,40 +1080,75 @@ test("Keep reading gives a site Quick stopped a full read and keeps the next sea
   await expect(runner.keepReading()).rejects.toThrow("more to read");
 });
 
-test("Quick bounds HTTP collection without cancelling an accepted listing read", async () => {
+test("Quick leaves active HTTP collection and accepted listing reads running beyond the old timer", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     const { runner, engine, context, store } = setup();
     context.sources = context.sources.slice(0, 1);
     let collectionSignal: AbortSignal | undefined;
     let readSignal: AbortSignal | undefined;
+    const collection =
+      deferred<Awaited<ReturnType<JobSearchEngine["collectSource"]>>>();
     const pending =
       deferred<Awaited<ReturnType<JobSearchEngine["readListings"]>>>();
     engine.readListings.mockImplementation(({ signal }) => {
       readSignal = signal;
       return pending.promise;
     });
-    engine.collectSource.mockImplementation(
-      async ({ target, onCards, signal }) => {
-        collectionSignal = signal;
-        await onCards?.([card(target.id)]);
-        return new Promise(() => {});
-      },
-    );
+    engine.collectSource.mockImplementation(async (input) => {
+      collectionSignal = input.signal;
+      await input.onCards?.([card(input.target.id)]);
+      return collection.promise;
+    });
     await runner.start({ depth: "quick", postedWithin: "any" });
     await vi.advanceTimersByTimeAsync(180001);
-    expect(collectionSignal?.aborted).toBe(true);
+    expect(collectionSignal?.aborted).toBe(false);
     expect(readSignal?.aborted).toBe(false);
-    expect(engine.collectSource).toHaveBeenCalledTimes(1);
+    collection.resolve({
+      cards: [],
+      complete: true,
+      pagesRead: 1,
+      notes: ["All pages read"],
+    });
     pending.resolve({
       jobs: [found(card(context.sources[0]!.id))],
       failures: [],
     });
     await vi.runAllTimersAsync();
     expect(runner.status().search).toMatchObject({ state: "done", scored: 1 });
-    expect(createSearchSourcesStore(store).list({}).rows[0]?.message).toContain(
-      "three-minute look at this site ran out",
-    );
+    expect(
+      createSearchSourcesStore(store).list({}).rows[0]?.message,
+    ).not.toContain("time limit");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("active browser navigation is not cancelled at the old source deadline, while Stop still cancels it", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const { runner, engine, context } = setup();
+    context.sources = context.sources.slice(0, 1);
+    let readSignal: AbortSignal | undefined;
+    engine.collectSource.mockImplementation((input) => {
+      if (input.lane === "http")
+        return Promise.resolve({
+          cards: [],
+          complete: false,
+          requiresBrowser: true,
+          pagesRead: 1,
+          notes: [],
+        });
+      readSignal = input.signal;
+      return new Promise(() => {});
+    });
+    await runner.start({ depth: "quick" });
+    await vi.advanceTimersByTimeAsync(45001);
+    expect(readSignal).toBeDefined();
+    expect(readSignal?.aborted).toBe(false);
+    runner.stop();
+    expect(readSignal?.aborted).toBe(true);
+    expect(runner.status().search?.state).toBe("stopped");
   } finally {
     vi.useRealTimers();
   }

@@ -1,4 +1,4 @@
-import { selfLimitTimeout, reportSelfLimitHit } from "@nestor/core";
+import { selfLimitTimeout, createConnectionIdleTimeout } from "@nestor/core";
 import { DiscoveryPageReadError } from "@nestor/contracts";
 import type { BrowserContext, Page } from "playwright";
 
@@ -47,19 +47,20 @@ export async function readRenderedPageHtml(
       ).catch(() => undefined);
     options.signal?.throwIfAborted();
     let html = await page.content();
-    const deadline = Date.now() + 12_000;
-    while (options.ready && !options.ready(html) && Date.now() < deadline) {
-      options.signal?.throwIfAborted();
-      await page.waitForTimeout(200);
-      html = await page.content().catch(() => html);
+    if (options.ready && !options.ready(html)) {
+      const idle = createConnectionIdleTimeout(12_000);
+      try {
+        while (!options.ready(html) && !idle.signal.aborted) {
+          options.signal?.throwIfAborted();
+          await page.waitForTimeout(200);
+          const next = await page.content().catch(() => html);
+          if (next !== html) idle.progress();
+          html = next;
+        }
+      } finally {
+        idle.cleanup();
+      }
     }
-    if (options.ready && !options.ready(html))
-      reportSelfLimitHit({
-        limit: "rendered_page_ready",
-        kind: "timeout",
-        value: 12000,
-        where: "browser-runtime/readRenderedPageHtml",
-      });
     return { html, finalUrl: page.url() };
   } finally {
     options.signal?.removeEventListener("abort", abort);

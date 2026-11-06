@@ -66,7 +66,6 @@ export interface AgentConfig extends BrowserPermissionPolicy {
   maxSteps: number;
   /** Legacy-compatible emergency ceiling. Normal completion is progress based. */
   runControl?: {
-    timeBudgetMs?: number;
     noProgressStepLimit?: number;
   };
   targetJobCount: number;

@@ -433,18 +433,19 @@ export async function fetchCompleteResumeImportJson(input: {
 }
 
 export async function extractOpenAiCompatibleResumeImportStage(input: {
-  stageInput: ExtractResumeImportStageInput;
+  stageInput: ExtractResumeImportStageInput & { signal?: AbortSignal };
   status: AgentProviderStatus;
   fetchModelJson: (
     operation: OpenAiCompatibleJsonOperation,
     systemPrompt: string,
     userPayload: unknown,
     options?: {
-      timeoutMs?: number;
+      timeoutMs?: number | undefined;
+      signal?: AbortSignal;
       reasoningEffort?: ModelReasoningEffort | undefined;
     },
   ) => Promise<unknown>;
-  timeoutMs: number;
+  timeoutMs: number | undefined;
   /** Extraction is read-and-structure work; callers pass a low read effort. */
   reasoningEffort?: ModelReasoningEffort | undefined;
 }): Promise<ResumeImportStageExtractionResult> {
@@ -460,6 +461,7 @@ export async function extractOpenAiCompatibleResumeImportStage(input: {
     fetch: (prompt, payload) =>
       input.fetchModelJson("extractResumeImportStage", prompt, payload, {
         timeoutMs: input.timeoutMs,
+        ...(input.stageInput.signal ? { signal: input.stageInput.signal } : {}),
         reasoningEffort: input.reasoningEffort,
       }),
     systemPrompt: [
@@ -562,9 +564,9 @@ export async function adjudicateOpenAiCompatibleResumeImportCandidates(input: {
     operation: OpenAiCompatibleJsonOperation,
     systemPrompt: string,
     userPayload: unknown,
-    options?: { timeoutMs?: number },
+    options?: { timeoutMs?: number | undefined },
   ) => Promise<unknown>;
-  timeoutMs: number;
+  timeoutMs: number | undefined;
 }): Promise<ResumeImportAdjudicationResult> {
   const payload = await fetchCompleteResumeImportJson({
     operation: "adjudicateResumeImportCandidates",

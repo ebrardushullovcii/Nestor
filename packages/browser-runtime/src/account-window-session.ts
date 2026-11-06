@@ -35,8 +35,6 @@ const BUSY = ACCOUNT_WINDOW_OPEN_MESSAGE;
 const MAX_COMMITS = 4;
 /** Non-committing actions (typing, plain navigation) one surface allows. */
 const MAX_STEPS = 8;
-/** How long a surface lasts without validated forward progress. */
-const SURFACE_LIFETIME_MS = 90_000;
 type Surface = {
   writeOrigins: readonly string[];
   disclosable: readonly string[];
@@ -44,13 +42,9 @@ type Surface = {
   actionsLeft: number;
   /** Actions that sent none: typing, a GET link, a press the page ignored. */
   stepsLeft: number;
-  expiresAtMs: number;
   /** Provider documents this surface has committed. */
   documents: number;
-  /**
-   * The document count its deadline was last set at. The surface's first
-   * provider document is its opening, not progress made on it.
-   */
+  /** The document count last acknowledged by the workflow. */
   renewedAt: number;
   secondWindow: boolean;
   ledgerKeys: Set<string>;
@@ -104,7 +98,6 @@ export function withAccountWindowSession(input: {
       Math.min(MAX_COMMITS, Math.trunc(grant.maxActions ?? 1) || 1),
     ),
     stepsLeft: MAX_STEPS,
-    expiresAtMs: Date.now() + SURFACE_LIFETIME_MS,
     documents: 0,
     renewedAt: 0,
     secondWindow: false,
@@ -112,9 +105,7 @@ export function withAccountWindowSession(input: {
   });
   /** What the workflow may still do on this surface. */
   const remaining = (active: Surface) =>
-    Date.now() < active.expiresAtMs && active.stepsLeft > 0
-      ? active.actionsLeft
-      : 0;
+    active.stepsLeft > 0 ? active.actionsLeft : 0;
   let pending: { locator: Locator; token: string; child: Page | null } | null =
     null;
   let lastRead: RawApplyPage | null = null;
@@ -354,8 +345,7 @@ export function withAccountWindowSession(input: {
     const writes = await openPrepareOnlyProviderWriteWindow(page, {
       origins: active.writeOrigins,
       disclosableValues: active.disclosable,
-      active: () =>
-        !inactive() && sameTab === active && Date.now() < active.expiresAtMs,
+      active: () => !inactive() && sameTab === active,
     });
     closeProviderWindow = writes;
     try {
@@ -410,7 +400,6 @@ export function withAccountWindowSession(input: {
         !active.writeOrigins.includes(url.origin)
       )
         return Promise.resolve(false);
-      active.expiresAtMs = Date.now() + SURFACE_LIFETIME_MS;
       active.renewedAt = active.documents;
       return Promise.resolve(true);
     },
@@ -602,7 +591,6 @@ export function withAccountWindowSession(input: {
             canWrite: () =>
               !inactive() &&
               slot?.child === child &&
-              Date.now() < slot.expiresAtMs &&
               Date.now() < childWriteUntil &&
               childRequestsLeft-- > 0,
           });

@@ -13,7 +13,6 @@ import {
   type ResumeParserWorkerResponse,
 } from "@nestor/contracts";
 
-const DEFAULT_PARSER_TIMEOUT_MS = 45_000;
 const MAX_SIDECAR_OUTPUT_BYTES = 512_000;
 const MAX_VISION_IMAGE_OUTPUT_BYTES = 64_000_000;
 const SIDECAR_BINARY_NAME =
@@ -438,7 +437,7 @@ export function appendBoundedSidecarOutputForTest(
 async function invokeSidecarCandidate<TResult>(input: {
   candidate: SidecarCommandCandidate;
   request: ResumeParserWorkerRequest | Record<string, unknown>;
-  timeoutMs: number;
+  timeoutMs: number | undefined;
   maxOutputBytes?: number;
   parseOutput: (output: unknown) => TResult;
 }): Promise<TResult> {
@@ -463,22 +462,25 @@ async function invokeSidecarCandidate<TResult>(input: {
       callback();
     };
 
-    const timer = setTimeout(() => {
-      reportSelfLimitHit({
-        limit: "resume_parser_time",
-        kind: "timeout",
-        value: input.timeoutMs,
-        where: "desktop/runResumeDocumentSidecar",
-      });
-      child.kill();
-      finish(() => {
-        reject(
-          new Error(
-            `Python resume parser sidecar timed out after ${input.timeoutMs}ms (${input.candidate.label}).`,
-          ),
-        );
-      });
-    }, input.timeoutMs);
+    const timer =
+      input.timeoutMs === undefined
+        ? undefined
+        : setTimeout(() => {
+            reportSelfLimitHit({
+              limit: "resume_parser_time",
+              kind: "timeout",
+              value: input.timeoutMs!,
+              where: "desktop/runResumeDocumentSidecar",
+            });
+            child.kill();
+            finish(() => {
+              reject(
+                new Error(
+                  `Python resume parser sidecar timed out after ${input.timeoutMs}ms (${input.candidate.label}).`,
+                ),
+              );
+            });
+          }, input.timeoutMs);
 
     child.once("error", (error) => {
       finish(() => reject(error));
@@ -575,7 +577,7 @@ function parseVisionImageSidecarResponse(
 
 export async function runResumeParserSidecar(
   request: ResumeParserWorkerRequest,
-  timeoutMs = DEFAULT_PARSER_TIMEOUT_MS,
+  timeoutMs?: number,
 ): Promise<ResumeParserWorkerResponse> {
   if (!sidecarAvailability.logged) {
     sidecarAvailability.logged = true;
@@ -740,7 +742,7 @@ export async function runResumeVisionImageSidecar(input: {
       const response = await invokeSidecarCandidate({
         candidate,
         request,
-        timeoutMs: input.timeoutMs ?? DEFAULT_PARSER_TIMEOUT_MS,
+        timeoutMs: input.timeoutMs,
         maxOutputBytes: MAX_VISION_IMAGE_OUTPUT_BYTES,
         parseOutput: parseVisionImageSidecarResponse,
       });

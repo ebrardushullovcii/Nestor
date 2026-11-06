@@ -43,7 +43,6 @@ import {
 } from "./model-request-transport";
 
 const DEFAULT_RESUME_VISION_MODEL = DEFAULT_VISION_MODEL;
-const DEFAULT_VISION_TIMEOUT_MS = 600_000;
 const DEFAULT_VISION_CONTEXT_WINDOW_TOKENS = 128_000;
 const DEFAULT_VISION_RESERVED_HEADROOM_TOKENS = 30_000;
 const MAX_PAGES_PER_BATCH = 8;
@@ -70,7 +69,12 @@ export type OpenAiCompatibleResumeVisionProviderOptions = z.infer<
 
 type StringMap = Record<string, string | undefined>;
 
-function normalizeTimeoutLikeError(error: unknown, timeoutMs: number): Error {
+function normalizeTimeoutLikeError(
+  error: unknown,
+  timeoutMs: number | undefined,
+): Error {
+  if (timeoutMs === undefined)
+    return error instanceof Error ? error : new Error(String(error));
   if (error instanceof ModelRequestTimeoutError) {
     return error;
   }
@@ -469,8 +473,7 @@ export function createOpenAiCompatibleResumeVisionProvider(
   const validatedOptions = configuredOptions.success
     ? configuredOptions.data
     : null;
-  const timeoutMs =
-    validatedOptions?.requestTimeoutMs ?? DEFAULT_VISION_TIMEOUT_MS;
+  const timeoutMs = validatedOptions?.requestTimeoutMs;
   const contextWindowTokens =
     validatedOptions?.contextWindowTokens ??
     DEFAULT_VISION_CONTEXT_WINDOW_TOKENS;
@@ -490,7 +493,7 @@ export function createOpenAiCompatibleResumeVisionProvider(
     reservedHeadroomTokens: configuredOptions.success
       ? reservedHeadroomTokens
       : null,
-    requestTimeoutMs: configuredOptions.success ? timeoutMs : null,
+    requestTimeoutMs: configuredOptions.success ? (timeoutMs ?? null) : null,
     detail: configuredOptions.success
       ? "The configured vision provider reads locally generated resume page images. App code validates the result before reconciliation."
       : "The configured vision provider settings are invalid; resume import will use text extraction and deterministic visual fallback only.",
@@ -822,9 +825,9 @@ export function createResumeVisionProviderFromEnvironment(
           env.NESTOR_AI_VISION_REASONING_EFFORT,
       ) ?? DEFAULT_VISION_MODEL_REASONING_EFFORT,
     label: "Resume visual scan",
-    requestTimeoutMs:
-      parseConfiguredNumber(env.NESTOR_RESUME_VISION_TIMEOUT_MS) ??
-      DEFAULT_VISION_TIMEOUT_MS,
+    requestTimeoutMs: parseConfiguredNumber(
+      env.NESTOR_RESUME_VISION_TIMEOUT_MS,
+    ),
     idleTimeoutMs: parseConfiguredNumber(env.NESTOR_AI_IDLE_TIMEOUT_MS),
     maxAttempts: parseConfiguredPositiveInteger(env.NESTOR_AI_MAX_ATTEMPTS),
     streaming: parseConfiguredBoolean(env.NESTOR_AI_STREAMING),

@@ -17,10 +17,7 @@ import {
 } from "./answer-source-catalog";
 import { createApplyTiming } from "./apply-timing";
 import { createApplyProgressGuard } from "./apply-progress";
-import {
-  APPLY_MODEL_TIMEOUT_MS,
-  createApplyModelActivity,
-} from "./model-activity";
+import { createApplyModelActivity } from "./model-activity";
 import { expectedPayHandoff, expectedPaySuggestion } from "./expected-pay";
 import { requiresSavedOpinionAnswer } from "./answer-evidence";
 import {
@@ -263,10 +260,8 @@ function offersYesNo(options: readonly string[]) {
   );
 }
 // Work that keeps changing the form has no total turn or wall-time budget.
-const DEFAULT_TIME_BUDGET_MS = Number.POSITIVE_INFINITY;
 const DEFAULT_NO_PROGRESS_STEP_LIMIT = 120;
 // Writing and then checking a high-effort letter can exceed a page tool's 90s.
-const DOCUMENT_TOOL_TIMEOUT_MS = APPLY_MODEL_TIMEOUT_MS;
 
 /** What a partial classifier outage still allows: reads and field writes. */
 const PARTIAL_OUTAGE_TOOLS = new Set([
@@ -4241,28 +4236,6 @@ async function runMeasuredApplyAgent(
     if (PAGE_TOOL_NAMES.has(name)) continue;
     domainTools.push({
       definition,
-      ...(name === "upload" || name === "type"
-        ? {
-            timeoutMs: (rawArguments: string) => {
-              const parsed = parseApplyProposal(name, rawArguments);
-              const ref =
-                parsed.ok && "ref" in parsed.proposal
-                  ? parsed.proposal.ref
-                  : null;
-              const control = pageTools.state.observation?.controls.find(
-                (candidate) => candidate.ref === ref,
-              );
-              return name === "upload"
-                ? Math.max(
-                    DOCUMENT_TOOL_TIMEOUT_MS,
-                    (MAX_UPLOAD_TRIES + 1) * (uploadWaitMs + 20_000),
-                  )
-                : control && isCoverLetterControl(control)
-                  ? DOCUMENT_TOOL_TIMEOUT_MS
-                  : undefined;
-            },
-          }
-        : {}),
       failureKind: browserFailureKind(name),
       describeError: (error) =>
         error instanceof WrittenAnswerCheckUnavailableError
@@ -4313,26 +4286,6 @@ async function runMeasuredApplyAgent(
 
   domainTools.push({
     definition: FILL_FIELDS_TOOL_DEFINITION,
-    timeoutMs: (rawArguments) => {
-      const parsed = parseFillFields(rawArguments);
-      return parsed.ok &&
-        parsed.fields.some((entry) => {
-          const control = pageTools.state.observation?.controls.find(
-            (candidate) => candidate.ref === entry.ref,
-          );
-          return (
-            entry.tool === "upload" ||
-            (entry.tool === "type" &&
-              control !== undefined &&
-              isCoverLetterControl(control))
-          );
-        })
-        ? Math.max(
-            DOCUMENT_TOOL_TIMEOUT_MS,
-            (MAX_UPLOAD_TRIES + 1) * (uploadWaitMs + 20_000),
-          )
-        : undefined;
-    },
     failureKind: "browser",
     describeError: (error) =>
       error instanceof WrittenAnswerCheckUnavailableError
@@ -4888,7 +4841,6 @@ async function runMeasuredApplyAgent(
         },
       },
     },
-    timeoutMs: DOCUMENT_TOOL_TIMEOUT_MS,
     execute: async (rawArguments) => {
       if (!runConfig.letters) {
         return {
@@ -5982,12 +5934,9 @@ async function runMeasuredApplyAgent(
     subjectLabel: config.siteLabel,
     ceilings: {
       maxSteps: config.runControl?.maxSteps ?? DEFAULT_MAX_STEPS,
-      timeBudgetMs: config.runControl?.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS,
       // A timed-out model turn has produced no tool calls, so retrying the
       // exact turn once cannot repeat a page write or a submission attempt.
       modelTurnTimeoutRetries: 1,
-      // Compatibility guard until the shared loop can disable its timer.
-      modelTurnTimeoutMs: APPLY_MODEL_TIMEOUT_MS,
       noProgressStepLimit:
         config.runControl?.noProgressStepLimit ?? Number.POSITIVE_INFINITY,
     },

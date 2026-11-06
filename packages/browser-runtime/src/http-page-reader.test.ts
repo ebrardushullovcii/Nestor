@@ -53,3 +53,37 @@ test("provider search queries use JSON without navigation, credentials or redire
   ).rejects.toThrow("cannot navigate");
   expect(request).toHaveBeenCalledTimes(1);
 });
+
+test("a streaming HTTP page keeps working beyond the old 15-second deadline", async () => {
+  vi.useFakeTimers();
+  try {
+    const request = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              let ticks = 0;
+              const interval = setInterval(() => {
+                controller.enqueue(new TextEncoder().encode("chunk"));
+                if (++ticks === 6) {
+                  clearInterval(interval);
+                  controller.close();
+                }
+              }, 10_000);
+            },
+          }),
+        ),
+      ),
+    );
+    const pending = createHttpPageReader({ fetch: request })(
+      "https://example.test/jobs",
+      {},
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect((await pending).html).toBe("chunk".repeat(6));
+    expect(request.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});

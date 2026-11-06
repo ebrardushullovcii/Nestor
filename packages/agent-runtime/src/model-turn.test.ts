@@ -4,7 +4,6 @@ import {
   runConversationTurn,
   type ConversationModel,
 } from "./conversation-turn";
-import { runModelTurn } from "./model-turn";
 
 afterEach(() => vi.useRealTimers());
 
@@ -24,7 +23,6 @@ function run(
         messages: [],
         subjectLabel: "the task",
         ceilings: {
-          modelTurnTimeoutMs: Infinity,
           modelIdleTimeoutMs: options.idleMs ?? 180_000,
         },
         onReplyWithoutTool: () =>
@@ -42,14 +40,13 @@ function run(
         ...common,
         assembleMessages: () => Promise.resolve([]),
         ceilings: {
-          modelCallTimeoutMs: Infinity,
           modelIdleTimeoutMs: options.idleMs ?? 180_000,
         },
       });
 }
 
 for (const kind of ["agent", "conversation"] as const) {
-  test(`${kind}: Infinity never becomes a one-millisecond timer`, async () => {
+  test(`${kind}: no default deadline becomes a one-millisecond timer`, async () => {
     vi.useFakeTimers();
     const model: ConversationModel = {
       chatWithTools: () =>
@@ -90,10 +87,10 @@ for (const kind of ["agent", "conversation"] as const) {
           setTimeout(() => {
             clearInterval(interval);
             resolve({ content: "Done" });
-          }, 800_000);
+          }, 7_200_000);
         }),
     });
-    await vi.advanceTimersByTimeAsync(800_000);
+    await vi.advanceTimersByTimeAsync(7_200_000);
     expect((await pending).ending).toBe(
       kind === "agent" ? "finished" : "replied",
     );
@@ -141,17 +138,6 @@ for (const kind of ["agent", "conversation"] as const) {
     expect(vi.getTimerCount()).toBe(0);
   });
 }
-
-test("an explicitly finite absolute deadline is still honored", async () => {
-  vi.useFakeTimers();
-  const pending = runModelTurn(() => new Promise(() => undefined), {
-    timeoutMs: 10,
-  });
-  const rejected = expect(pending).rejects.toMatchObject({ kind: "absolute" });
-  await vi.advanceTimersByTimeAsync(10);
-  await rejected;
-  expect(vi.getTimerCount()).toBe(0);
-});
 
 test.each(["length", "max_output_tokens", "transport"])(
   "output truncation (%s) retries with more room and the same history",
@@ -295,5 +281,53 @@ test("a long tool stays alive while its nested model reports progress", async ()
   });
   await vi.advanceTimersByTimeAsync(500_000);
   expect((await pending).ending).toBe("finished");
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test("conversation tools keep running while they report progress", async () => {
+  vi.useFakeTimers();
+  let calls = 0;
+  const pending = runConversationTurn({
+    model: {
+      chatWithTools: () =>
+        Promise.resolve(
+          ++calls === 1
+            ? {
+                toolCalls: [
+                  {
+                    id: "read",
+                    type: "function",
+                    function: { name: "read", arguments: "{}" },
+                  },
+                ],
+              }
+            : { content: "Done" },
+        ),
+    },
+    tools: [
+      {
+        definition: {
+          type: "function",
+          function: {
+            name: "read",
+            description: "Read",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+        label: () => "Read",
+        execute: (_raw, context) =>
+          new Promise((resolve) => {
+            const interval = setInterval(() => context.onProgress?.(), 100_000);
+            setTimeout(() => {
+              clearInterval(interval);
+              resolve({ kind: "ok", content: "Read", progress: true });
+            }, 7_200_000);
+          }),
+      },
+    ],
+    assembleMessages: (turn) => Promise.resolve([...turn]),
+  });
+  await vi.advanceTimersByTimeAsync(7_200_000);
+  expect((await pending).ending).toBe("replied");
   expect(vi.getTimerCount()).toBe(0);
 });

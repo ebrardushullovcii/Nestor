@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { z } from "zod";
+import { ModelRequestTimeoutError } from "./model-request-transport";
 
 import { createResumeImportFixtureBundle } from "./resume-import-fixtures";
 import {
@@ -298,11 +299,7 @@ describe("resume vision provider", () => {
     const cases = [
       {
         name: "timeout",
-        rejection: (() => {
-          const abortError = new Error("This operation was aborted");
-          abortError.name = "AbortError";
-          return abortError;
-        })(),
+        rejection: new ModelRequestTimeoutError("idle", 180_000),
         expectedKind: "timeout" as const,
         expectedReason: /timed out after \d+s/i,
       },
@@ -389,7 +386,7 @@ describe("resume vision provider", () => {
       baseUrl: "https://shared.example.com/v1",
       modelContextWindowTokens: 128_000,
       reservedHeadroomTokens: 30_000,
-      requestTimeoutMs: 600_000,
+      requestTimeoutMs: null,
     });
   });
 

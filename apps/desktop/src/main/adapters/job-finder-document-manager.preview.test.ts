@@ -344,7 +344,7 @@ test("a preview cancelled behind final renders never creates a window or HTML fi
   expect(mocks.windows.every((window) => window.destroyed)).toBe(true);
 });
 
-test("reports only PDF admission wait and starts the two-minute deadline after admission", async () => {
+test("reports PDF admission wait and lets rendering finish beyond two minutes", async () => {
   vi.useFakeTimers();
   const releases: Array<(buffer: Buffer) => void> = [];
   mocks.print.mockImplementation(
@@ -352,9 +352,6 @@ test("reports only PDF admission wait and starts the two-minute deadline after a
   );
   const first = finalResume();
   const second = finalResume();
-  const secondDeadline = expect(second).rejects.toThrow(
-    "did not finish rendering within 2 minutes",
-  );
   const onQueueWait = vi.fn();
   const third = finalResume(onQueueWait);
   await flush();
@@ -365,9 +362,9 @@ test("reports only PDF admission wait and starts the two-minute deadline after a
   expect(onQueueWait).toHaveBeenCalledTimes(1);
   expect(onQueueWait.mock.calls[0]![0]).toBeGreaterThanOrEqual(119_000);
   await vi.advanceTimersByTimeAsync(2_000);
-  await secondDeadline;
+  releases[1]!(Buffer.from("second PDF"));
   releases[2]!(Buffer.from("third PDF"));
-  await Promise.all([first, third]);
+  await Promise.all([first, second, third]);
   expect(mocks.maximumWindows).toBe(2);
   expect(mocks.windows.every((window) => window.destroyed)).toBe(true);
 });

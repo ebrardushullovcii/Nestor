@@ -465,9 +465,8 @@ export function withBrowserPermissions(
   /**
    * A Google action moved the flow forward: the same intended account, still
    * proven basic access, Google sign-in still on, and a different step on the
-   * same live surface. Only then does the surface get a fresh deadline; the
-   * runtime separately requires a new document. An unchanged page (an
-   * uncertain result) is never renewed.
+   * same live surface. The runtime separately requires a new document. An
+   * unchanged page (an uncertain result) is never renewed.
    */
   const renewAfterProgress = async (
     before: ApplyFormObservation,

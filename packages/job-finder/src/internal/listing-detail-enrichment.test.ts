@@ -23,9 +23,21 @@ const NOW = "2026-09-05T10:00:00.000Z";
 afterEach(() => vi.unstubAllGlobals());
 
 it("reads every selected listing beyond the former sixty-page ceiling", async () => {
-  const jobs = Array.from({ length: 65 }, (_, index) => cardOnlyJob({ id: `job_${index}`, canonicalUrl: `https://jobs.example.test/${index}` }));
-  const fetchHtml = vi.fn((url: string) => Promise.resolve({ status: 200, html: RECORD_PAGE, finalUrl: url }));
-  const result = await enrichSavedJobListingDetails({ jobs, fetchHtml, assess, now: () => NOW });
+  const jobs = Array.from({ length: 65 }, (_, index) =>
+    cardOnlyJob({
+      id: `job_${index}`,
+      canonicalUrl: `https://jobs.example.test/${index}`,
+    }),
+  );
+  const fetchHtml = vi.fn((url: string) =>
+    Promise.resolve({ status: 200, html: RECORD_PAGE, finalUrl: url }),
+  );
+  const result = await enrichSavedJobListingDetails({
+    jobs,
+    fetchHtml,
+    assess,
+    now: () => NOW,
+  });
   expect(result.summary.attempted).toBe(65);
   expect(fetchHtml).toHaveBeenCalledTimes(65);
 });
@@ -594,7 +606,7 @@ describe("enrichSavedJobListingDetails", () => {
     ]);
   });
 
-  it("gives every queued listing its own request budget", async () => {
+  it("reads every queued listing without a shared request deadline", async () => {
     const jobs = [1, 2, 3].map((index) =>
       cardOnlyJob({
         id: `job_${index}`,
@@ -614,7 +626,6 @@ describe("enrichSavedJobListingDetails", () => {
       assess,
       now: () => NOW,
       concurrency: 1,
-      perRequestTimeoutMs: 100,
     });
 
     expect(ticks).toBe(3);

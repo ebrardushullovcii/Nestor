@@ -17,7 +17,6 @@ import { extractLiteralCandidates } from "./resume-import-literal-extraction";
 import { parseSourceInstructionReviewOverride } from "./source-instruction-types";
 import { filterSourceDebugWarnings } from "./source-instruction-filtering";
 import { writeResumeLanguage } from "./resume-workspace-language";
-import { withResumeClaimChecks } from "./resume-claim-checks";
 import {
   enrichSearchPreferencesFromProfile,
   mergeEvents,
@@ -193,7 +192,7 @@ test("hidden source-intelligence validation and warning-word vetoes report", () 
     "source_warning_keyword_veto",
   ]);
 });
-test("removed translation caps stay quiet and claim-check writer deadlines report", async () => {
+test("removed translation caps stay quiet", async () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {}),
     seed = createSeed(),
     job = seed.savedJobs[0]!;
@@ -212,29 +211,7 @@ test("removed translation caps stay quiet and claim-check writer deadlines repor
       },
     }),
   ).rejects.toThrow();
-  await expect(
-    withResumeClaimChecks({
-      draft: {
-        ...draft,
-        sections: draft.sections.map((section) => ({
-          ...section,
-          origin: "ai_generated" as const,
-          text:
-            section.kind === "summary"
-              ? "A new generated synthetic claim."
-              : section.text,
-        })),
-      },
-      job,
-      profile: seed.profile,
-      aiClient: { checkResumeClaims: () => Promise.resolve([]) },
-      getRemainingBudgetMs: () => 0,
-    }),
-  ).rejects.toThrow();
   expect(hits(log).some((hit) => hit.limit === "resume_language_output")).toBe(
     false,
   );
-  expect(
-    hits(log).some((hit) => hit.limit === "claim_check_writing_budget"),
-  ).toBe(true);
 });

@@ -90,7 +90,6 @@ import {
   adjudicateOpenAiCompatibleResumeImportCandidates,
   extractOpenAiCompatibleResumeImportStage,
 } from "./openai-compatible-resume-import";
-import type { ResumeImportExtractionStage } from "./resume-import";
 import { createBrowserVisualAnalysisProviderFromEnvironment } from "./browser-visual-analysis";
 import {
   runProfileCopilotAgentTask,
@@ -106,31 +105,6 @@ import {
   modelConversationKeys,
 } from "./model-request-identity";
 
-const DEFAULT_MODEL_TIMEOUT_MS = Infinity;
-/**
- * A first tailored draft is the largest structured output the product asks
- * for: every section rewritten against a full listing body with evidence
- * references. Sixty seconds cut real drafts off mid-generation on slower
- * models and reported them as failures; the extraction budget fits the work.
- */
-const DEFAULT_RESUME_DRAFT_TIMEOUT_MS = Infinity;
-/**
- * One tool-calling turn of the Assistant or Copilot. A turn that inspects the
- * draft and proposes a grounded rewrite is a large structured output too; at
- * sixty seconds slower models were cut off mid-turn and the whole request
- * collapsed into the safe fallback.
- */
-const DEFAULT_AGENT_TURN_TIMEOUT_MS = Infinity;
-const DEFAULT_RESUME_EXTRACTION_TIMEOUT_MS = 600_000;
-const DEFAULT_RESUME_IMPORT_STAGE_TIMEOUT_MS: Record<
-  Exclude<ResumeImportExtractionStage, "shared_memory">,
-  number
-> = {
-  identity_summary: 300_000,
-  experience: 300_000,
-  background: 300_000,
-};
-const SEARCH_RESULTS_EXTRACTION_TIMEOUT_MS = Infinity;
 const SEARCH_RESULTS_MAX_MODEL_JOBS = 60;
 const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 196_000;
 
@@ -199,7 +173,12 @@ function parseConfiguredTimeoutMs(
   return parsedValue;
 }
 
-function normalizeTimeoutLikeError(error: unknown, timeoutMs: number): Error {
+function normalizeTimeoutLikeError(
+  error: unknown,
+  timeoutMs: number | undefined,
+): Error {
+  if (timeoutMs === undefined)
+    return error instanceof Error ? error : new Error(String(error));
   if (error instanceof ModelRequestTimeoutError) {
     return error;
   }
@@ -233,20 +212,6 @@ function normalizeTimeoutLikeError(error: unknown, timeoutMs: number): Error {
   }
 
   return error instanceof Error ? error : new Error(String(error));
-}
-
-function resumeImportStageTimeoutMs(
-  stage: ResumeImportExtractionStage,
-  configuredResumeTimeoutMs?: number,
-  configuredRequestTimeoutMs?: number,
-): number {
-  return (
-    configuredResumeTimeoutMs ??
-    configuredRequestTimeoutMs ??
-    (stage === "shared_memory"
-      ? DEFAULT_RESUME_EXTRACTION_TIMEOUT_MS
-      : DEFAULT_RESUME_IMPORT_STAGE_TIMEOUT_MS[stage])
-  );
 }
 
 export function createOpenAiCompatibleJobFinderAiClient(
@@ -303,7 +268,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
     systemPrompt: string,
     userPayload: unknown,
     options?: {
-      timeoutMs?: number;
+      timeoutMs?: number | undefined;
       signal?: AbortSignal;
       onStreamEvent?: ChatWithToolsOptions["onStreamEvent"];
       /** Which conversation this request continues; see model-request-identity. */
@@ -319,10 +284,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
       );
     }
 
-    const timeoutMs =
-      options?.timeoutMs ??
-      validatedOptions.requestTimeoutMs ??
-      DEFAULT_MODEL_TIMEOUT_MS;
+    const timeoutMs = options?.timeoutMs ?? validatedOptions.requestTimeoutMs;
     const compactedUserPayload = compactOpenAiCompatibleUserPayload({
       operation,
       modelContextWindowTokens:
@@ -382,12 +344,6 @@ export function createOpenAiCompatibleJobFinderAiClient(
         }),
         apiMode,
         totalTimeoutMs: timeoutMs,
-        // A looping response can keep emitting real deltas forever. One
-        // low-effort extraction attempt gets a minute (healthy one-page reads
-        // measured 8–33s); a fresh attempt can still use the remaining total.
-        ...(operation === "extractResumeImportStage"
-          ? { attemptTimeoutMs: 60_000, idleOnModelProgressOnly: true }
-          : {}),
         ...resilience,
         idleOnModelProgressOnly: true,
         // Resume reads use low effort. Two missed reasoning-summary intervals
@@ -449,8 +405,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         {
           timeoutMs:
             validatedOptions?.resumeExtractionTimeoutMs ??
-            validatedOptions?.requestTimeoutMs ??
-            DEFAULT_RESUME_EXTRACTION_TIMEOUT_MS,
+            validatedOptions?.requestTimeoutMs,
           conversationKey: modelConversationKeys.resumeImport(input.resumeText),
         },
       );
@@ -501,11 +456,9 @@ export function createOpenAiCompatibleJobFinderAiClient(
         // reasoning: run it at the resume_import task effort (low unless
         // configured otherwise), not the client's main effort.
         reasoningEffort: reasoningEffortFor("resume_import"),
-        timeoutMs: resumeImportStageTimeoutMs(
-          input.stage,
-          validatedOptions?.resumeExtractionTimeoutMs,
+        timeoutMs:
+          validatedOptions?.resumeExtractionTimeoutMs ??
           validatedOptions?.requestTimeoutMs,
-        ),
       });
       const durationMs = Math.max(
         0,
@@ -527,8 +480,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         fetchModelJson,
         timeoutMs:
           validatedOptions?.resumeExtractionTimeoutMs ??
-          validatedOptions?.requestTimeoutMs ??
-          DEFAULT_RESUME_EXTRACTION_TIMEOUT_MS,
+          validatedOptions?.requestTimeoutMs,
       });
     },
     async createResumeDraft(input) {
@@ -537,9 +489,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         buildResumeRewriteProposalPrompt(input.searchPreferences.tailoringMode),
         buildGroundedResumeRewriteModelPayload(input),
         {
-          timeoutMs:
-            validatedOptions?.requestTimeoutMs ??
-            DEFAULT_RESUME_DRAFT_TIMEOUT_MS,
+          timeoutMs: validatedOptions?.requestTimeoutMs,
           conversationKey: modelConversationKeys.resumeWriting(input.profile),
         },
       );
@@ -770,11 +720,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
           effectiveMaxJobs,
         }) +
         " When excludedCanonicalUrls is supplied, those jobs were already read from this same page. Return only remaining jobs, without repeating those URLs. Return fewer than the limit when no more remain.";
-      const timeoutMs =
-        validatedOptions?.requestTimeoutMs ??
-        (input.pageType === "search_results"
-          ? SEARCH_RESULTS_EXTRACTION_TIMEOUT_MS
-          : DEFAULT_MODEL_TIMEOUT_MS);
+      const timeoutMs = validatedOptions?.requestTimeoutMs;
 
       const payload = await fetchModelJson(
         "extractJobsFromPage",
@@ -815,14 +761,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
         );
       }
 
-      // A writer turn is a whole resume: it gets the draft budget, which also
-      // covers one stalled stream (two minutes of silence) and its retry.
-      // Under the agent-turn limit, one stall plus a slow retry failed it.
-      const timeoutMs =
-        validatedOptions.requestTimeoutMs ??
-        (options?.reasoningTask === "resume_writer"
-          ? DEFAULT_RESUME_DRAFT_TIMEOUT_MS
-          : DEFAULT_AGENT_TURN_TIMEOUT_MS);
+      const timeoutMs = validatedOptions.requestTimeoutMs;
 
       if (options?.signal?.aborted) {
         throw new DOMException("Aborted", "AbortError");
@@ -1327,7 +1266,7 @@ export function createJobFinderAiClientFromEnvironment(
   );
   function createFallbackExecutionReceipt(
     capability: string,
-    stopReason: "no_progress" | "permanent_failure" | "time_budget",
+    stopReason: "no_progress" | "permanent_failure",
   ) {
     const timestamp = new Date().toISOString();
     return AgentTaskExecutionReceiptSchema.parse({
@@ -1375,6 +1314,7 @@ export function createJobFinderAiClientFromEnvironment(
         attempt < RESUME_IMPORT_STAGE_ATTEMPTS;
         attempt += 1
       ) {
+        input.signal?.throwIfAborted();
         if (attempt > 0) {
           await waitBeforeResumeImportRetry(attempt);
         }
@@ -1394,6 +1334,7 @@ export function createJobFinderAiClientFromEnvironment(
                 primary = rescued;
               }
             } catch (error) {
+              input.signal?.throwIfAborted();
               // The fast read already answered; a failed rescue must not
               // turn a completed stage into an import failure.
               logFallbackError("extractResumeImportStage", error);
@@ -1413,11 +1354,12 @@ export function createJobFinderAiClientFromEnvironment(
             },
           };
         } catch (error) {
+          input.signal?.throwIfAborted();
           lastError = error;
           logFallbackError("extractResumeImportStage", error);
           if (/timed out after \d+s/i.test(summarizeError(error))) {
-            // A timeout already spent the whole budget once; asking again
-            // would double the wait for the same answer.
+            // The transport already retried the silent connection or honoured
+            // an explicit operator timeout.
             break;
           }
         }
@@ -1559,15 +1501,12 @@ export function createJobFinderAiClientFromEnvironment(
         ) {
           return reply;
         }
-        const timedOut = reply.executionReceipt?.stopReason === "time_budget";
         return {
-          content: timedOut
-            ? "The AI took too long to answer this time, so nothing was changed. Send the request again."
-            : RESUME_ASSISTANT_UNAVAILABLE_REPLY,
+          content: RESUME_ASSISTANT_UNAVAILABLE_REPLY,
           patches: [],
           executionReceipt: createFallbackExecutionReceipt(
             "resume_guided_edit",
-            timedOut ? "time_budget" : "no_progress",
+            "no_progress",
           ),
         };
       } catch (error) {

@@ -615,7 +615,6 @@ export async function runSourceDebugWorkflow(
             targetJobCount: getSourceDebugTargetJobCount(phase),
             maxSteps: phaseMaxSteps,
             runControl: {
-              timeBudgetMs: SOURCE_DEBUG_PHASE_TIME_CEILING_MS,
               noProgressStepLimit: SOURCE_DEBUG_STALL_STEP_WINDOW,
             },
             startingUrls: phaseStartingUrls,
@@ -1311,7 +1310,6 @@ function describeSourceCheckPhaseActivity(phase: SourceDebugPhase): string {
  * SOURCE_DEBUG_STALL_STEP_WINDOW steps, twice: once to warn, once to stop).
  */
 const SOURCE_DEBUG_PHASE_STEP_CEILING = 60;
-const SOURCE_DEBUG_PHASE_TIME_CEILING_MS = 6 * 60_000;
 const SOURCE_DEBUG_STALL_STEP_WINDOW = 6;
 
 /**

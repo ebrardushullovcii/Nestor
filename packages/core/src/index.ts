@@ -30,3 +30,5 @@ export function fnv1a32(value: string): string {
   }
   return `fnv1a32:${(hash >>> 0).toString(16).padStart(8, "0")}`;
 }
+
+export { createConnectionIdleTimeout } from "./connection-idle";

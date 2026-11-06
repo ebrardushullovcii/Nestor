@@ -112,7 +112,7 @@ describe("tool-using AI capabilities", () => {
           ? T
           : never,
       ) => {
-        expect(input.getRemainingBudgetMs).toBeUndefined();
+        expect(input).not.toHaveProperty("getRemainingBudgetMs");
         if (++calls < 6)
           throw new ResumeProposalValidationError("Repair the proposal", [
             { code: "repair", message: "Try the next correction", path: [] },
@@ -591,7 +591,6 @@ describe("tool-using AI capabilities", () => {
     async ({ previewMs, expectedCalls }) => {
       vi.useFakeTimers();
       vi.setSystemTime(0);
-      let excludedMs = 0;
       let calls = 0;
       let renders = 0;
       try {
@@ -611,10 +610,8 @@ describe("tool-using AI capabilities", () => {
           request: {
             ...baseRequest(),
             resumeText: "Selected base resume",
-            getExcludedElapsedMs: () => excludedMs,
             renderPreview() {
               vi.setSystemTime(Date.now() + 700_000);
-              excludedMs += 700_000;
               vi.setSystemTime(Date.now() + previewMs);
               // The first proposal is refused; slow successful work does not
               // spend an aggregate deadline that prevents its repair.

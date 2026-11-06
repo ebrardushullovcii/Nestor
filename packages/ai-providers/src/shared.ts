@@ -382,8 +382,6 @@ export class ResumeProposalValidationError extends Error {
 }
 
 export interface CreateResumeDraftInput extends TailorResumeInput {
-  /** Trusted local PDF-slot queue wait only; rendering and AI validation still count. */
-  getExcludedElapsedMs?: () => number;
   /** Workspace replacement/shutdown cancels obsolete writers; ordinary batch Stop does not. */
   signal?: AbortSignal;
   availableTemplates?: readonly ResumeTemplateDefinition[];
@@ -398,7 +396,6 @@ export interface CreateResumeDraftInput extends TailorResumeInput {
     draft: TailoredResumeDraft;
     templateId: string;
     signal?: AbortSignal;
-    getRemainingBudgetMs?: () => number;
   }) => Promise<{
     templateId: string;
     pageCount: number | null;
@@ -713,6 +710,7 @@ export type BrowserVisualAnalysisResult = z.infer<
 export type { BrowserVisualAnalysisInput, BrowserVisualObservationSet };
 
 export interface ExtractResumeImportStageTransportInput extends ExtractResumeImportStageInput {
+  signal?: AbortSignal;
   documentBundle: ResumeDocumentBundle;
 }
 

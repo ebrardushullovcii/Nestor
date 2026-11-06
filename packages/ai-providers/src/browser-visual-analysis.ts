@@ -36,7 +36,6 @@ import {
 
 const DEFAULT_BROWSER_VISUAL_MODEL = DEFAULT_VISION_MODEL;
 const DEFAULT_BROWSER_VISUAL_BASE_URL = DEFAULT_OPENCODE_GO_BASE_URL;
-const DEFAULT_BROWSER_VISUAL_TIMEOUT_MS = 120_000;
 
 export const OpenAiCompatibleBrowserVisualProviderOptionsSchema = z.object({
   apiKey: z.string().trim().min(1),
@@ -126,7 +125,12 @@ function visualQuestionContextKey(value: BrowserVisualQuestionContext): string {
   ].join("\u0000");
 }
 
-function normalizeTimeoutLikeError(error: unknown, timeoutMs: number): Error {
+function normalizeTimeoutLikeError(
+  error: unknown,
+  timeoutMs: number | undefined,
+): Error {
+  if (timeoutMs === undefined)
+    return error instanceof Error ? error : new Error(String(error));
   if (error instanceof ModelRequestTimeoutError) {
     return error;
   }
@@ -488,8 +492,7 @@ export function createOpenAiCompatibleBrowserVisualAnalysisProvider(
   const validatedOptions = configuredOptions.success
     ? configuredOptions.data
     : null;
-  const timeoutMs =
-    validatedOptions?.requestTimeoutMs ?? DEFAULT_BROWSER_VISUAL_TIMEOUT_MS;
+  const timeoutMs = validatedOptions?.requestTimeoutMs;
   const status = AgentProviderStatusSchema.parse({
     kind: "openai_compatible_vision",
     role: "vision",
@@ -499,7 +502,7 @@ export function createOpenAiCompatibleBrowserVisualAnalysisProvider(
     baseUrl: validatedOptions?.baseUrl ?? null,
     modelContextWindowTokens: null,
     reservedHeadroomTokens: null,
-    requestTimeoutMs: configuredOptions.success ? timeoutMs : null,
+    requestTimeoutMs: configuredOptions.success ? (timeoutMs ?? null) : null,
     detail: configuredOptions.success
       ? "The configured vision provider classifies bounded browser screenshots into schema-validated observations only."
       : "The configured browser vision provider settings are invalid; deterministic visual fallback will be used.",
@@ -768,9 +771,9 @@ export function createBrowserVisualAnalysisProviderFromEnvironment(
           env.NESTOR_AI_VISION_REASONING_EFFORT,
       ) ?? DEFAULT_VISION_MODEL_REASONING_EFFORT,
     label: "Browser visual analysis",
-    requestTimeoutMs:
-      parseConfiguredNumber(env.NESTOR_BROWSER_VISION_TIMEOUT_MS) ??
-      DEFAULT_BROWSER_VISUAL_TIMEOUT_MS,
+    requestTimeoutMs: parseConfiguredNumber(
+      env.NESTOR_BROWSER_VISION_TIMEOUT_MS,
+    ),
     idleTimeoutMs: parseConfiguredNumber(env.NESTOR_AI_IDLE_TIMEOUT_MS),
     maxAttempts: parseConfiguredPositiveInteger(env.NESTOR_AI_MAX_ATTEMPTS),
     streaming: parseConfiguredBoolean(env.NESTOR_AI_STREAMING),

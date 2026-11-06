@@ -1,5 +1,4 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import * as agentRuntime from "@nestor/agent-runtime";
 import type { LLMClient } from "../agent/contracts";
 
 // Structural compatibility while the shared stream-liveness API lands.
@@ -13,10 +12,6 @@ type ModelOptions = NonNullable<Parameters<LLMClient["chatWithTools"]>[2]> & {
   onStreamEvent?: (event: StreamEvent) => void;
 };
 type Activity = { signal?: AbortSignal; onProgress?: () => void };
-
-/** Never pass Infinity to the older shared loop's unconditional Node timer. */
-export const APPLY_MODEL_TIMEOUT_MS =
-  "runModelTurn" in agentRuntime ? Number.POSITIVE_INFINITY : 2_147_483_647;
 
 /** Nested question/fact checks are progress in the model turn or tool waiting for them. */
 export function createApplyModelActivity(client: LLMClient) {

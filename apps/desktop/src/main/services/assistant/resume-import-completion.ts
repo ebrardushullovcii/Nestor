@@ -50,21 +50,10 @@ export async function waitForAssistantResumeImport(
     imported.latestResumeImportRun?.sourceResumeId === sourceResumeId
       ? imported.latestResumeImportRun
       : null;
-  const timeoutMs =
-    run?.modelRoles?.vision.timeoutMs ??
-    imported.visionProvider?.requestTimeoutMs ??
-    600_000;
-  const deadline = Date.now() + timeoutMs;
   let state = await service.getResumeImportState();
   while (run && state.activeVisionRunIds.includes(run.id)) {
     options.signal?.throwIfAborted();
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) {
-      throw new Error(
-        "The resume file was saved, but its visual scan is still finishing. Imported profile details are not confirmed yet.",
-      );
-    }
-    await delay(Math.min(200, remainingMs), undefined, {
+    await delay(200, undefined, {
       signal: options.signal,
     });
     state = await service.getResumeImportState();
