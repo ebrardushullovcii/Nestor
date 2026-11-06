@@ -73,10 +73,14 @@ test("HTML, visible text and JSON-LD traversal report actual evidence loss", () 
 });
 test("profession evidence, positive keyword shortcuts and closed-wording vetoes are visible", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
-  expect(professionEvidence(card("x".repeat(1400)))).toHaveLength(1200);
+  expect(professionEvidence(card("x".repeat(8001)))).toHaveLength(8000);
   expect(
-    professionEvidence(card(JSON.stringify({ description: "x".repeat(1400) }))),
-  ).toHaveLength(1200);
+    professionEvidence(card(JSON.stringify({ description: "x".repeat(8001) }))),
+  ).toHaveLength(8000);
+  expect(hits(log).filter((hit) => hit.limit === "evidence_window")).toEqual([
+    expect.objectContaining({ value: 8000 }),
+    expect.objectContaining({ value: 8000 }),
+  ]);
   expect(
     clearRoleMatch("Senior Backend Engineer", {
       targetRoles: ["Backend Engineer"],
