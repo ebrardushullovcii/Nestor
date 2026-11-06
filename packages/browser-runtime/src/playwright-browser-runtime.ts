@@ -1,3 +1,4 @@
+import { setTimeout as waitForConnection } from "node:timers/promises";
 import { withNavigationLiveness } from "./browser-navigation";
 import { withTraceScope } from "@nestor/core/run-trace";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
@@ -798,6 +799,30 @@ async function resolveBrowserDebugPort(
   );
 }
 
+/** Recheck endpoint liveness before each reconnect; Stop interrupts backoff. */
+export async function attachToLiveDebugger<T>(input: {
+  attach(): Promise<T>;
+  endpointReady(): Promise<boolean>;
+  signal: AbortSignal;
+}): Promise<T> {
+  let delayMs = 250;
+  for (;;) {
+    input.signal.throwIfAborted();
+    try {
+      return await input.attach();
+    } catch (cause) {
+      input.signal.throwIfAborted();
+      if (!(await input.endpointReady()))
+        throw new Error(
+          "Chrome's debugging endpoint disappeared while attaching.",
+          { cause },
+        );
+      await waitForConnection(delayMs, undefined, { signal: input.signal });
+      delayMs = Math.min(4_000, delayMs * 2);
+    }
+  }
+}
+
 async function waitForDebuggerEndpoint(
   debugPort: number,
   chromeProcess?: ChildProcess | null,
@@ -1259,6 +1284,7 @@ export function createBrowserAgentRuntime(
   const jobExtractor = options.jobExtractor;
   const runtimeAiClient = options.aiClient ?? null;
   let browserPromise: Promise<Browser> | null = null;
+  let connectionController: AbortController | null = null;
   let launchedChromeProcess: ChildProcess | null = null;
   let ownsChromeProcess = false;
   const envConcurrency = process.env.NESTOR_APPLICATION_PREPARATION_CONCURRENCY;
@@ -1924,19 +1950,25 @@ export function createBrowserAgentRuntime(
     await terminateChromeProcess(chromeProcess, shouldTerminate);
   }
 
-  async function connectBrowser(): Promise<Browser> {
+  async function connectBrowser(signal: AbortSignal): Promise<Browser> {
     const { chromium } = await import("playwright");
-    const cdpEndpoint =
-      (await getDebuggerWebSocketUrl(activeDebugPort)) ??
-      `http://127.0.0.1:${activeDebugPort}`;
     const browser = attachBrowserLifecycle(
-      await chromium.connectOverCDP(cdpEndpoint, { timeout: 5_000 }),
+      await attachToLiveDebugger({
+        signal,
+        endpointReady: () => isDebuggerEndpointReady(activeDebugPort),
+        attach: async () => {
+          const endpoint =
+            (await getDebuggerWebSocketUrl(activeDebugPort)) ??
+            `http://127.0.0.1:${activeDebugPort}`;
+          return chromium.connectOverCDP(endpoint, { timeout: 5_000 });
+        },
+      }),
     );
     await restoreBrowserWindowBounds(browser).catch(() => undefined);
     return browser;
   }
 
-  async function ensureBrowser(): Promise<Browser> {
+  async function ensureBrowser(signal?: AbortSignal): Promise<Browser> {
     if (options.browserHost) {
       browserPromise = options.browserHost.connect();
       return browserPromise;
@@ -1953,7 +1985,12 @@ export function createBrowserAgentRuntime(
       }
     }
 
+    connectionController = new AbortController();
+    const connectionSignal = signal
+      ? AbortSignal.any([signal, connectionController.signal])
+      : connectionController.signal;
     browserPromise = (async () => {
+      connectionSignal.throwIfAborted();
       activeDebugPort = await resolveBrowserDebugPort(
         debugPort,
         options.userDataDir,
@@ -2016,7 +2053,7 @@ export function createBrowserAgentRuntime(
         }
       }
 
-      return connectBrowser();
+      return connectBrowser(connectionSignal);
     })().catch(async (error: unknown) => {
       await terminateLaunchedChromeProcess().catch(() => undefined);
       resetBrowserConnection();
@@ -2026,8 +2063,8 @@ export function createBrowserAgentRuntime(
     return browserPromise;
   }
 
-  async function getContext(): Promise<BrowserContext> {
-    const browser = await ensureBrowser();
+  async function getContext(signal?: AbortSignal): Promise<BrowserContext> {
+    const browser = await ensureBrowser(signal);
     const context = browser.contexts()[0];
 
     if (!context) {
@@ -2076,7 +2113,7 @@ export function createBrowserAgentRuntime(
     if ((agentOptions.sourceCatalog?.length ?? 0) > 0) {
       // Catalog review needs an isolated page only if the agent later chooses
       // to browse. Do not depend on the source landing page being reachable.
-      const page = await (await getContext()).newPage();
+      const page = await (await getContext(agentOptions.signal)).newPage();
       await onPageResolved?.(page);
       setSessionState(
         source,
@@ -2090,12 +2127,12 @@ export function createBrowserAgentRuntime(
       agentOptions.startingUrls.find((url) => isHttpUrlLike(url)) ?? null;
 
     if (!navigationTarget) {
-      const page = await (await getContext()).newPage();
+      const page = await (await getContext(agentOptions.signal)).newPage();
       await onPageResolved?.(page);
       return page;
     }
 
-    const context = await getContext();
+    const context = await getContext(agentOptions.signal);
     const retainedApplicationPages =
       await getProtectedApplicationPages(context);
     const prepared = await prepareAutomationPageForTarget(context, {
@@ -2417,7 +2454,11 @@ export function createBrowserAgentRuntime(
 
   return {
     async readRenderedPage(url, readOptions) {
-      return readRenderedPageHtml(await getContext(), url, readOptions);
+      return readRenderedPageHtml(
+        await getContext(readOptions?.signal),
+        url,
+        readOptions,
+      );
     },
     getSessionState(source) {
       return Promise.resolve(
@@ -2437,6 +2478,7 @@ export function createBrowserAgentRuntime(
       });
     },
     async closeSession(source) {
+      connectionController?.abort();
       if (
         pagesInUseByOtherRuns().length > 0 ||
         getLivePreparedApplicationPages().length > 0
@@ -3085,7 +3127,7 @@ export function createBrowserAgentRuntime(
               },
             );
             try {
-              const context = await getContext();
+              const context = await getContext(options?.signal);
               const pagesBeforeRun = new Set(context.pages());
               const runSentinel = createApplicationRunServiceWorkerSentinel({
                 context,
@@ -3788,7 +3830,7 @@ export function createBrowserAgentRuntime(
       let releaseReservedTab: (() => void) | null = null;
       try {
         if (usesEmbeddedBrowserHost) {
-          const context = await getContext();
+          const context = await getContext(agentOptions.signal);
           releaseReservedTab = await reserveEmbeddedApplicationTab(
             context,
             agentOptions.signal,

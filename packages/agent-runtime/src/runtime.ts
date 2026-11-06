@@ -158,28 +158,6 @@ export function classifyAgentTaskFailure(
   return error instanceof Error ? "permanent" : "unknown";
 }
 
-function shouldRetry(kind: AgentTaskFailureKind): boolean {
-  return kind === "transient_provider" || kind === "transient_network";
-}
-
-async function waitForBackoff(attempt: number, signal?: AbortSignal) {
-  const delayMs = Math.min(4_000, 300 * 2 ** attempt) + attempt * 37;
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => signal?.removeEventListener("abort", abort);
-    const timer = setTimeout(() => {
-      cleanup();
-      resolve();
-    }, delayMs);
-    const abort = () => {
-      clearTimeout(timer);
-      cleanup();
-      reject(new DOMException("Aborted", "AbortError"));
-    };
-    if (signal?.aborted) abort();
-    else signal?.addEventListener("abort", abort, { once: true });
-  });
-}
-
 function parseToolArguments(
   text: string | undefined,
 ): { ok: true; value: unknown } | { ok: false } {
@@ -424,7 +402,7 @@ export async function runAgentTask<TState, TDraft>(
 
     emitProgress("thinking", "Working on the next useful change");
     let response: Awaited<ReturnType<AgentTaskModel["chat"]>> | null = null;
-    for (let attempt = 0; ; attempt += 1) {
+    for (;;) {
       try {
         providerCalls += 1;
         response = await runModelTurn(
@@ -466,16 +444,19 @@ export async function runAgentTask<TState, TDraft>(
           stopReason = "cancelled";
           break;
         }
-        if (error instanceof ModelTurnTimeoutError) continue;
-        const failureKind = classifyAgentTaskFailure(error, options.signal);
-        if (!shouldRetry(failureKind)) throw error;
-        try {
-          await waitForBackoff(attempt, options.signal);
-        } catch (backoffError) {
-          if (!isAgentRunAborted(options.signal)) throw backoffError;
-          stopReason = "cancelled";
-          break;
+        if (error instanceof ModelTurnTimeoutError) {
+          const fact = {
+            role: "user" as const,
+            content:
+              "The last model connection went idle and was disconnected. No reply or tool calls were received. Continue from the recorded draft and action history.",
+          };
+          messages.push(fact);
+          recentMessages.push(fact);
+          continue;
         }
+        // Provider adapters own protocol recovery and waits. Return an actual
+        // request failure to the caller instead of replaying it unchanged.
+        throw error;
       }
     }
     if (!response) {

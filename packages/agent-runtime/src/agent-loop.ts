@@ -516,6 +516,11 @@ export async function runAgentLoop(
           );
         }
         if (error instanceof ModelTurnTimeoutError && error.kind === "idle") {
+          messages.push({
+            role: "user",
+            content:
+              "The last model connection went idle and was disconnected. No reply or actions were received. Continue from the recorded action history.",
+          });
           await note(
             "waiting for the AI provider; reconnecting the silent connection",
           );

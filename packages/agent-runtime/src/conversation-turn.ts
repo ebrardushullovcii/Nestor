@@ -287,7 +287,7 @@ export async function runConversationTurn(
     if (!current()) return result("superseded");
     await readSteering();
 
-    const messages = await options.assembleMessages(turnMessages);
+    let messages = await options.assembleMessages(turnMessages);
     const definitions = (
       options.getToolDefinitions?.() ??
       options.tools.map((tool) => tool.definition)
@@ -331,11 +331,25 @@ export async function runConversationTurn(
           // Existing explicit caps can grow. With no cap the route already
           // supplies its maximum; recover without dropping the action history.
           if (outputLimit !== undefined) outputLimit *= 2;
+          else {
+            turnMessages.push({
+              role: "user",
+              content:
+                "Your last reply hit this route's maximum output and was discarded. Answer more briefly or split the work into smaller tool calls. No actions from that discarded reply ran.",
+            });
+            messages = await options.assembleMessages(turnMessages);
+          }
           modelCalls += 1;
           await options.onOutputLimitRetry?.();
           continue;
         }
         if (error instanceof ModelTurnTimeoutError && error.kind === "idle") {
+          turnMessages.push({
+            role: "user",
+            content:
+              "The last model connection went idle and was disconnected. No reply or actions were received from it. Continue from the recorded action history.",
+          });
+          messages = await options.assembleMessages(turnMessages);
           modelCalls += 1;
           await emit({
             type: "stream",

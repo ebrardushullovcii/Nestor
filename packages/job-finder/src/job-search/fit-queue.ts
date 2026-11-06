@@ -38,10 +38,7 @@ export function createFitQueue(
       : Date.now() - (settings.postedWithin === "week" ? 7 : 30) * 86_400_000;
   let scored = 0,
     judging = 0,
-    drainers = 0,
-    // A batch with no answers (usually the provider's rate limit) halves the
-    // requests in flight; each answered batch adds one back, up to the limit.
-    ceiling = limit;
+    drainers = 0;
   let deferred = false;
   let partialTimer: ReturnType<typeof setTimeout> | null = null;
   const clearTimer = () => {
@@ -85,12 +82,6 @@ export function createFitQueue(
     Math.ceil(
       (job.description.length + job.title.length + job.location.length) / 3.5,
     ) + 500;
-
-  /** Unanswered listings stay queued until the model supplies their scores. */
-  const retry = (jobs: readonly JobDetail[], nothingAnswered: boolean) => {
-    if (nothingAnswered) ceiling = Math.max(1, Math.ceil(ceiling / 2));
-    pending.push(...jobs.map((job) => job.id));
-  };
 
   const judge = async (jobs: JobDetail[]) => {
     for (const job of jobs) inFlight.add(job.id);
@@ -149,14 +140,13 @@ export function createFitQueue(
       }
       signal.throwIfAborted();
       await persist(updates);
-      if (updates.length && ceiling < limit) ceiling++;
       // Superseded returned judgments are not technical omissions.
       for (const update of updates) answered.add(update.id);
-      // A superseded input is normal background work, not a model failure.
-      retry(
-        jobs.filter((job) => !answered.has(job.id)),
-        updates.length === 0,
-      );
+      const missing = jobs.filter((job) => !answered.has(job.id));
+      if (missing.length)
+        throw new Error(
+          `Fit response omitted job ids: ${missing.map((job) => job.id).join(", ")}. Their listings remain saved and unscored.`,
+        );
     } finally {
       for (const job of jobs) inFlight.delete(job.id);
       judging -= jobs.length;
@@ -216,14 +206,14 @@ export function createFitQueue(
       pending.length = 0;
       return;
     }
-    if (pending.length && active.size >= Math.min(limit, ceiling))
+    if (pending.length && active.size >= limit)
       reportSelfLimitHit({
         limit: "fit_concurrency",
         kind: "concurrency",
-        value: Math.min(limit, ceiling),
+        value: limit,
         where: "job-finder/fitQueue/pump",
       });
-    while (active.size < Math.min(limit, ceiling) && pending.length) {
+    while (active.size < limit && pending.length) {
       const jobs = takeBatch(drainers > 0);
       if (!jobs) break;
       const task = judge(jobs)

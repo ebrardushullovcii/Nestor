@@ -91,53 +91,41 @@ test("a streaming HTTP page keeps working beyond the old 15-second deadline", as
   }
 });
 
-test("retries dropped connections beyond three failures until success", async () => {
-  vi.useFakeTimers();
-  try {
-    let calls = 0;
-    const request = vi.fn<typeof fetch>(() =>
-      ++calls <= 6
-        ? Promise.reject(new TypeError("fetch failed"))
-        : Promise.resolve(new Response("last listing")),
-    );
-    const reading = createHttpPageReader({ fetch: request })(
-      "https://example.test/jobs",
-      {},
-    );
-    await vi.runAllTimersAsync();
-    expect((await reading).html).toBe("last listing");
-    expect(calls).toBe(7);
-  } finally {
-    vi.useRealTimers();
-  }
+test.each([
+  new TypeError("fetch failed", { cause: new Error("ENOTFOUND") }),
+  new DOMException("Connection idle", "AbortError"),
+])("returns connection failure to the deciding lane: %s", async (error) => {
+  const request = vi.fn<typeof fetch>(() => Promise.reject(error));
+  await expect(
+    createHttpPageReader({ fetch: request })("https://example.test/jobs", {}),
+  ).rejects.toBe(error);
+  expect(request).toHaveBeenCalledOnce();
 });
 
-test("Stop reaches immediate retry failures and HTTP refusals keep their real status", async () => {
+test("Stop interrupts a server-requested queue pause", async () => {
   vi.useFakeTimers();
   try {
     const controller = new AbortController();
-    let calls = 0;
-    const request = vi.fn<typeof fetch>(() => {
-      if (++calls === 6)
-        setTimeout(() => controller.abort(new Error("Stopped")), 0);
-      return Promise.reject(new TypeError("fetch failed"));
+    const request = vi.fn<typeof fetch>(() =>
+      Promise.resolve(
+        new Response("busy", {
+          status: 429,
+          headers: { "retry-after": "120" },
+        }),
+      ),
+    );
+    const read = createHttpPageReader({ fetch: request });
+    await expect(read("https://example.test/jobs", {})).rejects.toMatchObject({
+      status: 429,
     });
     const stopped = expect(
-      createHttpPageReader({ fetch: request })("https://example.test/jobs", {
-        signal: controller.signal,
-      }),
-    ).rejects.toThrow("Stopped");
-    await vi.runAllTimersAsync();
+      read("https://example.test/next", { signal: controller.signal }),
+    ).rejects.toThrow();
+    await vi.advanceTimersByTimeAsync(1);
+    controller.abort();
     await stopped;
-    expect(calls).toBe(6);
+    expect(request).toHaveBeenCalledOnce();
   } finally {
     vi.useRealTimers();
   }
-  const refused = vi.fn<typeof fetch>(() =>
-    Promise.resolve(new Response("missing", { status: 404 })),
-  );
-  await expect(
-    createHttpPageReader({ fetch: refused })("https://example.test/jobs", {}),
-  ).rejects.toMatchObject({ status: 404 });
-  expect(refused).toHaveBeenCalledOnce();
 });

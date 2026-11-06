@@ -1425,14 +1425,6 @@ function inferWorkModes(
 
 /** Silence (no answer, no bytes) that ends a feed request. */
 const PROVIDER_API_TIMEOUT_MS = 30_000;
-/** The longest a feed may take even while bytes keep arriving. */
-/**
- * Waits before asking a provider again after a failure that passes: the
- * connection dropped, or the provider asked to slow down. A computer waking
- * from sleep takes a few seconds to get its network back. Retryable failures
- * keep their work until success or Stop.
- */
-const PROVIDER_API_RETRY_DELAYS_MS: readonly number[] = [2_000, 10_000, 30_000];
 /** Feed jobs converted between turns of the event loop. */
 const PROVIDER_API_JOBS_PER_TURN = 25;
 const SUMMARY_MAX_LENGTH = 280;
@@ -1453,20 +1445,6 @@ function readRetryAfterMs(value: string | null): number | null {
   if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
   const at = Date.parse(value);
   return Number.isNaN(at) ? null : Math.max(0, at - Date.now());
-}
-
-/**
- * Whether asking again could work: a network error, a silent connection, or a
- * provider asking to slow down. A permanent refusal or a malformed feed
- * is reported as it is.
- */
-function isPassingProviderFailure(error: unknown): boolean {
-  if (error instanceof ProviderApiStatusError)
-    return error.status === 408 || error.status === 429 || error.status >= 500;
-  if (isAbortError(error)) return true;
-  // undici reports every connection failure as a TypeError "fetch failed"
-  // with the cause attached.
-  return error instanceof TypeError;
 }
 
 /**
@@ -1874,8 +1852,6 @@ export async function collectPublicProviderJobs(input: {
   artifact: Pick<SourceInstructionArtifact, "intelligence">;
   source: JobSource;
   signal?: AbortSignal;
-  /** Waits before each repeat request; the default suits real networks. */
-  retryDelaysMs?: readonly number[];
   /** Silence that ends a request; the default suits real networks. */
   timeoutMs?: number;
   /** Discovery can consume the worker's normalized postings without a second pass. */
@@ -1886,7 +1862,6 @@ export async function collectPublicProviderJobs(input: {
   pagesCovered?: number;
 }> {
   const provider = input.artifact.intelligence.provider;
-  const retryDelaysMs = input.retryDelaysMs ?? PROVIDER_API_RETRY_DELAYS_MS;
   if (!provider || provider.apiAvailability !== "available") {
     return {
       jobs: [],
@@ -1921,9 +1896,7 @@ export async function collectPublicProviderJobs(input: {
             await response.body?.cancel().catch(() => undefined);
             throw new ProviderApiStatusError(
               response.status,
-              response.status === 429
-                ? readRetryAfterMs(response.headers.get("retry-after"))
-                : null,
+              readRetryAfterMs(response.headers.get("retry-after")),
             );
           }
           return await readFeedBytes(response, timeout.progress);
@@ -1935,18 +1908,24 @@ export async function collectPublicProviderJobs(input: {
 
       pagesCovered += 1;
       let payload: Uint8Array;
-      for (let attempt = 0; ; attempt += 1) {
+      for (;;) {
         try {
           payload = await requestFeed();
           break;
         } catch (error) {
           input.signal?.throwIfAborted();
-          if (!isPassingProviderFailure(error)) throw error;
-          const delay =
-            retryDelaysMs[attempt] ?? retryDelaysMs.at(-1) ?? 30_000;
-          const retryAfter =
-            error instanceof ProviderApiStatusError ? error.retryAfterMs : null;
-          await waitBeforeRetry(Math.max(delay, retryAfter ?? 0), input.signal);
+          if (
+            !(error instanceof ProviderApiStatusError) ||
+            !(
+              error.status === 408 ||
+              error.status === 429 ||
+              error.status >= 500
+            ) ||
+            error.retryAfterMs === null ||
+            error.retryAfterMs <= 0
+          )
+            throw error;
+          await waitBeforeRetry(error.retryAfterMs, input.signal);
         }
       }
 

@@ -573,50 +573,27 @@ describe("collectPublicProviderJobs", () => {
     );
   });
 
-  test("asks again through a dropped connection and keeps the feed", async () => {
+  test("returns a dropped connection to the deciding lane without holding the source", async () => {
     const target = createGreenhouseTarget();
     const intelligence = inferSourceIntelligenceFromTarget({
       target,
       currentArtifact: null,
     });
-    const dropped = () =>
-      Promise.reject(
-        new TypeError("fetch failed", { cause: { code: "ECONNRESET" } }),
-      );
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
-      .mockImplementationOnce(dropped)
-      .mockImplementationOnce(dropped)
-      .mockImplementationOnce(dropped)
-      .mockImplementationOnce(dropped)
-      .mockImplementationOnce(dropped)
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            jobs: [
-              {
-                id: 4401,
-                title: "Platform Engineer",
-                absolute_url: "https://boards.greenhouse.io/acme/jobs/4401",
-                location: { name: "Remote" },
-                content: "<p>Build the platform.</p>",
-              },
-            ],
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
+      .mockRejectedValue(
+        new TypeError("fetch failed", { cause: new Error("ENOTFOUND") }),
       );
 
     const result = await collectPublicProviderJobs({
       target,
       artifact: { intelligence },
       source: "target_site",
-      retryDelaysMs: [0],
     });
 
-    expect(fetchSpy).toHaveBeenCalledTimes(6);
-    expect(result.warning).toBeNull();
-    expect(result.jobs.map((job) => job.sourceJobId)).toEqual(["4401"]);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(result.warning).toContain("could not be reached");
+    expect(result.jobs).toEqual([]);
   });
 
   test("does not ask a provider again after it answers with an error", async () => {
@@ -633,7 +610,6 @@ describe("collectPublicProviderJobs", () => {
       target,
       artifact: { intelligence },
       source: "target_site",
-      retryDelaysMs: [0, 0, 0],
     });
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -681,7 +657,7 @@ describe("collectPublicProviderJobs", () => {
       target,
       artifact: { intelligence },
       source: "target_site",
-      retryDelaysMs: [],
+
       timeoutMs: 30,
     });
     // Queue the quiet-time check, then deliver the response before its
@@ -1286,4 +1262,56 @@ describe("collectPublicProviderJobs", () => {
       ),
     ).toBe("anchor");
   });
+});
+
+test("public feed honors a server Retry-After beyond sixty seconds then reads the feed", async () => {
+  vi.useFakeTimers();
+  const target = createGreenhouseTarget();
+  const intelligence = inferSourceIntelligenceFromTarget({
+    target,
+    currentArtifact: null,
+  });
+  const fetchSpy = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(
+      new Response("busy", { status: 503, headers: { "retry-after": "120" } }),
+    )
+    .mockResolvedValueOnce(new Response('{"jobs":[]}', { status: 200 }));
+  const pending = collectPublicProviderJobs({
+    target,
+    artifact: { intelligence },
+    source: "target_site",
+  });
+  await vi.advanceTimersByTimeAsync(119999);
+  expect(fetchSpy).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(1);
+  expect((await pending).warning).toBeNull();
+  expect(fetchSpy).toHaveBeenCalledTimes(2);
+});
+
+test("Stop interrupts a public feed server wait", async () => {
+  vi.useFakeTimers();
+  const stop = new AbortController();
+  const target = createGreenhouseTarget();
+  const intelligence = inferSourceIntelligenceFromTarget({
+    target,
+    currentArtifact: null,
+  });
+  const fetchSpy = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(
+      new Response("busy", { status: 429, headers: { "retry-after": "120" } }),
+    );
+  const pending = expect(
+    collectPublicProviderJobs({
+      target,
+      artifact: { intelligence },
+      source: "target_site",
+      signal: stop.signal,
+    }),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  await vi.advanceTimersByTimeAsync(1);
+  stop.abort();
+  await pending;
+  expect(fetchSpy).toHaveBeenCalledOnce();
 });

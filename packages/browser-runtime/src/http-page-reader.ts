@@ -1,6 +1,6 @@
 import { traceEvent } from "@nestor/core/run-trace";
 import { createHostQueue } from "./host-queue";
-import { createConnectionIdleTimeout, yieldToEventLoop } from "@nestor/core";
+import { createConnectionIdleTimeout } from "@nestor/core";
 import {
   DiscoveryPageReadError,
   type ReadDiscoveryPostingPage,
@@ -31,112 +31,86 @@ export function createHttpPageReader(
         throw new Error("This listing needs a browser read.");
       return options.readRendered(url, readOptions);
     }
-    for (let attempt = 0; ; attempt++) {
-      const queueSignal = readOptions.signal ?? new AbortController().signal;
+    const queueSignal = readOptions.signal ?? new AbortController().signal;
+    return queue.run(address.hostname, queueSignal, async () => {
+      const idle = createConnectionIdleTimeout(options.idleTimeoutMs ?? 15_000);
+      const signal = AbortSignal.any([idle.signal, queueSignal]);
       try {
-        const result = await queue.run(
-          address.hostname,
-          queueSignal,
-          async () => {
-            const idle = createConnectionIdleTimeout(
-              options.idleTimeoutMs ?? 15_000,
-            );
-            const signal = AbortSignal.any([idle.signal, queueSignal]);
-            try {
-              traceEvent("search_page_started", {
-                url,
-                rendered: false,
-                attempt,
-              });
-              const response = await request(url, {
-                method: readOptions.jsonQuery ? "POST" : "GET",
-                signal,
-                ...(readOptions.jsonQuery
-                  ? {
-                      body: JSON.stringify(readOptions.jsonQuery),
-                      redirect: "manual" as const,
-                    }
-                  : {}),
-                headers: {
-                  Accept:
-                    "text/html, application/json, application/xml;q=0.9, */*;q=0.5",
-                  ...(readOptions.jsonQuery
-                    ? { "Content-Type": "application/json" }
-                    : {}),
-                },
-              });
-              idle.progress();
-              traceEvent("search_page_fetched", {
-                url,
-                finalUrl: response.url || url,
-                status: response.status,
-                attempt,
-              });
-              if (
-                response.status === 408 ||
-                response.status === 429 ||
-                response.status >= 500
-              ) {
-                const retry = response.headers.get("retry-after");
-                const until =
-                  retry && /^\d+(?:\.\d+)?$/u.test(retry)
-                    ? Date.now() + Number(retry) * 1000
-                    : retry
-                      ? Date.parse(retry)
-                      : NaN;
-                queue.pause(
-                  address.hostname,
-                  Number.isFinite(until) ? until : Date.now() + 1000,
-                );
+        traceEvent("search_page_started", {
+          url,
+          rendered: false,
+        });
+        const response = await request(url, {
+          method: readOptions.jsonQuery ? "POST" : "GET",
+          signal,
+          ...(readOptions.jsonQuery
+            ? {
+                body: JSON.stringify(readOptions.jsonQuery),
+                redirect: "manual" as const,
               }
-              if (!response.ok) {
-                await response.body?.cancel();
-                throw new DiscoveryPageReadError(response.status);
-              }
-              const reader = response.body?.getReader();
-              const decoder = new TextDecoder();
-              let html = "";
-              if (reader) {
-                const cancel = () => {
-                  void reader.cancel().catch(() => undefined);
-                };
-                signal.addEventListener("abort", cancel, { once: true });
-                if (signal.aborted) cancel();
-                try {
-                  for (;;) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    idle.progress();
-                    html += decoder.decode(value, { stream: true });
-                  }
-                  html += decoder.decode();
-                } finally {
-                  signal.removeEventListener("abort", cancel);
-                  reader.releaseLock();
-                }
-              }
-              signal.throwIfAborted();
-              return { html, finalUrl: response.url || url };
-            } finally {
-              idle.cleanup();
-            }
+            : {}),
+          headers: {
+            Accept:
+              "text/html, application/json, application/xml;q=0.9, */*;q=0.5",
+            ...(readOptions.jsonQuery
+              ? { "Content-Type": "application/json" }
+              : {}),
           },
-        );
-        return result;
-      } catch (error) {
-        queueSignal.throwIfAborted();
-        // HTTP refusals are page facts for browser/model continuation. Retry
-        // dropped or silent connections, where no usable page answer arrived.
-        const retryable =
-          !(error instanceof DiscoveryPageReadError) &&
-          (error instanceof TypeError ||
-            (error instanceof Error && error.name === "AbortError"));
-        if (!retryable) throw error;
-        if (!(error instanceof DiscoveryPageReadError))
-          queue.pause(address.hostname, Date.now() + 1000);
-        // Keep Stop responsive even when an adapter resolves retries immediately.
-        await yieldToEventLoop();
+        });
+        idle.progress();
+        traceEvent("search_page_fetched", {
+          url,
+          finalUrl: response.url || url,
+          status: response.status,
+        });
+        if (
+          response.status === 408 ||
+          response.status === 429 ||
+          response.status >= 500
+        ) {
+          const retry = response.headers.get("retry-after");
+          const until =
+            retry && /^\d+(?:\.\d+)?$/u.test(retry)
+              ? Date.now() + Number(retry) * 1000
+              : retry
+                ? Date.parse(retry)
+                : NaN;
+          queue.pause(
+            address.hostname,
+            Number.isFinite(until) ? until : Date.now() + 1000,
+          );
+        }
+        if (!response.ok) {
+          await response.body?.cancel();
+          throw new DiscoveryPageReadError(response.status);
+        }
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let html = "";
+        if (reader) {
+          const cancel = () => {
+            void reader.cancel().catch(() => undefined);
+          };
+          signal.addEventListener("abort", cancel, { once: true });
+          if (signal.aborted) cancel();
+          try {
+            for (;;) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              idle.progress();
+              html += decoder.decode(value, { stream: true });
+            }
+            html += decoder.decode();
+          } finally {
+            signal.removeEventListener("abort", cancel);
+            reader.releaseLock();
+          }
+        }
+        signal.throwIfAborted();
+        return { html, finalUrl: response.url || url };
+      } finally {
+        idle.cleanup();
       }
-    }
+    });
   };
 }

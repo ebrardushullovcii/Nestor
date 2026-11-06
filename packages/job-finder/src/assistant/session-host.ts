@@ -766,7 +766,7 @@ export class AssistantSessionHost {
             conversationId,
             live.turn.id,
             "continued",
-            "The AI response reached its output limit. Retrying with the full output allowance.",
+            "The AI reply was too long. Asking it to continue in smaller pieces.",
           ),
         onEmptyReply: async (detail) => {
           recoverEmptyReply = true;

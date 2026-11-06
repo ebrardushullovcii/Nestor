@@ -38,7 +38,7 @@ function run(
       })
     : runConversationTurn({
         ...common,
-        assembleMessages: () => Promise.resolve([]),
+        assembleMessages: (history) => Promise.resolve([...history]),
         ceilings: {
           modelIdleTimeoutMs: options.idleMs ?? 180_000,
         },
@@ -115,6 +115,9 @@ for (const kind of ["agent", "conversation"] as const) {
     const result = await pending;
     expect(result.ending).toBe(kind === "agent" ? "finished" : "replied");
     expect(chatWithTools).toHaveBeenCalledTimes(4);
+    expect(JSON.stringify(chatWithTools.mock.calls[3]?.[0])).toContain(
+      "went idle and was disconnected",
+    );
     expect(signals.slice(0, 3).every((signal) => signal.aborted)).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -207,11 +210,17 @@ test("repeated output truncation recovers without executing partial tools", asyn
         execute,
       },
     ],
-    assembleMessages: () => Promise.resolve([]),
+    assembleMessages: (history) => Promise.resolve([...history]),
   });
   expect(result.ending).toBe("replied");
   expect(chatWithTools).toHaveBeenCalledTimes(3);
   expect(execute).not.toHaveBeenCalled();
+  expect(JSON.stringify(chatWithTools.mock.calls[1]?.[0])).toContain(
+    "was discarded",
+  );
+  expect(JSON.stringify(chatWithTools.mock.calls[2]?.[0])).toContain(
+    "split the work",
+  );
 });
 
 test("a long tool stays alive while its nested model reports progress", async () => {

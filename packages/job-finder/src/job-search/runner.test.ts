@@ -1447,34 +1447,10 @@ test("fit batches run in parallel up to the limit", async () => {
   controller.abort();
 });
 
-test("unanswered fit work stays queued beyond the former retry count until answered", async () => {
+test("unanswered fit work reports the omitted ids and remains saved for continuation", async () => {
   const { context, engine, store } = setup();
   const ids = seedBacklog(store, 120, LONG_LISTING);
-  const never = ids[5]!;
-  let neverAttempts = 0;
-  let calls = 0,
-    inFlight = 0,
-    peakAfterFailure = 0;
-  engine.fitJobs.mockImplementation(async ({ jobs }) => {
-    const first = calls++ === 0;
-    if (jobs.some((job) => job.id === never)) neverAttempts++;
-    if (!first) peakAfterFailure = Math.max(peakAfterFailure, ++inFlight);
-    await new Promise((done) => setTimeout(done, first ? 1 : 5));
-    if (!first) inFlight--;
-    // The first request gets no answer at all (a rate limit, say); one job
-    // is never answered.
-    return first
-      ? []
-      : jobs
-          .filter(({ id }) => id !== never || neverAttempts >= 7)
-          .map(({ id }) => ({
-            id,
-            score: 80,
-            summary: "Fit",
-            reasons: [],
-            gaps: [],
-          }));
-  });
+  engine.fitJobs.mockResolvedValue([]);
   const errors: unknown[] = [];
   const controller = new AbortController();
   const queue = createFitQueue(
@@ -1488,16 +1464,20 @@ test("unanswered fit work stays queued beyond the former retry count until answe
   );
   queue.enqueue(ids);
   await queue.drain();
-  expect(queue.scored).toBe(ids.length);
-  expect(store.unscoredJobIds(200)).toEqual([]);
+  expect(queue.scored).toBe(0);
+  expect(store.unscoredJobIds(200)).toEqual(ids);
+  expect(errors.length).toBeGreaterThan(0);
   expect(
-    engine.fitJobs.mock.calls.filter(([input]) =>
-      input.jobs.some(({ id }) => id === never),
+    errors.every(
+      (error) =>
+        error instanceof Error && error.message.includes("omitted job ids"),
     ),
-  ).toHaveLength(7);
-  expect(errors).toHaveLength(0);
-  // Halved from 4 when nothing came back, then climbing back up.
-  expect(peakAfterFailure).toBeLessThanOrEqual(4);
+  ).toBe(true);
+  expect(
+    engine.fitJobs.mock.calls.flatMap(([input]) =>
+      input.jobs.map((job) => job.id),
+    ),
+  ).toEqual(ids);
   controller.abort();
 });
 
@@ -1528,11 +1508,9 @@ test("failed fit work retains jobs and retries saved listings without reading si
     return [];
   });
   await runner.start({ postedWithin: "any" });
-  await vi.waitFor(() =>
-    expect(engine.fitJobs.mock.calls.length).toBeGreaterThanOrEqual(3),
-  );
-  runner.stop();
   await finished(runner);
+  expect(engine.fitJobs).toHaveBeenCalledOnce();
+  expect(runner.status().fitError).toContain("omitted job ids");
   expect(store.listJobs({ stage: "found" }).rows).toHaveLength(1);
   const reads = engine.readListings.mock.calls.length;
   const screens = engine.screenCards.mock.calls.length;

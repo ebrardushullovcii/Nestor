@@ -62,7 +62,16 @@ export async function collectRenderedInventory(input: {
           action.visible && !action.disabled && moreListingsLabel(action.label),
       );
       if (!action)
-        return partial("The remaining results control could not be resolved.");
+        return partial(
+          observation.actions.some(
+            (action) =>
+              action.visible &&
+              action.disabled &&
+              moreListingsLabel(action.label),
+          )
+            ? `${cards.size} listings; More is disabled and no loading indicator is present.`
+            : "The remaining results control could not be resolved.",
+        );
       input.signal?.throwIfAborted();
       const outcome = await input.hands.clickElement(action.ref);
       if (!outcome.ok)
@@ -90,15 +99,20 @@ export async function collectRenderedInventory(input: {
           changed = true;
           break;
         }
-        const waitingForBatch =
-          view.loading ||
-          view.actions.some(
-            (action) =>
-              action.visible &&
-              action.disabled &&
-              moreListingsLabel(action.label),
-          );
-        if (!waitingForBatch) break;
+        if (!view.loading) {
+          if (
+            view.actions.some(
+              (action) =>
+                action.visible &&
+                action.disabled &&
+                moreListingsLabel(action.label),
+            )
+          )
+            return partial(
+              `${cards.size} listings; More is disabled and no loading indicator is present.`,
+            );
+          break;
+        }
         await input.hands.wait(500);
       }
       if (!changed) {

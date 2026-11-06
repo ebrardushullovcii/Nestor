@@ -839,3 +839,59 @@ it("hands the complete long page to the model without marking a fabricated omiss
   expect(detail?.descriptionLikelyTruncated).toBe(false);
   expect(detail?.description).toBe(text);
 });
+
+it("a connection failure returns to the caller with its cause", async () => {
+  const error = new TypeError("fetch failed", {
+    cause: new Error("ENOTFOUND"),
+  });
+  const request = vi.fn(() => Promise.reject(error));
+  vi.stubGlobal("fetch", request);
+  await expect(
+    createDefaultListingHtmlFetcher()("https://example.test/job", {
+      signal: new AbortController().signal,
+    }),
+  ).rejects.toBe(error);
+  expect(request).toHaveBeenCalledOnce();
+});
+
+it("a page refusal without a server wait settles as a saved failure", async () => {
+  const fetchHtml = vi.fn((url: string) =>
+    Promise.resolve({ status: 503, html: "unavailable", finalUrl: url }),
+  );
+  const result = await enrichSavedJobListingDetails({
+    jobs: [cardOnlyJob()],
+    fetchHtml,
+    assess,
+    now: () => NOW,
+  });
+  expect(fetchHtml).toHaveBeenCalledOnce();
+  expect(result.jobs[0]?.listingDetailFetch).toMatchObject({
+    outcome: "fetch_failed",
+    detail: "The page answered 503.",
+  });
+});
+
+it("server-requested waits continue beyond the former attempt count until success", async () => {
+  vi.useFakeTimers();
+  try {
+    let calls = 0;
+    const fetchHtml = vi.fn((url: string) =>
+      Promise.resolve(
+        ++calls <= 6
+          ? { status: 503, html: "busy", retryAfterMs: 1, finalUrl: url }
+          : { status: 200, html: RECORD_PAGE, finalUrl: url },
+      ),
+    );
+    const pending = enrichSavedJobListingDetails({
+      jobs: [cardOnlyJob()],
+      fetchHtml,
+      assess,
+      now: () => NOW,
+    });
+    await vi.runAllTimersAsync();
+    expect((await pending).summary.enriched).toBe(1);
+    expect(fetchHtml).toHaveBeenCalledTimes(7);
+  } finally {
+    vi.useRealTimers();
+  }
+});

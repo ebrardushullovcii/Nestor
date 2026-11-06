@@ -4501,3 +4501,58 @@ describe("managed context active service worker gate", () => {
     }
   });
 });
+
+test("CDP attach recovers transient failures while its endpoint remains live", async () => {
+  const { attachToLiveDebugger } = await import("./playwright-browser-runtime");
+  vi.useFakeTimers();
+  try {
+    let failures = 6;
+    const attach = vi.fn(() =>
+      --failures >= 0
+        ? Promise.reject(new Error("CDP websocket reset"))
+        : Promise.resolve("connected"),
+    );
+    const endpointReady = vi.fn(() => Promise.resolve(true));
+    const pending = attachToLiveDebugger({
+      attach,
+      endpointReady,
+      signal: new AbortController().signal,
+    });
+    await vi.runAllTimersAsync();
+    expect(await pending).toBe("connected");
+    expect(attach).toHaveBeenCalledTimes(7);
+    expect(endpointReady).toHaveBeenCalledTimes(6);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("CDP attach returns a vanished endpoint's original failure", async () => {
+  const { attachToLiveDebugger } = await import("./playwright-browser-runtime");
+  const cause = new Error("WebSocket connection refused");
+  await expect(
+    attachToLiveDebugger({
+      attach: () => Promise.reject(cause),
+      endpointReady: () => Promise.resolve(false),
+      signal: new AbortController().signal,
+    }),
+  ).rejects.toMatchObject({ cause });
+});
+
+test("Stop interrupts CDP attach backoff", async () => {
+  const { attachToLiveDebugger } = await import("./playwright-browser-runtime");
+  const stop = new AbortController();
+  const attach = vi.fn(() => Promise.reject(new Error("CDP reset")));
+  const pending = expect(
+    attachToLiveDebugger({
+      attach,
+      endpointReady: () => {
+        stop.abort();
+        return Promise.resolve(true);
+      },
+      signal: stop.signal,
+    }),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  await pending;
+  expect(attach).toHaveBeenCalledOnce();
+});

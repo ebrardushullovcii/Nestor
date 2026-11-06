@@ -157,3 +157,27 @@ test.each(["options", "steps"] as const)(
     ).toBe(false);
   },
 );
+
+test("a list that refuses scrolling returns its observed choices as incomplete", async () => {
+  vi.useFakeTimers();
+  const page = dom(
+    '<div id="choices" style="overflow-y:auto"><div role="option">One choice</div></div>',
+  );
+  page.window.eval(
+    'Object.defineProperty(HTMLElement.prototype,"scrollHeight",{get(){return 10000}});Object.defineProperty(HTMLElement.prototype,"clientHeight",{get(){return 100}});Object.defineProperty(HTMLElement.prototype,"scrollTop",{get(){return 0},set(){}});',
+  );
+  const list = {
+    evaluate: (read: (...args: unknown[]) => unknown, input: unknown) =>
+      Promise.resolve(
+        page.window.eval(
+          `(${read.toString()})(document.getElementById("choices"),${JSON.stringify(input)})`,
+        ),
+      ),
+  } as unknown as Locator;
+  const pending = readWholeList(list, "Other choice");
+  await vi.runAllTimersAsync();
+  expect(await pending).toMatchObject({
+    complete: false,
+    options: ["One choice"],
+  });
+});

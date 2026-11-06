@@ -54,7 +54,7 @@ export interface ListingHtmlFetchResult {
   status: number;
   html: string;
   finalUrl: string;
-  /** Server-requested pause after a 429, already parsed. */
+  /** Server-requested pause, already parsed. */
   retryAfterMs?: number;
 }
 
@@ -198,7 +198,7 @@ const BROWSER_LIKE_HEADERS = {
 /** Plain-HTTP page reader used outside tests. */
 export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
   return async (url, options) => {
-    while (true) {
+    {
       options.signal.throwIfAborted();
       const idle = createConnectionIdleTimeout(60_000);
       const signal = options.signal
@@ -259,6 +259,9 @@ export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
           }
         }
         signal.throwIfAborted();
+        const retryAfterMs = parseRetryAfterMs(
+          response.headers.get("retry-after"),
+        );
         return {
           status: response.status,
           html:
@@ -271,25 +274,8 @@ export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
                 )
               : text,
           finalUrl: response.url || url,
-          ...(response.status === 429
-            ? {
-                retryAfterMs: parseRetryAfterMs(
-                  response.headers.get("retry-after"),
-                ),
-              }
-            : {}),
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
         };
-      } catch (error) {
-        options.signal.throwIfAborted();
-        if (
-          !(error instanceof TypeError) &&
-          !(error instanceof Error && error.name === "AbortError")
-        )
-          throw error;
-        await waitForRateLimitPause(
-          DEFAULT_RATE_LIMIT_PAUSE_MS,
-          options.signal,
-        );
       } finally {
         idle.cleanup();
       }
@@ -297,17 +283,13 @@ export function createDefaultListingHtmlFetcher(): ListingHtmlFetcher {
   };
 }
 
-function parseRetryAfterMs(value: string | null): number {
-  if (!value) {
-    return DEFAULT_RATE_LIMIT_PAUSE_MS;
-  }
+function parseRetryAfterMs(value: string | null): number | undefined {
+  if (!value) return undefined;
   const seconds = Number(value);
   const requestedMs = Number.isFinite(seconds)
     ? seconds * 1_000
     : Date.parse(value) - Date.now();
-  if (!Number.isFinite(requestedMs)) {
-    return DEFAULT_RATE_LIMIT_PAUSE_MS;
-  }
+  if (!Number.isFinite(requestedMs)) return undefined;
   return Math.max(0, Math.round(requestedMs));
 }
 
@@ -912,12 +894,14 @@ export async function enrichSavedJobListingDetails(
         let response = await input.fetchHtml(job.canonicalUrl, {
           signal: input.signal ?? new AbortController().signal,
         });
-        // Server pauses are shared; retryable failures keep their place until
-        // success or Stop, without a per-listing or per-pass attempt count.
+        // Only an explicit server wait supplies a reason to repeat this read.
+        // Otherwise return the HTTP failure as a fact to the deciding lane.
         while (
-          response.status === 408 ||
-          response.status === 429 ||
-          response.status >= 500
+          (response.status === 408 ||
+            response.status === 429 ||
+            response.status >= 500) &&
+          response.retryAfterMs !== undefined &&
+          response.retryAfterMs > 0
         ) {
           registerRateLimit(response);
           await waitForSharedRateLimit();
@@ -925,6 +909,12 @@ export async function enrichSavedJobListingDetails(
             signal: input.signal ?? new AbortController().signal,
           });
         }
+        if (
+          response.status === 408 ||
+          response.status === 429 ||
+          response.status >= 500
+        )
+          registerRateLimit(response);
         if (
           response.status === 401 ||
           response.status === 403 ||

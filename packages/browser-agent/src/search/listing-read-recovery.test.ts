@@ -45,6 +45,9 @@ test.each(["length", "max_output_tokens", "transport"])(
       goals,
       client: { chatWithTools },
     });
+    expect(JSON.stringify(chatWithTools.mock.calls[1]?.[0])).toContain(
+      "was discarded",
+    );
     expect(result.related).toEqual([card]);
     expect(result.failed).toEqual([]);
     expect(result.seen).toEqual([]);

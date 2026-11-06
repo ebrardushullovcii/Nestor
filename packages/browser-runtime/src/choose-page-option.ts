@@ -292,8 +292,14 @@ export async function readWholeList(
             return done(!loading, null);
           }
         }
+        const beforeScroll = scroller.scrollTop;
         scroller.scrollTop += Math.max(scroller.clientHeight * 0.8, 40);
         await wait(120);
+        if (scroller.scrollTop === beforeScroll) {
+          // The requested scroll did not move. Return the observed options
+          // as incomplete so the model can choose another interaction.
+          return done(false, collect());
+        }
       }
     },
     {

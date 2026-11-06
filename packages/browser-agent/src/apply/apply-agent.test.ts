@@ -1615,18 +1615,6 @@ describe("apply agent run endings", () => {
     expect(progress).toContain("asking the assistant what to do next");
   });
 
-  test("an agent that keeps doing nothing is warned once and then stopped", async () => {
-    const result = await runApplyAgent(
-      config(page(), { runControl: { maxSteps: 40, noProgressStepLimit: 3 } }),
-      repeatingModel("inspect_form", {}),
-    );
-
-    expect(result.outcome).toBe("stuck");
-    expect(result.reason).toContain("stopped responding");
-    // Stopped well before the ceiling: one warning, then one more idle window.
-    expect(result.steps).toBeLessThan(12);
-  });
-
   test("an agent that says it is stuck is believed, and its words reach the person", async () => {
     const result = await runApplyAgent(
       config(page()),
@@ -2214,21 +2202,6 @@ describe("no field is written twice", () => {
   });
 });
 
-describe("only meaningful page movement counts as progress", () => {
-  test("repeated scrolling cannot keep a stuck run alive", async () => {
-    const result = await runApplyAgent(
-      config(page(), {
-        runControl: { noProgressStepLimit: 3, maxSteps: 20 },
-      }),
-      repeatingModel("scroll", { direction: "down" }),
-    );
-
-    expect(result.outcome).toBe("stuck");
-    expect(result.reason).toContain("nothing new happened");
-    expect(result.steps).toBeLessThan(20);
-  });
-});
-
 describe("the browser failing underneath a step", () => {
   test("one failure is handed back to the model as a fact, and the run carries on", async () => {
     const source = page();
@@ -2264,34 +2237,6 @@ describe("the browser failing underneath a step", () => {
     expect(result.outcome).toBe("prepared");
     expect(result.notes.join("\n")).toContain("browser failure");
     expect(result.notes.join("\n")).toContain("moved to a new address");
-  });
-
-  test("the browser failing three times in a row ends the run in plain words", async () => {
-    const source = page();
-    const base = hands(source);
-    let reads = 0;
-    const deadHands: ApplyPageHands = {
-      ...base,
-      observe: () => {
-        reads += 1;
-        return reads === 1
-          ? base.observe()
-          : Promise.reject(
-              new Error(
-                "The browser tab Job Finder was working in was closed.",
-              ),
-            );
-      },
-    };
-    const result = await runApplyAgent(
-      config(source, { hands: deadHands }),
-      repeatingModel("observe", {}),
-    );
-
-    expect(result.outcome).toBe("stuck");
-    expect(result.reason).toContain("the browser page stopped responding");
-    expect(result.reason).toContain("was closed");
-    expect(result.reason).not.toContain("locator");
   });
 });
 

@@ -761,13 +761,14 @@ test("Stop interrupts an uncooperative typed-task tool and starts no later step"
   expect(after).not.toHaveBeenCalled();
 });
 
-test("Stop during provider backoff returns a cancelled receipt without retrying", async () => {
-  vi.useFakeTimers();
-  try {
-    const controller = new AbortController();
-    const chat = vi.fn(() => Promise.reject(new Error("Network reset")));
-    const pending = runAgentTask({
-      taskId: "stop-backoff",
+test("a provider request failure returns its cause to the deciding caller without replay", async () => {
+  const error = new Error("Network reset", {
+    cause: new Error("ECONNREFUSED"),
+  });
+  const chat = vi.fn(() => Promise.reject(error));
+  await expect(
+    runAgentTask({
+      taskId: "request-failure",
       capability: "synthetic",
       systemPrompt: "Finish",
       state: {},
@@ -776,62 +777,7 @@ test("Stop during provider backoff returns a cancelled receipt without retrying"
       tools: [],
       validate: () => [],
       buildContext: () => ({}),
-      signal: controller.signal,
-    });
-    await vi.advanceTimersByTimeAsync(1);
-    expect(vi.getTimerCount()).toBe(1);
-    controller.abort();
-    expect((await pending).receipt.stopReason).toBe("cancelled");
-    expect(chat).toHaveBeenCalledOnce();
-    expect(vi.getTimerCount()).toBe(0);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("retryable task provider failures continue beyond three attempts until success", async () => {
-  vi.useFakeTimers();
-  try {
-    let attempts = 0;
-    const pending = runAgentTask({
-      taskId: "retry-until-success",
-      capability: "synthetic",
-      systemPrompt: "Finish",
-      state: {},
-      initialDraft: {},
-      model: {
-        chat: () =>
-          ++attempts <= 6
-            ? Promise.reject(new Error("Network reset"))
-            : Promise.resolve({
-                toolCalls: [
-                  {
-                    id: "finish",
-                    type: "function",
-                    function: { name: "finish_task", arguments: "{}" },
-                  },
-                ],
-              }),
-      },
-      tools: [
-        {
-          name: "finish_task",
-          description: "Finish",
-          inputSchema: z.object({}),
-          parameters: { type: "object" },
-          permission: "read",
-          execute: () => ({ summary: "Done", finish: true }),
-        },
-      ],
-      validate: () => [],
-      buildContext: () => ({}),
-    });
-    await vi.runAllTimersAsync();
-    const result = await pending;
-    expect(result.receipt.stopReason).toBe("completed");
-    expect(result.receipt.providerCalls).toBe(7);
-    expect(vi.getTimerCount()).toBe(0);
-  } finally {
-    vi.useRealTimers();
-  }
+    }),
+  ).rejects.toBe(error);
+  expect(chat).toHaveBeenCalledOnce();
 });
