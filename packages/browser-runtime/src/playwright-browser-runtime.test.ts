@@ -1425,9 +1425,18 @@ describe("playwright browser runtime", () => {
       const { createBrowserAgentRuntime } =
         await import("./playwright-browser-runtime");
       const mockAiClient = {
-        chatWithTools: vi
-          .fn()
-          .mockResolvedValue({ content: "done", toolCalls: [] }),
+        chatWithTools: vi.fn().mockResolvedValue({
+          toolCalls: [
+            {
+              id: "finish",
+              type: "function",
+              function: {
+                name: "finish",
+                arguments: JSON.stringify({ reason: "Navigation checked." }),
+              },
+            },
+          ],
+        }),
         getStatus: () => ({
           kind: "deterministic",
           role: "chat",
@@ -1648,6 +1657,7 @@ describe("playwright browser runtime", () => {
       expect(fakeContext.newPage).not.toHaveBeenCalled();
       expect(blankPage.goto).toHaveBeenCalledWith("https://example.com/jobs", {
         waitUntil: "domcontentloaded",
+        timeout: 0,
       });
       expect(blankPage.bringToFront).toHaveBeenCalled();
       expect(backgroundLivePage.goto).not.toHaveBeenCalled();
@@ -2134,9 +2144,18 @@ describe("playwright browser runtime", () => {
       const { createBrowserAgentRuntime } =
         await import("./playwright-browser-runtime");
       const mockAiClient = {
-        chatWithTools: vi
-          .fn()
-          .mockResolvedValue({ content: "done", toolCalls: [] }),
+        chatWithTools: vi.fn().mockResolvedValue({
+          toolCalls: [
+            {
+              id: "finish",
+              type: "function",
+              function: {
+                name: "finish",
+                arguments: JSON.stringify({ reason: "Navigation checked." }),
+              },
+            },
+          ],
+        }),
         getStatus: () => ({
           kind: "deterministic",
           role: "chat",
@@ -3185,9 +3204,18 @@ describe("managed context service worker blocking", () => {
       const { createBrowserAgentRuntime } =
         await import("./playwright-browser-runtime");
       const mockAiClient = {
-        chatWithTools: vi
-          .fn()
-          .mockResolvedValue({ content: "done", toolCalls: [] }),
+        chatWithTools: vi.fn().mockResolvedValue({
+          toolCalls: [
+            {
+              id: "finish",
+              type: "function",
+              function: {
+                name: "finish",
+                arguments: JSON.stringify({ reason: "Navigation checked." }),
+              },
+            },
+          ],
+        }),
         getStatus: () => ({
           kind: "deterministic",
           role: "chat",
@@ -4972,9 +5000,18 @@ describe("managed context active service worker gate", () => {
         evaluate: vi.fn().mockResolvedValue(null),
       });
       const mockAiClient = {
-        chatWithTools: vi
-          .fn()
-          .mockResolvedValue({ content: "done", toolCalls: [] }),
+        chatWithTools: vi.fn().mockResolvedValue({
+          toolCalls: [
+            {
+              id: "finish",
+              type: "function",
+              function: {
+                name: "finish",
+                arguments: JSON.stringify({ reason: "Navigation checked." }),
+              },
+            },
+          ],
+        }),
         getStatus: () => ({
           kind: "deterministic",
           role: "chat",

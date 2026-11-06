@@ -112,7 +112,7 @@ test("an unusual title is judged with full duties once and its page is reused", 
   expect(read.jobs).toHaveLength(2);
 });
 
-test("a failed duty read is evidence for the model, not a code-side profession veto", () => {
+test("a failed duty read is evidence for the model, not a code-side profession veto", async () => {
   const client = {
     chatWithTools: vi.fn(() =>
       Promise.resolve({ content: '{"keep":{"0":1}}' }),
@@ -1271,7 +1271,7 @@ test("a known employer beside a breadcrumb still needs the real location read", 
 
 test.each([403, 429, 999, 404, 410, 500])(
   "a browser HTTP %s hands its failure to browser navigation",
-  (status) => {
+  async (status) => {
     const navigateFallback = vi.fn(() =>
       Promise.resolve({
         cards: [],
@@ -1469,7 +1469,7 @@ test("completed browser coverage replaces the initial load-more warning", async 
   ]);
 });
 
-test("missing title/company parses and a different heading still reach the model with the complete listing", () => {
+test("missing title/company parses and a different heading still reach the model with the complete listing", async () => {
   const middle = "Special requirement in the middle: Albanian and TypeScript.";
   const text = "Duties ".repeat(8000) + middle + " Details".repeat(8000);
   const chatWithTools = vi.fn<LLMClient["chatWithTools"]>((messages) => {

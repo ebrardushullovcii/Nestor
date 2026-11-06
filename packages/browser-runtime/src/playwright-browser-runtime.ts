@@ -1,3 +1,4 @@
+import { withNavigationLiveness } from "./browser-navigation";
 import { withTraceScope } from "@nestor/core/run-trace";
 import {
   bindTracePage,
@@ -1030,10 +1031,12 @@ async function navigatePageToTarget(input: {
   }
 
   allowPrepareOnlyRunNavigation(input.page, input.targetUrl);
-  await input.page.goto(input.targetUrl, {
-    waitUntil: "domcontentloaded",
-    ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
-  });
+  await withNavigationLiveness(input.page, () =>
+    input.page.goto(input.targetUrl, {
+      waitUntil: "domcontentloaded",
+      ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
+    }),
+  );
 
   return true;
 }
@@ -4093,6 +4096,7 @@ export function createBrowserAgentRuntime(
             const response = await page
               .goto(navigationTarget, {
                 waitUntil: "domcontentloaded",
+                timeout: 0,
               })
               .catch((error: unknown) => {
                 // A navigation deadline does not mean the page is unusable.

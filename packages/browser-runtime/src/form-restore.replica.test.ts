@@ -5,13 +5,16 @@ import { join, resolve as resolvePath } from "node:path";
 import {
   createApplyPageHands,
   runApplyAgent,
+  runJobSearchAgent,
   type FormReplay,
 } from "@nestor/browser-agent";
 import { CandidateProfileSchema } from "@nestor/contracts";
 import { chromium, type Browser, type Page } from "playwright";
 import { afterAll, beforeAll, expect, test } from "vitest";
-import { createPlaywrightApplyPageSession } from "./apply-page-mechanics";
-import { readRenderedPageHtml } from "./rendered-page-reader";
+import {
+  createPlaywrightApplyPageMechanics,
+  createPlaywrightApplyPageSession,
+} from "./apply-page-mechanics";
 import {
   allowPrepareOnlyRunNavigation,
   closePrepareOnlyFinalActionWindow,
@@ -73,15 +76,67 @@ test("Gatekeeper remembers verification and all six detail reads reach content",
   try {
     const before = posts().length;
     for (let id = 1; id <= 6; id++) {
-      const read = await readRenderedPageHtml(
-        context,
-        `${base}/gatekeeper/security/${id}`,
-        {
-          ready: (html) => html.includes("About the role"),
+      const page = await context.newPage();
+      await page.goto(`${base}/gatekeeper/security/${id}`);
+      let turn = 0;
+      const result = await runJobSearchAgent({
+        page,
+        hands: createApplyPageHands(createPlaywrightApplyPageMechanics(page)),
+        config: {
+          source: "target_site",
+          maxSteps: 1,
+          targetJobCount: 1,
+          userProfile: CandidateProfileSchema.parse({
+            id: "replica",
+            yearsExperience: 2,
+            baseResume: {
+              id: "resume",
+              fileName: "synthetic.txt",
+              textContent: "Synthetic experience",
+              textUpdatedAt: new Date().toISOString(),
+              uploadedAt: new Date().toISOString(),
+              extractionStatus: "ready",
+            },
+          }),
+          searchPreferences: { targetRoles: [], locations: [] },
+          startingUrls: [`${base}/gatekeeper/security/${id}`],
+          navigationPolicy: {
+            allowedHostnames: ["127.0.0.1"],
+            allowSubdomains: true,
+          },
+          promptContext: { siteLabel: "Gatekeeper replica" },
         },
-      );
-      expect(read.finalUrl).toBe(`${base}/gatekeeper/jobs/${id}`);
-      expect(read.html).toContain("What you will do");
+        llmClient: {
+          chatWithTools: () => {
+            const action =
+              ++turn === 1
+                ? { name: "wait", args: { milliseconds: 1000 } }
+                : {
+                    name: "finish",
+                    args: {
+                      reason: "The check cleared and the listing is readable.",
+                    },
+                  };
+            return Promise.resolve({
+              toolCalls: [
+                {
+                  id: `turn-${turn}`,
+                  type: "function",
+                  function: {
+                    name: action.name,
+                    arguments: JSON.stringify(action.args),
+                  },
+                },
+              ],
+            });
+          },
+        },
+        jobExtractor: { extractJobsFromPage: () => Promise.resolve([]) },
+      });
+      expect(result.incomplete).toBe(false);
+      expect(page.url()).toBe(`${base}/gatekeeper/jobs/${id}`);
+      expect(await page.content()).toContain("What you will do");
+      await page.close();
     }
     expect(
       (await context.cookies()).some(

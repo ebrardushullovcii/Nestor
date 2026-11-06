@@ -201,7 +201,7 @@ test.each([999, 403, 429])(
         signal: input.signal,
       });
       expect(read.failures).toEqual([]);
-      expect(read.jobs[0]?.description).toBe(fullText);
+      expect(read.jobs[0]?.description).toBe(fullText.trim());
       expect(runAgentDiscovery).toHaveBeenCalledTimes(2);
       expect(runAgentDiscovery.mock.calls[0]?.[1]).toMatchObject({
         browserPermissions: context.browserPermissions,
