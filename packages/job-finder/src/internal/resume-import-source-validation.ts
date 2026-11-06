@@ -418,10 +418,12 @@ function groundSourceRecord(
   } else if (section === "education") {
     const graduation = ownLines
       .find((line) => /(?:19|20)\d{2}/.test(line.text))
-      ?.text.match(/\b((?:19|20)\d{2})\b/);
+      ?.text.match(
+        /\b((?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+)?(?:19|20)\d{2})\b/i,
+      );
     if (graduation) {
       result.startDate = null;
-      result.endDate = graduation[1] ?? null;
+      result.endDate = canonicalizeRecordDateText(graduation[1]);
     }
   }
   if (section === "experience" && identity) {
@@ -475,9 +477,13 @@ function groundSourceRecord(
     );
     if (inline) {
       const qualification = (inline[1] ?? "").match(/^(.+?)\s+in\s+(.+)$/i);
-      result.schoolName = inline[2] ?? null;
+      const schoolAndField = (inline[2] ?? "").split(/\s+[–—]\s+/);
+      result.schoolName = schoolAndField.at(-1) ?? null;
       result.degree = qualification?.[1] ?? inline[1] ?? null;
-      result.fieldOfStudy = qualification?.[2] ?? null;
+      result.fieldOfStudy =
+        schoolAndField.length > 1
+          ? schoolAndField.slice(0, -1).join(" — ")
+          : (qualification?.[2] ?? null);
       result.location = inline[3] ?? null;
     }
   }

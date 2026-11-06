@@ -3,6 +3,7 @@ import {
   ResumeImportFieldCandidateSchema,
   hasProfileSetupPlaceholderValue,
   isFreshStartCandidateProfile,
+  normalizePublicLinkUrl,
   type CandidateProfile,
   type JobSearchPreferences,
   type ResumeDocumentBundle,
@@ -743,9 +744,12 @@ function normalizeRecordCandidateValue(
     case "language": {
       const value = parsedValue;
       return {
-        language: typeof value.language === "string" ? value.language : null,
-        proficiency:
-          typeof value.proficiency === "string" ? value.proficiency : null,
+        language: readAliasString(value, ["language", "languageName", "name"]),
+        proficiency: readAliasString(value, [
+          "proficiency",
+          "level",
+          "fluency",
+        ]),
         interviewPreference: value.interviewPreference === true,
         notes: typeof value.notes === "string" ? value.notes : null,
       };
@@ -1900,6 +1904,13 @@ function recordDetailsAlreadySaved(
     }
     if (typeof value === "string") {
       if (!value.trim()) return true;
+      if (
+        key === "summary" &&
+        toNarrativeStringArray(saved.achievements).some(
+          (achievement) => normalizeText(achievement) === normalizeText(value),
+        )
+      )
+        return true;
       if (key === "startDate" || key === "endDate") {
         return (
           canonicalizeRecordDateText(value) ===
@@ -2727,6 +2738,21 @@ export const DUPLICATE_LINK_REASON = "duplicate_link_candidate";
 const GENERIC_LINK_KEYS = new Set(["portfolioUrl", "personalWebsiteUrl"]);
 const NAMED_LINK_KEYS = ["linkedinUrl", "githubUrl"] as const;
 
+function normalizeContactLinkCandidate(
+  candidate: ResumeImportFieldCandidate,
+): ResumeImportFieldCandidate {
+  if (
+    candidate.target.section !== "contact" ||
+    ![...NAMED_LINK_KEYS, ...GENERIC_LINK_KEYS].includes(
+      candidate.target.key,
+    ) ||
+    typeof candidate.value !== "string"
+  )
+    return candidate;
+  const value = normalizePublicLinkUrl(candidate.value);
+  return { ...candidate, value, normalizedValue: value, valuePreview: value };
+}
+
 function normalizeLinkForComparison(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -2793,12 +2819,14 @@ export function reconcileCandidates(
   const resolved: ResumeImportFieldCandidate[] = [];
   const { candidates: foldedCandidates, foldedAway } =
     foldLooseRecordFieldCandidates(
-      candidates.map((candidate) => ({
-        ...candidate,
-        value: cleanImportedValue(
-          candidate.value,
-        ) as ResumeImportFieldCandidate["value"],
-      })),
+      candidates.map((candidate) =>
+        normalizeContactLinkCandidate({
+          ...candidate,
+          value: cleanImportedValue(
+            candidate.value,
+          ) as ResumeImportFieldCandidate["value"],
+        }),
+      ),
     );
   for (const candidate of foldedAway) {
     resolved.push(

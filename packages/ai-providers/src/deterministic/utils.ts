@@ -216,10 +216,27 @@ export function normalizeLocationLabel(value: string | null): string | null {
 }
 
 export function extractAllUrls(resumeText: string): string[] {
+  const lines = splitLines(resumeText);
+  const sectionStart = lines.findIndex(isResumeSectionHeading);
+  const header = (
+    sectionStart < 0 ? lines.slice(0, 12) : lines.slice(0, sectionStart)
+  ).join("\n");
+  // Bare domains are common contact values. Restrict them to the header so
+  // software names such as Node.js in a skills section cannot become links.
+  const bareUrls = header.split(/[\n|·•;]/).flatMap((part) => {
+    const value = part
+      .trim()
+      .replace(/^(?:website|portfolio|linkedin|github)\s*:\s*/i, "")
+      .replace(/[),.;]+$/, "");
+    return /^(?:[a-z0-9-]+\.)+[a-z]{2,}(?:\/[^\s<>)]*)?$/i.test(value)
+      ? [value]
+      : [];
+  });
   return uniqueStrings(
-    (resumeText.match(/https?:\/\/[^\s]+/gi) ?? []).map((url) =>
-      url.replace(/[),.;]+$/, ""),
-    ),
+    [
+      ...(resumeText.match(/https?:\/\/[^\s<>]+/gi) ?? []),
+      ...bareUrls.map((url) => `https://${url}`),
+    ].map((url) => url.replace(/[),.;]+$/, "")),
   );
 }
 

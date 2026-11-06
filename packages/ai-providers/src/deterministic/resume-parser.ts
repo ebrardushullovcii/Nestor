@@ -11,7 +11,6 @@ import {
 import {
   cleanLine,
   extractAllUrls,
-  extractFirstUrl,
   extractRegexMatch,
   findSectionBodyLinesByAliases,
   isResumeSectionHeading,
@@ -784,6 +783,7 @@ export function buildDeterministicResumeProfileExtraction(
       .replace(/(\*\*|__|~~)(.+?)\1/g, "$2")
       .replace(/(?<!\w)([*_])([^\n]+?)\1(?!\w)/g, "$2")
       .replace(/^\s*#{1,6}\s+/gm, "")
+      .replace(/\b(\d{1,2})\s*\r?\n\s*(\/\d{4})\b/g, "$1$2")
       .replace(/(\p{L})-\s*\r?\n\s*(?=\p{Ll})/gu, "$1"),
   };
   const lines = splitLines(input.resumeText);
@@ -827,10 +827,10 @@ export function buildDeterministicResumeProfileExtraction(
     preserveExistingValues ? input.existingProfile.phone : null,
   );
   const extractedGithubUrl = inferGithubUrl(input.resumeText);
-  const extractedLinkedinUrl = extractFirstUrl(
-    input.resumeText,
-    /https?:\/\/(?:www\.)?linkedin\.com\/[\w./?%&=+-]*/i,
-  );
+  const extractedLinkedinUrl =
+    extractAllUrls(input.resumeText).find((url) =>
+      /^https?:\/\/(?:www\.)?linkedin\.com\//i.test(url),
+    ) ?? null;
   const extractedTimeZone = inferTimeZoneFromLocation(currentLocation);
   const extractedSalaryCurrency =
     inferSalaryCurrencyFromLocation(currentLocation);

@@ -2,13 +2,11 @@ import { describe, expect, test } from "vitest";
 
 import {
   ResumeImportFieldCandidateSchema,
+  CandidateExperienceSchema,
   type ResumeImportFieldCandidate,
 } from "@nestor/contracts";
 import { reconcileCandidates } from "./internal/resume-import-reconciliation";
-import {
-  createFreshStartSeedProfile,
-  createSeed,
-} from "./test-fixtures";
+import { createFreshStartSeedProfile, createSeed } from "./test-fixtures";
 import {
   createStageCandidate,
   createTestBundle,
@@ -77,6 +75,43 @@ describe("resume import reconciliation", () => {
     });
   const scannedBundle = () =>
     createTestBundle({ fullText: "", blocks: [], qualityScore: 0.2836 });
+
+  test.each([
+    ["Built accessible tools.", "rejected"],
+    ["Led a new team.", "needs_review"],
+  ] as const)(
+    "only asks about genuinely new role summaries: %s",
+    (summary, resolution) => {
+      const role = CandidateExperienceSchema.parse({
+        id: "saved_role",
+        title: "Engineer",
+        companyName: "Example Labs",
+        startDate: "2020",
+        isCurrent: true,
+        achievements: ["Built accessible tools."],
+      });
+      const profile = { ...emptyProfile(), experiences: [role] };
+      const candidate = scannedCandidate({
+        target: { section: "experience", key: "record", recordId: null },
+        value: {
+          title: "Engineer",
+          companyName: "Example Labs",
+          startDate: "2020",
+          isCurrent: true,
+          summary,
+          achievements: ["Built accessible tools."],
+        },
+      });
+      const result = reconcileCandidates(
+        profile,
+        createSeed().searchPreferences,
+        [candidate],
+        undefined,
+        { readByModel: true },
+      );
+      expect(result[0]?.resolution).toBe(resolution);
+    },
+  );
 
   test("fills empty fields and collections from a clear scan despite an empty native text layer", () => {
     const seed = createSeed();

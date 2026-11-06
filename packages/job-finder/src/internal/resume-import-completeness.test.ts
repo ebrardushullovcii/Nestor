@@ -48,6 +48,40 @@ function input() {
   };
 }
 describe("resume import completeness", () => {
+  it.each([
+    ["London", 0],
+    ["Dublin", 1],
+  ] as const)(
+    "compares the employer and separately imported place against %s",
+    (location, count) => {
+      const source = input();
+      const result = completeResumeImport({
+        ...source,
+        bundle: {
+          ...source.bundle,
+          fullText: `Experience\nProduct Designer — Signal Systems, ${location}\nMarch 2021 - Present`,
+        },
+        candidates: [
+          {
+            ...role,
+            value: {
+              title: "Product Designer",
+              companyName: "Signal Systems",
+              location: "London",
+            },
+          },
+        ],
+      });
+      expect(
+        result.candidates.filter(
+          (candidate) =>
+            candidate.target.section === "experience" &&
+            candidate.resolutionReason === "grounded_completeness_suggestion",
+        ),
+      ).toHaveLength(count);
+    },
+  );
+
   it("offers editable headline, summary and roles from cited work history without applying them", () => {
     const source = input();
     const result = completeResumeImport(source);

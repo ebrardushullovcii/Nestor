@@ -2,11 +2,46 @@ import { describe, expect, test } from "vitest";
 
 import {
   areEquivalentEducationRecords,
+  areEquivalentCertificationReadings,
   areEquivalentExperienceRecords,
   canonicalizeRecordDateText,
 } from "./resume-record-identity";
 
 describe("resume record identity", () => {
+  test("merges delivery-format labels but preserves certificate levels, issuers and dates", () => {
+    const base = {
+      name: "Workflow Foundations",
+      issuer: "Example Academy",
+      issueDate: "2024",
+    };
+    expect(
+      areEquivalentCertificationReadings(base, {
+        ...base,
+        name: "Workflow Foundations (online course)",
+      }),
+    ).toBe(true);
+    expect(
+      areEquivalentCertificationReadings(base, {
+        ...base,
+        name: "Workflow Foundations (Advanced)",
+      }),
+    ).toBe(false);
+    expect(
+      areEquivalentCertificationReadings(base, {
+        ...base,
+        name: "Workflow Foundations (online course)",
+        issuer: "Other Academy",
+      }),
+    ).toBe(false);
+    expect(
+      areEquivalentCertificationReadings(base, {
+        ...base,
+        name: "Workflow Foundations (online course)",
+        issueDate: "2025",
+      }),
+    ).toBe(false);
+  });
+
   const locatedRole = {
     companyName: "Signal Systems",
     title: "Senior Full-stack Engineer",

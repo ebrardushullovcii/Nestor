@@ -29,6 +29,48 @@ import { detectResumeDocumentFileKind } from "../../adapters/resume-document/wor
 import { generateResumeVisionImages } from "../../adapters/resume-vision-images";
 
 const defaultBenchmarkCases = [
+  ...(["txt", "md"] as const).map((format) => ({
+    id: `persona_alex_long_${format}`,
+    label: `Alex, nine professional roles (${format})`,
+    resumePath: `apps/desktop/test-fixtures/job-finder/resume-import-personas/alex-vale-long.${format}`,
+    canary: false,
+    tags: [format, "long", "older_roles"],
+    expected: {
+      literalFields: {
+        fullName: "Alex Vale",
+        email: "alex.vale@example.test",
+        currentLocation: "Berlin, Germany",
+      },
+      summaryContains: [],
+      experienceRecords: [
+        ...Array.from({ length: 9 }, (_, index) => {
+          const number = 9 - index;
+          return {
+            title: `Engineer ${number}`,
+            companyName: `Example Studio ${number}`,
+            startDate: `${2007 + 2 * number}-01`,
+            endDate: `${2008 + 2 * number}-12`,
+            isCurrent: false,
+          };
+        }),
+        {
+          title: "Mentor",
+          companyName: "Example Coding Club",
+          startDate: "2009",
+          endDate: "2010",
+          isCurrent: false,
+        },
+      ],
+      educationRecords: [
+        {
+          schoolName: "Example University",
+          degree: "BSc Computing",
+          startDate: "2004",
+          endDate: "2008",
+        },
+      ],
+    },
+  })),
   {
     id: "resume_import_comprehensive_txt",
     label: "Comprehensive structured text canary",
@@ -88,20 +130,20 @@ const defaultBenchmarkCases = [
         },
       ],
       languageRecords: [
-        { language: "English", proficiency: "Professional working proficiency" },
+        {
+          language: "English",
+          proficiency: "Professional working proficiency",
+        },
         { language: "Dutch", proficiency: "Native" },
       ],
-      forbiddenProfileText: [
-        "PhD",
-        "Spanish - Native",
-        "managed 50 engineers",
-      ],
+      forbiddenProfileText: ["PhD", "Spanish - Native", "managed 50 engineers"],
     },
   },
   {
     id: "resume_import_sample_txt",
     label: "Deterministic text canary",
-    resumePath: "apps/desktop/test-fixtures/job-finder/resume-import-sample.txt",
+    resumePath:
+      "apps/desktop/test-fixtures/job-finder/resume-import-sample.txt",
     canary: true,
     tags: ["txt", "canary"],
     expected: {
@@ -412,8 +454,11 @@ function resolveRepoRoot(): string {
 function resolveBenchmarkCases(
   request: ResumeImportBenchmarkRequest,
 ): ResumeImportBenchmarkCase[] {
-  const cases = request.cases.length > 0 ? request.cases : defaultBenchmarkCases;
-  return cases.map((benchmarkCase) => ResumeImportBenchmarkCaseSchema.parse(benchmarkCase));
+  const cases =
+    request.cases.length > 0 ? request.cases : defaultBenchmarkCases;
+  return cases.map((benchmarkCase) =>
+    ResumeImportBenchmarkCaseSchema.parse(benchmarkCase),
+  );
 }
 
 function buildBenchmarkProfile(fileName: string): CandidateProfile {
@@ -456,7 +501,9 @@ async function loadDocumentBundle(input: {
   documentBundle: ResumeDocumentBundle;
   parseMethod: string;
   workerManifestVersion: string | null;
-  visionArtifact: Awaited<ReturnType<typeof generateResumeVisionImages>>["artifact"] | null;
+  visionArtifact:
+    | Awaited<ReturnType<typeof generateResumeVisionImages>>["artifact"]
+    | null;
 }> {
   const repoRoot = resolveRepoRoot();
   const resumePath = path.resolve(repoRoot, input.benchmarkCase.resumePath);
@@ -482,8 +529,11 @@ async function loadDocumentBundle(input: {
     parseMethod: [
       extracted.bundle.parserManifest?.workerKind ?? "unknown_worker",
       extracted.bundle.primaryParserKind,
-    ].filter(Boolean).join("+"),
-    workerManifestVersion: extracted.bundle.parserManifest?.manifestVersion ?? null,
+    ]
+      .filter(Boolean)
+      .join("+"),
+    workerManifestVersion:
+      extracted.bundle.parserManifest?.manifestVersion ?? null,
     visionArtifact,
   };
 }
@@ -503,9 +553,16 @@ export async function runDesktopResumeImportBenchmark(
   return runResumeImportBenchmark({
     request,
     async createHarness(benchmarkCase, normalizedRequest) {
-      const profile = buildBenchmarkProfile(path.basename(benchmarkCase.resumePath));
+      const profile = buildBenchmarkProfile(
+        path.basename(benchmarkCase.resumePath),
+      );
       const searchPreferences = buildBenchmarkSearchPreferences();
-      const { documentBundle, parseMethod, workerManifestVersion, visionArtifact } = await loadDocumentBundle({
+      const {
+        documentBundle,
+        parseMethod,
+        workerManifestVersion,
+        visionArtifact,
+      } = await loadDocumentBundle({
         benchmarkCase,
         profile,
         useVision: normalizedRequest.useVision,
@@ -517,17 +574,23 @@ export async function runDesktopResumeImportBenchmark(
           baseResume: {
             ...profile.baseResume,
             textContent: documentBundle.fullText,
-            textUpdatedAt: documentBundle.fullText ? new Date().toISOString() : null,
+            textUpdatedAt: documentBundle.fullText
+              ? new Date().toISOString()
+              : null,
             extractionStatus: documentBundle.fullText ? "ready" : "needs_text",
-            storagePath: path.resolve(resolveRepoRoot(), benchmarkCase.resumePath),
+            storagePath: path.resolve(
+              resolveRepoRoot(),
+              benchmarkCase.resumePath,
+            ),
           },
         },
         searchPreferences,
         documentBundle,
         aiClient: buildAiClient(normalizedRequest),
-        visionProvider: normalizedRequest.useConfiguredAi && normalizedRequest.useVision
-          ? createResumeVisionProviderFromEnvironment(process.env)
-          : null,
+        visionProvider:
+          normalizedRequest.useConfiguredAi && normalizedRequest.useVision
+            ? createResumeVisionProviderFromEnvironment(process.env)
+            : null,
         parseMethod,
         workerManifestVersion,
         ...(normalizedRequest.useVision ? { visionArtifact } : {}),

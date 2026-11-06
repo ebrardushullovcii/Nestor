@@ -771,6 +771,10 @@ def extract_plain_text(file_path: str) -> Optional[str]:
 
 
 def iter_docx_block_text(document: Any) -> List[str]:
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
     lines: List[str] = []
     seen_paragraphs: set[Any] = set()
 
@@ -785,7 +789,19 @@ def iter_docx_block_text(document: Any) -> List[str]:
                 walk_container(cell)
 
     def walk_container(container: Any) -> None:
-        for paragraph in getattr(container, "paragraphs", []):
+        if container is None:
+            return
+        element = getattr(container, "_element", None)
+        body = getattr(element, "body", element)
+        if body is None:
+            return
+        for child in body:
+            if child.tag == qn("w:tbl"):
+                walk_table(Table(child, container))
+                continue
+            if child.tag != qn("w:p"):
+                continue
+            paragraph = Paragraph(child, container)
             # Shared headers and merged cells may expose the same XML paragraph
             # more than once. Distinct paragraphs may legitimately repeat a job
             # title, employer, location, or date, so never deduplicate their text.
@@ -794,17 +810,33 @@ def iter_docx_block_text(document: Any) -> List[str]:
                 if element in seen_paragraphs:
                     continue
                 seen_paragraphs.add(element)
-            append_text(getattr(paragraph, "text", ""))
-
-        for table in getattr(container, "tables", []):
-            walk_table(table)
-
-    walk_container(document)
+            # paragraph.text in older python-docx versions omits hyperlinks.
+            # Read their visible label and relationship target in place.
+            parts: List[str] = []
+            for node in child:
+                text = "".join(
+                    descendant.text or "" if descendant.tag == qn("w:t")
+                    else "\n" if descendant.tag == qn("w:br")
+                    else "\t" if descendant.tag == qn("w:tab") else ""
+                    for descendant in node.iter()
+                )
+                parts.append(text)
+                if node.tag == qn("w:hyperlink"):
+                    relationship = paragraph.part.rels.get(node.get(qn("r:id")))
+                    if relationship is not None and relationship.is_external:
+                        target = relationship.target_ref
+                        if target.startswith(("https://", "http://", "mailto:")) and target not in text:
+                            parts.append(f" ({target})")
+            append_text("".join(parts))
 
     for section in getattr(document, "sections", []):
         walk_container(getattr(section, "header", None))
         walk_container(getattr(section, "first_page_header", None))
         walk_container(getattr(section, "even_page_header", None))
+
+    walk_container(document)
+
+    for section in getattr(document, "sections", []):
         walk_container(getattr(section, "footer", None))
         walk_container(getattr(section, "first_page_footer", None))
         walk_container(getattr(section, "even_page_footer", None))
@@ -831,6 +863,18 @@ def extract_docx_text(file_path: str) -> Tuple[Optional[str], str, List[str]]:
         return None, "local_sidecar_fallback", warnings
 
 
+def repair_pdf_token_wraps(text: str) -> str:
+    # A slash attached to the next year is still part of the same numeric date.
+    text = re.sub(r"\b(\d{1,2})[ \t]*\n[ \t]*(/\d{4})\b", r"\1\2", text)
+    # Only a standalone lowercase path continuation can extend a URL. Do not
+    # consume the next heading or an ordinary sentence following a contact row.
+    return re.sub(
+        r"((?:https?://[^\s/]+/|www\.[^\s/]+/|[\w.-]+\.[a-z]{2,}/)[^\s]*)\n([a-z0-9][a-z0-9_/?%&=+#.~-]*)(?=\n|$)",
+        lambda match: match[0] if match[2].upper() in RESUME_HEADINGS else match[1] + match[2],
+        text,
+    )
+
+
 def extract_pdf_text(
     file_path: str,
 ) -> Tuple[List[str], Optional[str], str, List[str], Dict[str, Any]]:
@@ -846,6 +890,16 @@ def extract_pdf_text(
                 page_text = normalize_multiline_text(
                     page.extract_text(x_tolerance=2, y_tolerance=3) or "",
                 ) or ""
+                # Keep linked destinations even when the PDF only displays a label.
+                urls = list(dict.fromkeys(
+                    link["uri"] for link in page.hyperlinks
+                    if isinstance(link.get("uri"), str)
+                    and link["uri"].startswith(("https://", "http://", "mailto:"))
+                    and link["uri"] not in page_text
+                ))
+                page_text = repair_pdf_token_wraps(page_text)
+                if urls:
+                    page_text = "\n".join([page_text, *urls])
                 page_texts.append(page_text)
 
         text = normalize_multiline_text(
@@ -862,7 +916,7 @@ def extract_pdf_text(
         from pypdf import PdfReader  # type: ignore
 
         reader = PdfReader(file_path)
-        page_texts = [normalize_multiline_text(page.extract_text() or "") or "" for page in reader.pages]
+        page_texts = [repair_pdf_token_wraps(normalize_multiline_text(page.extract_text() or "") or "") for page in reader.pages]
         text = normalize_multiline_text(
             "\n\n".join(page_text for page_text in page_texts if page_text),
         )
