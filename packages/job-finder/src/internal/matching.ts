@@ -1,4 +1,3 @@
-import type { JobFinderAiClient } from "@nestor/ai-providers";
 import {
   captureDiscoverySavedIdentityBasis,
   readDiscoveryPreparation,
@@ -22,13 +21,8 @@ import {
 } from "./matching-compensation";
 import type { MatchAssessmentPostingInput } from "./match-assessment-posting-input";
 import { createMatchAssessmentChangeAudit } from "./match-assessment-change-audit";
-import {
-  MATCH_ASSESSMENT_SCORER_VERSION,
-  createFitVerdictFingerprint,
-  createMatchAssessmentPostingFingerprint,
-} from "./match-assessment-session";
+import { MATCH_ASSESSMENT_SCORER_VERSION } from "./match-assessment-session";
 import { preserveCompletedAssessment } from "./fit-judgment-apply";
-import { applyFitJudgment, toFitJudgment } from "./fit-judgment";
 import { buildBookkeepingDimensions } from "./matching-dimensions";
 import {
   createJobIdentityDigest,
@@ -59,10 +53,7 @@ export {
   buildDiscoveryJobs,
   buildReviewQueue,
 } from "./matching-review-queue";
-import {
-  normalizeText,
-  uniqueStrings,
-} from "./shared";
+import { normalizeText, uniqueStrings } from "./shared";
 
 const remoteGeographyHints = [
   {
@@ -612,78 +603,6 @@ export function createMatchAssessment<
 
 const NOT_JUDGED_EXPLANATION =
   "Not judged yet. The AI judges this job against your profile and goals after a search, or when you choose Judge fit.";
-
-export async function createMatchAssessmentAsync(
-  aiClient: JobFinderAiClient,
-  profile: CandidateProfile,
-  searchPreferences: JobSearchPreferences,
-  posting: JobPosting & { matchAssessment?: MatchAssessment | null },
-  signal?: AbortSignal,
-  options: { background?: boolean } = {},
-): Promise<MatchAssessment> {
-  signal?.throwIfAborted();
-  const assistedAssessment = await aiClient.assessJobFit({
-    ...(signal ? { signal } : {}),
-    ...(options.background ? { background: true } : {}),
-    assessmentDate: new Date().toISOString().slice(0, 10),
-    profile,
-    searchPreferences,
-    job: posting,
-  });
-
-  signal?.throwIfAborted();
-  const previous = posting.matchAssessment;
-  if (!assistedAssessment || !assistedAssessment.requirements?.length) {
-    throw new Error(
-      "The fit assessment could not be completed. Your previous assessment was kept. Try again.",
-    );
-  }
-
-  // The model read the full listing against the profile and goals; its score
-  // and verdict stand (ADR 0041). The requirements it found feed the
-  // evidence counts and the requirement list the screen shows.
-  const withRequirements = createMatchAssessment(
-    profile,
-    searchPreferences,
-    posting,
-    assistedAssessment.requirements,
-  );
-  const judgment = toFitJudgment(
-    {
-      score: assistedAssessment.score,
-      recommendation:
-        assistedAssessment.recommendation ?? "review_before_applying",
-      role: assistedAssessment.role ?? "unknown",
-      roleExplanation: assistedAssessment.roleExplanation ?? null,
-      preferences: assistedAssessment.preferences ?? "unknown",
-      preferencesExplanation: assistedAssessment.preferencesExplanation ?? null,
-      locationReach: assistedAssessment.locationReach ?? "unknown",
-      reasons: assistedAssessment.reasons,
-      gaps: assistedAssessment.gaps,
-      listingClosed: assistedAssessment.listingClosed ?? false,
-      listingClosedEvidence: assistedAssessment.listingClosedEvidence ?? null,
-    },
-    {
-      source: "full",
-      judgedAt: new Date().toISOString(),
-      contextFingerprint: createFitVerdictFingerprint(
-        profile,
-        searchPreferences,
-      ),
-      postingFingerprint: createMatchAssessmentPostingFingerprint(posting),
-    },
-  );
-  const completed = applyFitJudgment(withRequirements, judgment);
-  if (previous?.judgment && previous.score !== completed.score) {
-    completed.recommendationRationale = `After reading the listing, your fit changed from ${previous.score}% to ${completed.score}%. ${completed.recommendationRationale}`;
-  }
-  return {
-    ...completed,
-    ...(assistedAssessment.requirements
-      ? { requirementsSource: "model" as const }
-      : {}),
-  };
-}
 
 function preserveJobStatus(
   existingJob: SavedJob | undefined,

@@ -1,5 +1,3 @@
-/** A full read cannot omit supplied evidence to fit the model budget. */
-export class FullFitEvidenceBudgetError extends Error {}
 export class ResumeImportBudgetError extends Error {}
 
 const DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS = 196_000;
@@ -48,8 +46,6 @@ export type OpenAiCompatibleJsonOperation =
   | "reviseResumeDraft"
   | "reviseCandidateProfile"
   | "tailorResume"
-  | "assessJobFit"
-  | "judgeJobFits"
   | "checkResumeClaims"
   | "extractJobsFromPage";
 
@@ -559,13 +555,11 @@ function responseHeadroomTokensForOperation(
     case "adjudicateResumeImportCandidates":
     case "createResumeDraft":
     case "tailorResume":
-    case "judgeJobFits":
     case "checkResumeClaims":
       return 4_096;
     case "reviseResumeDraft":
     case "reviseCandidateProfile":
       return 2_048;
-    case "assessJobFit":
     case "extractJobsFromPage":
       return 1_024;
   }
@@ -634,7 +628,7 @@ function withGroundingEvidenceCompactionMetadata(
 }
 
 const PRESIZED_OPERATIONS: ReadonlySet<OpenAiCompatibleJsonOperation> = new Set(
-  ["extractJobsFromPage", "judgeJobFits", "checkResumeClaims", "assessJobFit"],
+  ["extractJobsFromPage", "checkResumeClaims"],
 );
 
 export function compactOpenAiCompatibleUserPayload(input: {
@@ -686,14 +680,6 @@ export function compactOpenAiCompatibleUserPayload(input: {
   // level-one bound pass through unchanged.
   if (PRESIZED_OPERATIONS.has(input.operation) && originalSize <= charBudget) {
     return parsedPayload.data;
-  }
-
-  // A full assessment must read all supplied evidence. Report an oversized
-  // request rather than silently removing requirements from its middle.
-  if (input.operation === "assessJobFit") {
-    throw new FullFitEvidenceBudgetError(
-      "The full listing and profile exceed the model's input limit. The assessment could not be completed; your previous assessment was kept. Choose a model with a larger context window and try again.",
-    );
   }
 
   for (const level of [1, 2, 3]) {

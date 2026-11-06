@@ -230,9 +230,6 @@ function buildBenchmarkAiClient(useConfiguredAi: boolean): JobFinderAiClient {
         ),
       );
     },
-    assessJobFit() {
-      return Promise.resolve(null);
-    },
     extractJobsFromPage(input) {
       if (input.signal?.aborted) {
         throw new DOMException("Aborted", "AbortError");

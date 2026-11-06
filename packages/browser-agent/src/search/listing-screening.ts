@@ -56,7 +56,7 @@ export function professionEvidence(card: ListingCard): string {
           .filter((part): part is string => typeof part === "string")
           .join("; "),
         0,
-        1200,
+        8000,
         "packages/browser-agent/src/search/listing-screening.ts:47",
       );
     }
@@ -72,7 +72,7 @@ export function professionEvidence(card: ListingCard): string {
       )
       .trim(),
     0,
-    1200,
+    8000,
     "packages/browser-agent/src/search/listing-screening.ts:66",
   );
 }

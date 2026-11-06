@@ -1,10 +1,44 @@
 import { CandidateProfileSchema } from "@nestor/contracts";
 import { expect, test } from "vitest";
 import {
-  assessFitWorkLocation,
+  assessFitWorkLocation as assessUncheckedFitWorkLocation,
   type FitLocationEvidence,
+  type FitWorkPermissionEvidence,
 } from "./fit-work-location";
 
+// Existing scope/quote cases supply completed model checks. Missing or
+// contradictory checks are exercised separately below.
+const assessFitWorkLocation: typeof assessUncheckedFitWorkLocation = (
+  profile,
+  job,
+  evidence,
+  fallbacks,
+) => {
+  const physical =
+    job.workModes.some((mode) => mode === "onsite" || mode === "hybrid") ||
+    evidence[2] === "onsite" ||
+    evidence[2] === "hybrid";
+  const proof: FitWorkPermissionEvidence = {
+    publishedLocation: job.location ?? "",
+    workCountry: physical
+      ? evidence[3].split(",")[0]
+      : (profile.currentCountry ?? ""),
+    residence: [
+      "met",
+      "Your saved location or relocation plans meet the published scope.",
+    ],
+    authorization: [
+      physical || evidence[2] === "country_remote" ? "met" : "not_required",
+      "Your saved facts meet the listing's permission requirements.",
+    ],
+  };
+  return assessUncheckedFitWorkLocation(
+    profile,
+    job,
+    [evidence[0], evidence[1], evidence[2], evidence[3], evidence[4] ?? proof],
+    fallbacks,
+  );
+};
 const profile = CandidateProfileSchema.parse({
   id: "synthetic",
   yearsExperience: 8,
@@ -438,3 +472,240 @@ test.each(["remote", "hybrid"] as const)(
     expect(profile.workEligibility.authorizedWorkCountries).toEqual(["Kosovo"]);
   },
 );
+
+test.each([
+  [undefined, "review"],
+  [
+    {
+      publishedLocation: "Remote, Europe",
+      workCountry: "XK",
+      residence: [
+        "unknown",
+        "The listing does not confirm whether Kosovo is included.",
+      ],
+      authorization: [
+        "not_required",
+        "No specific permit requirement is published.",
+      ],
+    },
+    "review",
+  ],
+  [
+    {
+      publishedLocation: "Remote, Europe",
+      workCountry: "XK",
+      residence: ["met", "Europe includes your Kosovo location."],
+      authorization: [
+        "unknown",
+        "US authorization is required but not established by your saved facts.",
+      ],
+    },
+    "review",
+  ],
+  [
+    {
+      publishedLocation: "Remote, Europe",
+      workCountry: "US",
+      residence: ["met", "The region includes the proposed work country."],
+      authorization: [
+        "not_required",
+        "No specific permit requirement is published.",
+      ],
+    },
+    "review",
+  ],
+  [
+    {
+      publishedLocation: "Remote, Europe",
+      workCountry: "XK",
+      residence: [
+        "conflict",
+        "The hiring region excludes your Kosovo work location.",
+      ],
+      authorization: [
+        "not_required",
+        "No specific permit requirement is published.",
+      ],
+    },
+    "blocked",
+  ],
+] as const)(
+  "a regional quote cannot replace the person's residence and authorization checks (%j)",
+  (proof, expected) => {
+    const result = assessUncheckedFitWorkLocation(
+      profile,
+      {
+        location: "Remote, Europe",
+        description: "Work remotely throughout Europe.",
+        workModes: ["remote"],
+      },
+      [
+        "compatible",
+        "Work remotely throughout Europe",
+        "broader_remote",
+        "",
+        proof
+          ? {
+              publishedLocation: "Remote, Europe",
+              workCountry: proof.workCountry,
+              residence: [...proof.residence],
+              authorization: [...proof.authorization],
+            }
+          : undefined,
+      ],
+    );
+    expect(result.status).toBe(expected);
+    expect(result.reason).not.toBe("Work remotely throughout Europe");
+  },
+);
+
+test("a regional permission is checked by the model for relocation, never accepted merely because it is text", () => {
+  const person = CandidateProfileSchema.parse({
+    ...profile,
+    currentCountry: "France",
+    workEligibility: {
+      authorizedWorkCountries: ["European Union"],
+      willingToRelocate: true,
+    },
+  });
+  const job = {
+    location: "Germany",
+    description: "Work onsite in Germany. Current authorization required.",
+    workModes: ["onsite" as const],
+  };
+  const evidence: FitLocationEvidence = [
+    "compatible",
+    "Work onsite in Germany",
+    "onsite",
+    "DE",
+    {
+      publishedLocation: "Germany",
+      workCountry: "DE",
+      residence: ["met", "You are willing to move to Germany."],
+      authorization: [
+        "met",
+        "Your saved EU permission covers Germany and this role.",
+      ],
+    },
+  ];
+  expect(
+    assessUncheckedFitWorkLocation(
+      person,
+      { ...job, workModes: [...job.workModes] },
+      evidence,
+    ).status,
+  ).toBe("compatible");
+  const unchecked: FitLocationEvidence = [
+    evidence[0],
+    evidence[1],
+    evidence[2],
+    evidence[3],
+    {
+      ...evidence[4]!,
+      authorization: [
+        "unknown",
+        "The scope of your saved regional permission needs checking.",
+      ],
+    },
+  ];
+  expect(
+    assessUncheckedFitWorkLocation(
+      person,
+      { ...job, workModes: [...job.workModes] },
+      unchecked,
+    ).status,
+  ).toBe("review");
+});
+
+test.each([
+  [
+    "Europe",
+    "Work remotely in Americas or Europe.",
+    "US",
+    "United States",
+    "review",
+  ],
+  [
+    "Remote, Europe",
+    "Work remotely throughout Europe.",
+    "XK",
+    "Kosovo",
+    "compatible",
+  ],
+  [
+    "Remote, European Union",
+    "Work remotely within European Union countries only.",
+    "XK",
+    "Kosovo",
+    "review",
+  ],
+  [
+    "Remote, EEA",
+    "Work remotely within EEA countries only.",
+    "CH",
+    "Switzerland",
+    "review",
+  ],
+  [
+    "Remote, EEA",
+    "Work remotely within EEA countries only.",
+    "NO",
+    "Norway",
+    "compatible",
+  ],
+  ["EEA", "EEA", "NO", "Norway", "compatible"],
+  [
+    "Remote, APAC",
+    "Work remotely within APAC.",
+    "US",
+    "United States",
+    "review",
+  ],
+  ["Remote, EMEA", "Work remotely within EMEA.", "AU", "Australia", "review"],
+] as const)(
+  "a recognized scope cannot include an outside work country even when the model claims met: %s / %s / %s",
+  (location, description, workCountry, currentCountry, expected) => {
+    const person = { ...profile, currentCountry };
+    const result = assessUncheckedFitWorkLocation(
+      person,
+      { location, description, workModes: ["remote"] },
+      [
+        "compatible",
+        description.replace(/\.$/u, ""),
+        "broader_remote",
+        "",
+        {
+          publishedLocation: location,
+          workCountry,
+          residence: [
+            "met",
+            "The model claims the published scope includes your work country.",
+          ],
+          authorization: [
+            "not_required",
+            "No specific authorization requirement is published.",
+          ],
+        },
+      ],
+    );
+    expect(result.status).toBe(expected);
+    if (expected === "review")
+      expect(result.reason).toContain("published hiring region");
+  },
+);
+
+test("an unanswered current work country names the missing profile fact", () => {
+  const result = assessFitWorkLocation(
+    { ...profile, currentCountry: "" },
+    {
+      location: "Remote worldwide",
+      description: "Work remotely worldwide.",
+      workModes: ["remote"],
+    },
+    ["compatible", "Work remotely worldwide", "broader_remote", ""],
+  );
+  expect(result.status).toBe("review");
+  expect(result.reason).toContain(
+    "Your profile does not state your current work country",
+  );
+});

@@ -12,10 +12,7 @@ export * from "./deterministic";
 export * from "./openai-compatible";
 export * from "./agent-capabilities";
 export { completeTailoredResumeDraft } from "./openai-compatible-shared";
-export {
-  buildFitVerdictContext,
-  JOB_FIT_JUDGING_BATCH_SIZE,
-} from "./openai-compatible-fit";
+export { buildFitVerdictContext } from "./fit-context";
 export { RESUME_CLAIM_CHECK_BATCH_SIZE } from "./openai-compatible-resume-claims";
 
 export const aiProvidersPackageReady = true;

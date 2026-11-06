@@ -9,6 +9,7 @@ import {
   fitCountryCodes,
   fitCountryNames,
 } from "./fit-country-codes";
+import { fitRegionContains } from "./fit-regions";
 
 export const fitLocationKinds = [
   "onsite",
@@ -19,11 +20,18 @@ export const fitLocationKinds = [
   "unknown",
 ] as const;
 type Eligibility = "compatible" | "review" | "blocked";
+export interface FitWorkPermissionEvidence {
+  publishedLocation: string;
+  workCountry: string;
+  residence: ["met" | "conflict" | "unknown", string];
+  authorization: ["met" | "conflict" | "unknown" | "not_required", string];
+}
 export type FitLocationEvidence = [
   Eligibility,
   string,
   (typeof fitLocationKinds)[number],
   string,
+  FitWorkPermissionEvidence?,
 ];
 const normalized = (text: string) =>
   text.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
@@ -37,12 +45,26 @@ export function assessFitWorkLocation(
   evidence: FitLocationEvidence,
   fallbacks: readonly SavedOptionFallback[] = [],
 ): { status: Eligibility; reason: string } {
-  const [status, passage, kind, inferredCountries] = evidence;
+  const [status, passage, kind, inferredCountries, proof] = evidence;
   const reason =
     passage.trim() || "Your work location or permission needs checking.";
+  for (const check of [proof?.residence, proof?.authorization])
+    if (check?.[0] === "conflict")
+      return { status: "blocked", reason: check[1] || reason };
   if (status === "blocked") return { status, reason };
   const currentCode = fitCountryCode(profile.currentCountry || "", true);
   const current = new Set(currentCode ? [currentCode] : []);
+  // This is a known exclusion, not missing permission: the complete published
+  // region excludes the saved work country and the person will not relocate.
+  if (
+    currentCode &&
+    profile.workEligibility.willingToRelocate === false &&
+    fitRegionContains(job.location ?? "", currentCode) === false
+  )
+    return {
+      status: "blocked",
+      reason: `The published hiring region (${job.location}) excludes your ${profile.currentCountry} work location, and you are not willing to relocate.`,
+    };
   const published = fitCountryCode(job.location ?? "");
   const countries = published
     ? new Set([published])
@@ -53,7 +75,9 @@ export function assessFitWorkLocation(
   const body = normalized(job.description);
   const location = normalized(job.location ?? "");
   const quoted =
-    quote.length >= 6 && (body.includes(quote) || location.includes(quote));
+    (quote.length >= 6 ||
+      fitRegionContains(passage, currentCode ?? "") !== null) &&
+    (body.includes(quote) || location.includes(quote));
   // A verbatim "fully remote" quote proves a work mode, not a hiring region.
   const geographic =
     [...fitCountryNames(current), profile.currentCountry ?? ""].some(
@@ -63,6 +87,7 @@ export function assessFitWorkLocation(
           ` ${normalized(name)} `,
         ),
     ) ||
+    fitRegionContains(passage, currentCode ?? "") !== null ||
     /\b(worldwide|globally|global|anywhere in (?:the )?world|any country|all countries|europe(?:an(?!\s+(?:union|economic\s+area)\b))?|emea|apac|americas|asia|africa|oceania)\b/u.test(
       quote,
     ) ||
@@ -104,7 +129,8 @@ export function assessFitWorkLocation(
   // An ISO lookup cannot turn their compatible verdict into missing permission.
   const permission =
     intersects(authorized, countries) ||
-    permissionScopes.some((scope) => !fitCountryCode(scope, true));
+    (proof?.authorization[0] === "met" &&
+      permissionScopes.some((scope) => !fitCountryCode(scope, true)));
   if (
     (physical || kind === "country_remote") &&
     countries.size > 0 &&
@@ -112,9 +138,18 @@ export function assessFitWorkLocation(
   )
     return {
       status: "review",
-      reason: physical
-        ? "On-site or hybrid work requires permission in the work country; permission for this role still needs checking."
-        : "This remote role is limited to its work country; permission for this role still needs checking.",
+      reason: [
+        proof?.authorization[0] === "unknown" && proof.authorization[1].trim()
+          ? proof.authorization[1]
+          : `Your profile does not confirm work authorization in ${fitCountryNames(
+              countries,
+            )
+              .filter((_name, index) => index % 2 === 1)
+              .join(" or ")}.`,
+        physical
+          ? "On-site or hybrid work requires permission in the work country; permission for this role still needs checking."
+          : "This remote role is limited to its work country; permission for this role still needs checking.",
+      ].join(" "),
     };
   if (foreign && physical && profile.workEligibility.willingToRelocate !== true)
     return {
@@ -122,8 +157,79 @@ export function assessFitWorkLocation(
       reason:
         "This role requires moving to its work country; relocation willingness is not confirmed.",
     };
-  if (status === "review") return { status, reason };
-  if (kind === "broader_remote" && broader) return { status, reason };
+  if (status === "review")
+    return {
+      status,
+      reason:
+        [proof?.residence, proof?.authorization].find(
+          (check) => check?.[0] === "unknown",
+        )?.[1] || reason,
+    };
+  // A geographic quote establishes the listing's scope, not this person's
+  // inclusion or work permission. The model must judge both against saved facts.
+  // Older replies without these checks remain readable, but cannot be strong.
+  if (proof && normalized(proof.publishedLocation) !== location)
+    return {
+      status: "review",
+      reason: `Your eligibility for the published work location (${job.location || "unspecified"}) has not been established.`,
+    };
+  if (
+    !proof ||
+    proof.residence[0] === "unknown" ||
+    proof.authorization[0] === "unknown"
+  )
+    return {
+      status: "review",
+      reason: !proof
+        ? "Your inclusion in the hiring region and required work permission are unconfirmed."
+        : proof.residence[0] === "unknown"
+          ? proof.residence[1] ||
+            "Your inclusion in the hiring region is unconfirmed."
+          : proof.authorization[1] ||
+            "Required work permission is unconfirmed.",
+    };
+  if (
+    !proof.residence[1].trim() ||
+    !proof.authorization[1].trim() ||
+    (physical && proof.authorization[0] === "not_required") ||
+    (proof.authorization[0] === "met" && !permissionScopes.length)
+  )
+    return {
+      status: "review",
+      reason:
+        "The listing's work permission requirements have not been checked against your saved facts.",
+    };
+  const workCountry = fitCountryCode(proof.workCountry, true);
+  if (
+    !workCountry ||
+    ((physical || kind === "country_remote") &&
+      countries.size > 0 &&
+      !countries.has(workCountry)) ||
+    (!current.has(workCountry) &&
+      !(
+        (physical || kind === "country_remote") &&
+        countries.has(workCountry) &&
+        permission &&
+        profile.workEligibility.willingToRelocate === true
+      ))
+  )
+    return {
+      status: "review",
+      reason: !current.size
+        ? "Your profile does not state your current work country."
+        : "The eligibility judgment does not establish an allowed work country for you.",
+    };
+  if (kind === "broader_remote" && broader) {
+    const outsideScope = [job.location ?? "", passage].find(
+      (scope) => fitRegionContains(scope, workCountry) === false,
+    );
+    if (outsideScope)
+      return {
+        status: "review",
+        reason: `The published hiring region (${outsideScope}) does not establish eligibility for your ${profile.currentCountry || workCountry} work location.`,
+      };
+    return { status, reason };
+  }
   if (kind === "offered_list" && quoted) {
     const offered = fitCountryCodes(inferredCountries);
     const accepted =
@@ -156,7 +262,9 @@ export function assessFitWorkLocation(
   )
     return {
       status: "review",
-      reason: "The listing does not establish where you may work.",
+      reason: !current.size
+        ? "Your profile does not state your current work country."
+        : "The listing does not establish where you may work.",
     };
   return { status, reason };
 }

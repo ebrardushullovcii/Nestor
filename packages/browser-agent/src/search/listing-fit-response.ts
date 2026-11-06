@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { fitLocationKinds } from "./fit-work-location";
+import {
+  fitLocationKinds,
+  type FitLocationEvidence,
+} from "./fit-work-location";
 
 const roleStates = [
   "strong",
@@ -12,6 +15,19 @@ const preferenceStates = ["aligned", "mixed", "conflict", "unknown"] as const;
 const coverageStates = ["strong", "partial", "unknown"] as const;
 const hardStates = ["met", "conflict", "unknown", "not_requested"] as const;
 const eligibilityStates = ["compatible", "review", "blocked"] as const;
+const residenceStates = ["met", "conflict", "unknown"] as const;
+const authorizationStates = [
+  "met",
+  "conflict",
+  "unknown",
+  "not_required",
+] as const;
+const permissionSchema = z.object({
+  publishedLocation: z.string(),
+  workCountry: z.string(),
+  residence: judgment(residenceStates),
+  authorization: judgment(authorizationStates),
+});
 const intervals = ["hour", "day", "week", "month", "year"] as const;
 const payBases = ["base", "total_ote"] as const;
 
@@ -55,6 +71,16 @@ export const fitSchema = z.object({
           quote: z.string(),
           kind: z.enum(fitLocationKinds),
           countries: z.string(),
+          workCountry: z.string().default(""),
+          publishedLocation: z.string().default(""),
+          residence: judgment(residenceStates).default([
+            "unknown",
+            "Your inclusion in the hiring region is unconfirmed.",
+          ]),
+          authorization: judgment(authorizationStates).default([
+            "unknown",
+            "Required work permission is unconfirmed.",
+          ]),
         })
         .transform(
           ({
@@ -62,13 +88,25 @@ export const fitSchema = z.object({
             quote,
             kind,
             countries,
-          }): [typeof status, string, typeof kind, string] => [
+            workCountry,
+            publishedLocation,
+            residence,
+            authorization,
+          }): FitLocationEvidence => [
             status,
             quote,
             kind,
             countries,
+            { publishedLocation, workCountry, residence, authorization },
           ],
         ),
+      z.tuple([
+        z.enum(eligibilityStates),
+        z.string(),
+        z.enum(fitLocationKinds),
+        z.string(),
+        permissionSchema,
+      ]),
       z.tuple([
         z.enum(eligibilityStates),
         z.string(),
@@ -115,6 +153,10 @@ export function fitResponseSchema() {
             quote: string,
             kind: enumeration(fitLocationKinds),
             countries: string,
+            workCountry: string,
+            publishedLocation: string,
+            residence: judgmentSchema(residenceStates),
+            authorization: judgmentSchema(authorizationStates),
           }),
           s: { type: "integer", minimum: 0, maximum: 100 },
           why: string,

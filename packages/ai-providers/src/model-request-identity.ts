@@ -102,11 +102,7 @@ export const modelConversationKeys = {
       .update(JSON.stringify(evidence), "utf8")
       .digest("hex")}`;
   },
-  /** A full listing read; the person and goals lead, as in resumeWriting. */
-  listingReading(profile: { id: string }): string {
-    return `listing-reading:${profile.id}`;
-  },
-  /** Fit batches share the person's evidence and goals across searches. */
+  /** The live listing-fit adapter shares the person's evidence across batches. */
   fitJudging(profile: { id: string }): string {
     return `fit-judging:${profile.id}`;
   },

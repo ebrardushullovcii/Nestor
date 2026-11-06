@@ -7,7 +7,6 @@ import { expect, test } from "vitest";
 
 import { runResumeGenerationAgentTask } from "./agent-capabilities";
 import { createDeterministicJobFinderAiClient } from "./deterministic";
-import { buildJobFitAssessmentPayload } from "./openai-compatible-fit";
 import { buildResumeClaimCheckPayload } from "./openai-compatible-resume-claims";
 import { buildResumeGenerationEvidenceCatalog } from "./resume-generation-grounding";
 import type { AgentCapableJobFinderAiClient, AgentMessage } from "./shared";
@@ -238,37 +237,6 @@ test("the writer gets the evidence once and a record outline, and a refused prop
     `[token budget] writer repair turn: ${repairTurn.length} chars, proposal copies ${repairTurn.split(marker).length - 1}`,
   );
   expect(repairTurn.split(marker).length - 1).toBe(1);
-});
-
-test("a full listing read gets the trimmed profile, not contact details or saved answers", () => {
-  const profile = largeSyntheticProfile();
-  const input = {
-    assessmentDate: "2026-10-21",
-    profile,
-    searchPreferences: createPreferences(),
-    job: createJobPosting(),
-  };
-  const after = JSON.stringify(buildJobFitAssessmentPayload(input));
-  const before = JSON.stringify({
-    ...buildJobFitAssessmentPayload(input),
-    profile: { ...profile },
-  });
-  console.info(
-    `[token budget] full listing read payload: before ${before.length} chars, after ${after.length} chars`,
-  );
-  expect(after.length).toBeLessThan(before.length);
-  expect(after).toContain("Built report 0 for team 0");
-  expect(after).toContain("Additional experience");
-  const payload = buildJobFitAssessmentPayload(input);
-  expect(
-    JSON.stringify(payload.profile).split("lina.haddad@example.com"),
-  ).toHaveLength(
-    // Only inside the imported resume text.
-    2,
-  );
-  expect(payload.profile).not.toHaveProperty("email");
-  expect(payload.profile).not.toHaveProperty("answerBank");
-  expect(after).not.toContain("Saved answer 0");
 });
 
 test("a claim check without the duplicate resume text", () => {
