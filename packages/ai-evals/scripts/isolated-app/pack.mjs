@@ -231,7 +231,7 @@ export async function generatePack(options) {
     if (
       e.event === "application_requested" &&
       app &&
-      e.input?.jobIds?.includes(app.job_id)
+      (e.input?.selection?.ids ?? e.input?.jobIds)?.includes(app.job_id)
     )
       return true;
     if (e.applicationKey && applicationKey)
@@ -348,7 +348,7 @@ export async function generatePack(options) {
   const requestedApplication = relevant.find(
     (e) =>
       e.event === "application_requested" &&
-      e.input?.jobIds?.includes(app?.job_id),
+      (e.input?.selection?.ids ?? e.input?.jobIds)?.includes(app?.job_id),
   );
   const instructionMode =
     requestedApplication?.instruction ??

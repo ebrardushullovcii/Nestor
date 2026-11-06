@@ -44,6 +44,13 @@ test("packs preserve recorded facts, application linkage and unknowns; omit vaul
     );
     const events = [
       {
+        event: "application_requested",
+        at: "2026-11-06T10:00:00.000Z",
+        input: { selection: { ids: [7] } },
+        settings: { initialPermission: false },
+        instruction: "confirm_before_submit",
+      },
+      {
         event: "run_header",
         at: "2026-11-06T10:00:00.000Z",
         network: "replica",
@@ -119,6 +126,9 @@ test("packs preserve recorded facts, application linkage and unknowns; omit vaul
       state: {},
     });
     assert.equal(manifest.oursCount, 1);
+    assert.deepEqual(manifest.header.permissionsAtStart, {
+      initialPermission: false,
+    });
     assert.equal(manifest.needsYouCount, 1);
     assert.equal(manifest.header.reported[0].model, "unknown");
     assert.ok(manifest.warnings.some((w) => w.includes("PERMISSIONS OFF")));
