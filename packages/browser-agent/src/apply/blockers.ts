@@ -186,28 +186,44 @@ export function hasExistingAccountLoginForm(input: {
   );
 }
 
-function isExactLink(link: ApplyPageLink, pattern: RegExp): boolean {
+function isExactLink(
+  link: Pick<ApplyPageLink, "visible" | "label">,
+  pattern: RegExp,
+): boolean {
   return link.visible && pattern.test(normalizeSignal(link.label));
 }
 
 function isAccountChoiceWall(input: {
   controls: readonly ApplyFormControl[];
   links: readonly ApplyPageLink[];
+  actions: readonly ApplyFormAction[];
 }): boolean {
+  const entries = [...input.links, ...input.actions].filter(
+    (entry) => !("disabled" in entry && entry.disabled),
+  );
   const visibleControls = input.controls.filter((control) => control.visible);
-  const hasSignIn = input.links.some((link) =>
+  const hasSignIn = entries.some((link) =>
     isExactLink(link, /^(?:sign in|log in|login)$/u),
   );
-  const hasCreateAccount = input.links.some((link) =>
+  const hasCreateAccount = entries.some((link) =>
     isExactLink(link, /^(?:create (?:an? )?account|register|sign up)$/u),
   );
-  const hasApplicationEntry = input.links.some((link) =>
-    isExactLink(link, /^(?:apply|apply now|continue application)$/u),
+  const hasApplicationEntry = entries.some((link) =>
+    isExactLink(
+      link,
+      /^(?:apply(?:\b|$)|(?:start|begin|continue) (?:my |your |an? )?application\b)/u,
+    ),
+  );
+  const signInChoices = new Set(
+    entries
+      .filter((entry) =>
+        isExactLink(entry, /^(?:sign in|log in|login) with [\p{L}\p{N} ]+$/u),
+      )
+      .map((entry) => normalizeSignal(entry.label)),
   );
   return (
     visibleControls.length === 0 &&
-    hasSignIn &&
-    hasCreateAccount &&
+    ((hasSignIn && hasCreateAccount) || signInChoices.size >= 2) &&
     !hasApplicationEntry
   );
 }
@@ -437,6 +453,7 @@ export function detectApplyBlocker(input: {
     isAccountChoiceWall({
       controls: input.controls,
       links: input.links ?? [],
+      actions: input.actions,
     })
   ) {
     return siteLoginRequiredBlocker(

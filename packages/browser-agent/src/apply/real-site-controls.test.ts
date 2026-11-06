@@ -583,6 +583,41 @@ test("a visible verification slider becomes an access handoff", () => {
   ).toMatchObject({ code: "security_challenge", requiresPerson: true });
 });
 
+test("a provider choice screen is a sign-in handoff, not a typed question", async () => {
+  const raw = page({
+    bodyText:
+      "Current step 1 of 6 Create Account/Sign In. Sign In. Sign in with Google OR Sign in with LinkedIn OR Sign in with email.",
+    actions: [
+      "Sign In",
+      "Sign in with Google",
+      "Sign in with LinkedIn",
+      "Sign in with email",
+    ].map((label, index) => ({ index, label, visible: true, disabled: false })),
+  });
+  expect(
+    buildApplyFormObservation(raw, now().toISOString()).blocker,
+  ).toMatchObject({ code: "site_login_required", requiresPerson: true });
+  const result = await runApplyAgent(
+    config(raw),
+    finishModel(["Sign in with email, Google or LinkedIn to continue."]),
+  );
+  expect(
+    result.pauses.some(
+      (pause) => pause.blocker?.code === "site_login_required",
+    ),
+  ).toBe(true);
+  expect(result.pauses.flatMap((pause) => pause.questions ?? [])).toEqual([]);
+  raw.actions.push({
+    index: 4,
+    label: "Apply for This Job",
+    visible: true,
+    disabled: false,
+  });
+  expect(
+    buildApplyFormObservation(raw, now().toISOString()).blocker,
+  ).toBeNull();
+});
+
 test("a completed security check is not reported as a slider handoff", () => {
   expect(
     reportedSecurityChallenge(
