@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import vm from "node:vm";
+import { fileURLToPath } from "node:url";
 import { startTime, stillOurs } from "./common.mjs";
 import {
   assertNativeIdentity,
@@ -278,7 +279,7 @@ test("graceful native quit waits for the app's own exit before any signal", asyn
   assert.equal(await exited, 0);
 });
 
-function patchedGuard(mode) {
+function patchedGuard(mode, authorized) {
   const events = new Map();
   const logs = [];
   class Window {
@@ -314,14 +315,22 @@ function patchedGuard(mode) {
         ({
           "node:module": { _load() {} },
           "node:fs": fs,
-          "node:path": { join: (...parts) => parts.join("/") },
+          "node:path": {
+            join: (...parts) => parts.join("/"),
+            basename: (value) => value.split("/").at(-1),
+          },
           electron,
+          "./provider-fixture.cjs": {
+            loadProviderFixture: () => null,
+            installProviderTransport() {},
+          },
         })[id],
       process: {
         env: {
           NESTOR_VERIFY_STATE: "/state",
           NESTOR_VERIFY_EVIDENCE: "/evidence",
           NESTOR_VERIFY_NET: mode,
+          NESTOR_LIVE_APPLY_AUTHORIZED: authorized,
         },
         platform: "linux",
       },
@@ -371,4 +380,49 @@ test("unchanged guards cover all sessions: external writes/redirect targets bloc
     assert.ok(guard.logs.length);
     assert.equal(JSON.stringify(guard.logs).includes("secret"), false);
   }
+});
+
+test("live requires the exact authorization flag and allows real-site requests in every session", () => {
+  for (const authorization of [undefined, "", "0", "true"])
+    assert.throws(
+      () => patchedGuard("live", authorization),
+      /NESTOR_LIVE_APPLY_AUTHORIZED=1/,
+    );
+  const guard = patchedGuard("live", "1");
+  for (const session of guard.sessions)
+    for (const method of [
+      "GET",
+      "HEAD",
+      "OPTIONS",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+    ])
+      assert.equal(
+        guard.request(session, "https://employer.example/apply", method),
+        false,
+      );
+  assert.equal(guard.logs.length, 0);
+});
+
+test("CLI refuses live mode without authorization before starting an instance", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL("./cli.mjs", import.meta.url)),
+      "up",
+      "--net",
+      "live",
+    ],
+    {
+      env: { ...process.env, NESTOR_LIVE_APPLY_AUTHORIZED: "0" },
+      encoding: "utf8",
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.match(
+    result.stderr,
+    /--net live requires NESTOR_LIVE_APPLY_AUTHORIZED=1/,
+  );
 });
