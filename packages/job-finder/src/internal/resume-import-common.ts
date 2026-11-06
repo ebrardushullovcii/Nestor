@@ -2,6 +2,7 @@ import type { ResumeImportFieldCandidate } from "@nestor/contracts";
 
 import {
   areEquivalentEducationRecords,
+  areEquivalentCertificationReadings,
   areEquivalentExperienceRecords,
 } from "./resume-record-identity";
 import { normalizeText } from "./shared";
@@ -61,8 +62,12 @@ export function areEquivalentRecordCandidates(
     case "link":
       return sameRecordField(left.value, right.value, "url");
     case "project":
-    case "certification":
       return sameRecordField(left.value, right.value, "name");
+    case "certification":
+      return (
+        sameRecordField(left.value, right.value, "name") ||
+        areEquivalentCertificationReadings(left.value, right.value)
+      );
     default:
       return false;
   }

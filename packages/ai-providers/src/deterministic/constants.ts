@@ -34,6 +34,7 @@ export const knownSkillPhrases = [
   "PostgreSQL",
   "MongoDB",
   "Docker",
+  "Kubernetes",
   "WebSockets",
   "Postman",
   "Jira",

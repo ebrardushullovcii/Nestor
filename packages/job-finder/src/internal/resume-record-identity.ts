@@ -9,6 +9,36 @@ function normalizeRecordText(value: unknown): string {
   return typeof value === "string" ? normalizeText(value) : "";
 }
 
+/** A delivery-format label does not make a second copy of a certificate. */
+export function areEquivalentCertificationReadings(
+  left: unknown,
+  right: unknown,
+): boolean {
+  if (!isObjectRecord(left) || !isObjectRecord(right)) return false;
+  const name = (record: Record<string, unknown>) =>
+    normalizeRecordText(
+      typeof record.name === "string"
+        ? record.name.replace(
+            /\s+\((?:(?:online|virtual|in-person|self-paced)\s+)?(?:course|training)\)$/i,
+            "",
+          )
+        : null,
+    );
+  const leftName = name(left);
+  const leftIssuer = normalizeRecordText(left.issuer);
+  const rightIssuer = normalizeRecordText(right.issuer);
+  return Boolean(
+    leftName &&
+    leftName === name(right) &&
+    (!leftIssuer || !rightIssuer || leftIssuer === rightIssuer) &&
+    fieldsCompatible(
+      normalizeRecordDate(left.issueDate),
+      normalizeRecordDate(right.issueDate),
+      "date",
+    ),
+  );
+}
+
 function normalizeRecordDate(value: unknown): string {
   if (typeof value !== "string") {
     return "";

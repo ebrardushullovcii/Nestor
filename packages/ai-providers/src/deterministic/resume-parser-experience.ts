@@ -19,7 +19,7 @@ import { inferSkills } from "./resume-parser-skills";
 const MAX_EXPERIENCE_ACHIEVEMENTS = 10;
 
 const roleTitlePattern =
-  /\b(engineer|developer|designer|manager|director|analyst|consultant|specialist|architect|officer|lead|support|administrator|scientist|qa|agent|intern|internship|co-op|coordinator|assistant|clerk|representative)\b/i;
+  /\b(engineer|developer|designer|manager|director|analyst|consultant|specialist|architect|officer|lead|support|administrator|scientist|qa|agent|intern|internship|co-op|coordinator|assistant|clerk|representative|teacher|student|supervisor|associate|technician)\b/i;
 
 type ResumeExperienceWorkMode = "remote" | "hybrid" | "onsite" | "flexible";
 
@@ -415,6 +415,7 @@ function hasPollutedTitleSignals(value: string): boolean {
 
 function isCompanyMarkerLine(line: string): boolean {
   const cleaned = cleanLine(line.replace(/^[^A-Za-z0-9]+/, ""));
+  if (looksLikeRoleTitle(cleaned.split(/\s+[–—-]\s+/)[0] ?? "")) return false;
   return /^[A-Za-z0-9&.'()/-]+(?:\s+[A-Za-z0-9&.'()/-]+)*\s*[–—-]\s*[A-Z][A-Za-z\s.'-]+,\s*[A-Z][A-Za-z\s.'-]+$/.test(
     cleaned,
   );
@@ -958,7 +959,11 @@ export function inferExperienceEntries(resumeText: string) {
           previousCompanyContext?.companyName ??
           null,
         location:
-          parsedHeader.location ?? previousCompanyContext?.location ?? null,
+          parsedHeader.location ??
+          (!parsedHeader.companyName
+            ? previousCompanyContext?.location
+            : null) ??
+          null,
       };
       if (header.companyName) {
         previousCompanyContext = {

@@ -141,6 +141,30 @@ const ROLE = {
 };
 
 describe("resume import with a model (ADR 0041)", () => {
+  test("keeps a language when the model calls its fields name and level", async () => {
+    const seed = freshSeed();
+    const { profileWork } = createProfileServiceHarness({
+      seed,
+      aiClient: modelClient({
+        identity_summary: IDENTITY,
+        background: [
+          {
+            section: "language",
+            key: "record",
+            value: { name: "French", level: "B2" },
+            line: "French (B2)",
+          },
+        ],
+      }),
+    });
+    const result = await profileWork.runResumeImport(
+      importInput(seed, `${TEXT}\nSkills\nFrench (B2)`),
+    );
+    expect(result.profile.spokenLanguages).toEqual([
+      expect.objectContaining({ language: "French", proficiency: "B2" }),
+    ]);
+  });
+
   test("the model's reading is the import; no rule reader adds candidates", async () => {
     const seed = freshSeed();
     const { profileWork, repository } = createProfileServiceHarness({

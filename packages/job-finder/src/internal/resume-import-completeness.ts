@@ -44,6 +44,28 @@ function normalizeRoleKey(value: string): string {
   return value.toLowerCase().replace(/\s+/gu, " ").trim();
 }
 
+function knownRoleKeys(record: {
+  title?: unknown;
+  companyName?: unknown;
+  location?: unknown;
+}): string[] {
+  const title = normalizeRoleKey(
+    typeof record.title === "string" ? record.title : "",
+  );
+  const company = normalizeRoleKey(
+    typeof record.companyName === "string" ? record.companyName : "",
+  );
+  const location = normalizeRoleKey(
+    typeof record.location === "string" ? record.location : "",
+  );
+  // Source headers often join employer and place with a comma. The model
+  // correctly separates them; that is the same role, not a missing one.
+  return [
+    `${title}|${company}`,
+    ...(location ? [`${title}|${company}, ${location}`] : []),
+  ];
+}
+
 function parseResumeDate(value: string): {
   date: string | null;
   current: boolean;
@@ -123,12 +145,7 @@ function suggestMissingExperienceRoles(input: {
     null;
   const known = new Set(
     [
-      ...input.profile.experiences.map(
-        (experience) =>
-          `${normalizeRoleKey(experience.title ?? "")}|${normalizeRoleKey(
-            experience.companyName ?? "",
-          )}`,
-      ),
+      ...input.profile.experiences.flatMap(knownRoleKeys),
       ...input.candidates.flatMap((candidate) => {
         const value = candidate.value;
         if (
@@ -140,14 +157,7 @@ function suggestMissingExperienceRoles(input: {
         ) {
           return [];
         }
-        const record = value as { title?: unknown; companyName?: unknown };
-        return [
-          `${normalizeRoleKey(
-            typeof record.title === "string" ? record.title : "",
-          )}|${normalizeRoleKey(
-            typeof record.companyName === "string" ? record.companyName : "",
-          )}`,
-        ];
+        return knownRoleKeys(value);
       }),
     ].filter((key) => !key.startsWith("|")),
   );

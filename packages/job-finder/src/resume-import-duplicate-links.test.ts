@@ -38,6 +38,63 @@ function contactCandidate(
 }
 
 describe("resume import duplicate links", () => {
+  test.each(["linkedinUrl", "githubUrl", "portfolioUrl", "personalWebsiteUrl"])(
+    "keeps a different saved %s for review even with the first-run profile id",
+    (key) => {
+      const seed = createSeed();
+      const profile = {
+        ...createFreshStartCandidateProfile(),
+        fullName: "Morgan Lee",
+        [key]: "https://example.test/saved",
+      };
+      const resolved = reconcileCandidates(
+        profile,
+        seed.searchPreferences,
+        [contactCandidate(key, "example.test/imported")],
+        undefined,
+        { readByModel: true },
+      );
+      expect(resolved).toEqual([
+        expect.objectContaining({
+          value: "https://example.test/imported",
+          resolution: "needs_review",
+          resolutionReason: "conflicts_with_existing_profile_value",
+        }),
+      ]);
+    },
+  );
+
+  test.each(["linkedinUrl", "githubUrl", "portfolioUrl", "personalWebsiteUrl"])(
+    "does not ask to review equivalent text and visual %s values",
+    (key) => {
+      const seed = createSeed();
+      const text = contactCandidate(key, "https://example.test/profile");
+      const vision = {
+        ...contactCandidate(key, "example.test/profile"),
+        id: "vision_link",
+        sourceKind: "vision_omni" as const,
+      };
+      const resolved = reconcileCandidates(
+        createFreshStartCandidateProfile(),
+        seed.searchPreferences,
+        [text, vision],
+        undefined,
+        { readByModel: true },
+      );
+      expect(
+        resolved.some((candidate) => candidate.resolution === "auto_applied"),
+      ).toBe(true);
+      expect(
+        resolved.some((candidate) => candidate.resolution === "needs_review"),
+      ).toBe(false);
+      expect(
+        resolved.every(
+          (candidate) => candidate.value === "https://example.test/profile",
+        ),
+      ).toBe(true);
+    },
+  );
+
   test("rejects a portfolio URL that only repeats the GitHub URL from the same run", () => {
     const seed = createSeed();
     const profile = createFreshStartCandidateProfile();

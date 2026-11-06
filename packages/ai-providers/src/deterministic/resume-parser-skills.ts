@@ -31,7 +31,7 @@ export function inferSkills(
   fallbackSkills: readonly string[],
 ): string[] {
   const sectionLines = findSectionBodyLinesByAliases(
-    splitLines(resumeText),
+    splitLines(repairWrappedSkills(resumeText)),
     skillSectionAliases,
   );
   const sectionSkills = uniqueStrings(
@@ -66,8 +66,26 @@ function stripInlineSkillCategory(line: string): string {
   );
 }
 
+function repairWrappedSkills(text: string): string {
+  return text.replace(
+    /([\p{L}]+)\r?\n(?=([\p{L}]+)\b)/gu,
+    (match, left: string, right: string) =>
+      knownSkillPhrases.some(
+        (skill) => skill.toLowerCase() === `${left}${right}`.toLowerCase(),
+      )
+        ? left
+        : match,
+  );
+}
+
 function splitSkillLine(line: string): string[] {
   line = stripInlineSkillCategory(line);
+  // Remove complete spoken-language entries before parentheses are expanded;
+  // otherwise "English (fluent)" becomes two unrelated skills.
+  line = line
+    .split(/[,;|](?![^()]*\))/)
+    .filter((entry) => !looksLikeSpokenLanguageSkillEntry(entry.trim()))
+    .join(", ");
   line = line.replace(/([^(),;|]+)\(([^()]*)\)/g, "$1, $2");
   const rawEntries = line
     .split(/[,;]|\||[\u2022\u25cf\u25aa\u25e6\u2023]| {2,}/)
@@ -110,7 +128,7 @@ export function inferSkillGroups(
   fallbackSkills: readonly string[],
 ) {
   const sectionLines = findSectionBodyLinesByAliases(
-    splitLines(resumeText),
+    splitLines(repairWrappedSkills(resumeText)),
     skillSectionAliases,
   );
   const groups = {

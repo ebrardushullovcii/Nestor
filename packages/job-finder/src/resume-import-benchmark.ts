@@ -99,48 +99,6 @@ function normalizeBenchmarkRecordIdentityParts(
     .filter((entry): entry is string => Boolean(entry));
 }
 
-function getBenchmarkActualRecordValues(input: {
-  actual: readonly ResumeImportFieldCandidate[];
-  section: ResumeImportFieldCandidate["target"]["section"];
-}): Record<string, unknown>[] {
-  const candidateRecords = input.actual
-    .filter(
-      (candidate) =>
-        candidate.resolution === "auto_applied" ||
-        candidate.resolution === "needs_review",
-    )
-    .map((candidate) => toRecordValue(candidate.value))
-    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
-  const autoAppliedRecords = input.actual
-    .filter(
-      (candidate) =>
-        candidate.target.section === input.section &&
-        candidate.resolution === "auto_applied" &&
-        typeof candidate.target.recordId === "string",
-    )
-    .reduce<Map<string, Record<string, unknown>>>((recordsById, candidate) => {
-      const recordId = candidate.target.recordId;
-      if (!recordId) {
-        return recordsById;
-      }
-
-      const current = recordsById.get(recordId) ?? {};
-      recordsById.set(recordId, {
-        ...current,
-        [candidate.target.key]: candidate.value,
-      });
-      return recordsById;
-    }, new Map());
-
-  return [...candidateRecords, ...autoAppliedRecords.values()];
-}
-
-function toRecordValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
 function normalizeRecordIdentity(
   value: Record<string, unknown> | null,
   keys: readonly string[],
@@ -714,12 +672,24 @@ function scoreContradictionFreeRate(input: {
     return 1;
   }
 
+  const { baseResume, ...savedFields } = input.profile;
+  void baseResume;
   const serializedProfile = normalizeBenchmarkRecordString(
-    JSON.stringify(input.profile),
+    JSON.stringify(savedFields),
   );
   const contradictionCount = input.forbiddenProfileText.filter((value) => {
     const normalized = normalizeBenchmarkRecordString(value);
-    return Boolean(normalized && serializedProfile?.includes(normalized));
+    if (!normalized || !serializedProfile) return false;
+    const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const startBoundary = /^[\p{L}\p{N}]/u.test(normalized)
+      ? "(?<![\\p{L}\\p{N}])"
+      : "";
+    const endBoundary = /[\p{L}\p{N}]$/u.test(normalized)
+      ? "(?![\\p{L}\\p{N}])"
+      : "";
+    return new RegExp(`${startBoundary}${escaped}${endBoundary}`, "u").test(
+      serializedProfile,
+    );
   }).length;
 
   return 1 - safeDivide(contradictionCount, input.forbiddenProfileText.length);
@@ -813,61 +783,14 @@ export function buildCaseResult(input: {
     profile: input.profile,
     searchPreferences: input.searchPreferences,
   });
-  const experienceCandidates = input.candidates.filter(
-    (candidate) => candidate.target.section === "experience",
-  );
-  const educationCandidates = input.candidates.filter(
-    (candidate) => candidate.target.section === "education",
-  );
-  const experienceRecords = getBenchmarkActualRecordValues({
-    actual: experienceCandidates,
-    section: "experience",
-  });
-  const shouldUseProfileExperienceRecords =
-    input.benchmarkCase.expected.experienceRecords.length > 0;
-  const scoredExperienceRecords = shouldUseProfileExperienceRecords
-    ? [...experienceRecords, ...input.profile.experiences]
-    : experienceRecords;
-  const educationRecords = getBenchmarkActualRecordValues({
-    actual: educationCandidates,
-    section: "education",
-  });
-  const shouldUseProfileEducationRecords =
-    input.benchmarkCase.expected.educationRecords.length > 0;
-  const scoredEducationRecords = shouldUseProfileEducationRecords
-    ? [...educationRecords, ...input.profile.education]
-    : educationRecords;
-  const projectRecords = getBenchmarkActualRecordValues({
-    actual: input.candidates.filter(
-      (candidate) => candidate.target.section === "project",
-    ),
-    section: "project",
-  });
+  // Score what later fit, tailoring and application steps can actually read.
+  // A needs-review candidate is not a saved profile record.
+  const scoredExperienceRecords = input.profile.experiences;
+  const scoredEducationRecords = input.profile.education;
+  const scoredProjectRecords = input.profile.projects;
+  const scoredCertificationRecords = input.profile.certifications;
+  const scoredLanguageRecords = input.profile.spokenLanguages;
   const expectedProjectRecords = input.benchmarkCase.expected.projectRecords;
-  const scoredProjectRecords =
-    expectedProjectRecords !== undefined
-      ? [...projectRecords, ...input.profile.projects]
-      : projectRecords;
-  const certificationRecords = getBenchmarkActualRecordValues({
-    actual: input.candidates.filter(
-      (candidate) => candidate.target.section === "certification",
-    ),
-    section: "certification",
-  });
-  const scoredCertificationRecords =
-    input.benchmarkCase.expected.certificationRecords !== undefined
-      ? [...certificationRecords, ...input.profile.certifications]
-      : certificationRecords;
-  const languageRecords = getBenchmarkActualRecordValues({
-    actual: input.candidates.filter(
-      (candidate) => candidate.target.section === "language",
-    ),
-    section: "language",
-  });
-  const scoredLanguageRecords =
-    input.benchmarkCase.expected.languageRecords !== undefined
-      ? [...languageRecords, ...input.profile.spokenLanguages]
-      : languageRecords;
   const metrics: ResumeImportBenchmarkMetrics = {
     literalFieldPrecision: literalScores.literalFieldPrecision,
     literalFieldRecall: literalScores.literalFieldRecall,
@@ -947,6 +870,17 @@ export function buildCaseResult(input: {
           `Actual experience identities: ${summarizeRecordIdentities({ records: scoredExperienceRecords, keys: ["title", "companyName"] }).join(", ")}`,
         ]
       : [];
+  for (const candidate of input.candidates) {
+    if (
+      candidate.resolution === "auto_applied" &&
+      candidate.sourceBlockIds.length === 0 &&
+      !normalizeString(candidate.evidenceText)
+    ) {
+      notes.push(
+        `Missing evidence: ${candidate.target.section}.${candidate.target.key} (${candidate.valuePreview ?? "empty"})`,
+      );
+    }
+  }
 
   return {
     caseId: input.benchmarkCase.id,

@@ -191,7 +191,8 @@ export function inferEducationEntries(resumeText: string) {
   // single best match over the whole text is kept, as before.
   if (section.length === 0) return inferEducationEntry(resumeText);
   const lines = section;
-  const schoolPattern = /\b(?:college|university|school|institute|kolegji)\b/i;
+  const schoolPattern =
+    /\b(?:college|university|school|institute|kolegji|universität|université|universidade|universiteit)\b/i;
   const degreePattern =
     /\b(?:degree|associate|bachelor|master|ph\.?d|b\.?sc|m\.?sc|diploma|bootcamp)\b/i;
   const anchors = lines.flatMap((line, index) =>
@@ -228,11 +229,65 @@ function inferEducationEntry(resumeText: string) {
     "EDUCATION",
   ] as const);
   const candidatePool = educationLines.length > 0 ? educationLines : lines;
+  // Delimiters identify these fields without cutting an institution down to
+  // its English keyword ("American University" or "Universität Berlin").
+  const qualificationLine = educationLines
+    .map(stripBulletPrefix)
+    .find(
+      (line) =>
+        /^(?:[bm]\.?sc\.?|[bm]\.?s\.?|[bm]\.?a\.?|bachelor|master|ph\.?d|associate|diploma)\b/i.test(
+          line,
+        ) && /,|\s[–—]\s/.test(line),
+    );
+  if (qualificationLine) {
+    const parts = qualificationLine.split(/\s+[–—]\s+/);
+    const qualification = parts[0] ?? "";
+    const degreeParts = qualification.split(",").map(cleanLine);
+    const schoolFirst =
+      parts.length > 1 &&
+      !/^(?:expected|graduat|(?:19|20)\d{2})/i.test(parts[1] ?? "");
+    const schoolParts = (
+      schoolFirst ? parts.slice(1).join(" — ") : degreeParts.slice(1).join(", ")
+    )
+      .split(",")
+      .map(cleanLine);
+    const schoolName = schoolParts[0] ?? "";
+    const dates = qualificationLine.match(dateRangePattern);
+    const graduation = qualificationLine.match(
+      /((?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+)?(?:19|20)\d{2})\s*$/i,
+    );
+    if (
+      !/\b(?:degree|associate)\b|\bin\b/i.test(qualification) &&
+      /\b(?:college|university|school|institute|kolegji|universität|université|universidade|universiteit)\b/i.test(
+        schoolName,
+      )
+    ) {
+      return [
+        {
+          schoolName,
+          degree: degreeParts[0] ?? null,
+          fieldOfStudy: schoolFirst
+            ? degreeParts.slice(1).join(", ") || null
+            : null,
+          location:
+            schoolParts
+              .slice(1)
+              .filter((part) => !/^(?:19|20)\d{2}/.test(part))
+              .join(", ") || null,
+          startDate: dates?.[1] ?? null,
+          endDate: dates?.[2] ?? graduation?.[1] ?? null,
+          summary: null,
+        },
+      ];
+    }
+  }
   // A qualification, institution and graduation year are structural fields;
   // their wording need not belong to an English degree vocabulary.
   const inline = educationLines
     .map((line) =>
-      line.match(/^([^,]+),\s*([^,]+)(?:,\s*([^,]+))?,\s*((?:19|20)\d{2})$/),
+      stripBulletPrefix(line).match(
+        /^([^,]+),\s*([^,]+)(?:,\s*([^,]+))?,\s*((?:19|20)\d{2})$/,
+      ),
     )
     .find(Boolean);
   if (inline) {
@@ -777,6 +832,19 @@ export function inferSpokenLanguages(resumeText: string) {
     "LANGUAGES",
   ] as const);
 
+  // A resume often lists spoken languages beside skills rather than in a
+  // separate section. The explicit proficiency distinguishes them from tools.
+  for (const match of resumeText.matchAll(
+    /(?:^|[,;|\n])\s*([\p{L}][\p{L} .'-]{0,35})\s*\((native|mother tongue|fluent|bilingual|conversational|[ABC][12])\)/giu,
+  )) {
+    entries.push({
+      language: cleanLine(match[1] ?? ""),
+      proficiency: cleanLine(match[2] ?? ""),
+      interviewPreference: false,
+      notes: null,
+    });
+  }
+
   for (const line of languageSectionLines) {
     const match = line.match(
       /^([A-Za-z][A-Za-z .'()-]*?)\s*(?:[:|]|\s+[–—-]\s+)\s*(.+)$/,
@@ -891,9 +959,8 @@ export function inferLocations(
 }
 
 export function inferGithubUrl(resumeText: string): string | null {
-  const match = extractFirstUrl(
-    resumeText,
-    /https?:\/\/(?:www\.)?github\.com\/[A-Za-z0-9_-]+\/?$/i,
+  const match = extractAllUrls(resumeText).find((url) =>
+    /^https?:\/\/(?:www\.)?github\.com\/[A-Za-z0-9_-]+\/?$/i.test(url),
   );
   if (match) {
     try {

@@ -15,6 +15,7 @@ import {
 } from "@nestor/contracts";
 import {
   areEquivalentEducationRecords,
+  areEquivalentCertificationReadings,
   areEquivalentExperienceRecords,
   scoreEducationRecordCompleteness,
   scoreExperienceRecordCompleteness,
@@ -509,7 +510,9 @@ export function mergeCertificationRecords(
         normalizeRecordKey([saved.name, saved.issuer, saved.issueDate]) ===
         fullKey,
       (saved) =>
-        nameKey.length > 0 && normalizeRecordKey([saved.name]) === nameKey,
+        nameKey.length > 0 &&
+        (normalizeRecordKey([saved.name]) === nameKey ||
+          areEquivalentCertificationReadings(saved, entry)),
     );
     const match = matchIndex === -1 ? null : (next[matchIndex] ?? null);
     const name = entry.name ?? match?.name ?? null;

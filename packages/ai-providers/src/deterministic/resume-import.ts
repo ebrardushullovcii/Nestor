@@ -159,6 +159,8 @@ function buildRelaxedEvidenceCandidates(value: string): string[] {
   }
 
   const candidates = new Set<string>([normalized]);
+  if (/^https?:\/\//.test(normalized))
+    candidates.add(normalized.replace(/^https?:\/\//, ""));
 
   const withoutPlus = normalized.replace(
     /\b(\d+)\+\s+(years?|yrs?)\b/gi,

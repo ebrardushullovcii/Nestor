@@ -11,12 +11,38 @@ import {
   buildCaseResult,
   runResumeImportBenchmark,
 } from "./resume-import-benchmark";
-import {
-  createFreshStartSeedProfile,
-  createSeed,
-} from "./test-fixtures";
+import { createFreshStartSeedProfile, createSeed } from "./test-fixtures";
 
 describe("resume import benchmark", () => {
+  test("checks saved fields for whole fragments and formatting without penalizing the original source", () => {
+    const profile = createFreshStartSeedProfile();
+    const result = buildCaseResult({
+      benchmarkCase: {
+        id: "fragments",
+        label: "Fragments",
+        resumePath: "fixture.txt",
+        canary: true,
+        tags: [],
+        expected: {
+          literalFields: {},
+          summaryContains: [],
+          experienceRecords: [],
+          educationRecords: [],
+          forbiddenProfileText: ["Kubern", "**"],
+        },
+      },
+      parserStrategy: "fixture",
+      profile: {
+        ...profile,
+        skills: ["Kubernetes", "**decorated**"],
+        baseResume: { ...profile.baseResume, textContent: "Kubern\netes" },
+      },
+      searchPreferences: createSeed().searchPreferences,
+      candidates: [],
+    });
+    expect(result.metrics.contradictionFreeRate).toBe(0.5);
+  });
+
   test("aggregates benchmark metrics across cases", () => {
     const metrics = aggregateBenchmarkMetrics([
       {
@@ -826,6 +852,8 @@ describe("resume import benchmark", () => {
       profile: {
         ...seed.profile,
         email: "jamie@example.com",
+        experiences: [],
+        education: [],
       },
       searchPreferences: seed.searchPreferences,
       candidates: [
@@ -882,59 +910,62 @@ describe("resume import benchmark", () => {
     expect(result.taxonomy).not.toContain("UNRESOLVED_SHOULD_HAVE_RESOLVED");
   });
 
-  test("does not count rejected record candidates as extracted output", () => {
-    const seed = createSeed();
-    const result = buildCaseResult({
-      benchmarkCase: {
-        id: "rejected_record_case",
-        label: "Rejected record case",
-        resumePath: "fixture.txt",
-        canary: true,
-        tags: ["test"],
-        expected: {
-          literalFields: {},
-          summaryContains: [],
-          experienceRecords: [
-            { title: "Product Engineer", companyName: "Northstar Labs" },
-          ],
-          educationRecords: [],
-        },
-      },
-      parserStrategy: "fixture+plain_text",
-      profile: { ...seed.profile, experiences: [] },
-      searchPreferences: seed.searchPreferences,
-      candidates: [
-        {
-          id: "candidate_rejected_experience",
-          runId: "run_1",
-          target: {
-            section: "experience",
-            key: "record",
-            recordId: "experience_1",
+  test.each(["rejected", "needs_review", "auto_applied"] as const)(
+    "does not score an unsaved %s candidate as profile output",
+    (resolution) => {
+      const seed = createSeed();
+      const result = buildCaseResult({
+        benchmarkCase: {
+          id: "rejected_record_case",
+          label: "Rejected record case",
+          resumePath: "fixture.txt",
+          canary: true,
+          tags: ["test"],
+          expected: {
+            literalFields: {},
+            summaryContains: [],
+            experienceRecords: [
+              { title: "Product Engineer", companyName: "Northstar Labs" },
+            ],
+            educationRecords: [],
           },
-          label: "Product Engineer",
-          sourceKind: "model_experience",
-          value: {
-            title: "Product Engineer",
-            companyName: "Northstar Labs",
-          },
-          normalizedValue: null,
-          valuePreview: "Product Engineer at Northstar Labs",
-          evidenceText: "Product Engineer at Northstar Labs",
-          sourceBlockIds: ["b1"],
-          confidence: 0.4,
-          alternatives: [],
-          notes: [],
-          resolution: "rejected",
-          resolutionReason: "conflicted_with_stronger_candidate",
-          createdAt: "2026-04-11T10:00:00.000Z",
-          resolvedAt: "2026-04-11T10:00:01.000Z",
         },
-      ],
-    });
+        parserStrategy: "fixture+plain_text",
+        profile: { ...seed.profile, experiences: [] },
+        searchPreferences: seed.searchPreferences,
+        candidates: [
+          {
+            id: "candidate_rejected_experience",
+            runId: "run_1",
+            target: {
+              section: "experience",
+              key: "record",
+              recordId: "experience_1",
+            },
+            label: "Product Engineer",
+            sourceKind: "model_experience",
+            value: {
+              title: "Product Engineer",
+              companyName: "Northstar Labs",
+            },
+            normalizedValue: null,
+            valuePreview: "Product Engineer at Northstar Labs",
+            evidenceText: "Product Engineer at Northstar Labs",
+            sourceBlockIds: ["b1"],
+            confidence: 0.4,
+            alternatives: [],
+            notes: [],
+            resolution,
+            resolutionReason: "conflicted_with_stronger_candidate",
+            createdAt: "2026-04-11T10:00:00.000Z",
+            resolvedAt: "2026-04-11T10:00:01.000Z",
+          },
+        ],
+      });
 
-    expect(result.metrics.experienceRecordF1).toBe(0);
-  });
+      expect(result.metrics.experienceRecordF1).toBe(0);
+    },
+  );
 
   test("penalizes extra records when an optional gold category is explicitly empty", () => {
     const seed = createSeed();

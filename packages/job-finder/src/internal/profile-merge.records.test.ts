@@ -24,6 +24,28 @@ function certificate(id: string, issueDate: string, expiryDate: string) {
   };
 }
 
+test("a deferred visual certificate reading updates the saved course instead of adding a copy", () => {
+  const saved = {
+    ...certificate("saved_course", "2024", "2028"),
+    name: "Workflow Foundations",
+    issuer: "Example Academy",
+  };
+  const imported = {
+    name: "Workflow Foundations (online course)",
+    issuer: "Example Academy",
+    issueDate: "2024",
+    expiryDate: null,
+    credentialUrl: null,
+  };
+  const result = mergeCertificationRecords([saved], [imported]);
+  expect(result).toHaveLength(1);
+  expect(result[0]).toMatchObject({
+    id: "saved_course",
+    name: imported.name,
+    expiryDate: "2028",
+  });
+});
+
 function project(id: string, role: string, summary: string) {
   return {
     id,

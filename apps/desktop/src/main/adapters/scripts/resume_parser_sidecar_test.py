@@ -4,11 +4,38 @@ import unittest
 
 from docx import Document
 from docx.enum.section import WD_SECTION_START
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.opc.constants import RELATIONSHIP_TYPE
 
-from resume_parser_sidecar import extract_docx_text, iter_docx_block_text
+from resume_parser_sidecar import extract_docx_text, iter_docx_block_text, repair_pdf_token_wraps
 
 
 class DocxBlockTextTests(unittest.TestCase):
+    def test_preserves_header_and_interleaved_table_order_and_nested_cells(self):
+        document = Document()
+        document.sections[0].header.paragraphs[0].text = "Jordan Example"
+        document.add_paragraph("Experience")
+        table = document.add_table(rows=1, cols=1)
+        table.cell(0, 0).text = "First role"
+        table.cell(0, 0).add_table(rows=1, cols=1).cell(0, 0).text = "2020 - 2022"
+        document.add_paragraph("Education")
+        document.add_table(rows=1, cols=1).cell(0, 0).text = "Example College"
+        self.assertEqual(iter_docx_block_text(document), ["Jordan Example", "Experience", "First role", "2020 - 2022", "Education", "Example College"])
+
+    def test_preserves_hyperlink_label_and_destination(self):
+        document = Document()
+        paragraph = document.add_paragraph("Contact: ")
+        link = OxmlElement("w:hyperlink")
+        link.set(qn("r:id"), paragraph.part.relate_to("https://example.test/jordan", RELATIONSHIP_TYPE.HYPERLINK, is_external=True))
+        run = OxmlElement("w:r")
+        text = OxmlElement("w:t")
+        text.text = "Portfolio"
+        run.append(text)
+        link.append(run)
+        paragraph._p.append(link)
+        self.assertEqual(iter_docx_block_text(document), ["Contact: Portfolio (https://example.test/jordan)"])
+
     def test_preserves_repeated_role_titles_and_locations_in_distinct_paragraphs(self):
         document = Document()
         lines = [
@@ -50,6 +77,12 @@ class DocxBlockTextTests(unittest.TestCase):
         table.cell(1, 1).text = "Amsterdam"
 
         self.assertEqual(iter_docx_block_text(document), ["Senior Engineer", "Amsterdam", "Amsterdam"])
+
+    def test_repairs_only_unambiguous_pdf_date_and_url_continuations(self):
+        self.assertEqual(repair_pdf_token_wraps("03\n/2022 - present\ngithub.com/jordan-exam\nple\nSUMMARY"), "03/2022 - present\ngithub.com/jordan-example\nSUMMARY")
+        self.assertEqual(repair_pdf_token_wraps("https://example.test/jordan\nBuilt reliable systems."), "https://example.test/jordan\nBuilt reliable systems.")
+        self.assertEqual(repair_pdf_token_wraps("https://example.test/jordan\nskills"), "https://example.test/jordan\nskills")
+        self.assertEqual(repair_pdf_token_wraps("https://example.test\nnext"), "https://example.test\nnext")
 
 
 if __name__ == "__main__":
