@@ -1,4 +1,10 @@
 import type { FoundJob } from "@nestor/contracts";
+import {
+  CandidateProfileSchema,
+  createFreshStartCandidateProfile,
+} from "@nestor/contracts";
+import { createProfileStore } from "@nestor/db/job-store";
+import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -103,4 +109,46 @@ describe("opening the job store after a reset stopped part way", () => {
     expect(() => getJobStore()).toThrow("database is locked");
     expect(getJobStore().stageCounts().found).toBe(0);
   });
+});
+
+it("imports the retained workspace beside the selected store before the first screen reads Profile", () => {
+  userData.dir = mkdtempSync(path.join(tmpdir(), "job-store-import-"));
+  pending.value = { status: "none" };
+  const legacy = new DatabaseSync(
+    path.join(userData.dir, "job-finder-workspace.sqlite"),
+  );
+  legacy.exec(
+    "CREATE TABLE singleton_state(key TEXT PRIMARY KEY,value TEXT NOT NULL)",
+  );
+  legacy.prepare("INSERT INTO singleton_state VALUES('profile',?)").run(
+    JSON.stringify(
+      CandidateProfileSchema.parse({
+        ...createFreshStartCandidateProfile(),
+        fullName: "Synthetic Candidate",
+      }),
+    ),
+  );
+  legacy.close();
+  expect(createProfileStore(getJobStore()).read().fullName).toBe(
+    "Synthetic Candidate",
+  );
+  closeJobStore();
+  expect(createProfileStore(getJobStore()).read().fullName).toBe(
+    "Synthetic Candidate",
+  );
+});
+
+it("does not import retained data while a confirmed reset is recovering", () => {
+  userData.dir = mkdtempSync(path.join(tmpdir(), "job-store-import-reset-"));
+  pending.value = { status: "readable", intent: { token: "t", entries: [] } };
+  // A malformed retired file is still ignored, rather than blocking reset.
+  const legacy = new DatabaseSync(
+    path.join(userData.dir, "job-finder-workspace.sqlite"),
+  );
+  legacy.exec("CREATE TABLE obsolete(value TEXT)");
+  legacy.close();
+  expect(createProfileStore(getJobStore()).read().fullName).toBeNull();
+  closeJobStore();
+  pending.value = { status: "none" };
+  expect(createProfileStore(getJobStore()).read().fullName).toBeNull();
 });

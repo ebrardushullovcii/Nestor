@@ -6,8 +6,8 @@ import type { JobStore } from "./job-store";
 
 /**
  * What "check this site" learned about a job site, which search and Apply
- * pass to the model. One row per saved artifact; old workspace artifacts are
- * not copied, and a check writes new ones.
+ * pass to the model. One row per saved artifact, including retained artifacts
+ * imported with an older workspace's sites.
  */
 export const SITE_INSTRUCTIONS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS site_instructions(id TEXT PRIMARY KEY,target_id TEXT NOT NULL,updated_at TEXT NOT NULL,value TEXT NOT NULL);

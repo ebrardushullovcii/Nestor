@@ -16,6 +16,8 @@ import { JOB_STORE_ADDED_COLUMNS } from "./schema";
  */
 const RELEASED_COLUMNS: Record<string, string> = {
   fit_context: "id fingerprint",
+  legacy_workspace_imports: "source completed_at counts_json",
+  legacy_workspace_jobs: "old_id job_id",
   activity_control: "id paused paused_at reason pause_behavior",
   application_details:
     "application_id attempt resume_artifact_json execution_json review_json authority_envelope_id profile_digest access_recheck",

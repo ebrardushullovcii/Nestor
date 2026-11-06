@@ -70,6 +70,10 @@ See [ADR 0007](adr/0007-source-generic-browser-workflows.md) for the source-gene
 
 ### Persistence safety
 
+- Opening an older `job-finder-workspace.sqlite` imports its saved data into
+  `job-finder.sqlite` once through `packages/db`. The source stays untouched,
+  the destination is backed up, and row checks and an import receipt commit
+  together. Reset keeps the receipt so retained data cannot reappear.
 - Find jobs, Shortlisted and Applications read indexed pages and counts from
   the job store, not a whole-workspace snapshot. List pages must never feed a
   destructive collection replacement.

@@ -18,7 +18,8 @@ import {
   type TriageStage,
   FIT_SHORT_MAX,
 } from "@nestor/contracts";
-import { chmodSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -47,6 +48,7 @@ import {
   restoreAgeHidden,
   migrateHideOwners,
 } from "./fit";
+import { importLegacyWorkspace } from "./legacy-workspace";
 
 export { createProfileStore, type ProfileStore } from "./profile-store";
 export {
@@ -194,10 +196,13 @@ export function addMissingColumns(
 
 /**
  * Opens the store at `filePath` (or `":memory:"`), adding what is missing and
- * keeping every row. Only a file from before the store kept its data
- * (`JOB_STORE_KEPT_FROM_VERSION`) is deleted and started over.
+ * keeping every row. An unsupported development layout is retained under a
+ * separate filename before creating the current layout.
  */
-export function openJobStore(filePath: string): JobStore {
+export function openJobStore(
+  filePath: string,
+  options: { legacyWorkspacePath?: string } = {},
+): JobStore {
   const inMemory = filePath === ":memory:";
   if (!inMemory) mkdirSync(path.dirname(filePath), { recursive: true });
   let db = openDatabase(filePath);
@@ -208,8 +213,10 @@ export function openJobStore(filePath: string): JobStore {
     !inMemory
   ) {
     db.close();
+    const retained = `${filePath}.pre-row-store-${randomUUID()}.sqlite`;
     for (const suffix of ["", "-wal", "-shm"]) {
-      rmSync(`${filePath}${suffix}`, { force: true });
+      if (existsSync(`${filePath}${suffix}`))
+        renameSync(`${filePath}${suffix}`, `${retained}${suffix}`);
     }
     db = openDatabase(filePath);
   }
@@ -293,7 +300,7 @@ export function openJobStore(filePath: string): JobStore {
     };
   };
 
-  return {
+  const store: JobStore = {
     db,
     sql,
     transaction,
@@ -524,6 +531,18 @@ export function openJobStore(filePath: string): JobStore {
       if (db.isOpen) db.close();
     },
   };
+  try {
+    if (options.legacyWorkspacePath)
+      importLegacyWorkspace(
+        store,
+        options.legacyWorkspacePath,
+        inMemory ? undefined : filePath,
+      );
+    return store;
+  } catch (error) {
+    store.close();
+    throw error;
+  }
 }
 export type { JobSearches } from "./searches";
 

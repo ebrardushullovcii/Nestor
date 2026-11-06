@@ -19,6 +19,9 @@ export function resetJobStore(store: JobStore): void {
   // The foreign-key switch and VACUUM below only work between transactions.
   if (db.isTransaction)
     throw new Error("The job store can't be reset inside a transaction.");
+  const imports = store
+    .sql("SELECT source,completed_at,counts_json FROM legacy_workspace_imports")
+    .all();
   const tables = () =>
     db
       .prepare(
@@ -36,6 +39,17 @@ export function resetJobStore(store: JobStore): void {
           db.exec(`DROP TABLE "${name}"`);
       for (const { name } of tables()) db.exec(`DROP TABLE "${name}"`);
       for (const ddl of JOB_STORE_SCHEMA) db.exec(ddl);
+      for (const row of imports)
+        store
+          .sql(
+            "INSERT INTO legacy_workspace_imports(source,completed_at,counts_json) VALUES(?,?,?)",
+          )
+          .run(row.source!, row.completed_at!, row.counts_json!);
+      store
+        .sql(
+          "INSERT OR IGNORE INTO legacy_workspace_imports(source,completed_at,counts_json) VALUES('job-finder-workspace.sqlite',?,'{}')",
+        )
+        .run(new Date().toISOString());
       // Existing repository/command handles still read these singleton rows.
       // Recreate only fresh defaults; reset never restores retired values.
       createProfileStore(store);

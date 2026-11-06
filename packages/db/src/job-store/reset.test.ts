@@ -111,7 +111,10 @@ describe("resetJobStore", () => {
     resetJobStore(store);
 
     expect(layout(store)).toEqual(layout(fresh));
-    expect(rowCounts(store)).toEqual(rowCounts(fresh));
+    expect(rowCounts(store)).toEqual({
+      ...rowCounts(fresh),
+      legacy_workspace_imports: 1,
+    });
     expect(store.db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(store.listJobs({ stage: "found" }).rows).toEqual([]);
     expect(store.searches.latest()).toBeNull();
