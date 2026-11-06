@@ -241,14 +241,7 @@ export function createPageTools(
       execute: async (raw) => {
         const ref = asString(parseToolArguments(raw).ref);
         const text = await hands.readText(ref ?? undefined);
-        return ok(
-          selfLimitSlice(
-            text,
-            0,
-            20_000,
-            "packages/browser-agent/src/page-tools.ts:245",
-          ) || "That has no text.",
-        );
+        return ok(text || "That has no text.");
       },
     },
     {

@@ -46,8 +46,7 @@ test("host queues report the active total and per-host boundaries and keep queue
     expect.arrayContaining(["host_queue_per_host", "host_queue_total"]),
   );
 });
-test("a public HTTP read reports its final bounded retry", async () => {
-  const log = vi.spyOn(console, "warn").mockImplementation(() => {});
+test("an HTTP refusal keeps its site status for browser continuation instead of spending a retry budget", async () => {
   const request = vi.fn<typeof fetch>(() =>
     Promise.resolve(
       new Response("busy", { status: 429, headers: { "retry-after": "0" } }),
@@ -55,48 +54,69 @@ test("a public HTTP read reports its final bounded retry", async () => {
   );
   await expect(
     createHttpPageReader({ fetch: request })("https://example.test/job", {}),
-  ).rejects.toThrow();
-  expect(request).toHaveBeenCalledTimes(4);
-  expect(hits(log).some((hit) => hit.limit === "http_retries")).toBe(true);
+  ).rejects.toMatchObject({ status: 429 });
+  expect(request).toHaveBeenCalledTimes(1);
 });
-test("rendered readiness stops on silence and navigation failures close only the owned tab", async () => {
-  vi.useFakeTimers();
-  const log = vi.spyOn(console, "warn").mockImplementation(() => {}),
-    close = vi.fn(async () => {});
-  const page = {
-    goto: () => Promise.resolve(null),
-    content: () => Promise.resolve("<main>Still loading</main>"),
-    url: () => "https://example.test/job",
-    close,
-    waitForTimeout: async (ms: number) => {
-      await vi.advanceTimersByTimeAsync(ms);
-    },
-  } as unknown as Page;
-  const context = {
-    newPage: () => Promise.resolve(page),
-  } as unknown as BrowserContext;
-  await readRenderedPageHtml(context, page.url(), { ready: () => false });
-  expect(hits(log).some((hit) => hit.limit === "rendered_page_ready")).toBe(
-    false,
-  );
-  expect(close).toHaveBeenCalledTimes(1);
-  // Changing page content is progress even after the old 12-second cutoff.
-  let reads = 0;
-  page.content = () => Promise.resolve(++reads >= 80 ? "Complete" : `Loading ${reads}`);
-  expect(await readRenderedPageHtml(context, page.url(), { ready: html => html === "Complete" })).toMatchObject({ html: "Complete" });
-  expect(reads).toBe(80);
 
-  const timeout = Object.assign(Error("Timeout 20000ms exceeded"), {
-    name: "TimeoutError",
-  });
-  page.goto = vi.fn().mockRejectedValue(timeout);
-  await expect(readRenderedPageHtml(context, page.url())).rejects.toBe(timeout);
-  expect(
-    hits(log).some(
-      (hit) => hit.limit === "operation_timeout" && hit.value === 20000,
+test("rendered snapshots do not wait for semantic readiness on a continually changing page", async () => {
+  const close = vi.fn(() => Promise.resolve()),
+    ready = vi.fn(() => false);
+  const page = {
+    goto: vi.fn(() => Promise.resolve(null)),
+    content: vi.fn(() =>
+      Promise.resolve("<main>Changing animation, no recognized cards</main>"),
     ),
-  ).toBe(true);
-  expect(close).toHaveBeenCalledTimes(3);
+    url: () => "https://example.test",
+    close,
+    on: vi.fn(),
+    off: vi.fn(),
+  } as unknown as Page;
+  const result = await readRenderedPageHtml(
+    { newPage: () => Promise.resolve(page) } as unknown as BrowserContext,
+    page.url(),
+    { ready },
+  );
+  expect(result.html).toContain("Changing animation");
+  expect(ready).not.toHaveBeenCalled();
+  expect(close).toHaveBeenCalledOnce();
+});
+
+test("active navigation can continue past 20 seconds with connection progress", async () => {
+  vi.useFakeTimers();
+  const listeners = new Map<string, () => void>();
+  let finish!: () => void;
+  const close = vi.fn(() => Promise.resolve());
+  const goto = vi.fn(
+    () =>
+      new Promise<null>((resolve) => {
+        finish = () => resolve(null);
+      }),
+  );
+  const page = {
+    goto,
+    content: () => Promise.resolve("Complete"),
+    url: () => "https://example.test",
+    close,
+    on: (name: string, listener: () => void) => listeners.set(name, listener),
+    off: (name: string) => listeners.delete(name),
+  } as unknown as Page;
+  const pending = readRenderedPageHtml(
+    { newPage: () => Promise.resolve(page) } as unknown as BrowserContext,
+    page.url(),
+  );
+  await vi.advanceTimersByTimeAsync(10_000);
+  listeners.get("response")?.();
+  await vi.advanceTimersByTimeAsync(10_000);
+  listeners.get("response")?.();
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(close).not.toHaveBeenCalled();
+  expect(goto).toHaveBeenCalledWith(page.url(), {
+    waitUntil: "domcontentloaded",
+    timeout: 0,
+  });
+  finish();
+  expect(await pending).toEqual({ html: "Complete", finalUrl: page.url() });
+  expect(close).toHaveBeenCalledOnce();
 });
 test("an attachment command timeout is reported at the real file tool boundary", async () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {}),

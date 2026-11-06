@@ -6,7 +6,6 @@ import { createHash } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   collectSource,
-  listingInventoryReady,
   screenCards,
   readListings,
   fitJobs,
@@ -68,6 +67,7 @@ export interface JobSearchEngine {
   }>;
   readListings(input: {
     lane?: "http" | "browser";
+    context?: JobSearchContext;
     cards: readonly ListingCard[];
     signal: AbortSignal;
   }): Promise<ReadListingResult>;
@@ -249,7 +249,6 @@ export function createListingSearchEngine(deps: {
                 readPage(url, {
                   ...options,
                   rendered: true,
-                  ready: (html) => listingInventoryReady(html, url),
                 }),
         signal,
         onPage: async (cards) => {
@@ -318,7 +317,7 @@ export function createListingSearchEngine(deps: {
                       sourceIds: [target.id],
                     },
                     targetJobCount: Number.MAX_SAFE_INTEGER,
-                    maxSteps: settings.depth === "quick" ? 8 : 16,
+                    maxSteps: Number.MAX_SAFE_INTEGER,
                     signal,
                     onProgress: (progress) => {
                       if (progress.message) input.message(progress.message);
@@ -389,8 +388,107 @@ export function createListingSearchEngine(deps: {
         }),
       );
     },
-    readListings: (input) =>
-      readListings({ client, onUsage, ...input, readPage }),
+    async readListings(input) {
+      if (input.lane !== "browser" || !input.context)
+        return readListings({ client, onUsage, ...input, readPage });
+      const context = input.context;
+      const result: ReadListingResult = { jobs: [], failures: [] };
+      for (const card of input.cards) {
+        input.signal.throwIfAborted();
+        if (!deps.browserRuntime.runAgentDiscovery) {
+          result.failures.push({
+            url: card.url,
+            reason: "Browser navigation is unavailable.",
+          });
+          continue;
+        }
+        try {
+          const browserPermissions = context.readBrowserPermissions
+            ? await context.readBrowserPermissions()
+            : context.browserPermissions;
+          const discovery = await deps.browserRuntime.runAgentDiscovery(
+            "target_site",
+            {
+              ...(browserPermissions ? { browserPermissions } : {}),
+              ...(context.readBrowserPermissions
+                ? { readBrowserPermissions: context.readBrowserPermissions }
+                : {}),
+              ...(context.readIntendedAccountEmail
+                ? { readIntendedAccountEmail: context.readIntendedAccountEmail }
+                : {}),
+              dedicatedPage: true,
+              retainAllFound: true,
+              userProfile: context.profile,
+              searchPreferences: toJobSearchGoals(context.searchPreferences),
+              startingUrls: [card.url],
+              searchRequest: {
+                intent:
+                  "Read this supplied vacancy in full and keep its complete text. This is a listing read, not a fit decision; do not reject it for preferences or expected fit.",
+                breadth: "wide",
+                freshness: "any",
+                sourceIds: [card.sourceId],
+              },
+              navigationHostnames: [new URL(card.url).hostname],
+              siteLabel: card.sourceLabel,
+              siteInstructions: [
+                "Read the supplied vacancy in full, including every requirement and the application link. This is a full listing read, not a fit decision: retain this vacancy regardless of its expected fit. Preserve its complete text in description. Missing metadata is unknown, not a reason to drop a vacancy. Do not apply.",
+                "Use this browser's imported session and the saved vault sign-in or Google sign-in when needed. Attempt permitted sign-in and site checks before asking the person. Never ask for or expose a password the vault can type. If a real attempt fails, hand off on the open page with exactly what happened.",
+              ],
+              targetJobCount: 1,
+              maxSteps: Number.MAX_SAFE_INTEGER,
+              signal: input.signal,
+              aiClient: deps.aiClient,
+            },
+          );
+          for (const job of discovery.jobs)
+            result.jobs.push({
+              title: job.title,
+              company: job.company,
+              location: job.location,
+              workModes: job.workMode,
+              url: job.canonicalUrl,
+              applyUrl: job.applicationUrl ?? null,
+              sourceId: card.sourceId,
+              sourceLabel: card.sourceLabel,
+              sourceJobId: job.sourceJobId ?? null,
+              postedAt: job.postedAt ?? null,
+              description: job.description,
+              facts: { fullListingRead: true },
+              summary: null,
+              seniority: job.seniority ?? null,
+              employmentType: job.employmentType ?? null,
+              salaryText: job.salaryText ?? null,
+              salaryMin: null,
+              salaryMax: null,
+              salaryCurrency: null,
+              ...(job.searchRejection?.category === "closed"
+                ? { hiddenReason: `Closed: ${job.searchRejection.reason}` }
+                : {}),
+            });
+          if (!discovery.jobs.length)
+            result.failures.push({
+              url: card.url,
+              reason:
+                discovery.warning ??
+                "The browser agent did not finish reading this vacancy.",
+              ...([
+                "auth_required",
+                "site_protection",
+                "manual_step_required",
+              ].includes(discovery.agentMetadata?.accessBlockerReason ?? "")
+                ? { needsYou: true }
+                : {}),
+            });
+        } catch (error) {
+          input.signal.throwIfAborted();
+          result.failures.push({
+            url: card.url,
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      return result;
+    },
     fitJobs: (input) =>
       fitJobs({
         client: {

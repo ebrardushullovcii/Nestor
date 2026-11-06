@@ -1032,7 +1032,7 @@ async function navigatePageToTarget(input: {
   allowPrepareOnlyRunNavigation(input.page, input.targetUrl);
   await input.page.goto(input.targetUrl, {
     waitUntil: "domcontentloaded",
-    ...(input.timeout ? { timeout: input.timeout } : {}),
+    ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
   });
 
   return true;
@@ -1183,7 +1183,7 @@ async function prepareAutomationPageForTarget(
       navigatedToTarget = await navigatePageToTarget({
         page,
         targetUrl: options.targetUrl,
-        ...(options.navigationTimeoutMs
+        ...(options.navigationTimeoutMs !== undefined
           ? { timeout: options.navigationTimeoutMs }
           : {}),
         ...(options.requireExactTarget !== undefined
@@ -2289,6 +2289,7 @@ export function createBrowserAgentRuntime(
       await getProtectedApplicationPages(context);
     const prepared = await prepareAutomationPageForTarget(context, {
       targetUrl: navigationTarget,
+      navigationTimeoutMs: 0,
       acceptTargetOriginAfterTimeout: true,
       bringToFront:
         !agentOptions.inventoryOnly && currentSessionState.status !== "ready",

@@ -34,6 +34,9 @@ test("a proven match streams before an uncertain profession finishes and is emit
   >(() => Promise.resolve());
   const work = screenCards({
     cards: [match, card("Landscape Architect")],
+    decisions: new Map([
+      [`${match.title.toLowerCase()}\n${professionEvidence(match)}`, true],
+    ]),
     goals,
     client: { chatWithTools: () => response.promise },
     onRelated,
@@ -112,7 +115,11 @@ test("a streaming persistence error propagates rather than becoming a profession
     screenCards({
       cards: [card("Frontend Engineer")],
       goals,
-      client: { chatWithTools: vi.fn() },
+      client: {
+        chatWithTools: vi.fn(() =>
+          Promise.resolve({ content: '{"keep":{"0":1}}' }),
+        ),
+      },
       onRelated: () => Promise.reject(failure),
     }),
   ).rejects.toBe(failure);
@@ -133,6 +140,9 @@ test("a proven match does not wait for another listing's full read", async () =>
     });
   const work = screenCards({
     cards: [match, uncertain],
+    decisions: new Map([
+      [`${match.title.toLowerCase()}\n${professionEvidence(match)}`, true],
+    ]),
     goals,
     onRelated,
     client: { chatWithTools },

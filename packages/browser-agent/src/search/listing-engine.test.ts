@@ -18,7 +18,6 @@ import {
   listingSignInRequired,
 } from "./listing-html";
 import { htmlToPlainText } from "./listing-detail-extraction";
-import { listingClosedReason } from "./listing-status";
 import { publicBoardFeed } from "./public-board-feed";
 import type { LLMClient } from "../agent/contracts";
 
@@ -113,30 +112,25 @@ test("an unusual title is judged with full duties once and its page is reused", 
   expect(read.jobs).toHaveLength(2);
 });
 
-test("failure to verify a negative profession is technical work, never remembered unrelated", async () => {
-  const decisions = new Map<string, boolean>();
+test("a failed duty read is evidence for the model, not a code-side profession veto", () => {
+  const client = {
+    chatWithTools: vi.fn(() =>
+      Promise.resolve({ content: '{"keep":{"0":1}}' }),
+    ),
+  };
   const result = await screenCards({
     cards: [card("Trend Steward")],
-    decisions,
     goals: {
       targetRoles: ["Data Analyst"],
       relatedRoles: [],
       strategy: "wide_net",
     },
-    client: {
-      chatWithTools: () => Promise.resolve({ content: '{"keep":{"0":0}}' }),
-    },
+    client,
     readPage: () => Promise.reject(new Error("Temporary source failure")),
   });
-  expect(result.related).toEqual([]);
-  expect(result.seen).toEqual([]);
-  expect(result.failed.map((row) => row.url)).toEqual([
-    card("Trend Steward").url,
-  ]);
-  expect(result.failed[0]?.reason).toContain(
-    "Profession not verified: Temporary source failure",
-  );
-  expect(decisions.size).toBe(0);
+  expect(result.related).toHaveLength(1);
+  expect(result.failed).toEqual([]);
+  expect(client.chatWithTools.mock.calls).toHaveLength(1);
 });
 
 test.each([{ "0": 1, "1": 0 }, { "keep{": { "0": 1, "1": 0 } }])(
@@ -383,7 +377,7 @@ test("screens titles in one call, retains senior variants and skips saved and re
   ];
   const client = {
     chatWithTools: vi.fn(() =>
-      Promise.resolve({ content: '{"keep":{"0":0}}' }),
+      Promise.resolve({ content: '{"keep":{"0":1,"1":1,"2":0}}' }),
     ),
   };
   const goals = {
@@ -496,8 +490,8 @@ test("returns full visible requirements beyond sparse JSON-LD and reads metadata
   ).toBe(true);
   expect(result.jobs[0].company).toBe("Real Employer");
   expect(readPage).toHaveBeenCalledTimes(2);
-  // Full bodies are retained; metadata excerpts let both fit in one read call.
-  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
+  // Each model request receives complete bodies. Batching never truncates them.
+  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
 });
 
 test("provider endpoints are reusable across boards and never claimed from lookalike hosts", () => {
@@ -824,39 +818,6 @@ test("judges merged unscored jobs once, retaining low scores and all three expla
   });
 });
 
-test("closed text outside the job body remains hidden without an AI fit", async () => {
-  const client = {
-    chatWithTools: vi.fn(() =>
-      Promise.reject(new Error("Metadata already published")),
-    ),
-  };
-  const listing = {
-    ...card("Senior Visual Designer"),
-    companyHint: "Real Employer",
-    locationHint: "Manchester, United Kingdom",
-  };
-  const readPage = vi.fn((url: string) =>
-    Promise.resolve({
-      finalUrl: url,
-      html: `<main><article><h1>Senior Visual Designer</h1><p>Real Employer</p><p>Manchester, United Kingdom</p><p>Design thoughtful visual systems and collaborate with researchers.</p></article><p role="status">This job is no longer accepting applications.</p></main>`,
-    }),
-  );
-  const result = await readListings({ cards: [listing], readPage, client });
-  expect(result.jobs[0]?.hiddenReason).toMatch(/^Closed:/);
-  expect(result.jobs[0]?.description).toContain("visual systems");
-  expect(client.chatWithTools).not.toHaveBeenCalled();
-});
-
-test("an expired published closing date closes a listing; posting age and future deadlines do not", () => {
-  const yesterday = new Date(Date.now() - 2 * 86400000).toISOString();
-  const tomorrow = new Date(Date.now() + 2 * 86400000).toISOString();
-  expect(listingClosedReason("Apply now", yesterday)).toMatch(/^Closed:/);
-  expect(
-    listingClosedReason("Applications close on a future date", tomorrow),
-  ).toBeNull();
-  expect(listingClosedReason("Posted three months ago. Apply now.")).toBeNull();
-});
-
 test("a source can be an unlinked single vacancy; its complete page is reused for metadata and full text", async () => {
   const direct = { ...source, url: "https://board.example/a-vacancy" };
   const html =
@@ -1072,42 +1033,29 @@ test("a truncated screen batch is left retryable while other title batches compl
   );
 });
 
-test("clear requested role variants need no model; ambiguous professions still use compact evidence", async () => {
+test("even exact role-title prefixes are decided by the model", async () => {
   const client = {
     chatWithTools: vi.fn(() =>
-      Promise.resolve({ content: '{"keep":{"0":0}}' }),
+      Promise.resolve({ content: '{"keep":{"0":0,"1":1}}' }),
     ),
   };
-  const goals = {
-    targetRoles: ["Senior Backend Engineer"],
-    relatedRoles: ["Platform Engineer"],
-    strategy: "related_roles" as const,
-  };
-  const first = await screenCards({
+  const result = await screenCards({
     client,
-    goals,
-    cards: [
-      card("Staff Backend Engineer"),
-      card("Senior Platform Engineer - hybrid Manchester"),
-    ],
+    goals: {
+      targetRoles: ["Backend Engineer"],
+      relatedRoles: ["Platform Engineer"],
+      strategy: "related_roles",
+    },
+    cards: [card("Staff Backend Engineer"), card("Senior Platform Engineer")],
   });
-  expect(first.related).toHaveLength(2);
-  expect(client.chatWithTools).not.toHaveBeenCalled();
-  const ambiguous = {
-    ...card("Solutions Engineer"),
-    text: JSON.stringify({
-      title: "Solutions Engineer",
-      categories: { team: "Pre-sales" },
-      location: "x".repeat(5000),
-      companyEvidence: "y".repeat(5000),
-    }),
-  };
-  const second = await screenCards({ client, goals, cards: [ambiguous] });
-  expect(second.related).toEqual([]);
-  expect(client.chatWithTools.mock.calls).toHaveLength(1);
+  expect(result.related.map((card) => card.title)).toEqual([
+    "Senior Platform Engineer",
+  ]);
+  expect(result.seen).toHaveLength(1);
+  expect(client.chatWithTools).toHaveBeenCalledOnce();
 });
 
-test("follows counted opening directories without counting categories or navigation as vacancies", async () => {
+test("hands a directory choice to browser navigation without crawling all categories", async () => {
   const directory =
     '<nav><h3>Jobs by teams</h3><ul><li><a href="/bogus1">Product 3</a></li><li><a href="/bogus2">News 4</a></li></ul></nav><main><h3>Openings By Teams</h3><ul><li><a href="/engineering"><span>Engineering</span><span>2</span></a></li><li><a href="/design">Design (1)</a></li></ul></main>';
   const parsed = readInventoryHtml(directory, source.url, source);
@@ -1129,8 +1077,9 @@ test("follows counted opening directories without counting categories or navigat
             : '<main><a href="/jobs/1"><h4>Data Analyst</h4><p>London</p></a></main>',
       }),
   });
-  expect(result.cards.map((c) => c.title)).toEqual(["Data Analyst"]);
-  expect(result.complete).toBe(true);
+  expect(result.cards).toEqual([]);
+  expect(result.complete).toBe(false);
+  expect(result.requiresBrowser).toBe(true);
 });
 
 test("malformed screening retries only its unfinished titles in small groups", async () => {
@@ -1204,7 +1153,7 @@ test("ambiguous provider titles include cached full duties in their first judgme
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test("uncertain metadata expands only the unresolved listing; full descriptions stay intact", async () => {
+test("uncertain metadata receives the complete listing on its first model call", async () => {
   const description =
     "Useful duties. ".repeat(1000) +
     "Northstar Trellis" +
@@ -1247,7 +1196,7 @@ test("uncertain metadata expands only the unresolved listing; full descriptions 
   });
   expect(result.jobs[0]?.company).toBe("Northstar Trellis");
   expect(result.jobs[0]?.description).toContain(description.trim());
-  expect(client.chatWithTools).toHaveBeenCalledTimes(2);
+  expect(client.chatWithTools).toHaveBeenCalledTimes(1);
   expect(readPage).toHaveBeenCalledTimes(1);
 });
 
@@ -1320,23 +1269,28 @@ test("a known employer beside a breadcrumb still needs the real location read", 
   expect(client.chatWithTools).toHaveBeenCalledTimes(1);
 });
 
-test.each([404, 410, 500])(
-  "a browser HTTP %s remains unreadable without an AI navigation attempt",
-  async (status) => {
-    const fallback = vi.fn(() =>
-      Promise.reject(Error("No navigation on error pages")),
+test.each([403, 429, 999, 404, 410, 500])(
+  "a browser HTTP %s hands its failure to browser navigation",
+  (status) => {
+    const navigateFallback = vi.fn(() =>
+      Promise.resolve({
+        cards: [],
+        complete: false,
+        pagesRead: 1,
+        notes: [`The site returned HTTP ${status} after a browser attempt.`],
+      }),
     );
     const result = await collectSource({
       source,
       lane: "browser",
       readPage: () => Promise.reject(new DiscoveryPageReadError(status)),
-      navigateFallback: fallback,
+      navigateFallback,
     });
+    expect(navigateFallback).toHaveBeenCalledOnce();
     expect(result.complete).toBe(false);
-    expect(result.cards).toEqual([]);
     expect(result.needsYou).not.toBe(true);
     expect(result.notes.join(" ")).toContain(`HTTP ${status}`);
-    expect(fallback).not.toHaveBeenCalled();
+    return Promise.resolve();
   },
 );
 
@@ -1416,7 +1370,7 @@ test("an employer-before-title card keeps its separate location without structur
 });
 
 test.each([401, 403])(
-  "an opted-in access wall at HTTP %s reaches the browser agent, while the default hands it over",
+  "an access wall at HTTP %s reaches browser navigation with settings as context",
   async (status) => {
     const readPage = () => Promise.reject(new DiscoveryPageReadError(status));
     const fallback = vi.fn(() =>
@@ -1433,8 +1387,9 @@ test.each([401, 403])(
       readPage,
       navigateFallback: fallback,
     });
-    expect(ordinary.needsYou).toBe(true);
-    expect(fallback).not.toHaveBeenCalled();
+    expect(ordinary.needsYou).not.toBe(true);
+    expect(ordinary.complete).toBe(true);
+    expect(fallback).toHaveBeenCalledOnce();
     const http = await collectSource({
       source,
       lane: "http",
@@ -1453,7 +1408,7 @@ test.each([401, 403])(
     expect(optedIn.complete).toBe(true);
     expect(optedIn.notes.join(" ")).not.toContain(`HTTP ${status}`);
     expect(optedIn.cards).toHaveLength(1);
-    expect(fallback).toHaveBeenCalledTimes(1);
+    expect(fallback).toHaveBeenCalledTimes(2);
   },
 );
 
@@ -1512,4 +1467,48 @@ test("completed browser coverage replaces the initial load-more warning", async 
   expect(result.notes).toEqual([
     "Every observed forward control was exhausted.",
   ]);
+});
+
+test("missing title/company parses and a different heading still reach the model with the complete listing", () => {
+  const middle = "Special requirement in the middle: Albanian and TypeScript.";
+  const text = "Duties ".repeat(8000) + middle + " Details".repeat(8000);
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>((messages) => {
+    expect(messages[1].content).toContain(middle);
+    expect(messages[1].content).toContain("The last requirement");
+    return Promise.resolve({
+      content: JSON.stringify({
+        jobs: [
+          {
+            id: 0,
+            title: "",
+            company: "",
+            location: "",
+            workModes: [],
+            sourceJobId: null,
+            employmentType: null,
+            seniority: null,
+            salaryText: null,
+            isListing: true,
+          },
+        ],
+      }),
+    });
+  });
+  const result = await readListings({
+    cards: [card("Inxhinier Softueri")],
+    client: { chatWithTools },
+    readPage: (url) =>
+      Promise.resolve({
+        finalUrl: url,
+        html: `<main><h2>Përshkrimi</h2><p>${text}</p><p>The last requirement</p></main><script>app()</script>`,
+      }),
+  });
+  expect(result.failures).toEqual([]);
+  expect(result.jobs[0]).toMatchObject({
+    title: "Inxhinier Softueri",
+    company: "Company not stated",
+  });
+  expect(result.jobs[0]?.description).toContain(middle);
+  expect(result.jobs[0]?.description).toContain("The last requirement");
+  expect(chatWithTools).toHaveBeenCalledOnce();
 });

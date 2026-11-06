@@ -1,7 +1,14 @@
+import type { BrowserSessionRuntime } from "@nestor/browser-runtime";
 import {
   createDeterministicJobFinderAiClient,
   type JobFinderAiClient,
 } from "@nestor/ai-providers";
+import {
+  DiscoveryPageReadError,
+  DiscoveryRunResultSchema,
+  JobDiscoveryTargetSchema,
+  JobSearchSettingsSchema,
+} from "@nestor/contracts";
 import { openJobStore } from "@nestor/db/job-store";
 import { expect, test, vi } from "vitest";
 import { createSeed } from "../test-fixtures";
@@ -61,7 +68,14 @@ test("passes remote location policy into fit and retains the model's changed sco
               c: ["strong", "React and TypeScript experience."],
               e: ["compatible", "Fully remote worldwide", "broader_remote", ""],
               h: ["met", "No unmet mandatory requirements."],
-              pay: {minimum: null, maximum: null, currency: null, interval: null, basis: null, quote: ""},
+              pay: {
+                minimum: null,
+                maximum: null,
+                currency: null,
+                interval: null,
+                basis: null,
+                quote: "",
+              },
             },
           ],
         }),
@@ -99,3 +113,102 @@ test("passes remote location policy into fit and retains the model's changed sco
     store.close();
   }
 });
+
+test.each([999, 403, 429])(
+  "HTTP %s continues through browser navigation and reads the full listing",
+  async (status) => {
+    const seed = createSeed();
+    const sourceUrl = "https://board.example/jobs";
+    const target = JobDiscoveryTargetSchema.parse({
+      id: "1",
+      label: "Synthetic board",
+      startingUrl: sourceUrl,
+    });
+    const fullText =
+      "Complete requirements: TypeScript and Albanian. " +
+      "Full duties. ".repeat(4000);
+    const job = {
+      ...seed.savedJobs[0]!,
+      canonicalUrl: "https://board.example/vacancy/one",
+      source: "target_site",
+      description: fullText,
+    };
+    const runAgentDiscovery = vi.fn<
+      NonNullable<BrowserSessionRuntime["runAgentDiscovery"]>
+    >(() =>
+      Promise.resolve(
+        DiscoveryRunResultSchema.parse({
+          source: "target_site",
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          querySummary: "Synthetic search",
+          warning: null,
+          jobs: [job],
+          inventoryCompleteness: "complete",
+          agentMetadata: {
+            incomplete: false,
+            phaseCompletionMode: "structured_finish",
+          },
+        }),
+      ),
+    );
+    const readRenderedPage = vi.fn(() => {
+      throw new DiscoveryPageReadError(status);
+    });
+    const request = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() =>
+        Promise.resolve(new Response("Site refusal", { status })),
+      );
+    const engine = createListingSearchEngine({
+      aiClient: {
+        ...createDeterministicJobFinderAiClient(),
+        chatWithTools: () => Promise.resolve({ content: "{}" }),
+      },
+      browserRuntime: { readRenderedPage, runAgentDiscovery },
+    });
+    const context = {
+      profile: seed.profile,
+      searchPreferences: seed.searchPreferences,
+      sources: [],
+      sourceInstructionArtifacts: [],
+      browserPermissions: {
+        signIn: true,
+        googleSignIn: true,
+        createAccounts: true,
+        solveCaptchas: true,
+      },
+    };
+    const input = {
+      target,
+      context,
+      settings: JobSearchSettingsSchema.parse({ depth: "thorough" }),
+      signal: new AbortController().signal,
+      message: () => {},
+      knownUrls: () => [],
+    };
+    try {
+      const http = await engine.collectSource({ ...input, lane: "http" });
+      expect(http.requiresBrowser).toBe(true);
+      const browser = await engine.collectSource({ ...input, lane: "browser" });
+      expect(browser.complete).toBe(true);
+      expect(browser.needsYou).not.toBe(true);
+      expect(runAgentDiscovery).toHaveBeenCalledOnce();
+      const read = await engine.readListings({
+        cards: browser.cards,
+        context,
+        lane: "browser",
+        signal: input.signal,
+      });
+      expect(read.failures).toEqual([]);
+      expect(read.jobs[0]?.description).toBe(fullText);
+      expect(runAgentDiscovery).toHaveBeenCalledTimes(2);
+      expect(runAgentDiscovery.mock.calls[0]?.[1]).toMatchObject({
+        browserPermissions: context.browserPermissions,
+        dedicatedPage: true,
+      });
+    } finally {
+      request.mockRestore();
+    }
+  },
+);

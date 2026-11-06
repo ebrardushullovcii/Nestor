@@ -2,6 +2,8 @@
 
 Status: partly superseded by [ADR 0041](0041-the-model-reads-the-page.md): collection, full listing reads and merged-job fit now use the job-store pipeline (a1cdeb6b), replacing buffered read-ahead and the final scoring pass; source-generic HTTP reads remain.
 
+Status update (2026-11-06): the source-generic HTTP reader remains. [ADR 0079](0079-job-finder-is-a-harness.md) supersedes the read budgets and the HTTP-only sign-in behavior: unread sources and listings continue in the browser with the person's session and saved sign-in tools. The model receives complete listing text, including when metadata parsing is incomplete.
+
 ## Context
 
 Compact discovery (ADR 0013) stops at the target job count after reading listing cards: title, employer, link. It does not open each listing. A card carries none of what the product is for: the fit score checks requirements the card does not state, the "worth opening" band stays empty, and a tailored resume has nothing to be tailored toward. In a live search against a board, every one of fifteen retained jobs was "title match · not yet checked", and the AI draft for a shortlisted one had to fall back to the original wording because there was no listing text.

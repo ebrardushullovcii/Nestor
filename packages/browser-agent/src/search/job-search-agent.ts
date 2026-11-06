@@ -37,7 +37,6 @@ import type { ApplyFormObservation, ApplyPageHands } from "../apply/types";
 import { createPageTools } from "../page-tools";
 import { withBrowserPermissions } from "../browser-permission-policy";
 import {
-  SEARCH_KEEP_WHOLE_ANSWERS,
   compactSearchObservation,
   createSearchViewDescriber,
 } from "./search-observation";
@@ -57,7 +56,6 @@ import {
   describeRemoteHandling,
   searchSelectivity,
 } from "./job-search-prompts";
-import { createMoveReviewer, describeSearchGoal } from "./move-reviewer";
 import {
   createBotCheckTracker,
   inspectBotCheckInterstitial,
@@ -90,41 +88,6 @@ export interface JobSearchAgentInput {
   onProgress?: (progress: AgentProgress) => void;
   signal?: AbortSignal;
   now?: () => Date;
-}
-
-/**
- * Why a read-off item is not a job posting, or null when it is one. Structure
- * only, never a list of words: a posting has a title with letters in it that
- * is not just the company's name, and on a results page a link of its own.
- * A site's brand, a category heading and a "124,564 jobs" counter fail it.
- */
-export function describeNonPosting(
-  posting: Pick<JobPosting, "title" | "company" | "canonicalUrl">,
-  pageUrl: string,
-  pageType: "search_results" | "job_detail",
-): string | null {
-  const title = posting.title.trim();
-  if (!/\p{L}/u.test(title)) return "it has no job title";
-  if (title.toLowerCase() === posting.company.trim().toLowerCase()) {
-    return "its title is just the company name";
-  }
-  if (pageType === "search_results") {
-    try {
-      const link = new URL(posting.canonicalUrl);
-      const page = new URL(pageUrl);
-      const samePage =
-        link.origin === page.origin &&
-        link.pathname.replace(/\/+$/u, "") ===
-          page.pathname.replace(/\/+$/u, "") &&
-        link.search === page.search;
-      if (link.pathname === "/" || samePage) {
-        return "it has no link of its own";
-      }
-    } catch {
-      return "it has no link of its own";
-    }
-  }
-  return null;
 }
 
 /**
@@ -303,8 +266,6 @@ type ExtractedJobs = Awaited<ReturnType<JobExtractor["extractJobsFromPage"]>>;
 const PART_MAX_JOBS = 60;
 const PART_MIN_SPLIT_CHARS = 600;
 const PAGE_READ_CONCURRENCY = 8;
-/** New parts one extract_jobs call reads: one round, well inside the 90-second tool deadline. */
-const PAGE_READ_PARTS_PER_CALL = 8;
 
 /** Retry a silent page reader without ending working siblings. */
 async function readWithLiveness<T>(
@@ -334,21 +295,9 @@ function detailReadText(
   // evidence available to the extractor so a listing and its own detail
   // link do not acquire separate identities merely because both were read.
   const urlEvidence: Array<Record<string, string>> = [];
-  let evidenceChars = 0;
   for (const link of observation.links) {
     if (!link.visible || !/^https?:\/\//iu.test(link.href)) continue;
     const entry = { kind: "page_link", label: link.label, href: link.href };
-    const size = JSON.stringify(entry).length;
-    if (evidenceChars + size > 8_000) {
-      reportSelfLimitHit({
-        limit: "posting_link_evidence",
-        kind: "input",
-        value: 8_000,
-        where: "browser-agent/detailReadText",
-      });
-      continue;
-    }
-    evidenceChars += size;
     urlEvidence.push(entry);
   }
   return urlEvidence.length > 0
@@ -410,6 +359,8 @@ export async function runJobSearchAgent(
         "This source has not changed; reused the previous search results.",
     };
   }
+  const mechanicallyCollected: JobPosting[] = [];
+  const collectionNotes: string[] = [];
   if (config.inventoryOnly && input.page && !isSourceCheck) {
     const postings = new Map<string, JobPosting>();
     const inventory = await collectRenderedInventory({
@@ -459,7 +410,7 @@ export async function runJobSearchAgent(
         });
       },
     });
-    if (inventory)
+    if (inventory?.complete)
       return {
         jobs: [...postings.values()],
         steps: 0,
@@ -475,6 +426,8 @@ export async function runJobSearchAgent(
         reviewTranscript: [],
         compactionState: null,
       };
+    mechanicallyCollected.push(...postings.values());
+    if (inventory) collectionNotes.push(...inventory.notes);
   }
   const collected: JobPosting[] = [];
   const known = new Set<string>();
@@ -539,22 +492,15 @@ export async function runJobSearchAgent(
     collected.push(job);
     return true;
   };
-  for (const job of config.resumeCheckpoint?.collectedJobs ?? []) {
+  for (const job of [
+    ...(config.resumeCheckpoint?.collectedJobs ?? []),
+    ...mechanicallyCollected,
+  ]) {
     keep(job);
   }
   let checkpointRevision = config.resumeCheckpoint?.revision ?? 0;
 
-  const notes: string[] = [];
-  const reviewMove = createMoveReviewer({
-    ...(config.browserPermissions
-      ? { browserPermissions: config.browserPermissions }
-      : {}),
-    llmClient,
-    goal: describeSearchGoal(config),
-    homeLabel: siteLabel,
-    homeHosts: config.navigationPolicy.allowedHostnames,
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
+  const notes: string[] = [...collectionNotes];
   let observationRevision = 0;
   // Tool answers given so far, so a view the model still has in full is not
   // sent again (see createSearchViewDescriber).
@@ -565,6 +511,10 @@ export async function runJobSearchAgent(
       ...hands,
       observe: async () => {
         let observation = await hands.observe();
+        observation = {
+          ...observation,
+          bodyTextExcerpt: await hands.readText(),
+        };
         // A page that has not drawn yet (an app shell still fetching its
         // list) is looked at again after a moment, rather than spending a
         // model turn on "wait".
@@ -575,6 +525,10 @@ export async function runJobSearchAgent(
         ) {
           await hands.wait(BLANK_PAGE_SETTLE_MS);
           observation = await hands.observe();
+          observation = {
+            ...observation,
+            bodyTextExcerpt: await hands.readText(),
+          };
         }
         observationRevision += 1;
         const view = compactSearchObservation(observation);
@@ -596,25 +550,6 @@ export async function runJobSearchAgent(
     },
     {
       describe: (observation) => views.describe(observation),
-      allowUrl: (url) => {
-        const check = isAllowedUrl(url, config.navigationPolicy);
-        return check.valid
-          ? null
-          : `${url} is outside ${siteLabel}, the site this run is on.`;
-      },
-      reviewMove: async (move) => {
-        emit(
-          "review_move",
-          `Reviewing a move off ${siteLabel} to ${move.url}.`,
-        );
-        const review = await reviewMove(move);
-        notes.push(
-          review.allowed
-            ? `Left ${siteLabel} for ${move.url} because: ${move.reason} Allowed after review: ${review.verdict}`
-            : `Stayed on ${siteLabel} rather than going to ${move.url}. Reason given: ${move.reason} Review: ${review.verdict}`,
-        );
-        return review;
-      },
     },
   );
   const trackBotCheck = createBotCheckTracker();
@@ -655,7 +590,7 @@ export async function runJobSearchAgent(
       return host
         ? {
             ...outcome,
-            content: `${outcome.content}\n\nThis page is a bot check, seen twice in a row on ${host}. Only the person can get past it. If it is still showing, finish this source with blockedBy: security_check and needsPerson: true, and tell the person to open ${host} in the app's browser, get past the check, and search again. Jobs saved so far are kept.`,
+            content: `${outcome.content}\n\nThis page is a bot check, seen twice in a row on ${host}. Use the available browser tools and saved permissions to attempt it. If a real attempt still fails, report what you tried and hand off on this open page. Jobs saved so far are kept.`,
           }
         : outcome;
     },
@@ -728,12 +663,9 @@ export async function runJobSearchAgent(
       saved.length === 0
         ? `${verb} no new postings.`
         : `${verb} ${saved.length} new posting${saved.length === 1 ? "" : "s"}${isSourceCheck ? " as samples for this check" : ""}:`,
-      ...selfLimitSlice(
-        saved,
-        0,
-        40,
-        "packages/browser-agent/src/search/job-search-agent.ts:749",
-      ).map((job) => `- ${job.title} — ${job.company} (${job.location})`),
+      ...saved.map(
+        (job) => `- ${job.title} — ${job.company} (${job.location})`,
+      ),
       rejected.length > 0
         ? `${rejected.length} rejected: ${rejected.map((job) => `${job.title}: ${job.searchRejection?.reason}`).join("; ")}`
         : null,
@@ -766,10 +698,12 @@ export async function runJobSearchAgent(
               enum: ["search_results", "job_detail"],
               description: "What this page is.",
             },
-            maxJobs: { type: "number", description: "Up to 50. Default 20." },
+            maxJobs: {
+              type: "number",
+              description: "Requested extraction batch size. Default 20.",
+            },
             rejected: {
               type: "array",
-              maxItems: 50,
               items: {
                 type: "object",
                 properties: {
@@ -847,18 +781,8 @@ export async function runJobSearchAgent(
       }
       const maxJobs =
         typeof args.maxJobs === "number"
-          ? Math.max(1, Math.min(50, Math.floor(args.maxJobs)))
+          ? Math.max(1, Math.floor(args.maxJobs))
           : 20;
-      if (typeof args.maxJobs === "number" && args.maxJobs > 50)
-        reportSelfLimitHit({
-          limit: "extract_jobs",
-          kind: "jobs",
-          value: 50,
-          where: "browser-agent/extract_jobs",
-        });
-      // Navigation or a redirect can change the page between tools. Bind the
-      // text, links and extraction URL to a fresh observation, not a cached
-      // source page (R3-069).
       const observation = await pageTools.observe();
       let pageText =
         pageType === "search_results" && hands.readLinkedText
@@ -925,6 +849,7 @@ export async function runJobSearchAgent(
           ? {
               found: await read(detailReadText(observation, pageText), maxJobs),
               unreadParts: 0,
+              readFailures: [],
               remainingParts: 0,
               rereadOnly: false,
             }
@@ -951,6 +876,7 @@ export async function runJobSearchAgent(
         );
         if (posting) posting.producingPageUrl = observation.url;
         if (posting && pageType === "job_detail") {
+          posting.description = pageText;
           posting.detailQuality = "detail_enriched";
           posting.listingDetailFetch = {
             attemptedAt: now().toISOString(),
@@ -970,9 +896,10 @@ export async function runJobSearchAgent(
           // can correct a provisional result-page rejection.
           if (
             previous &&
-            (decision || pageType === "job_detail") &&
-            JSON.stringify(previous.searchRejection ?? null) !==
-              JSON.stringify(posting.searchRejection ?? null)
+            (pageType === "job_detail" ||
+              (decision &&
+                JSON.stringify(previous.searchRejection ?? null) !==
+                  JSON.stringify(posting.searchRejection ?? null)))
           ) {
             collected[index] = posting;
             decisionRevision += 1;
@@ -984,25 +911,6 @@ export async function runJobSearchAgent(
             duplicateListings += 1;
             duplicateListingPageUrls.push(observation.url);
           }
-          continue;
-        }
-        const notAPosting = posting
-          ? describeNonPosting(posting, observation.url, pageType)
-          : null;
-        if (posting && notAPosting && !posting.searchRejection) {
-          reportSelfLimitHit({
-            limit: "non_posting_veto",
-            kind: "veto",
-            value: "describeNonPosting",
-            where: "browser-agent/extract_jobs",
-          });
-          unreadableListings.push({
-            title: posting.title,
-            url: posting.canonicalUrl,
-            category: "unreadable",
-            reason: notAPosting,
-          });
-          skipped.push(`"${posting.title}" (${notAPosting})`);
           continue;
         }
         if (!posting) {
@@ -1036,7 +944,7 @@ export async function runJobSearchAgent(
           ? `${savedListingsSkipped} already-saved listing${savedListingsSkipped === 1 ? " was" : "s were"} skipped before the page reader; only new listings need reading. Continue through the remaining pages for new jobs.`
           : null,
         pageRead.unreadParts > 0
-          ? `${pageRead.unreadParts} part${pageRead.unreadParts === 1 ? "" : "s"} of this page could not be read this time; reading the page again tries ${pageRead.unreadParts === 1 ? "it" : "them"} again.`
+          ? `${pageRead.unreadParts} part${pageRead.unreadParts === 1 ? "" : "s"} of this page could not be read: ${pageRead.readFailures.join("; ")}. Reading the page again tries ${pageRead.unreadParts === 1 ? "it" : "them"} again.`
           : null,
         pageRead.remainingParts > 0
           ? `This page is long: ${pageRead.remainingParts} more part${pageRead.remainingParts === 1 ? " is" : "s are"} still unread. Call extract_jobs again on this page to read ${pageRead.remainingParts === 1 ? "it" : "them"} before moving on.`
@@ -1045,7 +953,7 @@ export async function runJobSearchAgent(
           ? "This page's listings were all read before in this search and have not changed; reading it again finds nothing new. Scrolling only helps if more listings load."
           : null,
         setAside.length > 0
-          ? `These rejections were set aside because they repeated an address or lacked a category or reason: ${selfLimitSlice(setAside, 0, 8, "packages/browser-agent/src/search/job-search-agent.ts:1066").join("; ")}.`
+          ? `These rejections were set aside because they repeated an address or lacked a category or reason: ${setAside.join("; ")}.`
           : null,
       ];
       return {
@@ -1069,10 +977,10 @@ export async function runJobSearchAgent(
                   outsideCatalogAttempts - ignoredBefore,
                 ),
                 skipped.length > 0
-                  ? `Not saved, because they do not look like job postings: ${selfLimitSlice(skipped, 0, 8, "packages/browser-agent/src/search/job-search-agent.ts:1090").join("; ")}. If one is a real job, open its own page and use extract_jobs there.`
+                  ? `Not saved, because they do not look like job postings: ${skipped.join("; ")}. If one is a real job, open its own page and use extract_jobs there.`
                   : null,
                 unmatchedRejections.length > 0
-                  ? `These rejections matched no listing read on this page, so they were not recorded: ${selfLimitSlice(unmatchedRejections, 0, 8, "packages/browser-agent/src/search/job-search-agent.ts:1093").join("; ")}. Use the listing address exactly as shown on the page.`
+                  ? `These rejections matched no listing read on this page, so they were not recorded: ${unmatchedRejections.join("; ")}. Use the listing address exactly as shown on the page.`
                   : null,
                 ...notes,
               ]
@@ -1104,9 +1012,7 @@ export async function runJobSearchAgent(
     execute: (raw) => {
       const requested = parseToolArguments(raw).limit;
       const limit =
-        typeof requested === "number"
-          ? Math.max(1, Math.min(200, Math.floor(requested)))
-          : 40;
+        typeof requested === "number" ? Math.max(1, Math.floor(requested)) : 40;
       if (typeof requested === "number" && requested > 200)
         reportSelfLimitHit({
           limit: "saved_jobs_count",
@@ -1165,7 +1071,6 @@ export async function runJobSearchAgent(
       }
       const args = parseToolArguments(raw);
       const requested = typeof args.url === "string" ? args.url.trim() : "";
-      const reason = typeof args.reason === "string" ? args.reason.trim() : "";
       const currentUrl = pageTools.state.observation?.url ?? input.page.url();
       let target: URL;
       try {
@@ -1176,87 +1081,23 @@ export async function runJobSearchAgent(
       if (target.protocol !== "https:" && target.protocol !== "http:") {
         return { kind: "ok", content: "Only HTTP GET endpoints can be read." };
       }
-      const allowedByHome = isAllowedUrl(
-        target.href,
-        config.navigationPolicy,
-      ).valid;
-      if (!reason) {
-        return {
-          kind: "ok",
-          content:
-            "Say what on the page points to this endpoint and what job detail you expect before reading it.",
-        };
-      }
-      if (
-        !allowedByHome &&
-        !pageTools.state.approvedOrigins.has(target.origin)
-      ) {
-        const review = await reviewMove({
-          url: target.href,
-          fromUrl: currentUrl || null,
-          reason,
-        });
-        if (!review.allowed) {
-          return {
-            kind: "ok",
-            content: `The endpoint was not read. Review: ${review.verdict}`,
-          };
-        }
-        pageTools.state.approvedOrigins.set(target.origin, review.verdict);
-      }
-
-      let response: APIResponse;
-      let requestedUrl = target.href;
-      for (let redirectCount = 0; ; redirectCount += 1) {
-        response = await input.page.context().request.get(requestedUrl, {
+      const requestedUrl = target.href;
+      const response: APIResponse = await input.page
+        .context()
+        .request.get(requestedUrl, {
           headers: { accept: "application/json, text/plain, text/html;q=0.8" },
-          timeout: 30_000,
+          timeout: 0,
           maxRedirects: 0,
         });
-        const location = response.headers().location;
-        if (response.status() < 300 || response.status() >= 400 || !location)
-          break;
-        if (redirectCount >= 5) {
-          return {
-            kind: "ok",
-            content:
-              "The endpoint redirected too many times, so Job Finder stopped reading it.",
-          };
-        }
-        const redirected = new URL(location, requestedUrl);
-        const redirectedAllowed =
-          isAllowedUrl(redirected.href, config.navigationPolicy).valid ||
-          pageTools.state.approvedOrigins.has(redirected.origin);
-        if (!redirectedAllowed) {
-          const redirectReview = await reviewMove({
-            url: redirected.href,
-            fromUrl: requestedUrl,
-            reason: `The task-relevant endpoint redirected here while reading it. Original reason: ${reason}`,
-          });
-          if (!redirectReview.allowed) {
-            return {
-              kind: "ok",
-              content: `Stopped before following the endpoint redirect to ${redirected.href}. Review: ${redirectReview.verdict}`,
-            };
-          }
-          pageTools.state.approvedOrigins.set(
-            redirected.origin,
-            redirectReview.verdict,
-          );
-        }
-        requestedUrl = redirected.href;
-      }
-      const body = selfLimitSlice(
-        await response.text(),
-        0,
-        20_000,
-        "packages/browser-agent/src/search/job-search-agent.ts:1267",
-      );
+      const body = await response.text();
       return {
         kind: "ok",
         content: [
           `GET ${requestedUrl} returned ${response.status()} ${response.statusText()}.`,
           `Content type: ${response.headers()["content-type"] ?? "not stated"}.`,
+          ...(response.headers().location
+            ? [`Redirect location: ${response.headers().location}`]
+            : []),
           body || "The response body was empty.",
         ].join("\n"),
         progress: response.ok() && body.length > 0,
@@ -1592,17 +1433,16 @@ export async function runJobSearchAgent(
       }),
     ),
     subjectLabel: siteLabel,
-    // Page views are long; two older ones in full rarely help the next
-    // move, and every turn resends them.
-    staleToolResultKeepRecent: SEARCH_KEEP_WHOLE_ANSWERS,
+    // Keep action history and observations intact; recover context at the
+    // provider boundary if the selected model reaches its context limit.
+    staleToolResultKeepRecent: Number.POSITIVE_INFINITY,
     ceilings: {
-      maxSteps: Math.max(config.maxSteps, DEFAULT_MAX_STEPS),
+      maxSteps: Number.POSITIVE_INFINITY,
       // A working stream may keep thinking. The shared loop retries a silent
       // connection once; transient service failures retain their own retries.
 
-      noProgressStepLimit:
-        config.runControl?.noProgressStepLimit ??
-        DEFAULT_NO_PROGRESS_STEP_LIMIT,
+      noProgressStepLimit: Number.POSITIVE_INFINITY,
+      browserFailureLimit: Number.POSITIVE_INFINITY,
     },
     describeStall: () =>
       [
@@ -1679,6 +1519,7 @@ export async function runJobSearchAgent(
   ): Promise<{
     found: ExtractedJobs;
     unreadParts: number;
+    readFailures: string[];
     remainingParts: number;
     rereadOnly: boolean;
   }> {
@@ -1772,14 +1613,7 @@ export async function runJobSearchAgent(
 ${part.text}`),
     );
     pendingPageReads.set(pageUrl, unread.length);
-    const now = new Set(
-      selfLimitSlice(
-        unread,
-        0,
-        PAGE_READ_PARTS_PER_CALL,
-        "browser-agent/page_read_parts_per_call",
-      ),
-    );
+    const now = new Set(unread);
     const settled = await mapWithLimit(
       parts.filter(
         (part) =>
@@ -1824,6 +1658,9 @@ ${part.text}`),
     return {
       found,
       unreadParts: failures.length,
+      readFailures: failures.map((error) =>
+        error instanceof Error ? error.message : String(error),
+      ),
       remainingParts,
       rereadOnly:
         freshReads === 0 && failures.length === 0 && remainingParts === 0,
@@ -1897,27 +1734,25 @@ ${part.text}`),
           : loop.reason;
 
     const phaseCompletionMode: SourceDebugPhaseCompletionMode | null =
-      !isSourceCheck
-        ? null
-        : loop.ending === "finished"
-          ? finish?.stuck
-            ? "stalled"
-            : blocker === "auth_required"
-              ? "blocked_auth"
-              : blocker === "site_protection"
-                ? "blocked_site_protection"
-                : blocker
-                  ? "blocked_manual_step"
-                  : "structured_finish"
-          : loop.ending === "stalled"
-            ? "stalled"
-            : loop.ending === "aborted"
-              ? "interrupted"
-              : loop.ending === "browser_failed"
-                ? "runtime_failed"
-                : hasFindings
-                  ? "timed_out_with_partial_evidence"
-                  : "timed_out_without_evidence";
+      loop.ending === "finished"
+        ? finish?.stuck
+          ? "stalled"
+          : blocker === "auth_required"
+            ? "blocked_auth"
+            : blocker === "site_protection"
+              ? "blocked_site_protection"
+              : blocker
+                ? "blocked_manual_step"
+                : "structured_finish"
+        : loop.ending === "stalled"
+          ? "stalled"
+          : loop.ending === "aborted"
+            ? "interrupted"
+            : loop.ending === "browser_failed"
+              ? "runtime_failed"
+              : hasFindings
+                ? "timed_out_with_partial_evidence"
+                : "timed_out_without_evidence";
 
     const phaseEvidence = isSourceCheck
       ? SourceDebugPhaseEvidenceSchema.parse({

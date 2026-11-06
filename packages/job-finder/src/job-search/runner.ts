@@ -341,16 +341,10 @@ export function createJobSearchRunner(
         })
         .catch((error: unknown) => {
           if (!current(source)) return;
-          if (source.accessBlocked)
-            needsAccess(
-              source,
-              "This site blocked access. Open it to finish sign-in or verification, then Retry.",
-            );
-          else
-            failedSource(
-              source,
-              `This site could not be read: ${errorMessage(error)}`,
-            );
+          failedSource(
+            source,
+            `This site could not be read: ${errorMessage(error)}`,
+          );
           source.collected = true;
           markDone(source);
         });
@@ -510,15 +504,6 @@ export function createJobSearchRunner(
       const source = sourceWork(target, full);
       states.set(target.id, source);
       write(source);
-      if (!force && access.pending(Number(target.id))) {
-        source.collected = true;
-        source.row.state = "needs_you";
-        source.notes = [
-          "Waiting for sign-in. Open this source in Needs you, then Retry.",
-        ];
-        markDone(source);
-        return;
-      }
       void http
         .run(new URL(target.startingUrl).hostname, signal, async () => {
           if (!current(source)) return;

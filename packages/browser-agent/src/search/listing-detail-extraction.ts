@@ -1,4 +1,3 @@
-import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
 import type {
   ExtractedListingDetail,
   ExtractListingDetailInput,
@@ -83,11 +82,8 @@ function looksLikeApplyEntryText(text: string): boolean {
   return APPLY_ENTRY_PHRASES.some((phrase) => signal.includes(phrase));
 }
 
-const MAX_HTML_LENGTH = 1_500_000;
-const MAX_PAGE_TEXT_LENGTH = 64_000;
 export const LISTING_PAGE_OMISSION_MARKER =
   "[Page text excerpt: middle omitted]";
-const MAX_JSON_LD_NODES = 200;
 
 /**
  * Reads the page's own JobPosting record. Returns null when the page publishes
@@ -96,17 +92,7 @@ const MAX_JSON_LD_NODES = 200;
 export function extractListingDetailFromHtml(
   input: ExtractListingDetailInput,
 ): ExtractedListingDetail | null {
-  const html =
-    input.html.length > MAX_HTML_LENGTH
-      ? selfLimitSlice(
-          input.html,
-          0,
-          MAX_HTML_LENGTH,
-          "packages/browser-agent/src/search/listing-detail-extraction.ts:101",
-        )
-      : input.html;
-
-  return extractJobPostingFromJsonLd(html, input);
+  return extractJobPostingFromJsonLd(input.html, input);
 }
 
 // ---------------------------------------------------------------------------
@@ -172,10 +158,9 @@ function hasType(node: JsonRecord, typeName: string): boolean {
 function collectJobPostingNodes(blocks: readonly unknown[]): JsonRecord[] {
   const found: JsonRecord[] = [];
   const queue: unknown[] = [...blocks];
-  let visited = 0;
-  while (queue.length > 0 && visited < MAX_JSON_LD_NODES) {
+
+  while (queue.length > 0) {
     const node = queue.shift();
-    visited += 1;
     if (Array.isArray(node)) {
       queue.push(...(node as unknown[]));
       continue;
@@ -194,13 +179,6 @@ function collectJobPostingNodes(blocks: readonly unknown[]): JsonRecord[] {
       }
     }
   }
-  if (queue.length > 0)
-    reportSelfLimitHit({
-      limit: "json_ld_nodes",
-      kind: "steps",
-      value: MAX_JSON_LD_NODES,
-      where: "browser-agent/collectJobPostingNodes",
-    });
   return found;
 }
 
@@ -293,9 +271,7 @@ function readLocation(node: JsonRecord): {
       .map((entry) => readString(entry))
       .filter((entry): entry is string => Boolean(entry));
     if (regions.length > 0) {
-      places.push(
-        `Remote (${selfLimitSlice(regions, 0, 3, "packages/browser-agent/src/search/listing-detail-extraction.ts:297").join(", ")})`,
-      );
+      places.push(`Remote (${regions.join(", ")})`);
     } else {
       places.push("Remote");
     }
@@ -311,15 +287,7 @@ function readLocation(node: JsonRecord): {
       ),
   );
   return {
-    location:
-      unique.length > 0
-        ? selfLimitSlice(
-            unique,
-            0,
-            3,
-            "packages/browser-agent/src/search/listing-detail-extraction.ts:316",
-          ).join(" · ")
-        : null,
+    location: unique.length > 0 ? unique.join(" · ") : null,
     workModeHints: hints,
   };
 }
@@ -570,16 +538,7 @@ const RECENT_PAGE_TEXT = 8;
 const recentPageText: { html: string; text: string }[] = [];
 
 function convertListingPageText(html: string): string {
-  const capped =
-    html.length > MAX_HTML_LENGTH
-      ? selfLimitSlice(
-          html,
-          0,
-          MAX_HTML_LENGTH,
-          "packages/browser-agent/src/search/listing-detail-extraction.ts:575",
-        )
-      : html;
-  const stripped = capped
+  const stripped = html
     .replace(/<script\b[\s\S]*?<\/script\s*>/giu, " ")
     .replace(/<style\b[\s\S]*?<\/style\s*>/giu, " ")
     .replace(/<noscript\b[\s\S]*?<\/noscript\s*>/giu, " ");
@@ -587,10 +546,10 @@ function convertListingPageText(html: string): string {
     stripped.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/iu)?.[1] ?? stripped;
   const title = collapseWhitespace(
     decodeHtmlEntities(
-      capped.match(/<title\b[^>]*>([\s\S]*?)<\/title>/iu)?.[1] ?? "",
+      html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/iu)?.[1] ?? "",
     ),
   );
-  const siteName = readMetaContent(capped, "og:site_name");
+  const siteName = readMetaContent(html, "og:site_name");
   const text = [
     title ? `Page title: ${title}` : null,
     siteName ? `Site name: ${siteName}` : null,
@@ -598,25 +557,7 @@ function convertListingPageText(html: string): string {
   ]
     .filter(Boolean)
     .join("\n\n");
-  if (text.length <= MAX_PAGE_TEXT_LENGTH) return text;
-  const marker = `\n\n${LISTING_PAGE_OMISSION_MARKER}\n\n`;
-  const available = MAX_PAGE_TEXT_LENGTH - marker.length;
-  const head = Math.floor((available * 2) / 3);
-  return (
-    selfLimitSlice(
-      text,
-      0,
-      head,
-      "packages/browser-agent/src/search/listing-detail-extraction.ts:606",
-    ) +
-    marker +
-    selfLimitSlice(
-      text,
-      text.length - (available - head),
-      undefined,
-      "packages/browser-agent/src/search/listing-detail-extraction.ts:613",
-    )
-  );
+  return text;
 }
 
 function readMetaContent(html: string, property: string): string | null {
@@ -786,7 +727,6 @@ export function normalizeListingText<T extends string | null | undefined>(
 const ENTITY_PATTERN = /&(?:#x[0-9a-f]+|#\d+|[a-z]+);/iu;
 // Three passes is enough for every double-encoding seen in practice
 // ("&amp;amp;" → "&amp;" → "&") and keeps a hostile page from looping.
-const MAX_ENTITY_DECODE_PASSES = 3;
 
 function decodeHtmlEntitiesOnce(value: string): string {
   return value
@@ -814,7 +754,7 @@ function decodeHtmlEntitiesOnce(value: string): string {
  */
 export function decodeHtmlEntities(value: string): string {
   let decoded = value;
-  for (let pass = 0; pass < MAX_ENTITY_DECODE_PASSES; pass += 1) {
+  for (;;) {
     if (!ENTITY_PATTERN.test(decoded)) {
       return decoded;
     }
@@ -824,17 +764,6 @@ export function decodeHtmlEntities(value: string): string {
     }
     decoded = next;
   }
-  if (
-    ENTITY_PATTERN.test(decoded) &&
-    decodeHtmlEntitiesOnce(decoded) !== decoded
-  )
-    reportSelfLimitHit({
-      limit: "entity_decode_passes",
-      kind: "retry",
-      value: MAX_ENTITY_DECODE_PASSES,
-      where: "browser-agent/decodeHtmlEntities",
-    });
-  return decoded;
 }
 
 function safeFromCodePoint(codePoint: number): string {
@@ -901,7 +830,7 @@ export function listingPageLinks(
   const seen = new Set<string>();
   ANCHOR_PATTERN.lastIndex = 0;
   let match: RegExpExecArray | null;
-  while (links.length < 150 && (match = ANCHOR_PATTERN.exec(html)) !== null) {
+  while ((match = ANCHOR_PATTERN.exec(html)) !== null) {
     const attributes = match[1] ?? "";
     const href = HREF_PATTERN.exec(attributes)?.[1];
     if (!href || decodeHtmlEntities(href).trim().startsWith("#")) continue;

@@ -194,7 +194,7 @@ describe("the apply link on a listing page", () => {
   });
 });
 
-it("deduplicates and bounds page links in page order without choosing an application route", () => {
+it("deduplicates and preserves page links in page order without choosing an application route", () => {
   const html =
     `<a href="#requirements">Requirements</a><a href="/logo.svg">Logo</a><a href="/style.css">Style</a><a href="/jobs/one">One</a><a href="/jobs/one">One again</a>` +
     Array.from(
@@ -202,7 +202,7 @@ it("deduplicates and bounds page links in page order without choosing an applica
       (_, i) => `<a href="/page/${i}">Page ${i}</a>`,
     ).join("");
   const links = listingPageLinks(html, "https://jobs.example.test/listing");
-  expect(links).toHaveLength(150);
+  expect(links).toHaveLength(181);
   expect(links[0]).toEqual({
     label: "One",
     url: "https://jobs.example.test/jobs/one",
@@ -219,14 +219,14 @@ it("deduplicates and bounds page links in page order without choosing an applica
   ).toBe(false);
 });
 
-it("bounds large page text and discloses omitted text while keeping ordinary listings whole", () => {
+it("preserves complete large page text including middle requirements", () => {
   const ordinary =
     "a".repeat(10000) + "Java and Dutch C1 are required" + "z".repeat(10000);
   expect(listingPageText(`<main>${ordinary}</main>`)).toBe(ordinary);
   const long = listingPageText(
     `<main>${"Body ".repeat(20000)}End requirements</main>`,
   );
-  expect(long.length).toBeLessThanOrEqual(64000);
-  expect(long).toContain("[Page text excerpt: middle omitted]");
+  expect(long.length).toBeGreaterThan(64000);
+  expect(long).not.toContain("[Page text excerpt: middle omitted]");
   expect(long).toContain("End requirements");
 });
