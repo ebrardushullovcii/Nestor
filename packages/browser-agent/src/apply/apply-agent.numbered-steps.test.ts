@@ -361,18 +361,20 @@ test.each(["saved", "other_form", "rejected"] as const)(
           : { name: "finish", args: { reason: "Filled" } },
       ),
     );
-    expect(
-      result.pauses
-        .flatMap((p) => p.questions ?? [])
-        .some((q) => q.prompt.includes("upload")),
-    ).toBe(variant !== "saved");
+    expect(result.pauses.flatMap((p) => p.questions ?? [])).toEqual([]);
     if (variant === "saved")
       expect(
         result.reviewAttachments?.find((a) => a.fileName === "resume.txt")
           ?.savedSha256,
       ).toBe(createHash("sha256").update(bytes).digest("hex"));
-    else
-      expect(result.reviewAttachments?.some((a) => a.savedSha256)).toBe(false);
+    else {
+      expect(result.outcome).toBe("stuck");
+      expect(result.reviewAttachments).toEqual([]);
+      expect(result.readyToSend).toBeNull();
+      expect(result.reason).toContain(
+        variant === "rejected" ? "site rejected" : "not confirmed",
+      );
+    }
   },
 );
 

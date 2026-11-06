@@ -140,6 +140,50 @@ function placementOf(raw: RawApplyPlacement): ApplyPlacement {
   };
 }
 
+function radioOptionLabel(control: RawApplyControl): string {
+  const label = control.label.trim();
+  for (const question of [
+    control.groupLabel.trim(),
+    control.groupLabel.split(" — ").at(-1)?.trim() ?? "",
+  ]) {
+    if (question && label.startsWith(question)) {
+      const option = label.slice(question.length).trim();
+      if (option) return option;
+    }
+  }
+  return label;
+}
+
+/** Nameless ARIA options still belong to their observed question group. */
+function radioGroupKey(control: RawApplyControl, page: RawApplyPage): string {
+  if (control.name.trim())
+    return `${control.scopeKey ?? "root"}:name:${control.name.trim()}`;
+  const identity = (entry: RawApplyControl) =>
+    JSON.stringify([
+      entry.frame ?? null,
+      entry.scopeKey ?? "root",
+      entry.rowScopeKey ?? null,
+      entry.groupLabel.trim(),
+      entry.sectionPath ?? [],
+    ]);
+  const key = identity(control);
+  const peers = page.controls.filter(
+    (entry) =>
+      toControlKind(entry) === "radio" &&
+      !entry.name.trim() &&
+      identity(entry) === key,
+  );
+  const labels = peers.map(radioOptionLabel);
+  // Equal labels can be separate, equally worded questions. Wording alone
+  // must not collapse them into a choice the page never established.
+  return control.groupLabel.trim() &&
+    peers.length > 1 &&
+    labels.every(Boolean) &&
+    new Set(labels).size === labels.length
+    ? `group:${key}`
+    : `ref:${control.ref ?? `c${control.index}`}`;
+}
+
 /**
  * Toggle buttons that answer one question read as that question's choices.
  * Ashby's Yes/No is two `aria-pressed` buttons inside the question's field:
@@ -244,6 +288,17 @@ export function buildApplyFormObservation(
       ref: rawControl.ref ?? `c${rawControl.index}`,
       ...(rawControl.frame ? { frame: { ...rawControl.frame } } : {}),
       kind,
+      ...(kind === "file" && (rawControl.id || rawControl.name)
+        ? {
+            fileControlKey: JSON.stringify([
+              rawControl.frame ?? null,
+              rawControl.scopeKey ?? "",
+              rawControl.name
+                ? ["name", rawControl.name]
+                : ["id", rawControl.id],
+            ]),
+          }
+        : {}),
       ...(rawControl.scopeKey ? { scopeKey: rawControl.scopeKey } : {}),
       ...(rawControl.rowScopeKey
         ? { rowScopeKey: rawControl.rowScopeKey }
@@ -276,7 +331,10 @@ export function buildApplyFormObservation(
               .filter(Boolean),
           }
         : {}),
-      label: rawControl.label.trim(),
+      label:
+        kind === "radio"
+          ? radioOptionLabel(rawControl)
+          : rawControl.label.trim(),
       ...(rawControl.hint?.trim() ? { hint: rawControl.hint.trim() } : {}),
       groupLabel: rawControl.groupLabel.trim(),
       sectionPath:
@@ -287,9 +345,12 @@ export function buildApplyFormObservation(
           .filter(Boolean),
       ...(kind === "radio" || (kind === "checkbox" && !rawControl.required)
         ? {
-            choiceGroupKey: rawControl.name.trim()
-              ? `${rawControl.scopeKey ?? "root"}:name:${rawControl.name.trim()}`
-              : `ref:${rawControl.ref ?? `c${rawControl.index}`}`,
+            choiceGroupKey:
+              kind === "radio"
+                ? radioGroupKey(rawControl, raw)
+                : rawControl.name.trim()
+                  ? `${rawControl.scopeKey ?? "root"}:name:${rawControl.name.trim()}`
+                  : `ref:${rawControl.ref ?? `c${rawControl.index}`}`,
           }
         : {}),
       placeholder: rawControl.placeholder.trim(),
@@ -357,7 +418,9 @@ export function buildApplyFormObservation(
     ref: rawAction.ref ?? `a${rawAction.index}`,
     ...(rawAction.frame ? { frame: { ...rawAction.frame } } : {}),
     label: rawAction.label.trim(),
-    kind: inferActionKind(rawAction.label),
+    ...(rawAction.role ? { role: rawAction.role } : {}),
+    // Tabs select a panel. Their native submit status remains separate.
+    kind: rawAction.role === "tab" ? "other" : inferActionKind(rawAction.label),
     visible: rawAction.visible,
     disabled: rawAction.disabled,
     ...(rawAction.formAction ? { formAction: rawAction.formAction } : {}),
@@ -411,11 +474,14 @@ export function buildApplyFormObservation(
       ),
       ...actions.map(
         (action) =>
-          `${action.ref}|${action.kind}|${normalizeSignal(action.label)}`,
+          `${action.ref}|${action.kind}|${action.role ?? ""}|${action.submitsForm ?? ""}|${normalizeSignal(action.label)}`,
       ),
       ...links.map((link) => `${link.ref}|${normalizeSignal(link.label)}`),
     ]),
     url: raw.url,
+    ...(raw.networkMutationCount !== undefined
+      ? { networkMutationCount: raw.networkMutationCount }
+      : {}),
     ...(raw.accountWindow ? { accountWindow: raw.accountWindow } : {}),
     ...(raw.summaryRows?.length
       ? {

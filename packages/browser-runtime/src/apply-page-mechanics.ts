@@ -77,9 +77,11 @@ export const APPLY_CONTROL_SELECTOR =
   "input:not([type='hidden']):not([type='submit']):not([type='button']), textarea, select, [role='combobox'], [role='checkbox'], [role='radio'], [contenteditable='true']";
 
 export const APPLY_ACTION_SELECTOR =
-  "button, input[type='submit'], input[type='button'], [role='button']";
+  "button, input[type='submit'], input[type='button'], [role='button'], [role='tab']";
 
-export const APPLY_LINK_SELECTOR = "a[href]";
+// A tab implemented as an anchor keeps its panel-navigation semantics and
+// has one action handle, rather than a second ordinary-link handle.
+export const APPLY_LINK_SELECTOR = "a[href]:not([role='tab'])";
 
 /**
  * Everything else a person could press.
@@ -103,7 +105,24 @@ async function settlePage(page: Page, timeout = 4_000): Promise<void> {
     .catch(() => undefined);
 }
 
+const mutationCounts = new WeakMap<Page, { count: number }>();
+
+function mutationCounter(page: Page): { count: number } {
+  let counter = mutationCounts.get(page);
+  if (!counter) {
+    counter = { count: 0 };
+    mutationCounts.set(page, counter);
+    const current = counter;
+    page.on("request", (request) => {
+      if (!["GET", "HEAD", "OPTIONS"].includes(request.method()))
+        current.count += 1;
+    });
+  }
+  return counter;
+}
+
 export async function readRawApplyPage(page: Page): Promise<RawApplyPage> {
+  const counter = mutationCounter(page);
   const raw = await readRawApplyPageContent(page);
   // A dropzone's inner input often says only "Choose a file". Its actual
   // question lives outside the shadow root, beside the widget's host.
@@ -124,7 +143,10 @@ export async function readRawApplyPage(page: Page): Promise<RawApplyPage> {
       if (labels[ordinal]) control.label = labels[ordinal]!;
     });
   }
-  return withPageMessages(page, raw);
+  return withPageMessages(page, {
+    ...raw,
+    networkMutationCount: counter.count,
+  });
 }
 
 /** Self-contained for evaluation in each frame, including open shadow roots. */
@@ -725,6 +747,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             return {
               ref: `${prefix}a${index}`,
               index,
+              role: element.getAttribute("role")?.toLowerCase() ?? "",
               ...(element.hasAttribute("aria-pressed")
                 ? { pressed: element.getAttribute("aria-pressed") === "true" }
                 : {}),
@@ -1741,6 +1764,7 @@ export function collectApplyDocumentSnapshot(
       const style = window.getComputedStyle(html);
       return {
         index,
+        role: element.getAttribute("role")?.toLowerCase() ?? "",
         ...placement(element),
         ...(element.hasAttribute("aria-pressed")
           ? { pressed: element.getAttribute("aria-pressed") === "true" }

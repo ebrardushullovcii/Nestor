@@ -67,6 +67,8 @@ export type ApplyAnswerEvidencePolicy =
   | "eligibility";
 
 export interface ApplyFormControl {
+  /** Native file-input identity, independent of mutable attachment labels. */
+  fileControlKey?: string;
   frame?: ApplyFrameOwner;
   /** Stable handle for this control within one observation. */
   ref: string;
@@ -148,6 +150,7 @@ export interface ApplyPlacement {
 export interface ApplyFormAction extends ApplyPlacement {
   ref: string;
   label: string;
+  role?: string;
   kind: ApplyActionKind;
   visible: boolean;
   disabled: boolean;
@@ -245,6 +248,8 @@ export interface ApplyOpenedTab {
  * see plainly.
  */
 export interface ApplyFormObservation {
+  /** Known browser request count; absence cannot establish a no-op upload gesture. */
+  networkMutationCount?: number;
   observedAt: string;
   /** Changes whenever the page changes; a write proposed against an older one is retried. */
   signature: string;
