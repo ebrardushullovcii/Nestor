@@ -54,6 +54,17 @@ export function assessFitWorkLocation(
   if (status === "blocked") return { status, reason };
   const currentCode = fitCountryCode(profile.currentCountry || "", true);
   const current = new Set(currentCode ? [currentCode] : []);
+  // This is a known exclusion, not missing permission: the complete published
+  // region excludes the saved work country and the person will not relocate.
+  if (
+    currentCode &&
+    profile.workEligibility.willingToRelocate === false &&
+    fitRegionContains(job.location ?? "", currentCode) === false
+  )
+    return {
+      status: "blocked",
+      reason: `The published hiring region (${job.location}) excludes your ${profile.currentCountry} work location, and you are not willing to relocate.`,
+    };
   const published = fitCountryCode(job.location ?? "");
   const countries = published
     ? new Set([published])
@@ -127,9 +138,18 @@ export function assessFitWorkLocation(
   )
     return {
       status: "review",
-      reason: physical
-        ? "On-site or hybrid work requires permission in the work country; permission for this role still needs checking."
-        : "This remote role is limited to its work country; permission for this role still needs checking.",
+      reason: [
+        proof?.authorization[0] === "unknown" && proof.authorization[1].trim()
+          ? proof.authorization[1]
+          : `Your profile does not confirm work authorization in ${fitCountryNames(
+              countries,
+            )
+              .filter((_name, index) => index % 2 === 1)
+              .join(" or ")}.`,
+        physical
+          ? "On-site or hybrid work requires permission in the work country; permission for this role still needs checking."
+          : "This remote role is limited to its work country; permission for this role still needs checking.",
+      ].join(" "),
     };
   if (foreign && physical && profile.workEligibility.willingToRelocate !== true)
     return {
@@ -195,8 +215,9 @@ export function assessFitWorkLocation(
   )
     return {
       status: "review",
-      reason:
-        "The eligibility judgment does not establish an allowed work country for you.",
+      reason: !current.size
+        ? "Your profile does not state your current work country."
+        : "The eligibility judgment does not establish an allowed work country for you.",
     };
   if (kind === "broader_remote" && broader) {
     const outsideScope = [job.location ?? "", passage].find(
@@ -241,7 +262,9 @@ export function assessFitWorkLocation(
   )
     return {
       status: "review",
-      reason: "The listing does not establish where you may work.",
+      reason: !current.size
+        ? "Your profile does not state your current work country."
+        : "The listing does not establish where you may work.",
     };
   return { status, reason };
 }

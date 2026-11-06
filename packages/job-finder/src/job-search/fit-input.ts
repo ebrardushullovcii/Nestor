@@ -4,7 +4,7 @@ import { toJobSearchGoals, type JobDetail } from "@nestor/contracts";
 import type { JobSearchContext } from "./types";
 
 // Retires previous judgments when the listing-fit instructions change.
-export const LISTING_FIT_SCORER_VERSION = 9;
+export const LISTING_FIT_SCORER_VERSION = 10;
 const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 

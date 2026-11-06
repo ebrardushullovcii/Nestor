@@ -128,10 +128,37 @@ and unknown or conflicting authorization requirements. Matching core duties
 remain distinct from a missing tool/workflow and from a different professional
 practice; eligibility uncertainty is capped after the model's work-fit judgment.
 
-The current artifacts are fit-region-tape.json.gz and fit-region-report.json.gz.
+The scorer 9 artifacts are preserved in commit e018dc0a27cbee9f5f09467187dfbb1bb4730f04 at fit-region-tape.json.gz and fit-region-report.json.gz.
 The scorer 8 fit-quality artifacts remain historical. Exact offline replay
 passes with 42 logical requests (41 unique recordings), zero fresh calls. The
 report's repositoryHead is the base checkout above; these changes were not yet
 committed at capture time. Fit retains complete postings and confirmed profile
 evidence; the unused excerpt-based provider APIs were removed. Ungrounded pay
 quotes now leave pay unknown without discarding an otherwise valid fit.
+
+The scorer 10 eligibility follow-up starts from e018dc0a27cbee9f5f09467187dfbb1bb4730f04.
+Unresolved eligibility now caps below Strong (84), allowing Good matches with a
+visible Check eligibility explanation. A missing profile fact names the country
+and unanswered authorization, residence, relocation or sponsorship fact. Known
+exclusions remain below Stretch (39); a recognized published region excluding
+the saved work country, with relocation explicitly declined, is a known exclusion.
+The model still judges professional fit. Existing hard-pay conflicts retain
+their separate below-Good cap.
+
+| Metric                                                                      | Scorer 9     | Scorer 10 |
+| --------------------------------------------------------------------------- | ------------ | --------- |
+| Broad recall                                                                | 22/22        | 22/22     |
+| Close recall                                                                | 8/8          | 8/8       |
+| Broad relevant in top 10                                                    | 10/10        | 10/10     |
+| Close relevant in top 10                                                    | 8/10         | 8/10      |
+| US-only person / Europe vacancy                                             | 39           | 39        |
+| Synthetic strong role/coverage, unanswered US authorization, model score 78 | 64 (Stretch) | 78 (Good) |
+
+The additional labelled synthetic case also checks a model score of 99 caps at 84,
+remains in Good+, stays out of Strong, and names the unanswered US work-authorization
+question. The 59 public vacancies, personas, labels, assessment date, model route
+and screen/read replies are unchanged. All 18 fit calls were refreshed with the
+updated prompt. Current fit-region-tape.json.gz and fit-region-report.json.gz
+contain scorer 10; exact offline replay passes with 42 logical requests and zero
+fresh calls. Collection-inclusive recall and coverage honesty remain unchanged.
+The report's repositoryHead is the base checkout above before this follow-up commit.

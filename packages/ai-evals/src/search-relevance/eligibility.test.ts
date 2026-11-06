@@ -12,13 +12,13 @@ const cases = [
     id: "europe_only",
     location: "Remote, Europe",
     description: "Work remotely from Europe only.",
-    expected: "limited",
+    expected: "blocked",
   },
   {
     id: "europe_shared_body",
     location: "Europe",
     description: "Work remotely in Americas or Europe.",
-    expected: "limited",
+    expected: "blocked",
   },
   {
     id: "us_remote",
@@ -37,14 +37,14 @@ const cases = [
     id: "permission_unknown",
     location: "Remote worldwide",
     description: "Work remotely worldwide. German work authorization required.",
-    expected: "limited",
+    expected: "review",
   },
   {
     id: "permission_conflict",
     location: "Remote worldwide",
     description:
       "Work remotely worldwide. German work authorization required; no sponsorship.",
-    expected: "limited",
+    expected: "blocked",
   },
 ] as const;
 const person = searchPersonas[0]!;
@@ -176,14 +176,14 @@ test("US-only persona: Europe-only and unresolved permission stay below eligible
     ).toEqual(["Synthetic us_remote", "Synthetic worldwide"]);
     expect(
       store.listJobs({ stage: "found", minFit: JOB_FIT_BANDS.good }).rows,
-    ).toHaveLength(2);
+    ).toHaveLength(3);
     for (const row of rows) {
       const entry = cases.find(
         (entry) => row.company === `Synthetic ${entry.id}`,
       )!;
       if (entry.expected === "strong") expect(row.fitScore).toBe(96);
       else {
-        expect(row.fitScore).toBeLessThan(JOB_FIT_BANDS.good);
+        expect(row.fitScore).toBe(entry.expected === "blocked" ? 39 : 84);
         expect(row.fitSummary).not.toContain("excellent match");
         expect(store.getJob(row.id)?.fit?.short).toBeUndefined();
       }
@@ -287,6 +287,111 @@ test.each(["country_remote", "broader_remote"])(
       expect(fit?.score).toBe(39);
       expect(fit?.summary).toContain("requires US residence");
       expect(fit?.short).toBeUndefined();
+    } finally {
+      store.close();
+    }
+  },
+);
+
+// Label: Good, check eligibility. Synthetic shape of the owner's aggregate
+// result: strong role and coverage, with a missing profile authorization fact.
+test.each([78, 99])(
+  "strong role/coverage with unanswered US authorization remains Good (model score %s)",
+  async (score) => {
+    const store = openJobStore(":memory:");
+    try {
+      store.saveFoundJobs({
+        searchId: null,
+        jobs: [
+          {
+            title: "Senior Product Engineer",
+            company: "Synthetic Missing Authorization",
+            location: "Remote, United States",
+            workModes: ["remote"],
+            url: "https://example.test/missing-us-authorization",
+            applyUrl: null,
+            sourceId: "synthetic",
+            sourceLabel: "Synthetic",
+            sourceJobId: null,
+            postedAt: null,
+            salaryText: null,
+            salaryMin: null,
+            salaryMax: null,
+            salaryCurrency: null,
+            seniority: "Senior",
+            employmentType: "Full-time",
+            summary: null,
+            description:
+              "US remote. US work authorization required. Build React/TypeScript SaaS products, Node APIs and PostgreSQL services.",
+          },
+        ],
+      });
+      const profile = CandidateProfileSchema.parse({
+        ...person.profile,
+        workEligibility: {
+          ...person.profile.workEligibility,
+          authorizedWorkCountries: [],
+          requiresVisaSponsorship: null,
+        },
+      });
+      const [fit] = await fitJobs({
+        profile,
+        goals: person.goals,
+        jobs: [store.getJob(1)!],
+        client: {
+          chatWithTools: () =>
+            Promise.resolve({
+              content: JSON.stringify({
+                fits: [
+                  {
+                    id: 1,
+                    s: score,
+                    why: "Your product engineering duties match; US authorization is unanswered.",
+                    w: "Product match; check eligibility",
+                    r: [
+                      "strong",
+                      "Your saved SaaS product duties directly match.",
+                    ],
+                    c: [
+                      "strong",
+                      "Your React, Node and PostgreSQL delivery is evidenced.",
+                    ],
+                    p: ["aligned", "US remote senior product role."],
+                    e: {
+                      status: "review",
+                      quote: "US work authorization required",
+                      kind: "country_remote",
+                      countries: "US",
+                      ...proof("US"),
+                      publishedLocation: "Remote, United States",
+                      authorization: {
+                        status: "unknown",
+                        reason:
+                          "Your profile does not say whether you have US work authorization.",
+                      },
+                    },
+                  },
+                ],
+              }),
+            }),
+        },
+      });
+      expect(fit?.score).toBe(Math.min(score, JOB_FIT_BANDS.strong - 1));
+      expect(fit?.role?.assessment).toBe("strong");
+      expect(fit?.coverage?.assessment).toBe("strong");
+      expect(fit?.limit?.kind).toBe("eligibility_unconfirmed");
+      expect(fit?.summary).toMatch(/check eligibility/i);
+      expect(fit?.summary).toContain(
+        "Your profile does not say whether you have US work authorization",
+      );
+      expect(fit?.short).toBeUndefined();
+      store.setFit([fit!]);
+      expect(
+        store.listJobs({ stage: "found", minFit: JOB_FIT_BANDS.good }).rows,
+      ).toHaveLength(1);
+      expect(
+        store.listJobs({ stage: "found", minFit: JOB_FIT_BANDS.strong }).rows,
+      ).toHaveLength(0);
     } finally {
       store.close();
     }

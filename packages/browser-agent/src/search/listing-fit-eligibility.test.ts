@@ -72,9 +72,16 @@ const job = JobDetailSchema.parse({
   summary: null,
 });
 
-test.each(["conflict", "met", "unknown"] as const)(
-  "B2 hard requirements cannot read Good fit when judgment is %s",
-  async (hard) => {
+test.each(
+  (["conflict", "met", "unknown"] as const).flatMap((hard) =>
+    (["compatible", "review"] as const).map((eligibility) => ({
+      hard,
+      eligibility,
+    })),
+  ),
+)(
+  "B2 below-floor pay stays below Good with eligibility $eligibility (hard $hard)",
+  async ({ hard, eligibility }) => {
     const [fit] = await fitJobs({
       profile,
       goals: {
@@ -109,7 +116,7 @@ test.each(["conflict", "met", "unknown"] as const)(
                   p: ["conflict", "Below the saved minimum"],
                   c: ["strong", "Experience"],
                   e: [
-                    "compatible",
+                    eligibility,
                     "Worldwide",
                     "broader_remote",
                     "",
@@ -131,14 +138,16 @@ test.each(["conflict", "met", "unknown"] as const)(
       },
     });
     expect(fit?.score).toBe(JOB_FIT_BANDS.good - 1);
-    expect(fit?.limit?.kind).toBe("preferences");
+    expect(fit?.limit?.kind).toBe(
+      eligibility === "review" ? "eligibility_unconfirmed" : "preferences",
+    );
   },
 );
 
 test.each([
   ["20 hours per week", "compatible", 92],
   ["40 hours per week", "blocked", 39],
-  ["Hours to be agreed", "review", 64],
+  ["Hours to be agreed", "review", 84],
 ] as const)(
   "conditional permission follows the model's reading of %s",
   async (hours, status, expected) => {
@@ -221,7 +230,7 @@ test.each([
 
 test.each([
   ["US-only residence contradicts your country", "blocked", 99, 39],
-  ["Required work authorization is not known", "review", 99, 64],
+  ["Required work authorization is not known", "review", 99, 84],
   ["Worldwide remote includes your country", "compatible", 99, 99],
   ["Europe hiring includes your country", "compatible", 90, 90],
   ["EU-only hiring excludes your country", "blocked", 90, 39],
@@ -267,7 +276,7 @@ test.each([
   });
   expect(fit?.score).toBe(expected);
   if (status === "blocked") {
-    expect(fit?.score).toBeLessThan(JOB_FIT_BANDS.good);
+    expect(fit?.score).toBeLessThan(JOB_FIT_BANDS.stretch);
     expect(fit?.preferences).toEqual({
       assessment: "conflict",
       explanation: reason,
@@ -366,8 +375,8 @@ test("a response with no eligibility verdict is capped with visible uncertainty"
         }),
     },
   });
-  expect(fit?.score).toBe(64);
-  expect(fit?.summary).toContain("Location or eligibility needs review");
+  expect(fit?.score).toBe(84);
+  expect(fit?.summary).toContain("Check eligibility:");
   expect(fit?.preferences?.assessment).toBe("unknown");
 });
 
@@ -429,17 +438,21 @@ test.each([
           }),
       },
     });
-    expect(fit?.score).toBe(review ? 64 : 87);
+    expect(fit?.score).toBe(review ? 84 : 87);
     if (!review) expect(fit?.summary).toContain("Direct TypeScript experience");
-    expect(fit?.summary.includes("needs review")).toBe(review);
+    expect(fit?.summary.includes("Check eligibility:")).toBe(review);
     expect(fit?.summary).not.toContain(
       "Work permission or hiring scope is unconfirmed",
     );
     if (authorized) expect(fit?.summary).not.toContain("not recorded");
-    else
+    else {
+      expect(fit?.summary).toContain(
+        "Your profile does not confirm work authorization in Germany",
+      );
       expect(fit?.summary).toContain(
         "permission for this role still needs checking",
       );
+    }
     expect(person.workEligibility.authorizedWorkCountries).toEqual(
       authorized ? ["Germany"] : [],
     );
@@ -499,7 +512,7 @@ test.each([
     description: "Build production software.",
     quote: "United States",
     kind: "unknown",
-    score: 64,
+    score: 84,
     assessment: "unknown",
   },
   {
@@ -508,7 +521,7 @@ test.each([
       "A hybrid work model of 3 days in the office. Relocation assistance is available.",
     quote: "hybrid work model of 3 days in the office",
     kind: "hybrid",
-    score: 64,
+    score: 84,
     assessment: "unknown",
   },
 ])(

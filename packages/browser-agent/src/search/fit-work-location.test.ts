@@ -693,3 +693,19 @@ test.each([
       expect(result.reason).toContain("published hiring region");
   },
 );
+
+test("an unanswered current work country names the missing profile fact", () => {
+  const result = assessFitWorkLocation(
+    { ...profile, currentCountry: "" },
+    {
+      location: "Remote worldwide",
+      description: "Work remotely worldwide.",
+      workModes: ["remote"],
+    },
+    ["compatible", "Work remotely worldwide", "broader_remote", ""],
+  );
+  expect(result.status).toBe("review");
+  expect(result.reason).toContain(
+    "Your profile does not state your current work country",
+  );
+});
