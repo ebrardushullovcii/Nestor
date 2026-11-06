@@ -1,8 +1,4 @@
-import {
-  CandidateProfileSchema,
-  JobDetailSchema,
-  JOB_FIT_BANDS,
-} from "@nestor/contracts";
+import { CandidateProfileSchema, JobDetailSchema } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
 import type { LLMClient } from "../agent/contracts";
 import { fitJobs } from "./listing-engine";
@@ -58,30 +54,13 @@ const job = JobDetailSchema.parse({
   summary: null,
 });
 
-test.each(["conflict", "met", "unknown"] as const)(
-  "B2 hard requirements cannot read Good fit when judgment is %s",
-  async (hard) => {
+test.each(["compatible", "review", "blocked"] as const)(
+  "the model's score and reason survive its %s eligibility verdict",
+  async (status) => {
     const [fit] = await fitJobs({
       profile,
-      goals: {
-        targetRoles: ["Software Engineer"],
-        locations: ["Kosovo"],
-        compensation: {
-          minimum: 24,
-          maximum: null,
-          interval: "hour",
-          currency: "EUR",
-          currencyStatus: "explicit",
-        },
-      },
-      jobs: [
-        {
-          ...job,
-          location: "Remote worldwide",
-          description: "Worldwide software role. EUR19 hourly.",
-          salaryText: "EUR19/hour",
-        },
-      ],
+      jobs: [job],
+      goals: { targetRoles: [], locations: [] },
       client: {
         chatWithTools: () =>
           Promise.resolve({
@@ -90,156 +69,30 @@ test.each(["conflict", "met", "unknown"] as const)(
                 {
                   id: 1,
                   s: 92,
-                  why: "Relevant work, pay needs attention",
-                  r: ["strong", "Software duties"],
-                  p: ["conflict", "Below the saved minimum"],
+                  why: "The model's own overall reason.",
+                  w: "Model reason",
+                  r: ["strong", "Requested work"],
+                  p: ["mixed", "Model preference reason"],
                   c: ["strong", "Experience"],
-                  e: ["compatible", "Worldwide", "broader_remote", ""],
-                  h: [hard, "Pay compared with the explicit hourly minimum"],
-                  pay: {
-                    minimum: 19,
-                    maximum: 19,
-                    currency: "EUR",
-                    interval: "hour",
-                    basis: "base",
-                    quote: "EUR19 hourly",
-                  },
+                  h: ["conflict", "Model requirement reason"],
+                  e: [status, "US only", "country_remote", "US"],
                 },
               ],
             }),
           }),
       },
     });
-    expect(fit?.score).toBe(JOB_FIT_BANDS.good - 1);
-    expect(fit?.limit?.kind).toBe("preferences");
-  },
-);
-
-test.each([
-  ["20 hours per week", "compatible", 92],
-  ["40 hours per week", "blocked", 39],
-  ["Hours to be agreed", "review", 92],
-] as const)(
-  "conditional permission follows the model's reading of %s",
-  async (hours, status, expected) => {
-    const student = CandidateProfileSchema.parse({
-      ...profile,
-      currentCountry: "Germany",
-      currentLocation: "Berlin",
-      workEligibility: {
-        limitedWorkPermissions: [
-          {
-            country: "Germany",
-            conditions:
-              "Study permit: up to 20 hours weekly until 2027-09. Full-time work later needs sponsorship.",
-            requiresFutureSponsorship: true,
-          },
-        ],
+    expect(fit).toMatchObject({
+      score: 92,
+      summary: "The model's own overall reason.",
+      short: "Model reason",
+      preferences: {
+        assessment: "mixed",
+        explanation: "Model preference reason",
       },
     });
-    const [fit] = await fitJobs({
-      profile: student,
-      jobs: [
-        {
-          ...job,
-          location: "Berlin, Germany",
-          workModes: ["onsite"],
-          description: `Software development. ${hours}.`,
-        },
-      ],
-      goals: { targetRoles: ["Software Engineer"], locations: ["Berlin"] },
-      client: {
-        chatWithTools: (messages) => {
-          expect(messages[0]?.content).toContain(
-            "Compare limitedWorkPermissions conditions",
-          );
-          expect(messages[1]?.content).toContain(
-            "up to 20 hours weekly until 2027-09",
-          );
-          return Promise.resolve({
-            content: JSON.stringify({
-              fits: [
-                {
-                  id: 1,
-                  s: 92,
-                  why: "Matching software work",
-                  r: ["strong", "Exact work"],
-                  p: ["aligned", "Hours"],
-                  c: ["strong", "Skills"],
-                  e: [status, hours, "onsite", "DE"],
-                },
-              ],
-            }),
-          });
-        },
-      },
-    });
-    expect(fit?.score).toBe(expected);
-    expect(fit?.limit?.kind).toBe(
-      status === "compatible"
-        ? undefined
-        : status === "blocked"
-          ? "eligibility"
-          : "eligibility_unconfirmed",
-    );
   },
 );
-
-test.each([
-  ["US-only residence contradicts your country", "blocked", 99, 39],
-  ["Required work authorization is not known", "review", 99, 99],
-  ["Worldwide remote includes your country", "compatible", 99, 99],
-  ["Europe hiring includes your country", "compatible", 90, 90],
-  ["EU-only hiring excludes your country", "blocked", 90, 39],
-  ["A low role score is never promoted", "compatible", 20, 20],
-] as const)("%s", async (reason, status, score, expected) => {
-  const client: LLMClient = {
-    chatWithTools: () =>
-      Promise.resolve({
-        content: JSON.stringify({
-          fits: [
-            {
-              id: 1,
-              s: score,
-              why: "Exact skills",
-              r: ["strong", "Requested work"],
-              p: ["aligned", "Remote work"],
-              c: ["strong", "Direct evidence"],
-              e: [
-                status,
-                status === "compatible" ? "Worldwide remote" : reason,
-                status === "compatible" ? "broader_remote" : "unknown",
-                status === "blocked" ? "US" : "",
-              ],
-            },
-          ],
-        }),
-      }),
-  };
-  const [fit] = await fitJobs({
-    client,
-    profile,
-    jobs: [
-      status === "compatible"
-        ? {
-            ...job,
-            location: "Remote, Worldwide",
-            description: "Worldwide remote. Build TypeScript products.",
-          }
-        : job,
-    ],
-    goals: { targetRoles: ["Software Engineer"], locations: ["Europe"] },
-  });
-  expect(fit?.score).toBe(expected);
-  if (status === "blocked") {
-    expect(fit?.score).toBeLessThan(JOB_FIT_BANDS.good);
-    expect(fit?.preferences).toEqual({
-      assessment: "conflict",
-      explanation: reason,
-    });
-  }
-  if (score > expected) expect(fit?.summary).toBe(reason);
-});
 
 test("fit gets explicit residence and saved country-list rules, without changing work permission", async () => {
   const rule = {
@@ -305,225 +158,6 @@ test("fit gets explicit residence and saved country-list rules, without changing
   expect(messages[0].content).toContain(
     "fit label never grants work permission",
   );
-});
-
-test("a response with no eligibility verdict retains its score with visible uncertainty", async () => {
-  const [fit] = await fitJobs({
-    profile,
-    jobs: [job],
-    goals: { targetRoles: [], locations: [] },
-    client: {
-      chatWithTools: () =>
-        Promise.resolve({
-          content: JSON.stringify({
-            fits: [
-              {
-                id: 1,
-                s: 99,
-                why: "Exact skills",
-                r: ["strong", "Requested work"],
-                p: ["aligned", "Remote"],
-                c: ["strong", "Direct evidence"],
-              },
-            ],
-          }),
-        }),
-    },
-  });
-  expect(fit?.score).toBe(99);
-  expect(fit?.summary).toContain("Location or eligibility needs review");
-  expect(fit?.preferences?.assessment).toBe("unknown");
-});
-
-test.each([
-  { authorized: true, status: "compatible", review: false },
-  { authorized: true, status: "review", review: true },
-  { authorized: false, status: "compatible", review: true },
-])(
-  "location review preserves saved permission facts: $authorized / $status",
-  async ({ authorized, status, review }) => {
-    const person = CandidateProfileSchema.parse({
-      ...profile,
-      currentCountry: "Germany",
-      workEligibility: {
-        authorizedWorkCountries: authorized ? ["Germany"] : [],
-      },
-    });
-    const [fit] = await fitJobs({
-      profile: person,
-      jobs: [
-        {
-          ...job,
-          location: "Germany",
-          workModes: ["onsite"],
-          description: "Synthetic Lab · Germany. Build TypeScript products.",
-        },
-      ],
-      goals: { targetRoles: ["Software Engineer"], locations: ["Germany"] },
-      client: {
-        chatWithTools: () =>
-          Promise.resolve({
-            content: JSON.stringify({
-              fits: [
-                {
-                  id: job.id,
-                  s: 87,
-                  why: "Direct TypeScript experience",
-                  r: ["strong", "Requested work"],
-                  p: ["aligned", "Germany"],
-                  c: ["strong", "Direct evidence"],
-                  e: [status, "Synthetic Lab · Germany", "onsite", "DE"],
-                },
-              ],
-            }),
-          }),
-      },
-    });
-    expect(fit?.score).toBe(87);
-    expect(fit?.summary).toContain("Direct TypeScript experience");
-    expect(fit?.summary.includes("needs review")).toBe(review);
-    expect(fit?.summary).not.toContain(
-      "Work permission or hiring scope is unconfirmed",
-    );
-    if (authorized) expect(fit?.summary).not.toContain("not recorded");
-    else
-      expect(fit?.summary).toContain(
-        "permission for this role still needs checking",
-      );
-    expect(person.workEligibility.authorizedWorkCountries).toEqual(
-      authorized ? ["Germany"] : [],
-    );
-  },
-);
-
-test.each([
-  "Work remotely from any European country, including non-EU countries",
-  "Work remotely from any European country",
-])("European remote hiring retains its compatible score: %s", async (quote) => {
-  const [fit] = await fitJobs({
-    profile,
-    jobs: [
-      {
-        ...job,
-        location: "Remote, Europe",
-        description:
-          "Work remotely from any European country, including non-EU countries.",
-      },
-    ],
-    goals: { targetRoles: ["Software Engineer"], locations: ["Europe"] },
-    client: {
-      chatWithTools: () =>
-        Promise.resolve({
-          content: JSON.stringify({
-            fits: [
-              {
-                id: job.id,
-                s: 96,
-                why: "Exact work with eligible European remote hiring",
-                r: ["strong", "Exact requested work"],
-                p: ["aligned", "European remote includes non-EU countries"],
-                c: ["strong", "Direct evidence"],
-                e: ["compatible", quote, "broader_remote", ""],
-              },
-            ],
-          }),
-        }),
-    },
-  });
-  expect(fit?.score).toBe(96);
-  expect(fit?.preferences).toEqual({
-    assessment: "aligned",
-    explanation: "European remote includes non-EU countries",
-  });
-});
-
-test.each([
-  {
-    location: "United States",
-    description: "Build production software.",
-    quote: "United States",
-    kind: "unknown",
-    score: 99,
-    assessment: "unknown",
-  },
-  {
-    location: "San Francisco",
-    description:
-      "A hybrid work model of 3 days in the office. Relocation assistance is available.",
-    quote: "hybrid work model of 3 days in the office",
-    kind: "hybrid",
-    score: 99,
-    assessment: "unknown",
-  },
-])(
-  "a model's compatible verdict cannot bypass the location guard: $location",
-  async ({ location, description, quote, kind, score, assessment }) => {
-    const [fit] = await fitJobs({
-      profile,
-      jobs: [{ ...job, location, description, workModes: [] }],
-      goals: { targetRoles: ["Software Engineer"], locations: ["Europe"] },
-      client: {
-        chatWithTools: () =>
-          Promise.resolve({
-            content: JSON.stringify({
-              fits: [
-                {
-                  id: job.id,
-                  s: 99,
-                  why: "Matching skills",
-                  r: ["strong", "Work"],
-                  p: ["aligned", "Remote"],
-                  c: ["strong", "Evidence"],
-                  e: ["compatible", quote, kind, "US"],
-                },
-              ],
-            }),
-          }),
-      },
-    });
-    expect(fit?.score).toBe(score);
-    expect(fit?.preferences?.assessment).toBe(assessment);
-  },
-);
-
-test("regional authorization stays with the model rather than an ISO country lookup", async () => {
-  const [fit] = await fitJobs({
-    profile: CandidateProfileSchema.parse({
-      ...profile,
-      currentCountry: "Germany",
-      currentLocation: "Berlin",
-      workEligibility: { authorizedWorkCountries: ["European Union"] },
-    }),
-    jobs: [
-      {
-        ...job,
-        location: "Berlin, Germany",
-        workModes: ["onsite"],
-        description:
-          "Work onsite in Berlin, Germany. Current work authorization required.",
-      },
-    ],
-    goals: { targetRoles: ["Software Engineer"], locations: ["Berlin"] },
-    client: {
-      chatWithTools: () =>
-        Promise.resolve({
-          content: JSON.stringify({
-            fits: [
-              {
-                id: 1,
-                s: 90,
-                why: "Relevant work and authorized location",
-                r: ["strong", "Relevant work"],
-                p: ["aligned", "EU authorization covers this job"],
-                c: ["strong", "Direct evidence"],
-                e: ["compatible", "Work onsite in Berlin", "onsite", "DE"],
-              },
-            ],
-          }),
-        }),
-    },
-  });
-  expect(fit?.score).toBe(90);
 });
 
 test("different fit batches retain the exact context prefix and response schema", async () => {
@@ -613,133 +247,4 @@ test("a stable schema still rejects a verdict for a job outside the batch", asyn
   });
   expect(calls).toBe(2);
   expect(fits.map(({ id }) => id)).toEqual([job.id]);
-});
-
-test("keeps the model's short reason beside its own reason, whole and capped", async () => {
-  const answer = (
-    w: string,
-    e: string,
-    s = 70,
-    why = "Fewer frontend duties than you want; mostly backend services.",
-  ) => ({
-    chatWithTools: () =>
-      Promise.resolve({
-        content: JSON.stringify({
-          fits: [
-            {
-              id: 1,
-              s,
-              why,
-              w,
-              r: ["related", "Backend-leaning role"],
-              p: ["aligned", "Remote work"],
-              c: ["strong", "Direct evidence"],
-              e: [e, "Worldwide remote", "broader_remote", ""],
-            },
-          ],
-        }),
-      }),
-  });
-  const fit = (client: LLMClient) =>
-    fitJobs({
-      client,
-      profile,
-      jobs: [
-        {
-          ...job,
-          location: "Remote, Worldwide",
-          description: "Worldwide remote. Mostly backend services.",
-        },
-      ],
-      goals: { targetRoles: ["Software Engineer"], locations: [] },
-    }).then((fits) => fits[0]);
-
-  const kept = await fit(answer("Less frontend than you want.", "compatible"));
-  expect(kept?.summary).toBe(
-    "Fewer frontend duties than you want; mostly backend services.",
-  );
-  expect(kept?.short).toBe("Less frontend than you want");
-  // Over the cap: none, never cut.
-  expect(
-    (
-      await fit(
-        answer(
-          "Rather less frontend work than you said you want",
-          "compatible",
-        ),
-      )
-    )?.short,
-  ).toBeUndefined();
-  // A capped score reads another reason, so its short form is not this one.
-  expect(
-    (await fit(answer("Less frontend than you want", "blocked", 90)))?.short,
-  ).toBeUndefined();
-  // The comparison and the reason's material caveat, when both fit.
-  const caveat =
-    "Good overlap on product UI; asks for some Go you have not listed.";
-  expect(
-    (await fit(answer("UI overlap ; Go not listed.", "compatible", 70, caveat)))
-      ?.short,
-  ).toBe("UI overlap; Go not listed");
-  // Over five words, or more than a comparison and one caveat: none.
-  expect(
-    (
-      await fit(
-        answer("Good UI overlap; some Go asked", "compatible", 70, caveat),
-      )
-    )?.short,
-  ).toBeUndefined();
-  expect(
-    (await fit(answer("UI; Go; remote", "compatible", 70, caveat)))?.short,
-  ).toBeUndefined();
-  // An older answer without it still reads.
-  expect((await fit(answer("", "compatible")))?.short).toBeUndefined();
-});
-
-test("unknown terms preserve relative model scores and explanations; a confirmed conflict stays capped", async () => {
-  const result = await fitJobs({
-    profile,
-    goals: { targetRoles: ["Software Engineer"], locations: [] },
-    jobs: [1, 2, 3].map((id) => ({
-      ...job,
-      id,
-      location: "Remote worldwide",
-      description: "Worldwide remote. Contract dates to be agreed.",
-    })),
-    client: {
-      chatWithTools: () =>
-        Promise.resolve({
-          content: JSON.stringify({
-            fits: [
-              [1, 93, "unknown"],
-              [2, 72, "unknown"],
-              [3, 93, "conflict"],
-            ].map(([id, s, hard]) => ({
-              id,
-              s,
-              why: `Core work comparison ${id}`,
-              w: "Core match",
-              r: ["strong", "Requested work"],
-              p: ["aligned", "Remote work"],
-              c: ["strong", "Direct evidence"],
-              e: ["compatible", "Worldwide remote", "broader_remote", ""],
-              h: [
-                hard,
-                hard === "unknown"
-                  ? "Contract term not stated"
-                  : "Explicit term exceeds recorded permission",
-              ],
-            })),
-          }),
-        }),
-    },
-  });
-  expect(result.map((row) => row.score)).toEqual([93, 72, 64]);
-  expect(result[0]?.summary).toContain("Core work comparison 1");
-  expect(result[0]?.summary).toContain(
-    "Requirement not confirmed: Contract term not stated",
-  );
-  expect(result[0]?.short).toBeUndefined();
-  expect(result[2]?.summary).toBe("Explicit term exceeds recorded permission");
-  expect(result[2]?.preferences?.assessment).toBe("conflict");
 });

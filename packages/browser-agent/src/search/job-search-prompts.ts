@@ -41,11 +41,23 @@ export function createJobSearchPrompts(config: AgentConfig): {
   user: string;
 } {
   const { searchPreferences, promptContext } = config;
+  if (config.requestedListing)
+    return {
+      system: [
+        `Read this one supplied vacancy on ${promptContext.siteLabel}; this task is complete when its full text or its current unavailability is recorded.`,
+        `Requested listing: ${JSON.stringify(config.requestedListing)}`,
+        "This is a listing read. Do not search for other jobs, explore categories or judge fit. Keep the requested listing identity separate from the page you land on. A redirect may show a login, the employer's application page, a closed notice or a board; give that evidence to the page reader. A board's other postings are not this vacancy. Use extract_jobs on the vacancy or save_jobs_from_data for data you read from an API or feed. Preserve this vacancy's complete text and its real application link; a login redirect is not a listing or application URL. If it is closed, record that decision for this listing. A failed read concerns this listing alone. Never apply.",
+        describeBrowserPermissions(config),
+        "Use the browser's imported session, prepare_saved_sign_in for a vault login, and the observed Google sign-in controls when needed. Passwords stay in the vault. Attempt sign-in and site checks before handing off a missing secret, MFA or a real attempt that still failed on the open page. Finish with the exact outcome for this vacancy.",
+        ...(promptContext.siteInstructions ?? []),
+      ].join("\n"),
+      user: `Read ${config.requestedListing.url}. The current page is shown below.`,
+    };
   if (config.inventoryOnly)
     return {
       system: [
         `Collect genuine vacancy cards from ${promptContext.siteLabel}. HTTP collection could not finish this site, so browser navigation is needed.`,
-        "Use extract_jobs to collect result cards and their actual employer, listing URL and visible facts. Assess fit later; do not reject individual vacancy cards for level, place, pay, hours or preferences. Choose useful search directories and location filters from the person's navigation goals rather than walking every location portal. The next engine steps screen roles, read full details and judge each merged job once.",
+        "Use extract_jobs to collect result cards and their actual employer, listing URL and visible facts. Use read_page_api to read a public API or feed and save_jobs_from_data to save listings from that read data, including their full descriptions. Assess fit later; do not reject individual vacancy cards for level, place, pay, hours or preferences. Choose useful search directories and location filters from the person's navigation goals rather than walking every location portal. The next engine steps screen roles, read full details and judge each merged job once.",
         "Read the inventory once and follow observed Next or Load more controls until exhausted. Do not repeat keyword searches over an inventory already collected. For a very large global board, use the person's target and related role terms to reach useful result pages, then collect their cards without fit filtering.",
         `Navigation goals: ${JSON.stringify({ targetRoles: searchPreferences.targetRoles, relatedRoles: searchPreferences.jobFamilies, locations: searchPreferences.locations, workModes: searchPreferences.workModes, excludedLocations: searchPreferences.excludedLocations, remoteCountsAsAnyLocation: searchPreferences.remoteCountsAsAnyLocation, request: promptContext.searchRequest?.intent })}`,
         describeBrowserPermissions(config),

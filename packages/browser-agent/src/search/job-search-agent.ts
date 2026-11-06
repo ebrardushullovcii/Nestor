@@ -1,4 +1,5 @@
 import { reportSelfLimitHit, selfLimitSlice } from "@nestor/core";
+import { z } from "zod";
 import { intendedAccountEmail } from "@nestor/contracts";
 import {
   ListingRejectionCategorySchema,
@@ -104,10 +105,17 @@ export function buildExtractionSelectionContext(
     reason: string;
   }>,
 ): string {
+  if (config.requestedListing)
+    return JSON.stringify({
+      purpose:
+        "Read only the requested vacancy. Keep its identity through redirects; report a closed vacancy as closed. Other jobs on a landed board are not this vacancy. Do not assess fit.",
+      requestedListing: config.requestedListing,
+      sourceInstructions: config.promptContext.siteInstructions ?? [],
+    });
   if (config.inventoryOnly)
     return JSON.stringify({
       purpose:
-        "Collect all genuine vacancy cards. Do not judge fit, score, seniority, place, hours or preferences. Full listing reads and role screening happen after this inventory.",
+        "Collect all genuine vacancy cards. Keep the real listing URL, not a login redirect; a login link may carry its intended listing destination. Do not judge fit, score, seniority, place, hours or preferences. Full listing reads and role screening happen after this inventory.",
       sourceInstructions: config.promptContext.siteInstructions ?? [],
     });
   const profile = config.userProfile;
@@ -872,7 +880,9 @@ export async function runJobSearchAgent(
         );
         if (posting) posting.producingPageUrl = observation.url;
         if (posting && pageType === "job_detail") {
-          posting.description = pageText;
+          // The extractor chooses this vacancy's text from the landed page.
+          // Assigning the whole page here attached blogs, board chrome and
+          // other postings to the requested vacancy after a redirect.
           posting.detailQuality = "detail_enriched";
           posting.listingDetailFetch = {
             attemptedAt: now().toISOString(),
@@ -1042,7 +1052,7 @@ export async function runJobSearchAgent(
       function: {
         name: "read_page_api",
         description:
-          "Read a GET-only JSON or text endpoint used by the current job site when the visible page does not expose enough detail. Use only an endpoint discovered from this task's page or earlier response. This shares the in-app browser session, never writes to the site, and returns at most 20,000 characters.",
+          "Read a GET-only JSON, feed or text endpoint used by the current job site. This shares the browser session and returns the complete response. Use save_jobs_from_data to save listings you read here with their own URLs and complete descriptions.",
         parameters: {
           type: "object",
           properties: {
@@ -1086,6 +1096,7 @@ export async function runJobSearchAgent(
           maxRedirects: 0,
         });
       const body = await response.text();
+      if (response.ok()) recordListingRead(requestedUrl, body);
       return {
         kind: "ok",
         content: [
@@ -1097,6 +1108,156 @@ export async function runJobSearchAgent(
           body || "The response body was empty.",
         ].join("\n"),
         progress: response.ok() && body.length > 0,
+      };
+    },
+  };
+
+  const dataJobSchema = z.object({
+    canonicalUrl: z.string().url(),
+    title: z.string().trim().min(1),
+    company: z.string().trim().min(1),
+    location: z.string().trim().min(1),
+    description: z.string().trim().min(1),
+    applicationUrl: z.string().url().nullable().optional(),
+    workMode: z
+      .array(z.enum(["remote", "hybrid", "onsite", "flexible"]))
+      .optional(),
+    sourceJobId: z.string().trim().min(1).nullable().optional(),
+    salaryText: z.string().trim().min(1).nullable().optional(),
+    postedAt: z.string().datetime().nullable().optional(),
+    closedReason: z.string().trim().min(1).optional(),
+  });
+  const saveDataTool: AgentLoopTool = {
+    definition: {
+      type: "function",
+      function: {
+        name: "save_jobs_from_data",
+        description:
+          "Save listings you read from API JSON, feeds or other page data. Give each listing its own URL, complete description and facts. For unknown company or location use 'Company not stated' or 'Location not stated'. Omit optional unknown fields. This records your decisions; it does not reread the rendered page or assess fit.",
+        parameters: {
+          type: "object",
+          properties: {
+            jobs: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  canonicalUrl: { type: "string", format: "uri" },
+                  title: { type: "string", minLength: 1, pattern: "\\S" },
+                  company: { type: "string", minLength: 1, pattern: "\\S" },
+                  location: { type: "string", minLength: 1, pattern: "\\S" },
+                  description: { type: "string", minLength: 1, pattern: "\\S" },
+                  applicationUrl: { type: ["string", "null"], format: "uri" },
+                  workMode: {
+                    type: "array",
+                    items: {
+                      type: "string",
+                      enum: ["remote", "hybrid", "onsite", "flexible"],
+                    },
+                  },
+                  sourceJobId: {
+                    type: ["string", "null"],
+                    minLength: 1,
+                    pattern: "\\S",
+                  },
+                  salaryText: {
+                    type: ["string", "null"],
+                    minLength: 1,
+                    pattern: "\\S",
+                  },
+                  postedAt: {
+                    type: ["string", "null"],
+                    format: "date-time",
+                    pattern: "Z$",
+                  },
+                  closedReason: {
+                    type: "string",
+                    minLength: 1,
+                    pattern: "\\S",
+                  },
+                },
+                required: [
+                  "canonicalUrl",
+                  "title",
+                  "company",
+                  "location",
+                  "description",
+                ],
+              },
+            },
+          },
+          required: ["jobs"],
+        },
+      },
+    },
+    execute: async (raw, context) => {
+      context.signal?.throwIfAborted();
+      const parsed = z
+        .object({ jobs: z.array(dataJobSchema) })
+        .safeParse(parseToolArguments(raw));
+      if (!parsed.success) return { kind: "ok", content: parsed.error.message };
+      const added: JobPosting[] = [];
+      for (const { closedReason, ...facts } of parsed.data.jobs) {
+        const posting = toPosting({
+          ...facts,
+          sourceJobId: facts.sourceJobId ?? facts.canonicalUrl,
+          workMode: facts.workMode ?? [],
+          salaryText: facts.salaryText ?? null,
+          postedAt: facts.postedAt ?? null,
+          applicationUrl: facts.applicationUrl ?? null,
+          summary: null,
+          keySkills: [],
+          applyPath: "unknown",
+          easyApplyEligible: false,
+          ...(closedReason
+            ? { searchRejection: { category: "closed", reason: closedReason } }
+            : {}),
+        });
+        if (!posting)
+          return {
+            kind: "ok",
+            content:
+              "The listing did not match the posting schema. Correct its fields and try again.",
+          };
+        posting.producingPageUrl =
+          pageTools.state.observation?.url ?? facts.canonicalUrl;
+        posting.listingDetailFetch = {
+          attemptedAt: now().toISOString(),
+          outcome: "enriched",
+          method: "page_text",
+          detail:
+            "The model supplied this listing's complete text from read data.",
+        };
+        if (keep(posting)) added.push(posting);
+      }
+      if (added.length) await checkpoint();
+      return {
+        kind: "ok",
+        content: describeSave(added, parsed.data.jobs.length),
+        progress: added.length > 0,
+      };
+    },
+  };
+  const signInTool: AgentLoopTool = {
+    definition: {
+      type: "function",
+      function: {
+        name: "prepare_saved_sign_in",
+        description:
+          "Have the vault type saved credentials into this page's sign-in fields without exposing secrets. Then inspect the page and press the sign-in control yourself. Use observed Google sign-in controls when offered. Report a missing secret or MFA only after attempting sign-in.",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+    execute: async (_raw, context) => {
+      context.signal?.throwIfAborted();
+      const observation = await pageTools.observe();
+      const prepare =
+        config.prepareBrowserCredentials ?? hands.prepareBrowserCredentials;
+      const prepared =
+        observation.url && prepare ? await prepare(observation.url) : false;
+      return {
+        kind: "ok",
+        content: `${prepared ? "The vault filled saved sign-in fields." : "No saved credential was filled on this page. Try the site's Google sign-in or another observed sign-in route."}\n${await pageTools.observe().then((page) => views.describe(page))}`,
       };
     },
   };
@@ -1372,6 +1533,8 @@ export async function runJobSearchAgent(
     withBotCheckHandoff(extractTool),
     savedTool,
     withBotCheckHandoff(pageApiTool),
+    saveDataTool,
+    signInTool,
     finishTool,
   ];
   // These tools report progress only for rows/details not previously read.

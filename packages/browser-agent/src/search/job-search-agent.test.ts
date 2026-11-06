@@ -2596,3 +2596,235 @@ test("ordinary browser searches record a clean model finish as complete, beyond 
   expect(result.phaseCompletionMode).toBe("structured_finish");
   expect(result.steps).toBe(5);
 });
+
+test("a listing read receives its exact identity without the general source-search goal", () => {
+  const requestedListing = {
+    url: "https://jobs.example.test/one",
+    title: "Platform Engineer",
+    text: "Employer's vacancy card",
+  };
+  const run = config({ requestedListing, retainAllFound: true });
+  const prompt = createJobSearchPrompts(run);
+  expect(prompt.system).toContain(JSON.stringify(requestedListing));
+  expect(prompt.system).toContain("Do not search for other jobs");
+  expect(prompt.system).not.toContain("find a broad pool");
+  expect(
+    (
+      JSON.parse(buildExtractionSelectionContext(run, [])) as {
+        requestedListing: typeof requestedListing;
+      }
+    ).requestedListing,
+  ).toEqual(requestedListing);
+});
+
+test("a detail extraction keeps the model's vacancy text instead of replacing it with landed page chrome", async () => {
+  const pages = {
+    current: rawPage({
+      bodyText: "Board chrome. Blog article. Another company's posting.",
+    }),
+  };
+  const result = await runJobSearchAgent({
+    hands: hands(pages),
+    config: config({
+      requestedListing: {
+        url: "https://jobs.example.test/one",
+        title: "Platform Engineer",
+        text: "One card",
+      },
+    }),
+    llmClient: scripted([
+      { name: "extract_jobs", args: { pageType: "job_detail" } },
+      { name: "finish", args: { reason: "Read this listing." } },
+    ]),
+    jobExtractor: {
+      extractJobsFromPage: () =>
+        Promise.resolve([
+          JobPostingSchema.parse({
+            source: "target_site",
+            canonicalUrl: "https://jobs.example.test/one",
+            sourceJobId: "one",
+            title: "Platform Engineer",
+            company: "Requested Employer",
+            location: "Europe",
+            description: "Only the requested vacancy's full description.",
+            salaryText: null,
+            applyPath: "unknown",
+            easyApplyEligible: false,
+            discoveredAt: "2026-11-06T00:00:00Z",
+          }),
+        ]),
+    },
+  });
+  expect(result.jobs[0]?.description).toBe(
+    "Only the requested vacancy's full description.",
+  );
+  expect(result.jobs[0]?.canonicalUrl).toBe("https://jobs.example.test/one");
+});
+
+test("the search model can save complete listings read from JSON without rendered cards", async () => {
+  const pages = {
+    current: rawPage({
+      bodyText: "This site exposes a public jobs API.",
+      actions: [],
+    }),
+  };
+  const jobs = Array.from({ length: 20 }, (_, index) => ({
+    canonicalUrl: `https://jobs.example.test/job/${index}`,
+    title: `Platform Engineer ${index}`,
+    company: "Synthetic Employer",
+    location: "Europe",
+    description:
+      `Unique listing ${index}. ` + "Full requirements. ".repeat(1500),
+  }));
+  const page = {
+    url: () => pages.current.url!,
+    context: () => ({
+      request: {
+        get: vi.fn(() =>
+          Promise.resolve({
+            text: () => Promise.resolve(JSON.stringify({ jobs })),
+            status: () => 200,
+            statusText: () => "OK",
+            headers: () => ({ "content-type": "application/json" }),
+            ok: () => true,
+          }),
+        ),
+      },
+    }),
+  } as unknown as Page;
+  const extractor = { extractJobsFromPage: vi.fn(() => Promise.resolve([])) };
+  const onCheckpoint = vi.fn();
+  const client = scripted([
+    {
+      name: "read_page_api",
+      args: {
+        url: "https://jobs.example.test/api/search",
+        reason: "The page links its public jobs API",
+      },
+    },
+    { name: "save_jobs_from_data", args: { jobs } },
+    { name: "finish", args: { reason: "Read all jobs in the public API." } },
+  ]);
+  let readResponse = "";
+  const result = await runJobSearchAgent({
+    hands: hands(pages),
+    page,
+    config: config({ onCheckpoint }),
+    llmClient: {
+      chatWithTools: async (...args) => {
+        readResponse += JSON.stringify(args[0]);
+        return client.chatWithTools(...args);
+      },
+    },
+    jobExtractor: extractor,
+  });
+  expect(result.jobs).toHaveLength(20);
+  expect(result.jobs.map((job) => job.description)).toEqual(
+    jobs.map((job) => job.description.trim()),
+  );
+  expect(readResponse).toContain("Unique listing 19");
+  expect(onCheckpoint).toHaveBeenCalled();
+  expect(extractor.extractJobsFromPage).not.toHaveBeenCalled();
+});
+
+test("search offers vault preparation and completes the observed Google sign-in path", async () => {
+  const email = "synthetic@example.test";
+  const pages = {
+    current: rawPage({
+      bodyText: "Sign in to read jobs",
+      actions: [
+        {
+          index: 0,
+          label: "Sign in with Google",
+          visible: true,
+          disabled: false,
+          submitsForm: false,
+        },
+      ],
+    }),
+  };
+  const liveHands = hands(pages);
+  const prepare = vi.fn(() => Promise.resolve(false));
+  let signInStep = 0;
+  const click = vi.fn(() => {
+    signInStep++;
+    pages.current =
+      signInStep === 1
+        ? rawPage({
+            url: "https://accounts.google.com/v3/signin/accountchooser",
+            bodyText: "Choose an account",
+            actions: [
+              {
+                index: 0,
+                label: email,
+                visible: true,
+                disabled: false,
+                submitsForm: false,
+              },
+            ],
+          })
+        : signInStep === 2
+          ? rawPage({
+              url: "https://accounts.google.com/signin/oauth/consent",
+              bodyText: `${email} � Share your name and email`,
+              actions: [
+                {
+                  index: 0,
+                  label: "Continue",
+                  visible: true,
+                  disabled: false,
+                  submitsForm: false,
+                },
+              ],
+            })
+          : rawPage({
+              url: "https://jobs.example.test/signed-in",
+              bodyText: "Platform Engineer. Complete vacancy duties.",
+              actions: [],
+            });
+    return Promise.resolve({
+      ok: true as const,
+      observedValue: "Sign-in step completed",
+    });
+  });
+  liveHands.clickElement = click;
+  liveHands.readAccountFlowEntry = () =>
+    Promise.resolve([
+      "https://accounts.google.com/o/oauth2/v2/auth?scope=openid+email+profile",
+    ]);
+  const client = scripted([
+    { name: "prepare_saved_sign_in" },
+    { name: "click", args: { ref: "a0" } },
+    { name: "click", args: { ref: "a0" } },
+    { name: "click", args: { ref: "a0" } },
+    {
+      name: "finish",
+      args: { reason: "Google account selected; the source can now be read." },
+    },
+  ]);
+  const toolNames = new Set<string>();
+  await runJobSearchAgent({
+    hands: liveHands,
+    config: config({
+      readIntendedAccountEmail: () => email,
+      prepareBrowserCredentials: prepare,
+      browserPermissions: {
+        signIn: true,
+        googleSignIn: true,
+        createAccounts: true,
+        solveCaptchas: true,
+      },
+    }),
+    llmClient: {
+      chatWithTools: (...args) => {
+        for (const tool of args[1]) toolNames.add(tool.function.name);
+        return client.chatWithTools(...args);
+      },
+    },
+    jobExtractor: { extractJobsFromPage: () => Promise.resolve([]) },
+  });
+  expect(toolNames.has("prepare_saved_sign_in")).toBe(true);
+  expect(prepare).toHaveBeenCalled();
+  expect(click).toHaveBeenCalledTimes(3);
+  expect(pages.current.url).toBe("https://jobs.example.test/signed-in");
+});

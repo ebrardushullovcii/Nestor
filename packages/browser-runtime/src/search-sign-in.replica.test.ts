@@ -126,7 +126,7 @@ test.skipIf(!existsSync(executablePath))(
                 title: "Interface Engineer",
                 company: "Synthetic Employer",
                 location: "Europe",
-                description: "A short model transcription",
+                description: input.pageText,
                 canonicalUrl: page.url(),
                 salaryText: null,
                 applyPath: "unknown",

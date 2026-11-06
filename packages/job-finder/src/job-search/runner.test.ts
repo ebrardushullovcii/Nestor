@@ -759,7 +759,7 @@ test("a site's screening failure stays visible without stopping successful sites
   const failed = createSearchSourcesStore(store)
     .list({})
     .rows.find((row) => row.sourceId === "two");
-  expect(failed?.state).toBe("failed");
+  expect(failed?.state).toBe("partial");
   expect(failed?.seen).toBe(0);
   expect(failed?.failedReads).toBe(2);
 });
@@ -1651,7 +1651,115 @@ test("late collection progress preserves the actual listing failure in the final
   await runner.start({ depth: "quick", postedWithin: "any" });
   await finished(runner);
   const row = createSearchSourcesStore(store).list({}).rows[0];
-  expect(row?.state).toBe("failed");
+  expect(row?.state).toBe("partial");
   expect(row?.message).toContain("listing connection was reset");
   expect(row?.message).not.toContain("Asking the assistant");
+});
+
+test.each(["HTTP 410", "connection reset", "HTTP 503"])(
+  "a listing's %s reaches the browser decider without failing its source or losing its sibling",
+  async (reason) => {
+    const { runner, engine, store, context } = setup();
+    context.sources = context.sources.slice(0, 1);
+    engine.collectSource.mockImplementation(({ target }) =>
+      Promise.resolve({
+        cards: [
+          card(target.id, "Backend Engineer"),
+          card(target.id, "Platform Engineer"),
+        ].map((row, index) => ({ ...row, url: `${row.url}/${index}` })),
+        pagesRead: 1,
+        complete: true,
+        notes: ["All observed pages covered."],
+      }),
+    );
+    engine.readListings.mockImplementation(({ cards, lane }) =>
+      Promise.resolve(
+        lane === "browser"
+          ? {
+              jobs: [],
+              failures: cards.map((row) => ({
+                url: row.url,
+                reason: `The browser model read this listing: ${reason}`,
+              })),
+            }
+          : {
+              jobs: [found(cards[0]!)],
+              failures: [{ url: cards[1]!.url, reason, requiresBrowser: true }],
+            },
+      ),
+    );
+    await runner.start({ depth: "thorough", postedWithin: "any" });
+    await finished(runner);
+    expect(
+      engine.readListings.mock.calls.some(
+        ([input]) =>
+          input.lane === "browser" && input.cards[0]?.url.endsWith("/1"),
+      ),
+    ).toBe(true);
+    expect(store.stageCounts().found).toBe(1);
+    const row = createSearchSourcesStore(store).list({}).rows[0];
+    expect(row?.state).toBe("partial");
+    expect(row?.failedReads).toBe(1);
+    expect(row?.message).toContain(reason);
+    expect(runner.status().search?.state).toBe("done");
+  },
+);
+
+test("a thrown HTTP read reaches the browser decider and keeps every recovered listing", async () => {
+  const { runner, engine, store } = setup();
+  engine.readListings.mockImplementation(({ lane, cards }) => {
+    if (lane === "http") throw new Error("HTTP connection failed");
+    return Promise.resolve({ jobs: cards.map(found), failures: [] });
+  });
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await finished(runner);
+  expect(store.stageCounts().found).toBe(1);
+  expect(
+    createSearchSourcesStore(store)
+      .list({})
+      .rows.every((row) => row.state === "done"),
+  ).toBe(true);
+});
+
+test("queued browser collection starts when the only browser lane frees", async () => {
+  const { engine, store, context } = setup();
+  const held = deferred<void>();
+  const started: string[] = [];
+  engine.collectSource.mockImplementation(async ({ target, lane }) => {
+    if (lane === "http")
+      return {
+        cards: [],
+        complete: false,
+        requiresBrowser: true,
+        pagesRead: 1,
+        notes: ["HTTP did not finish"],
+      };
+    started.push(target.id);
+    if (started.length === 1) await held.promise;
+    return {
+      cards: [card(target.id)],
+      complete: true,
+      pagesRead: 1,
+      notes: ["Browser inventory complete"],
+    };
+  });
+  const runner = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+    concurrency: { browser: 1 },
+  });
+  runners.push(runner);
+  await runner.start({ depth: "thorough", postedWithin: "any" });
+  await vi.waitFor(() => expect(started).toHaveLength(1));
+  expect(runner.status().progress?.browserQueued).toBe(1);
+  held.resolve();
+  await finished(runner);
+  expect(started).toHaveLength(2);
+  expect(store.stageCounts().found).toBe(1);
+  expect(
+    createSearchSourcesStore(store)
+      .list({})
+      .rows.every((row) => !row.message?.includes("HTTP did not finish")),
+  ).toBe(true);
 });

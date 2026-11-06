@@ -510,6 +510,7 @@ export interface BrowserApplicationExecutionOptions {
 }
 
 export interface AgentDiscoveryOptions {
+  requestedListing?: { url: string; title: string; text: string };
   /** Main-owned exact-site autofill; returns no credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;
   browserPermissions?: BrowserAgentPermissions;
