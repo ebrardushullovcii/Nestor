@@ -83,19 +83,30 @@ const content = JSON.stringify({ fits });
 afterEach(() => vi.unstubAllGlobals());
 
 test.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
-  "accepts all 48 realistic Responses fit rows at %s effort after one retry at the model maximum",
+  "accepts all 48 realistic Responses fit rows at %s effort by splitting a truncated batch",
   async (effort) => {
     expect(content.length).toBeGreaterThan(35000);
+    const groups: number[][] = [];
     const bodies: Array<{
       max_output_tokens: number;
       reasoning: { effort: string };
+      input: Array<{ role: string; content: string | Array<{ text: string }> }>;
     }> = [];
     vi.stubGlobal(
       "fetch",
       vi.fn((_url: unknown, options: RequestInit) => {
         if (typeof options.body !== "string")
           throw new Error("Expected JSON request body");
-        bodies.push(JSON.parse(options.body) as (typeof bodies)[number]);
+        const body = JSON.parse(options.body) as (typeof bodies)[number];
+        bodies.push(body);
+        const user = body.input.find((message) => message.role === "user")!;
+        const data = JSON.parse(
+          typeof user.content === "string"
+            ? user.content
+            : user.content.map((part) => part.text).join(""),
+        ) as { listings: { id: number }[] };
+        const ids = data.listings.map((row) => row.id);
+        groups.push(ids);
         return Promise.resolve(
           new Response(
             JSON.stringify(
@@ -105,7 +116,12 @@ test.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
                     incomplete_details: { reason: "max_output_tokens" },
                     output_text: content.slice(0, 300),
                   }
-                : { status: "completed", output_text: content },
+                : {
+                    status: "completed",
+                    output_text: JSON.stringify({
+                      fits: fits.filter((fit) => ids.includes(fit.id)),
+                    }),
+                  },
             ),
             { headers: { "content-type": "application/json" } },
           ),
@@ -128,10 +144,15 @@ test.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
       jobs,
     });
     expect(result.map(({ id }) => id)).toEqual(jobs.map(({ id }) => id));
-    expect(bodies.map((body) => body.max_output_tokens)).toEqual([
-      modelOutputLimit("muse-spark-1.3-contributor"),
-      modelOutputLimit("muse-spark-1.3-contributor"),
-    ]);
+    expect(groups.map((group) => group.length)).toEqual([48, 24, 24]);
+    expect(groups.slice(1).flat()).toEqual(jobs.map((job) => job.id));
+    expect(
+      bodies.every(
+        (body) =>
+          body.max_output_tokens ===
+          modelOutputLimit("muse-spark-1.3-contributor"),
+      ),
+    ).toBe(true);
     expect(bodies.every((body) => body.reasoning?.effort === effort)).toBe(
       true,
     );
@@ -139,17 +160,22 @@ test.each(["none", "low", "medium", "high", "xhigh", "max"] as const)(
 );
 
 test.each(["length", "max_output_tokens", "transport"])(
-  "reports repeated %s truncation after exactly two calls",
+  "reports %s truncation for each indivisible listing without replaying identical batches",
   async (reason) => {
-    const chatWithTools = vi.fn(() =>
-      reason === "transport"
+    const groups: number[][] = [];
+    const chatWithTools = vi.fn((messages: Array<{ content: string }>) => {
+      const data = JSON.parse(messages[1]!.content) as {
+        listings: { id: number }[];
+      };
+      groups.push(data.listings.map((row) => row.id));
+      return reason === "transport"
         ? Promise.reject(
             new Error(
               "Model returned an incomplete response: max_output_tokens",
             ),
           )
-        : Promise.resolve({ content, finishReason: reason }),
-    );
+        : Promise.resolve({ content, finishReason: reason });
+    });
     await expect(
       fitJobs({
         client: { chatWithTools },
@@ -157,8 +183,13 @@ test.each(["length", "max_output_tokens", "transport"])(
         goals: persona.goals,
         jobs,
       }),
-    ).rejects.toThrow("output limit");
-    expect(chatWithTools).toHaveBeenCalledTimes(2);
+    ).rejects.toThrow("incomplete response");
+    expect(groups.filter((group) => group.length === 1).flat()).toEqual(
+      jobs.map((job) => job.id),
+    );
+    expect(new Set(groups.map((group) => JSON.stringify(group))).size).toBe(
+      groups.length,
+    );
   },
 );
 
