@@ -582,7 +582,15 @@ async function runMeasuredApplyAgent(
   const handOverPress = async (
     pause: ApplyPause,
   ): Promise<AgentLoopToolOutcome> => {
-    if (exhaustedUploads.size) {
+    if (uploadTries.size) syncObservation(await pageTools.observe());
+    if (
+      exhaustedUploads.size ||
+      [...uploadLedger].some(
+        ([key, entry]) =>
+          uploadTries.has(key) &&
+          ["rejected", "unconfirmed"].includes(entry.state),
+      )
+    ) {
       // A failed upload's Attach/Home button is not a candidate question.
       // Use normal finishing so genuine required gaps are still collected.
       needsPersonFinishPending = false;
@@ -2218,7 +2226,44 @@ async function runMeasuredApplyAgent(
         (upload) =>
           upload.fileName.toLowerCase() === entry.fileName.toLowerCase(),
       )?.network;
-      if (!word) continue;
+      if (!word) {
+        // An error page can replace a deferred selection after it first
+        // appeared attached. It cannot keep an unverified receipt.
+        const field = next.controls.find(
+          (control) =>
+            control.kind === "file" && uploadFieldKey(control, next) === key,
+        );
+        const errorPage =
+          !next.controls.some(
+            (control) => control.visible && !control.disabled,
+          ) &&
+          (next.validationErrors.length > 0 ||
+            /\b(?:unknown error|an error (?:has )?occurred|something went wrong|temporarily unavailable|error submitting|submission failed|upload failed)\b/iu.test(
+              next.bodyTextExcerpt,
+            ));
+        if (
+          uploadTries.has(key) &&
+          ["accepted", "uploading"].includes(entry.state) &&
+          errorPage &&
+          !nativeSavedFiles.has(key) &&
+          !field?.answered &&
+          !next.bodyTextExcerpt
+            .toLowerCase()
+            .includes(entry.fileName.toLowerCase())
+        ) {
+          uploadLedger.set(key, {
+            ...entry,
+            state: "unconfirmed",
+            since: now().getTime(),
+          });
+          forgetObservedUpload(key);
+          uploadDiagnostics.set(
+            key,
+            `The selected file ${entry.fileName} no longer appears on the page, and the site has not confirmed it.`,
+          );
+        }
+        continue;
+      }
       // A wizard keeps an earlier step's field in the page, disabled and
       // hidden. When that input still holds the exact file inside a POST
       // multipart form, the form's submission sends it: an untied word from

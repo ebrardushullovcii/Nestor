@@ -754,67 +754,79 @@ async function uploadRun(
   return { result: await runApplyAgent(input, model), methods, writes };
 }
 
-test("an upload that replaces the form with an error is a technical stop, not a homepage chore", async () => {
-  const raw = page({
-    controls: [field({ inputType: "file", name: "resume", label: "Resume" })],
-  });
-  const input = config(raw);
-  input.sources.documents = [
-    {
-      id: "resume",
-      kind: "resume",
-      label: "Synthetic CV",
-      fileName: "synthetic.pdf",
-      mimeType: "application/pdf",
-      loadBytes: () => Promise.resolve(new TextEncoder().encode("synthetic")),
-    },
-  ];
-  input.hands.uploadFile = (_ref, file) => {
-    raw.controls = [];
-    raw.bodyText = "Sorry, an unknown error occurred. Go to homepage";
-    raw.links = [
+test.each([false, true])(
+  "an upload that replaces the form with an error is a technical stop (initially deferred: %s)",
+  async (deferred) => {
+    const raw = page({
+      controls: [field({ inputType: "file", name: "resume", label: "Resume" })],
+    });
+    const input = config(raw);
+    input.sources.documents = [
       {
-        index: 0,
-        label: "Go to homepage",
-        href: "https://employer.example.test/",
-        target: "",
-        visible: true,
-        topOffset: 0,
+        id: "resume",
+        kind: "resume",
+        label: "Synthetic CV",
+        fileName: "synthetic.pdf",
+        mimeType: "application/pdf",
+        loadBytes: () => Promise.resolve(new TextEncoder().encode("synthetic")),
       },
     ];
-    raw.networkMutationCount = 1;
-    return Promise.resolve({ ok: true, observedValue: file.name });
-  };
-  let calls = 0;
-  const model: LLMClient = {
-    chatWithTools: () =>
-      Promise.resolve({
-        toolCalls: [
-          {
-            id: `call-${calls}`,
-            type: "function",
-            function:
-              calls++ === 0
-                ? {
-                    name: "upload",
-                    arguments: JSON.stringify({
-                      ref: "c0",
-                      documentId: "resume",
-                    }),
-                  }
-                : {
-                    name: "follow_link",
-                    arguments: JSON.stringify({ ref: "l0" }),
-                  },
-          },
-        ],
-      }),
-  };
-  const result = await runApplyAgent(input, model);
-  expect(result.outcome).toBe("stuck");
-  expect(result.reason).toContain("attachment field disappeared");
-  expect(result.pauses).toEqual([]);
-});
+    const showError = () => {
+      raw.controls = [];
+      raw.bodyText = "Sorry, an unknown error occurred. Go to homepage";
+      raw.links = [
+        {
+          index: 0,
+          label: "Go to homepage",
+          href: "https://employer.example.test/",
+          target: "",
+          visible: true,
+          topOffset: 0,
+        },
+      ];
+    };
+    input.hands.uploadFile = (_ref, file) => {
+      if (deferred) raw.controls[0].value = file.name;
+      else showError();
+      raw.networkMutationCount = 1;
+      return Promise.resolve({ ok: true, observedValue: file.name });
+    };
+    let calls = 0;
+    const model: LLMClient = {
+      chatWithTools: () => {
+        if (deferred && calls > 0) showError();
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: `call-${calls}`,
+              type: "function",
+              function:
+                calls++ === 0
+                  ? {
+                      name: "upload",
+                      arguments: JSON.stringify({
+                        ref: "c0",
+                        documentId: "resume",
+                      }),
+                    }
+                  : {
+                      name: "follow_link",
+                      arguments: JSON.stringify({ ref: "l0" }),
+                    },
+            },
+          ],
+        });
+      },
+    };
+    const result = await runApplyAgent(input, model);
+    expect(result.outcome).toBe("stuck");
+    expect(result.reason).toContain(
+      deferred ? "no longer appears" : "attachment field disappeared",
+    );
+    expect(result.pauses).toEqual([]);
+    expect(result.reviewAttachments).toEqual([]);
+  },
+);
 
 test("a repeated Attach press after an upload failure keeps genuine gaps instead of an attachment chore", async () => {
   const raw = page({
