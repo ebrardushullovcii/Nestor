@@ -298,7 +298,7 @@ it("revokes retired approvals before Apply even when Profile has never been cons
   expect(applications.applyJobs({ selection: { ids: [1] } })).toEqual({
     queued: 0,
     unchanged: 0,
-    notApproved: 1,
+    notReady: 1,
   });
   expect(
     jobs.sql("SELECT approved_at FROM resumes WHERE job_id=1").get()
@@ -1427,53 +1427,93 @@ describe("applications on the job store", () => {
       "autonomous_submit",
     );
   });
-  it("applies only to jobs whose resume is approved, whatever their stage says", () => {
+  it("applies to every shortlisted job whose resume is ready, approved or not", () => {
     const { jobs, applications } = open();
-    const [approved, unapproved, noResume] = add(jobs, 3);
+    const [approved, unapproved, writing, noResume, found] = add(jobs, 5);
+    // To review: written at the chosen level, never approved.
     jobs
       .sql("UPDATE resumes SET approved_at = NULL WHERE job_id = ?")
       .run(unapproved!);
+    jobs.setStage([unapproved!], "shortlisted");
+    jobs
+      .sql(
+        "UPDATE resumes SET approved_at = NULL, state = 'writing' WHERE job_id = ?",
+      )
+      .run(writing!);
+    jobs.setStage([writing!], "shortlisted");
     jobs.sql("DELETE FROM resumes WHERE job_id = ?").run(noResume!);
+    jobs.setStage([found!], "found");
 
     expect(
-      applications.applyJobs({
-        selection: { ids: [approved!, unapproved!, noResume!] },
+      applications.selectedJobIds({
+        filter: { stage: "shortlisted" },
+        except: [],
       }),
-    ).toEqual({ queued: 1, unchanged: 0, notApproved: 2 });
+    ).toEqual([unapproved]);
+    expect(
+      applications.applyJobs({
+        selection: {
+          ids: [approved!, unapproved!, writing!, noResume!, found!],
+        },
+      }),
+    ).toEqual({ queued: 2, unchanged: 0, notReady: 3 });
+    expect(
+      applications.applyJobs({
+        selection: { filter: { stage: "shortlisted" }, except: [] },
+      }),
+    ).toEqual({ queued: 0, unchanged: 1, notReady: 1 });
     expect(
       applications.applyJobs({
         selection: { filter: { stage: "resume" }, except: [] },
       }),
-    ).toEqual({ queued: 0, unchanged: 1, notApproved: 2 });
+    ).toEqual({ queued: 0, unchanged: 1, notReady: 1 });
+    expect(
+      new Set([
+        applications.claimNext()?.jobId,
+        applications.claimNext()?.jobId,
+      ]),
+    ).toEqual(new Set([approved, unapproved]));
   });
 
-  it("claims and freezes only jobs whose resume is still approved", () => {
+  it("claims a job whose approval was taken away, and waits while its resume is written again", () => {
     const { jobs, applications } = open();
-    const [kept, unapproved] = add(jobs, 2);
-    applications.applyJobs({ selection: { ids: [kept!, unapproved!] } });
+    const [kept, unapproved, rewriting] = add(jobs, 3);
+    applications.applyJobs({
+      selection: { ids: [kept!, unapproved!, rewriting!] },
+    });
     jobs
       .sql("UPDATE resumes SET approved_at = NULL WHERE job_id = ?")
       .run(unapproved!);
+    jobs.setStage([unapproved!], "shortlisted");
+    jobs
+      .sql(
+        "UPDATE resumes SET approved_at = NULL, state = 'queued' WHERE job_id = ?",
+      )
+      .run(rewriting!);
+    jobs.setStage([rewriting!], "shortlisted");
 
     expect(
-      applications.selectedJobIds({
-        filter: { stage: "resume" },
-        except: [],
-      }),
+      applications.selectedJobIds({ filter: { stage: "resume" }, except: [] }),
     ).toEqual([kept]);
-    expect(applications.claimNext()?.jobId).toBe(kept);
+    expect(
+      [applications.claimNext()?.jobId, applications.claimNext()?.jobId].sort(),
+    ).toEqual([kept, unapproved].sort());
     expect(applications.claimNext()).toBeNull();
+    jobs
+      .sql("UPDATE resumes SET state = 'ready' WHERE job_id = ?")
+      .run(rewriting!);
+    expect(applications.claimNext()?.jobId).toBe(rewriting);
   });
 
-  it("queues ids or the complete Approved filter once, skips unapproved jobs, and pages the queue", () => {
+  it("queues ids or the complete Approved filter once, skips jobs outside Shortlisted, and pages the queue", () => {
     const { jobs, applications } = open();
     const ids = add(jobs, 7);
-    jobs.setStage([ids[0]!], "shortlisted");
+    jobs.setStage([ids[0]!], "found");
     expect(
       applications.applyJobs({
         selection: { ids: [ids[0]!, ids[1]!, ids[1]!, 999] },
       }),
-    ).toEqual({ queued: 1, unchanged: 0, notApproved: 2 });
+    ).toEqual({ queued: 1, unchanged: 0, notReady: 2 });
     expect(
       applications.applyJobs({
         selection: {
@@ -1481,10 +1521,10 @@ describe("applications on the job store", () => {
           except: [ids[6]!],
         },
       }),
-    ).toEqual({ queued: 4, unchanged: 1, notApproved: 0 });
+    ).toEqual({ queued: 4, unchanged: 1, notReady: 0 });
     expect(() =>
       applications.applyJobs({ selection: { filter: { stage: "found" } } }),
-    ).toThrow("Approved");
+    ).toThrow("To review or Approved");
     const first = applications.listApplications({ state: "queued", limit: 2 });
     const next = applications.listApplications({
       state: "queued",
@@ -1539,10 +1579,14 @@ describe("applications on the job store", () => {
     expect(
       applications.applyJobs({ selection: { ids: [retry.jobId] } }).unchanged,
     ).toBe(1);
+    // Taking the approval away moves it to To review and leaves Apply on it;
+    // taking the job out of Shortlisted stops it.
     jobs.setStage([retry.jobId], "shortlisted");
+    expect(applications.getApplication(retry.id)?.state).toBe("ready");
+    jobs.setStage([retry.jobId], "found");
     expect(applications.getApplication(retry.id)?.state).toBe("stopped");
     expect(
-      applications.applyJobs({ selection: { ids: [retry.jobId] } }).notApproved,
+      applications.applyJobs({ selection: { ids: [retry.jobId] } }).notReady,
     ).toBe(1);
   });
 

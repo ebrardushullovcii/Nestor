@@ -188,6 +188,29 @@ export function resolveApplicationDocumentMimeType(fileName: string): string {
   }
 }
 
+const RESUME_LEVEL_NAME = {
+  original: "Original",
+  light: "Light",
+  tailored: "Tailored",
+  aggressive: "Aggressive",
+} as const;
+
+/**
+ * The resume's label tells the model which file it is and whether the person
+ * approved it: a fact about the file, not a condition on using it.
+ */
+export function resumeDocumentLabel(
+  artifact: ApplyPreparationInput["resumeArtifact"],
+): string {
+  const file =
+    artifact.source === "original_upload"
+      ? "original file"
+      : artifact.level
+        ? `${RESUME_LEVEL_NAME[artifact.level]} resume for this job`
+        : "resume for this job";
+  return `Your CV (${file}, ${artifact.approvedAt ? "approved" : "not marked approved"})`;
+}
+
 export function toApplyDocuments(
   executionInput: ApplyPreparationInput,
 ): ApplyDocument[] {
@@ -197,7 +220,7 @@ export function toApplyDocuments(
     mimeType: resolveApplicationDocumentMimeType(
       executionInput.resumeArtifact.fileName,
     ),
-    label: "Your CV",
+    label: resumeDocumentLabel(executionInput.resumeArtifact),
     kind: "resume",
     loadBytes: () => loadVerifiedResumeBytes(executionInput.resumeArtifact),
   };

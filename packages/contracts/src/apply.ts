@@ -19,6 +19,7 @@ import {
   ApplicationQuestionStatusSchema,
 } from "./discovery";
 import { ApplicationListingSignalEvidenceSchema } from "./job-finder-intelligence";
+import { ResumeLevelSchema } from "./resumes";
 import {
   BrowserVisualEvidenceSummarySchema,
   BrowserVisualObservationSetSchema,
@@ -61,7 +62,14 @@ export const ApplicationResumeArtifactSchema = z.object({
     )
     .nullable()
     .optional(),
-  approvedAt: IsoDateTimeSchema,
+  /**
+   * When the person approved this resume, or null when Apply took a ready
+   * resume they had not approved. Approval is the person's marker, never a
+   * condition for applying; the record says which file went either way.
+   */
+  approvedAt: IsoDateTimeSchema.nullable(),
+  /** The resume level of the file that went; null on records made before it was kept. */
+  level: ResumeLevelSchema.nullable().optional(),
 });
 export type ApplicationResumeArtifact = z.infer<
   typeof ApplicationResumeArtifactSchema

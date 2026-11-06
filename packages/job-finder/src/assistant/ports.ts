@@ -34,8 +34,8 @@ export interface AssistantHostPorts {
   executeAction?(actionId: string, input: unknown): Promise<unknown>;
   /** Includes reading the file before the domain import run is stored. */
   isResumeImportActive?(): boolean;
-  /** Freeze the approved selection behind a sidebar instruction, without model pagination. */
-  resolveApprovedJobs?(selection: JobSelectionInput): Promise<number[]>;
+  /** Freeze an Apply selection (jobs with a ready resume) behind a sidebar instruction, without model pagination. */
+  resolveReadyJobs?(selection: JobSelectionInput): Promise<number[]>;
   /** Runs a source check (the same as Check this source). */
   checkSource(
     targetId: string,

@@ -43,7 +43,7 @@ Builds and full suites are the slowest part of most changes. CI runs lint, typec
 - CI and synthetic regression tests send applications only to the local replica job sites (below). Never send a synthetic applicant to a real employer. Without an owner grant, real-site runs stay prepare-only; authorized live runs follow Real-site runs.
 - Live Assistant harnesses default to deterministic providers with AI credentials blanked. Live providers require `UI_LIVE_ASSISTANT_PROVIDER_MODE=configured` (see `docs/AI_PROVIDER_SETUP.md`).
 - Never add personal resumes, live workspaces, credentials, or authenticated browser state to benchmark corpora.
-- Approve store resumes through `approve_resume` (or the store test seed for a precondition); never bypass approval when Apply is the behavior under test.
+- Apply takes ready resumes approved or not (ADR 0079). When Apply is the behavior under test, cover both an unapproved ready resume and one approved through `approve_resume` (or the store test seed for a precondition).
 
 ## Real-site runs
 

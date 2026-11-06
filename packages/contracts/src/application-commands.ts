@@ -16,7 +16,7 @@ export const APPLICATION_COMMANDS = {
   apply_to_jobs: {
     effect: "external",
     description:
-      "Queues approved resumes for Apply, one job, selected/page ids, or all matching an Approved (stage=resume) filter except exclusions. Returns immediately; queued, filled and sent differ. Record the person's instruction first. Fill in for me leaves Send to the person; Send for me permits sending, with the same send guards as the screen. Existing queued, prepared or sent work is never duplicated or upgraded.",
+      "Queues shortlisted jobs whose resume at the chosen level is ready, approved or not: one job, selected/page ids, or all matching a To review (stage=shortlisted) or Approved (stage=resume) filter except exclusions. Jobs whose resume is still being written are counted as notReady. Returns immediately; queued, filled and sent differ. Record the person's instruction first. Fill in for me leaves Send to the person; Send for me permits sending, with the same send guards as the screen. Existing queued, prepared or sent work is never duplicated or upgraded.",
     input: ApplyJobsInputSchema,
   },
   list_application_work: {

@@ -26,7 +26,7 @@ Each line names the symbol or file to check before changing the behavior. If the
 
 - Approval checks the saved resume's `updatedAt` before recording approval and moving a shortlisted job to `resume`; an edit or level change clears approval (`resumes/resume-service.ts`, `job-store/resumes.ts`).
 - Download PDF uses the native Save dialog and neither approves nor saves unsaved typing (`ResumePdfExportInputSchema`, `routes/resumes.ts`).
-- Apply requires an approved, ready resume and checks the file's SHA-256 before browser preparation, then rechecks it at upload (`applications/application-service.ts`, `applications/resume-artifacts.ts`).
+- Apply takes a ready resume, approved or not; approval is the person's marker and the model is told it as a fact. `ApplicationResumeArtifact` records the attached file's path, SHA-256, level and `approvedAt` (null when unapproved). Apply checks the file's SHA-256 before browser preparation, then rechecks it at upload (`applications/application-service.ts`, `applications/resume-artifacts.ts`).
 - The approved answer-snapshot digest excludes lifecycle timestamps and the Profile revision so unrelated Profile writes cannot stale unchanged answers (`serializeApprovedApplicationAnswerSnapshotForDigest`).
 
 ### Discovery

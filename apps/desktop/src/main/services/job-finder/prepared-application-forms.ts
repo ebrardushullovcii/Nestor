@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import type { PreparedApplicationFormStore } from "@nestor/browser-runtime";
 import type { JobFinderRepository } from "@nestor/db";
 import {
@@ -7,6 +8,7 @@ import {
   type JobStore,
 } from "@nestor/db/job-store";
 import {
+  isReadyJobResumeIdentity,
   loadOriginalResumeBytes,
   loadApprovedJobResumeBytes,
 } from "@nestor/job-finder/applications";
@@ -43,6 +45,14 @@ export function createPreparedApplicationFormStore(
         )
           throw new Error("Resume unavailable");
         bytes = await loadOriginalResumeBytes(profile.baseResume);
+      } else if (isReadyJobResumeIdentity(file.id)) {
+        // Rendered by Apply from a resume the person had not approved.
+        const attached = createResumeStore(store).applicationResumeFile(
+          file.id,
+        );
+        if (!attached || attached.sha256.toLowerCase() !== file.sha256)
+          throw new Error("Resume unavailable");
+        bytes = await readFile(attached.path);
       } else {
         const match = /^job_resume:([1-9]\d*):/u.exec(file.id);
         const resume = match

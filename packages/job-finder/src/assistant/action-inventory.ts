@@ -278,7 +278,7 @@ export const ACTION_INVENTORY: readonly ActionInventoryEntry[] = [
     id: "apply.work",
     screen: "Shortlisted / Applications",
     action:
-      "Apply to one, selected, page or all approved jobs; read, open or stop work",
+      "Apply to one, selected, page or all shortlisted jobs with a ready resume; read, open or stop work",
     channels: [
       "job-finder:apply-jobs",
       "job-finder:list-applications",

@@ -153,8 +153,14 @@ WHEN NEW.review_refill = 1 AND NEW.state NOT IN ('queued', 'running') BEGIN
   UPDATE applications SET review_refill = 0 WHERE id = NEW.id;
 END;
 
-CREATE TRIGGER IF NOT EXISTS applications_approval_removed AFTER UPDATE OF stage ON jobs
-WHEN OLD.stage = 'resume' AND NEW.stage NOT IN ('resume', 'applied') BEGIN
+-- Apply stops when the person takes the job out of Shortlisted (back to Find
+-- jobs, or hidden). Approving or un-approving its resume moves it between
+-- Shortlisted's two tabs and never stops Apply: approval is not a condition.
+DROP TRIGGER IF EXISTS applications_approval_removed;
+DROP TRIGGER IF EXISTS applications_left_shortlisted;
+CREATE TRIGGER applications_left_shortlisted AFTER UPDATE OF stage ON jobs
+WHEN OLD.stage IN ('shortlisted', 'resume')
+  AND NEW.stage NOT IN ('shortlisted', 'resume', 'applied') BEGIN
   UPDATE applications SET state = 'stopped', updated_at = CAST(unixepoch('subsec') * 1000 AS INTEGER)
   WHERE job_id = NEW.id AND state IN ('queued', 'running', 'needs_you', 'ready');
 END;

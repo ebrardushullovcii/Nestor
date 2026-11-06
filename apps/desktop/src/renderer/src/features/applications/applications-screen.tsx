@@ -1171,7 +1171,7 @@ function useFirstApplicationStep(): {
     return {
       label: setup === "not_started" ? "Set up your profile" : "Finish setup",
       detail:
-        "Apply sends approved resumes with your profile; each application shows up here.",
+        "Apply sends your shortlisted resumes with your profile; each application shows up here.",
       to: "/job-finder/profile/setup",
     };
   if (stages && stages.resume > 0)

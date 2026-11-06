@@ -614,45 +614,43 @@ describe("agent application preparation seam", () => {
     vi.useFakeTimers();
     const openSession = session();
     let calls = 0;
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(() =>
-        Promise.resolve(
-          ++calls <= 10
-            ? new Response(
-                JSON.stringify({ error: { message: "at capacity" } }),
-                {
-                  status: 429,
-                  headers: {
-                    "content-type": "application/json",
-                    "Retry-After": "30",
-                  },
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        ++calls <= 10
+          ? new Response(
+              JSON.stringify({ error: { message: "at capacity" } }),
+              {
+                status: 429,
+                headers: {
+                  "content-type": "application/json",
+                  "Retry-After": "30",
                 },
-              )
-            : new Response(
-                JSON.stringify({
-                  choices: [
-                    {
-                      message: {
-                        tool_calls: [
-                          {
-                            id: "finish-after-wait",
-                            type: "function",
-                            function: {
-                              name: "finish",
-                              arguments: '{"reason":"Nothing left to fill in"}',
-                            },
+              },
+            )
+          : new Response(
+              JSON.stringify({
+                choices: [
+                  {
+                    message: {
+                      tool_calls: [
+                        {
+                          id: "finish-after-wait",
+                          type: "function",
+                          function: {
+                            name: "finish",
+                            arguments: '{"reason":"Nothing left to fill in"}',
                           },
-                        ],
-                      },
-                      finish_reason: "tool_calls",
+                        },
+                      ],
                     },
-                  ],
-                }),
-                { headers: { "content-type": "application/json" } },
-              ),
-        ),
-      );
+                    finish_reason: "tool_calls",
+                  },
+                ],
+              }),
+              { headers: { "content-type": "application/json" } },
+            ),
+      ),
+    );
     const client = createOpenAiCompatibleJobFinderAiClient({
       apiKey: "synthetic",
       baseUrl: "https://model.example.test/v1",
@@ -1682,6 +1680,30 @@ describe("toApplyDocuments", () => {
       ["document_asset_asset_letter", "cover_letter"],
       ["document_asset_asset_portfolio", "portfolio"],
     ]);
+  });
+
+  test("names the resume's level and whether the person approved it, as a fact for the model", () => {
+    const label = (artifact: object) =>
+      toApplyDocuments({
+        resumeArtifact: {
+          id: "resume_1",
+          fileName: "jamie-rivers.pdf",
+          filePath: "/tmp/jamie-rivers.pdf",
+          sha256: "a".repeat(64),
+          source: "tailored_export",
+          approvedAt: null,
+          ...artifact,
+        },
+      } as unknown as Parameters<typeof toApplyDocuments>[0])[0]!.label;
+    expect(label({ level: "aggressive" })).toBe(
+      "Your CV (Aggressive resume for this job, not marked approved)",
+    );
+    expect(
+      label({ level: "aggressive", approvedAt: "2026-11-06T10:00:00.000Z" }),
+    ).toBe("Your CV (Aggressive resume for this job, approved)");
+    expect(label({ source: "original_upload", level: "original" })).toBe(
+      "Your CV (original file, not marked approved)",
+    );
   });
 });
 

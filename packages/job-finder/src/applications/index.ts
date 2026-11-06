@@ -9,6 +9,7 @@ export { describeSavedFormAnswer } from "./questions";
 export { createNeedsYouCommandRunner } from "./needs-you-commands";
 export {
   loadOriginalResumeBytes,
+  isReadyJobResumeIdentity,
   approvedJobResumeIdentity,
   loadApprovedJobResumeBytes,
 } from "./resume-artifacts";

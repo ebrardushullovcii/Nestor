@@ -33,8 +33,8 @@ export const ApplyJobsResultSchema = z.object({
   queued: z.number().int().nonnegative(),
   /** Already queued, sent, or otherwise protected from another attempt. */
   unchanged: z.number().int().nonnegative(),
-  /** Explicit ids that are missing or do not have an approved resume. */
-  notApproved: z.number().int().nonnegative(),
+  /** Ids that are missing or whose resume is not ready yet (still writing or failed). */
+  notReady: z.number().int().nonnegative(),
 });
 export type ApplyJobsResult = z.infer<typeof ApplyJobsResultSchema>;
 

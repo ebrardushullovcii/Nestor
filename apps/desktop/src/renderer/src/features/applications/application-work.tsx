@@ -314,8 +314,8 @@ function ApplyActions(props: {
           : {
               title: "It couldn't start again",
               description:
-                result.notApproved > 0
-                  ? "This job no longer has an approved resume. Approve one, then apply."
+                result.notReady > 0
+                  ? "This job has no ready resume in Shortlisted right now. Once it is written, apply again."
                   : "It has already moved on.",
               tone: "warning",
             },

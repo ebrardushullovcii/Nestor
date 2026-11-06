@@ -494,7 +494,7 @@ function recordingPorts(
   const patches = profilePatchReceipts(runJobCommand);
   return {
     savePageJobs: (input) => Promise.resolve(savePageJobs(store, input)),
-    resolveApprovedJobs: (selection) =>
+    resolveReadyJobs: (selection) =>
       Promise.resolve(applications.selectedJobIds(selection)),
     readCommand: async (name, input) => {
       if (name === "list_applications")

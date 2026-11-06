@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type {
-  ApplicationResumeArtifact,
-  CandidateProfile,
-  StoredResume,
-  SavedJob,
-  JobFinderSettings,
+import {
+  ApplicationResumeArtifactSchema,
+  type ApplicationResumeArtifact,
+  type CandidateProfile,
+  type StoredResume,
+  type SavedJob,
+  type JobFinderSettings,
 } from "@nestor/contracts";
 import type {
   JobFinderDocumentManager,
@@ -56,10 +57,76 @@ export async function loadApprovedJobResumeBytes(
   return bytes;
 }
 
-/** Render the approved words once; format conversion never calls the writer. */
+/** The identity of a ready resume Apply rendered without an approval. */
+const DRAFT_RESUME_PREFIX = "job_resume_draft:";
+
+const sha256Of = (bytes: Uint8Array | string) =>
+  createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * A ready resume the person has not approved, rendered for this application
+ * the way approval renders it: the same words, template and PDF renderer. A
+ * continuation keeps the file it already attached while the words match.
+ */
+export async function renderReadyJobResume(input: {
+  resume: StoredResume;
+  profile: CandidateProfile;
+  job: SavedJob;
+  settings: JobFinderSettings;
+  documentManager: JobFinderDocumentManager;
+  existingArtifact?: ApplicationResumeArtifact | null;
+  signal?: AbortSignal;
+}): Promise<ApplicationResumeArtifact> {
+  const { resume } = input;
+  if (resume.state !== "ready" || !resume.draft)
+    throw new Error("This job's resume is still being written.");
+  const renderDocument = buildResumeRenderDocument(input.profile, resume.draft);
+  const templateId = resume.draft.templateId;
+  const id = `resume_${resume.jobId}_draft_${sha256Of(JSON.stringify({ renderDocument, templateId }))}`;
+  const existing = input.existingArtifact;
+  if (existing?.id === id && existing.sha256) {
+    const bytes = await readFile(existing.filePath).catch(() => null);
+    if (bytes && sha256Of(bytes) === existing.sha256) return existing;
+  }
+  const rendered = await input.documentManager.renderResumeArtifact({
+    job: input.job,
+    profile: input.profile,
+    renderDocument,
+    templateId,
+    settings: { ...input.settings, resumeFormat: "pdf" },
+    purpose: "application",
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  if (
+    rendered.format !== "pdf" ||
+    !rendered.storagePath ||
+    !rendered.fileName ||
+    !rendered.sha256
+  )
+    throw new Error("The resume could not be rendered as PDF.");
+  return ApplicationResumeArtifactSchema.parse({
+    id,
+    jobId: String(resume.jobId),
+    source: "tailored_export",
+    sourceDocumentId: null,
+    exportArtifactId: `${DRAFT_RESUME_PREFIX}${resume.jobId}:${rendered.sha256.toLowerCase()}`,
+    fileName: rendered.fileName,
+    filePath: rendered.storagePath,
+    sha256: rendered.sha256,
+    approvedAt: null,
+    level: resume.level,
+  });
+}
+
+/** Whether a prepared form's resume file is one Apply rendered from an unapproved draft. */
+export function isReadyJobResumeIdentity(id: string): boolean {
+  return id.startsWith(DRAFT_RESUME_PREFIX);
+}
+
+/** Render the resume's words once; format conversion never calls the writer. */
 export async function renderApplicationResume(input: {
   artifact: ApplicationResumeArtifact;
-  approved: StoredResume;
+  resume: StoredResume;
   profile: CandidateProfile;
   job: SavedJob;
   settings: JobFinderSettings;
@@ -71,8 +138,8 @@ export async function renderApplicationResume(input: {
   docx: RenderedLetterArtifact | null;
 }> {
   const originalText = input.profile.baseResume.textContent?.trim();
-  const renderDocument = input.approved.draft
-    ? buildResumeRenderDocument(input.profile, input.approved.draft)
+  const renderDocument = input.resume.draft
+    ? buildResumeRenderDocument(input.profile, input.resume.draft)
     : originalText
       ? {
           // Original keeps the complete imported text, including its identity.
@@ -95,11 +162,9 @@ export async function renderApplicationResume(input: {
   let artifact = input.artifact;
   if (!/\.pdf$/iu.test(artifact.fileName)) {
     if (!renderDocument)
-      throw new Error(
-        "The approved resume has no readable content to render as PDF.",
-      );
+      throw new Error("The resume has no readable content to render as PDF.");
     const templateId =
-      input.approved.draft?.templateId ?? input.settings.resumeTemplateId;
+      input.resume.draft?.templateId ?? input.settings.resumeTemplateId;
     const identity = `${artifact.id}_pdf_${createHash("sha256").update(JSON.stringify({ renderDocument, templateId })).digest("hex")}`;
     const existing = input.existingArtifact;
     const existingBytes =
@@ -129,7 +194,7 @@ export async function renderApplicationResume(input: {
         !rendered.fileName ||
         !rendered.sha256
       )
-        throw new Error("The approved resume could not be rendered as PDF.");
+        throw new Error("The resume could not be rendered as PDF.");
       artifact = {
         ...artifact,
         id: identity,
@@ -147,30 +212,4 @@ export async function renderApplicationResume(input: {
         })
       : null;
   return { artifact, docx };
-}
-
-/** A format copy keeps the same approved source even though its path differs. */
-export async function applicationResumeSourceStillApproved(
-  artifact: ApplicationResumeArtifact,
-  approved: StoredResume,
-  profile: CandidateProfile,
-): Promise<boolean> {
-  if (approved.approvedAt !== artifact.approvedAt) return false;
-  if (artifact.source === "original_upload") {
-    if (
-      approved.pdfPath !== null ||
-      profile.baseResume.id !== artifact.sourceDocumentId
-    )
-      return false;
-    await loadOriginalResumeBytes(profile.baseResume);
-    return true;
-  }
-  if (artifact.exportArtifactId !== approvedJobResumeIdentity(approved))
-    return false;
-  await loadApprovedJobResumeBytes(
-    approved,
-    artifact.exportArtifactId,
-    approved.pdfSha256!.toLowerCase(),
-  );
-  return true;
 }
