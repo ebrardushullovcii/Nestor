@@ -288,6 +288,16 @@ export function buildApplyFormObservation(
       ref: rawControl.ref ?? `c${rawControl.index}`,
       ...(rawControl.frame ? { frame: { ...rawControl.frame } } : {}),
       kind,
+      ...(kind === "file" && (rawControl.id || rawControl.name)
+        ? {
+            fileControlKey: JSON.stringify([
+              rawControl.frame ?? null,
+              rawControl.scopeKey ?? "",
+              rawControl.id,
+              rawControl.name,
+            ]),
+          }
+        : {}),
       ...(rawControl.scopeKey ? { scopeKey: rawControl.scopeKey } : {}),
       ...(rawControl.rowScopeKey
         ? { rowScopeKey: rawControl.rowScopeKey }

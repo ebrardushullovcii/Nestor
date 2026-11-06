@@ -67,6 +67,8 @@ export type ApplyAnswerEvidencePolicy =
   | "eligibility";
 
 export interface ApplyFormControl {
+  /** Native file-input identity, independent of mutable attachment labels. */
+  fileControlKey?: string;
   frame?: ApplyFrameOwner;
   /** Stable handle for this control within one observation. */
   ref: string;

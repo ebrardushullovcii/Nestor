@@ -1631,12 +1631,20 @@ async function runMeasuredApplyAgent(
     {
       label: string;
       control: ApplyFormObservation["controls"][number];
+      fieldKey: string;
       fileName: string;
       documentId: string | undefined;
       state: FileUploadProblem["state"] | "accepted";
       since: number;
     }
   >();
+  const stableUploadKeys = new Map<string, string>();
+  const uploadReviewFields = new Map<string, Set<string>>();
+  const forgetObservedUpload = (key: string): void => {
+    for (const fieldKey of uploadReviewFields.get(key) ?? [])
+      observedAttachments.delete(fieldKey);
+    observedAttachments.delete(key);
+  };
   const uploadFieldKey = (
     control: ApplyFormControl,
     page: ApplyFormObservation,
@@ -1645,7 +1653,21 @@ async function runMeasuredApplyAgent(
     const ordinal = page.controls
       .filter((entry) => questionPrompt(entry) === label)
       .indexOf(control);
-    return `${page.url?.split(/[?#]/u)[0] ?? ""}|field:file:${ordinal}|${label}`;
+    const url = page.url?.split(/[?#]/u)[0] ?? "";
+    const key = `${url}|field:file:${ordinal}|${label}`;
+    if (!control.fileControlKey) return key;
+    const nativeOrdinal = page.controls
+      .filter(
+        (entry) =>
+          entry.kind === "file" &&
+          entry.fileControlKey === control.fileControlKey,
+      )
+      .indexOf(control);
+    const identity = `${url}|${control.fileControlKey}|${nativeOrdinal}`;
+    const stable = stableUploadKeys.get(identity);
+    if (stable) return stable;
+    stableUploadKeys.set(identity, key);
+    return key;
   };
   const selectedFiles = new Map<
     string,
@@ -1736,6 +1758,7 @@ async function runMeasuredApplyAgent(
     uploadLedger.set(fieldKey, {
       label,
       control,
+      fieldKey: reviewFieldKey(page, control),
       fileName,
       documentId:
         selectedFiles.get(fieldKey)?.documentId ?? earlier?.documentId,
@@ -1977,6 +2000,10 @@ async function runMeasuredApplyAgent(
         // Without the step label: a field that stays in the page while later
         // steps show is the same field on every step.
         const ledgerKey = uploadFieldKey(control, next);
+        const reviewFields =
+          uploadReviewFields.get(ledgerKey) ?? new Set<string>();
+        reviewFields.add(fieldKey);
+        uploadReviewFields.set(ledgerKey, reviewFields);
         fileFieldsSeen.add(ledgerKey);
         recordUpload(
           ledgerKey,
@@ -2019,7 +2046,7 @@ async function runMeasuredApplyAgent(
             fieldKey,
           });
         } else {
-          observedAttachments.delete(fieldKey);
+          forgetObservedUpload(ledgerKey);
         }
       } else if (
         control.answered &&
@@ -2210,7 +2237,17 @@ async function runMeasuredApplyAgent(
       if (state !== entry.state)
         uploadLedger.set(key, { ...entry, state, since: now().getTime() });
       if (state === "accepted") exhaustedUploads.delete(key);
-      if (state !== "accepted") continue;
+      if (state !== "accepted") {
+        forgetObservedUpload(key);
+        observedAttachments.delete(entry.fieldKey);
+        uploadDiagnostics.set(
+          key,
+          word === "rejected"
+            ? `The site rejected ${entry.fileName} after its attachment field left the page.`
+            : `The site has not confirmed ${entry.fileName} in the form that was submitted.`,
+        );
+        continue;
+      }
       const recorded = [...attachments]
         .reverse()
         .find(
@@ -2218,7 +2255,7 @@ async function runMeasuredApplyAgent(
             attached.controlLabel === entry.label &&
             attached.fileName === entry.fileName,
         );
-      const observedKey = nativeSaved?.fieldKey ?? key;
+      const observedKey = nativeSaved?.fieldKey ?? entry.fieldKey;
       observedAttachments.set(observedKey, {
         ...(recorded ?? {
           documentId: `observed.${entry.label}`,
@@ -4006,6 +4043,7 @@ async function runMeasuredApplyAgent(
         uploadLedger.set(fieldKey, {
           label,
           control,
+          fieldKey: reviewFieldKey(current!, control),
           fileName: selected?.fileName ?? control.upload?.fileName ?? "",
           documentId: selected?.documentId ?? proposal.documentId,
           state: "unconfirmed",
@@ -4098,6 +4136,7 @@ async function runMeasuredApplyAgent(
         );
       }
       if (failed || outcome.kind === "refused") {
+        forgetObservedUpload(fieldKey);
         const summary = exhaustedUploadReason(
           fieldKey,
           label,

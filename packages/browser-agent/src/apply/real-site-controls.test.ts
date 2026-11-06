@@ -615,6 +615,7 @@ test("hCaptcha named only in forPerson is an access handoff with no typed questi
 async function uploadRun(
   dropOnly: boolean,
   counter: "known" | "changed" | "missing" = "known",
+  changingLabel = false,
 ) {
   const raw = page({
     actions: [
@@ -652,6 +653,8 @@ async function uploadRun(
   input.hands.uploadFile = (_ref, file) => {
     const method = file.method ?? "input";
     methods.push(method);
+    if (changingLabel)
+      raw.controls[0].label = `Resume/CV ${file.name} ATTACH RESUME/CV Couldn't auto-read resume`;
     const accepted = dropOnly && method === "drop";
     const noRequest = dropOnly && !accepted;
     if (counter === "changed" && method === "chooser") {
@@ -792,6 +795,14 @@ test("a rejected recovery upload fails with its cause and creates no candidate q
     ),
   ).toEqual([]);
   expect(result.readyToSend).toBeNull();
+});
+
+test("a filename added to the file label does not reset retries or create another upload question", async () => {
+  const { result, methods } = await uploadRun(false, "known", true);
+  expect(methods).toEqual(["input", "chooser"]);
+  expect(result.outcome).toBe("stuck");
+  expect(result.pauses).toEqual([]);
+  expect(result.reviewAttachments).toEqual([]);
 });
 
 test("the recovery pass drops only after a chooser with no request and no attachment", async () => {
