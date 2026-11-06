@@ -154,3 +154,26 @@ test("observation includes every child frame, long site error and full review te
     await page.close();
   }
 }, 30_000);
+
+test("a list read uses the observed node when another field is inserted during observation", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(origin);
+    await page.setContent(`<label>Country<input id="country" role="combobox" aria-controls="choices" aria-expanded="false" readonly></label><div id="choices" role="listbox" hidden></div><script>
+      const country=document.querySelector('#country');
+      country.onclick=()=>{document.querySelector('#choices').hidden=false;document.querySelector('#choices').innerHTML='<div role="option">Alpha</div><div role="option">Beta</div>';country.setAttribute('aria-expanded','true')};
+      const observer=new MutationObserver(()=>{if(country.hasAttribute('data-nestor-control-ref')){observer.disconnect();const input=document.createElement('input');input.onclick=()=>document.body.dataset.wrongClick='true';country.parentElement.before(input)}});
+      observer.observe(country,{attributes:true,attributeFilter:['data-nestor-control-ref']});
+    </script>`);
+    const observation =
+      await createPlaywrightApplyPageMechanics(page).readPage();
+    expect(
+      observation.controls.find((control) => control.id === "country")?.options,
+    ).toEqual(["Alpha", "Beta"]);
+    expect(
+      await page.locator("body").getAttribute("data-wrong-click"),
+    ).toBeNull();
+  } finally {
+    await page.close();
+  }
+});

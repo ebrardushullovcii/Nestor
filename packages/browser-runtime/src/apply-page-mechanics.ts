@@ -2326,7 +2326,8 @@ async function readClosedComboboxOptions(
   }
 
   for (const control of toOpen) {
-    const locator = page.locator(APPLY_CONTROL_SELECTOR).nth(control.index);
+    const locator = controlLocator(page, control.ref ?? `c${control.index}`);
+    if (!locator) continue;
     try {
       // Whatever the last list left open is closed first: a click that only
       // dismisses someone else's flyout reads as a list with no choices, and
