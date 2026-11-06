@@ -16,6 +16,7 @@ import { getSiteIconCache } from "../services/browser/site-icon-cache";
 import { getJobStore } from "../services/job-store";
 import { scoreUnscoredJobs } from "../services/job-commands";
 import { registerBrowserPasswordRoutes } from "./browser-passwords";
+import { BROWSER_JOB_PAGE_HTML } from "./browser-job-page";
 
 export function registerBrowserRoutes(ipc: IpcMain): void {
   // The browser loads after the first window; each call waits for it here.
@@ -33,10 +34,7 @@ export function registerBrowserRoutes(ipc: IpcMain): void {
   ipc.handle("browser:add-job", async (event, input: unknown) => {
     const host = await owner(event);
     const { tabId } = AddBrowserJobInputSchema.parse(input);
-    const page = await host.readTab<string>(
-      tabId,
-      "document.documentElement.outerHTML",
-    );
+    const page = await host.readTab<string>(tabId, BROWSER_JOB_PAGE_HTML);
     if (!page)
       throw new Error("Wait for this page to finish loading, then try again.");
     // Job Finder's AI loads on first use, not with main.
