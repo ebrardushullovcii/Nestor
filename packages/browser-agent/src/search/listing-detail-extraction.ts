@@ -426,8 +426,13 @@ function convertListingPageText(html: string): string {
     .replace(/<script\b[\s\S]*?<\/script\s*>/giu, " ")
     .replace(/<style\b[\s\S]*?<\/style\s*>/giu, " ")
     .replace(/<noscript\b[\s\S]*?<\/noscript\s*>/giu, " ");
+  const withoutTemplates = stripped.replace(
+    /<template\b[\s\S]*?<\/template\s*>/giu,
+    " ",
+  );
   const content =
-    stripped.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/iu)?.[1] ?? stripped;
+    withoutTemplates.match(/<body\b[^>]*>([\s\S]*?)<\/body\s*>/iu)?.[1] ??
+    withoutTemplates;
   const title = collapseWhitespace(
     decodeHtmlEntities(
       html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/iu)?.[1] ?? "",
@@ -678,6 +683,8 @@ export function htmlToPlainText(html: string): string {
   const withBreaks = decodeHtmlEntities(html)
     .replace(/<script\b[\s\S]*?<\/script\s*>/giu, " ")
     .replace(/<style\b[\s\S]*?<\/style\s*>/giu, " ")
+    .replace(/<noscript\b[\s\S]*?<\/noscript\s*>/giu, " ")
+    .replace(/<template\b[\s\S]*?<\/template\s*>/giu, " ")
     .replace(/<!--[\s\S]*?-->/gu, " ")
     .replace(/<\s*br\s*\/?>/giu, "\n")
     .replace(/<\s*li\b[^>]*>/giu, "\n• ")

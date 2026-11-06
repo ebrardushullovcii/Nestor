@@ -298,7 +298,7 @@ export interface BrowserSessionRuntime {
       onPage?: AutomationPageListener;
       ready?: (html: string) => boolean;
     },
-  ): Promise<{ html: string; finalUrl: string }>;
+  ): Promise<{ html: string; finalUrl: string; visibleText?: string }>;
   getSessionState(source: JobSource): Promise<BrowserSessionState>;
   openSession(
     source: JobSource,

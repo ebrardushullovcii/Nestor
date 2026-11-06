@@ -264,7 +264,11 @@ describe("runConversationTurn", () => {
       assembleMessages: async (messages) => [...messages],
     });
     expect(result.ending).toBe("replied");
-    expect(seen).toEqual([["load"], ["load", "edit"], ["load", "edit"]]);
+    expect(seen).toEqual([
+      ["read_context_part", "load"],
+      ["read_context_part", "load", "edit"],
+      ["read_context_part", "load", "edit"],
+    ]);
   });
 
   it("ends with plain words as the reply and reports usage", async () => {

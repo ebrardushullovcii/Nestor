@@ -35,6 +35,96 @@ const card = (title: string, id = title): ListingCard => ({
   sourceLabel: source.label,
 });
 
+test("structured search reads all visible frame facts in parts and recovers an input-limit rejection", async () => {
+  const visibleText =
+    "Visible frame requirement. ".repeat(4000) + "FINAL VISIBLE REQUIREMENT";
+  let calls = 0;
+  let id = "";
+  let offset: number | null = null;
+  let exact = "";
+  const client: LLMClient = {
+    chatWithTools: (messages, tools) => {
+      calls++;
+      if (calls === 1)
+        return Promise.reject(
+          Error(
+            "Upstream request failed: [invalid_request_error] Input too long",
+          ),
+        );
+      expect(
+        tools.some((tool) => tool.function.name === "read_context_part"),
+      ).toBe(true);
+      const last = messages.at(-1)!;
+      if (last.role === "tool") {
+        const part = JSON.parse(last.content) as {
+          text: string;
+          nextOffset: number | null;
+        };
+        exact += part.text;
+        offset = part.nextOffset;
+      } else {
+        const content = messages.find((message) =>
+          message.content.includes("Exact content in ordered parts"),
+        )!.content;
+        id = /parts: ([^;]+);/u.exec(content)![1]!;
+        offset = Number(/characters 0\.\.(\d+)/u.exec(content)![1]);
+        exact = content.slice(content.indexOf("\n") + 1);
+      }
+      if (offset !== null)
+        return Promise.resolve({
+          toolCalls: [
+            {
+              id: `part-${calls}`,
+              type: "function",
+              function: {
+                name: "read_context_part",
+                arguments: JSON.stringify({ id, offset }),
+              },
+            },
+          ],
+        });
+      const facts = JSON.parse(exact) as {
+        listings: { pageText: string; description: string }[];
+      };
+      expect(facts.listings[0].pageText).toBe(visibleText);
+      expect(facts.listings[0].description).toBe(visibleText);
+      expect(exact).not.toContain("HIDDEN_SOURCE");
+      return Promise.resolve({
+        content: JSON.stringify({
+          jobs: [
+            {
+              id: 0,
+              title: "Engineer",
+              company: "Employer",
+              location: "Remote",
+              workModes: ["remote"],
+              sourceJobId: null,
+              employmentType: null,
+              seniority: null,
+              salaryText: null,
+              closed: false,
+            },
+          ],
+        }),
+      });
+    },
+  };
+  const result = await readListings({
+    client,
+    lane: "browser",
+    cards: [card("Engineer")],
+    readPage: () =>
+      Promise.resolve({
+        html: "<main><h1>Engineer</h1><p>Old parser text</p><script>HIDDEN_SOURCE</script></main>",
+        finalUrl: card("Engineer").url,
+        visibleText,
+      }),
+  });
+  expect(result.failures).toEqual([]);
+  expect(result.jobs[0].description).toBe(visibleText);
+  expect(calls).toBeGreaterThan(3);
+});
+
 function metadataClient(
   company = "Real Employer",
   location = "Remote, Worldwide",
@@ -1668,6 +1758,7 @@ test("missing title/company parses and a different heading still reach the model
   });
   const result = await readListings({
     cards: [card("Inxhinier Softueri")],
+    contextWindowTokens: 1_000_000,
     client: { chatWithTools },
     readPage: (url) =>
       Promise.resolve({

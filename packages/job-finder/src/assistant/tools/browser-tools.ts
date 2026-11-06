@@ -87,8 +87,7 @@ export async function readPageTextWithLinks(
   ]);
   const links = (page?.links ?? [])
     .filter((link) => /^https?:/iu.test(link.href) && link.label.trim())
-    .slice(0, 250)
-    .map((link) => `${link.label.trim().slice(0, 160)} -> ${link.href}`);
+    .map((link) => `${link.label.trim()} -> ${link.href}`);
   return links.length > 0
     ? `${text}\n\nLinks on this page (text -> address):\n${links.join("\n")}`
     : text;

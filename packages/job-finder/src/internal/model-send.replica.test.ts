@@ -378,7 +378,7 @@ test.each(["prepare_only", "confirm_before_submit"] as const)(
   30_000,
 );
 
-test("the model receives every long-page item and child frame on its first turn", async () => {
+test("the model reads every long-page item and child frame through ordered context parts", async () => {
   const context = await browser.newContext();
   const page = await context.newPage();
   try {
@@ -403,6 +403,9 @@ test("the model receives every long-page item and child frame on its first turn"
       createPlaywrightApplyPageMechanics(page),
     );
     let read = "";
+    let pageId: string | null = null;
+    let nextOffset: number | null = null;
+    let turns = 0;
     await runApplyAgent(
       {
         hands,
@@ -434,7 +437,41 @@ test("the model receives every long-page item and child frame on its first turn"
       },
       {
         chatWithTools: (messages) => {
-          read = messages.map((message) => message.content).join("\n");
+          turns++;
+          if (!pageId) {
+            const observation = messages.find((message) =>
+              message.content.includes("Exact content in ordered parts"),
+            )!.content;
+            pageId = /parts: ([^;]+);/u.exec(observation)![1]!;
+            nextOffset = Number(/characters 0\.\.(\d+)/u.exec(observation)![1]);
+            read += observation.slice(observation.indexOf("\n") + 1);
+          } else {
+            const latest = messages.findLast(
+              (message) => message.role === "tool",
+            )!;
+            const part = JSON.parse(latest.content) as {
+              text: string;
+              nextOffset: number | null;
+            };
+            read += part.text;
+            nextOffset = part.nextOffset;
+          }
+          if (nextOffset !== null)
+            return Promise.resolve({
+              toolCalls: [
+                {
+                  id: `read-part-${turns}`,
+                  type: "function" as const,
+                  function: {
+                    name: "read_context_part",
+                    arguments: JSON.stringify({
+                      id: pageId,
+                      offset: nextOffset,
+                    }),
+                  },
+                },
+              ],
+            });
           return Promise.resolve({
             toolCalls: [
               {
@@ -452,6 +489,7 @@ test("the model receives every long-page item and child frame on its first turn"
         },
       },
     );
+    expect(turns).toBeGreaterThan(1);
     for (const line of content.split("\n")) expect(read).toContain(line.trim());
     for (let i = 0; i < 20; i++)
       expect(read).toContain(`last-frame-evidence-${i}`);

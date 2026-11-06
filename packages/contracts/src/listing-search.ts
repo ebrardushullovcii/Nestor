@@ -19,7 +19,7 @@ export interface ListingCard {
   /** Complete body from an authoritative provider feed; avoids a second GET. */
   listingText?: string;
   /** An already-read detail page, when a source URL itself was a vacancy. */
-  listingPage?: { html: string; finalUrl: string };
+  listingPage?: Awaited<ReturnType<ReadDiscoveryPostingPage>>;
   /** Visible card facts; detail reading must corroborate the employer. */
   companyHint?: string;
   locationHint?: string;

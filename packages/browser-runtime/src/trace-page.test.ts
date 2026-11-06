@@ -36,7 +36,7 @@ test("action capture uses the exact native-owned Page, masks secrets and never w
       ],
       evaluate: () => Promise.resolve({ width: 800, height: 600 }),
       locator: () => ({
-        innerText: () => Promise.resolve("Visible application text"),
+        evaluate: () => Promise.resolve("Visible application text"),
       }),
       url: () => "https://replica.invalid/application-1",
       screenshot,

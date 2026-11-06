@@ -1,5 +1,6 @@
 export * from "./agent-loop";
 export * from "./context-history";
+export * from "./context-parts";
 export * from "./context-budget";
 export * from "./conversation-turn";
 export * from "./result-store";

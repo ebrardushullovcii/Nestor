@@ -1,5 +1,6 @@
 import type { ApplyWriteResult, RawApplyClickable } from "@nestor/contracts";
 import type { CDPSession, Frame, Page } from "playwright";
+import { isVisibleFrame, visiblePageText } from "./visible-page-text";
 interface DomNode {
   nodeType: number;
   backendNodeId: number;
@@ -100,26 +101,6 @@ async function inNode<T>(
   }
 }
 
-/** Rendered text only: scripts, hidden inputs and hidden ancestors contribute none. */
-function readShadowText(this: ShadowRoot): string {
-  const walker = this.ownerDocument.createTreeWalker(
-    this,
-    NodeFilter.SHOW_TEXT,
-  );
-  const parts: string[] = [];
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const range = this.ownerDocument.createRange();
-    range.selectNodeContents(node);
-    const parent = node.parentElement ?? this.host;
-    if (
-      range.getClientRects().length > 0 &&
-      getComputedStyle(parent).visibility !== "hidden"
-    )
-      parts.push(node.textContent ?? "");
-  }
-  return parts.join(" ").replace(/\s+/gu, " ").trim();
-}
-
 /** CDP can read closed roots without changing attachShadow or the site's DOM. */
 export async function readClosedShadowControls(
   page: Page,
@@ -132,6 +113,7 @@ export async function readClosedShadowControls(
   const controls: RawApplyClickable[] = [];
   const text: string[] = [];
   for (const frame of page.frames()) {
+    if (!(await isVisibleFrame(frame))) continue;
     let session: CDPSession;
     try {
       session = await page
@@ -167,7 +149,7 @@ export async function readClosedShadowControls(
         const visible = await inNode<string>(
           session,
           shadow,
-          readShadowText.toString(),
+          `function() { return (${visiblePageText.toString()})(this); }`,
         );
         if (visible) text.push(visible);
       }

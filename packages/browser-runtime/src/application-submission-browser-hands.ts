@@ -9,6 +9,7 @@ import {
 } from "@nestor/contracts";
 import type { Page, Request, Response } from "playwright";
 import { actionLocator } from "./apply-page-mechanics";
+import { readVisibleText } from "./visible-page-text";
 import { watchPageSelfLimits } from "./self-limit-page";
 
 export const APPLICATION_FINAL_CONTROL_SELECTOR =
@@ -748,7 +749,7 @@ export async function executeExactlyOneFinalAction(
     let siteMessage = "";
     try {
       siteMessage = await withBrowserReadLiveness(page, () =>
-        page.locator("body").innerText(),
+        readVisibleText(page.locator("body")),
       );
     } catch {
       /* Navigation/read failure is returned as uncertainty. */
