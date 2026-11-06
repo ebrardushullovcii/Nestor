@@ -1440,11 +1440,12 @@ export async function fitJobs(
           group.map((job) => repairIssues.get(job.id)),
         );
         if (group.length === 1 && issues === previousIssues)
-          return [
-            new Error(
-              `Fit response still omitted or invalid for job ${group[0].id}: ${repairIssues.get(group[0].id)?.join("; ")}`,
-            ),
-          ];
+          return group.map(
+            (job) =>
+              new Error(
+                `Fit response still omitted or invalid for job ${job.id}: ${repairIssues.get(job.id)?.join("; ")}`,
+              ),
+          );
         const failures: unknown[] = [];
         for (const smaller of batches(
           missing,
