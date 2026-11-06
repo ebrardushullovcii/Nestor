@@ -1586,7 +1586,7 @@ describe("what the person sees while it runs", () => {
     expect(result.error).toBe("Stopped: no new page content or listings in the last 6 steps.");
   });
 
-  test("the wall-clock safety ceiling still stops a productive search", async () => {
+  test("a productive search finishes beyond the former hour-long ceiling", async () => {
     let elapsed = 0;
     const result = await runJobSearchAgent({
       hands: hands({ current: rawPage() }),
@@ -1598,14 +1598,14 @@ describe("what the person sees while it runs", () => {
       ]),
       jobExtractor: {
         extractJobsFromPage: async (input) => {
-          elapsed = 60 * 60_000;
+          elapsed = 2 * 60 * 60_000;
           return extractor.extractJobsFromPage(input);
         },
       },
     });
     expect(result.jobs).toHaveLength(2);
-    expect(result.incomplete).toBe(true);
-    expect(result.error).toContain("ran out of time");
+    expect(result.incomplete).toBe(false);
+    expect(result.error).toBeFalsy();
   });
 });
 

@@ -641,123 +641,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
     );
   });
 
-  test("times out a slow vision branch without waiting beyond text completion", async () => {
-    const seed = createSeed();
-    const { repository, profileWork } = createProfileServiceHarness({
-      seed: { ...seed, profile: createFreshStartSeedProfile() },
-      aiClient: {
-        ...createAiClient(),
-        extractResumeImportStage(input) {
-          if (input.stage !== "identity_summary") {
-            return Promise.resolve({
-              stage: input.stage,
-              analysisProviderKind: "deterministic",
-              analysisProviderLabel: "Test AI",
-              candidates: [],
-              notes: [],
-            });
-          }
-
-          return Promise.resolve({
-            stage: input.stage,
-            analysisProviderKind: "deterministic",
-            analysisProviderLabel: "Test AI",
-            candidates: [
-              createStageCandidate({
-                target: { section: "contact", key: "email", recordId: null },
-                label: "Email",
-                value: "jamie@example.com",
-                sourceBlockIds: ["page_1_block_2"],
-                confidence: 0.9,
-                recommendation: "auto_apply",
-                overall: 0.86,
-              }),
-            ],
-            notes: [],
-          });
-        },
-      },
-      visionProvider: {
-        getStatus() {
-          return {
-            kind: "openai_compatible_vision",
-            role: "vision",
-            ready: true,
-            label: "Slow vision",
-            model: "FelidaeAI-Omni-3.6",
-            baseUrl: "https://example.com/v1",
-            modelContextWindowTokens: 139000,
-            reservedHeadroomTokens: 30000,
-            requestTimeoutMs: 25,
-            detail: "test",
-          };
-        },
-        async extractResumeVision() {
-          await new Promise((resolve) => setTimeout(resolve, 250));
-          return {
-            analysisProviderKind: "openai_compatible_vision" as const,
-            analysisProviderLabel: "Slow vision",
-            candidates: [],
-            notes: [],
-            warnings: [],
-            primaryErrorMessage: null,
-          };
-        },
-      },
-    });
-
-    await profileWork.runResumeImport({
-      baseResume: {
-        ...seed.profile.baseResume,
-        id: "resume_slow_vision_timeout",
-        fileName: "resume.pdf",
-        textContent: "Jamie Rivers\njamie@example.com",
-      },
-      documentBundle: createTestBundle({
-        fullText: "Jamie Rivers\njamie@example.com",
-      }),
-      visionArtifact: {
-        id: "vision_artifact_slow_timeout_test",
-        runId: "seed_run",
-        sourceResumeId: "resume_slow_vision_timeout",
-        sourceFileKind: "pdf",
-        createdAt: "2026-04-10T10:00:00.000Z",
-        retained: "temporary",
-        pages: [
-          {
-            id: "vision_page_slow_timeout",
-            sourceResumeId: "resume_slow_vision_timeout",
-            sourceFileKind: "pdf",
-            pageNumber: 1,
-            renderKind: "pdf_page_image",
-            mimeType: "image/png",
-            width: 1200,
-            height: 1600,
-            byteLength: 4,
-            sha256: "abc123",
-            dataUrl: "data:image/png;base64,AAAA",
-            storagePath: null,
-            retained: "temporary",
-            generatedAt: "2026-04-10T10:00:00.000Z",
-            warnings: [],
-          },
-        ],
-        warnings: [],
-      },
-    });
-
-    const run = await repository.getLatestResumeImportRun();
-    const profile = await repository.getProfile();
-
-    expect(run?.modelRoles?.vision.status).toBe("running");
-    expect(run?.modelRoles?.vision.warning).toContain("text import is ready");
-    expect(run?.modelRoles?.vision.providerKind).toBe(
-      "openai_compatible_vision",
-    );
-    expect(profile.email).toBe("jamie@example.com");
-  });
-
-  test("does not wait for a hung vision branch with the default long provider deadline", async () => {
+  test("text completes while the vision provider is still working", async () => {
     const seed = createSeed();
     const { repository, profileWork } = createProfileServiceHarness({
       seed: { ...seed, profile: createFreshStartSeedProfile() },
@@ -804,7 +688,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
             baseUrl: "https://example.com/v1",
             modelContextWindowTokens: 139000,
             reservedHeadroomTokens: 30000,
-            requestTimeoutMs: 600_000,
+            requestTimeoutMs: null,
             detail: "test",
           };
         },
@@ -861,7 +745,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
 
     expect(run?.status).toBe("applied");
     expect(run?.modelRoles?.vision.status).toBe("running");
-    expect(run?.modelRoles?.vision.timeoutMs).toBe(600_000);
+    expect(run?.modelRoles?.vision.timeoutMs).toBeNull();
     expect(run?.modelRoles?.vision.warning).toContain("text import is ready");
     expect(profile.email).toBe("jamie@example.com");
   });
@@ -1265,14 +1149,7 @@ Preferred location: Remote worldwide or Berlin, Germany`;
         },
         async extractResumeVision() {
           await new Promise((resolve) => setTimeout(resolve, 200));
-          return {
-            analysisProviderKind: "openai_compatible_vision" as const,
-            analysisProviderLabel: "Slow vision",
-            candidates: [],
-            notes: [],
-            warnings: [],
-            primaryErrorMessage: null,
-          };
+          throw new Error("The visual AI connection failed");
         },
       },
     });
@@ -1324,9 +1201,9 @@ Preferred location: Remote worldwide or Berlin, Germany`;
     expect(run?.modelRoles?.text.errorMessage).toContain(
       "The AI connection failed",
     );
-    expect(run?.modelRoles?.vision.status).toBe("timed_out");
+    expect(run?.modelRoles?.vision.status).toBe("failed");
     expect(run?.modelRoles?.vision.errorMessage).toContain(
-      "timed out after 20ms",
+      "The visual AI connection failed",
     );
   });
 

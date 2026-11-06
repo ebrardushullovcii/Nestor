@@ -1334,66 +1334,6 @@ describe("ai provider config and fallback behavior", () => {
       capture.restore();
     }
   });
-
-  test("says the Assistant ran out of time instead of blaming the request", async () => {
-    const capture = mockCapturingJsonFetch({
-      choices: [
-        {
-          message: {
-            tool_calls: [
-              {
-                id: "read",
-                type: "function",
-                function: { name: "read_resume_context", arguments: "{}" },
-              },
-            ],
-          },
-        },
-      ],
-    });
-    // Every clock read is a minute later: the 180 s budget runs out while
-    // the model is still reading, as a slow provider did live.
-    let now = Date.parse("2026-09-24T12:00:00.000Z");
-    const clock = vi.spyOn(Date, "now").mockImplementation(() => {
-      now += 60_000;
-      return now;
-    });
-
-    try {
-      const client = createJobFinderAiClientFromEnvironment({
-        NESTOR_AI_API_KEY: "test-key",
-        NESTOR_AI_MODEL: "ordinary-model",
-      });
-
-      const reply = await client.reviseResumeDraft({
-        draft: ResumeDraftSchema.parse({
-          id: "draft_1",
-          jobId: "job_1",
-          templateId: "classic_ats",
-          status: "draft",
-          identity: null,
-          sections: [],
-          targetPageCount: 1,
-          generationMethod: null,
-          createdAt: "2026-08-12T12:00:00.000Z",
-          updatedAt: "2026-08-12T12:00:00.000Z",
-          approvedAt: null,
-          approvedExportId: null,
-          staleReason: null,
-        }),
-        job: createJobPosting(),
-        request: "the second one",
-      });
-
-      expect(reply.patches).toEqual([]);
-      expect(reply.content).toBe(
-        "The AI took too long to answer this time, so nothing was changed. Send the request again.",
-      );
-    } finally {
-      clock.mockRestore();
-      capture.restore();
-    }
-  });
 });
 
 test("keeps an explicit primary model for titles instead of implicitly switching providers", async () => {

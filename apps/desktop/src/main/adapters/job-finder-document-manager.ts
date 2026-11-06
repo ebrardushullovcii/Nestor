@@ -171,20 +171,6 @@ async function renderPdfFromHtml(
       },
     });
 
-    // A hidden print window that never finishes must fail loudly, not leave
-    // "Exporting PDF" on screen for good.
-    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<never>((_, reject) => {
-      deadlineTimer = setTimeout(
-        () =>
-          reject(
-            new Error(
-              "The PDF did not finish rendering within 2 minutes. Try approving again.",
-            ),
-          ),
-        120_000,
-      ).unref?.();
-    });
     let onAbort: (() => void) | undefined;
     const aborted = new Promise<never>((_, reject) => {
       onAbort = () =>
@@ -196,7 +182,7 @@ async function renderPdfFromHtml(
     // Cancellation can arrive while the HTML file write is still pending.
     void aborted.catch(() => {});
     const waitFor = <T>(operation: Promise<T>) =>
-      Promise.race([operation, deadline, aborted]);
+      Promise.race([operation, aborted]);
     try {
       await writeFile(htmlPath, html, "utf8");
       throwIfPreviewAborted(signal);
@@ -225,7 +211,6 @@ async function renderPdfFromHtml(
       throwIfPreviewAborted(signal);
       await writeFile(targetPath, pdfBuffer);
     } finally {
-      clearTimeout(deadlineTimer);
       if (onAbort) signal?.removeEventListener("abort", onAbort);
       if (!exportWindow.isDestroyed()) {
         exportWindow.destroy();

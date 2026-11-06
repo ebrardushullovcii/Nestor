@@ -21,9 +21,9 @@ function parseRetentionMode(env: NodeJS.ProcessEnv): ResumeImportArtifactRetenti
   return 'temporary'
 }
 
-function parseTimeoutMs(env: NodeJS.ProcessEnv): number {
+function parseTimeoutMs(env: NodeJS.ProcessEnv): number | undefined {
   const parsed = Number.parseInt(env.NESTOR_RESUME_VISION_IMAGE_TIMEOUT_MS ?? '', 10)
-  return Number.isFinite(parsed) && parsed >= 1_000 ? parsed : 600_000
+  return Number.isFinite(parsed) && parsed >= 1_000 ? parsed : undefined
 }
 
 export async function generateResumeVisionImages(input: {
@@ -41,6 +41,7 @@ export async function generateResumeVisionImages(input: {
   const fileKind = input.fileKind ?? detectResumeDocumentFileKind(input.filePath)
   const artifactId = input.artifactId ?? `resume_vision_artifact_${Date.now()}`
   const retention = parseRetentionMode(env)
+  const timeoutMs = parseTimeoutMs(env)
   const response = await runResumeVisionImageSidecar({
     filePath: input.filePath,
     fileKind,
@@ -48,7 +49,7 @@ export async function generateResumeVisionImages(input: {
     runId: input.runId,
     sourceResumeId: input.sourceResumeId,
     retention,
-    timeoutMs: parseTimeoutMs(env),
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
   })
   const baseWarnings = response.warnings.length > 0
     ? response.warnings

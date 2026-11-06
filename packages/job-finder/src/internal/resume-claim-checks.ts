@@ -10,7 +10,7 @@ import type {
   ResumeDraft,
   SavedJob,
 } from "@nestor/contracts";
-import { fnv1a32, reportSelfLimitHit } from "@nestor/core";
+import { fnv1a32 } from "@nestor/core";
 
 import { applyPatchToResumeDraft } from "./resume-workspace-patches";
 import {
@@ -39,49 +39,18 @@ type ResumeLine = Parameters<
 >[0];
 const sessionChecks = new Map<string, ResumeClaimCheck>();
 
-class ResumeClaimBudgetExceededError extends Error {
-  constructor() {
-    super(
-      "Resume claim checking timed out: exceeded the remaining writing budget.",
-    );
-    this.name = "TimeoutError";
-  }
-}
-
 type ClaimCheckTransaction = {
   signal?: AbortSignal;
-  getRemainingBudgetMs?: () => number;
 };
 
-/** Each batch/retry consumes the same writer clock, including nested checks. */
-async function checkWithinWritingBudget(
+/** Stop cancels nested checks; the provider owns connection liveness. */
+async function checkClaims(
   transaction: ClaimCheckTransaction,
   request: ResumeClaimCheckInput,
   check: NonNullable<JobFinderAiClient["checkResumeClaims"]>,
 ) {
   transaction.signal?.throwIfAborted();
-  const remaining = transaction.getRemainingBudgetMs?.();
-  if (
-    remaining !== undefined &&
-    (!Number.isFinite(remaining) || remaining <= 0)
-  ) {
-    reportSelfLimitHit({
-      limit: "claim_check_writing_budget",
-      kind: "timeout",
-      value: 0,
-      where: "job-finder/checkWithinWritingBudget",
-    });
-    throw new ResumeClaimBudgetExceededError();
-  }
-  const timeoutMs =
-    remaining === undefined ? undefined : Math.max(1, Math.floor(remaining));
-  const deadline = timeoutMs === undefined ? undefined : new AbortController();
-  const signal = deadline
-    ? transaction.signal
-      ? AbortSignal.any([transaction.signal, deadline.signal])
-      : deadline.signal
-    : transaction.signal;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const signal = transaction.signal;
   let onAbort: (() => void) | undefined;
   const aborted = signal
     ? new Promise<never>((_resolve, reject) => {
@@ -103,20 +72,9 @@ async function checkWithinWritingBudget(
   void aborted?.catch(() => {});
   try {
     signal?.throwIfAborted();
-    if (deadline && timeoutMs !== undefined)
-      timer = setTimeout(() => {
-        reportSelfLimitHit({
-          limit: "claim_check_writing_budget",
-          kind: "timeout",
-          value: timeoutMs,
-          where: "job-finder/checkWithinWritingBudget",
-        });
-        deadline.abort(new ResumeClaimBudgetExceededError());
-      }, timeoutMs);
     const checking = check({
       ...request,
       ...(signal ? { signal } : {}),
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
     });
     const results = await (aborted
       ? Promise.race([checking, aborted])
@@ -124,7 +82,6 @@ async function checkWithinWritingBudget(
     signal?.throwIfAborted();
     return results;
   } finally {
-    clearTimeout(timer);
     if (onAbort) signal?.removeEventListener("abort", onAbort);
   }
 }
@@ -146,7 +103,6 @@ export async function withResumeClaimChecks(input: {
   tailoringStrength?: string | null;
   now?: () => string;
   signal?: AbortSignal;
-  getRemainingBudgetMs?: () => number;
   /**
    * False reuses the verdicts already known and asks the model nothing; the
    * rest stay unchecked until the draft is saved (the live preview).
@@ -301,16 +257,12 @@ export async function withResumeClaimChecks(input: {
       // The provider transport already retries transient requests within its budget.
       // Repeating that whole operation here doubles failed paid attempts without
       // giving the model new feedback. Unchecked lines still go to the person.
-      const results = await checkWithinWritingBudget(
+      const results = await checkClaims(
         input,
         request,
         checkResumeClaims,
       ).catch((error: unknown) => {
-        if (
-          input.signal?.aborted ||
-          error instanceof ResumeClaimBudgetExceededError ||
-          getAiProviderAccessFailure(error) !== null
-        )
+        if (input.signal?.aborted || getAiProviderAccessFailure(error) !== null)
           throw error;
         return [];
       });

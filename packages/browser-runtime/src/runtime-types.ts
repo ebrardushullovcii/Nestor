@@ -539,7 +539,6 @@ export interface AgentDiscoveryOptions {
   targetJobCount: number;
   maxSteps: number;
   runControl?: {
-    timeBudgetMs?: number;
     noProgressStepLimit?: number;
   };
   resumeCheckpoint?: BrowserAgentRunCheckpoint;

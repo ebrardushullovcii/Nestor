@@ -102,11 +102,6 @@ export interface AgentTaskRunOptions<TState, TDraft> {
     validationIssues: readonly AgentTaskValidationIssue[];
   }) => unknown;
   readonly signal?: AbortSignal;
-  readonly timeBudgetMs?: number;
-  /** Cumulative host queue wait excluded from the budget; never model/tool execution. */
-  readonly getExcludedElapsedMs?: () => number;
-  /** Maximum time for one provider turn; also capped by the task time left. */
-  readonly modelTurnTimeoutMs?: number;
   /** A provider-call ceiling used as the deterministic cost guard. */
   readonly providerCallBudget?: number;
   readonly noProgressLimit?: number;
@@ -362,18 +357,6 @@ export async function runAgentTask<TState, TDraft>(
 ): Promise<AgentTaskRunResult<TDraft>> {
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
-  const timeBudgetMs = Math.max(1_000, options.timeBudgetMs ?? 90_000);
-  const budgetElapsedMs = () => {
-    const elapsedMs = Math.max(0, Date.now() - startedAtMs);
-    const excludedMs = options.getExcludedElapsedMs?.() ?? 0;
-    return Number.isFinite(excludedMs)
-      ? elapsedMs - Math.min(elapsedMs, Math.max(0, excludedMs))
-      : elapsedMs;
-  };
-  const modelTurnTimeoutMs = Math.max(
-    10,
-    options.modelTurnTimeoutMs ?? timeBudgetMs,
-  );
   const noProgressLimit = Math.max(1, options.noProgressLimit ?? 4);
   const providerCallBudget = Math.max(1, options.providerCallBudget ?? 24);
   const emergencyCeiling = Math.max(4, options.emergencyCeiling ?? 32);
@@ -420,16 +403,6 @@ export async function runAgentTask<TState, TDraft>(
   for (let cycle = 0; cycle < emergencyCeiling; cycle += 1) {
     if (options.signal?.aborted) {
       stopReason = "cancelled";
-      break;
-    }
-    if (budgetElapsedMs() >= timeBudgetMs) {
-      reportSelfLimitHit({
-        limit: "task_time",
-        kind: "timeout",
-        value: timeBudgetMs,
-        where: "agent-runtime/runAgentTask",
-      });
-      stopReason = "time_budget";
       break;
     }
     if (providerCalls >= providerCallBudget) {
@@ -515,7 +488,6 @@ export async function runAgentTask<TState, TDraft>(
       }
       try {
         providerCalls += 1;
-        const remainingMs = Math.max(1, timeBudgetMs - budgetElapsedMs());
         response = await runModelTurn(
           (turnOptions) =>
             options.model.chat({
@@ -532,25 +504,12 @@ export async function runAgentTask<TState, TDraft>(
             }),
           {
             signal: options.signal,
-            timeoutMs: Math.min(modelTurnTimeoutMs, remainingMs),
           },
         );
         break;
       } catch (error) {
         if (options.signal?.aborted) throw error;
-        if (error instanceof ModelTurnTimeoutError) {
-          if (error.kind === "idle" && attempt === 0) continue;
-          emitProgress(
-            "timed_out",
-            "The assistant did not answer before this turn's time limit",
-          );
-          stopReason = "time_budget";
-          break;
-        }
-        if (budgetElapsedMs() >= timeBudgetMs) {
-          stopReason = "time_budget";
-          break;
-        }
+        if (error instanceof ModelTurnTimeoutError && attempt === 0) continue;
         const failureKind = classifyAgentTaskFailure(error);
         if (!shouldRetry(failureKind) || attempt === 2) {
           if (shouldRetry(failureKind) && attempt === 2)
@@ -566,7 +525,7 @@ export async function runAgentTask<TState, TDraft>(
       }
     }
     if (!response) {
-      if (stopReason !== "cost_budget" && stopReason !== "time_budget") {
+      if (stopReason !== "cost_budget") {
         stopReason = "permanent_failure";
       }
       break;

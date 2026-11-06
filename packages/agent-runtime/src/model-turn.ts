@@ -1,4 +1,3 @@
-import { reportSelfLimitHit } from "@nestor/core";
 export type ModelTurnStreamEvent =
   | { type: "attempt_started"; attempt: number }
   | { type: "text_delta"; text: string }
@@ -9,12 +8,8 @@ export type ModelTurnStreamEvent =
 export const DEFAULT_MODEL_IDLE_TIMEOUT_MS = 180_000;
 
 export class ModelTurnTimeoutError extends Error {
-  constructor(readonly kind: "idle" | "absolute") {
-    super(
-      kind === "idle"
-        ? "The AI connection stopped responding. Try again to continue."
-        : "The AI did not answer before this turn's time limit.",
-    );
+  constructor(readonly kind: "idle") {
+    super("The AI connection stopped responding. Try again to continue.");
     this.name = "ModelTurnTimeoutError";
   }
 }
@@ -27,7 +22,6 @@ export async function runModelTurn<T>(
   }) => Promise<T>,
   options: {
     signal?: AbortSignal | undefined;
-    timeoutMs?: number | undefined;
     idleTimeoutMs?: number | undefined;
     onStreamEvent?: ((event: ModelTurnStreamEvent) => void) | undefined;
   },
@@ -35,7 +29,6 @@ export async function runModelTurn<T>(
   const controller = new AbortController();
   const cancel = () => controller.abort(options.signal?.reason);
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
-  let absoluteTimer: ReturnType<typeof setTimeout> | undefined;
   let rejectAbort: (() => void) | undefined;
   const idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_MODEL_IDLE_TIMEOUT_MS;
   const resetIdle = () => {
@@ -51,19 +44,6 @@ export async function runModelTurn<T>(
   try {
     controller.signal.throwIfAborted();
     resetIdle();
-    if (options.timeoutMs !== undefined && Number.isFinite(options.timeoutMs))
-      absoluteTimer = setTimeout(
-        () => {
-          reportSelfLimitHit({
-            limit: "model_turn_time",
-            kind: "timeout",
-            value: options.timeoutMs!,
-            where: "agent-runtime/runModelTurn",
-          });
-          controller.abort(new ModelTurnTimeoutError("absolute"));
-        },
-        Math.max(1, options.timeoutMs),
-      );
     const aborted = new Promise<never>((_resolve, reject) => {
       rejectAbort = () => {
         const reason: unknown = controller.signal.reason;
@@ -88,7 +68,6 @@ export async function runModelTurn<T>(
     ]);
   } finally {
     clearTimeout(idleTimer);
-    clearTimeout(absoluteTimer);
     options.signal?.removeEventListener("abort", cancel);
     if (rejectAbort)
       controller.signal.removeEventListener("abort", rejectAbort);

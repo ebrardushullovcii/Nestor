@@ -688,43 +688,6 @@ describe("performModelRequest", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
-  test("retries an active but non-terminating attempt within the unchanged total budget", async () => {
-    let timer: ReturnType<typeof setInterval>;
-    const response = new Response(
-      new ReadableStream({
-        start(controller) {
-          timer = setInterval(
-            () =>
-              controller.enqueue(
-                new TextEncoder().encode(
-                  'data: {"choices":[{"delta":{"content":"loop"}}]}\n\n',
-                ),
-              ),
-            10,
-          );
-        },
-        cancel() {
-          clearInterval(timer);
-        },
-      }),
-      { headers: { "content-type": "text/event-stream" } },
-    );
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValueOnce(response)
-      .mockResolvedValueOnce(
-        jsonResponse({ choices: [{ message: { content: "fresh read" } }] }),
-      );
-    const result = await performModelRequest({
-      ...baseInput,
-      totalTimeoutMs: 2000,
-      attemptTimeoutMs: 80,
-      idleTimeoutMs: 1000,
-      fetchImpl,
-    });
-    expect(result.choices?.[0]?.message?.content).toBe("fresh read");
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-  });
 
   test("retries a stream the service closed before completing", async () => {
     const fetchImpl = vi

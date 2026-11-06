@@ -59,7 +59,7 @@ test("a public HTTP read reports its final bounded retry", async () => {
   expect(request).toHaveBeenCalledTimes(4);
   expect(hits(log).some((hit) => hit.limit === "http_retries")).toBe(true);
 });
-test("rendered readiness and navigation deadlines report and close only the owned tab", async () => {
+test("rendered readiness stops on silence and navigation failures close only the owned tab", async () => {
   vi.useFakeTimers();
   const log = vi.spyOn(console, "warn").mockImplementation(() => {}),
     close = vi.fn(async () => {});
@@ -77,7 +77,7 @@ test("rendered readiness and navigation deadlines report and close only the owne
   } as unknown as BrowserContext;
   await readRenderedPageHtml(context, page.url(), { ready: () => false });
   expect(hits(log).some((hit) => hit.limit === "rendered_page_ready")).toBe(
-    true,
+    false,
   );
   expect(close).toHaveBeenCalledTimes(1);
   const timeout = Object.assign(Error("Timeout 20000ms exceeded"), {

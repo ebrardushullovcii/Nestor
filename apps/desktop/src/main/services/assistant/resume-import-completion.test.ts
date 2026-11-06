@@ -90,18 +90,6 @@ describe("sidebar resume import completion", () => {
     expect(existing.profile.fullName).toBe("Alex Existing");
   });
 
-  test("uses the import's configured vision timeout and does not call an unfinished scan unreadable", async () => {
-    const h = harness({ active: true });
-    if (!h.run.modelRoles) throw new Error("Expected model roles");
-    h.run.modelRoles.vision.timeoutMs = 25;
-    await expect(
-      waitForAssistantResumeImport(h.service, h.snapshot, {
-        readProfile: h.service.readProfile,
-      }),
-    ).rejects.toThrow("visual scan is still finishing");
-    expect(h.service.readProfile).not.toHaveBeenCalled();
-  });
-
   test("Stop aborts the wait without claiming import success", async () => {
     const h = harness({ active: true });
     const controller = new AbortController();

@@ -14,10 +14,8 @@ import type { ModelTurnStreamEvent } from "@nestor/agent-runtime";
  * - Requests are streamed (`stream: true`). Arriving bytes prove the service
  *   is alive; an operation may opt into counting only model progress (text,
  *   tool arguments, reasoning), as resume import does.
- * - Two clocks per request: an idle clock (no progress for `idleTimeoutMs` means
- *   the connection is presumed dead and the attempt is retried) and a total
- *   clock (`totalTimeoutMs`, the most the caller is willing to wait across
- *   all attempts).
+ * - An idle clock detects a silent connection and retries it. Working streams
+ *   have no deadline unless the operator explicitly supplies one.
  * - Retries with capped exponential backoff and `Retry-After` support for
  *   the failures that are worth retrying: network errors, idle timeouts,
  *   incomplete streams, 408/409/425/429 and 5xx. Never for 4xx validation
@@ -57,7 +55,6 @@ const TRANSIENT_MESSAGE_PATTERN =
 export type ModelRequestRetryReason =
   | "network"
   | "idle_timeout"
-  | "attempt_timeout"
   | "incomplete_stream"
   | "http_status"
   | "transient_message";
@@ -92,8 +89,6 @@ export interface ModelRequestResilienceOptions {
 }
 
 export interface PerformModelRequestInput extends ModelRequestResilienceOptions {
-  /** Optional cap on one attempt, leaving the total budget for a fresh read. */
-  attemptTimeoutMs?: number | undefined;
   /**
    * Reset the idle clock only on model progress (text, tool arguments,
    * reasoning), not on keepalives or whitespace. Off by default: other
@@ -106,8 +101,8 @@ export interface PerformModelRequestInput extends ModelRequestResilienceOptions 
   apiMode: ModelApiMode;
   purpose?: string | undefined;
   onUsage?: ((usage: ModelRequestUsage) => void) | undefined;
-  /** Most the caller waits across every attempt. */
-  totalTimeoutMs: number;
+  /** Explicit operator setting only; no default absolute deadline. */
+  totalTimeoutMs?: number | undefined;
   signal?: AbortSignal | undefined;
   fetchImpl?: typeof fetch | undefined;
   onEvent?: ((event: ModelRequestEvent) => void) | undefined;
@@ -128,15 +123,15 @@ export class ModelRequestHttpError extends Error {
 }
 
 export class ModelRequestTimeoutError extends Error {
-  readonly kind: "idle" | "attempt" | "total";
+  readonly kind: "idle" | "total";
 
-  constructor(kind: "idle" | "attempt" | "total", waitedMs: number) {
+  constructor(kind: "idle" | "total", waitedMs: number) {
     // The "timed out after Ns" shape is what provenance and studio copy key
     // on to say "the AI took too long" instead of "the AI failed".
     super(
       kind === "idle"
         ? `Model request timed out after ${Math.floor(waitedMs / 1000)}s of silence from the AI service`
-        : `Model request timed out after ${Math.floor(waitedMs / 1000)}s${kind === "attempt" ? " on one attempt" : ""}`,
+        : `Model request timed out after ${Math.floor(waitedMs / 1000)}s`,
     );
     this.name = "AbortError";
     this.kind = kind;
@@ -745,9 +740,7 @@ function classifyRetry(
   if (error instanceof ModelRequestTimeoutError) {
     return error.kind === "idle"
       ? { reason: "idle_timeout", retryAfterMs: null }
-      : error.kind === "attempt"
-        ? { reason: "attempt_timeout", retryAfterMs: null }
-        : null;
+      : null;
   }
   if (error instanceof ModelRequestHttpError) {
     return RETRYABLE_HTTP_STATUSES.has(error.status)
@@ -820,7 +813,7 @@ export function resetModelCredentialRejections(): void {
 
 /**
  * Performs one logical model request with streaming liveness, idle and
- * total deadlines, and bounded retries. Resolves with the normalized
+ * an optional operator deadline, and retries. Resolves with the normalized
  * Chat Completions payload; rejects with the last error, a
  * `ModelRequestTimeoutError`, or an `AbortError` when the caller cancelled.
  */
@@ -867,7 +860,10 @@ async function performModelRequestAttempts(
     input.retryBaseDelayMs ?? DEFAULT_MODEL_RETRY_BASE_DELAY_MS;
   const maxDelayMs = input.retryMaxDelayMs ?? DEFAULT_MODEL_RETRY_MAX_DELAY_MS;
   const startedAt = Date.now();
-  const deadline = startedAt + input.totalTimeoutMs;
+  const deadline =
+    input.totalTimeoutMs === undefined
+      ? Infinity
+      : startedAt + input.totalTimeoutMs;
   const requestBody = JSON.stringify(
     streaming
       ? {
@@ -895,7 +891,7 @@ async function performModelRequestAttempts(
     if (remainingMs <= 0) {
       throw lastError
         ? toError(lastError)
-        : new ModelRequestTimeoutError("total", input.totalTimeoutMs);
+        : new ModelRequestTimeoutError("total", input.totalTimeoutMs!);
     }
 
     input.onEvent?.({ type: "attempt_started", attempt, maxAttempts });
@@ -908,18 +904,13 @@ async function performModelRequestAttempts(
     let failureKind: ModelRequestUsage["failureKind"];
 
     const attemptController = new AbortController();
-    let abortReason: "idle" | "attempt" | "total" | "caller" | null = null;
+    let abortReason: "idle" | "total" | "caller" | null = null;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    const attemptBudget = Math.min(
-      remainingMs,
-      input.attemptTimeoutMs ?? remainingMs,
-    );
-    const totalTimer = Number.isFinite(attemptBudget)
+    const totalTimer = Number.isFinite(remainingMs)
       ? setTimeout(() => {
-          abortReason =
-            abortReason ?? (attemptBudget < remainingMs ? "attempt" : "total");
+          abortReason = abortReason ?? "total";
           attemptController.abort();
-        }, attemptBudget)
+        }, remainingMs)
       : undefined;
     const armIdle = () => {
       if (idleTimer) {
@@ -1022,12 +1013,10 @@ async function performModelRequestAttempts(
       }
       const normalized: unknown =
         abortReason === "total"
-          ? new ModelRequestTimeoutError("total", input.totalTimeoutMs)
+          ? new ModelRequestTimeoutError("total", input.totalTimeoutMs!)
           : abortReason === "idle"
             ? new ModelRequestTimeoutError("idle", idleTimeoutMs)
-            : abortReason === "attempt"
-              ? new ModelRequestTimeoutError("attempt", attemptBudget)
-              : error;
+            : error;
       lastError = normalized;
       failureKind =
         normalized instanceof ModelRequestHttpError

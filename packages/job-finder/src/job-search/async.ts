@@ -49,6 +49,6 @@ export function errorMessage(error: unknown): string {
     (error.name === "TimeoutError" ||
       /timed? out|timeout/iu.test(error.message))
   )
-    return "Nestor's reading time limit was reached. Saved progress is kept; Continue unfinished sites resumes remaining work. Other sites continue normally.";
+    return `The page or model stopped responding: ${error.message}. Saved progress is kept; Retry this site to continue.`;
   return (error instanceof Error ? error.message : String(error)).slice(0, 240);
 }

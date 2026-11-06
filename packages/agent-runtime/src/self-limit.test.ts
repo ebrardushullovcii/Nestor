@@ -35,33 +35,6 @@ test.each([
   await runAgentTask({ ...base(), ...options });
   expect(events(log).some((hit) => hit.limit === limit)).toBe(true);
 });
-test("reports elapsed work and a model turn deadline, but not person cancellation", async () => {
-  vi.useFakeTimers();
-  const log = vi.spyOn(console, "warn").mockImplementation(() => {});
-  await runAgentTask({
-    ...base(),
-    timeBudgetMs: 1000,
-    model: {
-      chat: () => {
-        vi.setSystemTime(Date.now() + 1100);
-        return Promise.resolve({});
-      },
-    },
-  });
-  expect(events(log).some((hit) => hit.limit === "task_time")).toBe(true);
-  log.mockClear();
-  const pending = runAgentTask({
-    ...base(),
-    modelTurnTimeoutMs: 10,
-    model: { chat: () => new Promise(() => {}) },
-  });
-  await vi.advanceTimersByTimeAsync(11);
-  expect((await pending).receipt.stopReason).toBe("time_budget");
-  expect(events(log).some((hit) => hit.limit === "model_turn_time")).toBe(true);
-  log.mockClear();
-  await runAgentTask({ ...base(), signal: AbortSignal.abort() });
-  expect(events(log)).toEqual([]);
-});
 test("reports exhausted transient provider retries", async () => {
   vi.useFakeTimers();
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});

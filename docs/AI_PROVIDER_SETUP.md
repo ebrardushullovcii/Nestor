@@ -218,15 +218,21 @@ on the separate Responses route.
 
 Every Job Finder model call (structured JSON, agent tool turns, resume and
 browser vision) goes through one transport
-(`packages/ai-providers/src/model-request-transport.ts`, ADR 0020):
+(`packages/ai-providers/src/model-request-transport.ts`, ADRs 0020 and 0079):
 
 - Requests are streamed. On the Responses route the model is asked for
   reasoning summaries, whose events keep the connection visibly alive while
   it thinks; on Chat Completions the reasoning deltas do the same.
-- Two clocks: an idle clock (`NESTOR_AI_IDLE_TIMEOUT_MS`, default 120s of
-  silence) retries an attempt that has gone quiet, and a total clock
-  (`NESTOR_AI_TIMEOUT_MS`, default 300s; `NESTOR_AI_RESUME_TIMEOUT_MS`,
-  default 600s) caps the whole wait across attempts.
+- The idle clock (`NESTOR_AI_IDLE_TIMEOUT_MS`, default 180s without model
+  progress) retries a silent connection. Resume import stages use 30s without
+  progress unless explicitly configured. Text, tool arguments and reasoning
+  deltas keep a working stream alive; keepalives and whitespace do not.
+- Model requests, agent turns/tasks, checker calls and search source/run work
+  have no default absolute deadline. Optional operator settings
+  `NESTOR_AI_TIMEOUT_MS`, `NESTOR_AI_RESUME_TIMEOUT_MS`,
+  `NESTOR_AI_ASSISTANT_TIMEOUT_MS`, `NESTOR_RESUME_VISION_TIMEOUT_MS` and
+  `NESTOR_BROWSER_VISION_TIMEOUT_MS` still apply when explicitly set.
+  Stop cancels the request, including during reconnect backoff.
 - Retries (`NESTOR_AI_MAX_ATTEMPTS`, default 5) cover network errors, idle
   timeouts, streams the gateway closed before completing, and HTTP
   408/409/425/429/5xx, with backoff from `NESTOR_AI_RETRY_BASE_DELAY_MS`
@@ -235,8 +241,8 @@ browser vision) goes through one transport
 - `NESTOR_AI_STREAMING=0` sends plain JSON requests; use it only for a
   gateway that rejects `stream: true`, since it removes the liveness signal.
 
-When a call still fails, the error says "timed out after Ns" (budget
-exhausted) or "of silence" (the service went quiet). Resume writing and import
+When a call still fails, the error says "of silence" when the service went
+quiet, or "timed out after Ns" when an explicit operator timeout was reached. Resume writing and import
 report failure rather than silently substituting a rule-made result.
 
 ## Verification

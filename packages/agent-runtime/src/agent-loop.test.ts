@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import {
   runAgentLoop,
@@ -341,73 +341,6 @@ describe("runAgentLoop", () => {
     expect(result.turnNotes.join("\n")).toContain("tool failure");
   });
 
-  test("the time ceiling stops a returned tool batch between calls", async () => {
-    let tick = 0;
-    let secondCalls = 0;
-    const first = tool("first", () => {
-      tick += 2;
-      return Promise.resolve({ kind: "ok", content: "first done" });
-    });
-    const second = tool("second", () => {
-      secondCalls += 1;
-      return Promise.resolve({ kind: "ok", content: "second done" });
-    });
-    const result = await runAgentLoop({
-      messages: opening,
-      model: scripted([[call("first"), call("second")]]),
-      tools: [first, second],
-      subjectLabel: "the site",
-      ceilings: { timeBudgetMs: 1_000 },
-      now: () => new Date(1_700_000_000_000 + tick * 1_000),
-    });
-
-    expect(result.ending).toBe("timed_out");
-    expect(secondCalls).toBe(0);
-  });
-
-  test("running out of time keeps what was done and says so", async () => {
-    let tick = 0;
-    const now = () => new Date(1_700_000_000_000 + tick * 60_000);
-    const work = tool("work", () => {
-      tick += 1;
-      return Promise.resolve({ kind: "ok", content: "ok", progress: true });
-    });
-    const result = await runAgentLoop({
-      messages: opening,
-      model: scripted([[call("work")]]),
-      tools: [work, finishTool],
-      subjectLabel: "the site",
-      ceilings: { timeBudgetMs: 3 * 60_000 },
-      now,
-    });
-    expect(result.ending).toBe("timed_out");
-    expect(result.reason).toContain("ran out of time");
-    expect(result.progressSteps).toBeGreaterThan(0);
-  });
-
-  test("a silent model turn stops promptly and reports progress", async () => {
-    const updates: string[] = [];
-    const result = await runAgentLoop({
-      messages: opening,
-      model: {
-        chatWithTools: () => new Promise(() => undefined),
-      },
-      tools: [finishTool],
-      subjectLabel: "the site",
-      ceilings: { modelTurnTimeoutMs: 10, modelTurnTimeoutRetries: 0 },
-      onStep: ({ note }) => {
-        updates.push(note);
-      },
-    });
-
-    expect(result.ending).toBe("timed_out");
-    expect(result.reason).toContain("did not answer in time");
-    expect(updates).toEqual([
-      "asking the assistant what to do next",
-      "the assistant did not answer before this turn's time limit",
-    ]);
-  });
-
   test("retries one unanswered model turn without replaying any tool", async () => {
     let calls = 0;
     let toolCalls = 0;
@@ -437,35 +370,15 @@ describe("runAgentLoop", () => {
       },
       tools: [countedFinish],
       subjectLabel: "the site",
-      ceilings: { modelTurnTimeoutMs: 10, modelTurnTimeoutRetries: 1 },
+      ceilings: { modelIdleTimeoutMs: 10, modelTurnTimeoutRetries: 1 },
     });
 
     expect(result.ending).toBe("finished");
     expect(calls).toBe(2);
     expect(toolCalls).toBe(1);
     expect(result.turnNotes.join("\n")).toContain(
-      "retrying the same unanswered assistant turn once",
+      "retrying the silent AI connection once",
     );
-  });
-
-  test("stops after the bounded unanswered-turn retry is exhausted", async () => {
-    let calls = 0;
-    const result = await runAgentLoop({
-      messages: opening,
-      model: {
-        chatWithTools: () => {
-          calls += 1;
-          return new Promise(() => undefined);
-        },
-      },
-      tools: [finishTool],
-      subjectLabel: "the site",
-      ceilings: { modelTurnTimeoutMs: 10, modelTurnTimeoutRetries: 1 },
-    });
-
-    expect(result.ending).toBe("timed_out");
-    expect(result.reason).toContain("did not answer in time");
-    expect(calls).toBe(2);
   });
 
   test("shares the bounded no-response retry with a typed transient HTTP failure", async () => {
@@ -586,7 +499,7 @@ describe("runAgentLoop", () => {
       },
       tools: [finishTool],
       subjectLabel: "the site",
-      ceilings: { modelTurnTimeoutMs: 100, modelTurnTimeoutRetries: 1 },
+      ceilings: { modelTurnTimeoutRetries: 1 },
       signal: controller.signal,
     });
     await started;
@@ -704,7 +617,7 @@ describe("runAgentLoop", () => {
     },
   );
 
-  test("a tool that hangs is given up after its deadline and the run carries on", async () => {
+  test("a silent tool returns an idle failure to the model and the run carries on", async () => {
     let calls = 0;
     const hang = tool(
       "read",
@@ -725,73 +638,21 @@ describe("runAgentLoop", () => {
       ]),
       tools: [hang, finishTool],
       subjectLabel: "the site",
-      ceilings: { toolTimeoutMs: 1_000 },
+      ceilings: { toolIdleTimeoutMs: 1_000 },
     });
     expect(result.ending).toBe("finished");
     const gaveUp = result.messages.find(
       (message) =>
-        message.role === "tool" && message.content.includes("took longer than"),
+        message.role === "tool" &&
+        message.content.includes("stopped reporting progress"),
     );
     expect(gaveUp).toBeDefined();
     expect(result.turnNotes.join("\n")).toContain("took too long");
   });
 
-  test("only a requested local task gets its longer deadline", async () => {
-    vi.useFakeTimers();
-    try {
-      const local = tool(
-        "local",
-        () =>
-          new Promise((resolve) => {
-            setTimeout(
-              () =>
-                resolve({
-                  kind: "ok",
-                  content: "Local task complete.",
-                  progress: true,
-                }),
-              1500,
-            );
-          }),
-      );
-      local.timeoutMs = (raw) =>
-        (JSON.parse(raw) as { writing?: boolean }).writing ? 3000 : undefined;
-      const pending = runAgentLoop({
-        messages: opening,
-        model: scripted([
-          [call("local", { writing: true })],
-          [call("local")],
-          [call("finish", { reason: "Done" })],
-        ]),
-        tools: [local, finishTool],
-        subjectLabel: "the task",
-        ceilings: { toolTimeoutMs: 1000 },
-      });
-      await vi.runAllTimersAsync();
-      const result = await pending;
-      const toolMessages = result.messages.filter(
-        (message) => message.role === "tool",
-      );
-      expect(
-        toolMessages.filter(
-          (message) => message.content === "Local task complete.",
-        ),
-      ).toHaveLength(1);
-      expect(
-        toolMessages.filter((message) =>
-          message.content.includes("took longer than 1 seconds"),
-        ),
-      ).toHaveLength(1);
-      expect(result.ending).toBe("finished");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  test("Stop still interrupts a tool with a longer deadline", async () => {
+  test("Stop still interrupts a hanging tool", async () => {
     const controller = new AbortController();
     const local = tool("local", () => new Promise(() => undefined));
-    local.timeoutMs = 300_000;
     const pending = runAgentLoop({
       messages: opening,
       model: scripted([[call("local")]]),

@@ -17,7 +17,6 @@ import {
   type JobSearchProgress,
 } from "@nestor/contracts";
 import { abortable, concurrency, errorMessage } from "./async";
-import { reportSelfLimitHit } from "@nestor/core";
 import { createFitQueue } from "./fit-queue";
 import { fitContextFingerprint } from "./fit-input";
 import { createSearchPipeline } from "./pipeline";
@@ -322,24 +321,7 @@ export function createJobSearchRunner(
             source.row.phase = "browser";
           }
           write(source);
-          const timeLimit =
-            settings.depth === "quick" && !source.full ? 25000 : 45000;
-          const timeout = new AbortController();
-          const timer = setTimeout(() => {
-            reportSelfLimitHit({
-              limit: "browser_source_time",
-              kind: "timeout",
-              value: timeLimit,
-              where: "job-finder/search/browserTask",
-            });
-            timeout.abort(new DOMException("Timed out", "TimeoutError"));
-          }, timeLimit);
-          const deadline = AbortSignal.any([signal, timeout.signal]);
-          try {
-            await abortable(work(deadline), deadline);
-          } finally {
-            clearTimeout(timer);
-          }
+          await abortable(work(signal), signal);
         })
         .catch((error: unknown) => {
           if (!current(source)) return;
@@ -408,22 +390,6 @@ export function createJobSearchRunner(
         );
         siteDirty = true;
       };
-      // HTTP collection has no model of its own. Stop paging, while accepted
-      // cards finish their already-running screening/reading/fit on run.signal.
-      const timer =
-        settings.depth === "quick" && !source.full && lane === "http"
-          ? setTimeout(() => {
-              reportSelfLimitHit({
-                limit: "quick_source_time",
-                kind: "timeout",
-                value: 180000,
-                where: "job-finder/search/collect",
-              });
-              source.quickStopReason ??=
-                "Quick's three-minute look at this site ran out.";
-              stopCollection();
-            }, 180000)
-          : null;
       try {
         const inventory = await abortable(
           deps.engine.collectSource({
@@ -513,8 +479,6 @@ export function createJobSearchRunner(
           source.row.state = "partial";
         write(source);
         markDone(source);
-      } finally {
-        if (timer) clearTimeout(timer);
       }
     };
     const enqueue = (
@@ -546,9 +510,8 @@ export function createJobSearchRunner(
           source.row.phase = "http";
           source.row.lane = "http";
           write(source);
-          const deadline = signal;
           try {
-            await collect(source, "http", deadline);
+            await collect(source, "http", signal);
           } catch (error) {
             if (!current(source)) return;
             source.notes = [

@@ -711,12 +711,11 @@ export interface ApplyAgentConfig extends BrowserPermissionPolicy {
   /** Safety ceilings only. The agent decides when it is done. */
   runControl?: {
     maxSteps?: number;
-    timeBudgetMs?: number;
+
     noProgressStepLimit?: number;
     /** How many pages the run may follow to reach the form. */
     applyEntryMaxHops?: number;
     /** How long the walk from a listing to the form may take. */
-    applyEntryTimeBudgetMs?: number;
   };
   /** Emitted even if a provider or tool throws. */
   onTiming?: (timing: ApplyAgentTiming) => void;

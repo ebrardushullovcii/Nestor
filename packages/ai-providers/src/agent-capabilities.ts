@@ -1107,12 +1107,7 @@ export async function runResumeGenerationAgentTask(input: {
             : {}),
         }),
       }),
-    timeBudgetMs: 60 * 60_000,
-    modelTurnTimeoutMs: Infinity,
     ...(input.request.signal ? { signal: input.request.signal } : {}),
-    ...(input.request.getExcludedElapsedMs
-      ? { getExcludedElapsedMs: input.request.getExcludedElapsedMs }
-      : {}),
     // A clean proposal still finishes immediately. Let useful repairs finish.
     providerCallBudget: Infinity,
     noProgressLimit: 120,
@@ -1128,7 +1123,7 @@ export async function runResumeGenerationAgentTask(input: {
   if (
     result.receipt.stopReason !== "completed" &&
     checkedProposal &&
-    ["time_budget", "cost_budget", "no_progress", "emergency_ceiling"].includes(
+    ["cost_budget", "no_progress", "emergency_ceiling"].includes(
       result.receipt.stopReason,
     )
   ) {
@@ -1166,12 +1161,9 @@ export async function runResumeGenerationAgentTask(input: {
     > | null;
     if (
       flaggedProposal &&
-      [
-        "time_budget",
-        "cost_budget",
-        "no_progress",
-        "emergency_ceiling",
-      ].includes(result.receipt.stopReason)
+      ["cost_budget", "no_progress", "emergency_ceiling"].includes(
+        result.receipt.stopReason,
+      )
     ) {
       // Lines the writer could not back are settled after it returns: the
       // claim fixes put back the person's saved wording or leave the line
@@ -1180,12 +1172,6 @@ export async function runResumeGenerationAgentTask(input: {
         ...completeTailoredResumeDraft(flaggedProposal, input.request),
         recommendedTemplateId: selectedTemplateId,
       });
-    }
-    if (result.receipt.stopReason === "time_budget") {
-      const seconds = Math.max(1, Math.ceil(result.receipt.durationMs / 1_000));
-      throw new Error(
-        `Resume generation agent timed out after ${seconds}s before completing.`,
-      );
     }
     throw new Error(
       `Resume generation agent stopped before completing (${result.receipt.stopReason}).`,
@@ -1471,7 +1457,7 @@ export async function runResumeImportStageAgentTask(input: {
           currentCandidates: draft,
         }),
       }),
-    timeBudgetMs: 600_000,
+    ...(input.request.signal ? { signal: input.request.signal } : {}),
     providerCallBudget: 40,
     noProgressLimit: 6,
     emergencyCeiling: 24,
@@ -1899,9 +1885,6 @@ export async function runProfileCopilotAgentTask(input: {
           validationIssues,
         }),
       }),
-    // Two or three tool turns on a slower model; each turn has its own
-    // timeout, this bounds the whole request.
-    timeBudgetMs: 150_000,
     noProgressLimit: 4,
   });
 
@@ -2160,26 +2143,12 @@ export async function runResumeEditAgentTask(input: {
   // is refused (a bounded number of times) with the verdict attached.
   let lastCheckedSignature: string | null = null;
   let gateRefusals = 0;
-  // Stall warning and safety net. A Tailored "what would you change" run
-  // rewrote the summary, was flagged, removed it, rewrote it again, and
-  // reached its time budget with nothing to show. From the third flagged
-  // check, or half the budget, the model is told to keep what passed and
-  // finish; a run that still stops mid-rewording keeps the newest set of
-  // changes that passed the check.
-  const editStartedAtMs = Date.now();
-  const editBudgetMs = 60 * 60_000;
+  // Keep the existing repeated-check warning; elapsed time never ends useful edits.
   let flaggedCheckCount = 0;
   let lastCleanPatches: ResumeDraftPatch[] | null = null;
   const describeEditStall = (): string | null => {
-    const elapsedMs = Date.now() - editStartedAtMs;
-    if (flaggedCheckCount < 3 && elapsedMs < editBudgetMs / 2) {
-      return null;
-    }
-    const secondsLeft = Math.max(
-      0,
-      Math.round((editBudgetMs - elapsedMs) / 1_000),
-    );
-    return `This is flagged check ${flaggedCheckCount} and about ${secondsLeft}s are left. Stop rewording: remove each flagged change with remove_resume_patch and keep the ones that passed, set the response to say what you changed and which part you could not do because the saved evidence does not back it, then call validate_resume_draft once more and finish_task. A run that stops in the middle of rewording gives the person nothing.`;
+    if (flaggedCheckCount < 3) return null;
+    return `This is flagged check ${flaggedCheckCount}. Stop rewording: remove each flagged change with remove_resume_patch and keep the ones that passed, set the response to say what you changed and which part you could not do because the saved evidence does not back it, then call validate_resume_draft once more and finish_task. A run that stops in the middle of rewording gives the person nothing.`;
   };
   const runCheck = async (patches: readonly ResumeDraftPatch[]) => {
     const check = input.request.checkProposal
@@ -2774,10 +2743,6 @@ export async function runResumeEditAgentTask(input: {
           validationIssues,
         }),
       }),
-    // A few tool turns plus one or two repairs after the approval check;
-    // each turn has its own timeout, this bounds the whole request.
-    timeBudgetMs: editBudgetMs,
-    modelTurnTimeoutMs: Infinity,
     providerCallBudget: Infinity,
     emergencyCeiling: Infinity,
     noProgressLimit: 120,

@@ -1,3 +1,4 @@
+import { createConnectionIdleTimeout } from "@nestor/core";
 import { reportSelfLimitHit, yieldToEventLoop } from "@nestor/core";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -1425,7 +1426,6 @@ function inferWorkModes(
 /** Silence (no answer, no bytes) that ends a feed request. */
 const PROVIDER_API_TIMEOUT_MS = 30_000;
 /** The longest a feed may take even while bytes keep arriving. */
-const PROVIDER_API_TOTAL_TIMEOUT_MS = 3 * 60_000;
 /**
  * Waits before asking a provider again after a failure that passes: the
  * connection dropped, or the provider asked to slow down. A computer waking
@@ -1573,63 +1573,12 @@ function resolveProviderCompanyLabel(input: {
 
 /**
  * Ends a feed request that went quiet: no answer and no body bytes for
- * `quietMs`, or still unfinished after `totalMs`. Time the main process
+ * `quietMs`. Time the main process
  * spent on other work does not count as quiet: when the timer comes due it
  * first lets the network events waiting behind that work run (one turn of
  * the event loop) and ends the request only if none of them moved it. A busy
  * search used to time out feeds whose bytes had already arrived.
  */
-function createProviderApiQuietTimeout(quietMs: number, totalMs: number) {
-  const controller = new AbortController();
-  let lastProgressAt = Date.now();
-  let finished = false;
-  let quietTimer: ReturnType<typeof setTimeout> | null = null;
-  const end = () => {
-    if (!finished) controller.abort();
-  };
-  const totalTimer = setTimeout(() => {
-    if (!finished && !controller.signal.aborted) {
-      reportSelfLimitHit({
-        limit: "provider_feed_total_time",
-        kind: "timeout",
-        value: totalMs,
-        where: "job-finder/createProviderApiQuietTimeout",
-      });
-      end();
-    }
-  }, totalMs);
-  const arm = (delay: number) => {
-    quietTimer = setTimeout(check, delay);
-  };
-  const check = () => {
-    quietTimer = null;
-    if (finished) return;
-    const quietFor = Date.now() - lastProgressAt;
-    if (quietFor < quietMs) {
-      arm(quietMs - quietFor);
-      return;
-    }
-    const progressBefore = lastProgressAt;
-    setImmediate(() => {
-      if (finished) return;
-      if (lastProgressAt !== progressBefore) arm(quietMs);
-      else end();
-    });
-  };
-  arm(quietMs);
-  return {
-    signal: controller.signal,
-    progress: () => {
-      lastProgressAt = Date.now();
-    },
-    cleanup: () => {
-      finished = true;
-      clearTimeout(totalTimer);
-      if (quietTimer) clearTimeout(quietTimer);
-    },
-  };
-}
-
 /** The feed's JSON, read chunk by chunk so each chunk counts as progress. */
 async function readFeedBytes(
   response: Response,
@@ -1957,9 +1906,8 @@ export async function collectPublicProviderJobs(input: {
       const publicApiUrl = provider.publicApiUrlTemplate;
       // One request with its own time limit; the body is read inside it.
       const requestFeed = async (): Promise<Uint8Array> => {
-        const timeout = createProviderApiQuietTimeout(
+        const timeout = createConnectionIdleTimeout(
           input.timeoutMs ?? PROVIDER_API_TIMEOUT_MS,
-          PROVIDER_API_TOTAL_TIMEOUT_MS,
         );
         const composedSignal = composeAbortSignals(
           timeout.signal,

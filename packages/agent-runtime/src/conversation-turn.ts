@@ -29,7 +29,7 @@ import type {
  * - the answer streams, and each retry replaces the partial text
  * - messages the person sends while the turn works are read at every tool
  *   boundary, before the next action is dispatched
- * - every tool call has its own cancellation, so a deadline or a Stop reaches
+ * - every tool call has its own cancellation, so silence or a Stop reaches
  *   the work instead of only ending the wait
  * - a fence is checked before every dispatch, so a superseded turn never
  *   starts another action
@@ -98,11 +98,9 @@ export type ConversationTurnEvent =
 export interface ConversationTurnCeilings {
   /** Model calls in one turn. Safety only; far above an honest turn. */
   maxModelCalls?: number;
-  timeBudgetMs?: number;
-  /** One tool call's deadline; the call's own signal is aborted when it passes. */
-  toolTimeoutMs?: number;
-  modelCallTimeoutMs?: number;
   maxOutputTokens?: number;
+  /** Silence while a tool is running; progress restarts this clock. */
+  toolIdleTimeoutMs?: number;
   /** Silence between model stream events, not elapsed reasoning time. */
   modelIdleTimeoutMs?: number;
   /** Repeated identical tool batches without progress before stopping. */
@@ -163,18 +161,8 @@ export interface ConversationTurnResult {
 }
 
 const DEFAULT_MAX_MODEL_CALLS = Infinity;
-const DEFAULT_TIME_BUDGET_MS = Infinity;
-const DEFAULT_TOOL_TIMEOUT_MS = 180_000;
-const DEFAULT_MODEL_CALL_TIMEOUT_MS = Infinity;
 const DEFAULT_TOOL_RESULT_LIMIT_CHARS = 16_000;
 const STATUS_ARGUMENT = "status";
-
-export class ToolCallDeadlineError extends Error {
-  constructor(seconds: number) {
-    super(`That step took longer than ${seconds} seconds and was stopped.`);
-    this.name = "ToolCallDeadlineError";
-  }
-}
 
 function parseArguments(raw: string): Record<string, unknown> {
   if (!raw || raw.trim().length === 0) return {};
@@ -255,72 +243,13 @@ function isAbortError(error: unknown): boolean {
   );
 }
 
-/**
- * Runs one tool call with its own abort controller. The deadline aborts the
- * controller, so a cooperative tool stops its work instead of finishing in
- * the background; a Stop of the whole turn reaches it the same way.
- */
-async function runToolWithDeadline(
-  tool: ConversationTool,
-  call: AgentLoopToolCall,
-  step: number,
-  timeoutMs: number,
-  turnSignal: AbortSignal | undefined,
-): Promise<AgentLoopToolOutcome> {
-  const controller = new AbortController();
-  const onTurnAbort = () => controller.abort(turnSignal?.reason);
-  if (turnSignal?.aborted) controller.abort(turnSignal.reason);
-  turnSignal?.addEventListener("abort", onTurnAbort, { once: true });
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await new Promise<AgentLoopToolOutcome>((resolve, reject) => {
-      timer = setTimeout(() => {
-        const error = new ToolCallDeadlineError(Math.round(timeoutMs / 1000));
-        controller.abort(error);
-        reject(error);
-      }, timeoutMs);
-      controller.signal.addEventListener(
-        "abort",
-        () => {
-          if (!(controller.signal.reason instanceof ToolCallDeadlineError)) {
-            reject(new DOMException("The turn was stopped.", "AbortError"));
-          }
-        },
-        { once: true },
-      );
-      if (controller.signal.aborted) {
-        reject(new DOMException("The turn was stopped.", "AbortError"));
-        return;
-      }
-      tool
-        .execute(call.function.arguments, {
-          step,
-          signal: controller.signal,
-        })
-        .then(resolve, reject);
-    });
-  } finally {
-    if (timer) clearTimeout(timer);
-    turnSignal?.removeEventListener("abort", onTurnAbort);
-  }
-}
-
 export async function runConversationTurn(
   options: RunConversationTurnOptions,
 ): Promise<ConversationTurnResult> {
-  const now = options.now ?? (() => Date.now());
-  const startedAt = now();
   const maxModelCalls = Math.max(
     1,
     options.ceilings?.maxModelCalls ?? DEFAULT_MAX_MODEL_CALLS,
   );
-  const timeBudgetMs = options.ceilings?.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS;
-  const toolTimeoutMs = Math.max(
-    1_000,
-    options.ceilings?.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
-  );
-  const modelCallTimeoutMs =
-    options.ceilings?.modelCallTimeoutMs ?? DEFAULT_MODEL_CALL_TIMEOUT_MS;
   const resultLimit =
     options.toolResultLimitChars ?? DEFAULT_TOOL_RESULT_LIMIT_CHARS;
   const toolsByName = new Map(
@@ -372,7 +301,6 @@ export async function runConversationTurn(
   while (modelCalls < maxModelCalls) {
     if (options.signal?.aborted) return result("aborted");
     if (!current()) return result("superseded");
-    if (now() - startedAt >= timeBudgetMs) return result("timed_out");
     await readSteering();
 
     const messages = await options.assembleMessages(turnMessages);
@@ -397,10 +325,6 @@ export async function runConversationTurn(
             }),
           {
             signal: options.signal,
-            timeoutMs: Math.min(
-              modelCallTimeoutMs,
-              timeBudgetMs - (now() - startedAt),
-            ),
             idleTimeoutMs: options.ceilings?.modelIdleTimeoutMs,
             onStreamEvent: (event) => {
               void emit({ type: "stream", call, event });
@@ -427,8 +351,7 @@ export async function runConversationTurn(
         if (
           error instanceof ModelTurnTimeoutError &&
           error.kind === "idle" &&
-          idleRetries++ === 0 &&
-          now() - startedAt < timeBudgetMs
+          idleRetries++ === 0
         ) {
           modelCalls += 1;
           await emit({
@@ -438,8 +361,6 @@ export async function runConversationTurn(
           });
           continue;
         }
-        if (error instanceof ModelTurnTimeoutError && error.kind === "absolute")
-          return result("timed_out", { error });
         return result("model_failed", { error });
       }
     }
@@ -566,12 +487,18 @@ export async function runConversationTurn(
       step += 1;
       let outcome: AgentLoopToolOutcome;
       try {
-        outcome = await runToolWithDeadline(
-          tool,
-          toolCall,
-          step,
-          toolTimeoutMs,
-          options.signal,
+        outcome = await runModelTurn(
+          ({ signal, onStreamEvent }) =>
+            tool.execute(toolCall.function.arguments, {
+              step,
+              signal,
+              onProgress: () =>
+                onStreamEvent({ type: "tool_call_delta", index: 0 }),
+            }),
+          {
+            signal: options.signal,
+            idleTimeoutMs: options.ceilings?.toolIdleTimeoutMs,
+          },
         );
       } catch (error) {
         batchSucceeded = false;
@@ -593,8 +520,8 @@ export async function runConversationTurn(
           continue;
         }
         const text =
-          error instanceof ToolCallDeadlineError
-            ? `${error.message} Look again before deciding what to do next.`
+          error instanceof ModelTurnTimeoutError
+            ? "That step stopped reporting progress. Look again before deciding what to do next."
             : (tool.describeError?.(error) ??
               "That tool could not complete this step. Try a different approach, or say what remains.");
         turnMessages.push({

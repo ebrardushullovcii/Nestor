@@ -173,9 +173,7 @@ export function buildExtractionSelectionContext(
 
 // Runaway protection only: productive searches routinely need hundreds of turns.
 /** How long one search turn may wait for the model before it is asked again. */
-const SEARCH_MODEL_TURN_TIMEOUT_MS = Infinity;
 const DEFAULT_MAX_STEPS = 10_000;
-const DEFAULT_TIME_BUDGET_MS = 60 * 60_000;
 const DEFAULT_NO_PROGRESS_STEP_LIMIT = 120;
 
 function jobKey(
@@ -308,8 +306,8 @@ const PAGE_READ_CONCURRENCY = 8;
 /** New parts one extract_jobs call reads: one round, well inside the 90-second tool deadline. */
 const PAGE_READ_PARTS_PER_CALL = 8;
 
-/** A timed-out part must not hold successful siblings past the tool deadline. */
-async function readWithDeadline<T>(
+/** Retry a silent page reader without ending working siblings. */
+async function readWithLiveness<T>(
   read: (options: {
     signal: AbortSignal;
     onStreamEvent: (event: ModelTurnStreamEvent) => void;
@@ -330,7 +328,7 @@ async function readWithDeadline<T>(
           limit: "page_reader_retries",
           kind: "retry",
           value: 2,
-          where: "browser-agent/readWithDeadline",
+          where: "browser-agent/readWithLiveness",
         });
       if (
         !(error instanceof ModelTurnTimeoutError) ||
@@ -920,7 +918,7 @@ export async function runJobSearchAgent(
         jobs: number,
         excludedCanonicalUrls: readonly string[] = [],
       ) =>
-        readWithDeadline((turnOptions) => {
+        readWithLiveness((turnOptions) => {
           context.onProgress?.();
           return input.jobExtractor.extractJobsFromPage({
             pageText,
@@ -1615,10 +1613,8 @@ export async function runJobSearchAgent(
     staleToolResultKeepRecent: SEARCH_KEEP_WHOLE_ANSWERS,
     ceilings: {
       maxSteps: Math.max(config.maxSteps, DEFAULT_MAX_STEPS),
-      timeBudgetMs: config.runControl?.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS,
       // A working stream may keep thinking. The shared loop retries a silent
       // connection once; transient service failures retain their own retries.
-      modelTurnTimeoutMs: SEARCH_MODEL_TURN_TIMEOUT_MS,
       modelTurnTimeoutRetries: 2,
       noProgressStepLimit:
         config.runControl?.noProgressStepLimit ??
@@ -1646,19 +1642,6 @@ export async function runJobSearchAgent(
       limit: "search_steps",
       kind: "steps",
       value: Math.max(config.maxSteps, DEFAULT_MAX_STEPS),
-      where: "browser-agent/runJobSearchAgent",
-    });
-  if (
-    loop.ending === "timed_out" &&
-    (!loop.reason.includes("assistant") ||
-      Number.isFinite(SEARCH_MODEL_TURN_TIMEOUT_MS))
-  )
-    reportSelfLimitHit({
-      limit: "search_time",
-      kind: "timeout",
-      value: loop.reason.includes("assistant")
-        ? SEARCH_MODEL_TURN_TIMEOUT_MS
-        : (config.runControl?.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS),
       where: "browser-agent/runJobSearchAgent",
     });
   if (loop.ending === "stalled")

@@ -117,7 +117,7 @@ export function createResumeService(deps: ResumeServiceDeps) {
   async function withListing(job: JobDetail, signal: AbortSignal) {
     if (job.facts.fullListingRead === true) return job;
     const page = await fetchHtml(job.url, {
-      signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]),
+      signal,
     });
     signal.throwIfAborted();
     if (page.status >= 400)

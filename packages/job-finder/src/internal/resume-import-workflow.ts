@@ -1,5 +1,5 @@
 import { resumeImportSavedAnswers } from "./resume-import-saved-answers";
-import { createConcurrencyLimiter, reportSelfLimitHit } from "@nestor/core";
+import { createConcurrencyLimiter } from "@nestor/core";
 import { ResumeImportStageUnreadError } from "@nestor/ai-providers";
 import {
   CandidateProfileSchema,
@@ -42,7 +42,6 @@ import { enrichExperienceCandidatesFromNearbyMarkers } from "./resume-import-exp
 import {
   NO_AI_PROVIDER_REASON,
   ResumeImportStageExtractionResultSchema,
-  ResumeVisionExtractionResultSchema,
   type ResumeImportExtractionStage,
   type ResumeImportStageExtractionResult,
   type ResumeVisionExtractionResult,
@@ -642,23 +641,8 @@ function resumeImportStageFailureOutcome(
   };
 }
 
-function visionTimeoutMsFor(ctx: ProfileContext): number {
-  const timeoutMs = ctx.visionProvider?.getStatus().requestTimeoutMs;
-
-  return typeof timeoutMs === "number" &&
-    Number.isFinite(timeoutMs) &&
-    timeoutMs > 0
-    ? timeoutMs
-    : 600_000;
-}
-
-function visionBranchTimeoutMessage(timeoutMs: number): string {
-  return `Vision resume import branch timed out after ${timeoutMs}ms; text import continued.`;
-}
-
-function visionBranchDeferredMessage(timeoutMs: number): string {
-  const timeoutMinutes = Math.max(1, Math.round(timeoutMs / 60_000));
-  return `Visual scan is still running. Your text import is ready, and visual reconciliation will continue in the background for up to ${timeoutMinutes} minute${timeoutMinutes === 1 ? "" : "s"}.`;
+function visionBranchDeferredMessage(): string {
+  return "Visual scan is still running. Your text import is ready, and visual reconciliation will continue in the background.";
 }
 
 function removeVisionDeferredWarnings(warnings: readonly string[]): string[] {
@@ -670,67 +654,10 @@ function removeVisionDeferredWarnings(warnings: readonly string[]): string[] {
   );
 }
 
-function createVisionTimeoutResult(
-  ctx: ProfileContext,
-  message: string,
-): ResumeVisionExtractionResult {
-  const status = ctx.visionProvider?.getStatus();
-
-  return ResumeVisionExtractionResultSchema.parse({
-    analysisProviderKind:
-      status?.kind === "openai_compatible_vision"
-        ? "openai_compatible_vision"
-        : "deterministic",
-    analysisProviderLabel: status?.label ?? "Resume vision provider",
-    candidates: [],
-    notes: [],
-    warnings: [message],
-    primaryErrorMessage: message,
-  });
-}
-
-function createTimedOutVisionResult(
-  ctx: ProfileContext,
-  timeoutMs: number,
-): ResumeVisionExtractionResult {
-  return createVisionTimeoutResult(ctx, visionBranchTimeoutMessage(timeoutMs));
-}
-
-function withVisionBranchDeadline(
-  promise: Promise<ResumeVisionBranchResult>,
-  timeoutMs: number,
-  ctx: ProfileContext,
-  options: { unrefTimer?: boolean } = {},
-): Promise<ResumeVisionBranchResult> {
-  let timer: NodeJS.Timeout | null = null;
-
-  const timeoutPromise = new Promise<ResumeVisionBranchResult>((resolve) => {
-    timer = setTimeout(() => {
-      reportSelfLimitHit({
-        limit: "resume_vision_branch",
-        kind: "timeout",
-        value: timeoutMs,
-        where: "job-finder/withVisionBranchDeadline",
-      });
-      resolve({ ok: true, result: createTimedOutVisionResult(ctx, timeoutMs) });
-    }, timeoutMs);
-    if (options.unrefTimer) {
-      timer.unref?.();
-    }
-  });
-
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  });
-}
-
 function getVisionBranchWithoutBlockingTextCompletion(
   observedVisionBranch: ReturnType<
     typeof observePromise<ResumeVisionBranchResult>
   >,
-  timeoutMs: number,
 ): Promise<ResumeVisionBranchResolution> {
   let timer: NodeJS.Timeout | null = null;
   const nextTickPromise = new Promise<{ settled: false }>((resolve) => {
@@ -754,7 +681,7 @@ function getVisionBranchWithoutBlockingTextCompletion(
       return {
         ok: false as const,
         deferred: true as const,
-        message: visionBranchDeferredMessage(timeoutMs),
+        message: visionBranchDeferredMessage(),
       };
     })
     .finally(() => {
@@ -988,7 +915,7 @@ async function completeDeferredVisionBranch(input: {
   textCandidates: readonly ResumeImportFieldCandidate[];
   baselineProfile: CandidateProfile;
   baselineSearchPreferences: JobSearchPreferences;
-  visionTimeoutMs: number;
+  visionTimeoutMs: number | null;
   /** A stopped import writes nothing more, even from this late branch. */
   signal?: AbortSignal;
 }): Promise<void> {
@@ -1001,12 +928,7 @@ async function completeDeferredVisionBranch(input: {
   let run = input.run;
 
   try {
-    const visionBranch = await waitForImport(
-      withVisionBranchDeadline(promise, visionTimeoutMs, ctx, {
-        unrefTimer: true,
-      }),
-      input.signal,
-    );
+    const visionBranch = await waitForImport(promise, input.signal);
     const currentCandidates =
       await ctx.repository.listResumeImportFieldCandidates({ runId });
     // Read the profile together with its current revision: the text stage
@@ -1766,7 +1688,9 @@ async function runResumeImportWorkflowInProcess(
       visionArtifact && visionArtifact.pages.length > 0 && visionProvider,
     );
     const visionStartedAt = canRunVision ? textStartedAt : null;
-    const visionTimeoutMs = canRunVision ? visionTimeoutMsFor(ctx) : null;
+    const visionTimeoutMs = canRunVision
+      ? (ctx.visionProvider?.getStatus().requestTimeoutMs ?? null)
+      : null;
     const modelRoles = modelRolesFor(run);
     run = ResumeImportRunSchema.parse({
       ...run,
@@ -1831,6 +1755,7 @@ async function runResumeImportWorkflowInProcess(
                   existingProfile: input.profile,
                   existingSearchPreferences: input.searchPreferences,
                   documentBundle: bundle,
+                  ...(input.signal ? { signal: input.signal } : {}),
                 };
                 const result = ResumeImportStageExtractionResultSchema.parse(
                   await ctx.aiClient.extractResumeImportStage(stageInput),
@@ -2098,22 +2023,12 @@ async function runResumeImportWorkflowInProcess(
       visionBranch = visionSnapshot.settled
         ? visionSnapshot.value
         : await waitForImport(
-            getVisionBranchWithoutBlockingTextCompletion(
-              observedVisionBranch,
-              visionTimeoutMs ?? 600_000,
-            ),
+            getVisionBranchWithoutBlockingTextCompletion(observedVisionBranch),
             input.signal,
           );
     } else {
       visionBranch = canRunVision
-        ? await waitForImport(
-            withVisionBranchDeadline(
-              observedVisionBranch.promise,
-              visionTimeoutMs ?? 600_000,
-              ctx,
-            ),
-            input.signal,
-          )
+        ? await waitForImport(observedVisionBranch.promise, input.signal)
         : await observedVisionBranch.promise;
     }
     const reconciliationStartedAtMs = performance.now();
@@ -2541,11 +2456,7 @@ async function runResumeImportWorkflowInProcess(
       run = atomicallyFinalizedRun;
     }
 
-    if (
-      isDeferredVisionBranch(visionBranch) &&
-      canRunVision &&
-      visionTimeoutMs
-    ) {
+    if (isDeferredVisionBranch(visionBranch) && canRunVision) {
       void scheduleDeferredVisionBranchCompletion({
         ctx,
         promise: observedVisionBranch.promise,

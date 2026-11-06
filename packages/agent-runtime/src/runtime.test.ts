@@ -529,104 +529,6 @@ describe("agent task runtime", () => {
     expect(result.receipt.stopReason).toBe("cost_budget");
   });
 
-  test("one silent provider call cannot overrun the task budget", async () => {
-    const progress: string[] = [];
-    const result = await runAgentTask({
-      taskId: "task_silent_provider",
-      capability: "bounded_task",
-      systemPrompt: "Use a tool.",
-      state: {},
-      initialDraft: {},
-      model: {
-        chat() {
-          return new Promise(() => {
-            // Deliberately ignore the signal: the runtime still owns its
-            // deadline even when a provider adapter fails to settle on abort.
-          });
-        },
-      },
-      tools: [],
-      validate: () => [],
-      buildContext: () => ({}),
-      timeBudgetMs: 1_000,
-      modelTurnTimeoutMs: 10,
-      onProgress: ({ message }) => progress.push(message),
-    });
-
-    expect(result.receipt.stopReason).toBe("time_budget");
-    expect(result.receipt.providerCalls).toBe(1);
-    expect(progress).toContain(
-      "The assistant did not answer before this turn's time limit",
-    );
-  });
-
-  test("excludes local queue wait but counts rendering and bounds the next model turn", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    let excludedMs = 0;
-    let calls = 0;
-    let settled = false;
-    try {
-      const run = runAgentTask({
-        taskId: "task_local_queue",
-        capability: "bounded_task",
-        systemPrompt: "Render, then finish.",
-        state: {},
-        initialDraft: {},
-        timeBudgetMs: 1_000,
-        getExcludedElapsedMs: () => excludedMs,
-        model: {
-          chat() {
-            calls += 1;
-            if (calls > 1) return new Promise(() => {});
-            vi.setSystemTime(100);
-            return Promise.resolve({
-              toolCalls: [
-                {
-                  id: "render",
-                  type: "function" as const,
-                  function: { name: "render", arguments: "{}" },
-                },
-              ],
-            });
-          },
-        },
-        tools: [
-          {
-            name: "render",
-            description: "Render a local artifact",
-            inputSchema: z.object({}),
-            parameters: { type: "object", properties: {} },
-            permission: "read",
-            execute() {
-              vi.setSystemTime(2_600);
-              excludedMs = 2_500;
-              vi.setSystemTime(3_000);
-              return { summary: "Rendered", progressMade: true };
-            },
-          },
-        ],
-        validate: () => [],
-        buildContext: () => ({}),
-      }).then((result) => {
-        settled = true;
-        return result;
-      });
-
-      await vi.advanceTimersByTimeAsync(0);
-      expect(calls).toBe(2);
-      await vi.advanceTimersByTimeAsync(499);
-      expect(settled).toBe(false);
-      await vi.advanceTimersByTimeAsync(1);
-      const result = await run;
-      expect(result.receipt.stopReason).toBe("time_budget");
-      expect(result.receipt.durationMs).toBe(3_500);
-      expect(result.receipt.toolReceipts[0]?.durationMs).toBe(2_900);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   test("keeps the assistant tool-call message when the recent tail contains many tool results", async () => {
     let providerCall = 0;
     const result = await runAgentTask({
@@ -693,4 +595,79 @@ describe("agent task runtime", () => {
 
     expect(result.receipt.stopReason).toBe("completed");
   });
+});
+
+test("a task's working model stream outlives the former task and turn budgets", async () => {
+  vi.useFakeTimers();
+  try {
+    const pending = runAgentTask({
+      taskId: "long-stream",
+      capability: "synthetic",
+      systemPrompt: "Finish",
+      state: {},
+      initialDraft: {},
+      model: {
+        chat: ({ onStreamEvent }) =>
+          new Promise((resolve) => {
+            const interval = setInterval(
+              () =>
+                onStreamEvent?.({ type: "reasoning_delta", text: "Working" }),
+              100_000,
+            );
+            setTimeout(() => {
+              clearInterval(interval);
+              resolve({
+                toolCalls: [
+                  {
+                    id: "finish",
+                    type: "function",
+                    function: { name: "finish_task", arguments: "{}" },
+                  },
+                ],
+              });
+            }, 7_200_000);
+          }),
+      },
+      tools: [
+        {
+          name: "finish_task",
+          description: "Finish",
+          parameters: { type: "object" },
+          inputSchema: z.object({}),
+          permission: "read",
+          execute: () => ({ summary: "Done", finish: true }),
+        },
+      ],
+      validate: () => [],
+      buildContext: () => ({}),
+    });
+    await vi.advanceTimersByTimeAsync(7_200_000);
+    expect((await pending).receipt.stopReason).toBe("completed");
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Stop cancels an uncooperative task model without retrying", async () => {
+  const controller = new AbortController();
+  const chat = vi.fn(() => new Promise<never>(() => {}));
+  const pending = runAgentTask({
+    taskId: "stop-stream",
+    capability: "synthetic",
+    systemPrompt: "Finish",
+    state: {},
+    initialDraft: {},
+    model: { chat },
+    tools: [],
+    validate: () => [],
+    buildContext: () => ({}),
+    signal: controller.signal,
+  });
+  const cancelled = expect(pending).rejects.toMatchObject({
+    name: "AbortError",
+  });
+  controller.abort();
+  await cancelled;
+  expect(chat).toHaveBeenCalledOnce();
 });

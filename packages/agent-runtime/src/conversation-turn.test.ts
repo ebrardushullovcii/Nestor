@@ -268,7 +268,7 @@ describe("runConversationTurn", () => {
     expect(toolResults[1]?.content).toMatch(/Not run/);
   });
 
-  it("aborts the running tool's own signal on the deadline", async () => {
+  it("aborts a silent tool's own signal after no progress", async () => {
     let sawAbort = false;
     const model = scripted([
       { toolCalls: [call("c1", "slow")] },
@@ -289,12 +289,12 @@ describe("runConversationTurn", () => {
         ),
       ],
       assembleMessages: async (turn) => [...turn],
-      ceilings: { toolTimeoutMs: 1_000 },
+      ceilings: { toolIdleTimeoutMs: 1_000 },
     });
     expect(sawAbort).toBe(true);
     expect(result.ending).toBe("replied");
     expect(result.turnMessages.find((m) => m.role === "tool")?.content).toMatch(
-      /longer than 1 seconds/,
+      /stopped reporting progress/,
     );
   });
 

@@ -1341,7 +1341,6 @@ export async function runBrowserAgentSystemCase(input: {
       source: "target_site",
       maxSteps: isSourceDebug ? 7 : 6,
       runControl: {
-        timeBudgetMs: isSourceDebug ? 120_000 : 90_000,
         noProgressStepLimit: isSourceDebug ? 10 : 8,
       },
       targetJobCount,
