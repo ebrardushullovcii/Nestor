@@ -1,6 +1,7 @@
 import { traceOurs, traceEvent, withTraceScope } from "@nestor/core/run-trace";
 import { isAgentRunAborted } from "./cancellation";
 import { observeModel, observeTool, type RuntimeObservers } from "./observers";
+import { createContextHistory } from "./context-history";
 /**
  * The one loop every Job Finder agent runs on.
  *
@@ -169,6 +170,8 @@ export interface AgentLoopOptions extends RuntimeObservers {
   describeStall?: () => string | null;
   /** Rough size at which older turns are trimmed. */
   compactionMaxChars?: number;
+  /** Keep exact compacted messages accessible through read_context_history. */
+  retainCompactedHistory?: boolean;
   /**
    * Tool answers older than the most recent few are cut to this many
    * characters. A page view is out of date once the model has acted again;
@@ -200,7 +203,7 @@ export interface AgentLoopOptions extends RuntimeObservers {
   onReplyWithoutTool?: (
     content: string,
   ) => Promise<AgentLoopToolOutcome | null>;
-  onHistoryCompacted?: () => string | null;
+  onHistoryCompacted?: (messages: readonly AgentLoopMessage[]) => string | null;
   /** Called for every attempted tool, including failures. */
   onToolTiming?: (step: { toolName: string; durationMs: number }) => void;
   signal?: AbortSignal;
@@ -391,10 +394,17 @@ export async function runAgentLoop(
 
   let messages: AgentLoopMessage[] = [...options.messages];
   const openingCount = messages.length;
+  const contextHistory = options.retainCompactedHistory
+    ? createContextHistory(compactionMaxChars)
+    : null;
+  const tools = [
+    ...options.tools,
+    ...(contextHistory ? [contextHistory.tool] : []),
+  ];
   const toolsByName = new Map(
-    options.tools.map((tool) => [tool.definition.function.name, tool]),
+    tools.map((tool) => [tool.definition.function.name, tool]),
   );
-  const definitions = options.tools.map((tool) => tool.definition);
+  const definitions = tools.map((tool) => tool.definition);
   const turnNotes: string[] = [];
 
   let steps = 0;
@@ -836,19 +846,18 @@ export async function runAgentLoop(
         );
     }
     const beforeCompaction = messages;
-    messages = compactMessages(
-      messages,
-      openingCount,
-      turnNotes,
-      compactionMaxChars,
-    );
+    messages = contextHistory
+      ? contextHistory.compact(messages, openingCount, turnNotes)
+      : compactMessages(messages, openingCount, turnNotes, compactionMaxChars);
     if (messages !== beforeCompaction) {
       traceOurs(
         "packages/agent-runtime/src/agent-loop.ts:compactMessages",
         "rewritten",
-        "Older conversation turns replaced by turn notes",
+        contextHistory
+          ? "Older turns moved to exact readable context-history archives at the model window"
+          : "Older conversation turns replaced by turn notes",
       );
-      const context = options.onHistoryCompacted?.();
+      const context = options.onHistoryCompacted?.(messages);
       if (context) messages.push({ role: "user", content: context });
     }
   }

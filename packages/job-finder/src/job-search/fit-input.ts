@@ -12,9 +12,6 @@ export function fitContextInput(context: JobSearchContext, request = "") {
   const p = context.profile;
   return {
     scorerVersion: LISTING_FIT_SCORER_VERSION,
-    permissionDate: p.workEligibility.limitedWorkPermissions?.length
-      ? new Date().toISOString().slice(0, 10)
-      : undefined,
     person: buildListingFitPerson(p),
     goals: toJobSearchGoals({
       ...context.searchPreferences,

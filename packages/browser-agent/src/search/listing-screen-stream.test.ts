@@ -3,7 +3,72 @@ import { DiscoveryPageReadError, type ListingCard } from "@nestor/contracts";
 import type { LLMClient } from "../agent/contracts";
 import { screenCards } from "./listing-engine";
 import { fingerprint } from "./listing-html";
-import { professionEvidence } from "./listing-screening";
+import {
+  professionEvidence,
+  encodeScreeningEvidence,
+} from "./listing-screening";
+
+test("screening evidence blocks appear once per batch and reconstruct every original field exactly", () => {
+  const common = "Menu\nLocations\n\nBuild accessible interfaces\nMenu";
+  const encoded = encodeScreeningEvidence([
+    [0, "One", "One\nMenu", common],
+    [1, "Two", "Two\nMenu", common + "\nUnique duty"],
+  ]);
+  expect(new Set(encoded.evidenceBlocks).size).toBe(
+    encoded.evidenceBlocks.length,
+  );
+  for (const [index, original] of [
+    common,
+    common + "\nUnique duty",
+  ].entries()) {
+    const refs = encoded.titles[index][3] as number[];
+    expect(refs.map((id) => encoded.evidenceBlocks[id]).join("\n")).toBe(
+      original,
+    );
+  }
+});
+
+test("published vacancy duties are supplied separately from an unmarked menu without losing page facts", async () => {
+  const listing = card("Interface Specialist");
+  const calls: Parameters<LLMClient["chatWithTools"]>[0][] = [];
+  await screenCards({
+    cards: [
+      listing,
+      {
+        ...listing,
+        url: listing.url + "-2",
+        title: "Interface Developer",
+        text: "Interface Developer",
+      },
+    ],
+    goals,
+    client: {
+      chatWithTools: (messages) => {
+        calls.push(messages);
+        return Promise.resolve({ content: '{"keep":{"0":1,"1":1}}' });
+      },
+    },
+    readPage: (url) =>
+      Promise.resolve({
+        finalUrl: url,
+        html: `<body><div>Menu</div><div>Locations</div><h1>${listing.title}</h1><div>Build accessible interfaces</div><script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", title: listing.title, description: "Build accessible interfaces", hiringOrganization: { name: "Synthetic Employer" } })}</script></body>`,
+      }),
+  });
+  const input = JSON.parse(calls[0][1].content) as {
+    evidenceBlocks: string[];
+    titles: [number, string, number[], number[]][];
+  };
+  const duties = input.titles[0][3]
+    .map((id) => input.evidenceBlocks[id])
+    .join("\n");
+  expect(duties).toContain(
+    "Published vacancy duties:\nBuild accessible interfaces",
+  );
+  expect(duties).toContain("Additional visible page evidence:\nMenu");
+  expect(input.evidenceBlocks.filter((value) => value === "Menu")).toHaveLength(
+    1,
+  );
+});
 
 const card = (title: string, id = title): ListingCard => ({
   title,

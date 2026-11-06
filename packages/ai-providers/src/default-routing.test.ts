@@ -46,7 +46,7 @@ test("key-only product routes all select DeepSeek; search efforts stay independe
   const client = createJobFinderAiClientFromEnvironment(env);
   expect(client.getStatus()).toMatchObject({
     model: "deepseek-v4.1-flash",
-    modelContextWindowTokens: 128000,
+    modelContextWindowTokens: 1_000_000,
   });
   expect(createResumeVisionProviderFromEnvironment(env).getStatus().model).toBe(
     "deepseek-v4.1-flash",

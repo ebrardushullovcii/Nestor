@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
   CandidateProfileSchema,
   JobSearchPreferencesSchema,
@@ -47,6 +47,46 @@ const context: JobSearchContext = {
   sources: [],
   sourceInstructionArtifacts: [],
 };
+
+test("limited permission fingerprints change with permission facts, not the calendar date", () => {
+  const limited = {
+    ...context,
+    profile: {
+      ...profile,
+      workEligibility: {
+        ...profile.workEligibility,
+        limitedWorkPermissions: [
+          {
+            country: "Germany",
+            conditions: "Student work, 20 hours per week",
+            requiresFutureSponsorship: false,
+          },
+        ],
+      },
+    },
+  };
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date("2026-11-06T10:00:00Z"));
+    const before = fitContextFingerprint(limited);
+    vi.setSystemTime(new Date("2026-11-07T10:00:00Z"));
+    expect(fitContextFingerprint(limited)).toBe(before);
+    expect(
+      fitContextFingerprint({
+        ...limited,
+        profile: {
+          ...limited.profile,
+          workEligibility: {
+            ...limited.profile.workEligibility,
+            limitedWorkPermissions: [],
+          },
+        },
+      }),
+    ).not.toBe(before);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 test("partial parsed facts retain resume/certification evidence and exclude unconfirmed drafts", () => {
   const evidence = buildListingFitPerson(profile);

@@ -3872,6 +3872,8 @@ export function createBrowserAgentRuntime(
         }
 
         const result = await runJobSearchAgent({
+          modelContextWindowTokens:
+            aiClient?.getStatus().modelContextWindowTokens ?? undefined,
           resultCache: searchResultCache,
           hands: createApplyPageHands(createPlaywrightApplyPageMechanics(page)),
           page,

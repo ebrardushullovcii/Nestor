@@ -241,7 +241,7 @@ export function createOpenAiCompatibleJobFinderAiClient(
     modelContextWindowTokens: configuredOptions.success
       ? (validatedOptions?.contextWindowTokens ??
         (validatedOptions?.model === "deepseek-v4.1-flash"
-          ? 128_000
+          ? 1_000_000
           : DEFAULT_MODEL_CONTEXT_WINDOW_TOKENS))
       : null,
     reservedHeadroomTokens: null,
