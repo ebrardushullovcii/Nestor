@@ -54,6 +54,8 @@ export const ApplicationResumeArtifactSchema = z.object({
   exportArtifactId: NonEmptyStringSchema.nullable().default(null),
   fileName: NonEmptyStringSchema,
   filePath: NonEmptyStringSchema,
+  /** Text of the selected document, kept with the artifact's byte identity. */
+  textContent: z.string().nullable().optional(),
   sha256: z
     .string()
     .regex(

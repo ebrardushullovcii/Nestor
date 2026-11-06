@@ -795,6 +795,41 @@ describe("agent application preparation seam", () => {
     expect(result.state).toBe("ready");
   });
 
+  test("a model-reported closed posting takes precedence over its unanswered questions", async () => {
+    const result = await runAgentApplicationPreparation({
+      session: session("This job is no longer accepting applications"),
+      executionInput: executionInput(),
+      llmClient: {
+        chatWithTools: () =>
+          Promise.resolve({
+            toolCalls: [
+              {
+                id: "report_closed",
+                type: "function" as const,
+                function: {
+                  name: "finish",
+                  arguments: JSON.stringify({
+                    reason: "The employer says this posting is closed.",
+                    applicationClosed: true,
+                    needsPerson: true,
+                    forPerson: ["An earlier unanswered question"],
+                  }),
+                },
+              },
+            ],
+          }),
+      },
+      startedAt: "2026-09-14T10:00:00.000Z",
+      siteLabel: "the careers site",
+      now: () => new Date("2026-09-14T10:05:00.000Z"),
+    });
+    expect(result.questions).toHaveLength(1);
+    expect(result.blocker?.code).toBe("application_closed");
+    expect(result.state).toBe("failed");
+    expect(result.detail).toBe("The employer says this posting is closed.");
+    expect(result.nextActionLabel).toBe("Find another job");
+  });
+
   test("a sign-in wall the model reports becomes the record's blocker", async () => {
     // The harness is told the page wants a sign-in; deciding what that means
     // is the model's, and what it says is what the person reads.

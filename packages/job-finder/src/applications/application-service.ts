@@ -101,10 +101,6 @@ import {
  * Why a Send for me application waits for the person's Send. A Ready row
  * looks the same in either mode, so each one says why it did not send.
  */
-const SEND_NOT_COVERED =
-  "Send for me could not confirm permission for this application, so the filled form waits for you to send it.";
-const SEND_NOT_CONFIRMED =
-  "Send for me filled this form but could not confirm it was ready to send, so it waits for you. Review it and press Send.";
 const OPENED_SEND_FORM =
   "You opened this form to review it, so Job Finder leaves the send to you. Review it and press Send.";
 const RESTORING_FORM = "Restoring the form for your review.";
@@ -227,7 +223,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     return (
       !!next &&
       next.attempt === row.attempt &&
-      !["stopped", "failed", "submitted", "uncertain"].includes(next.state)
+      !["stopped", "failed", "closed", "submitted", "uncertain"].includes(
+        next.state,
+      )
     );
   }
 
@@ -952,6 +950,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             profile,
             settings,
             searchPreferences,
+            resumeText: artifact.textContent ?? null,
             reusableAnswers: letterAnswers,
           }),
           uploadsConfirmedByPerson: confirmedUploadFields(row),
@@ -1105,17 +1104,24 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           onPrepared: (outcome) => {
             agent = outcome.result;
             currentReview = outcome.reviewCard;
-            review = mergeApplyReviewCards(
-              previous?.reviewCard ?? null,
-              outcome.reviewCard,
-              {
-                freshPreparation:
-                  !keptPage ||
-                  ["submitted", "failed", "uncertain"].includes(
-                    outcome.result.outcome,
-                  ),
-              },
-            );
+            review =
+              outcome.result.readyToSend ||
+              ["submitted", "uncertain"].includes(outcome.result.outcome)
+                ? outcome.reviewCard
+                : mergeApplyReviewCards(
+                    previous?.reviewCard ?? null,
+                    outcome.reviewCard,
+                    {
+                      freshPreparation:
+                        !keptPage ||
+                        [
+                          "submitted",
+                          "failed",
+                          "uncertain",
+                          "ready_to_send",
+                        ].includes(outcome.result.outcome),
+                    },
+                  );
           },
         }),
       },
@@ -1215,7 +1221,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       applications.finishPreparation({
         id: row.id,
         attempt: row.attempt,
-        state: "failed",
+        state:
+          result.blocker?.code === "application_closed" ? "closed" : "failed",
         error: result.detail,
       });
       await closePage(row.id, row.attempt);
@@ -1304,7 +1311,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       applications.finishPreparation({
         id: row.id,
         attempt: row.attempt,
-        state: "failed",
+        state:
+          result.blocker?.code === "application_closed" ? "closed" : "failed",
         error: result.detail,
       });
       await closePage(row.id, row.attempt);
@@ -1323,11 +1331,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     } else {
       await leaveForPerson(
         row,
-        (sends
-          ? envelope
-            ? SEND_NOT_CONFIRMED
-            : SEND_NOT_COVERED
-          : refillReason) ?? undefined,
+        sends
+          ? `The model finished without sending: ${result.detail}`
+          : (refillReason ??
+              `The model finished without sending: ${result.detail}`),
       );
     }
   }
@@ -1406,7 +1413,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
             } else
               await leaveForPerson(
                 row,
-                "The site did not accept a submission. Review the form before trying again.",
+                outcome.outcome.browserAction?.detail ??
+                  outcome.outcome.browserAction?.reason ??
+                  "The send was recorded as not submitted.",
               );
           } else
             await leaveForPerson(

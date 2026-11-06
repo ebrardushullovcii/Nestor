@@ -1,5 +1,5 @@
 import { buildApplyFormObservation } from "@nestor/browser-agent";
-import { chromium, type Browser, type Locator } from "playwright";
+import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import githubReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/github-username.json";
 import menuReplay from "../../../apps/desktop/test-fixtures/job-finder/apply-replays/handover-options.json";
@@ -200,11 +200,14 @@ describe("reading the choices of lists the page draws itself", () => {
         native.controls.map((control, index) => ({
           ...control,
           ref: `c${index}`,
+          scopeKey: undefined,
         })),
       ).toEqual(
-        automated.controls.map((control, index) =>
-          index < 2 ? { ...control, value: "" } : control,
-        ),
+        automated.controls.map((control, index) => ({
+          ...control,
+          scopeKey: undefined,
+          ...(index < 2 ? { value: "" } : {}),
+        })),
       );
       expect(
         native.controls.map((control: { value: string }) => control.value),
@@ -613,6 +616,14 @@ describe("reading the choices of lists the page draws itself", () => {
       }
       document.addEventListener('keydown',event=>{if(event.key==='Escape'){document.querySelectorAll('input[aria-expanded=true]').forEach(x=>{x.setAttribute('aria-expanded','false');if(data.entry.releaseOwner)x.removeAttribute('aria-controls');});menu.hidden=true;}});
       </script>`);
+        const initial = await readRawApplyPage(page);
+        expect(
+          initial.controls.every((control) => control.options.length === 0),
+        ).toBe(true);
+        await page.locator("#country").click();
+        await page
+          .getByRole("option", { name: "Afghanistan", exact: true })
+          .waitFor();
         for (let read = 0; read < 2; read++) {
           const snapshot = await readRawApplyPage(page);
           expect(
@@ -622,11 +633,11 @@ describe("reading the choices of lists the page draws itself", () => {
           expect(
             snapshot.controls.find((control) => control.id === "restrictions")
               ?.options,
-          ).toEqual(entry.settles ? menuReplay.restrictionOptions : []);
+          ).toEqual([]);
           expect(
             snapshot.controls.find((control) => control.id === "previous")
               ?.options,
-          ).toEqual(entry.settles ? menuReplay.previousEmploymentOptions : []);
+          ).toEqual([]);
           expect(snapshot.controls.every((control) => !control.value)).toBe(
             true,
           );
@@ -655,6 +666,8 @@ describe("reading the choices of lists the page draws itself", () => {
             document.querySelectorAll('[role="listbox"]').forEach(menu=>menu.hidden=true);
           }});
         </script>`);
+      await page.locator("#one").click();
+      await page.locator("#two").click();
       for (let read = 0; read < 2; read++) {
         const controls = (await readRawApplyPage(page)).controls;
         expect(
@@ -681,6 +694,7 @@ describe("reading the choices of lists the page draws itself", () => {
         input.onclick=()=>{input.setAttribute('aria-expanded','true');list.hidden=false;list.innerHTML=${JSON.stringify(options)}.map(x=>'<div role="option">'+x+'</div>').join('');};
         document.addEventListener('keydown',event=>{if(event.key==='Escape'){input.setAttribute('aria-expanded','false');list.hidden=true;}});
       </script>`);
+      await page.locator("#choices").click();
       expect(
         (await readRawApplyPage(page)).controls.find(
           (control) => control.id === "choices",
@@ -691,49 +705,16 @@ describe("reading the choices of lists the page draws itself", () => {
     }
   });
 
-  test("a slow background click does not expire the menu observer before redraw", async () => {
-    const page = await browser.newPage();
-    const prototype = Object.getPrototypeOf(page.locator("input")) as Locator;
-    // Called below with the locator that received the click.
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    const original = prototype.click;
-    const click = vi
-      .spyOn(prototype, "click")
-      .mockImplementation(async function (this: Locator, options) {
-        await new Promise((resolve) => setTimeout(resolve, 1450));
-        await original.call(this, options);
-      });
-    try {
-      await page.setContent(`<label for="one">First question</label><input id="one" role="combobox" aria-controls="shared" aria-expanded="false" readonly>
-        <label for="two">Second question</label><input id="two" role="combobox" aria-controls="shared" aria-expanded="false" readonly>
-        <div id="shared" role="listbox" hidden></div><script>
-          for(const id of ['one','two']) document.getElementById(id).onclick=()=>{
-            document.getElementById(id).setAttribute('aria-expanded','true');
-            const menu=document.getElementById('shared');menu.hidden=false;
-            setTimeout(()=>menu.innerHTML=(id==='one'?['First A','First B']:['Second A','Second B']).map(label=>'<div role="option">'+label+'</div>').join(''),80);
-          };
-          document.addEventListener('keydown',event=>{if(event.key==='Escape'){
-            document.querySelectorAll('input').forEach(input=>input.setAttribute('aria-expanded','false'));
-            document.getElementById('shared').hidden=true;
-          }});
-        </script>`);
-      const controls = (await readRawApplyPage(page)).controls;
-      expect(controls.find((control) => control.id === "one")?.options).toEqual(
-        ["First A", "First B"],
-      );
-      expect(controls.find((control) => control.id === "two")?.options).toEqual(
-        ["Second A", "Second B"],
-      );
-    } finally {
-      click.mockRestore();
-      await page.close();
-    }
-  }, 15_000);
-
   test("each control gets its own choices, and keeps them on a second read", async () => {
     const page = await browser.newPage();
     await page.setContent(PAGE);
 
+    const closed = await readRawApplyPage(page);
+    expect(
+      closed.controls.every((control) => control.options.length === 0),
+    ).toBe(true);
+    await page.locator("#agreements").click();
+    await page.locator("#country").click();
     const first = await readRawApplyPage(page);
     const agreements = first.controls.find(
       (control) => control.id === "agreements",
@@ -933,7 +914,7 @@ describe("reading the choices of lists the page draws itself", () => {
     await page.close();
   });
 
-  test("does not report immediate success when a controlled input clears the value", async () => {
+  test("reports the actual resulting value when a controlled input clears it", async () => {
     const page = await browser.newPage();
     await page.setContent(`
       <label>Current location <input id="location" /></label>
@@ -946,9 +927,8 @@ describe("reading the choices of lists the page draws itself", () => {
 
     const mechanics = createPlaywrightApplyPageMechanics(page);
     await expect(mechanics.fillText("c0", "Pristina")).resolves.toEqual({
-      ok: false,
-      error:
-        "The field cleared the answer instead of keeping it. Leave it for the person or try a different control once.",
+      ok: true,
+      observedValue: "",
     });
 
     await page.close();

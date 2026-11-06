@@ -7,6 +7,7 @@ import {
   type StoredResume,
   type SavedJob,
   type JobFinderSettings,
+  type ResumeRenderDocument,
 } from "@nestor/contracts";
 import type {
   JobFinderDocumentManager,
@@ -63,6 +64,32 @@ const DRAFT_RESUME_PREFIX = "job_resume_draft:";
 const sha256Of = (bytes: Uint8Array | string) =>
   createHash("sha256").update(bytes).digest("hex");
 
+/** The same included words given to the file renderer, in reading order. */
+export function applicationResumeText(document: ResumeRenderDocument): string {
+  return [
+    document.fullName,
+    document.headline,
+    document.location,
+    ...document.contactItems.map((item) => item.text),
+    ...document.sections.flatMap((section) => [
+      section.label,
+      section.text,
+      ...section.bullets.map((bullet) => bullet.text),
+      ...section.entries.flatMap((entry) => [
+        entry.title,
+        entry.subtitle,
+        entry.location,
+        entry.dateRange,
+        entry.heading,
+        entry.summary,
+        ...entry.bullets.map((bullet) => bullet.text),
+      ]),
+    ]),
+  ]
+    .filter((text): text is string => Boolean(text?.trim()))
+    .join("\n");
+}
+
 /**
  * A ready resume the person has not approved, rendered for this application
  * the way approval renders it: the same words, template and PDF renderer. A
@@ -86,7 +113,11 @@ export async function renderReadyJobResume(input: {
   const existing = input.existingArtifact;
   if (existing?.id === id && existing.sha256) {
     const bytes = await readFile(existing.filePath).catch(() => null);
-    if (bytes && sha256Of(bytes) === existing.sha256) return existing;
+    if (bytes && sha256Of(bytes) === existing.sha256)
+      return {
+        ...existing,
+        textContent: applicationResumeText(renderDocument),
+      };
   }
   const rendered = await input.documentManager.renderResumeArtifact({
     job: input.job,
@@ -115,6 +146,7 @@ export async function renderReadyJobResume(input: {
     sha256: rendered.sha256,
     approvedAt: null,
     level: resume.level,
+    textContent: applicationResumeText(renderDocument),
   });
 }
 
@@ -211,5 +243,16 @@ export async function renderApplicationResume(input: {
           profile: input.profile,
         })
       : null;
-  return { artifact, docx };
+  return {
+    artifact: {
+      ...artifact,
+      textContent:
+        artifact.source === "original_upload"
+          ? (originalText ?? null)
+          : renderDocument
+            ? applicationResumeText(renderDocument)
+            : (artifact.textContent ?? null),
+    },
+    docx,
+  };
 }

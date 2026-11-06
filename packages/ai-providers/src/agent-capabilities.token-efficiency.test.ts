@@ -102,6 +102,15 @@ function requestWithResume(profileText: string, selectedText = profileText) {
   } satisfies CreateResumeDraftInput;
 }
 
+test("writer facts omit retired review fields that contradict the actual application setting", async () => {
+  const request = requestWithResume("Maintained a synthetic migration ledger.");
+  request.settings.humanReviewRequired = true;
+  request.searchPreferences.approvalMode = "review_before_submit";
+  const { payloads } = await captureGeneration(request);
+  expect(JSON.stringify(payloads)).not.toContain("humanReviewRequired");
+  expect(JSON.stringify(payloads)).not.toContain("approvalMode");
+});
+
 test("the selected raw resume appears once per writer request with resolvable evidence references", async () => {
   const marker = "SYNTHETIC_SELECTED_RESUME_SOURCE";
   const resumeText =

@@ -70,6 +70,7 @@ export async function runApplyAgent(
     hands: timingRecord.hands(input.hands),
     sources: {
       ...input.sources,
+      applicationAutomationMode: input.authority.mode,
       documents: documentCatalog,
       taskInstructions:
         input.application.instructions ?? input.sources.taskInstructions,
@@ -95,7 +96,11 @@ export async function runApplyAgent(
     >();
   const fieldOwners = new Map<
     string,
-    { formIndex: number | undefined; frame: string }
+    {
+      formIndex: number | undefined;
+      scopeKey?: string | undefined;
+      frame: string;
+    }
   >();
   const observedFields = new Set<string>(),
     notes: string[] = [];
@@ -108,9 +113,11 @@ export async function runApplyAgent(
     url: string | undefined;
     formIndex: number | undefined;
     frame: string;
+    scopeKey?: string | undefined;
   } | null = null;
   let page: ApplyFormObservation | null = null;
   let sendOutcome: "submitted" | "failed" | "uncertain" | null = null;
+  let applicationClosed = false;
   let readyToSend: ApplyAgentResult["readyToSend"] = null;
   const modelCallIds = new Map<string, string[]>();
   const payDisclosed =
@@ -130,6 +137,7 @@ export async function runApplyAgent(
     const recordsControl = (c: ApplyFormObservation["controls"][number]) =>
       !sendingForm ||
       (next.url?.split(/[?#]/u)[0] === sendingForm.url &&
+        (!sendingForm.scopeKey || c.scopeKey === sendingForm.scopeKey) &&
         (sendingForm.formIndex === undefined ||
           (c.formIndex === sendingForm.formIndex &&
             JSON.stringify(c.frame) === sendingForm.frame)));
@@ -137,6 +145,7 @@ export async function runApplyAgent(
       if (!recordsControl(c)) continue;
       fieldOwners.set(reviewFieldKey(next, c), {
         formIndex: c.formIndex,
+        scopeKey: c.scopeKey,
         frame: JSON.stringify(c.frame),
       });
       if (!c.credentialRole) observedFields.add(reviewFieldKey(next, c));
@@ -153,6 +162,7 @@ export async function runApplyAgent(
         continue;
       fieldOwners.set(reviewFieldKey(next, control), {
         formIndex: control.formIndex,
+        scopeKey: control.scopeKey,
         frame: JSON.stringify(control.frame),
       });
       const fieldKey = reviewFieldKey(next, control),
@@ -346,8 +356,10 @@ export async function runApplyAgent(
       guardState,
       seenObservation: before,
     });
-    if (outcome.kind === "finished")
+    if (outcome.kind === "finished") {
+      applicationClosed = outcome.applicationClosed === true;
       return finish(outcome.reason, outcome.stuck, outcome.forPerson);
+    }
     observe(outcome.observation);
     let content: string;
     switch (outcome.kind) {
@@ -361,7 +373,7 @@ export async function runApplyAgent(
         const entry = { ...outcome.filled, fieldKey };
         filled.push(entry);
         reviewFilled.set(fieldKey, entry);
-        content = `Wrote ${JSON.stringify(entry.answer.value)} to ${entry.label}.`;
+        content = `${entry.label} now holds ${JSON.stringify(entry.answer.value)}${proposal.tool === "type" ? ` (requested ${JSON.stringify(proposal.text)})` : ""}.`;
         break;
       }
       case "attached": {
@@ -387,10 +399,12 @@ export async function runApplyAgent(
           if (!key.startsWith(`${sendPage}|`)) return false;
           const owner = fieldOwners.get(key);
           return (
-            sendControl?.formIndex === undefined ||
-            !owner ||
-            (owner.formIndex === sendControl.formIndex &&
-              owner.frame === JSON.stringify(sendControl.frame))
+            (!sendControl?.scopeKey ||
+              owner?.scopeKey === sendControl.scopeKey) &&
+            (sendControl?.formIndex === undefined ||
+              !owner ||
+              (owner.formIndex === sendControl.formIndex &&
+                owner.frame === JSON.stringify(sendControl.frame)))
           );
         };
         for (const key of reviewFilled.keys())
@@ -402,6 +416,7 @@ export async function runApplyAgent(
         sendingForm = {
           url: sendPage,
           formIndex: sendControl?.formIndex,
+          scopeKey: sendControl?.scopeKey,
           frame: JSON.stringify(sendControl?.frame),
         };
         const decision = {
@@ -495,11 +510,80 @@ export async function runApplyAgent(
             : []),
         ];
         const lines: string[] = [];
-        for (const step of steps) {
+        const refs = (observation: ApplyFormObservation | null) =>
+          new Set(
+            observation
+              ? [
+                  ...observation.controls,
+                  ...observation.actions,
+                  ...observation.links,
+                  ...observation.clickables,
+                ].map((entry) => entry.ref)
+              : [],
+          );
+        const planned = refs(page);
+        const notAttempted = (from: number, reason: string) =>
+          steps
+            .slice(from)
+            .map(
+              (entry, index) =>
+                `${from + index + 1}. ${entry.tool}${"ref" in entry ? ` ${entry.ref}` : ""}: not attempted (${reason}).`,
+            );
+        for (const [index, step] of steps.entries()) {
           context.signal?.throwIfAborted();
-          const result = await runProposal(step);
-          if (result.kind !== "ok") return result;
-          lines.push(result.content);
+          if (
+            "ref" in step &&
+            step.ref &&
+            planned.has(step.ref) &&
+            !refs(page).has(step.ref)
+          ) {
+            const reason = `planned ref ${step.ref} is stale or missing; observe again`;
+            lines.push(...notAttempted(index, reason));
+            traceOurs("browser-agent/fill_fields", "blocked", reason);
+            return {
+              kind: "ok",
+              status: "failed",
+              content: lines.join("\n"),
+              progress: index > 0,
+            };
+          }
+          try {
+            const result = await runProposal(step);
+            if (result.kind !== "ok") {
+              const remaining = notAttempted(
+                index + 1,
+                `the ${step.tool} operation ended the run`,
+              );
+              if (remaining.length) {
+                const detail = [...lines, ...remaining].join("\n");
+                note(detail);
+                if (result.kind === "finish")
+                  return {
+                    ...result,
+                    finish: { ...result.finish, output: detail },
+                  };
+                return { ...result, reason: `${result.reason}\n${detail}` };
+              }
+              return result;
+            }
+            lines.push(
+              `${index + 1}. ${step.tool}${"ref" in step ? ` ${step.ref}` : ""}: ${result.content}`,
+            );
+          } catch (error) {
+            context.signal?.throwIfAborted();
+            lines.push(
+              `${index + 1}. ${step.tool}: failed (${describeBrowserError(error, "The browser action failed.")}).`,
+            );
+            try {
+              await readPage();
+            } catch (readError) {
+              const reason = describeBrowserError(
+                readError,
+                "The page could not be read; observe again.",
+              );
+              lines.push(`The page read failed: ${reason}`);
+            }
+          }
         }
         if (parsed.finishWhenReady)
           return finish("The model finished filling this form.");
@@ -824,6 +908,7 @@ export async function runApplyAgent(
     traceEvent("apply_outcome", { outcome, pauses, notes });
     return {
       outcome,
+      ...(applicationClosed ? { applicationClosed: true } : {}),
       reason: loop.finish?.reason ?? loop.reason,
       steps: loop.steps,
       finalUrl: (page as ApplyFormObservation | null)?.url ?? null,

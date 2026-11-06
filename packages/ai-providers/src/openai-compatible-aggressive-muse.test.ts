@@ -1,5 +1,8 @@
 import { expect, test, vi } from "vitest";
-import { createJobFinderAiClientFromEnvironment } from "./openai-compatible";
+import {
+  createJobFinderAiClientFromEnvironment,
+  buildResumeRewriteProposalPrompt,
+} from "./openai-compatible";
 import {
   createEnvironment,
   createJobPosting,
@@ -135,3 +138,19 @@ test("Aggressive Muse writing and claim checks use Responses at their task effor
     fetchMock.mockRestore();
   }
 });
+
+test.each(["conservative", "balanced", "aggressive"] as const)(
+  "%s writer gets the same prose and relevant-project instructions",
+  (mode) => {
+    const prompt = buildResumeRewriteProposalPrompt(mode);
+    expect(prompt).toContain("merging imported sentence fragments");
+    expect(prompt).toContain("without manufacturing a generic duty bullet");
+    expect(prompt).toContain("without cover-letter promises");
+    expect(prompt).toContain(
+      "Keep the person's most relevant projects visible",
+    );
+    expect(prompt).not.toContain("what you would do for this team");
+    if (mode === "aggressive")
+      expect(prompt).toContain("you may name an adjacent technology");
+  },
+);

@@ -7,6 +7,7 @@ import {
   type NeedsYouCommandOutput,
 } from "@nestor/contracts";
 import type { ApplicationStore } from "@nestor/db/applications";
+import { traceEvent } from "@nestor/core/run-trace";
 
 /** One command implementation for the screen, the sidebar and local checks. */
 export function createNeedsYouCommandRunner(
@@ -30,9 +31,19 @@ export function createNeedsYouCommandRunner(
     get_need: ({ id }) => getStore().needsYou.details(id),
     save_need_draft: (input) => getStore().needsYou.saveDraft(input),
     answer_need: (input) => {
+      const details = getStore().needsYou.details(input.id);
       const { value, ...change } = getStore().needsYou.changeAnswers(() =>
         getStore().needsYou.answer(input),
       );
+      traceEvent("operator_action", {
+        action: "answer_need",
+        needId: input.id,
+        applicationKeys:
+          details?.applications.map(
+            (application) =>
+              `application_${application.id}_attempt_${getStore().getApplication(application.id)?.attempt}`,
+          ) ?? [],
+      });
       return { ...value, ...change };
     },
     list_form_answers: (input) => getStore().needsYou.listAnswers(input),

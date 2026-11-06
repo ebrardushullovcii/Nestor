@@ -26,6 +26,29 @@ import {
 const stores: JobStore[] = [];
 const folders: string[] = [];
 
+it("stores the model's closed-posting outcome and exposes it in application, tracker and activity records", () => {
+  const { jobs, applications } = open();
+  applications.applyJobs({ selection: { ids: add(jobs, 1) } });
+  const row = applications.claimNext()!;
+  expect(
+    applications.finishPreparation({
+      id: row.id,
+      attempt: row.attempt,
+      state: "closed",
+      error: "The employer says applications are closed.",
+    }),
+  ).toBe(true);
+  expect(applications.getApplication(row.id)?.state).toBe("closed");
+  expect(applications.listApplications({ state: "closed" }).rows).toHaveLength(
+    1,
+  );
+  expect(applications.listApplications({ state: "failed" }).rows).toHaveLength(
+    0,
+  );
+  expect(applications.stateCounts()).toMatchObject({ closed: 1 });
+  expect(applications.listWorkInState("closed")).toHaveLength(1);
+});
+
 it("an exact answer key wins before normalized-wording alternatives", () => {
   const { applications } = open();
   const memory = applications.needsYou;

@@ -128,6 +128,34 @@ test("packs preserve recorded facts, application linkage and unknowns; omit vaul
       state: {},
     });
     assert.equal(manifest.oursCount, 1);
+    const sliced = events
+      .filter((event) => event.event !== "run_header")
+      .map((event) => ({
+        ...event,
+        runConfiguration: { ai: "live", network: "live" },
+      }));
+    sliced.push({
+      event: "operator_action",
+      at: "2026-11-06T09:59:00.000Z",
+      action: "answer_need",
+      applicationKeys: ["application_1_attempt_0"],
+    });
+    const sliceTrace = path.join(root, "sliced-trace");
+    mkdirSync(sliceTrace);
+    writeFileSync(
+      path.join(sliceTrace, "events-sliced.jsonl"),
+      sliced.map((event) => JSON.stringify(event)).join("\n"),
+    );
+    const continuation = await generatePack({
+      out: path.join(root, "continued-pack"),
+      trace: sliceTrace,
+      data,
+      application: "1",
+      state: {},
+    });
+    assert.equal(continuation.header.raw.network, "live");
+    assert.equal(continuation.header.raw.ai, "live");
+    assert.equal(continuation.header.operatorActed, true);
     assert.deepEqual(manifest.header.permissionsAtStart, {
       initialPermission: false,
     });

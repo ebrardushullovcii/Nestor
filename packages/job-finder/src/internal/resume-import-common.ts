@@ -235,28 +235,12 @@ export function toNarrativeStringArray(value: unknown): string[] {
   return (
     entries
       .flatMap((entry) => entry.split(/\r?\n+/))
-      // Inline bullet glyphs ("• a • b") and long multi-sentence blobs are one
-      // resume's ten bullets glued together; downstream tailoring can only
-      // select, reorder and rewrite what arrives as separate entries.
+      // Split only explicit bullet boundaries. Sentences within one source
+      // accomplishment carry its context and result together.
       .flatMap((entry) => entry.split(/\s+[•·▪◦‣]\s+/u))
-      .flatMap((entry) => splitLongNarrativeBlob(entry))
       .map((entry) => entry.trim().replace(/^(?:[-*•·▪◦‣]\s+|\d+[.)]\s+)/u, ""))
       .filter(Boolean)
   );
-}
-
-const LONG_NARRATIVE_BLOB_MIN_LENGTH = 240;
-
-function splitLongNarrativeBlob(entry: string): string[] {
-  const trimmed = entry.trim();
-  if (trimmed.length < LONG_NARRATIVE_BLOB_MIN_LENGTH) {
-    return [trimmed];
-  }
-  const sentences = trimmed
-    .split(/(?<=[.!?])\s+(?=[A-Z0-9"'(])/u)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-  return sentences.length >= 3 ? sentences : [trimmed];
 }
 
 export function stripImportFormatting(value: string): string {

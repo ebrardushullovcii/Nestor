@@ -59,8 +59,11 @@ export function isExplicitResidenceCountryControl(
 export function serializeApplicationData(
   value: Record<string, unknown> | readonly unknown[],
 ): string {
-  return JSON.stringify(value, (_key, entry: unknown) =>
-    entry === "" || (Array.isArray(entry) && entry.length === 0)
+  return JSON.stringify(value, (key, entry: unknown) =>
+    key === "approvalMode" ||
+    key === "humanReviewRequired" ||
+    entry === "" ||
+    (Array.isArray(entry) && entry.length === 0)
       ? undefined
       : entry,
   );
@@ -107,7 +110,14 @@ export function applicationFacts(
   const { baseResume, ...profileFacts } = profile;
   return {
     ...profileFacts,
-    baseResumeText: baseResume.textContent,
+    originalResume: {
+      label: "Original imported resume",
+      text: baseResume.textContent,
+    },
+    attachedResume: {
+      label: "Selected resume being sent with this application",
+      text: sources.resumeText,
+    },
     payDisclosure: options.payDisclosed,
     listingDiscovery: sources.listingDiscovery,
     name: {
@@ -141,7 +151,13 @@ export function applicationFacts(
     targetRoles: profile.targetRoles,
     preferredLocations: profile.locations,
     taskGuidance: sources.taskInstructions,
-    preferences: sources.preferences,
+    preferences: sources.preferences
+      ? (({ approvalMode: _legacy, ...preferences }) => {
+          void _legacy;
+          return preferences;
+        })(sources.preferences)
+      : undefined,
+    applicationAutomationMode: sources.applicationAutomationMode,
     yearsExperience: profile.yearsExperience,
     workEligibility: profile.workEligibility,
     ...(profile.workEligibility.limitedWorkPermissions?.length

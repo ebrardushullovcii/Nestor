@@ -118,6 +118,7 @@ const WORK_LABEL: Record<ApplicationWorkState, string> = {
   skipped: "Skipped",
   blocked: "Blocked",
   failed: "Could not apply",
+  closed: "Posting closed",
   uncertain: "Sent? Check the site",
 };
 
@@ -135,6 +136,7 @@ export const WORK_HINT: Record<ApplicationWorkState, string> = {
   blocked:
     "The site blocked this browser. Open the job in your browser to continue by hand.",
   failed: "Apply couldn’t finish this application.",
+  closed: "The employer is no longer accepting applications for this posting.",
   uncertain:
     "Apply could not tell whether it went through. Check the site, then say what you found.",
 };
@@ -191,6 +193,7 @@ const WORK_NEXT: Record<ApplicationWorkState, { text: string; act: boolean }> =
     skipped: { text: "Apply by hand if you want it", act: false },
     blocked: { text: "Continue by hand in your browser", act: true },
     failed: { text: "Try again or apply by hand", act: true },
+    closed: { text: "Posting closed", act: false },
     uncertain: { text: "Check the site", act: true },
   };
 

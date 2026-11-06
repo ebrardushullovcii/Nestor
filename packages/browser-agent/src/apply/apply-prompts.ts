@@ -67,7 +67,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     "- Derive the earliest start date from the saved notice period and today. Map a BSc to the form's Bachelor's choice, and compose experience, skills and AI-tool-use summaries from the whole record; no verbatim saved sentence or additional confirmation is required.",
     `- ${APPLICATION_ELIGIBILITY_INSTRUCTIONS}`,
     "- Respect saved goals, hours, location and availability in written answers. If this job conflicts, ask how the person wants to handle that conflict; do not silently change their intent or promise incompatible availability.",
-    "- On each visible step, put EVERY field you can answer into ONE fill_fields call: text, choices, checkboxes and radio options, including approved declarations. Include supported written answers and application questions in this same batch as contact details and the resume; do not split them into separate passes. Use entries with tool: type and text; tool: select and option; tool: set_checkbox and checked (for a radio, use the chosen option's ref); or tool: upload and documentId from the available document list. Attach the requested resume or other available document in this same call, even on the first step; do not spend a turn listing files already shown. Small chores such as dismissing a cookie banner or adding a needed work-history row may be entries with tool: click and ref, in the order needed. Use observed handles; if adding a row exposes unseen handles, read the returned page before filling that row. Keep their arguments exactly as for the single-field tools. Execute independent fields in the supplied order; page chores, uploads and writes to the same field or choice group keep their order. The host gives you one fresh page observation; read it before handling newly revealed fields or questions for the person. When you are confident every required field on this step is answered, include thenContinue with the visible Continue or Next ref in the same call. Otherwise fill without continuing. On the final page, include finishWhenReady: true in fill_fields when the batch completes the form; it runs the ordinary finish checks without another turn and does not press Send. Never combine it with thenContinue. Never use thenContinue for final submit. If Continue returns validation errors or the same step, fix what the result reports on your next turn. Do not ask observe between entries or put navigation, Next, submit_application or finish beside fill_fields. A planned ref changing identity stops the remaining fields: read the fresh page and carry on. Other page changes and field failures return as facts while the batch continues. An answer Job Finder leaves for the person does not stop the other fields in the call. Single-field tools remain available for a correction.",
+    "- On each visible step, put EVERY field you can answer into ONE fill_fields call: text, choices, checkboxes and radio options, including approved declarations. Include supported written answers and application questions in this same batch as contact details and the resume; do not split them into separate passes. Use entries with tool: type and text; tool: select and option; tool: set_checkbox and checked (for a radio, use the chosen option's ref); or tool: upload and documentId from the available document list. Attach the requested resume or other available document in this same call, even on the first step; do not spend a turn listing files already shown. Small chores such as dismissing a cookie banner or adding a needed work-history row may be entries with tool: click and ref, in the order needed. Use observed handles; if adding a row exposes unseen handles, read the returned page before filling that row. Keep their arguments exactly as for the single-field tools. Execute independent fields in the supplied order; page chores, uploads and writes to the same field or choice group keep their order. The host gives you one fresh page observation; read it before handling newly revealed fields or questions for the person. When you are confident every required field on this step is answered, include thenContinue with the visible Continue or Next ref in the same call. Otherwise fill without continuing. On the final page under Fill in for me, include finishWhenReady: true in fill_fields when the batch completes the form; it finishes without pressing Send. Under Send for me, fill the batch, read its returned page and call submit_application on the final send control. Never combine it with thenContinue. Never use thenContinue for final submit. If Continue returns validation errors or the same step, fix what the result reports on your next turn. Do not ask observe between entries or put navigation, Next, submit_application or finish beside fill_fields. A planned ref changing identity stops the remaining fields: read the fresh page and carry on. Other page changes and field failures return as facts while the batch continues. An answer Job Finder leaves for the person does not stop the other fields in the call. Single-field tools remain available for a correction.",
     "- storedFactId is optional provenance for an answer, not permission. You may format, calculate, combine and write answers from the supplied facts without an exact source binding.",
     "- When the form asks which job location you are applying for, use the listing location when it matches an offered option. This is the job's location, not a new preference or a claim about work permission. Ask only when the options do not match the listing.",
     "- Use the person's saved expected salary for expected or desired compensation: split the amount, currency and annual/hourly period into the form's fields. Expected pay is not evidence of current pay or pay history; never put it in those fields. Use recorded employers, titles and employment dates from the selected resume and profile, retaining month precision. Ask only when a needed fact is missing or ambiguous.",
@@ -171,6 +171,8 @@ function describeControl(
     control.required ? "required" : "optional",
     describeAnswered(control),
   ];
+  if (control.visibility)
+    parts.push(`visibility: ${JSON.stringify(control.visibility)}`);
   if (control.frame) parts.push(`frame: ${control.frame.origin}`);
   if (control.sectionPath?.length)
     parts.push(`sections: ${control.sectionPath.join(" > ")}`);
@@ -210,7 +212,7 @@ export function describeObservation(observation: ApplyFormObservation): string {
         ? `Step: ${observation.step.label}.`
         : null;
 
-  const controls = observation.controls.filter((control) => control.visible);
+  const controls = observation.controls;
   const actions = observation.actions.filter(
     (action) => action.visible && action.label.length > 0,
   );
@@ -312,11 +314,9 @@ export function describeObservationUpdate(
     return describeObservation(observation);
   }
   const previousControls = new Map(
-    previous.controls
-      .filter((control) => control.visible)
-      .map((control) => [control.ref, describeControl(control)]),
+    previous.controls.map((control) => [control.ref, describeControl(control)]),
   );
-  const controls = observation.controls.filter((control) => control.visible);
+  const controls = observation.controls;
   const changed = controls.filter(
     (control) => previousControls.get(control.ref) !== describeControl(control),
   );

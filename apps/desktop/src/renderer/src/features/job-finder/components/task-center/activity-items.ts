@@ -64,6 +64,11 @@ const APPLICATION_WORDS: Record<
     badge: "Could not apply",
     detail: "Nothing was sent; try again or apply by hand",
   },
+  closed: {
+    status: "stopped",
+    badge: "Posting closed",
+    detail: "The employer is no longer accepting applications",
+  },
   uncertain: {
     status: "failed",
     badge: "Unclear",

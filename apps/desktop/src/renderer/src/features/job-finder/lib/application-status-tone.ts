@@ -21,6 +21,7 @@ export const APPLICATION_WORK_TONE: Record<ApplicationWorkState, BadgeTone> = {
   blocked: "warning",
   submitted: "neutral",
   failed: "critical",
+  closed: "muted",
   stopped: "muted",
   skipped: "muted",
 };

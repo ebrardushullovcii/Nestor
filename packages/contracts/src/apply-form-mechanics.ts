@@ -18,6 +18,20 @@ export interface ApplyFrameOwner {
 }
 
 export interface RawApplyControl {
+  /** Browser geometry and styling facts, without deciding whether to fill it. */
+  visibility?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    viewportWidth: number;
+    viewportHeight: number;
+    inViewport: boolean;
+    offCanvas: boolean;
+    zeroSize: boolean;
+    ariaHidden: boolean;
+    cssHidden: boolean;
+  };
   frame?: ApplyFrameOwner;
   /** Stable handle supplied by the browser when the control is inside a frame. */
   ref?: string;
@@ -113,6 +127,8 @@ export interface RawApplyUpload {
  * whether that part is a form with fields. Nothing here says what to press.
  */
 export interface RawApplyPlacement {
+  /** Identity of the containing form or application dialog in this document. */
+  scopeKey?: string;
   formIndex?: number;
   frame?: ApplyFrameOwner;
   section?: string;

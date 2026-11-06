@@ -133,6 +133,7 @@ function hashSignature(parts: readonly string[]): string {
 
 function placementOf(raw: RawApplyPlacement): ApplyPlacement {
   return {
+    ...(raw.scopeKey ? { scopeKey: raw.scopeKey } : {}),
     ...(raw.formIndex !== undefined ? { formIndex: raw.formIndex } : {}),
     ...(raw.section?.trim() ? { section: raw.section.trim() } : {}),
     ...(raw.inForm ? { inForm: true } : {}),
@@ -304,6 +305,7 @@ export function buildApplyFormObservation(
         rawControl.scopeKey ?? null,
         rawControl.frame ?? null,
       ]),
+      ...(rawControl.visibility ? { visibility: rawControl.visibility } : {}),
       ...(rawControl.scopeKey ? { scopeKey: rawControl.scopeKey } : {}),
       ...(rawControl.formIndex !== undefined
         ? { formIndex: rawControl.formIndex }

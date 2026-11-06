@@ -5,6 +5,7 @@ import {
 } from "@nestor/agent-runtime";
 import {
   ProfileCopilotPatchGroupSchema,
+  withoutLegacyApprovalSettings,
   ProfileCopilotPatchOperationSchema,
   ProfileCompensationPreferencePatchFieldsSchema,
   ProfileCoreListPatchFieldsSchema,
@@ -857,13 +858,10 @@ export async function runResumeGenerationAgentTask(input: {
       ? {}
       : { baseResumeEvidenceRef: "baseResume:text" }),
     candidateProfile,
-    searchPreferences: {
-      ...searchPreferences,
-    },
+    searchPreferences: withoutLegacyApprovalSettings(searchPreferences),
     settings: {
       resumeFormat: input.request.settings.resumeFormat,
       fontPreset: input.request.settings.fontPreset,
-      humanReviewRequired: input.request.settings.humanReviewRequired,
     },
     ...jobSpecificPayload,
     targetJob: {

@@ -128,3 +128,25 @@ it("detects restored source prose beside translated fields without assuming a la
   profile.projects = [];
   expect(hasUntranslatedResumeSourceProse(draft, profile)).toBe(false);
 });
+
+it("assembles skills case-insensitively without code injecting listing keywords", async () => {
+  const { seedResumeDraft } =
+    await import("../internal/resume-workspace-structure");
+  const seed = createSeed();
+  seed.profile.skills = ["GraphQL", "graphql", "GRAPHQL", "CI/CD pipelines"];
+  seed.profile.skillGroups.coreSkills = ["graphql", "CI/CD pipelines"];
+  const draft = seedResumeDraft({
+    profile: seed.profile,
+    job: seed.savedJobs[0]!,
+    templateId: seed.settings.resumeTemplateId,
+  });
+  const skills = draft.sections
+    .filter((section) => section.kind === "skills")
+    .flatMap((section) => section.bullets.map((bullet) => bullet.text));
+  expect(
+    skills.filter((skill) => skill.toLowerCase() === "graphql"),
+  ).toHaveLength(1);
+  expect(
+    skills.filter((skill) => skill.toLowerCase() === "ci/cd pipelines"),
+  ).toHaveLength(1);
+});

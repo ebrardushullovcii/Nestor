@@ -157,6 +157,31 @@ const ready = () =>
   });
 const cleanups: (() => void | Promise<void>)[] = [];
 
+it("records a model-reported closed posting as closed instead of failed", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!({
+    ...ready(),
+    state: "failed",
+    detail: "The employer says this posting is closed.",
+    blocker: {
+      code: "application_closed",
+      summary: "Posting closed",
+      detail: "Applications are closed.",
+      userActionKind: null,
+      questionIds: [],
+      sourceDebugEvidenceRefIds: [],
+      url: "https://replica.test/closed",
+    },
+  });
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("closed"),
+  );
+  expect(f.applications.needsYou.list().total).toBe(0);
+});
+
 it("closes a saved-rule skip without adding a Needs you question", async () => {
   const f = await setup(1);
   await f.service.start();
@@ -534,8 +559,7 @@ it("a Send for me form that could not be confirmed ready says why, keeps Send, a
   expect(action).not.toHaveBeenCalled();
   expect(row).toMatchObject({
     mode: "autonomous_submit",
-    error:
-      "Send for me filled this form but could not confirm it was ready to send, so it waits for you. Review it and press Send.",
+    error: "The model finished without sending: Filled form",
   });
   // Its page is still open: Open shows it, with no refill and no new mode.
   f.browser.focusApplicationPageBinding.mockResolvedValue(true);
@@ -1694,7 +1718,9 @@ it("a refill of a closed form gets what the attempt before left, to bring it bac
     expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
   );
   // Fill always leaves the send to the person: nothing more to say.
-  expect(f.applications.getApplication(row.id)?.error).toBeNull();
+  expect(f.applications.getApplication(row.id)?.error).toBe(
+    "The model finished without sending: Filled form",
+  );
   preparation.answers = [];
 });
 

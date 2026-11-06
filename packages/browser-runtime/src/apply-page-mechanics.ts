@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { withAccountWindowSession } from "./account-window-session";
 import { choosePageOption } from "./choose-page-option";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
-import { pickCalendarDate } from "./date-picker";
+import { replaceFieldText } from "./replace-field-text";
 import type {
   ApplyBlockedAttempt,
   RawApplyClickable,
@@ -1176,6 +1176,49 @@ export function collectApplyDocumentSnapshot(
 ) {
   const matching = (selector: string) =>
     elements.filter((element) => element.matches(selector));
+  const fieldVisibility = (element: Element) => {
+    const rect = element.getBoundingClientRect();
+    let ariaHidden = false,
+      cssHidden = false;
+    for (
+      let node: Element | null = element;
+      node;
+      node = node.parentElement ?? (node.getRootNode() as ShadowRoot).host
+    ) {
+      const style = getComputedStyle(node);
+      ariaHidden ||= node.getAttribute("aria-hidden") === "true";
+      cssHidden ||=
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        style.visibility === "collapse" ||
+        style.opacity === "0";
+    }
+    return {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      viewportWidth: innerWidth,
+      viewportHeight: innerHeight,
+      inViewport:
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.right > 0 &&
+        rect.bottom > 0 &&
+        rect.left < innerWidth &&
+        rect.top < innerHeight,
+      offCanvas:
+        rect.right <= 0 ||
+        rect.bottom <= 0 ||
+        rect.left + scrollX >=
+          Math.max(innerWidth, document.documentElement.scrollWidth) ||
+        rect.top + scrollY >=
+          Math.max(innerHeight, document.documentElement.scrollHeight),
+      zeroSize: rect.width === 0 || rect.height === 0,
+      ariaHidden,
+      cssHidden,
+    };
+  };
   const fieldDescriptions = matching(selectors.controls).flatMap((control) => {
     const root = control.getRootNode();
     // Live picker guidance can be aria-describedby too. Its text still stays
@@ -1586,6 +1629,7 @@ export function collectApplyDocumentSnapshot(
       return names;
     };
     const customOptions = (element: HTMLElement): string[] => {
+      if (element.getAttribute("aria-expanded") === "false") return [];
       // Only a list this control says is its own. Reaching into the
       // nearest listbox in the DOM is how a phone number field ended up
       // carrying the 200 countries belonging to the picker beside it,
@@ -1815,6 +1859,7 @@ export function collectApplyDocumentSnapshot(
             : "contenteditable";
       return {
         index,
+        visibility: fieldVisibility(element),
         tagName,
         inputType: datePicker(element)
           ? "date"
@@ -2141,14 +2186,8 @@ async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
     };
   });
 
-  // A list the page builds itself renders its choices only while it is open.
-  // Closed, the question reaches the person as a bare text box with nothing to
-  // pick from, which is no question at all. Opening it is a read: it asks the
-  // page to show what it already offers and writes nothing.
-  const controlsWithChoices = await readClosedComboboxOptions(
-    page,
-    enrichedControls,
-  );
+  // Observing must not open, dismiss or change pickers or their parent dialogs.
+  const controlsWithChoices = enrichedControls;
 
   return {
     ...snapshot,
@@ -2211,246 +2250,6 @@ async function listTaskOwnedPopups(root: Page): Promise<Page[]> {
   }
 
   return owned;
-}
-
-/**
- * The choices already read out of one page's lists.
- *
- * Opening a list costs the better part of a second, and a form is read again
- * after every single field is filled in. Reading the same ten lists on every
- * one of those reads was minutes of a person's run spent learning nothing new:
- * the choices a list offers do not change while the form is being filled in.
- * Keyed by the page and by what the control says about itself, so a renumbered
- * control still finds its own choices and a new page starts fresh.
- */
-const comboboxOptionMemo = new WeakMap<Page, Map<string, string[]>>();
-const comboboxMenuOwners = new WeakMap<Page, Map<string, string>>();
-
-/**
- * What makes one list that list, on this page and on the next read.
- *
- * Its own words and the kind of field it is — never where it sits in the DOM,
- * and never a listbox id the page mints afresh each time it opens. Position is
- * how the country list ended up answering a yes/no question.
- */
-function comboboxMemoKey(url: string, control: RawApplyControl): string {
-  const words = `${control.groupLabel} ${control.label}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, " ")
-    .trim();
-  return `${url}|${words}|${control.tagName}|${control.inputType}|${control.role}`;
-}
-
-/**
- * Fills in the choices of every list that only renders them while open.
- *
- * Bounded on both axes: a few lists per read, a moment each. Anything that
- * will not open is left as it was rather than holding up the read.
- */
-async function readClosedComboboxOptions(
-  page: Page,
-  controls: readonly RawApplyControl[],
-): Promise<RawApplyControl[]> {
-  const closed = controls.filter(
-    (control) =>
-      control.visible &&
-      !control.disabled &&
-      control.tagName !== "select" &&
-      (control.role === "combobox" || control.inputType === "combobox") &&
-      // A list that already shows a choice has been answered; opening it
-      // tells the person nothing and costs them a second of their run.
-      control.selectedOptionLabel.trim().length === 0,
-  );
-  if (closed.length === 0) {
-    return [...controls];
-  }
-
-  // A previous choice can change the choices another menu offers.
-  const url = `${page.url()}|${JSON.stringify(controls.filter((control) => control.tagName === "select" || control.role === "combobox" || control.inputType === "combobox").map((control) => [control.scopeKey, control.id, control.name, control.value, control.selectedOptionLabel]))}`;
-  const keyFor = (control: RawApplyControl) =>
-    `${comboboxMemoKey(url, control)}|${JSON.stringify([control.scopeKey, control.index, control.id, control.name])}`;
-  let memo = comboboxOptionMemo.get(page);
-  if (!memo) {
-    memo = new Map<string, string[]>();
-    comboboxOptionMemo.set(page, memo);
-  }
-
-  let knownMenuOwners = comboboxMenuOwners.get(page);
-  if (!knownMenuOwners) {
-    knownMenuOwners = new Map();
-    comboboxMenuOwners.set(page, knownMenuOwners);
-  }
-  const optionsByIndex = new Map<number, string[]>();
-  const toOpen: RawApplyControl[] = [];
-  for (const control of closed) {
-    const remembered = memo.get(keyFor(control));
-    if (remembered) {
-      if (remembered.length > 0) {
-        optionsByIndex.set(control.index, remembered);
-      }
-      continue;
-    }
-    toOpen.push(control);
-  }
-
-  for (const control of toOpen) {
-    const locator = controlLocator(page, control.ref ?? `c${control.index}`);
-    if (!locator) continue;
-    try {
-      // Whatever the last list left open is closed first: a click that only
-      // dismisses someone else's flyout reads as a list with no choices, and
-      // the question then reaches the person as a bare text box.
-      await page.keyboard.press("Escape").catch(() => undefined);
-      await locator
-        .scrollIntoViewIfNeeded({ timeout: 0 })
-        .catch(() => undefined);
-      const menuRead = await locator.evaluateHandle((element) => {
-        const ownedMenu = () => {
-          const ids = (
-            element.getAttribute("aria-controls") ??
-            element.getAttribute("aria-owns") ??
-            ""
-          )
-            .split(/\s+/u)
-            .filter(Boolean);
-          return ids.length === 1 ? document.getElementById(ids[0]!) : null;
-        };
-        const initialOwned = ownedMenu();
-        const initialMenus = new Set(
-          document.querySelectorAll("[role='listbox']"),
-        );
-        const changed = new Set<Element>();
-        const observer = new MutationObserver((records) => {
-          for (const record of records) {
-            const target =
-              record.target instanceof Element
-                ? record.target
-                : record.target.parentElement;
-            const menu = target?.closest("[role='listbox']");
-            if (menu) changed.add(menu);
-          }
-        });
-        observer.observe(document, {
-          subtree: true,
-          childList: true,
-          characterData: true,
-        });
-        // Cover the three bounded open actions and the 700 ms read. A
-        // background click can take nearly its whole 1.5 s timeout before
-        // the menu starts rendering. The finally below normally cleans up.
-        setTimeout(() => observer.disconnect(), 6000);
-        return { element, initialOwned, initialMenus, changed, observer };
-      });
-      let options: string[] = [];
-      try {
-        await locator.focus({ timeout: 0 }).catch(() => undefined);
-        await locator.press("ArrowDown", { timeout: 0 }).catch(() => undefined);
-        if ((await locator.getAttribute("aria-expanded")) !== "true")
-          await locator.click({ timeout: 0 });
-        const owner = keyFor(control);
-        const observed = await menuRead.evaluate(
-          async (state, context) => {
-            const started = Date.now(),
-              deadline = started + 700;
-            let last = "",
-              menuId = "",
-              stableAt = started;
-            while (Date.now() < deadline) {
-              const ids = (
-                state.element.getAttribute("aria-controls") ??
-                state.element.getAttribute("aria-owns") ??
-                ""
-              )
-                .split(/\s+/u)
-                .filter(Boolean);
-              const menu =
-                ids.length === 1 ? document.getElementById(ids[0]!) : null;
-              menuId = menu?.id ?? "";
-              const previousOwner = context.owners[`${context.url}|${menuId}`];
-              const owners =
-                ids.length === 1
-                  ? Array.from(
-                      document.querySelectorAll("[aria-controls],[aria-owns]"),
-                    ).filter((candidate) =>
-                      (
-                        candidate.getAttribute("aria-controls") ??
-                        candidate.getAttribute("aria-owns") ??
-                        ""
-                      )
-                        .split(/\s+/u)
-                        .includes(ids[0]!),
-                    )
-                  : [];
-              const fresh =
-                menu &&
-                (state.changed.has(menu) ||
-                  !state.initialMenus.has(menu) ||
-                  (menu === state.initialOwned &&
-                    owners.length === 1 &&
-                    (!previousOwner || previousOwner === context.owner)));
-              const choices =
-                state.element.getAttribute("aria-expanded") === "true" &&
-                menu &&
-                fresh
-                  ? Array.from(menu.querySelectorAll("[role='option']"))
-                      .filter(
-                        (option) =>
-                          option.getAttribute("aria-disabled") !== "true",
-                      )
-                      .map((option) => (option as HTMLElement).innerText.trim())
-                      .filter(Boolean)
-                  : [];
-              const signature = JSON.stringify(choices);
-              if (signature !== last) {
-                last = signature;
-                stableAt = Date.now();
-              }
-              if (
-                choices.length &&
-                Date.now() - stableAt >= 120 &&
-                Date.now() - started >= 200
-              )
-                return { options: choices, menuId };
-              await new Promise((resolve) => setTimeout(resolve, 25));
-            }
-            return { options: [], menuId };
-          },
-          {
-            owners: Object.fromEntries(knownMenuOwners),
-            owner,
-            url: page.url(),
-          },
-        );
-        options = observed.options;
-        if (options.length && observed.menuId)
-          knownMenuOwners.set(`${page.url()}|${observed.menuId}`, owner);
-      } finally {
-        await menuRead
-          .evaluate((state) => state.observer.disconnect())
-          .catch(() => undefined);
-        await menuRead.dispose();
-      }
-      memo.set(keyFor(control), options);
-      if (options.length > 0) {
-        optionsByIndex.set(control.index, options);
-      }
-    } catch {
-      // Remembered as "nothing to offer" so the next read does not pay for
-      // the same list again.
-      memo.set(keyFor(control), []);
-      // A list that will not open tells us nothing; the question still goes
-      // to the person, just without its choices.
-    }
-    await page.keyboard.press("Escape").catch(() => undefined);
-  }
-
-  return controls.map((control) => {
-    const options = optionsByIndex.get(control.index);
-    // Raw DOM text from a reused, closed portal is not evidence for this question.
-    return closed.includes(control)
-      ? { ...control, options: options ?? [] }
-      : control;
-  });
 }
 
 /**
@@ -2750,24 +2549,7 @@ export function createPlaywrightApplyPageMechanics(
         return { ok: false, error: `No control named ${ref} on this page.` };
       }
       try {
-        // A calendar's text box takes a date, picked from its calendar.
-        const picked = await pickCalendarDate(page, locator, value);
-        if (picked) return picked;
-        await locator.fill(value, { timeout: 0 });
-        // Check immediate acceptance here. The apply workflow checks retention
-        // after 300 ms, sharing that window across a batch of typed answers.
-        const observedValue = await locator.inputValue({ timeout: 0 });
-        if (value.trim().length > 0 && observedValue.trim().length === 0) {
-          return {
-            ok: false,
-            error:
-              "The field cleared the answer instead of keeping it. Leave it for the person or try a different control once.",
-          };
-        }
-        return {
-          ok: true,
-          observedValue,
-        };
+        return await replaceFieldText(locator, value);
       } catch (error) {
         return {
           ok: false,

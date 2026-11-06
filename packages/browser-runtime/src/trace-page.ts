@@ -102,6 +102,11 @@ async function capturePageTrace(
   }
 }
 
+/** Final evidence is collected after the outcome and before this exact tab closes. */
+export async function traceFinalPage(page: Page): Promise<void> {
+  if (runTraceEnabled()) await capturePageTrace(page, "final_outcome");
+}
+
 /** Optional recording wraps the existing mechanics, preserving values/errors. */
 export function tracePageHands<T extends object>(page: Page, hands: T): T {
   if (!runTraceEnabled()) return hands;

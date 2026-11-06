@@ -218,7 +218,10 @@ export async function generatePack(options) {
         (a.seq ?? 0) - (b.seq ?? 0),
     );
   const rows = data ? readRunRows(data, options.application, kind) : {};
-  const app = rows.applications?.[0];
+  const storedApp = rows.applications?.[0];
+  const app = storedApp?.posting_closed
+    ? { ...storedApp, state: "closed" }
+    : storedApp;
   const applicationKey = app
     ? `application_${app.id}_attempt_${app.attempt}`
     : options["application-key"];
@@ -228,6 +231,14 @@ export async function generatePack(options) {
   const endMs = terminal ? Number(app.updated_at) : Infinity;
   const relevant = events.filter((e) => {
     if (e.event === "run_header") return true;
+    if (
+      e.event === "operator_action" &&
+      app &&
+      e.applicationKeys?.some((key) =>
+        key.startsWith(`application_${app.id}_attempt_`),
+      )
+    )
+      return !Number.isFinite(endMs) || Date.parse(e.at) <= endMs;
     if (
       e.event === "application_requested" &&
       app &&
@@ -256,7 +267,9 @@ export async function generatePack(options) {
     relevant.map((e) => JSON.stringify(traceSafe(e))).join("\n") + "\n",
     { mode: 0o600, flag: "wx" },
   );
-  const headerEvent = relevant.find((e) => e.event === "run_header");
+  const headerEvent =
+    relevant.findLast((e) => e.event === "run_header") ??
+    relevant.find((e) => e.runConfiguration)?.runConfiguration;
   const permissions = rows.profile_settings ?? [];
   const permissionValues = Object.entries(permissions[0] ?? {}).filter(
     ([key]) =>
@@ -316,9 +329,11 @@ export async function generatePack(options) {
   const needs = rows.needs_you ?? [];
   writeJson(out, "needs-you.json", needs);
   const finalShot =
+    shots.findLast((s) => s.action === "final_outcome") ??
     shots
       .filter((s) => s.event === "page_snapshot" || s.target === "browser")
-      .at(-1) ?? null;
+      .at(-1) ??
+    null;
   if (finalShot)
     copyFileSync(
       path.join(out, finalShot.file),

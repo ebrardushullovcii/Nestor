@@ -175,6 +175,85 @@ function model(
 }
 const done = { name: "finish", args: { reason: "Finished", forPerson: [] } };
 test.each(["prepare_only", "autonomous_submit"] as const)(
+  "%s receives the real instruction and both labelled resume documents",
+  async (mode) => {
+    const input = config(page());
+    input.authority.mode = mode;
+    input.sources.preferences = {
+      approvalMode: "review_before_submit",
+      humanReviewRequired: true,
+    } as unknown as NonNullable<ApplyAgentConfig["sources"]["preferences"]>;
+    input.sources.resumeText =
+      "Selected tailored resume: Optimizely and A/B testing.";
+    const client = model([done]);
+    await runApplyAgent(input, client);
+    const prompt = JSON.stringify(
+      vi.mocked(client.chatWithTools).mock.calls[0][0],
+    );
+    expect(prompt).not.toContain("approvalMode");
+    expect(prompt).not.toContain("humanReviewRequired");
+    expect(prompt).toContain(mode);
+    expect(prompt).toContain("Original imported resume");
+    expect(prompt).toContain("8 years of platform engineering");
+    expect(prompt).toContain("Selected resume being sent");
+    expect(prompt).toContain("Optimizely and A/B testing");
+  },
+);
+
+test("a stale planned ref names every unattempted batch entry and leaves them untouched", async () => {
+  const source = page({
+    controls: [0, 1, 2].map((index) => ({
+      ...nameControl(),
+      index,
+      value: "",
+    })),
+  });
+  const input = config(source);
+  const write = input.hands.fillText;
+  input.hands.fillText = async (ref, value) => {
+    const result = await write(ref, value);
+    source.controls = source.controls.filter((entry) => entry.index !== 1);
+    return result;
+  };
+  const client = model([
+    {
+      name: "fill_fields",
+      args: {
+        fields: [0, 1, 2].map((index) => ({
+          tool: "type",
+          ref: `c${index}`,
+          text: `Value ${index}`,
+        })),
+      },
+    },
+    done,
+  ]);
+  await runApplyAgent(input, client);
+  const messages = JSON.stringify(
+    vi.mocked(client.chatWithTools).mock.calls[1][0],
+  );
+  expect(messages).toContain("type c1: not attempted");
+  expect(messages).toContain("type c2: not attempted");
+  expect(source.controls.find((entry) => entry.index === 2)?.value).toBe("");
+});
+
+test("the model can report a closed posting without a failure classifier", async () => {
+  const result = await runApplyAgent(
+    config(page()),
+    model([
+      {
+        name: "finish",
+        args: {
+          reason: "The employer says this posting is closed.",
+          applicationClosed: true,
+        },
+      },
+    ]),
+  );
+  expect(result.applicationClosed).toBe(true);
+  expect(result.reason).toContain("posting is closed");
+});
+test.each(["prepare_only", "autonomous_submit"] as const)(
   "%s passes a closed-root site-check ref directly to click and checkbox hands",
   async (mode) => {
     const source = page({
@@ -942,4 +1021,82 @@ test("a changed HTML id does not veto a write to a resolving DOM ref", async () 
     ]),
   );
   expect(source.controls[1]?.value).toBe("Employer");
+});
+
+test("What was sent binds a dialog's fields without including the underlying page's widgets", async () => {
+  const source = page({
+    controls: [
+      {
+        ...nameControl(),
+        index: 0,
+        scopeKey: "search",
+        label: "Search",
+        value: "Query",
+      },
+      {
+        ...nameControl(),
+        index: 1,
+        scopeKey: "dialog",
+        label: "Applicant",
+        value: "Robin",
+      },
+    ],
+    actions: [
+      {
+        index: 0,
+        scopeKey: "dialog",
+        label: "Send",
+        visible: true,
+        disabled: false,
+      },
+    ],
+  });
+  const input = config(source);
+  input.submitApplication = () =>
+    Promise.resolve({ outcome: "outcome_uncertain", content: "Issued send" });
+  const result = await runApplyAgent(
+    input,
+    model([{ name: "submit_application", args: { ref: "a0" } }, done]),
+  );
+  expect(result.reviewFilled?.map((entry) => entry.label)).toEqual([
+    "Applicant",
+  ]);
+});
+
+test("a failed batch field does not stop independent fields", async () => {
+  const source = page({
+    controls: [0, 1, 2].map((index) => ({
+      ...nameControl(),
+      index,
+      value: "",
+    })),
+  });
+  const input = config(source),
+    write = input.hands.fillText;
+  input.hands.fillText = (ref, value) =>
+    ref === "c0"
+      ? Promise.reject(new Error("Field request failed"))
+      : write(ref, value);
+  const result = await runApplyAgent(
+    input,
+    model([
+      {
+        name: "fill_fields",
+        args: {
+          fields: [0, 1, 2].map((index) => ({
+            tool: "type",
+            ref: `c${index}`,
+            text: `Value ${index}`,
+          })),
+        },
+      },
+      done,
+    ]),
+  );
+  expect(source.controls.map((entry) => entry.value)).toEqual([
+    "",
+    "Value 1",
+    "Value 2",
+  ]);
+  expect(result.filled).toHaveLength(2);
 });
