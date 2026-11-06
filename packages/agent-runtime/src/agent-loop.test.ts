@@ -297,6 +297,14 @@ describe("runAgentLoop", () => {
     expect(result.steps).toBe(3);
   });
 
+  test("a browser failure uses its generous failure allowance instead of a shorter no-progress window", async () => {
+    const dead = tool("observe", () => Promise.reject(new Error("The tab was closed")), { failureKind: "browser", describeError: () => "The tab was closed" });
+    const result = await runAgentLoop({ messages: opening, model: scripted([[call("observe")]]), tools: [dead], subjectLabel: "the site", ceilings: { noProgressStepLimit: 3 } });
+    expect(result.ending).toBe("browser_failed");
+    expect(result.steps).toBe(30);
+    expect(result.reason).toContain("tab was closed");
+  });
+
   test("a safety stop ends the run with the host's reason", async () => {
     const guard = tool("press", () =>
       Promise.resolve({

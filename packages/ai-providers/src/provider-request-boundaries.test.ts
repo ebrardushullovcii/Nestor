@@ -162,8 +162,8 @@ test.each(["responses", "chat_completions"] as const)(
           : request.body.reasoning_effort,
       ).toEqual(
         apiMode === "responses"
-          ? { effort: index < 2 ? "low" : "high", summary: "auto" }
-          : index < 2
+          ? { effort: index === 1 ? "low" : "high", summary: "auto" }
+          : index === 1
             ? "low"
             : "high",
       );

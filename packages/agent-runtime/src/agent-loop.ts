@@ -458,7 +458,7 @@ export async function runAgentLoop(
   let steps = 0;
   let progressSteps = 0;
   let lastProgressStep = 0;
-  let waitSteps = 0;
+  let stallExemptSteps = 0;
   let stallWarningStep: number | null = null;
   let consecutiveBrowserFailures = 0;
   let modelMs = 0;
@@ -505,7 +505,7 @@ export async function runAgentLoop(
   const markProgress = (): void => {
     progressSteps += 1;
     lastProgressStep = steps;
-    waitSteps = 0;
+    stallExemptSteps = 0;
     stallWarningStep = null;
   };
 
@@ -528,7 +528,7 @@ export async function runAgentLoop(
       return result("finished", endSentence(hostedFinish.reason), {
         finish: hostedFinish,
       });
-    const stepsWithoutProgress = steps - lastProgressStep - waitSteps;
+    const stepsWithoutProgress = steps - lastProgressStep - stallExemptSteps;
     if (
       stallWarningStep === null &&
       steps > 0 &&
@@ -682,7 +682,10 @@ export async function runAgentLoop(
     });
 
     let ended: AgentLoopResult | null = null;
-    let waitedThisStep = false;
+    let exemptedThisStep = false;
+    const exemptFromStall = () => {
+      if (!exemptedThisStep) { stallExemptSteps += 1; exemptedThisStep = true; }
+    };
     let batchStopped = false;
     for (const toolCall of toolCalls) {
       if (ended || batchStopped) {
@@ -786,8 +789,9 @@ export async function runAgentLoop(
         }
         if (error instanceof ToolDeadlineError) {
           // A hung step is reported as a fact and counted like a dead page:
-          // three in a row end the run in plain words instead of a freeze.
+          // repeated silence ends the run in plain words instead of a freeze.
           consecutiveBrowserFailures += 1;
+          exemptFromStall();
           const failure = Number.isFinite(deadlineMs)
             ? `That step took longer than ${Math.round(deadlineMs / 1000)} seconds and was given up.`
             : "That step stopped reporting progress and was given up.";
@@ -825,6 +829,7 @@ export async function runAgentLoop(
         // Only a page tool can increment the dead-browser counter. Its own
         // descriptor removes library internals before the model or person sees it.
         consecutiveBrowserFailures += 1;
+        exemptFromStall();
         const failure = endSentence(
           tool.describeError?.(error) ?? "The browser did not respond.",
         );
@@ -858,10 +863,7 @@ export async function runAgentLoop(
 
       switch (outcome.kind) {
         case "ok": {
-          if (tool.isWait && !waitedThisStep) {
-            waitSteps += 1;
-            waitedThisStep = true;
-          }
+          if (tool.isWait || tool.definition.function.name === "wait") exemptFromStall();
           batchStopped =
             outcome.stopBatch === true ||
             outcome.status === "refused" ||
