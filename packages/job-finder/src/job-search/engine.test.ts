@@ -114,7 +114,7 @@ test("passes remote location policy into fit and retains the model's changed sco
   }
 });
 
-test.each([999, 403])(
+test.each([999, 403, 429])(
   "HTTP %s continues through browser navigation and reads the full listing",
   async (status) => {
     const seed = createSeed();

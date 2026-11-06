@@ -125,7 +125,7 @@ test("a small complete DOM does not report a self-limit", () => {
 });
 
 test.each(["options", "steps"] as const)(
-  "serialized picker scanning reports its %s ceiling and leaves completeness unknown",
+  "serialized picker scanning passes its former %s ceiling without omitting choices",
   async (boundary) => {
     vi.useFakeTimers();
     const log = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -133,7 +133,7 @@ test.each(["options", "steps"] as const)(
       `<div id="choices" style="overflow-y:auto">${Array.from({ length: boundary === "options" ? 1510 : 3 }, (_, i) => `<div role="option">Choice ${i}</div>`).join("")}</div>`,
     );
     page.window.eval(
-      `Object.defineProperty(HTMLElement.prototype,"scrollHeight",{get(){return 1000000}});Object.defineProperty(HTMLElement.prototype,"clientHeight",{get(){return 100}});`,
+      `Object.defineProperty(HTMLElement.prototype,"scrollHeight",{get(){return 10000}});Object.defineProperty(HTMLElement.prototype,"clientHeight",{get(){return 100}});`,
     );
     const list = {
       evaluate: (read: (...args: unknown[]) => unknown, input: unknown) =>
@@ -144,14 +144,16 @@ test.each(["options", "steps"] as const)(
         ),
     } as unknown as Locator;
     const pending = readWholeList(list, "Unlisted choice");
-    await vi.advanceTimersByTimeAsync(12000);
-    expect((await pending).complete).toBe(false);
+    await vi.advanceTimersByTimeAsync(20000);
+    const result = await pending;
+    expect(result.complete).toBe(true);
+    expect(result.options).toHaveLength(boundary === "options" ? 1510 : 3);
     expect(
       hits(log).some(
         (hit) =>
           hit.limit ===
           (boundary === "options" ? "picker_options" : "picker_scroll_steps"),
       ),
-    ).toBe(true);
+    ).toBe(false);
   },
 );

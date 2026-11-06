@@ -1,6 +1,6 @@
 import { traceEvent } from "@nestor/core/run-trace";
 import { createHostQueue } from "./host-queue";
-import { createConnectionIdleTimeout } from "@nestor/core";
+import { createConnectionIdleTimeout, yieldToEventLoop } from "@nestor/core";
 import {
   DiscoveryPageReadError,
   type ReadDiscoveryPostingPage,
@@ -54,7 +54,7 @@ export function createHttpPageReader(
                 ...(readOptions.jsonQuery
                   ? {
                       body: JSON.stringify(readOptions.jsonQuery),
-                      redirect: "error" as const,
+                      redirect: "manual" as const,
                     }
                   : {}),
                 headers: {
@@ -125,16 +125,17 @@ export function createHttpPageReader(
         return result;
       } catch (error) {
         queueSignal.throwIfAborted();
+        // HTTP refusals are page facts for browser/model continuation. Retry
+        // dropped or silent connections, where no usable page answer arrived.
         const retryable =
-          error instanceof DiscoveryPageReadError
-            ? error.status === 408 ||
-              error.status === 429 ||
-              error.status >= 500
-            : error instanceof TypeError ||
-              (error instanceof Error && error.name === "AbortError");
+          !(error instanceof DiscoveryPageReadError) &&
+          (error instanceof TypeError ||
+            (error instanceof Error && error.name === "AbortError"));
         if (!retryable) throw error;
         if (!(error instanceof DiscoveryPageReadError))
           queue.pause(address.hostname, Date.now() + 1000);
+        // Keep Stop responsive even when an adapter resolves retries immediately.
+        await yieldToEventLoop();
       }
     }
   };
