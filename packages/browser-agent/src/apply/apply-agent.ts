@@ -53,8 +53,6 @@ import type {
   ApplyProposal,
 } from "./types";
 
-export { refIdentity } from "./control-identity";
-import { refIdentity } from "./control-identity";
 export async function runApplyAgent(
   input: ApplyAgentConfig,
   client: LLMClient,
@@ -490,39 +488,15 @@ export async function runApplyAgent(
         const parsed = parseFillFields(raw);
         if (!parsed.ok)
           return { kind: "ok", status: "failed", content: parsed.error };
-        const planned = page ?? (await readPage());
         const steps: ApplyProposal[] = [
           ...parsed.fields,
           ...(parsed.thenContinue
             ? [{ tool: "click" as const, ref: parsed.thenContinue }]
             : []),
         ];
-        const identities = new Map(
-            steps.flatMap((step) =>
-              "ref" in step && step.ref
-                ? [[step.ref, refIdentity(planned, step.ref)] as const]
-                : [],
-            ),
-          ),
-          lines: string[] = [];
-        for (const [index, step] of steps.entries()) {
+        const lines: string[] = [];
+        for (const step of steps) {
           context.signal?.throwIfAborted();
-          const current = await readPage();
-          const changed = steps
-            .slice(index)
-            .some(
-              (next) =>
-                "ref" in next &&
-                next.ref &&
-                (!identities.get(next.ref) ||
-                  identities.get(next.ref) !== refIdentity(current, next.ref)),
-            );
-          if (changed)
-            return {
-              kind: "ok",
-              content: `${lines.join("\n")}\nA planned ref changed identity; remaining actions were not attempted.\n${describeObservation(current)}`,
-              stopBatch: true,
-            };
           const result = await runProposal(step);
           if (result.kind !== "ok") return result;
           lines.push(result.content);

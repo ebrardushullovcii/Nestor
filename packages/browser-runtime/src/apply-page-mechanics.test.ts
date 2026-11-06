@@ -196,7 +196,12 @@ describe("reading the choices of lists the page draws itself", () => {
           source,
         );
       const automated = await readRawApplyPage(page);
-      expect(native.controls).toEqual(
+      expect(
+        native.controls.map((control, index) => ({
+          ...control,
+          ref: `c${index}`,
+        })),
+      ).toEqual(
         automated.controls.map((control, index) =>
           index < 2 ? { ...control, value: "" } : control,
         ),

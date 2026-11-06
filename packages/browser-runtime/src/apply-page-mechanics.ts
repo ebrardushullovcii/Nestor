@@ -2,7 +2,7 @@ import { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { withNavigationLiveness } from "./browser-navigation";
 import { tracePageHands, tracePage } from "./trace-page";
-import { selfLimitTimeout, selfLimitSlice } from "@nestor/core";
+import { selfLimitTimeout } from "@nestor/core";
 
 import { watchPageSelfLimits } from "./self-limit-page";
 import {
@@ -38,6 +38,16 @@ import { describeBrowserError, isPageReplacedError } from "@nestor/contracts";
 import type { Frame, Locator, Page } from "playwright";
 import { readPageLinkedText } from "./page-linked-text";
 import { readPageMessages } from "./page-messages";
+import {
+  readClosedShadowControls,
+  clickClosedShadowControl,
+} from "./closed-shadow-controls";
+import {
+  controlSnapshot,
+  controlRefFrame,
+  boundControlLocator,
+  hasBoundControlRefs,
+} from "./page-control-refs";
 export {
   installPageMessageRecorderInPage,
   PAGE_MESSAGE_CONSOLE_PREFIX,
@@ -132,15 +142,23 @@ async function collectRawApplyPage(page: Page): Promise<RawApplyPage> {
   watchPageSelfLimits(page);
   const counter = mutationCounter(page);
   const raw = await readRawApplyPageContent(page);
+  raw.clickables.push(
+    ...(await readClosedShadowControls(
+      page,
+      `${APPLY_CONTROL_SELECTOR}, ${APPLY_ACTION_SELECTOR}, ${APPLY_LINK_SELECTOR}, ${APPLY_CLICKABLE_SELECTOR}`,
+    )),
+  );
   // A dropzone's inner input often says only "Choose a file". Its actual
   // question lives outside the shadow root, beside the widget's host.
   for (const [index, frame] of page.frames().entries()) {
     const fields = raw.controls.filter(
       (control) =>
         control.inputType === "file" &&
-        (index === 0
-          ? !control.ref?.startsWith("f")
-          : control.ref?.startsWith(`f${index - 1}c`)),
+        (controlRefFrame(page, control.ref) === frame ||
+          (!hasBoundControlRefs(page) &&
+            (index === 0
+              ? !control.ref?.startsWith("f")
+              : control.ref?.startsWith(`f${index - 1}c`)))),
     );
     if (!fields.length) continue;
     const labels = await frame
@@ -257,12 +275,7 @@ async function includeChildFrameContent(
   if (frames.length === 0) return root;
 
   const snapshots = await Promise.all(
-    selfLimitSlice(
-      frames,
-      0,
-      16,
-      "packages/browser-runtime/src/apply-page-mechanics.ts:262",
-    ).map((frame, index) => readApplyFrame(frame, index)),
+    frames.map((frame, index) => readApplyFrame(frame, index)),
   );
   const readable = snapshots.filter(
     (snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== null,
@@ -271,14 +284,9 @@ async function includeChildFrameContent(
 
   return {
     ...root,
-    bodyText: selfLimitSlice(
-      [root.bodyText, ...readable.map((item) => item.bodyText)]
-        .filter(Boolean)
-        .join("\n\n"),
-      0,
-      20_000,
-      "packages/browser-runtime/src/apply-page-mechanics.ts:276",
-    ),
+    bodyText: [root.bodyText, ...readable.map((item) => item.bodyText)]
+      .filter(Boolean)
+      .join("\n\n"),
     controls: [...root.controls, ...readable.flatMap((item) => item.controls)],
     actions: [...root.actions, ...readable.flatMap((item) => item.actions)],
     links: [...root.links, ...readable.flatMap((item) => item.links)],
@@ -287,27 +295,17 @@ async function includeChildFrameContent(
       ...readable.flatMap((item) => item.clickables),
     ],
     headings: [...root.headings, ...readable.flatMap((item) => item.headings)],
-    validationErrors: selfLimitSlice(
-      [
-        ...root.validationErrors,
-        ...readable.flatMap((item) => item.validationErrors),
-      ],
-      0,
-      24,
-      "packages/browser-runtime/src/apply-page-mechanics.ts:292",
-    ),
+    validationErrors: [
+      ...root.validationErrors,
+      ...readable.flatMap((item) => item.validationErrors),
+    ],
     ...(root.summaryRows?.length ||
     readable.some((item) => item.summaryRows.length)
       ? {
-          summaryRows: selfLimitSlice(
-            [
-              ...(root.summaryRows ?? []),
-              ...readable.flatMap((item) => item.summaryRows),
-            ],
-            0,
-            200,
-            "packages/browser-runtime/src/apply-page-mechanics.ts:304",
-          ),
+          summaryRows: [
+            ...(root.summaryRows ?? []),
+            ...readable.flatMap((item) => item.summaryRows),
+          ],
         }
       : {}),
   };
@@ -326,6 +324,10 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
       }
     };
     const frameOwner = owner();
+    const snapshot = {
+      locator: (selector: string, kind: "c" | "a" | "l" | "e") =>
+        controlSnapshot(frame, frame.locator(selector), { [kind]: selector }),
+    };
     const [
       controls,
       unplacedActions,
@@ -338,8 +340,8 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
       clickablePlacements,
       summaryRows,
     ] = await Promise.all([
-      frame
-        .locator(APPLY_CONTROL_SELECTOR)
+      snapshot
+        .locator(APPLY_CONTROL_SELECTOR, "c")
         .evaluateAll((elements, prefix): RawApplyControl[] => {
           // This callback is serialized into the page; only fixed limit metadata returns
           // over its console channel. The host records it through reportSelfLimitHit.
@@ -771,7 +773,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             };
           });
         }, `f${frameIndex}`),
-      frame.locator(APPLY_ACTION_SELECTOR).evaluateAll(
+      snapshot.locator(APPLY_ACTION_SELECTOR, "a").evaluateAll(
         (elements, prefix): RawApplyAction[] =>
           elements.map((element, index) => {
             const html = element as HTMLElement;
@@ -823,8 +825,8 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
           }),
         `f${frameIndex}`,
       ),
-      frame
-        .locator(APPLY_LINK_SELECTOR)
+      snapshot
+        .locator(APPLY_LINK_SELECTOR, "l")
         .evaluateAll((elements, prefix): RawApplyLink[] => {
           // This callback is serialized into the page; only fixed limit metadata returns
           // over its console channel. The host records it through reportSelfLimitHit.
@@ -854,7 +856,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
             };
           });
         }, `f${frameIndex}`),
-      frame.locator(APPLY_CLICKABLE_SELECTOR).evaluateAll(
+      snapshot.locator(APPLY_CLICKABLE_SELECTOR, "e").evaluateAll(
         (elements, [prefix, owned]): RawApplyClickable[] => {
           // This callback is serialized into the page; only fixed limit metadata returns
           // over its console channel. The host records it through reportSelfLimitHit.
@@ -933,24 +935,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
 
           return elements
             .map((element) => (element as HTMLElement).innerText.trim())
-            .filter((text) => {
-              if (text.length >= 300) {
-                try {
-                  console.debug(
-                    "__nestor_self_limit__ " +
-                      JSON.stringify({
-                        limit: "long_validation_text_veto",
-                        kind: "input",
-                        value: 300,
-                        where: "browser-runtime/readValidationErrors",
-                      }),
-                  );
-                } catch {
-                  /* A page-owned console cannot change the operation. */
-                }
-              }
-              return text.length > 0 && text.length < 300;
-            });
+            .filter((text) => text.length > 0);
         })
         .catch(() => [] as string[]),
       // Where each sits is extra: a frame that will not say still reads.
@@ -989,7 +974,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
       links: links.map((link) => ({ ...link, frame: frameOwner })),
       clickables,
       headings,
-      bodyText: bodyText.slice(0, 8_000),
+      bodyText,
       validationErrors,
       summaryRows: summaryRows.map((row) => ({ ...row, frame: frameOwner })),
     };
@@ -1084,24 +1069,6 @@ export function readApplySummaryRows(
         label,
         value: text(value),
       });
-      if (rows.length >= 200) {
-        {
-          try {
-            console.debug(
-              "__nestor_self_limit__ " +
-                JSON.stringify({
-                  limit: "summary_rows",
-                  kind: "count",
-                  value: 200,
-                  where: "browser-runtime/readApplySummaryRows",
-                }),
-            );
-          } catch {
-            /* A page-owned console cannot change the operation. */
-          }
-        }
-        return rows;
-      }
     }
   }
   return rows;
@@ -2065,24 +2032,9 @@ export function collectApplyDocumentSnapshot(
               window.getComputedStyle(element).visibility !== "hidden",
           )
           .map((element) => (element as HTMLElement).innerText.trim())
-          .filter((text) => {
-            if (text.length >= 300) {
-              try {
-                console.debug(
-                  "__nestor_self_limit__ " +
-                    JSON.stringify({
-                      limit: "long_validation_text_veto",
-                      kind: "input",
-                      value: 300,
-                      where: "browser-runtime/readValidationErrors",
-                    }),
-                );
-              } catch {
-                /* A page-owned console cannot change the operation. */
-              }
-            }
-            return text.length > 0 && text.length < 300;
-          }))(matching(selectors.validationErrors)),
+          .filter((text) => text.length > 0))(
+        matching(selectors.validationErrors),
+      ),
     [],
   );
   const headings = safe(
@@ -2167,9 +2119,16 @@ export function collectApplyDocumentSnapshot(
 async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
   // One DOM snapshot, preserving selector order and shadow-root access.
   const [snapshot, stepLabel, openedTabs, summaryRows] = await Promise.all([
-    page
-      .locator(Object.values(APPLY_PAGE_SELECTORS).join(", "))
-      .evaluateAll(collectApplyDocumentSnapshot, APPLY_PAGE_SELECTORS),
+    controlSnapshot(
+      page,
+      page.locator(Object.values(APPLY_PAGE_SELECTORS).join(", ")),
+      {
+        c: APPLY_CONTROL_SELECTOR,
+        a: APPLY_ACTION_SELECTOR,
+        l: APPLY_LINK_SELECTOR,
+        e: APPLY_CLICKABLE_SELECTOR,
+      },
+    ).evaluateAll(collectApplyDocumentSnapshot, APPLY_PAGE_SELECTORS),
     readApplyStepLabel(page),
     readOpenedTabs(page),
     page
@@ -2242,12 +2201,7 @@ async function readOpenedTabs(page: Page): Promise<RawApplyOpenedTab[]> {
   try {
     const others = await listTaskOwnedPopups(page);
     return await Promise.all(
-      selfLimitSlice(
-        others,
-        0,
-        8,
-        "packages/browser-runtime/src/apply-page-mechanics.ts:2715",
-      ).map(async (candidate, index) => ({
+      others.map(async (candidate, index) => ({
         index,
         url: candidate.url(),
         title: await candidate.title().catch(() => ""),
@@ -2290,9 +2244,6 @@ async function listTaskOwnedPopups(root: Page): Promise<Page[]> {
 
   return owned;
 }
-
-/** How many closed lists one page read is willing to open. */
-const MAX_OPENED_COMBOBOXES = 16;
 
 /**
  * The choices already read out of one page's lists.
@@ -2374,12 +2325,7 @@ async function readClosedComboboxOptions(
     toOpen.push(control);
   }
 
-  for (const control of selfLimitSlice(
-    toOpen,
-    0,
-    MAX_OPENED_COMBOBOXES,
-    "packages/browser-runtime/src/apply-page-mechanics.ts:2847",
-  )) {
+  for (const control of toOpen) {
     const locator = page.locator(APPLY_CONTROL_SELECTOR).nth(control.index);
     try {
       // Whatever the last list left open is closed first: a click that only
@@ -2661,6 +2607,7 @@ async function pressToggleButton(
 }
 
 function controlLocator(page: Page, ref: string): Locator | null {
+  if (hasBoundControlRefs(page)) return boundControlLocator(page, ref, "c");
   const target = locatorRootForRef(page, ref, "c");
   return target
     ? target.root.locator(APPLY_CONTROL_SELECTOR).nth(target.index)
@@ -2668,6 +2615,7 @@ function controlLocator(page: Page, ref: string): Locator | null {
 }
 
 export function actionLocator(page: Page, ref: string): Locator | null {
+  if (hasBoundControlRefs(page)) return boundControlLocator(page, ref, "a");
   const target = locatorRootForRef(page, ref, "a");
   return target
     ? target.root.locator(APPLY_ACTION_SELECTOR).nth(target.index)
@@ -2692,6 +2640,7 @@ export async function armPlaywrightApplicationFormAction(
 }
 
 function linkLocator(page: Page, ref: string): Locator | null {
+  if (hasBoundControlRefs(page)) return boundControlLocator(page, ref, "l");
   const target = locatorRootForRef(page, ref, "l");
   return target
     ? target.root.locator(APPLY_LINK_SELECTOR).nth(target.index)
@@ -2699,6 +2648,7 @@ function linkLocator(page: Page, ref: string): Locator | null {
 }
 
 function clickableLocator(page: Page, ref: string): Locator | null {
+  if (hasBoundControlRefs(page)) return boundControlLocator(page, ref, "e");
   const target = locatorRootForRef(page, ref, "e");
   return target
     ? target.root.locator(APPLY_CLICKABLE_SELECTOR).nth(target.index)
@@ -2717,6 +2667,9 @@ function describeWriteFailure(error: unknown, fallback: string): string {
  * than the document it destroyed on the way.
  */
 async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
+  if ((await locator.count()) === 0)
+    throw new Error("Stale control; observe again.");
+  if (!(await locator.isEnabled())) throw new Error("The control is disabled.");
   await selfLimitTimeout(
     locator.scrollIntoViewIfNeeded({ timeout: 2_000 }),
     2_000,
@@ -2805,7 +2758,7 @@ export function createPlaywrightApplyPageMechanics(
               )
                 return {
                   ok: false,
-                  error: "The intended button is unavailable.",
+                  error: "The intended button is disabled or unavailable.",
                 };
               element.scrollIntoView({
                 block: "center",
@@ -3171,6 +3124,7 @@ export function createPlaywrightApplyPageMechanics(
       }
     },
     clickElement: async (ref): Promise<ApplyWriteResult> => {
+      if (/^s\d+$/u.test(ref)) return clickClosedShadowControl(page, ref);
       const locator =
         actionLocator(page, ref) ??
         linkLocator(page, ref) ??

@@ -65,6 +65,7 @@ interface SessionBinding {
   nativeSessionId?: string;
   parentSessionId?: string;
   nativeTargetId?: string;
+  borrowed?: boolean;
 }
 
 function record(value: unknown): value is Params {
@@ -85,6 +86,7 @@ export class BrowserCdpBridge {
   private readonly contextId = randomUUID();
   private readonly targets = new Map<string, AttachedPage>();
   private readonly sessions = new Map<string, SessionBinding>();
+  private readonly browserSessions = new Set<string>();
   private server: Server | null = null;
   private socketServer: WebSocketServer | null = null;
   private socket: WebSocket | null = null;
@@ -426,15 +428,25 @@ export class BrowserCdpBridge {
     if (this.autoAttach) this.attachLogicalSession(target);
   }
 
-  private attachLogicalSession(target: AttachedPage): string {
+  private attachLogicalSession(
+    target: AttachedPage,
+    parentSessionId?: string,
+  ): string {
     const sessionId = randomUUID();
-    this.sessions.set(sessionId, { target });
-    target.sessions.add(sessionId);
-    this.emit("Target.attachedToTarget", {
-      sessionId,
-      targetInfo: target.info,
-      waitingForDebugger: false,
+    this.sessions.set(sessionId, {
+      target,
+      ...(parentSessionId ? { parentSessionId } : {}),
     });
+    target.sessions.add(sessionId);
+    this.emit(
+      "Target.attachedToTarget",
+      {
+        sessionId,
+        targetInfo: target.info,
+        waitingForDebugger: false,
+      },
+      parentSessionId,
+    );
     return sessionId;
   }
 
@@ -453,7 +465,11 @@ export class BrowserCdpBridge {
     const binding = request.sessionId
       ? this.sessions.get(request.sessionId)
       : undefined;
-    if (request.sessionId && !binding)
+    if (
+      request.sessionId &&
+      !binding &&
+      !this.browserSessions.has(request.sessionId)
+    )
       throw new Error("Browser session is no longer available.");
     if (request.method === "Browser.getVersion")
       return {
@@ -506,14 +522,40 @@ export class BrowserCdpBridge {
         }
       return {};
     }
-    if (request.method === "Target.attachToTarget")
-      return {
-        sessionId: this.attachLogicalSession(this.findTarget(p.targetId)),
-      };
+    if (request.method === "Target.attachToBrowserTarget") {
+      const sessionId = randomUUID();
+      this.browserSessions.add(sessionId);
+      return { sessionId };
+    }
+    if (request.method === "Target.attachToTarget") {
+      const target = [...this.targets.values()].find(
+        (item) => item.info.targetId === p.targetId,
+      );
+      if (target)
+        return {
+          sessionId: this.attachLogicalSession(target, request.sessionId),
+        };
+      // A raw page/frame CDP session shares an already-owned descendant's
+      // transport. It cannot discover or attach to unrelated Electron targets.
+      const descendant = [...this.sessions.values()].find(
+        (item) => item.nativeTargetId === p.targetId,
+      );
+      if (!descendant)
+        throw new Error("Browser target is not owned by this connection.");
+      const sessionId = randomUUID();
+      this.sessions.set(sessionId, {
+        ...descendant,
+        ...(request.sessionId ? { parentSessionId: request.sessionId } : {}),
+        borrowed: true,
+      });
+      descendant.target.sessions.add(sessionId);
+      return { sessionId };
+    }
     if (request.method === "Target.detachFromTarget") {
       const id = string(p.sessionId);
+      if (this.browserSessions.delete(id)) return {};
       const attached = this.sessions.get(id);
-      if (attached?.nativeSessionId) {
+      if (attached?.nativeSessionId && !attached.borrowed) {
         const parent = attached.parentSessionId
           ? this.sessions.get(attached.parentSessionId)
           : undefined;
@@ -528,10 +570,14 @@ export class BrowserCdpBridge {
       if (attached) {
         this.sessions.delete(id);
         attached.target.sessions.delete(id);
-        this.emit("Target.detachedFromTarget", {
-          sessionId: id,
-          targetId: attached.target.info.targetId,
-        });
+        this.emit(
+          "Target.detachedFromTarget",
+          {
+            sessionId: id,
+            targetId: attached.nativeTargetId ?? attached.target.info.targetId,
+          },
+          attached.parentSessionId,
+        );
       }
       return {};
     }
@@ -836,6 +882,7 @@ export class BrowserCdpBridge {
     for (const target of this.targets.values()) target.dispose();
     this.targets.clear();
     this.sessions.clear();
+    this.browserSessions.clear();
     this.autoAttach = false;
     this.discover = false;
   }

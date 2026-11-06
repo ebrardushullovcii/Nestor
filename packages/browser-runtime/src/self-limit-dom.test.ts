@@ -78,7 +78,7 @@ test("the serialized snapshot preserves full body, headings, clickables, alerts,
   expect(hits(log), JSON.stringify(hits(log))).toEqual([]);
 });
 
-test("summary rows, placement sections and access-signal scanning report their own boundaries", () => {
+test("summary rows retain every row while access-signal scanning reports its existing boundary", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});
   const page = dom(
     `<dl>${Array.from({ length: 205 }, () => `<dt>${"label".repeat(110)}</dt><dd>${"value ".repeat(2100)}</dd>`).join("")}</dl><fieldset><legend>${"section ".repeat(40)}</legend><input></fieldset>${"<button>Sign in</button>".repeat(1010)}`,
@@ -86,7 +86,7 @@ test("summary rows, placement sections and access-signal scanning report their o
   const rows = page.window.eval(
     `(${readApplySummaryRows.toString()})(Array.from(document.querySelectorAll("dl")))`,
   ) as { label: string; value: string }[];
-  expect(rows).toHaveLength(200);
+  expect(rows).toHaveLength(205);
   expect(rows[0]!.label).toHaveLength(550);
   expect(rows[0]!.value).toHaveLength("value ".repeat(2100).trim().length);
   page.window.eval(
@@ -94,9 +94,9 @@ test("summary rows, placement sections and access-signal scanning report their o
   );
   page.window.eval(`(${collectVisibleAccessSignals.toString()})()`);
   expect(hits(log).map((hit) => hit.value)).toEqual(
-    expect.arrayContaining([200, 1000]),
+    expect.arrayContaining([1000]),
   );
-  expect(hits(log).some((hit) => hit.limit === "summary_rows")).toBe(true);
+  expect(hits(log).some((hit) => hit.limit === "summary_rows")).toBe(false);
 });
 
 test("serialized page messages report text/history limits while keeping dialogs dismissed", () => {

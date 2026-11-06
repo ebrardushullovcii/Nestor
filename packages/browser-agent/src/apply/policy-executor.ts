@@ -1,4 +1,3 @@
-import { refIdentity } from "./control-identity";
 import type {
   ApplyPersonRequest,
   ApplicationAttemptQuestion,
@@ -354,26 +353,6 @@ export async function executeApplyProposal(
     "ref" in proposal
       ? observation.controls.find((c) => c.ref === proposal.ref)
       : undefined;
-  if (
-    "ref" in proposal &&
-    proposal.ref &&
-    !control &&
-    ![
-      ...observation.actions,
-      ...observation.links,
-      ...observation.clickables,
-    ].some((c) => c.ref === proposal.ref)
-  )
-    return failed("That control is stale or missing; observe again.");
-  if (
-    "ref" in proposal &&
-    proposal.ref &&
-    proposal.tool !== "read_text" &&
-    deps.seenObservation &&
-    refIdentity(deps.seenObservation, proposal.ref) !==
-      refIdentity(observation, proposal.ref)
-  )
-    return failed("That control changed identity; observe again.");
   const at = deps.now().toISOString();
   if (proposal.tool === "observe") return { kind: "observed", observation };
   if (proposal.tool === "read_text")
