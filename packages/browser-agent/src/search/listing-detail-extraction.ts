@@ -13,75 +13,6 @@ import type {
  * text before treating the description as complete.
  */
 
-/**
- * Whether a link's text reads as the one that starts an application.
- *
- * This is discovery, not the apply harness: it records a likely apply URL from
- * a listing's HTML before any run begins, so a later run has somewhere to
- * start. Nothing here gates what the harness may click — the harness reads the
- * page itself and decides (ADR 0021).
- */
-const APPLY_ENTRY_PHRASES: readonly string[] = [
-  "apply",
-  "apply now",
-  "apply here",
-  "apply today",
-  "apply for this job",
-  "apply for this role",
-  "apply for this position",
-  "apply to this job",
-  "easy apply",
-  "quick apply",
-  "one click apply",
-  "apply on company site",
-  "apply on company website",
-  "apply on employer site",
-  "apply externally",
-  "apply with your resume",
-  "apply for job",
-  "start your application",
-  "start application",
-  "begin application",
-  "i m interested",
-  "im interested",
-  "i am interested",
-  "view job and apply",
-  "see job and apply",
-];
-
-const NOT_AN_ENTRY_PHRASES: readonly string[] = [
-  "apply filter",
-  "apply filters",
-  "apply changes",
-  "applied",
-  "how to apply",
-  "jobs you applied",
-  "why apply",
-  "apply for other",
-  "apply to other",
-  "similar jobs",
-  "back to",
-  "apply for a different",
-];
-
-function normalizeApplyEntrySignal(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, " ")
-    .trim();
-}
-
-function looksLikeApplyEntryText(text: string): boolean {
-  const signal = normalizeApplyEntrySignal(text);
-  if (!signal || signal.length > 60) {
-    return false;
-  }
-  if (NOT_AN_ENTRY_PHRASES.some((phrase) => signal.includes(phrase))) {
-    return false;
-  }
-  return APPLY_ENTRY_PHRASES.some((phrase) => signal.includes(phrase));
-}
-
 export const LISTING_PAGE_OMISSION_MARKER =
   "[Page text excerpt: middle omitted]";
 
@@ -386,53 +317,6 @@ function readDirectApplyUrl(node: JsonRecord): string | null {
 const ANCHOR_PATTERN = /<a\b([^>]*?)>([\s\S]*?)<\/a\s*>/giu;
 const HREF_PATTERN = /\bhref\s*=\s*["']([^"']+)["']/iu;
 const ARIA_LABEL_PATTERN = /\baria-label\s*=\s*["']([^"']+)["']/iu;
-
-/**
- * The plain apply link on a listing page, when the page has one.
- *
- * Most listings put the way in behind an ordinary anchor whose text says so.
- * Reading it here means the run starts on the employer's form rather than on
- * the listing. It is the same reading of the words the apply run does, so the
- * rule lives in one place. Best-effort by design: a page that builds its apply
- * control in script has none of this in its HTML, and the run walks the page
- * itself instead.
- */
-export function findApplyLinkInHtml(
-  html: string,
-  baseUrl: string,
-): string | null {
-  ANCHOR_PATTERN.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = ANCHOR_PATTERN.exec(html)) !== null) {
-    const attributes = match[1] ?? "";
-    const href = HREF_PATTERN.exec(attributes)?.[1];
-    if (!href) {
-      continue;
-    }
-    const text = collapseWhitespace(htmlToPlainText(match[2] ?? ""));
-    const label =
-      text ||
-      collapseWhitespace(
-        decodeHtmlEntities(ARIA_LABEL_PATTERN.exec(attributes)?.[1] ?? ""),
-      );
-    if (!looksLikeApplyEntryText(label)) {
-      continue;
-    }
-    try {
-      const resolved = new URL(decodeHtmlEntities(href), baseUrl);
-      if (resolved.protocol !== "https:" && resolved.protocol !== "http:") {
-        continue;
-      }
-      if (resolved.toString() === baseUrl) {
-        continue;
-      }
-      return resolved.toString();
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
 
 function scoreTitleMatch(
   candidate: string | null,
