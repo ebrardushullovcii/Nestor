@@ -2,6 +2,7 @@ import type {
   FoundJob,
   ListingCard,
   ReadListingResult,
+  SourceInventory,
 } from "@nestor/contracts";
 import type { JobSearchContext, JobSearchRunnerDeps } from "./types";
 import { settledState, type SourceWork } from "./source-work";
@@ -184,8 +185,9 @@ export function createSearchPipeline(input: {
             .filter((failure) => failure.requiresBrowser)
             .map((failure) => failure.url),
         );
+        const indexUrls = new Set(result.indexes ?? []);
         const fastCards = relatedCards.filter(
-          (card) => !deferredUrls.has(card.url),
+          (card) => !deferredUrls.has(card.url) && !indexUrls.has(card.url),
         );
         finishRead(fastCards, {
           jobs: result.jobs,
@@ -193,6 +195,16 @@ export function createSearchPipeline(input: {
             (failure) => !deferredUrls.has(failure.url),
           ),
         });
+        // The reader found an index, not a vacancy: collect its postings
+        // through the source's inventory path instead of a vacancy read.
+        for (const card of relatedCards)
+          if (indexUrls.has(card.url) && !deferredUrls.has(card.url))
+            await collectIndex(
+              sources.get(card.sourceId)!,
+              card.url,
+              "http",
+              signal,
+            );
         const deferred = new Map<string, ListingCard[]>();
         for (const card of relatedCards)
           if (deferredUrls.has(card.url)) {
@@ -301,6 +313,83 @@ export function createSearchPipeline(input: {
     concurrency(deps.concurrency?.sources, 12),
     durable.cardQueue(input.searchId),
   );
+  /**
+   * Collects the postings of an index a listing read found into its source,
+   * by HTTP and then, when the index needs it, in the browser, where the
+   * model can save postings from the page's data. The index counts as read
+   * once its postings are accepted.
+   */
+  const collectIndex = async (
+    source: SourceWork,
+    url: string,
+    lane: "http" | "browser",
+    laneSignal: AbortSignal,
+  ): Promise<void> => {
+    let inventory: SourceInventory | null = null;
+    let failure: string | null = null;
+    try {
+      inventory = await deps.engine.collectSource({
+        target: { ...source.target, startingUrl: url },
+        lane,
+        context,
+        settings,
+        signal: laneSignal,
+        knownUrls: (urls) => deps.store.findKnownUrls(urls),
+        onCards: (cards) => accept(source, cards),
+        message: () => {},
+      });
+      await accept(source, inventory.cards);
+    } catch (error) {
+      signal.throwIfAborted();
+      laneSignal.throwIfAborted();
+      failure = error instanceof Error ? error.message : String(error);
+    }
+    if (lane === "http" && (failure !== null || inventory?.requiresBrowser)) {
+      input.browser(source, (browserSignal) =>
+        collectIndex(source, url, "browser", browserSignal),
+      );
+      return;
+    }
+    if (inventory?.needsYou)
+      input.needsAccess(
+        source,
+        `${source.target.label} (${url}): ${inventory.notes.join(" ")}`,
+      );
+    else if (failure !== null || !inventory?.complete)
+      source.readFailures.push(
+        `${url}: this index's listings were not all collected. ${failure ?? inventory?.notes.join(" ") ?? ""}`.trim(),
+      );
+    source.processed++;
+    input.write(source);
+    input.settled(source);
+  };
+  const accept = async (source: SourceWork, cards: readonly ListingCard[]) => {
+    const quick = settings.depth === "quick" && !source.full;
+    const chunk = quick ? QUICK_REVIEW_INTERVAL : 400;
+    for (let offset = 0; offset < cards.length; offset += chunk) {
+      const fresh: ListingCard[] = [];
+      for (const card of cards.slice(offset, offset + chunk)) {
+        if (source.urls.has(card.url)) continue;
+        source.urls.add(card.url);
+        fresh.push(card);
+      }
+      countPreviouslySaved(
+        deps.store.knownJobsBeforeSearch(
+          fresh.map((card) => card.url),
+          input.searchId,
+        ),
+      );
+      const closed = fresh
+        .filter((card) => card.closed)
+        .map((card) => card.url);
+      if (closed.length) deps.store.closeFoundUrls(closed);
+      source.row.cards += fresh.length;
+      input.write(source);
+      await waves.push(fresh);
+      // Acceptance is durable. Screening is queue work, never a browser
+      // tool's silent connection, in either search depth.
+    }
+  };
   return {
     start: () => waves.push([]),
     restore(source: SourceWork) {
@@ -308,33 +397,7 @@ export function createSearchPipeline(input: {
         source.urls.add(url);
       source.row.cards = source.urls.size;
     },
-    async accept(source: SourceWork, cards: readonly ListingCard[]) {
-      const quick = settings.depth === "quick" && !source.full;
-      const chunk = quick ? QUICK_REVIEW_INTERVAL : 400;
-      for (let offset = 0; offset < cards.length; offset += chunk) {
-        const fresh: ListingCard[] = [];
-        for (const card of cards.slice(offset, offset + chunk)) {
-          if (source.urls.has(card.url)) continue;
-          source.urls.add(card.url);
-          fresh.push(card);
-        }
-        countPreviouslySaved(
-          deps.store.knownJobsBeforeSearch(
-            fresh.map((card) => card.url),
-            input.searchId,
-          ),
-        );
-        const closed = fresh
-          .filter((card) => card.closed)
-          .map((card) => card.url);
-        if (closed.length) deps.store.closeFoundUrls(closed);
-        source.row.cards += fresh.length;
-        input.write(source);
-        await waves.push(fresh);
-        // Acceptance is durable. Screening is queue work, never a browser
-        // tool's silent connection, in either search depth.
-      }
-    },
+    accept,
     drain: () => waves.drain(),
   };
 }

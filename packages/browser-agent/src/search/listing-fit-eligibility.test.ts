@@ -160,6 +160,61 @@ test("fit gets explicit residence and saved country-list rules, without changing
   );
 });
 
+test("fit gets the person's saved eligibility answers as facts and reads preferences as preferences", async () => {
+  const savedAnswers = [
+    {
+      question: "Are you legally authorized to work in the United States?*",
+      answer: "Yes",
+    },
+    {
+      question:
+        "United States work authorization and citizenship status (both questions on one form, or either one)",
+      answer:
+        "I am legally authorized to work in the US (Yes). I am not a US citizen or permanent resident.",
+    },
+  ];
+  const chatWithTools = vi.fn<LLMClient["chatWithTools"]>(() =>
+    Promise.resolve({
+      content: JSON.stringify({
+        fits: [
+          {
+            id: 1,
+            s: 80,
+            why: "Your US authorization meets the residence requirement",
+            r: ["strong", "Requested work"],
+            p: ["aligned", "Remote"],
+            c: ["strong", "Direct evidence"],
+            e: [
+              "compatible",
+              "must reside in the United States",
+              "country_remote",
+              "US",
+            ],
+          },
+        ],
+      }),
+    }),
+  );
+  await fitJobs({
+    client: { chatWithTools },
+    profile,
+    jobs: [job],
+    savedAnswers,
+    goals: { targetRoles: [], locations: [] },
+  });
+  const [messages] = chatWithTools.mock.calls[0];
+  const data = JSON.parse(messages[1].content) as {
+    savedAnswers: typeof savedAnswers;
+  };
+  expect(data.savedAnswers).toEqual(savedAnswers);
+  expect(messages[0].content).toContain(
+    "Their answers about work authorization, citizenship, permanent residence, visas, sponsorship, clearance and similar eligibility are established facts for e and h",
+  );
+  expect(messages[0].content).toContain(
+    "A preferred, nice-to-have or bonus qualification is not a requirement, and a requirement the listing states as alternatives (X, Y or Z) is met by any one of them",
+  );
+});
+
 test("different fit batches retain the exact context prefix and response schema", async () => {
   const requests: Parameters<LLMClient["chatWithTools"]>[] = [];
   const client: LLMClient = {

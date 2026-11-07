@@ -83,6 +83,22 @@ export interface ReadListingResult {
     needsYou?: boolean;
     requiresBrowser?: boolean;
   }>;
+  /**
+   * Supplied addresses the reader found to be an index of several vacancies
+   * (a category, directory or results list). Their postings are collected
+   * from the index; the index itself is neither a vacancy nor a failed read.
+   */
+  indexes?: string[];
+}
+
+/** One answer the person gave to an earlier application question. */
+export interface SavedFitAnswer {
+  question: string;
+  answer: string;
+  /** Set when the person gave it for applications in one country only. */
+  country?: string;
+  /** Set when the person gave it for one site only. */
+  site?: string;
 }
 
 export interface SearchFitInput {
@@ -91,6 +107,11 @@ export interface SearchFitInput {
   goals: JobSearchGoals;
   /** Confirmed global country-list rules, never a grant of work permission. */
   countryOptionFallbacks?: readonly SavedOptionFallback[];
+  /**
+   * The person's confirmed saved answers, such as work authorization,
+   * citizenship and sponsorship: facts for eligibility and requirements.
+   */
+  savedAnswers?: readonly SavedFitAnswer[];
   jobs: readonly JobDetail[];
   signal?: AbortSignal;
   onBatch?: (fits: JobFitUpdate[]) => Promise<void> | void;

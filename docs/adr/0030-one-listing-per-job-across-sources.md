@@ -1,6 +1,6 @@
 # ADR 0030: A job seen on several sources shows the employer's own listing
 
-Status: partly superseded: job-store deduplication keeps sightings but retains the first job URL, fills missing scalar facts and may keep a longer description (db925711), replacing employer-route selection and whole-sighting display facts. Cross-source identity merging remains.
+Status: partly superseded: job-store deduplication keeps sightings but retains the first job URL, fills missing scalar facts and may keep a longer description (db925711), replacing employer-route selection and whole-sighting display facts. Cross-source identity merging remains, and also matches employer and title alone across boards when apply targets agree and only one saved job qualifies (`job-store/found-jobs.ts`), since boards name one posting's place differently.
 
 ## Context
 

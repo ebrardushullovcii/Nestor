@@ -592,6 +592,9 @@ export function createListingSearchEngine(deps: {
             ...(input.context.countryOptionFallbacks?.length
               ? { countryOptionFallbacks: input.context.countryOptionFallbacks }
               : {}),
+            ...(input.context.savedAnswers?.length
+              ? { savedAnswers: input.context.savedAnswers }
+              : {}),
             goals: toJobSearchGoals({
               ...input.context.searchPreferences,
               remoteCountsAsAnyLocation:

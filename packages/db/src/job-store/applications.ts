@@ -3,6 +3,7 @@ import {
   SavedOptionFallbackSchema,
   sameSavedChoice,
   type SavedOptionFallback,
+  type SavedFitAnswer,
   ApplicationListQuerySchema,
   ApplicationApplyModeSchema,
   DEFAULT_APPLICATION_APPLY_MODE,
@@ -1115,6 +1116,32 @@ export function readSavedCountryOptionFallbacks(
     );
     return sameSavedChoice(rule.primary, currentCountry) ? [rule] : [];
   });
+}
+
+/**
+ * The person's own saved answers for fit judgments: work authorization,
+ * citizenship, sponsorship and the rest, with their country or site scope.
+ * Unconfirmed suggestions are not the person's facts and stay out.
+ */
+export function readSavedFitAnswers(store: JobStore): SavedFitAnswer[] {
+  const rows = store
+    .sql(
+      `SELECT label, prompt, answer, country, site_origin FROM form_answers
+       WHERE needs_confirmation=0 AND answer <> '' ORDER BY id`,
+    )
+    .all() as Array<{
+    label: string;
+    prompt: string;
+    answer: string;
+    country: string;
+    site_origin: string;
+  }>;
+  return rows.map((row) => ({
+    question: row.prompt || row.label,
+    answer: row.answer,
+    ...(row.country ? { country: row.country } : {}),
+    ...(row.site_origin ? { site: row.site_origin } : {}),
+  }));
 }
 
 /** Full saved-answer records for the model, retaining their original context. */

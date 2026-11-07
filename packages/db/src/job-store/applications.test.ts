@@ -16,6 +16,7 @@ import {
   createSavedAnswersStore,
   readSavedApplicationAnswers,
   readSavedCountryOptionFallbacks,
+  readSavedFitAnswers,
 } from "./applications";
 import {
   approveOriginalResumesForTests,
@@ -220,6 +221,49 @@ it("an unresolved local task does not suppress a saved answer and model context 
       .map((answer) => answer.question)
       .sort(),
   ).toEqual(["email", "other", "site"]);
+});
+
+it("fit reads the person's confirmed saved answers with their scope, not unconfirmed suggestions", () => {
+  const { jobs, applications } = open();
+  const remember = (
+    key: string,
+    prompt: string,
+    answer: string,
+    scope: { country?: string; siteOrigin?: string } = {},
+    needsConfirmation = false,
+  ) =>
+    applications.needsYou.remember({
+      key,
+      prompt,
+      answer,
+      input: "text",
+      options: [],
+      scope,
+      ...(needsConfirmation ? { needsConfirmation } : {}),
+    });
+  remember(
+    "us-authorized",
+    "Are you legally authorized to work in the United States?",
+    "Yes",
+  );
+  remember(
+    "sponsorship",
+    "Will you now or in the future require sponsorship?",
+    "No",
+    { country: "US" },
+  );
+  remember("guess", "Do you hold a security clearance?", "Yes", {}, true);
+  expect(readSavedFitAnswers(jobs)).toEqual([
+    {
+      question: "Are you legally authorized to work in the United States?",
+      answer: "Yes",
+    },
+    {
+      question: "Will you now or in the future require sponsorship?",
+      answer: "No",
+      country: "US",
+    },
+  ]);
 });
 
 it("search reads only confirmed global country-list rules for the person's saved country", () => {

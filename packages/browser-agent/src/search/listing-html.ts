@@ -215,6 +215,8 @@ export function readInventoryHtml(
   cards: ListingCard[];
   next: string[];
   portals: string[];
+  /** Index pages of this site that hold more vacancy cards, such as categories. */
+  directories: string[];
   needsInteraction: boolean;
 } {
   const { markup, scripts } = takeScripts(html);
@@ -307,6 +309,7 @@ export function readInventoryHtml(
         : {}),
     });
   }
+  const candidates: { node: Element; href: string; inside: Set<Node> }[] = [];
   for (const node of nodes) {
     if (excluded(node)) continue;
     if (
@@ -423,6 +426,25 @@ export function readInventoryHtml(
       // Profession screening reads the title, so an age or sponsored badge is not a new decision.
       cardFingerprint: fingerprint(title.trim().toLowerCase()),
     });
+    candidates.push({ node, href, inside: new Set(children) });
+  }
+  // A "card" holding other vacancy cards is a directory section, such as a
+  // category heading over its latest postings. Its link is an index to read
+  // for postings, never a vacancy.
+  const directories: string[] = [];
+  for (const outer of candidates) {
+    if (
+      !candidates.some(
+        (inner) => inner.href !== outer.href && outer.inside.has(inner.node),
+      )
+    )
+      continue;
+    cards.delete(outer.href);
+    if (
+      outer.href !== url &&
+      new URL(outer.href).origin === new URL(url).origin
+    )
+      directories.push(outer.href);
   }
   // A source can point at a vacancy itself, with no linked title/card around it.
   if (!cards.size) {
@@ -615,6 +637,7 @@ export function readInventoryHtml(
     cards: [...cards.values()],
     next: [...next],
     portals: [...new Set(portals)],
+    directories: [...new Set(directories)],
     needsInteraction,
   };
 }

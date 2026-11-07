@@ -8,6 +8,7 @@ import type {
   JobSearchStatus,
   SourceInstructionArtifact,
   SavedOptionFallback,
+  SavedFitAnswer,
 } from "@nestor/contracts";
 import type { JobStore } from "@nestor/db/job-store";
 
@@ -25,6 +26,8 @@ export interface JobSearchContext {
   sourceInstructionArtifacts: readonly SourceInstructionArtifact[];
   remoteCountsAsAnyLocation?: boolean;
   countryOptionFallbacks?: readonly SavedOptionFallback[];
+  /** The person's confirmed saved answers: eligibility facts for fit. */
+  savedAnswers?: readonly SavedFitAnswer[];
 }
 
 export interface JobSearchRunnerDeps {
