@@ -550,6 +550,8 @@ export function createApplyPageHands(
 ): ApplyPageHands {
   const readLinkedText = mechanics.readLinkedText;
   return {
+    ...(mechanics.screenshot ? { screenshot: mechanics.screenshot } : {}),
+    ...(mechanics.pointer ? { pointer: mechanics.pointer } : {}),
     observe: async () =>
       buildApplyFormObservation(
         await mechanics.readPage(),

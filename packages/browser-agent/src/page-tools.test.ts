@@ -32,6 +32,32 @@ function rawPage(overrides: Partial<RawApplyPage> = {}): RawApplyPage {
   };
 }
 
+test("shared visual tools return schema errors to the model without browser actions", async () => {
+  const pageHands = hands({ current: rawPage() });
+  const screenshot = vi.fn();
+  const pointer = vi.fn();
+  const pack = createPageTools({ ...pageHands, screenshot, pointer });
+  const execute = (name: string, input: unknown) =>
+    pack.tools
+      .find((tool) => tool.definition.function.name === name)!
+      .execute(JSON.stringify(input), { step: 1 });
+  for (const [name, args, error] of [
+    ["screenshot", { frame: 3 }, "string"],
+    ["pointer", { action: "drag", x: 10, y: 20 }, "endX and endY"],
+    ["pointer", { action: "hold", x: 10, y: 20 }, "durationMs"],
+    ["pointer", { action: "click", x: "10", y: 20 }, "number"],
+  ] as const) {
+    const result = await execute(name, args);
+    expect(result).toMatchObject({
+      kind: "ok",
+      status: "failed",
+      content: expect.stringContaining(error) as string,
+    });
+  }
+  expect(pointer).not.toHaveBeenCalled();
+  expect(screenshot).not.toHaveBeenCalled();
+});
+
 function hands(pages: { current: RawApplyPage }): ApplyPageHands & {
   adoptOpenedTab: ReturnType<typeof vi.fn>;
 } {

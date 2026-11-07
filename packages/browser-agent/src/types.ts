@@ -1,3 +1,4 @@
+import type { ModelImageInput } from "@nestor/contracts";
 import type { BrowserPermissionPolicy } from "./browser-permission-policy";
 import type {
   AgentDebugFindings,
@@ -118,6 +119,11 @@ export type AgentMessage =
   | { role: "system"; content: string }
   | { role: "user"; content: string }
   | { role: "assistant"; content: string; toolCalls?: ToolCall[] }
-  | { role: "tool"; toolCallId: string; content: string };
+  | {
+      role: "tool";
+      toolCallId: string;
+      content: string;
+      images?: ModelImageInput[];
+    };
 
 export type OnProgressCallback = (progress: AgentProgress) => void;

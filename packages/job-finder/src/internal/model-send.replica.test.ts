@@ -72,6 +72,180 @@ afterAll(async () => {
   server?.kill();
 });
 
+test.each(["autonomous_submit", "prepare_only"] as const)(
+  "a scripted %s model sees the canvas puzzle and solves it through screenshots and pointer input",
+  async (mode) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const scenario = `image-${mode}`;
+    const url = `${base}/image-challenge/apply?scenario=${scenario}`;
+    try {
+      await page.goto(url);
+      const hands = createApplyPageHands(
+        createPlaywrightApplyPageMechanics(page),
+      );
+      let turn = 0,
+        imageCount = 0,
+        sends = 0;
+      let bounds = { x: 0, y: 0 };
+      const result = await runApplyAgent(
+        {
+          hands,
+          browserPermissions: {
+            solveCaptchas: true,
+            signIn: true,
+            googleSignIn: true,
+            createAccounts: true,
+          },
+          authority: {
+            mode,
+            submitAuthorized: mode === "autonomous_submit",
+            allowedOrigins: [],
+            preApprovedAttestationKinds: [],
+            salaryDisclosure: "answer_from_profile",
+          },
+          application: {
+            jobId: "image-job",
+            applicationId: scenario,
+            startingUrl: url,
+          },
+          siteLabel: "synthetic image replica",
+          sources: {
+            profile,
+            resumeText: null,
+            posting: {
+              title: "Canvas Engineer",
+              company: "Synthetic Workshop",
+              location: "Remote",
+              description: "Local image regression",
+            },
+            reusableAnswers: [],
+            documents: [],
+          },
+          submitApplication: async (decision) => {
+            sends++;
+            const response = page.waitForResponse(
+              (response) => response.request().method() === "POST",
+            );
+            await hands.clickAction(decision.actionRef);
+            expect((await response).status()).toBe(200);
+            return {
+              sendCallId: decision.callId!,
+              outcome: "outcome_uncertain",
+              content:
+                "Pressed the send control once; inspect the employer page.",
+            };
+          },
+          recordSendOutcome: () =>
+            Promise.resolve({
+              recorded: true,
+              content: "Recorded the model's confirmed receipt.",
+            }),
+        },
+        {
+          chatWithTools: async (messages, tools) => {
+            expect(tools.map((tool) => tool.function.name)).toEqual(
+              expect.arrayContaining(["screenshot", "pointer"]),
+            );
+            const images = messages.filter(
+              (message) => message.role === "tool" && message.images?.length,
+            );
+            imageCount = images.length;
+            const last = messages.findLast(
+              (message) => message.role === "tool",
+            )!;
+            if (last?.role === "tool" && last.images) {
+              expect(last.images[0]!.dataUrl).toMatch(
+                /^data:image\/png;base64,/u,
+              );
+              if (turn === 3)
+                bounds = JSON.parse(
+                  /pixels: (\{[^\n]+?\})\./u.exec(last.content)![1]!,
+                ) as typeof bounds;
+            }
+            const observation = await hands.observe();
+            const name = observation.controls.find(
+              (control) => control.label === "Full name",
+            )!;
+            const send = observation.actions.find(
+              (action) => action.label === "Send application",
+            );
+            const decisions = [
+              {
+                name: "type",
+                args: { ref: name?.ref, text: "Alex Synthetic" },
+              },
+              { name: "screenshot", args: {} },
+              { name: "screenshot", args: { frame: "image-puzzle" } },
+              {
+                name: "pointer",
+                args: { action: "click", x: bounds.x + 150, y: bounds.y + 90 },
+              },
+              {
+                name: "pointer",
+                args: { action: "click", x: bounds.x + 150, y: bounds.y + 190 },
+              },
+              mode === "autonomous_submit"
+                ? { name: "submit_application", args: { ref: send?.ref } }
+                : {
+                    name: "finish",
+                    args: {
+                      reason:
+                        "Challenge passed; the form is filled for the person to send.",
+                    },
+                  },
+              {
+                name: "record_send_outcome",
+                args: {
+                  sendCallId: "image-turn-6",
+                  outcome: "confirmed",
+                  evidence: "Thank you! Your application has been received.",
+                },
+              },
+              {
+                name: "finish",
+                args: { reason: "The synthetic employer confirmed receipt." },
+              },
+            ];
+            if (turn === 5)
+              expect(observation.bodyTextExcerpt).toContain("Challenge passed");
+            const decision = decisions[turn++]!;
+            expect(decision).toBeDefined();
+            return {
+              toolCalls: [
+                {
+                  id: `image-turn-${turn}`,
+                  type: "function",
+                  function: {
+                    name: decision.name,
+                    arguments: JSON.stringify(decision.args),
+                  },
+                },
+              ],
+            };
+          },
+        },
+      );
+      expect(imageCount).toBe(2);
+      expect(result.outcome).toBe(
+        mode === "autonomous_submit" ? "submitted" : "prepared",
+      );
+      expect(sends).toBe(mode === "autonomous_submit" ? 1 : 0);
+      const accepted = (await (
+        await fetch(`${base}/image-challenge/state?scenario=${scenario}`)
+      ).json()) as { accepted: number };
+      expect(accepted.accepted).toBe(sends);
+      if (mode === "prepare_only")
+        expect(await page.locator("body").innerText()).toContain(
+          "Challenge passed",
+        );
+    } finally {
+      await context.close();
+    }
+  },
+  30_000,
+);
+
 test.each([
   { trace: false, tool: "submit_application", shape: "native" },
   { trace: true, tool: "submit_application", shape: "native" },

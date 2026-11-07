@@ -2306,6 +2306,14 @@ export function createBrowserAgentRuntime(
 
     return {
       readPage: () => onReadyPage((page) => readRawApplyPage(page)),
+      screenshot: (frame) =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).screenshot!(frame),
+        ),
+      pointer: (input) =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).pointer!(input),
+        ),
       readAccountFlowEntry: (origins) =>
         onReadyPage((page) =>
           Promise.resolve(readAccountFlowEntry(page, origins)),

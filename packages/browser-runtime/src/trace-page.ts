@@ -12,6 +12,7 @@ const bindings = new WeakMap<Page, string>();
 export interface TraceCaptureInput {
   masks: { x: number; y: number; width: number; height: number }[];
   viewport: { width: number; height: number };
+  clip?: { x: number; y: number; width: number; height: number };
 }
 export type TracePageCapture = (
   page: Page,
@@ -22,17 +23,50 @@ export function configureTraceCapture(
   context: ReturnType<Page["context"]>,
   capture?: TracePageCapture,
 ): void {
-  if (runTraceEnabled() && capture) captures.set(context, capture);
+  if (capture) captures.set(context, capture);
 }
 export function bindTracePage(
   page: Page,
   key: string,
   capture?: TracePageCapture,
 ): void {
+  if (capture) captures.set(page.context(), capture);
   if (runTraceEnabled()) {
     bindings.set(page, key);
-    if (capture) captures.set(page.context(), capture);
   }
+}
+
+/** Hidden native capture when embedded; CSS-sized Playwright capture otherwise. */
+export async function captureModelPageImage(
+  page: Page,
+  clip?: TraceCaptureInput["clip"],
+): Promise<Uint8Array> {
+  const masks = page
+    .frames()
+    .map((frame) =>
+      frame.locator(
+        'input[type="password"],input[name*="password" i],input[autocomplete*="password" i],input[autocomplete="one-time-code"],input[name*="otp" i],input[name*="mfa" i],input[name*="token" i],input[name*="verification" i],input[name="code" i],input[name="passcode" i]',
+      ),
+    );
+  const boxes: TraceCaptureInput["masks"] = [];
+  for (const mask of masks)
+    for (const locator of await mask.all()) {
+      const box = await locator.boundingBox();
+      if (box) boxes.push(box);
+    }
+  const viewport = await page.evaluate(() => ({
+    width: innerWidth,
+    height: innerHeight,
+  }));
+  const capture = captures.get(page.context());
+  return capture
+    ? capture(page, { masks: boxes, viewport, ...(clip ? { clip } : {}) })
+    : page.screenshot({
+        type: "png",
+        scale: "css",
+        mask: masks,
+        ...(clip ? { clip } : {}),
+      });
 }
 
 /** Captures the supplied Page, never a last/active tab chosen by URL. */

@@ -1,3 +1,4 @@
+import type { ModelImageInput } from "@nestor/contracts";
 import type {
   AssistantNavigationDisplay,
   AssistantChangeEntry,
@@ -66,6 +67,7 @@ export class AssistantToolError extends Error {
 }
 
 export interface AssistantToolResult {
+  images?: ModelImageInput[];
   /** A complete, verified action can use its receipt as the reply. */
   canFinish?: boolean;
   /** One plain line: what happened. */
@@ -565,6 +567,7 @@ export function toConversationTool(
         return {
           kind: "ok",
           content: renderResult(result),
+          ...(result.images ? { images: result.images } : {}),
           progress: definition.effect !== "read",
           status: result.status ?? "done",
         };

@@ -14,6 +14,54 @@ import {
 } from "./openai-compatible-transport";
 
 describe("Responses API transport", () => {
+  test.each(["chat_completions", "responses"] as const)(
+    "%s attaches tool images after all tool replies without losing their text",
+    (apiMode) => {
+      const image = {
+        dataUrl: "data:image/png;base64,AAAA",
+        label: "Puzzle at viewport 100,200",
+      };
+      const body = buildModelRequestBody({
+        apiMode,
+        model: "vision",
+        messages: [
+          {
+            role: "assistant",
+            content: "",
+            tool_calls: ["a", "b"].map((id) => ({
+              id,
+              type: "function",
+              function: { name: "screenshot", arguments: "{}" },
+            })),
+          },
+          {
+            role: "tool",
+            tool_call_id: "a",
+            content: "Whole page geometry",
+            images: [image],
+          },
+          {
+            role: "tool",
+            tool_call_id: "b",
+            content: "Named frame geometry",
+            images: [image],
+          },
+        ],
+      });
+      const wire = JSON.stringify(body);
+      expect(wire).toContain(image.dataUrl);
+      expect(wire).toContain(image.label);
+      expect(wire).toContain("Whole page geometry");
+      expect(wire).toContain("Named frame geometry");
+      const items = (body.messages ?? body.input) as Array<{
+        role?: string;
+        content?: unknown;
+      }>;
+      expect(items.at(-1)?.role).toBe("user");
+      expect(JSON.stringify(items.slice(0, -1))).not.toContain(image.dataUrl);
+      expect(wire).not.toContain('"images":');
+    },
+  );
   test("sends an explicitly requested strict response schema", () => {
     const jsonSchema = {
       name: "judgments",

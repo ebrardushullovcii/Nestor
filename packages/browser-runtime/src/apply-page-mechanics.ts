@@ -1,4 +1,5 @@
 import { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
+import { screenshotPage, pointerPage } from "./page-image-input";
 import { readPressability } from "./element-state";
 import { watchPagePress } from "./page-press-facts";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
@@ -2477,6 +2478,8 @@ export function createPlaywrightApplyPageMechanics(
   // Before any file is attached, so the request that carries it is seen.
   watchAttachmentUploads(page);
   return tracePageHands(page, {
+    screenshot: (frame) => screenshotPage(page, frame),
+    pointer: (input) => pointerPage(page, input),
     clickAuthorizedFormAction: async (ref) => {
       const locator = actionLocator(page, ref);
       if (!locator)
