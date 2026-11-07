@@ -24,7 +24,11 @@ export function textRetentionError(
   }
   // Page reads blank a password field's value, so an empty one proves nothing;
   // the write's own immediate read already caught a refused password.
-  if (control.credentialRole === "password") return null;
+  if (
+    control.credentialRole === "password" ||
+    control.credentialRole === "one_time_code"
+  )
+    return null;
   return value.trim().length > 0 && current.value.trim().length === 0
     ? CLEARED_TEXT_ERROR
     : null;

@@ -65,7 +65,7 @@ export async function clickPreparedLoginAction(
           passwords[0]!.disabled ||
           passwords[0]!.autocomplete === "new-password" ||
           form.querySelector(
-            '[autocomplete="one-time-code"], [autocomplete="new-password"], input[type="file"]',
+            '[autocomplete="new-password"], input[type="file"]',
           )
         )
           return null;

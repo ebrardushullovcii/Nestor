@@ -1,5 +1,9 @@
 import type { BrowserAgentPermissions } from "@nestor/contracts";
 import type {
+  BrowserPasswordsList,
+  BrowserPasswordFieldTarget,
+  BrowserGenerateAccountInput,
+  BrowserGeneratedLoginResult,
   ApplicationPageState,
   ApplicationPageReopenProgress,
   PreparedApplicationForm,
@@ -507,6 +511,15 @@ export interface BrowserApplicationExecutionOptions {
 }
 
 export interface AgentDiscoveryOptions {
+  listSavedCredentials?: (url: string) => Promise<BrowserPasswordsList>;
+  fillSavedCredential?: (input: {
+    url: string;
+    target: BrowserPasswordFieldTarget;
+    credentialId: string;
+  }) => Promise<boolean>;
+  generateAccountCredential?: (
+    input: BrowserGenerateAccountInput,
+  ) => Promise<BrowserGeneratedLoginResult>;
   requestedListing?: { url: string; title: string; text: string };
   /** Main-owned exact-site autofill; returns no credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;

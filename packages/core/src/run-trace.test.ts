@@ -1,6 +1,56 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { traceSafe, traceEvent } from "./run-trace";
+import { randomBytes } from "node:crypto";
+import {
+  withVerificationPrivacy,
+  markVerificationPrivate,
+  rememberVerificationSecret,
+  redactVerificationData,
+} from "./run-trace";
 afterEach(() => vi.unstubAllEnvs());
+
+test("mailbox privacy omits model payloads before a code field is known, leaves execution intact and isolates concurrent runs", async () => {
+  const code = randomBytes(5).toString("hex");
+  await Promise.all([
+    withVerificationPrivacy(async () => {
+      markVerificationPrivate();
+      await Promise.resolve();
+      const request = { messages: [{ content: `Mailbox message: ${code}` }] };
+      const response = {
+        toolCalls: [
+          {
+            function: {
+              name: "type",
+              arguments: JSON.stringify({ ref: "c1", text: code }),
+            },
+          },
+        ],
+      };
+      expect(
+        JSON.stringify(traceSafe({ request, response })).includes(code),
+      ).toBe(false);
+      expect(request.messages[0]?.content.includes(code)).toBe(true);
+      const dataUrl = `data:image/png;base64,${Buffer.from(code).toString("base64")}`;
+      expect(
+        traceSafe({ images: [{ dataUrl, label: "Mailbox viewport" }] }),
+      ).toEqual({
+        images: [{ dataUrl: "[secret omitted]", label: "Mailbox viewport" }],
+      });
+      rememberVerificationSecret(code);
+      expect(
+        JSON.stringify(
+          redactVerificationData({ reason: `Entered ${code}` }),
+        ).includes(code),
+      ).toBe(false);
+    }),
+    withVerificationPrivacy(async () => {
+      await Promise.resolve();
+      expect(traceSafe({ request: "Other task facts" })).toEqual({
+        request: "Other task facts",
+      });
+    }),
+  ]);
+});
 test("trace omits credentials, MFA answers and private reasoning but retains the person's facts", () => {
   vi.stubEnv("NESTOR_TEST_API_KEY", "test-api-secret");
   const text = JSON.stringify(

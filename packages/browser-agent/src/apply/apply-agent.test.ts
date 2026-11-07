@@ -4,6 +4,8 @@ import {
   type RawApplyPage,
 } from "@nestor/contracts";
 import { expect, test, vi } from "vitest";
+import { randomBytes } from "node:crypto";
+import { createApplySystemPrompt } from "./apply-prompts";
 import type { LLMClient } from "../agent/contracts";
 import { runApplyAgent } from "./apply-agent";
 import { buildApplyFormObservation } from "./page-hands";
@@ -174,6 +176,138 @@ function model(
   };
 }
 const done = { name: "finish", args: { reason: "Finished", forPerson: [] } };
+
+test("a failed mailbox attempt hands off its kept form, with no saved-answer question", async () => {
+  const formUrl = "https://apply.example.test/verify";
+  const source = page({
+    url: "https://mail.google.com/mail/u/0/",
+    controls: [],
+    tabs: [
+      {
+        id: "form",
+        url: formUrl,
+        title: "Verify email",
+        active: false,
+        primary: true,
+      },
+      {
+        id: "tab1",
+        url: "https://mail.google.com/mail/u/0/",
+        title: "Inbox",
+        active: true,
+        primary: false,
+      },
+    ],
+  });
+  const input = config(source);
+  input.hands.closeAuxiliaryTabs = () => {
+    source.url = formUrl;
+    source.tabs = [
+      {
+        id: "form",
+        url: formUrl,
+        title: "Verify email",
+        active: true,
+        primary: true,
+      },
+    ];
+    return Promise.resolve();
+  };
+  const result = await runApplyAgent(
+    input,
+    model([
+      {
+        name: "finish",
+        args: {
+          reason: "The mailbox attempt could not retrieve the emailed code.",
+          needsPerson: true,
+          forPerson: [
+            {
+              onPage: "mfa",
+              instructions:
+                "Enter the emailed code on this open application form.",
+            },
+          ],
+        },
+      },
+    ]),
+  );
+  expect(result.finalUrl).toBe(formUrl);
+  expect(result.pauses[0]?.blocker?.code).toBe("multi_factor_required");
+  expect(result.pauses[0]?.question).toBeNull();
+});
+
+test.each(["type", "fill_fields"])(
+  "%s enters an emailed code without retaining it as an answer",
+  async (tool) => {
+    const secret = randomBytes(5).toString("hex");
+    const source = page({
+      controls: [
+        {
+          ...nameControl(),
+          autocomplete: "one-time-code",
+          label: "Verification code",
+          value: "",
+        },
+      ],
+    });
+    const input = config(source);
+    const write = { tool: "type", ref: "c0", text: secret };
+    const result = await runApplyAgent(
+      input,
+      model([
+        { name: tool, args: tool === "type" ? write : { fields: [write] } },
+        done,
+      ]),
+    );
+    expect(source.controls[0]?.value === secret).toBe(true);
+    expect(result.filled).toEqual([]);
+    expect(result.reviewFilled).toEqual([]);
+    expect(JSON.stringify(result).includes(secret)).toBe(false);
+  },
+);
+
+test.each([
+  "prepare_only",
+  "confirm_before_submit",
+  "autonomous_submit",
+] as const)(
+  "%s receives mailbox facts, required agreement instructions and the vault account tool",
+  async (mode) => {
+    const input = config(page());
+    input.authority.mode = mode;
+    input.authority.preApprovedAttestationKinds = ["terms_acceptance"];
+    input.hands.readMailboxAccounts = () =>
+      Promise.resolve([
+        {
+          email: "synthetic@example.test",
+          url: "https://mail.google.com/mail/u/0/",
+        },
+      ]);
+    const client = model([done]);
+    await runApplyAgent(input, client);
+    const prompt = createApplySystemPrompt(input);
+    for (const removed of [
+      "You work in one tab",
+      "This does not permit accepting a legal declaration",
+      "If the banner offers only opt-in, leave it for the person",
+      "If this job conflicts, ask how the person wants to handle that conflict",
+    ])
+      expect(prompt).not.toContain(removed);
+    expect(prompt).toContain("including arbitration");
+    const call = vi.mocked(client.chatWithTools).mock.calls[0];
+    expect(JSON.stringify(call[0])).toContain("synthetic@example.test");
+    expect(JSON.stringify(call[0])).toContain("are signed in in this browser");
+    expect(call[1].map((tool) => tool.function.name)).toEqual(
+      expect.arrayContaining([
+        "open_tab",
+        "switch_tab",
+        "close_tab",
+        "generate_account_login",
+      ]),
+    );
+  },
+);
 test.each(["prepare_only", "autonomous_submit"] as const)(
   "%s receives the real instruction and both labelled resume documents",
   async (mode) => {

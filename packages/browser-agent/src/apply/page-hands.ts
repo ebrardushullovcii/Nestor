@@ -4,6 +4,7 @@ import type {
   RawApplyPage,
   RawApplyPlacement,
 } from "@nestor/contracts";
+import { isVerificationCodeControl } from "@nestor/contracts";
 
 import {
   inferActionKind,
@@ -257,11 +258,7 @@ export function buildApplyFormObservation(
   const controls: ApplyFormControl[] = raw.controls.map((rawControl) => {
     const kind = toControlKind(rawControl);
     const inputType = rawControl.inputType.toLowerCase();
-    const oneTimeCode =
-      /(?:^|\s)one-time-code(?:\s|$)/iu.test(rawControl.autocomplete) ||
-      /\b(?:otp|one[ -]?time (?:code|password)|verification code)\b/iu.test(
-        rawControl.label,
-      );
+    const oneTimeCode = isVerificationCodeControl(rawControl);
     const password =
       inputType === "password" ||
       /(?:^|\s)(?:current-password|new-password)(?:\s|$)/iu.test(
@@ -394,7 +391,8 @@ export function buildApplyFormObservation(
       ...control,
       answered:
         credentialRole === "password" || credentialRole === "one_time_code"
-          ? rawControl.value.length > 0
+          ? rawControl.secretValuePresent === true ||
+            rawControl.value.length > 0
           : isControlAnswered(control),
     };
   });
@@ -473,6 +471,7 @@ export function buildApplyFormObservation(
   }
 
   return {
+    ...(raw.tabs ? { tabs: raw.tabs } : {}),
     ...(raw.navigationNote ? { navigationNote: raw.navigationNote } : {}),
     observedAt,
     signature: hashSignature([
@@ -552,6 +551,18 @@ export function createApplyPageHands(
   return {
     ...(mechanics.screenshot ? { screenshot: mechanics.screenshot } : {}),
     ...(mechanics.pointer ? { pointer: mechanics.pointer } : {}),
+    ...(mechanics.generateAccountCredential
+      ? { generateAccountCredential: mechanics.generateAccountCredential }
+      : {}),
+    ...(mechanics.openTab ? { openTab: mechanics.openTab } : {}),
+    ...(mechanics.switchTab ? { switchTab: mechanics.switchTab } : {}),
+    ...(mechanics.closeTab ? { closeTab: mechanics.closeTab } : {}),
+    ...(mechanics.closeAuxiliaryTabs
+      ? { closeAuxiliaryTabs: mechanics.closeAuxiliaryTabs }
+      : {}),
+    ...(mechanics.readMailboxAccounts
+      ? { readMailboxAccounts: mechanics.readMailboxAccounts }
+      : {}),
     observe: async () =>
       buildApplyFormObservation(
         await mechanics.readPage(),

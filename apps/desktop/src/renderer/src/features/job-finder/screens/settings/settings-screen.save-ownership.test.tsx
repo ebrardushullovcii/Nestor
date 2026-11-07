@@ -114,23 +114,33 @@ describe("Settings section nav is real navigation", () => {
     vi.clearAllMocks();
   });
 
-  it("names the sections in plain language and keeps account access person-owned", () => {
+  it("names the sections in plain language and explains private passwords and emailed codes", () => {
     renderScreen(parseSettings(), createCallbacks());
 
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
     expect(
       within(nav).getByRole("link", { name: APPLICATION_AUTHORITY_LABEL }),
     ).toBeTruthy();
-    expect(within(nav).queryByRole("link", { name: "Browser & saved jobs" })).toBeNull();
+    expect(
+      within(nav).queryByRole("link", { name: "Browser & saved jobs" }),
+    ).toBeNull();
 
     const authority = screen.getByRole("region", {
       name: APPLICATION_AUTHORITY_LABEL,
     });
     expect(
-      within(authority).getAllByText(/You control account creation/i).length,
+      within(authority).getAllByText(/follows your browser permissions/i)
+        .length,
     ).toBeTruthy();
     expect(
-      within(authority).getAllByText(/without saving them/i).length,
+      within(authority).getAllByText(
+        /vault stores and types passwords privately/i,
+      ).length,
+    ).toBeTruthy();
+    expect(
+      within(authority).getAllByText(
+        /read emailed verification codes in your signed-in mailbox/i,
+      ).length,
     ).toBeTruthy();
     expect(
       within(authority).queryByRole("button", { name: /submit/i }),
@@ -147,11 +157,7 @@ describe("Settings save ownership", () => {
   it("shows no save button in a section with nothing to save", () => {
     renderScreen(parseSettings(), createCallbacks());
 
-    for (const label of [
-      "App & device",
-      "AI behavior",
-      "Resume look",
-    ]) {
+    for (const label of ["App & device", "AI behavior", "Resume look"]) {
       const region = screen.getByRole("region", { name: label });
       expect(region.querySelector("[data-settings-save-state]")).toBeNull();
       expect(
@@ -230,9 +236,6 @@ describe("Settings save ownership", () => {
 
     await waitFor(() => expect(unsavedBar()).toBeNull());
   });
-
-
-
 });
 
 describe("Settings appearance preview", () => {
@@ -332,7 +335,10 @@ describe("Settings save bar reaches the window bottom", () => {
     );
     renderScreen(parseSettings(), callbacks);
     fireEvent.click(
-      within(screen.getByRole("region", { name: "App & device" })).getByRole("button", { name: "Light" }),
+      within(screen.getByRole("region", { name: "App & device" })).getByRole(
+        "button",
+        { name: "Light" },
+      ),
     );
 
     const bar = unsavedBar();

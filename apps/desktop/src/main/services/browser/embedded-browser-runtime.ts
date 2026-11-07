@@ -3,6 +3,7 @@ import type {
   OpenBrowserSessionOptions,
 } from "@nestor/browser-runtime";
 import type {
+  BrowserGenerateAccountInput,
   ApplyExecutionResult,
   BrowserSessionState,
   DiscoveryRunResult,
@@ -62,6 +63,28 @@ export function withEmbeddedBrowserActivity(
   browser: EmbeddedBrowser,
 ): BrowserSessionRuntime {
   const applicationSources = new Map<string, JobSource>();
+  const generateOwnedAccount = async (
+    claimedTabs: () => Promise<string[]>,
+    input: BrowserGenerateAccountInput,
+  ) => {
+    const owned = new Set(await claimedTabs());
+    const tab = browser
+      .getState()
+      .tabs.find(
+        (t) =>
+          owned.has(t.id) &&
+          browserDisplayUrl(t.url) === browserDisplayUrl(input.url),
+      );
+    return tab
+      ? browser.generateAccountCredential(tab.id, input.username, input.targets)
+      : {
+          ok: false,
+          credentialId: null,
+          origin: null,
+          username: input.username,
+          message: "The owned account tab is unavailable; observe again.",
+        };
+  };
   const prepareOwnedCredentials = async (
     claimedTabs: () => Promise<string[]>,
     url: string,
@@ -500,6 +523,41 @@ export function withEmbeddedBrowserActivity(
                       ...formInput.session,
                       prepareBrowserCredentials: (url) =>
                         prepareOwnedCredentials(claimedTabs, url),
+                      generateAccountCredential: async ({
+                        username,
+                        passwordRefs,
+                      }) => {
+                        const raw = await formInput.session.readPage();
+                        const targets = passwordRefs.flatMap((ref) => {
+                          const c = raw.controls.find(
+                            (entry) => (entry.ref ?? `c${entry.index}`) === ref,
+                          );
+                          return c
+                            ? [
+                                {
+                                  controlIndex: c.index,
+                                  id: c.id,
+                                  name: c.name,
+                                  ...(c.frame ? { frame: c.frame } : {}),
+                                },
+                              ]
+                            : [];
+                        });
+                        return targets.length === passwordRefs.length
+                          ? generateOwnedAccount(claimedTabs, {
+                              url: raw.url ?? "",
+                              username,
+                              targets,
+                            })
+                          : {
+                              ok: false,
+                              credentialId: null,
+                              origin: null,
+                              username,
+                              message:
+                                "A named password field changed; observe again.",
+                            };
+                      },
                       listSavedCredentials: async () => {
                         const raw = await formInput.session.readPage();
                         const owned = new Set(await claimedTabs());
@@ -628,6 +686,46 @@ export function withEmbeddedBrowserActivity(
                   ...options,
                   prepareBrowserCredentials: (url) =>
                     prepareOwnedCredentials(claimedTabs, url),
+                  generateAccountCredential: (input) =>
+                    generateOwnedAccount(claimedTabs, input),
+                  listSavedCredentials: async (url) => {
+                    const owned = new Set(await claimedTabs());
+                    const tab = browser
+                      .getState()
+                      .tabs.find(
+                        (tab) =>
+                          owned.has(tab.id) &&
+                          browserDisplayUrl(tab.url) === browserDisplayUrl(url),
+                      );
+                    return tab
+                      ? browser.listAgentCredentials(tab.id)
+                      : {
+                          available: false,
+                          credentials: [],
+                          message: "The owned sign-in tab is unavailable.",
+                        };
+                  },
+                  fillSavedCredential: async ({
+                    url,
+                    target,
+                    credentialId,
+                  }) => {
+                    const owned = new Set(await claimedTabs());
+                    const tab = browser
+                      .getState()
+                      .tabs.find(
+                        (tab) =>
+                          owned.has(tab.id) &&
+                          browserDisplayUrl(tab.url) === browserDisplayUrl(url),
+                      );
+                    return tab
+                      ? browser.fillAgentCredential(
+                          tab.id,
+                          credentialId,
+                          target,
+                        )
+                      : false;
+                  },
                   protectedPages,
                   signal,
                   onAutomationPage: async (page) => {

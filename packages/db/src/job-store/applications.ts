@@ -572,6 +572,43 @@ export function createApplicationStore(store: JobStore) {
       });
     },
 
+    /** A consumed send waiting on its email step stays live, never failed. */
+    recordVerificationWait(
+      id: number,
+      attempt: number,
+      receipt: SubmissionOutcomeRecord,
+    ): boolean {
+      receipt = SubmissionOutcomeRecordSchema.parse(receipt);
+      return store.transaction(() => {
+        const current = getApplication(id);
+        if (
+          !current ||
+          current.attempt !== attempt ||
+          current.state !== "running"
+        )
+          return false;
+        if (
+          receipt.applicationRecordId !== `application_${id}` ||
+          receipt.jobId !== String(current.jobId)
+        )
+          throw new Error(
+            "The verification receipt belongs to another application.",
+          );
+        sql(
+          `UPDATE applications SET submission_outcome_id=?, submission_outcome_json=?, error=?, updated_at=? WHERE id=? AND attempt=?`,
+        ).run(
+          receipt.id,
+          JSON.stringify(receipt),
+          "Waiting for the emailed verification step on the open form.",
+          Date.now(),
+          id,
+          attempt,
+        );
+        changed([current.jobId]);
+        return true;
+      });
+    },
+
     /** The state is written before the existing guarded send can be armed. */
     beginSubmission(
       id: number,

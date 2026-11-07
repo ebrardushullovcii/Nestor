@@ -1035,6 +1035,8 @@ describe("reading the choices of lists the page draws itself", () => {
           .mockRejectedValue(new Error("Not accepted"));
         const mechanics = createPlaywrightApplyPageMechanics({
           locator: () => ({ nth: () => input }),
+          once: page.once.bind(page),
+          isClosed: () => false,
         } as unknown as Parameters<
           typeof createPlaywrightApplyPageMechanics
         >[0]);

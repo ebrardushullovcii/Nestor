@@ -208,6 +208,79 @@ it.each([
   },
 );
 
+it("an emailed step after Send stays waiting and hands off on its kept form instead of failing", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  preparation.notReadyToSend = true;
+  preparation.blocker = {
+    code: "multi_factor_required",
+    requiresPerson: true,
+    summary: "The mailbox attempt could not retrieve the emailed code.",
+    detail: "Enter the emailed code on this open form.",
+    nextActionLabel: "Open the application",
+  };
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const row = f.applications.listApplications().rows[0]!;
+  expect(
+    await preparation.recordSendOutcome!({
+      sendCallId: "email-step-send",
+      outcome: "waiting",
+      evidence: "The employer is waiting for emailed verification.",
+      pageUrl: "https://replica.test/verify",
+    }),
+  ).toMatchObject({ recorded: true });
+  expect(f.applications.getApplication(row.id)?.state).toBe("running");
+  expect(
+    f.applications.getSubmissionReceipt(row.id)?.browserAction?.reason,
+  ).toBe("awaiting_email_verification");
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
+  );
+  expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
+  expect(f.applications.getSubmissionReceipt(row.id)?.outcome).toBe(
+    "outcome_uncertain",
+  );
+});
+
+it("a waiting emailed step resolves its one consumed send call after verification", async () => {
+  const f = await setup(1);
+  const guards = createSendGuards(f.jobs);
+  f.deps.authorityRepository = guards;
+  preparation.notReadyToSend = true;
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  const report = {
+    sendCallId: "email-step-send",
+    evidence: "The employer is waiting for emailed verification.",
+    pageUrl: "https://replica.test/verify",
+  };
+  expect(
+    await preparation.recordSendOutcome!({ ...report, outcome: "waiting" }),
+  ).toMatchObject({ recorded: true });
+  expect(
+    await preparation.recordSendOutcome!({
+      ...report,
+      outcome: "confirmed",
+      evidence: "The employer confirmed the application.",
+    }),
+  ).toMatchObject({ recorded: true });
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("submitted"),
+  );
+  expect(await guards.listSubmissionArmedMarkers()).toHaveLength(1);
+  expect(
+    f.applications.getSubmissionReceipt(
+      f.applications.listApplications().rows[0]!.id,
+    )?.outcome,
+  ).toBe("submitted");
+});
+
 it("the model can reconcile an older recorded send call while a later attempt is open", async () => {
   const f = await setup(1);
   const guards = createSendGuards(f.jobs);

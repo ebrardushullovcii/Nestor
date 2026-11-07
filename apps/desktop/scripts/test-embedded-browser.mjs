@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, cp } from "node:fs/promises";
 import { createRequire, isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -12,6 +12,12 @@ const output = await mkdtemp(join(tmpdir(), "nestor-embedded-browser-test-"));
 const discoveryCleanup = process.argv.includes("--discovery-cleanup");
 const pageApi = process.argv.includes("--page-api");
 const siteChecks = process.argv.includes("--site-checks");
+const verification = process.argv.includes("--verification");
+const buildOutput = verification ? join(output, "main") : output;
+if (verification)
+  await cp(join(desktop, "out/preload"), join(output, "preload"), {
+    recursive: true,
+  });
 await build({
   configFile: false,
   root: desktop,
@@ -46,15 +52,17 @@ await build({
   build: {
     ssr: join(
       desktop,
-      siteChecks
-        ? "scripts/fixtures/embedded-browser-site-checks.ts"
-        : discoveryCleanup
-          ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
-          : pageApi
-            ? "scripts/fixtures/embedded-browser-page-api.ts"
-            : "scripts/fixtures/embedded-browser.ts",
+      verification
+        ? "scripts/fixtures/embedded-browser-verification.ts"
+        : siteChecks
+          ? "scripts/fixtures/embedded-browser-site-checks.ts"
+          : discoveryCleanup
+            ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
+            : pageApi
+              ? "scripts/fixtures/embedded-browser-page-api.ts"
+              : "scripts/fixtures/embedded-browser.ts",
     ),
-    outDir: output,
+    outDir: buildOutput,
     emptyOutDir: false,
     rollupOptions: {
       external: [
@@ -75,7 +83,7 @@ await build({
 });
 const env = { ...process.env, EMBEDDED_BROWSER_TEST_OUTPUT: output };
 delete env.ELECTRON_RUN_AS_NODE;
-const child = spawn(require("electron"), [join(output, "probe.cjs")], {
+const child = spawn(require("electron"), [join(buildOutput, "probe.cjs")], {
   env,
   windowsHide: true,
   stdio: "inherit",

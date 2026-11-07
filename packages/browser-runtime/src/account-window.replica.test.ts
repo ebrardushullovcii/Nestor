@@ -12,6 +12,7 @@ import {
   createPlaywrightApplyPageSession,
 } from "./apply-page-mechanics";
 import { withAccountWindowSession } from "./account-window-session";
+import { configureTraceCapture } from "./trace-page";
 
 let browser: Browser;
 let base = "";
@@ -152,6 +153,69 @@ test("same-tab account navigation completes without waiting for a popup", async 
     await context.close();
   }
 });
+
+test("images and pointer input follow the account popup and its auxiliary tab while the application stays bound", async () => {
+  const context = await browser.newContext();
+  try {
+    const { page, session, ref } = await open(context);
+    const popupPromise = page.waitForEvent("popup");
+    await session.clickOpeningAccountWindow!({
+      ref,
+      frame: null,
+      writeOrigins: [],
+    });
+    const popup = await popupPromise;
+    await popup.waitForLoadState("domcontentloaded");
+    const captured: Page[] = [];
+    configureTraceCapture(context, (target) => {
+      captured.push(target);
+      return Promise.resolve(new Uint8Array([1, 2, 3]));
+    });
+    const pressTarget = async (target: Page) => {
+      await target.evaluate(() => {
+        const button = document.createElement("button");
+        button.textContent = "Image target";
+        button.onclick = () => {
+          document.body.dataset.pressed = "yes";
+        };
+        document.body.append(button);
+      });
+      await session.screenshot!();
+      expect(captured.at(-1)).toBe(target);
+      const box = await target
+        .getByRole("button", { name: "Image target" })
+        .boundingBox();
+      expect(
+        await session.pointer!({
+          action: "click",
+          x: box!.x + box!.width / 2,
+          y: box!.y + box!.height / 2,
+        }),
+      ).toMatchObject({ ok: true });
+      expect(await target.locator("body").getAttribute("data-pressed")).toBe(
+        "yes",
+      );
+    };
+    await pressTarget(popup);
+    await session.openTab!(base + "/signed-in");
+    const auxiliary = context
+      .pages()
+      .find((candidate) => candidate !== page && candidate !== popup)!;
+    await pressTarget(auxiliary);
+    await session.switchTab!("form");
+    await session.screenshot!();
+    expect(captured.at(-1)).toBe(popup);
+    await session.closeAuxiliaryTabs!();
+    expect(auxiliary.isClosed()).toBe(true);
+    expect(page.isClosed()).toBe(false);
+    expect(await page.getByRole("textbox", { name: "Name" }).inputValue()).toBe(
+      "Alex Example",
+    );
+    await session.closeAccountWindow();
+  } finally {
+    await context.close();
+  }
+}, 30_000);
 test("Stop rejects another account action and cleanup leaves unrelated tabs alone", async () => {
   const context = await browser.newContext();
   try {

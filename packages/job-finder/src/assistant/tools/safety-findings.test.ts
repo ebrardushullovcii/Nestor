@@ -756,9 +756,7 @@ it("the sidebar exposes permission changes and describes the current saved choic
   expect(ASSISTANT_SYSTEM_PROMPT).toContain(
     "use update_ai_behavior only for an explicit request",
   );
-  expect(ASSISTANT_SYSTEM_PROMPT).toContain(
-    "Password entry, MFA and missing consent stay with the person",
-  );
+  expect(ASSISTANT_SYSTEM_PROMPT).toContain("Passwords stay in the vault");
   expect(ASSISTANT_SYSTEM_PROMPT).not.toContain(
     "Sign-in, CAPTCHA, MFA and account creation stay with the person",
   );

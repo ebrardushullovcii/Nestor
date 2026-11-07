@@ -1,4 +1,11 @@
 import { z } from "zod";
+import {
+  withVerificationPrivacy,
+  verificationIsPrivate,
+  redactVerificationText,
+  redactVerificationData,
+} from "@nestor/core/run-trace";
+import { mailboxAccountFacts } from "../tab-tools";
 import { intendedAccountEmail } from "@nestor/contracts";
 import {
   ListingRejectionCategorySchema,
@@ -330,6 +337,18 @@ function indexFingerprint(observation: ApplyFormObservation): string | null {
 }
 
 export async function runJobSearchAgent(
+  input: JobSearchAgentInput,
+): Promise<AgentResult> {
+  return withVerificationPrivacy(async () => {
+    try {
+      return redactVerificationData(await runJobSearchAgentPrivate(input));
+    } finally {
+      await input.hands.closeAuxiliaryTabs?.();
+    }
+  });
+}
+
+async function runJobSearchAgentPrivate(
   input: JobSearchAgentInput,
 ): Promise<AgentResult> {
   const { config } = input;
@@ -1347,6 +1366,7 @@ export async function runJobSearchAgent(
   const prompts = createJobSearchPrompts(config);
   const messages: AgentLoopMessage[] = [
     { role: "system", content: prompts.system },
+    { role: "user", content: await mailboxAccountFacts(hands) },
     { role: "user", content: prompts.user },
   ];
   if (config.sourceCatalog) {
@@ -1590,13 +1610,18 @@ export async function runJobSearchAgent(
       views.restoreContext(retained, pageTools.state.observation),
     onStep: ({ step, note }) => {
       steps = step;
-      emit("thinking", describeStepForPerson(note));
+      emit(
+        "thinking",
+        verificationIsPrivate()
+          ? "Completing verification; private mailbox content omitted."
+          : describeStepForPerson(note),
+      );
     },
     ...(input.signal ? { signal: input.signal } : {}),
     now,
   });
 
-  emit("finish", loop.reason);
+  emit("finish", redactVerificationText(loop.reason));
   const result = buildResult(loop);
   const completeIndex =
     initialIndex &&

@@ -6,9 +6,17 @@ import {
   runTraceEnabled,
   traceArtifact,
   traceEvent,
+  verificationIsPrivate,
 } from "@nestor/core/run-trace";
 
 const bindings = new WeakMap<Page, string>();
+const privatePages = new WeakSet<Page>();
+/** Mailboxes and pages that displayed a code have no retained text or pixels. */
+export function markPrivateTracePage(page: Page): void {
+  privatePages.add(page);
+}
+export const pageTraceIsPrivate = (page: Page): boolean =>
+  privatePages.has(page) || verificationIsPrivate();
 export interface TraceCaptureInput {
   masks: { x: number; y: number; width: number; height: number }[];
   viewport: { width: number; height: number };
@@ -87,6 +95,15 @@ async function capturePageTrace(
   bytes?: Uint8Array,
 ): Promise<void> {
   if (!runTraceEnabled()) return;
+  if (pageTraceIsPrivate(page)) {
+    traceEvent("page_snapshot", {
+      applicationKey: bindings.get(page) ?? null,
+      action,
+      shot: null,
+      omitted: "verification privacy",
+    });
+    return;
+  }
   const applicationKey = bindings.get(page) ?? null;
   try {
     const started = Date.now();
@@ -122,6 +139,15 @@ async function capturePageTrace(
               type: "png",
               mask: masks,
             });
+    if (pageTraceIsPrivate(page)) {
+      traceEvent("page_snapshot", {
+        applicationKey,
+        action,
+        shot: null,
+        omitted: "verification privacy",
+      });
+      return;
+    }
     const shot = traceArtifact("shots", image, "png");
     const visibleText = await readVisibleText(page.locator("body"));
     traceEvent("page_snapshot", {

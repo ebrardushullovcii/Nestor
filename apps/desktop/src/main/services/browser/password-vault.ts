@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomInt } from "node:crypto";
 import type { BrowserPasswordMetadata } from "@nestor/contracts";
 import type { BrowserPasswordRepository } from "@nestor/db";
 import { passwordOrigin } from "./password-origin";
@@ -15,6 +15,7 @@ export interface PasswordValue {
   password: string;
 }
 export class PasswordVault {
+  private readonly generatedAccounts = new Set<string>();
   constructor(
     private readonly repository: BrowserPasswordRepository,
     private readonly encryption: PasswordEncryption,
@@ -72,9 +73,42 @@ export class PasswordVault {
       );
     }
   }
+  /** Generate once per origin/account so a retry reuses the saved login. */
+  generateAccount(origin: string, username: string): BrowserPasswordMetadata {
+    const normalized = passwordOrigin(origin);
+    if (!normalized || !username.trim())
+      throw new Error("The new login needs its site and username.");
+    const existing = this.list(normalized).find(
+      (row) => row.username === username,
+    );
+    const accountKey = JSON.stringify([normalized, username]);
+    if (
+      existing &&
+      this.generatedAccounts.has(accountKey) &&
+      this.read(existing.id)
+    )
+      return existing;
+    const groups = [
+      "ABCDEFGHJKLMNPQRSTUVWXYZ",
+      "abcdefghijkmnopqrstuvwxyz",
+      "23456789",
+      "!@#$%*-_",
+    ];
+    const alphabet = groups.join("");
+    const chars = groups.map((group) => group[randomInt(group.length)]!);
+    while (chars.length < 24) chars.push(alphabet[randomInt(alphabet.length)]!);
+    for (let index = chars.length - 1; index > 0; index--) {
+      const target = randomInt(index + 1);
+      [chars[index], chars[target]] = [chars[target]!, chars[index]!];
+    }
+    this.save({ origin: normalized, username, password: chars.join("") });
+    this.generatedAccounts.add(accountKey);
+    return this.list(normalized).find((row) => row.username === username)!;
+  }
   save(value: PasswordValue): "added" | "updated" | "skipped" {
     this.requireEncryption();
     const origin = passwordOrigin(value.origin);
+    this.generatedAccounts.delete(JSON.stringify([origin, value.username]));
     if (
       !origin ||
       value.username.length > 1000 ||

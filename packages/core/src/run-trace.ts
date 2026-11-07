@@ -12,6 +12,14 @@ export const runTraceEnabled = (): boolean =>
 
 import { traceSafe } from "./trace-redaction.mjs";
 export { traceSafe };
+export {
+  withVerificationPrivacy,
+  markVerificationPrivate,
+  verificationIsPrivate,
+  rememberVerificationSecret,
+  redactVerificationText,
+  redactVerificationData,
+} from "./verification-privacy.mjs";
 
 /** Observation only: failures and observer return values never affect execution. */
 export function traceEvent(

@@ -14,6 +14,7 @@ import { handleHandoverOptions } from "./handover-options.mjs";
 import { handleRememberedQuestions } from "./remembered-questions.mjs";
 import { handleRemoteSearch } from "./remote-search.mjs";
 import { handleImageChallenge } from "./image-challenge.mjs";
+import { handleVerificationReplica } from "./verification-replica.mjs";
 
 // All data, accounts and endpoints are synthetic and local to this server.
 const confirmation = "Thank you! Your application has been received.";
@@ -449,6 +450,14 @@ const server = http.createServer(async (req, res) => {
     req.headers.cookie || "",
   );
   try {
+    if (
+      await handleVerificationReplica(req, res, url, {
+        send,
+        readPost,
+        logPost,
+      })
+    )
+      return;
     if (await handleRemoteSearch(req, res, url, { send, readPost, logPost }))
       return;
     if (handlePermitFit(req, res, url, { send })) return;

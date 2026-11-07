@@ -1,3 +1,4 @@
+import { rememberVerificationSecret } from "@nestor/core/run-trace";
 import type {
   ApplyPersonRequest,
   ApplicationAttemptQuestion,
@@ -433,10 +434,7 @@ export async function executeApplyProposal(
         progress: observation.signature !== after.signature,
       };
     }
-    if (
-      control.credentialRole === "password" ||
-      control.credentialRole === "one_time_code"
-    )
+    if (control.credentialRole === "password")
       return failed(
         "Use the vault for saved secrets. A missing secret must be entered on the open page; never include it in a model tool call.",
       );
@@ -507,6 +505,8 @@ export async function executeApplyProposal(
       };
     }
     config.signal?.throwIfAborted();
+    if (control.credentialRole === "one_time_code")
+      rememberVerificationSecret(value);
     const result =
       proposal.tool === "type"
         ? await config.hands.fillText(proposal.ref, value)
@@ -525,6 +525,13 @@ export async function executeApplyProposal(
         observation: after,
       };
     deps.guardState.hasWritten = true;
+    if (control.credentialRole === "one_time_code")
+      return {
+        kind: "moved",
+        note: "Entered the emailed verification code (value omitted).",
+        observation: after,
+        progress: true,
+      };
     deps.guardState.lastFieldLabel = questionPrompt(control);
     const sourceId = proposal.storedFactId ?? `chosen.${control.ref}`;
     const saved = config.sources.reusableAnswers.find(

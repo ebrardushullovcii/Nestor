@@ -1,4 +1,7 @@
-import type { BrowserPasswordsList } from "./browser-passwords";
+import type {
+  BrowserPasswordsList,
+  BrowserGeneratedLoginResult,
+} from "./browser-passwords";
 import type {
   BrowserPageImage,
   BrowserPointerInput,
@@ -76,12 +79,32 @@ export interface RawApplyControl {
   readOnly: boolean;
   visible: boolean;
   value: string;
+  /** Presence only; the value of a code field is never retained in a page read. */
+  secretValuePresent?: boolean;
   checked: boolean;
   multiple: boolean;
   options: string[];
   selectedOptionLabel: string;
   /** What a file input's own field shows about its upload. */
   upload?: RawApplyUpload;
+}
+
+/** Privacy metadata only: this never prevents a model's field write. */
+export function isVerificationCodeControl(
+  control: Pick<
+    RawApplyControl,
+    "autocomplete" | "label" | "placeholder" | "name" | "id"
+  >,
+): boolean {
+  return (
+    /(?:^|\s)one-time-code(?:\s|$)/iu.test(control.autocomplete) ||
+    /\b(?:otp|(?:verification|authentication|security|email|emailed|one[ -]?time)[ -]+(?:code|password)|\d+[ -]character code)\b/iu.test(
+      `${control.label} ${control.placeholder}`,
+    ) ||
+    /(?:^|[_\W])(?:otp|mfa|code|passcode)(?:\d|[_\W]|$)/iu.test(
+      `${control.name} ${control.id}`,
+    )
+  );
 }
 
 export interface RawApplyUpload {
@@ -232,6 +255,14 @@ export interface RawApplySummaryRow {
 }
 
 export interface RawApplyPage {
+  /** Task-owned tabs. The original application remains bound while another is read. */
+  tabs?: {
+    id: string;
+    url: string;
+    title: string;
+    active: boolean;
+    primary: boolean;
+  }[];
   navigationNote?: string;
   /** Monotonic count of non-GET/HEAD/OPTIONS page requests, independent of file matching. */
   networkMutationCount?: number;
@@ -374,6 +405,16 @@ export interface ApplyUploadFile {
 export interface ApplyRawPageHands {
   screenshot?: (frame?: string) => Promise<BrowserPageImage>;
   pointer?: (input: BrowserPointerInput) => Promise<ApplyWriteResult>;
+  generateAccountCredential?: (input: {
+    username: string;
+    passwordRefs: string[];
+  }) => Promise<BrowserGeneratedLoginResult>;
+  openTab?: (url: string) => Promise<ApplyNavigationResult>;
+  switchTab?: (tabId: string) => Promise<ApplyNavigationResult>;
+  closeTab?: (tabId: string) => Promise<ApplyNavigationResult>;
+  closeAuxiliaryTabs?: () => Promise<void>;
+  /** Non-secret identity read from the mailbox's own signed-in account UI. */
+  readMailboxAccounts?: () => Promise<{ email: string; url: string }[]>;
   /** Host-only exact-site autofill. It never returns credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;
   listSavedCredentials?: () => Promise<BrowserPasswordsList>;
@@ -443,8 +484,8 @@ export interface ApplyRawPageHands {
   readLinkedText?: () => Promise<string>;
   /**
    * Brings a tab the page opened into this one: the working tab goes to the
-   * tab's address and the extra tab is closed. A run works in one tab; a
-   * site that opens the form in a new one has moved the work, not blocked it.
+   * tab's address and the extra tab is closed. This compatibility navigation
+   * does not affect the separate auxiliary tabs opened with openTab.
    */
   adoptOpenedTab?: (index: number) => Promise<ApplyNavigationResult>;
   /** Private transient policy input; never include these URLs in observations or logs. */
