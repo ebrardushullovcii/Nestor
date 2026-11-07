@@ -1,8 +1,12 @@
 import { reportSelfLimitHit } from "@nestor/core";
 import type { ApplyWriteResult } from "@nestor/contracts";
+import { describeBrowserError } from "@nestor/contracts";
 import type { Frame, Locator, Page, Request } from "playwright";
 import { pressableLabel } from "./pressable-label";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
+
+import { presentControl, evaluatePresent } from "./present-control";
+import { controlResultState } from "./control-result-state";
 
 import { replaceFieldText } from "./replace-field-text";
 
@@ -72,13 +76,77 @@ export async function choosePageOption(
   page.on?.("response", response);
   page.on?.("requestfinished", networkProgress);
   page.on?.("requestfailed", networkProgress);
+  let latest: ListState = {
+    visible: false,
+    loading: false,
+    noResults: false,
+    options: [],
+  };
+  const seen = new Map<string, string>();
+  let complete = false;
+  const report: ListReport = (state, finished = false) => {
+    latest = state;
+    complete = finished;
+    for (const option of state.options)
+      seen.set(normalizeOptionLabel(option), option);
+  };
   try {
-    const native = await locator.evaluate(
+    const native = await evaluatePresent(
+      locator,
       (element) => element.tagName === "SELECT",
+      undefined,
     );
-    return await (native
-      ? chooseNativeOption(locator, label, progressAt)
-      : chooseCustomOption(page, locator, label, progressAt));
+    const result = await (native
+      ? chooseNativeOption(locator, label, progressAt, report)
+      : chooseCustomOption(page, locator, label, progressAt, report));
+    if (!native) {
+      const scope = (await controlFrame(locator)) ?? page;
+      const list = await boundList(scope, locator);
+      const state = list ? await readList(list) : null;
+      const expanded = await locator.getAttribute("aria-expanded");
+      if (state)
+        report(
+          {
+            ...state,
+            visible: expanded === "false" ? false : state.visible,
+            loading:
+              state.loading ||
+              (await locator.getAttribute("aria-busy")) === "true",
+          },
+          complete,
+        );
+      else
+        latest = {
+          ...latest,
+          visible: expanded === "true",
+          loading: (await locator.getAttribute("aria-busy")) === "true",
+        };
+    }
+    return {
+      ...result,
+      controlState: await controlResultState(locator),
+      optionList: {
+        open: latest.visible,
+        busy: latest.loading,
+        options: [...seen.values()],
+        complete,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: describeBrowserError(
+        error,
+        "The picker could not select that option.",
+      ),
+      controlState: await controlResultState(locator),
+      optionList: {
+        open: latest.visible,
+        busy: latest.loading,
+        options: [...seen.values()],
+        complete,
+      },
+    };
   } finally {
     page.off?.("request", requestStarted);
     page.off?.("response", response);
@@ -86,6 +154,8 @@ export async function choosePageOption(
     page.off?.("requestfailed", networkProgress);
   }
 }
+
+type ListReport = (state: ListState, complete?: boolean) => void;
 
 interface NativeState {
   disabled: boolean;
@@ -97,23 +167,44 @@ async function chooseNativeOption(
   locator: Locator,
   label: string,
   networkProgress: () => number,
+  report: ListReport,
 ): Promise<ApplyWriteResult> {
   const wanted = normalizeOptionLabel(label);
   let lastKey = "";
   let stableSince = Date.now();
   for (;;) {
-    const state = await locator.evaluate((element): NativeState => {
-      const select = element as HTMLSelectElement;
-      return {
-        disabled: select.disabled,
-        busy: select.getAttribute("aria-busy") === "true",
-        options: Array.from(select.options).map((option) => ({
-          text: option.text,
-          value: option.value,
-          disabled: option.disabled,
-        })),
-      };
-    });
+    const state = await evaluatePresent(
+      locator,
+      (element): NativeState => {
+        const select = element as HTMLSelectElement;
+        return {
+          disabled: select.disabled,
+          busy: select.getAttribute("aria-busy") === "true",
+          options: Array.from(select.options).map((option) => ({
+            text: option.text,
+            value: option.value,
+            disabled: option.disabled,
+          })),
+        };
+      },
+      undefined,
+    );
+    report(
+      {
+        visible: false,
+        loading: state.busy,
+        noResults: false,
+        options: state.options
+          .filter(
+            (option) =>
+              !option.disabled &&
+              option.value !== "" &&
+              !PLACEHOLDER.test(option.text),
+          )
+          .map((option) => option.text),
+      },
+      !state.busy && !state.disabled,
+    );
     const index = state.options.findIndex(
       (option) =>
         !option.disabled && normalizeOptionLabel(option.text) === wanted,
@@ -392,6 +483,10 @@ export async function readWholeList(
           let found = collect();
           if (found !== null || !scroller) return done(true, found);
           scroller.scrollTop = 0;
+          // Background Chromium coalesces native scroll events until a frame.
+          // Notify the virtual list at each position before advancing, so its
+          // render callback sees every window rather than only the last one.
+          scroller.dispatchEvent(new Event("scroll"));
           await wait(120);
           while (true) {
             found = collect();
@@ -418,6 +513,7 @@ export async function readWholeList(
             }
             const beforeScroll = scroller.scrollTop;
             scroller.scrollTop += Math.max(scroller.clientHeight * 0.8, 40);
+            scroller.dispatchEvent(new Event("scroll"));
             await wait(120);
             if (scroller.scrollTop === beforeScroll) {
               // The requested scroll did not move. Return the observed options
@@ -439,7 +535,7 @@ export async function readWholeList(
 }
 
 async function controlFrame(locator: Locator): Promise<Frame | null> {
-  const handle = await locator.elementHandle();
+  const handle = await presentControl(locator);
   const frame = (await handle?.ownerFrame()) ?? null;
   await handle?.dispose();
   return frame;
@@ -533,6 +629,7 @@ async function settle(
   searched: boolean,
   query = wanted,
   networkProgress: () => number = () => 0,
+  report: ListReport = () => undefined,
 ): Promise<
   | { kind: "found"; list: Locator; text: string }
   | { kind: "settled"; list: Locator; state: ListState }
@@ -548,6 +645,11 @@ async function settle(
     const state = list ? await readList(list) : null;
     if (list && state) {
       bound = true;
+      report({
+        ...state,
+        loading:
+          state.loading || (await locator.getAttribute("aria-busy")) === "true",
+      });
       const text = state.options.find(
         (option) => normalizeOptionLabel(option) === wanted,
       );
@@ -573,8 +675,10 @@ async function settle(
         Date.now() - stableSince >= STABLE_MS &&
         (answersSearch ||
           Date.now() - Math.max(stableSince, networkProgress()) >= idleMs)
-      )
+      ) {
+        report(state, true);
         return { kind: "settled", list, state };
+      }
       if (
         searched &&
         state.visible &&
@@ -607,6 +711,7 @@ async function chooseCustomOption(
   locator: Locator,
   label: string,
   networkProgress: () => number,
+  report: ListReport,
 ): Promise<ApplyWriteResult> {
   const selected = (
     await locator.evaluateAll(collectCustomComboboxStates, [0])
@@ -621,7 +726,14 @@ async function chooseCustomOption(
     (await locator.evaluate((element) =>
       element.matches("input, textarea, [contenteditable='true']"),
     ));
-  return chooseFromList(page, locator, label, searchable, networkProgress);
+  return chooseFromList(
+    page,
+    locator,
+    label,
+    searchable,
+    networkProgress,
+    report,
+  );
 }
 
 async function chooseFromList(
@@ -630,12 +742,19 @@ async function chooseFromList(
   label: string,
   searchable: boolean,
   networkProgress: () => number,
+  report: ListReport,
 ): Promise<ApplyWriteResult> {
   const wanted = normalizeOptionLabel(label);
   // Open it, type enough of the answer for the list to narrow to it, then
   // take the choice that says it. Typing first is what makes a list of two
   // hundred countries usable at all.
-  await locator.click({ timeout: 0 });
+  const scope = (await controlFrame(locator)) ?? page;
+  const expanded = await locator.getAttribute("aria-expanded");
+  const list = await boundList(scope, locator);
+  const open = list ? await readList(list) : null;
+  // Selecting an already-open picker must not toggle it closed.
+  if (expanded !== "true" && (expanded === "false" || !open?.visible))
+    await locator.click({ timeout: 0 });
   if (searchable) {
     // Replacing identical search text otherwise produces no React change.
     // Clear this element first, without dismissing its list or parent modal.
@@ -643,7 +762,6 @@ async function chooseFromList(
       await replaceFieldText(locator, "");
     await replaceFieldText(locator, label);
   }
-  const scope = (await controlFrame(locator)) ?? page;
   const first = await settle(
     scope,
     locator,
@@ -652,6 +770,7 @@ async function chooseFromList(
     searchable,
     wanted,
     networkProgress,
+    report,
   );
   if (first.kind === "found")
     return selectRow(first.list, locator, first.text, searchable);
@@ -679,6 +798,15 @@ async function chooseFromList(
   };
   if (first.kind === "settled") {
     const read = await readWholeList(first.list, wanted);
+    report(
+      {
+        visible: true,
+        loading: false,
+        noResults: false,
+        options: read.options,
+      },
+      read.complete && read.found === null,
+    );
     if (read.found)
       return selectRow(first.list, locator, read.found, searchable);
     collect(read.options);
@@ -708,6 +836,7 @@ async function chooseFromList(
     false,
     wanted,
     networkProgress,
+    report,
   );
   if (listed.kind === "found")
     return selectRow(listed.list, locator, listed.text, searchable);
@@ -732,6 +861,7 @@ async function chooseFromList(
         true,
         normalizeOptionLabel(query),
         networkProgress,
+        report,
       );
       if (searched.kind === "found")
         return selectRow(searched.list, locator, searched.text, searchable);

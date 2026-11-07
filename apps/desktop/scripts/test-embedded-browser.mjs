@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtemp, cp } from "node:fs/promises";
+import { mkdtemp, cp, readFile } from "node:fs/promises";
 import { createRequire, isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +13,7 @@ const discoveryCleanup = process.argv.includes("--discovery-cleanup");
 const pageApi = process.argv.includes("--page-api");
 const siteChecks = process.argv.includes("--site-checks");
 const verification = process.argv.includes("--verification");
+const fieldResults = process.argv.includes("--field-results");
 const buildOutput = verification ? join(output, "main") : output;
 if (verification)
   await cp(join(desktop, "out/preload"), join(output, "preload"), {
@@ -54,13 +55,15 @@ await build({
       desktop,
       verification
         ? "scripts/fixtures/embedded-browser-verification.ts"
-        : siteChecks
-          ? "scripts/fixtures/embedded-browser-site-checks.ts"
-          : discoveryCleanup
-            ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
-            : pageApi
-              ? "scripts/fixtures/embedded-browser-page-api.ts"
-              : "scripts/fixtures/embedded-browser.ts",
+        : fieldResults
+          ? "scripts/fixtures/embedded-browser-field-results.ts"
+          : siteChecks
+            ? "scripts/fixtures/embedded-browser-site-checks.ts"
+            : discoveryCleanup
+              ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
+              : pageApi
+                ? "scripts/fixtures/embedded-browser-page-api.ts"
+                : "scripts/fixtures/embedded-browser.ts",
     ),
     outDir: buildOutput,
     emptyOutDir: false,
@@ -104,7 +107,22 @@ child.once("error", (error) => {
   console.error(error);
   process.exitCode = 1;
 });
-child.once("exit", (code) => {
+child.once("exit", async (code) => {
   clearTimeout(timeout);
   process.exitCode = code ?? 1;
+  if (fieldResults) {
+    try {
+      const result = JSON.parse(
+        await readFile(join(output, "field-results.json"), "utf8"),
+      );
+      console.log(JSON.stringify(result, null, 2));
+      if (result.pass !== true) process.exitCode = 1;
+    } catch (error) {
+      console.error(
+        "The native field-results fixture did not produce a passing result.",
+        error,
+      );
+      process.exitCode = 1;
+    }
+  }
 });

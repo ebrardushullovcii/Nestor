@@ -588,7 +588,7 @@ test("remote-search replica returns city and degree rows, commits exact retries 
       0,
     );
     await registerPrepareOnlyPreparedValue(page, offered[0]);
-    expect(await session.chooseOption(ref, offered[0])).toEqual({
+    expect(await session.chooseOption(ref, offered[0])).toMatchObject({
       ok: true,
       observedValue: offered[0],
     });

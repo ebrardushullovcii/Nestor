@@ -50,7 +50,7 @@ test.each([
         page.getByRole("combobox"),
         label,
       );
-      expect(result).toEqual({ ok: true, observedValue: label });
+      expect(result).toMatchObject({ ok: true, observedValue: label });
       const observation = await createPlaywrightApplyPageSession({
         page,
       }).readPage();
@@ -94,7 +94,7 @@ test.each([
       const control = observation.controls.find(
         (entry) => entry.id === "answer",
       )!;
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         ok: true,
         observedValue: control.selectedOptionLabel || control.value,
       });

@@ -926,7 +926,7 @@ describe("reading the choices of lists the page draws itself", () => {
     `);
 
     const mechanics = createPlaywrightApplyPageMechanics(page);
-    await expect(mechanics.fillText("c0", "Pristina")).resolves.toEqual({
+    await expect(mechanics.fillText("c0", "Pristina")).resolves.toMatchObject({
       ok: true,
       observedValue: "",
     });
@@ -1094,7 +1094,7 @@ describe("reading the choices of lists the page draws itself", () => {
     `);
 
     const mechanics = createPlaywrightApplyPageMechanics(page);
-    await expect(mechanics.setToggle("c0", true)).resolves.toEqual({
+    await expect(mechanics.setToggle("c0", true)).resolves.toMatchObject({
       ok: true,
       observedValue: "checked",
     });
@@ -1196,17 +1196,17 @@ describe("reading the choices of lists the page draws itself", () => {
     );
     expect(observation.bodyText).toContain("Email in frame");
 
-    expect(await mechanics.fillText(shadowRef, "Ada Lovelace")).toEqual({
+    expect(await mechanics.fillText(shadowRef, "Ada Lovelace")).toMatchObject({
       ok: true,
       observedValue: "Ada Lovelace",
     });
     expect(
       await mechanics.fillText(frameControl!.ref!, "ada@example.test"),
-    ).toEqual({
+    ).toMatchObject({
       ok: true,
       observedValue: "ada@example.test",
     });
-    expect(await mechanics.clickAction(frameAction!.ref!)).toEqual({
+    expect(await mechanics.clickAction(frameAction!.ref!)).toMatchObject({
       ok: true,
       observedValue: "clicked",
     });

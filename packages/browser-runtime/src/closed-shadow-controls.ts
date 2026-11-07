@@ -288,7 +288,14 @@ export async function clickClosedShadowControl(
       button: "left",
       clickCount: 1,
     });
-    return { ok: true, observedValue: "clicked" };
+    const controlState = await inNode<
+      NonNullable<ApplyWriteResult["controlState"]>
+    >(
+      session,
+      target.node,
+      `function(){return {present:this.isConnected,...(this.matches('input[type="checkbox"],input[type="radio"]')?{checked:this.checked,value:this.value}:this.hasAttribute('aria-checked')?{checked:this.getAttribute('aria-checked')==='true'}:{}),...(this.hasAttribute('aria-selected')?{selected:this.getAttribute('aria-selected')==='true'}:{})}}`,
+    );
+    return { ok: true, observedValue: "clicked", controlState };
   } catch (error) {
     return {
       ok: false,
@@ -329,7 +336,11 @@ export async function setClosedShadowToggle(
     if (!state.toggle)
       return { ok: false, error: "That element is not a checkbox or radio." };
     if (state.checked === checked)
-      return { ok: true, observedValue: checked ? "checked" : "not checked" };
+      return {
+        ok: true,
+        observedValue: checked ? "checked" : "not checked",
+        controlState: { present: true, checked: state.checked },
+      };
     return await clickClosedShadowControl(page, ref);
   } catch (error) {
     return {

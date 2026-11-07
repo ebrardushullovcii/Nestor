@@ -399,6 +399,7 @@ async function runApplyAgentPrivate(
   const runProposal = async (
     proposal: ApplyProposal,
     callId: string = randomUUID(),
+    includePage = true,
   ): Promise<AgentLoopToolOutcome> => {
     signal.throwIfAborted();
     let before = page ?? (await readPage());
@@ -444,7 +445,7 @@ async function runApplyAgentPrivate(
         const entry = { ...outcome.filled, fieldKey };
         filled.push(entry);
         reviewFilled.set(fieldKey, entry);
-        content = `${entry.label} now holds ${JSON.stringify(entry.answer.value)}${proposal.tool === "type" ? ` (requested ${JSON.stringify(proposal.text)})` : ""}.`;
+        content = `${entry.label} now holds ${JSON.stringify(entry.answer.value)}${proposal.tool === "type" ? ` (requested ${JSON.stringify(proposal.text)})` : ""}.${outcome.stateNote ?? ""}`;
         break;
       }
       case "attached": {
@@ -541,7 +542,9 @@ async function runApplyAgentPrivate(
       kind: "ok",
       status: outcome.kind === "refused" ? "failed" : "done",
       progress: outcome.kind !== "refused",
-      content: `${content}\n\n${page ? describeObservation(page) : "Page unavailable."}`,
+      content: includePage
+        ? `${content}\n\n${page ? describeObservation(page) : "Page unavailable."}`
+        : content,
     };
   };
   let opening: string;
@@ -625,12 +628,16 @@ async function runApplyAgentPrivate(
             return {
               kind: "ok",
               status: "failed",
-              content: lines.join("\n"),
+              content: `${lines.join("\n")}\n\n${page ? describeObservation(page) : "Page unavailable."}`,
               progress: index > 0,
             };
           }
           try {
-            const result = await runProposal(step, `${batchCallId}:${index}`);
+            const result = await runProposal(
+              step,
+              `${batchCallId}:${index}`,
+              false,
+            );
             if (result.kind !== "ok") {
               const remaining = notAttempted(
                 index + 1,
@@ -668,9 +675,22 @@ async function runApplyAgentPrivate(
           }
         }
         if (parsed.finishWhenReady) {
-          return finish("The model finished filling this form.");
+          const result = finish("The model finished filling this form.");
+          return result.kind === "finish"
+            ? {
+                ...result,
+                finish: {
+                  ...result.finish,
+                  output: `${lines.join("\n")}\n\n${page ? describeObservation(page) : "Page unavailable."}`,
+                },
+              }
+            : result;
         }
-        return { kind: "ok", content: lines.join("\n"), progress: true };
+        return {
+          kind: "ok",
+          content: `${lines.join("\n")}\n\n${page ? describeObservation(page) : "Page unavailable."}`,
+          progress: true,
+        };
       }),
   });
   domainTools.push({

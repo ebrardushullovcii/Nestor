@@ -65,19 +65,21 @@ test("React modal: reads, exact replacements and asynchronous option clicks pres
     await page.locator("#salary").evaluate((element) => {
       (element as HTMLElement).focus = () => {};
     });
-    expect(await hands.fillText(salary, "EUR 4000")).toEqual({
+    expect(await hands.fillText(salary, "EUR 4000")).toMatchObject({
       ok: true,
       observedValue: "EUR 4000",
     });
     expect(await page.locator("#date").inputValue()).toBe("06.11.2026");
     expect(
       await hands.fillText(await ref("native-date"), "2026-11-06"),
-    ).toEqual({ ok: true, observedValue: "2026-11-06" });
-    expect(await hands.fillText(await ref("rich"), "Complete answer")).toEqual({
+    ).toMatchObject({ ok: true, observedValue: "2026-11-06" });
+    expect(
+      await hands.fillText(await ref("rich"), "Complete answer"),
+    ).toMatchObject({
       ok: true,
       observedValue: "Complete answer",
     });
-    expect(await hands.fillText(await ref("Location"), "Pris")).toEqual({
+    expect(await hands.fillText(await ref("Location"), "Pris")).toMatchObject({
       ok: true,
       observedValue: "Pris",
     });
@@ -85,10 +87,10 @@ test("React modal: reads, exact replacements and asynchronous option clicks pres
     expect(await page.getByRole("dialog").count()).toBe(1);
     expect(
       await hands.chooseOption(await ref("Location"), "Pristina, Kosovo"),
-    ).toEqual({ ok: true, observedValue: "Pristina, Kosovo" });
+    ).toMatchObject({ ok: true, observedValue: "Pristina, Kosovo" });
     expect(
       await hands.chooseOption(await ref("Experience"), "8 years"),
-    ).toEqual({ ok: true, observedValue: "8 years" });
+    ).toMatchObject({ ok: true, observedValue: "8 years" });
     const raw = await readRawApplyPage(page);
     expect(await page.getByRole("dialog").count()).toBe(1);
     expect(await page.locator("#salary").inputValue()).toBe("EUR 4000");

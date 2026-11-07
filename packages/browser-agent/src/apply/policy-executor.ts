@@ -50,6 +50,7 @@ export type ApplyExecutionOutcome =
   | {
       kind: "filled";
       filled: ApplyFilledControl;
+      stateNote?: string;
       observation: ApplyFormObservation;
     }
   | {
@@ -326,6 +327,37 @@ export function applicationLetterRequest(
   };
 }
 
+/** Browser facts describe the result; they do not approve or veto the action. */
+function writeFacts(
+  result: ApplyWriteResult,
+  after?: ApplyFormObservation,
+  ref?: string,
+): string {
+  const control = after?.controls.find((entry) => entry.ref === ref);
+  const state =
+    control &&
+    control.credentialRole !== "password" &&
+    control.credentialRole !== "one_time_code"
+      ? {
+          ...result.controlState,
+          present: true,
+          value: control.value,
+          ...(control.kind === "checkbox" || control.kind === "radio"
+            ? { checked: control.checked }
+            : {}),
+          ...(control.selectedOptionLabel
+            ? { selectedOptions: [control.selectedOptionLabel] }
+            : {}),
+        }
+      : result.controlState;
+  return (
+    (state ? ` Control state: ${JSON.stringify(state)}.` : "") +
+    (result.optionList
+      ? ` Option list: ${JSON.stringify(result.optionList)}.`
+      : "")
+  );
+}
+
 /** Execute the model's call and return the browser result, in every apply mode. */
 export async function executeApplyProposal(
   proposal: ApplyProposal,
@@ -419,6 +451,7 @@ export async function executeApplyProposal(
         return {
           ...failed(
             result.error +
+              writeFacts(result, after, proposal.ref) +
               (result.offeredOptions?.length
                 ? ` Offered options: ${JSON.stringify(result.offeredOptions)}.`
                 : ""),
@@ -429,7 +462,7 @@ export async function executeApplyProposal(
       deps.guardState.hasWritten = true;
       return {
         kind: "moved",
-        note: `Completed ${proposal.tool}: ${result.observedValue}.`,
+        note: `Completed ${proposal.tool}: ${result.observedValue}.${writeFacts(result, after, proposal.ref)}`,
         observation: after,
         progress: observation.signature !== after.signature,
       };
@@ -518,6 +551,7 @@ export async function executeApplyProposal(
       return {
         ...failed(
           result.error +
+            writeFacts(result, after, proposal.ref) +
             (result.offeredOptions?.length
               ? ` Offered options: ${JSON.stringify(result.offeredOptions)}.`
               : ""),
@@ -537,6 +571,19 @@ export async function executeApplyProposal(
     const saved = config.sources.reusableAnswers.find(
       (a) => `answerLibrary.${a.id}` === sourceId,
     );
+    const observedControl = after.controls.find(
+      (entry) => entry.ref === proposal.ref,
+    );
+    if (proposal.tool === "set_checkbox" && observedControl) {
+      value =
+        control.kind === "radio"
+          ? observedControl.checked
+            ? control.label || control.value
+            : ""
+          : observedControl.checked
+            ? "Yes"
+            : "No";
+    }
     const answer: ApplyAnswer = {
       value:
         proposal.tool === "type" || proposal.tool === "select"
@@ -556,6 +603,7 @@ export async function executeApplyProposal(
     };
     return {
       kind: "filled",
+      stateNote: writeFacts(result, after, proposal.ref),
       filled: {
         ref: control.ref,
         label: questionPrompt(control),
@@ -579,8 +627,12 @@ export async function executeApplyProposal(
           : proposal.tool === "navigate"
             ? await config.hands.navigate(proposal.url)
             : await config.hands.goBack();
+    if (proposal.tool === "click") {
+      const written = result as ApplyWriteResult;
+      pressNote += ` Result: ${written.ok ? written.observedValue : written.error}.${writeFacts(written)}`;
+    }
     if ("clickFacts" in result && result.clickFacts)
-      pressNote = ` Press facts (descriptive only): ${JSON.stringify(result.clickFacts)}.`;
+      pressNote += ` Press facts (descriptive only): ${JSON.stringify(result.clickFacts)}.`;
     if (!result.ok)
       return {
         ...failed(result.error + pressNote),

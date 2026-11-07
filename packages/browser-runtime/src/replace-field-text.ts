@@ -1,12 +1,15 @@
 import type { Locator } from "playwright";
 import type { ApplyWriteResult } from "@nestor/contracts";
+import { evaluatePresent } from "./present-control";
+import { controlResultState } from "./control-result-state";
 
 /** Bind replacement to the element, including when browser focus stays elsewhere. */
 export async function replaceFieldText(
   locator: Locator,
   value: string,
 ): Promise<ApplyWriteResult> {
-  await locator.evaluate(
+  await evaluatePresent(
+    locator,
     (element, text) => {
       const field = element as HTMLElement;
       field.focus({ preventScroll: true });
@@ -45,16 +48,19 @@ export async function replaceFieldText(
       field.dispatchEvent(new Event("change", { bubbles: true }));
     },
     value,
-    { timeout: 0 },
   );
-  const observedValue = await locator.evaluate(
+  const observedValue = await evaluatePresent(
+    locator,
     (element) =>
       element instanceof HTMLInputElement ||
       element instanceof HTMLTextAreaElement
         ? element.value
         : (element.textContent ?? ""),
     undefined,
-    { timeout: 0 },
   );
-  return { ok: true, observedValue };
+  return {
+    ok: true,
+    observedValue,
+    controlState: await controlResultState(locator),
+  };
 }

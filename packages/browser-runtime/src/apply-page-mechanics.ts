@@ -22,6 +22,8 @@ import { createHash } from "node:crypto";
 import { withAccountWindowSession } from "./account-window-session";
 import { choosePageOption } from "./choose-page-option";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
+import { evaluatePresent } from "./present-control";
+import { controlResultState } from "./control-result-state";
 import { replaceFieldText } from "./replace-field-text";
 import type {
   ApplyBlockedAttempt,
@@ -2515,7 +2517,11 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
         await openPrepareOnlyAuthorizedFormActionWindow(page, locator);
         await clickAndSettle(page, locator);
         await waitForPrepareOnlyAuthorizedFormAction(page);
-        return { ok: true, observedValue: "clicked" };
+        return {
+          ok: true,
+          observedValue: "clicked",
+          controlState: await controlResultState(locator),
+        };
       } catch {
         // A prefilled password must never escape through a locator call log.
         return {
@@ -2598,22 +2604,30 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
     fillText: async (ref, value): Promise<ApplyWriteResult> => {
       const locator = controlLocator(page, ref);
       if (!locator) {
-        return { ok: false, error: `No control named ${ref} on this page.` };
+        return {
+          ok: false,
+          error: `No control named ${ref} on this page.`,
+          controlState: { present: false },
+        };
       }
       try {
-        const metadata = await locator.evaluate((element) => {
-          const input = element instanceof HTMLInputElement ? element : null;
-          return {
-            autocomplete: input?.autocomplete ?? "",
-            name: input?.name ?? "",
-            id: element.id,
-            label:
-              input?.labels?.[0]?.textContent ??
-              element.getAttribute("aria-label") ??
-              "",
-            placeholder: input?.placeholder ?? "",
-          };
-        });
+        const metadata = await evaluatePresent(
+          locator,
+          (element) => {
+            const input = element instanceof HTMLInputElement ? element : null;
+            return {
+              autocomplete: input?.autocomplete ?? "",
+              name: input?.name ?? "",
+              id: element.id,
+              label:
+                input?.labels?.[0]?.textContent ??
+                element.getAttribute("aria-label") ??
+                "",
+              placeholder: input?.placeholder ?? "",
+            };
+          },
+          undefined,
+        );
         if (isVerificationCodeControl(metadata)) {
           rememberVerificationSecret(value);
           markPrivateTracePage(page);
@@ -2626,13 +2640,18 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
             error,
             "The field would not accept the answer.",
           ),
+          controlState: await controlResultState(locator),
         };
       }
     },
     chooseOption: async (ref, optionLabel): Promise<ApplyWriteResult> => {
       const locator = controlLocator(page, ref);
       if (!locator) {
-        return { ok: false, error: `No control named ${ref} on this page.` };
+        return {
+          ok: false,
+          error: `No control named ${ref} on this page.`,
+          controlState: { present: false },
+        };
       }
       try {
         return await choosePageOption(page, locator, optionLabel);
@@ -2643,16 +2662,25 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
             error,
             "The picker could not select that option.",
           ),
+          controlState: await controlResultState(locator),
         };
       }
     },
     setToggle: async (ref, checked): Promise<ApplyWriteResult> => {
       if (/^s\d+$/u.test(ref)) return setClosedShadowToggle(page, ref, checked);
       const toggle = actionLocator(page, ref);
-      if (toggle) return pressToggleButton(toggle, checked);
+      if (toggle)
+        return {
+          ...(await pressToggleButton(toggle, checked)),
+          controlState: await controlResultState(toggle),
+        };
       const locator = controlLocator(page, ref);
       if (!locator) {
-        return { ok: false, error: `No control named ${ref} on this page.` };
+        return {
+          ok: false,
+          error: `No control named ${ref} on this page.`,
+          controlState: { present: false },
+        };
       }
       try {
         // A covered native input used to spend five seconds failing the
@@ -2704,11 +2732,22 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
             if (!(await activateNative(false))) throw actionabilityError;
           }
         }
-        return { ok: true, observedValue: checked ? "checked" : "unchecked" };
+        const controlState = await controlResultState(locator);
+        return {
+          ok: true,
+          observedValue:
+            controlState.checked === undefined
+              ? "state unavailable"
+              : controlState.checked
+                ? "checked"
+                : "unchecked",
+          controlState,
+        };
       } catch (error) {
         return {
           ok: false,
           error: describeWriteFailure(error, "The box would not change."),
+          controlState: await controlResultState(locator),
         };
       }
     },
@@ -2718,7 +2757,11 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
     ): Promise<ApplyWriteResult> => {
       const locator = controlLocator(page, ref);
       if (!locator) {
-        return { ok: false, error: `No control named ${ref} on this page.` };
+        return {
+          ok: false,
+          error: `No control named ${ref} on this page.`,
+          controlState: { present: false },
+        };
       }
       try {
         // Read before the file goes in: some widgets (Greenhouse) remove
@@ -2762,7 +2805,11 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
       }
       try {
         await clickAndSettle(page, locator);
-        return { ok: true, observedValue: "clicked" };
+        return {
+          ok: true,
+          observedValue: "clicked",
+          controlState: await controlResultState(locator),
+        };
       } catch (error) {
         return {
           ok: false,
@@ -2807,13 +2854,13 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
       }
       let href = "";
       try {
-        href = await locator.evaluate(
+        href = await evaluatePresent(
+          locator,
           (element) =>
             (element as HTMLAnchorElement).href ||
             element.getAttribute("href") ||
             "",
           undefined,
-          { timeout: 0 },
         );
       } catch (error) {
         return {
@@ -2894,6 +2941,7 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
     clickElement: async (ref): Promise<ApplyWriteResult> => {
       const press = watchPagePress(page);
       let result: ApplyWriteResult;
+      let target: Locator | null = null;
       try {
         if (/^s\d+$/u.test(ref)) {
           result = await clickClosedShadowControl(page, ref);
@@ -2903,6 +2951,7 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
             linkLocator(page, ref) ??
             clickableLocator(page, ref) ??
             controlLocator(page, ref);
+          target = locator;
           if (!locator)
             result = {
               ok: false,
@@ -2919,7 +2968,13 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
           error: describeWriteFailure(error, "That would not respond."),
         };
       }
-      return { ...result, clickFacts: press.finish() };
+      return {
+        ...result,
+        controlState: target
+          ? await controlResultState(target)
+          : (result.controlState ?? { present: false }),
+        clickFacts: press.finish(),
+      };
     },
     scroll: async (direction): Promise<ApplyWriteResult> => {
       try {
