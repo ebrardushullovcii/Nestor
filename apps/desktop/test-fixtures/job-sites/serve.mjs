@@ -13,6 +13,7 @@ import { handleUploadRecovery } from "./upload-recovery.mjs";
 import { handleHandoverOptions } from "./handover-options.mjs";
 import { handleRememberedQuestions } from "./remembered-questions.mjs";
 import { handleRemoteSearch } from "./remote-search.mjs";
+import { handleImageChallenge } from "./image-challenge.mjs";
 
 // All data, accounts and endpoints are synthetic and local to this server.
 const confirmation = "Thank you! Your application has been received.";
@@ -490,6 +491,8 @@ const server = http.createServer(async (req, res) => {
       return;
     if (handlePersonalClaims(req, res, url, { send })) return;
     if (await handleUploadRepair(req, res, url, { send, readPost, logPost }))
+      return;
+    if (await handleImageChallenge(req, res, url, { send, readPost, logPost }))
       return;
     if (await handleUploadRecovery(req, res, url, { send, readPost, logPost }))
       return;

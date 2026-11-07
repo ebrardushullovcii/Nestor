@@ -19,6 +19,9 @@ import {
 } from "./tool-kit";
 
 const ResultSchema = z.object({
+  images: z
+    .array(z.object({ dataUrl: z.string(), label: z.string() }))
+    .optional(),
   summary: z.string(),
   data: z.unknown().optional(),
   status: z.enum(["done", "refused", "failed"]).optional(),
@@ -76,7 +79,14 @@ export async function connectAssistantMcp(
       context.session.assertCurrent();
       const result = await definition.execute(input, context);
       return {
-        content: [{ type: "text", text: result.summary }],
+        content: [
+          { type: "text", text: result.summary },
+          ...(result.images ?? []).map((image) => ({
+            type: "image",
+            mimeType: "image/png",
+            data: image.dataUrl.slice(image.dataUrl.indexOf(",") + 1),
+          })),
+        ],
         structuredContent: ResultSchema.parse(
           withoutLegacyApprovalSettings(result),
         ),
@@ -149,6 +159,7 @@ export async function connectAssistantMcp(
             if (parsed.success)
               return {
                 summary: parsed.data.summary,
+                ...(parsed.data.images ? { images: parsed.data.images } : {}),
                 ...(parsed.data.data !== undefined
                   ? { data: parsed.data.data }
                   : {}),

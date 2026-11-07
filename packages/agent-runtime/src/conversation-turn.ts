@@ -611,6 +611,7 @@ export async function runConversationTurn(
           role: "tool",
           toolCallId: toolCall.id,
           content,
+          ...(outcome.images ? { images: outcome.images } : {}),
         });
         await emit({
           type: "tool_finished",

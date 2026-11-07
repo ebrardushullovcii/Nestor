@@ -4,6 +4,7 @@ export * from "./desktop-browser";
 export * from "./site-icons";
 export * from "./browser-permissions";
 export * from "./apply-form-mechanics";
+export * from "./browser-page-image";
 export * from "./browser-errors";
 export * from "./application-authority";
 export * from "./application-authority-management";

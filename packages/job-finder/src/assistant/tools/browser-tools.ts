@@ -114,6 +114,8 @@ const TEMPLATE = createPageTools(createApplyPageHands(TEMPLATE_HANDS), {});
 
 const LABELS: Record<string, string> = {
   observe: "Looking at the page",
+  screenshot: "Looking at the page image",
+  pointer: "Using the browser pointer",
   read_text: "Reading the page",
   navigate: "Opening a page",
   follow_link: "Following a link",
@@ -166,7 +168,10 @@ function forwardedTool(name: string): AssistantToolDefinition | null {
     input: z.record(z.unknown()),
     label: () => LABELS[name] ?? "Working in the browser",
     effect:
-      name === "observe" || name === "read_text" || name === "wait"
+      name === "observe" ||
+      name === "read_text" ||
+      name === "screenshot" ||
+      name === "wait"
         ? "read"
         : "external",
     async execute(input, context) {
@@ -213,12 +218,18 @@ function forwardedTool(name: string): AssistantToolDefinition | null {
       if (outcome.kind !== "ok") {
         return { summary: outcome.kind === "stop" ? outcome.reason : "Done." };
       }
-      return { summary: outcome.content };
+      return {
+        summary: outcome.content,
+        status: outcome.status ?? "done",
+        ...(outcome.images ? { images: outcome.images } : {}),
+      };
     },
   });
 }
 
 const FORWARDED = [
+  "screenshot",
+  "pointer",
   "observe",
   "read_text",
   "navigate",

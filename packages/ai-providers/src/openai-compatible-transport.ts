@@ -1,5 +1,5 @@
 import { modelOutputLimit } from "./model-output-limit";
-import type { ModelTokenUsage } from "@nestor/contracts";
+import type { ModelTokenUsage, ModelImageInput } from "@nestor/contracts";
 
 export const modelApiModes = ["responses", "chat_completions"] as const;
 export type ModelApiMode = (typeof modelApiModes)[number];
@@ -33,6 +33,7 @@ export const DEFAULT_VISION_MODEL_REASONING_EFFORT: ModelReasoningEffort =
 export type CompatibleMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: unknown;
+  images?: ModelImageInput[];
   /** DeepSeek thinking-mode continuation, sent back on later tool turns. */
   reasoning_content?: string;
   tool_call_id?: string;
@@ -416,6 +417,28 @@ export function buildModelRequestBody(input: {
   /** Chat Completions only: ask for a usage chunk at the end of a stream. */
   includeStreamUsage?: boolean | undefined;
 }): Record<string, unknown> {
+  // Complete every tool reply before attaching its images in a user message.
+  // Chat Completions tool content is text; both APIs accept user image parts.
+  const messages: CompatibleMessage[] = [];
+  let images: ModelImageInput[] = [];
+  for (const [index, message] of input.messages.entries()) {
+    const { images: attached, ...textMessage } = message;
+    messages.push(textMessage);
+    images.push(...(attached ?? []));
+    if (images.length && input.messages[index + 1]?.role !== "tool") {
+      messages.push({
+        role: "user",
+        content: images.flatMap((image) => [
+          { type: "text", text: image.label },
+          {
+            type: "image_url",
+            image_url: { url: image.dataUrl, detail: "high" },
+          },
+        ]),
+      });
+      images = [];
+    }
+  }
   const maxOutputTokens = modelOutputLimit(input.model);
   if (input.apiMode === "chat_completions") {
     return {
@@ -434,7 +457,7 @@ export function buildModelRequestBody(input: {
           }
         : {}),
       ...(input.jsonOutput ? { response_format: { type: "json_object" } } : {}),
-      messages: input.messages,
+      messages,
       ...(input.tools && input.tools.length > 0
         ? {
             tools: input.tools,
@@ -460,7 +483,7 @@ export function buildModelRequestBody(input: {
       effort: input.reasoningEffort ?? DEFAULT_VISION_MODEL_REASONING_EFFORT,
       ...(input.reasoningSummary ? { summary: "auto" } : {}),
     },
-    input: toResponsesInput(input.messages),
+    input: toResponsesInput(messages),
     ...(input.jsonSchema
       ? {
           text: {

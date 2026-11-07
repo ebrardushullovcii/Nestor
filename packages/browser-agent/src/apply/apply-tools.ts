@@ -3,6 +3,7 @@ import {
   ApplyFinishSendOutcomeSchema,
 } from "@nestor/contracts";
 import type { ApplyProposal } from "./types";
+import { VISUAL_PAGE_TOOL_DEFINITIONS } from "../visual-page-tools";
 
 const STORED_FACT_PARAMETER = {
   type: "string",
@@ -25,6 +26,8 @@ const STORED_FACT_PARAMETER = {
  */
 
 export const APPLY_TOOL_NAMES = [
+  "screenshot",
+  "pointer",
   "observe",
   "read_text",
   "navigate",
@@ -59,6 +62,7 @@ export interface ApplyToolDefinition {
 
 export function getApplyToolDefinitions(): ApplyToolDefinition[] {
   return [
+    ...VISUAL_PAGE_TOOL_DEFINITIONS,
     {
       type: "function",
       function: {

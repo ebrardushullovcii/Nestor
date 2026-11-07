@@ -2275,6 +2275,7 @@ export class EmbeddedBrowser {
     input: {
       masks: { x: number; y: number; width: number; height: number }[];
       viewport: { width: number; height: number };
+      clip?: { x: number; y: number; width: number; height: number };
     },
   ): Promise<Uint8Array> {
     let identity = this.automationPageTabIds.get(automationPage);
@@ -2319,6 +2320,9 @@ export class EmbeddedBrowser {
       }
       image = nativeImage.createFromBitmap(bitmap, size);
     }
+    // Return one image pixel per viewport CSS pixel, independent of display DPI.
+    image = image.resize(input.viewport);
+    if (input.clip) image = image.crop(input.clip);
     return image.toPNG();
   }
 

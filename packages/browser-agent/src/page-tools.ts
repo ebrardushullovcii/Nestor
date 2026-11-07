@@ -4,6 +4,7 @@ import {
   type AgentLoopToolOutcome,
 } from "@nestor/agent-runtime";
 import { describeBrowserError } from "@nestor/contracts";
+import { createVisualPageTools } from "./visual-page-tools";
 
 import { describeObservation } from "./apply/apply-prompts";
 import { TEXT_RETENTION_MS, textRetentionError } from "./apply/text-retention";
@@ -104,6 +105,7 @@ export function createPageTools(
   };
 
   const tools: AgentLoopTool[] = [
+    ...createVisualPageTools(hands, observe),
     {
       definition: {
         type: "function",

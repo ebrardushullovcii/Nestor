@@ -1,4 +1,8 @@
 import type { BrowserPasswordsList } from "./browser-passwords";
+import type {
+  BrowserPageImage,
+  BrowserPointerInput,
+} from "./browser-page-image";
 import type { SubmissionActionRequest } from "./application-authority";
 /**
  * The raw shape of an application form, before any product meaning.
@@ -368,6 +372,8 @@ export interface ApplyUploadFile {
  * control, an answer, or whether a write is allowed.
  */
 export interface ApplyRawPageHands {
+  screenshot?: (frame?: string) => Promise<BrowserPageImage>;
+  pointer?: (input: BrowserPointerInput) => Promise<ApplyWriteResult>;
   /** Host-only exact-site autofill. It never returns credentials. */
   prepareBrowserCredentials?: (url: string) => Promise<boolean>;
   listSavedCredentials?: () => Promise<BrowserPasswordsList>;

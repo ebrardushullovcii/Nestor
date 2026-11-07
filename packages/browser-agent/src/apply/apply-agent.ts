@@ -15,6 +15,7 @@ import {
   type ApplyFinishSendOutcome,
 } from "@nestor/contracts";
 import { withReasoningTask, type LLMClient } from "../agent/contracts";
+import { createVisualPageTools } from "../visual-page-tools";
 import { createApplyTiming } from "./apply-timing";
 import { createApplyModelActivity } from "./model-activity";
 import {
@@ -511,6 +512,7 @@ export async function runApplyAgent(
   } catch (error) {
     opening = `The initial read failed: ${describeBrowserError(error, "The browser failed.")}. Recover with observe, wait or navigate.`;
   }
+  const visualTools = createVisualPageTools(config.hands, readPage);
   const domainTools: AgentLoopTool[] = getApplyToolDefinitions().map(
     (definition) => ({
       definition,
@@ -519,6 +521,11 @@ export async function runApplyAgent(
         describeBrowserError(error, "The browser action failed."),
       execute: async (raw, context) =>
         modelActivity.run(context, async () => {
+          const visual = visualTools.find(
+            (tool) =>
+              tool.definition.function.name === definition.function.name,
+          );
+          if (visual) return visual.execute(raw, context);
           const parsed = parseApplyProposal(definition.function.name, raw);
           if (!parsed.ok)
             return { kind: "ok", status: "failed", content: parsed.error };

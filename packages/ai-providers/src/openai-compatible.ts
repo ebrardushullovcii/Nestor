@@ -835,7 +835,11 @@ export function createOpenAiCompatibleJobFinderAiClient(
                 };
               }
               if (msg.role === "tool") {
-                return { ...base, tool_call_id: msg.toolCallId };
+                return {
+                  ...base,
+                  tool_call_id: msg.toolCallId,
+                  ...(msg.images ? { images: msg.images } : {}),
+                };
               }
               return base;
             }),

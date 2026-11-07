@@ -1,3 +1,4 @@
+import type { ModelImageInput } from "@nestor/contracts";
 import {
   type ModelTokenUsage,
   type ModelRequestAttempt,
@@ -727,7 +728,12 @@ export type AgentMessage =
       toolCalls?: ToolCall[];
       continuation?: ModelContinuation;
     }
-  | { role: "tool"; toolCallId: string; content: string };
+  | {
+      role: "tool";
+      toolCallId: string;
+      content: string;
+      images?: ModelImageInput[];
+    };
 
 export interface JobFinderAiClient {
   getStatus(): AgentProviderStatus;

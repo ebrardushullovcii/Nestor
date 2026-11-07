@@ -319,6 +319,8 @@ export interface ApplyDocument {
  * whether writing is allowed; that is the executor's job.
  */
 export interface ApplyPageHands {
+  screenshot?: ApplyRawPageHands["screenshot"];
+  pointer?: ApplyRawPageHands["pointer"];
   prepareBrowserCredentials?: ApplyRawPageHands["prepareBrowserCredentials"];
   listSavedCredentials?: ApplyRawPageHands["listSavedCredentials"];
   fillSavedCredential?: ApplyRawPageHands["fillSavedCredential"];

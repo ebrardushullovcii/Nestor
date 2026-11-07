@@ -1,4 +1,5 @@
 import { traceOurs, traceEvent, withTraceScope } from "@nestor/core/run-trace";
+import type { ModelImageInput } from "@nestor/contracts";
 import { isAgentRunAborted } from "./cancellation";
 import { observeModel, observeTool, type RuntimeObservers } from "./observers";
 import { createContextHistory } from "./context-history";
@@ -49,7 +50,12 @@ export type AgentLoopMessage =
       toolCalls?: AgentLoopToolCall[];
       continuation?: AgentLoopContinuation;
     }
-  | { role: "tool"; toolCallId: string; content: string };
+  | {
+      role: "tool";
+      toolCallId: string;
+      content: string;
+      images?: ModelImageInput[];
+    };
 
 export interface AgentLoopToolCall {
   id: string;
@@ -67,6 +73,8 @@ export interface AgentLoopToolDefinition {
       type: "object";
       properties: Record<string, unknown>;
       required?: string[];
+      additionalProperties?: boolean;
+      allOf?: Record<string, unknown>[];
     };
   };
 }
@@ -102,6 +110,7 @@ export type AgentLoopToolOutcome =
   | {
       kind: "ok";
       content: string;
+      images?: ModelImageInput[];
       progress?: boolean;
       /**
        * How the step went, for hosts that show activity: a refusal or a
@@ -763,6 +772,7 @@ export async function runAgentLoop(
               role: "tool",
               toolCallId: toolCall.id,
               content: outcome.content,
+              ...(outcome.images ? { images: outcome.images } : {}),
             });
             await note(
               `${toolCall.function.name} → ${outcome.content.split("\n")[0]?.slice(0, 160) ?? "ok"}`,

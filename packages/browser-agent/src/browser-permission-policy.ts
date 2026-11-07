@@ -50,7 +50,7 @@ export function describeBrowserPermissions(
   const permissions = BrowserAgentPermissionsSchema.parse(
     policy.browserPermissions ?? {},
   );
-  return `Browser settings (instructions from the person): CAPTCHA ${permissions.solveCaptchas ? "ON" : "OFF"}; website sign-in ${permissions.signIn ? "ON" : "OFF"}; Google sign-in/sign-up ${permissions.googleSignIn ? "ON" : "OFF"}; account creation ${permissions.createAccounts ? "ON" : "OFF"}. All tools remain available. Choose a route from the page facts; a failed Google route does not prevent using saved website credentials. Use the available vault tools for saved logins. Passwords, tokens and MFA codes never belong in model context.`;
+  return `Browser settings (instructions from the person): CAPTCHA ${permissions.solveCaptchas ? "ON" : "OFF"}; website sign-in ${permissions.signIn ? "ON" : "OFF"}; Google sign-in/sign-up ${permissions.googleSignIn ? "ON" : "OFF"}; account creation ${permissions.createAccounts ? "ON" : "OFF"}. All tools remain available. Use screenshot to see the page or a named frame and pointer to click, drag or hold at its viewport coordinates. With CAPTCHA ON, solve a challenge yourself as a person would: look at the puzzle image, choose, press, look again, and retry a new puzzle if needed. Hand off on the open page only after real attempts fail. A browser checking itself (Just a moment) can need 20 to 30 seconds of waiting at a time while it progresses. Choose a route from the page facts; a failed Google route does not prevent using saved website credentials. Use the available vault tools for saved logins. Passwords, tokens and MFA codes never belong in model context.`;
 }
 
 /** The wrapper preserves secret isolation. Settings and navigation are model instructions. */
