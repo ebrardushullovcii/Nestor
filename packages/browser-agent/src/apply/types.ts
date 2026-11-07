@@ -534,6 +534,7 @@ export type ApplyAgentOutcome =
   | "failed"
   | "uncertain"
   | "prepared"
+  | "closed"
   /** Complete, with the send button identified. Nobody has pressed it. */
   | "ready_to_send"
   | "awaiting_your_review"

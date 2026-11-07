@@ -654,8 +654,8 @@ it("a Send for me form that could not be confirmed ready says why, keeps Send, a
     error: "The model finished without sending: Filled form",
   });
   // Its page is still open: Open shows it, with no refill and no new mode.
-  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
-  expect(await f.service.open(row.id)).toBe(true);
+  f.browser.focusRetainedApplicationPage.mockResolvedValue(true);
+  expect((await f.service.open(row.id)).opened).toBe(true);
   expect(f.execute).toHaveBeenCalledOnce();
   expect(f.applications.getApplication(row.id)).toMatchObject({
     state: "ready",
@@ -667,49 +667,6 @@ it("a Send for me form that could not be confirmed ready says why, keeps Send, a
   expect(action).toHaveBeenCalledOnce();
   expect(f.applications.getApplication(row.id)?.state).toBe("submitted");
   expect(f.onError).not.toHaveBeenCalled();
-});
-
-it("a Send for me form waiting on a question keeps Send through Open's refill and says why the refill waits", async () => {
-  const f = await setup(1);
-  f.seed.settings.applicationAutomationMode = "autonomous_submit";
-  const waitingOnQuestion = () =>
-    ApplyExecutionResultSchema.parse({
-      ...ready(),
-      state: "paused",
-      questions: [
-        {
-          id: "office",
-          prompt: "Which office would you work from?",
-          kind: "other",
-          answerControlType: "text",
-          detectedAt: new Date().toISOString(),
-        },
-      ],
-    });
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
-  f.releases.shift()!(waitingOnQuestion());
-  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
-  const row = f.applications.listApplications().rows[0]!;
-  // The page is gone: Open refills it, and the refill never sends.
-  expect(await f.service.open(row.id)).toBe(true);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-  expect(f.execute.mock.calls[1]![1]).toMatchObject({
-    submitAuthorized: false,
-    applyAutomationMode: "confirm_before_submit",
-  });
-  // On the refilled page the person typed the answer in: it comes back Ready.
-  f.releases.shift()!();
-  await vi.waitFor(() =>
-    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
-  );
-  expect(f.applications.getApplication(row.id)).toMatchObject({
-    mode: "autonomous_submit",
-    error:
-      "You opened this form to review it, so Job Finder leaves the send to you. Review it and press Send.",
-  });
-  expect(f.authorizeSending).toHaveBeenCalledOnce();
 });
 
 async function setup(
@@ -815,6 +772,7 @@ async function setup(
   };
   const browser = {
     executeApplicationFlow: execute,
+    openSession: vi.fn(() => Promise.resolve({})),
     focusApplicationPageBinding: vi.fn(() => Promise.resolve(false)),
     focusRetainedApplicationPage: vi.fn(() => Promise.resolve(false)),
     readApplicationPageBinding: vi.fn<
@@ -908,6 +866,57 @@ async function setup(
     deps,
   };
 }
+
+it.each(["confirm_before_submit", "autonomous_submit"] as const)(
+  "Open only shows a retained page or opens its URL, preserving %s state and attempts",
+  async (mode) => {
+    const f = await setup(1);
+    preparation.notReadyToSend = true;
+    await f.service.start();
+    f.applications.applyJobs({ selection: { ids: f.ids } }, mode);
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    f.releases.shift()!();
+    await vi.waitFor(() =>
+      expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+    );
+    f.service.stop();
+    const row = f.applications.listApplications().rows[0]!;
+    const authorized = f.authorizeSending.mock.calls.length;
+    for (const state of [
+      "ready",
+      "needs_you",
+      "stopped",
+      "failed",
+      "uncertain",
+      "submitted",
+      "queued",
+      "running",
+    ] as const) {
+      f.jobs
+        .sql("UPDATE applications SET state=? WHERE id=?")
+        .run(state, row.id);
+      const before = f.applications.getApplication(row.id);
+      f.browser.focusRetainedApplicationPage.mockResolvedValueOnce(true);
+      expect(await f.service.open(row.id)).toEqual({
+        opened: true,
+        retained: true,
+      });
+      expect(await f.service.open(row.id)).toEqual({
+        opened: true,
+        retained: false,
+      });
+      expect(f.applications.getApplication(row.id)).toEqual(before);
+    }
+    expect(f.execute).toHaveBeenCalledOnce();
+    expect(f.authorizeSending).toHaveBeenCalledTimes(authorized);
+    expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalled();
+    expect(f.browser.focusApplicationPageBinding).not.toHaveBeenCalled();
+    expect(f.browser.openSession).toHaveBeenCalledTimes(8);
+    expect(f.browser.openSession).toHaveBeenLastCalledWith("target_site", {
+      targetUrl: f.jobs.getJob(row.jobId)!.url,
+    });
+  },
+);
 
 it("tells a continue on the same page which files the attempt before it attached", async () => {
   const f = await setup(1);
@@ -1200,11 +1209,11 @@ it("keeps one upload item per refused form, reopening or refilling it without se
   const row = f.applications.forJobs([f.ids[0]!])[0]!;
   expect(row.state).toBe("needs_you");
   expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
-  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
-  expect(await f.service.open(row.id)).toBe(true);
+  f.browser.focusRetainedApplicationPage.mockResolvedValue(true);
+  expect((await f.service.open(row.id)).opened).toBe(true);
   expect(f.browser.handApplicationPageToPerson).toHaveBeenCalled();
-  f.browser.focusApplicationPageBinding.mockResolvedValue(false);
-  expect(await f.service.open(row.id)).toBe(true);
+  f.browser.focusRetainedApplicationPage.mockResolvedValue(false);
+  expect(f.service.retryPreparation(row.id)).toBe(true);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
   f.releases.shift()!();
   await vi.waitFor(() =>
@@ -1217,6 +1226,7 @@ it("keeps one upload item per refused form, reopening or refilling it without se
 
 it("keeps Send for me through an upload repair and drops the upload item when the form stops on another question", async () => {
   const f = await setup(1);
+  preparation.notReadyToSend = true;
   f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
   f.seed.settings.applicationAutomationMode = "autonomous_submit";
   await f.service.start();
@@ -1228,11 +1238,11 @@ it("keeps Send for me through an upload repair and drops the upload item when th
   f.releases.shift()!(rejectedUpload());
   await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
   const row = f.applications.listApplications().rows[0]!;
-  expect(await f.service.open(row.id)).toBe(true);
+  expect(f.service.retryPreparation(row.id)).toBe(true);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   expect(f.applications.getApplication(row.id)?.mode).toBe("autonomous_submit");
   // The refill Open asked for never sends, so it asks for no send.
-  expect(f.authorizeSending).toHaveBeenCalledTimes(1);
+  expect(f.authorizeSending).toHaveBeenCalledTimes(2);
   f.releases.shift()!(
     ApplyExecutionResultSchema.parse({
       ...ready(),
@@ -1408,13 +1418,14 @@ it("refills with the person's word when they say the file is attached on the sit
   await vi.waitFor(() =>
     expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
   );
-  expect(await f.service.open(row.id)).toBe(true);
+  expect(f.service.retryPreparation(row.id)).toBe(true);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
   expect(preparation.uploadsConfirmed).toEqual([false, true, false]);
 });
 
 it("never makes Ready or sends a form whose refused upload is still open, whatever a later run saw", async () => {
   const f = await setup(1);
+  preparation.notReadyToSend = true;
   f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
   f.seed.settings.applicationAutomationMode = "autonomous_submit";
   await f.service.start();
@@ -1428,7 +1439,7 @@ it("never makes Ready or sends a form whose refused upload is still open, whatev
   const row = f.applications.listApplications().rows[0]!;
   // The rerun resumes past the file's step and reports the form ready.
   preparation.attachedField = null;
-  expect(await f.service.open(row.id)).toBe(true);
+  expect(f.service.retryPreparation(row.id)).toBe(true);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   f.releases.shift()!();
   await vi.waitFor(() =>
@@ -1449,7 +1460,7 @@ it("keeps the upload item when a later run attaches a different field's file", a
   const row = f.applications.listApplications().rows[0]!;
   // The rerun settles the cover letter, not the refused resume.
   preparation.attachedField = "Cover letter";
-  expect(await f.service.open(row.id)).toBe(true);
+  expect(f.service.retryPreparation(row.id)).toBe(true);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   f.releases.shift()!();
   await vi.waitFor(() =>
@@ -1528,32 +1539,34 @@ it("opens a restored Ready form without preparing or authorizing a send again", 
   const restarted = createApplicationService(f.deps);
   cleanups.unshift(() => restarted.stop());
   await restarted.start();
-  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+  f.browser.focusRetainedApplicationPage.mockResolvedValue(true);
   const row = f.applications.listApplications().rows[0]!;
-  expect(await restarted.open(row.id)).toBe(true);
+  expect((await restarted.open(row.id)).opened).toBe(true);
   expect(f.applications.getApplication(row.id)?.state).toBe("ready");
   expect(f.execute).toHaveBeenCalledTimes(1);
   expect(f.authorizeSending).not.toHaveBeenCalled();
 });
 
-it("a failed snapshot reopen queues a linked Fill-only restoration instead of leaving a dead Ready row", async () => {
+it("a failed retained-page focus opens the URL without restoring a snapshot or starting work", async () => {
   const f = await setup(1);
   await f.service.start();
   f.applications.applyJobs({ selection: { ids: f.ids } });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
   f.releases.shift()!();
   await vi.waitFor(() =>
     expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
   );
   const row = f.applications.listApplications().rows[0]!;
-  f.browser.focusApplicationPageBinding.mockRejectedValueOnce(
-    new Error("Saved multistep form could not reopen"),
+  f.browser.focusRetainedApplicationPage.mockRejectedValueOnce(
+    new Error("Page gone"),
   );
-  expect(await f.service.open(row.id)).toBe(true);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-  expect(f.applications.getApplication(row.id)?.attempt).toBe(row.attempt + 1);
+  expect(await f.service.open(row.id)).toEqual({
+    opened: true,
+    retained: false,
+  });
+  expect(f.applications.getApplication(row.id)).toEqual(row);
+  expect(f.execute).toHaveBeenCalledOnce();
   expect(f.authorizeSending).not.toHaveBeenCalled();
-  f.releases.shift()!();
 });
 
 it("a database-backed refill carries the actual Google selection checkpoint into the next caller", async () => {
@@ -1580,7 +1593,7 @@ it("a database-backed refill carries the actual Google selection checkpoint into
   cleanups.unshift(() => restarted.stop());
   await restarted.start();
   const row = f.applications.listApplications().rows[0]!;
-  expect(await restarted.open(row.id)).toBe(true);
+  expect(restarted.retryPreparation(row.id)).toBe(true);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   expect(preparation.activities.at(-1)).toEqual([checkpoint]);
   f.releases.shift()!();
@@ -1748,8 +1761,11 @@ it("brings back a form waiting on a question after a restart, still waiting with
     task.id,
   ]);
   // The restart closed the page: Open refills the form.
-  f.browser.focusApplicationPageBinding.mockResolvedValue(false);
-  expect(await restarted.open(row.id)).toBe(true);
+  f.browser.focusRetainedApplicationPage.mockResolvedValue(false);
+  expect((await restarted.open(row.id)).opened).toBe(true);
+  expect(f.execute).toHaveBeenCalledOnce();
+  expect(f.applications.getApplication(row.id)).toEqual(row);
+  expect(restarted.retryPreparation(row.id)).toBe(true);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   f.releases.shift()!(waitingOnQuestion());
   await vi.waitFor(() =>
@@ -1783,10 +1799,10 @@ it("a refill of a closed form gets what the attempt before left, to bring it bac
     expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
   );
   // The page was closed to free memory: nothing to keep, so Open refills.
-  f.browser.focusApplicationPageBinding.mockResolvedValue(false);
+  f.browser.focusRetainedApplicationPage.mockResolvedValue(false);
   f.browser.transferApplicationPageBinding.mockResolvedValue(false);
   const row = f.applications.listApplications().rows[0]!;
-  expect(await f.service.open(row.id)).toBe(true);
+  expect(f.service.retryPreparation(row.id)).toBe(true);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   expect(preparation.replays).toEqual([
     null,
@@ -1816,107 +1832,48 @@ it("a refill of a closed form gets what the attempt before left, to bring it bac
   preparation.answers = [];
 });
 
-it("in Send for me, Open's refill never sends, and the answer that clears the item still sends", async () => {
-  const f = await setup(1);
-  f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
-  f.seed.settings.applicationAutomationMode = "autonomous_submit";
-  await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit", {
-    conversationId: "send-waiting-on-question",
-    mode: "autonomous_submit",
-  });
-  const waitingOnQuestion = () =>
-    ApplyExecutionResultSchema.parse({
-      ...ready(),
-      state: "paused",
-      questions: [
-        {
-          id: "office",
-          prompt: "Which office would you work from?",
-          kind: "other",
-          answerControlType: "text",
-          detectedAt: new Date().toISOString(),
-        },
-      ],
-    });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
-  f.releases.shift()!(waitingOnQuestion());
-  await vi.waitFor(() => expect(f.applications.needsYou.list().total).toBe(1));
-  const row = f.applications.listApplications().rows[0]!;
-  expect(f.authorizeSending).toHaveBeenCalledTimes(1);
-  // A restart in the middle of the refill keeps it a refill.
-  expect(await f.service.open(row.id)).toBe(true);
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
-  f.service.stop();
-  const restarted = createApplicationService(f.deps);
-  cleanups.unshift(() => restarted.stop());
-  await restarted.start();
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(3));
-  expect(f.execute.mock.calls[2]![1]).toMatchObject({
-    submitAuthorized: false,
-    applyAutomationMode: "confirm_before_submit",
-  });
-  f.releases.splice(0, 2).forEach((release) => release(waitingOnQuestion()));
-  await vi.waitFor(() =>
-    expect(f.applications.getApplication(row.id)?.state).toBe("needs_you"),
-  );
-  expect(f.authorizeSending).toHaveBeenCalledTimes(1);
-  expect(f.applications.getApplication(row.id)?.mode).toBe("autonomous_submit");
-  // The person's answer starts a run in the mode they chose.
-  const task = f.applications.needsYou.list().rows[0]!;
-  f.applications.needsYou.answer({
-    id: task.id,
-    answer: "Berlin",
-    remember: false,
-  });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(4));
-  // It asks for permission to send again, as Send for me does.
-  expect(f.authorizeSending).toHaveBeenCalledTimes(2);
-});
-
-it("refills a lost Ready form through the bounded queue and never revives its send instruction", async () => {
+it("an explicit Apply again keeps the selected mode and queues one new preparation", async () => {
   const f = await setup(1);
   preparation.notReadyToSend = true;
-  f.deps.instructionMode = () => Promise.resolve("autonomous_submit");
-  f.seed.settings.applicationAutomationMode = "autonomous_submit";
   await f.service.start();
-  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit", {
-    conversationId: "send-before-restart",
-    mode: "autonomous_submit",
-  });
-  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(1));
+  f.applications.applyJobs({ selection: { ids: f.ids } }, "autonomous_submit");
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
   f.releases.shift()!();
   await vi.waitFor(() =>
     expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
   );
-  f.service.stop();
-  f.authorizeSending.mockClear();
-  const restarted = createApplicationService(f.deps);
-  cleanups.unshift(() => restarted.stop());
-  await restarted.start();
   const row = f.applications.listApplications().rows[0]!;
-  expect(
-    await Promise.all([restarted.open(row.id), restarted.open(row.id)]),
-  ).toEqual([true, true]);
+  expect(f.service.retryPreparation(row.id)).toBe(true);
   await vi.waitFor(() => expect(f.execute).toHaveBeenCalledTimes(2));
   expect(f.applications.getApplication(row.id)).toMatchObject({
-    state: "running",
-    mode: "confirm_before_submit",
     attempt: 2,
+    mode: "autonomous_submit",
   });
-  expect(f.execute.mock.calls[1]![1]).toMatchObject({
-    submitAuthorized: false,
-    applyAutomationMode: "confirm_before_submit",
-  });
+  expect(f.execute.mock.calls[1]![1].applyAutomationMode).toBe(
+    "autonomous_submit",
+  );
+  f.releases.shift()!();
+});
+
+it("concurrent Open calls share one URL open and never queue preparation", async () => {
+  const f = await setup(1);
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
   f.releases.shift()!();
   await vi.waitFor(() =>
-    expect(f.applications.getApplication(row.id)?.state).toBe("ready"),
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
   );
-  expect(f.authorizeSending).not.toHaveBeenCalled();
-  // The person opened it to look: the row says the send is theirs now.
-  expect(f.applications.getApplication(row.id)?.error).toBe(
-    "You opened this form to review it, so Job Finder leaves the send to you. Review it and press Send.",
-  );
+  const row = f.applications.listApplications().rows[0]!;
+  expect(
+    await Promise.all([f.service.open(row.id), f.service.open(row.id)]),
+  ).toEqual([
+    { opened: true, retained: false },
+    { opened: true, retained: false },
+  ]);
+  expect(f.browser.openSession).toHaveBeenCalledOnce();
+  expect(f.execute).toHaveBeenCalledOnce();
+  expect(f.applications.getApplication(row.id)).toEqual(row);
 });
 
 it("reopens the original account entry after restart and keeps one shared task until both forms continue", async () => {
@@ -1944,17 +1901,14 @@ it("reopens the original account entry after restart and keeps one shared task u
   const task = f.applications.needsYou.list().rows[0]!;
   const row = f.applications.needsYou.details(task.id)!.applications[0]!;
   f.browser.reloadApplicationPageBinding.mockImplementation(() => {
-    f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+    f.browser.focusRetainedApplicationPage.mockResolvedValue(true);
     return Promise.resolve();
   });
-  expect(await restarted.open(row.id)).toBe(true);
-  expect(
-    f.browser.reloadApplicationPageBinding,
-  ).toHaveBeenCalledExactlyOnceWith(
-    "target_site",
-    `application_${row.id}_attempt_1`,
-    f.jobs.getJob(row.jobId)!.url,
-  );
+  expect((await restarted.open(row.id)).opened).toBe(true);
+  expect(f.browser.openSession).toHaveBeenCalledWith("target_site", {
+    targetUrl: f.jobs.getJob(row.jobId)!.url,
+  });
+  expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalled();
   expect(f.execute).toHaveBeenCalledTimes(2);
   expect(f.applications.needsYou.list().total).toBe(1);
   expect(f.applications.needsYou.details(task.id)!.applications).toHaveLength(
@@ -2039,6 +1993,126 @@ it("starts approved jobs immediately, caps preparation, and leaves Original form
     `application_${row.id}_attempt_1`,
   );
 });
+
+it("a native send event is recorded immediately even when the page cannot be read afterwards", async () => {
+  const f = await setup(1);
+  let pressed:
+    | Parameters<
+        NonNullable<BrowserSessionRuntime["onApplicationSendPressed"]>
+      >[0]
+    | undefined;
+  const unsubscribe = vi.fn();
+  f.deps.browser.onApplicationSendPressed = (listener) => {
+    pressed = listener;
+    return unsubscribe;
+  };
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  const event = {
+    resultId: `application_${row.id}_attempt_${row.attempt}`,
+    pressedAt: new Date().toISOString(),
+    pageUrl: "https://replica.test/apply",
+  };
+  pressed!({ ...event, resultId: `application_${row.id}_attempt_0` });
+  expect(f.applications.getApplication(row.id)?.state).toBe("ready");
+  pressed!(event);
+  const receipt = f.applications.getSubmissionReceipt(row.id);
+  expect(receipt?.outcome).toBe("outcome_uncertain");
+  pressed!(event);
+  expect(f.applications.getSubmissionReceipt(row.id)).toEqual(receipt);
+  expect(f.browser.readApplicationPageWithPerson).not.toHaveBeenCalled();
+  f.service.stop();
+  expect(unsubscribe).toHaveBeenCalledOnce();
+});
+
+it("the person's own press is recorded once as uncertain and can be confirmed without another send", async () => {
+  const f = await setup(1);
+  vi.useFakeTimers();
+  await f.service.start();
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+  f.releases.shift()!();
+  await vi.waitFor(() =>
+    expect(f.applications.listApplications().rows[0]?.state).toBe("ready"),
+  );
+  const row = f.applications.listApplications().rows[0]!;
+  f.browser.readApplicationPageWithPerson.mockResolvedValue({
+    ...f.personPage,
+    sendPressedAt: new Date().toISOString(),
+  });
+  await vi.advanceTimersByTimeAsync(2_000);
+  const receipt = f.applications.getSubmissionReceipt(row.id)!;
+  expect(f.applications.getApplication(row.id)?.state).toBe("uncertain");
+  expect(receipt.outcome).toBe("outcome_uncertain");
+  await vi.advanceTimersByTimeAsync(4_000);
+  expect(f.applications.getSubmissionReceipt(row.id)).toEqual(receipt);
+  expect(await f.service.reportSendByPerson(row.id, true)).toBe(true);
+  expect(f.applications.getSubmissionReceipt(row.id)).toMatchObject({
+    outcome: "submitted",
+    attemptedAt: receipt.attemptedAt,
+  });
+  expect(f.execute).toHaveBeenCalledOnce();
+  expect(f.authorizeSending).not.toHaveBeenCalled();
+});
+
+it.each([
+  "ready",
+  "stopped",
+  "failed",
+  "needs_you",
+  "queued",
+  "running",
+  "uncertain",
+  "closed",
+  "skipped",
+  "blocked",
+] as const)(
+  "the person's report settles %s as sent or not sent without browser actions",
+  async (state) => {
+    const f = await setup(2);
+    f.applications.applyJobs(
+      { selection: { ids: f.ids } },
+      "autonomous_submit",
+    );
+    const rows = f.applications.forJobs(f.ids);
+    for (const [index, row] of rows.entries()) {
+      f.jobs
+        .sql(
+          "UPDATE applications SET state=?, disposition=?, posting_closed=? WHERE id=?",
+        )
+        .run(
+          ["closed", "skipped", "blocked"].includes(state) ? "stopped" : state,
+          state === "skipped" || state === "blocked" ? state : null,
+          state === "closed" ? 1 : 0,
+          row.id,
+        );
+      expect(await f.service.reportSendByPerson(row.id, index === 0)).toBe(
+        true,
+      );
+      expect(f.applications.getApplication(row.id)).toMatchObject({
+        state: index === 0 ? "submitted" : "stopped",
+        mode: "autonomous_submit",
+        attempt: row.attempt,
+      });
+      expect(
+        f.applications.getSubmissionReceipt(row.id)?.evidence[0],
+      ).toMatchObject({ kind: "operator_confirmation" });
+      expect(
+        f.applications.getSubmissionReceipt(row.id)?.attemptedAt,
+      ).toBeTruthy();
+    }
+    expect(await f.service.reportSendByPerson(rows[0]!.id, false)).toBe(false);
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.browser.openSession).not.toHaveBeenCalled();
+    expect(f.authorizeSending).not.toHaveBeenCalled();
+  },
+);
 
 it("a press older than the application's own state is not the person's send", async () => {
   const f = await setup(1);
@@ -2234,9 +2308,9 @@ it.each(["missing", "failed"] as const)(
     ]);
     expect(f.browser.handApplicationPageToPerson).not.toHaveBeenCalled();
     expect(f.browser.reloadApplicationPageBinding).not.toHaveBeenCalled();
-    f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+    f.browser.focusRetainedApplicationPage.mockResolvedValue(true);
     const row = f.applications.listApplications().rows[0]!;
-    expect(await f.service.open(row.id)).toBe(true);
+    expect((await f.service.open(row.id)).opened).toBe(true);
     expect(f.browser.handApplicationPageToPerson).toHaveBeenCalledWith(
       "target_site",
       `application_${row.id}_attempt_${row.attempt}`,
@@ -2578,7 +2652,7 @@ it("Send for me resumes after two Needs-you answers and forwards only the final 
   expect(f.onError).not.toHaveBeenCalled();
 });
 
-it("opening an account child keeps the form ready with finish-or-close guidance", async () => {
+it("opening an account child leaves the application record unchanged", async () => {
   const f = await setup(1);
   await f.service.start();
   f.applications.applyJobs({ selection: { ids: f.ids } });
@@ -2590,13 +2664,10 @@ it("opening an account child keeps the form ready with finish-or-close guidance"
   const row = f.applications.listApplications().rows[0]!;
   const error =
     "An account window is open for this application; finish or close it first.";
-  f.browser.focusApplicationPageBinding.mockResolvedValue(true);
+  f.browser.focusRetainedApplicationPage.mockResolvedValue(true);
   f.browser.handApplicationPageToPerson.mockResolvedValue({ ok: false, error });
-  expect(await f.service.open(row.id)).toBe(true);
-  expect(f.applications.getApplication(row.id)).toMatchObject({
-    state: "ready",
-    error,
-  });
+  expect((await f.service.open(row.id)).opened).toBe(true);
+  expect(f.applications.getApplication(row.id)).toEqual(row);
   expect(f.authorizeSending).not.toHaveBeenCalled();
   expect(f.execute).toHaveBeenCalledTimes(1);
   expect(f.onError).not.toHaveBeenCalled();

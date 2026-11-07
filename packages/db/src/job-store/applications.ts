@@ -555,6 +555,23 @@ export function createApplicationStore(store: JobStore) {
       ).get(id);
     },
 
+    /** Only an explicit Try again / Apply again queues another preparation. */
+    retryPreparation(id: number, attempt: number): boolean {
+      return store.transaction(() => {
+        const row =
+          sql(`UPDATE applications SET state='queued', review_refill=0,
+          queued_at=?, updated_at=?, error=NULL, disposition=NULL, posting_closed=0
+          WHERE id=? AND attempt=? AND state IN ('ready','needs_you','stopped','failed')
+          AND submitted_at IS NULL
+          AND COALESCE(json_extract(submission_outcome_json,'$.outcome'),'not_submitted')='not_submitted'
+          RETURNING job_id`).get(Date.now(), Date.now(), id, attempt) as
+            | { job_id: number }
+            | undefined;
+        if (row) changed([row.job_id]);
+        return !!row;
+      });
+    },
+
     /** The state is written before the existing guarded send can be armed. */
     beginSubmission(
       id: number,
@@ -701,22 +718,34 @@ export function createApplicationStore(store: JobStore) {
       outcome: SubmissionOutcomeRecord,
     ): boolean {
       outcome = SubmissionOutcomeRecordSchema.parse(outcome);
+      if (getApplication(id)?.state !== "uncertain") return false;
+      return this.reportSendByPerson(id, outcome);
+    },
+
+    /** Record the person's report in any unsent state, without executing a send. */
+    reportSendByPerson(id: number, outcome: SubmissionOutcomeRecord): boolean {
+      outcome = SubmissionOutcomeRecordSchema.parse(outcome);
       return store.transaction(() => {
         const current = getApplication(id);
-        if (!current || current.state !== "uncertain") return false;
+        if (
+          !current ||
+          current.state === "submitted" ||
+          current.submittedAt !== null
+        )
+          return false;
         if (!isOwnSendLineage(current, outcome))
           throw new Error(
             "The outcome belongs to another application attempt.",
           );
         const sent = outcome.outcome === "submitted";
-        sql(`UPDATE applications SET state = ?, submitted_at = ?, updated_at = ?,
+        sql(`UPDATE applications SET state = ?, disposition = NULL, posting_closed = 0, submitted_at = ?, updated_at = ?,
           submission_outcome_id = ?, submission_outcome_json = ?, error = ? WHERE id = ?`).run(
           sent ? "submitted" : "stopped",
           sent && outcome.verifiedAt ? Date.parse(outcome.verifiedAt) : null,
           Date.now(),
           outcome.id,
           JSON.stringify(outcome),
-          sent ? null : "You checked the site: this application was not sent.",
+          sent ? null : "You reported that this application was not sent.",
           id,
         );
         if (sent) store.setStage([current.jobId], "applied");

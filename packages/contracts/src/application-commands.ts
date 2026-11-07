@@ -9,6 +9,7 @@ import {
   type ApplicationListPage,
   type ApplicationRow,
   type ApplicationDetails,
+  type OpenApplicationResult,
 } from "./applications";
 
 /** Apply's work records are separate from the Applications tracker. */
@@ -40,7 +41,7 @@ export const APPLICATION_COMMANDS = {
   open_application: {
     effect: "local_write",
     description:
-      "Opens the exact retained form for a ready or needs_you application work id in the app browser. Does not send. Returns false if the form is unavailable.",
+      "Shows the retained application page, or opens its URL when the earlier page is gone. Never prepares, sends or changes its saved mode. Returns {opened, retained}; a fresh URL is not the prepared form.",
     input: ApplicationTargetSchema,
   },
   stop_application: {
@@ -66,7 +67,7 @@ export interface ApplicationCommandOutputs {
   list_application_work: ApplicationListPage;
   applications_for_jobs: ApplicationRow[];
   get_application_details: ApplicationDetails | null;
-  open_application: boolean;
+  open_application: OpenApplicationResult;
   stop_application: boolean;
   send_application: boolean;
 }

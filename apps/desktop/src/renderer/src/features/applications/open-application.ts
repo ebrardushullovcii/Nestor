@@ -1,7 +1,6 @@
 /**
- * Opens the form Apply prepared. A page that was closed to save memory, or
- * by a restart, comes back from what Apply filled; while it does, the
- * person reads that it is on its way and will not be sent.
+ * Shows the retained form or its URL, without starting preparation or
+ * changing the application's state or mode.
  */
 export async function openPreparedApplication(
   id: number,
@@ -9,15 +8,11 @@ export async function openPreparedApplication(
 ): Promise<boolean> {
   const target = { id };
   const done = await window.nestor.jobFinder.openApplication(target);
-  if (!done) return false;
-  const restoring = ["queued", "running"].includes(
-    (await window.nestor.jobFinder.getApplicationDetails(target))?.application
-      .state ?? "",
-  );
+  if (!done.opened) return false;
   showToast({
-    title: restoring
-      ? "Restoring the form for your review. Restoring it won't send it."
-      : "Opened the application page",
+    title: done.retained
+      ? "Opened the application page"
+      : "The earlier page is gone. Opened the application URL.",
   });
   return true;
 }

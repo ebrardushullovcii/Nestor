@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   listApplications: vi.fn(),
   stopApplication: vi.fn(),
   openApplication: vi.fn(),
+  sendPrepared: vi.fn(),
+  reportSendByPerson: vi.fn(),
   browserCommand: vi.fn(),
   getApplication: vi.fn(),
   getWork: vi.fn(),
@@ -28,6 +30,8 @@ vi.mock("../services/applications", () => ({
     Promise.resolve({
       stopApplication: mocks.stopApplication,
       open: mocks.openApplication,
+      sendPrepared: mocks.sendPrepared,
+      reportSendByPerson: mocks.reportSendByPerson,
     }),
 }));
 vi.mock("../services/browser/load-embedded-browser", () => ({
@@ -48,6 +52,33 @@ beforeEach(() => vi.clearAllMocks());
 
 // The preload passes these calls through, so main is where they are checked.
 describe("application commands in main", () => {
+  it("the Ready Send command calls only the existing ledgered send path", async () => {
+    mocks.sendPrepared.mockResolvedValue(true);
+    await expect(
+      executeApplicationStoreCommand("send-application", { id: 3 }),
+    ).resolves.toBe(true);
+    expect(mocks.sendPrepared).toHaveBeenCalledExactlyOnceWith(3, undefined);
+    expect(mocks.openApplication).not.toHaveBeenCalled();
+    expect(mocks.browserCommand).not.toHaveBeenCalled();
+  });
+
+  it.each(["ready", "stopped", "failed"])(
+    "the record-only route settles %s without sending or opening it",
+    async (state) => {
+      mocks.getApplication.mockReturnValue({ state });
+      mocks.getSubmissionReceipt.mockReturnValue(null);
+      mocks.reportSendByPerson.mockResolvedValue(true);
+      await expect(
+        executeApplicationStoreCommand("report-application-send", {
+          id: 3,
+          sent: true,
+        }),
+      ).resolves.toBe(true);
+      expect(mocks.reportSendByPerson).toHaveBeenCalledExactlyOnceWith(3, true);
+      expect(mocks.sendPrepared).not.toHaveBeenCalled();
+      expect(mocks.openApplication).not.toHaveBeenCalled();
+    },
+  );
   it.each(["site_login_required", "security_challenge"])(
     "exposes the recorded access reason only for a sign-in handoff: %s",
     async (code) => {
@@ -89,12 +120,12 @@ describe("application commands in main", () => {
   );
 
   it.each([true, false])(
-    "Open delegates the exact page or refill to the service and never opens an unrelated active tab: %s",
+    "Open delegates the retained page or URL to the service and never opens an unrelated active tab: %s",
     async (opened) => {
-      mocks.openApplication.mockResolvedValue(opened);
+      mocks.openApplication.mockResolvedValue({ opened, retained: opened });
       expect(
         await executeApplicationStoreCommand("open-application", { id: 3 }),
-      ).toBe(opened);
+      ).toEqual({ opened, retained: opened });
       expect(mocks.openApplication).toHaveBeenCalledWith(3);
       expect(mocks.browserCommand).not.toHaveBeenCalled();
       // Opening is the person's own start: a browser they closed may reopen.

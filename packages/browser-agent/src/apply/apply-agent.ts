@@ -939,15 +939,17 @@ export async function runApplyAgent(
     });
     const outcome: ApplyAgentResult["outcome"] =
       sendOutcome ??
-      (readyToSend
-        ? "ready_to_send"
-        : pauses.length
-          ? "paused"
-          : loop.finish?.stuck || loop.ending !== "finished"
-            ? "stuck"
-            : input.authority.mode === "confirm_before_submit"
-              ? "awaiting_your_review"
-              : "prepared");
+      (applicationClosed
+        ? "closed"
+        : readyToSend
+          ? "ready_to_send"
+          : pauses.length
+            ? "paused"
+            : loop.finish?.stuck || loop.ending !== "finished"
+              ? "stuck"
+              : input.authority.mode === "confirm_before_submit"
+                ? "awaiting_your_review"
+                : "prepared");
     traceEvent("apply_outcome", { outcome, pauses, notes });
     return {
       outcome,

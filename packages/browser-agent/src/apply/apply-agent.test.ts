@@ -251,6 +251,7 @@ test("the model can report a closed posting without a failure classifier", async
     ]),
   );
   expect(result.applicationClosed).toBe(true);
+  expect(result.outcome).toBe("closed");
   expect(result.reason).toContain("posting is closed");
 });
 test.each(["prepare_only", "autonomous_submit"] as const)(

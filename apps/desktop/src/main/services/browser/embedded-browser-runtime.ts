@@ -293,6 +293,8 @@ export function withEmbeddedBrowserActivity(
       };
     },
     closeSession: (source) => runtime.closeSession(source),
+    onApplicationSendPressed: (listener) =>
+      browser.onApplicationSendPressed(listener),
     async readApplicationPageWithPerson(source, key) {
       const page = await browser.readApplicationPageWithPerson(key);
       if (!page)

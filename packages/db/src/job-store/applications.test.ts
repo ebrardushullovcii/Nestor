@@ -1379,7 +1379,7 @@ describe("applications on the job store", () => {
     ).toBe(true);
     expect(applications.getApplication(second.id)).toMatchObject({
       state: "stopped",
-      error: "You checked the site: this application was not sent.",
+      error: "You reported that this application was not sent.",
     });
     expect(jobs.getJob(second.jobId)?.stage).toBe("resume");
   });

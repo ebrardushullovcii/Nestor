@@ -8,6 +8,8 @@ import type {
   ApplicationListQuery,
   ApplicationRow,
   ApplicationTarget,
+  OpenApplicationResult,
+  ReportApplicationSendInput,
   ResolveUncertainSendInput,
   ApplicationsForJobsInput,
   ApplicationDetails,
@@ -186,7 +188,14 @@ declare global {
         getApplicationDetails: (
           input: ApplicationTarget,
         ) => Promise<ApplicationDetails | null>;
-        openApplication: (input: ApplicationTarget) => Promise<boolean>;
+        openApplication: (
+          input: ApplicationTarget,
+        ) => Promise<OpenApplicationResult>;
+        sendApplication: (input: ApplicationTarget) => Promise<boolean>;
+        retryApplication: (input: ApplicationTarget) => Promise<boolean>;
+        reportApplicationSend: (
+          input: ReportApplicationSendInput,
+        ) => Promise<boolean>;
         stopApplication: (input: ApplicationTarget) => Promise<boolean>;
         resolveUncertainSend: (
           input: ResolveUncertainSendInput,

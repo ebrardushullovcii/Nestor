@@ -13,6 +13,8 @@ import type {
   ApplicationRow,
   ApplicationStoreDemoResult,
   ApplicationTarget,
+  OpenApplicationResult,
+  ReportApplicationSendInput,
   ResolveUncertainSendInput,
   ApplicationsForJobsInput,
   ApplyJobsInput,
@@ -434,6 +436,21 @@ const desktopApi = {
     openApplication: (input: ApplicationTarget) =>
       ipcRenderer.invoke(
         "job-finder:open-application",
+        input,
+      ) as Promise<OpenApplicationResult>,
+    sendApplication: (input: ApplicationTarget) =>
+      ipcRenderer.invoke(
+        "job-finder:send-application",
+        input,
+      ) as Promise<boolean>,
+    retryApplication: (input: ApplicationTarget) =>
+      ipcRenderer.invoke(
+        "job-finder:retry-application",
+        input,
+      ) as Promise<boolean>,
+    reportApplicationSend: (input: ReportApplicationSendInput) =>
+      ipcRenderer.invoke(
+        "job-finder:report-application-send",
         input,
       ) as Promise<boolean>,
     stopApplication: (input: ApplicationTarget) =>

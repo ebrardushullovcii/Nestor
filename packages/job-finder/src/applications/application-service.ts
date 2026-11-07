@@ -35,6 +35,7 @@ import {
   type JobFinderSettings,
   type JobSearchPreferences,
   type NeedsYouKind,
+  type OpenApplicationResult,
   type SourceInstructionArtifact,
   type SubmissionOutcomeRecord,
 } from "@nestor/contracts";
@@ -98,14 +99,6 @@ import {
   toKnownFormAnswer,
   type FormQuestion,
 } from "./questions";
-
-/**
- * Why a Send for me application waits for the person's Send. A Ready row
- * looks the same in either mode, so each one says why it did not send.
- */
-const OPENED_SEND_FORM =
-  "You opened this form to review it, so Job Finder leaves the send to you. Review it and press Send.";
-const RESTORING_FORM = "Restoring the form for your review.";
 
 /** The file fields an upload item names, from its words. */
 function uploadRepairFields(prompt: string): string[] {
@@ -196,12 +189,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   };
   const resumes = createResumeStore(jobs);
   const active = new Map<number, AbortController>();
+  const personSends = new Map<number, Set<AbortController>>();
   const waiting = new Map<number, number>();
   /** When each waiting page is read next, and until when it is read closely. */
   const watchPlan = new Map<number, { next: number; closeUntil: number }>();
   const watchClosely = (id: number) =>
     watchPlan.set(id, { next: 0, closeUntil: Date.now() + WATCH_CLOSE_FOR_MS });
-  const opening = new Map<number, Promise<boolean>>();
+  const opening = new Map<number, Promise<OpenApplicationResult>>();
   // Read at each pump, so a Speed change applies to the next application.
   const capacity = () =>
     applicationPreparationConcurrency(
@@ -215,6 +209,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     deps.onError ?? ((error: unknown) => console.error("[Apply]", error));
   let stopped = true;
   let unsubscribe: (() => void) | null = null;
+  let unsubscribePersonSend: (() => void) | null = null;
   let pumping: Promise<void> | null = null;
   let pumpAgain = false;
   let watching = false;
@@ -369,8 +364,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   async function modeFor(
     row: ApplicationRow,
   ): Promise<ApplicationAutomationMode | null> {
-    // The person pressed Open to look: that refill never sends.
-    if (applications.isReviewRefill(row.id)) return "confirm_before_submit";
     const instruction = applications.instructionFor(row.id);
     if (instruction) {
       const requested = await deps.instructionMode?.({
@@ -504,15 +497,6 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     applications.recordOrigin(row.id, new URL(job.url).origin);
     // Apply captures the default. Only task-local authority can narrow it later.
     const mode = await modeFor(row);
-    // A refill Open asked for keeps saying why it waits for the person: the
-    // reason it was refilled, or that a Send for me form was opened to look.
-    const refillReason = applications.isReviewRefill(row.id)
-      ? row.mode === "autonomous_submit"
-        ? OPENED_SEND_FORM
-        : row.error !== RESTORING_FORM
-          ? row.error
-          : null
-      : null;
     if (!mode)
       throw new Error("The instruction for this application was withdrawn.");
     const sends = mode === "autonomous_submit";
@@ -1383,10 +1367,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     } else {
       await leaveForPerson(
         row,
-        sends
-          ? `The model finished without sending: ${result.detail}`
-          : (refillReason ??
-              `The model finished without sending: ${result.detail}`),
+        `The model finished without sending: ${result.detail}`,
       );
     }
   }
@@ -1494,12 +1475,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
    * says what it shows. Their word settles the row: sent moves it to
    * Applied; not sent stops it, so nothing sends it again by itself.
    */
-  async function resolveUncertainByPerson(
+  async function reportSendByPerson(
     id: number,
     sent: boolean,
   ): Promise<boolean> {
     const row = applications.getApplication(id);
-    if (!row || row.state !== "uncertain") return false;
+    if (!row || row.state === "submitted" || row.submittedAt !== null)
+      return false;
     const job = jobs.getJob(row.jobId);
     const page =
       applications.getWork(id)?.reviewCard?.pageUrl ??
@@ -1520,7 +1502,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       ...identity,
       jobId: String(row.jobId),
       outcome: sent ? "submitted" : "not_submitted",
-      attemptedAt: previous?.attemptedAt ?? row.updatedAt,
+      attemptedAt: previous?.attemptedAt ?? at,
       verifiedAt: sent ? at : null,
       evidence: [
         {
@@ -1533,8 +1515,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
           },
           artifactRefId: null,
           summary: sent
-            ? "You checked the employer's site: this application was sent."
-            : "You checked the employer's site: this application was not sent.",
+            ? "You reported that this application was sent."
+            : "You reported that this application was not sent.",
         },
       ],
       retry: {
@@ -1542,7 +1524,9 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         blockReason: sent ? "submission_confirmed" : "policy_decision",
       },
     });
-    if (!applications.resolveUncertainSend(id, receipt)) return false;
+    if (!applications.reportSendByPerson(id, receipt)) return false;
+    active.get(id)?.abort();
+    for (const controller of personSends.get(id) ?? []) controller.abort();
     await closePage(id, row.attempt);
     return true;
   }
@@ -1595,8 +1579,8 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   /**
    * The person pressed the form's send on the site in their own window, and
    * the site has not confirmed it. From that press the application is
-   * Uncertain, so nothing sends it again; their page stays watched, and a
-   * confirmation moves it to Applied.
+   * Uncertain. Their page stays available for checking and an explicit
+   * outcome can settle the recorded press without another send.
    */
   async function recordPersonPress(
     row: ApplicationRow,
@@ -1607,17 +1591,25 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       .readApplicationPageWithPerson?.("target_site", identity.resultId)
       .catch(() => null);
     const pressedAt = page?.sendPressedAt;
-    if (
-      !page?.url ||
-      !pressedAt ||
-      Date.parse(pressedAt) < Date.parse(row.updatedAt) ||
-      !current(row)
-    )
+    return (
+      !!page?.url &&
+      !!pressedAt &&
+      recordPersonSend(row, attempt, pressedAt, page.url)
+    );
+  }
+
+  function recordPersonSend(
+    row: ApplicationRow,
+    attempt: number,
+    pressedAt: string,
+    pageUrl: string,
+  ): boolean {
+    if (Date.parse(pressedAt) < Date.parse(row.updatedAt) || !current(row))
       return false;
     const receipt = personReceipt(row, attempt, {
       kind: "pressed",
       at: pressedAt,
-      url: new URL(page.url),
+      url: new URL(pageUrl),
     });
     if (!applications.recordSubmission(row.id, attempt, receipt)) return false;
     waiting.delete(row.id);
@@ -1814,6 +1806,16 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         else applications.submissionUnknown(row.id, row.attempt);
       }
       stopped = false;
+      unsubscribePersonSend =
+        browser.onApplicationSendPressed?.((press) => {
+          const match = /^application_(\d+)_attempt_(\d+)$/u.exec(
+            press.resultId,
+          );
+          if (!match) return;
+          const row = applications.getApplication(Number(match[1]));
+          if (row?.attempt === Number(match[2]))
+            recordPersonSend(row, row.attempt, press.pressedAt, press.pageUrl);
+        }) ?? null;
       applications.recoverPreparation();
       applications.needsYou.reconcileSavedQuestions();
       for (const state of ["ready", "needs_you"] as const)
@@ -1843,9 +1845,13 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       stopped = true;
       unsubscribe?.();
       unsubscribe = null;
+      unsubscribePersonSend?.();
+      unsubscribePersonSend = null;
       if (timer) clearInterval(timer);
       timer = null;
       for (const controller of active.values()) controller.abort();
+      for (const controllers of personSends.values())
+        for (const controller of controllers) controller.abort();
     },
     wake,
     async sendPrepared(id: number, callId?: string): Promise<boolean> {
@@ -1860,25 +1866,33 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       )
         return false;
       const controller = new AbortController();
-      // Called only by a person's send action or a checked sidebar send instruction.
-      const envelope = await deps.authorizeSending({
-        application: row,
-        artifact: work.resumeArtifact,
-        job,
-        signal: controller.signal,
-        personClicked: true,
-      });
-      await send(
-        row,
-        work.resumeArtifact,
-        envelope,
-        work.profileDigest,
-        controller.signal,
-        true,
-        undefined,
-        callId,
-      );
-      return applications.getApplication(id)?.state === "submitted";
+      const controllers = personSends.get(id) ?? new Set<AbortController>();
+      controllers.add(controller);
+      personSends.set(id, controllers);
+      try {
+        // Called only by a person's send action or a checked sidebar send instruction.
+        const envelope = await deps.authorizeSending({
+          application: row,
+          artifact: work.resumeArtifact,
+          job,
+          signal: controller.signal,
+          personClicked: true,
+        });
+        await send(
+          row,
+          work.resumeArtifact,
+          envelope,
+          work.profileDigest,
+          controller.signal,
+          true,
+          undefined,
+          callId,
+        );
+        return applications.getApplication(id)?.state === "submitted";
+      } finally {
+        controllers.delete(controller);
+        if (!controllers.size) personSends.delete(id);
+      }
     },
     checkAccess(taskId: number): Promise<boolean> {
       return Promise.resolve().then(() => {
@@ -1906,7 +1920,19 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         return applications.needsYou.details(taskId) === null;
       });
     },
-    resolveUncertainByPerson,
+    reportSendByPerson,
+    retryPreparation(id: number): boolean {
+      const row = applications.getApplication(id);
+      if (!row || resumes.get(row.jobId)?.state !== "ready") return false;
+      const queued = applications.retryPreparation(id, row.attempt);
+      if (queued) wake();
+      return queued;
+    },
+    resolveUncertainByPerson(id: number, sent: boolean): Promise<boolean> {
+      return applications.getApplication(id)?.state === "uncertain"
+        ? reportSendByPerson(id, sent)
+        : Promise.resolve(false);
+    },
     async stopApplication(id: number): Promise<boolean> {
       const row = applications.getApplication(id);
       if (!row || !applications.stop(id)) return false;
@@ -1924,7 +1950,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       }
       wake();
     },
-    open(id: number): Promise<boolean> {
+    open(id: number): Promise<OpenApplicationResult> {
       const pending = opening.get(id);
       if (pending) return pending;
       const operation = open(id).finally(() => opening.delete(id));
@@ -1933,79 +1959,34 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
     },
   };
 
-  async function open(id: number): Promise<boolean> {
+  async function open(id: number): Promise<OpenApplicationResult> {
     const row = applications.getApplication(id);
-    if (row?.state === "uncertain") {
-      return (
-        (await browser.focusRetainedApplicationPage?.(
-          "target_site",
-          applicationIdentity(id, row.attempt).resultId,
-        )) ?? false
-      );
-    }
-    // A retry can already be running while its shared access task stays
-    // visible. Show that exact tab without handing it over or queuing again.
-    if (row && ["queued", "running"].includes(row.state)) {
-      return (
-        (await browser.focusApplicationPageBinding?.(
-          "target_site",
-          applicationIdentity(id, row.attempt).resultId,
-        )) ?? false
-      );
-    }
-    const work = applications.getWork(id);
-    if (!row || !work || !["ready", "needs_you"].includes(row.state))
-      return false;
-    const key = applicationIdentity(id, work.attempt).resultId;
-    let focused = await browser
-      .focusApplicationPageBinding?.("target_site", key)
+    if (!row) return { opened: false, retained: false };
+    const key = applicationIdentity(id, row.attempt).resultId;
+    // Focus only a live retained page. Snapshot restoration can refill fields;
+    // Open must never run preparation, replay answers or change the saved mode.
+    const retained = await browser
+      .focusRetainedApplicationPage?.("target_site", key)
       .catch((error: unknown) => {
         onError(error);
         return false;
       });
-    if (
-      !focused &&
-      row.state === "needs_you" &&
-      applications.needsYou.accessForApplication(id).length
-    ) {
-      const job = jobs.getJob(row.jobId);
-      if (!job || !browser.reloadApplicationPageBinding) return false;
-      // Re-enter with GET, not a saved credential/MFA POST or a stale wizard URL.
-      await browser.reloadApplicationPageBinding(
-        "target_site",
-        key,
-        job.applyUrl ?? job.url,
-      );
-      focused = await browser.focusApplicationPageBinding?.("target_site", key);
+    if (retained) {
+      if (["ready", "needs_you"].includes(row.state)) {
+        await browser.handApplicationPageToPerson?.("target_site", key);
+        waiting.set(id, row.attempt);
+        watchClosely(id);
+      }
+      return { opened: true, retained: true };
     }
-    if (!current(row)) {
-      await closePage(id, work.attempt);
-      return false;
-    }
-    if (focused) {
-      const handoff = await browser.handApplicationPageToPerson?.(
-        "target_site",
-        key,
-      );
-      if (handoff && !handoff.ok)
-        applications.submissionRefused(id, work.attempt, handoff.error);
-      waiting.set(id, work.attempt);
-      watchClosely(id);
-      return true;
-    }
-    // The page is gone (a restart closes them all): refill the form, and a
-    // form still waiting on the person stops at the same items again.
-    await closePage(id, work.attempt).catch(onError);
-    // A Ready Send for me form opened to look is the person's to send now.
-    const queued = applications.reprepareForReview(
-      id,
-      row.attempt,
-      row.state === "ready" && row.mode === "autonomous_submit"
-        ? OPENED_SEND_FORM
-        : RESTORING_FORM,
-    );
-    if (queued) wake();
-    return queued;
+    const job = jobs.getJob(row.jobId);
+    const url =
+      applications.getWork(id)?.reviewCard?.pageUrl ??
+      job?.applyUrl ??
+      job?.url;
+    if (!url) return { opened: false, retained: false };
+    await browser.openSession("target_site", { targetUrl: url });
+    return { opened: true, retained: false };
   }
 }
 
