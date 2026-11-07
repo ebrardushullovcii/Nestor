@@ -15,6 +15,8 @@ import {
   JobSelectionSchema,
   type JobSelectionInput,
   type CandidateAnswerKind,
+  type CandidateApplicationHistory,
+  type TrackerEvent,
   type CandidateReusableAnswer,
   type UpsertSavedFormAnswerInput,
   type SavedFormAnswersQuery,
@@ -143,6 +145,67 @@ export function createApplicationStore(store: JobStore) {
   };
 
   return {
+    /** All stored application and hiring history, without list-view limits. */
+    history(): CandidateApplicationHistory {
+      const applications = (
+        sql(`SELECT ${COLUMNS} FROM applications a
+        JOIN jobs j ON j.id = a.job_id ORDER BY a.id`).all() as Row[]
+      ).map((record) => ({
+        ...toRow(record),
+        source: "applications" as const,
+        submissionOutcome: this.getSubmissionReceipt(record.id),
+      }));
+      const events = new Map<number, TrackerEvent[]>();
+      for (const event of sql(
+        "SELECT * FROM tracker_events ORDER BY at DESC, id DESC",
+      ).all() as {
+        job_id: number;
+        id: number;
+        kind: TrackerEvent["kind"];
+        at: number;
+        title: string;
+        body: string | null;
+        due_at: number | null;
+        done_at: number | null;
+        place: string | null;
+      }[]) {
+        const recorded: TrackerEvent = {
+          id: event.id,
+          kind: event.kind,
+          at: toIso(event.at),
+          title: event.title,
+          body: event.body,
+          place: event.place,
+          dueAt: event.due_at === null ? null : toIso(event.due_at),
+          doneAt: event.done_at === null ? null : toIso(event.done_at),
+        };
+        const entries = events.get(event.job_id) ?? [];
+        entries.push(recorded);
+        events.set(event.job_id, entries);
+      }
+      const tracker = (
+        sql(`SELECT t.job_id, j.title, j.company,
+        t.status, t.status_at, t.applied_at FROM tracker t
+        JOIN jobs j ON j.id = t.job_id ORDER BY t.job_id`).all() as {
+          job_id: number;
+          title: string;
+          company: string;
+          status: CandidateApplicationHistory["tracker"][number]["status"];
+          status_at: number;
+          applied_at: number | null;
+        }[]
+      ).map((record) => ({
+        source: "tracker" as const,
+        jobId: record.job_id,
+        title: record.title,
+        company: record.company,
+        status: record.status,
+        statusAt: toIso(record.status_at),
+        appliedAt: record.applied_at === null ? null : toIso(record.applied_at),
+        events: events.get(record.job_id) ?? [],
+      }));
+      return { applications, tracker };
+    },
     /** Resolves a chat instruction once, so later arrivals cannot widen it. */
     selectedJobIds(input: JobSelectionInput): number[] {
       const selection = JobSelectionSchema.parse(input);

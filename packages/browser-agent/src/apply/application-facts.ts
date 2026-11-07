@@ -158,6 +158,7 @@ export function applicationFacts(
         })(sources.preferences)
       : undefined,
     applicationAutomationMode: sources.applicationAutomationMode,
+    applicationHistory: sources.history ?? { applications: [], tracker: [] },
     yearsExperience: profile.yearsExperience,
     workEligibility: profile.workEligibility,
     ...(profile.workEligibility.limitedWorkPermissions?.length

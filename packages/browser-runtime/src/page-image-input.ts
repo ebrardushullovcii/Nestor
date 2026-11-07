@@ -108,13 +108,13 @@ export async function pointerPage(
     return {
       ok: true,
       observedValue: input.action,
-      clickFacts: press.finish(),
+      clickFacts: await press.finish(),
     };
   } catch {
     return {
       ok: false,
       error: "The browser pointer action failed; look at the page again.",
-      clickFacts: press.finish(),
+      clickFacts: await press.finish(),
     };
   }
 }

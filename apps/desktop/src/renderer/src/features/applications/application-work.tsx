@@ -269,13 +269,12 @@ function ApplyActions(props: {
     application.state,
   );
   const canStop = props.showStop && canStopApply(props.details);
-  // Only a run that never reached a send, or one stopped after the site or
-  // the person said it was not sent: anything else the guarded send tried
-  // keeps its receipt, and trying again could send it twice.
+  // A failed attempt can start a new run; its old send stays in the ledger.
   const canRetry =
     ["ready", "needs_you", "failed", "stopped"].includes(application.state) &&
     !confirmedSent &&
-    (receipt === null ||
+    (application.state === "failed" ||
+      receipt === null ||
       (application.state === "stopped" && receipt.outcome === "not_submitted"));
   const canSettle = !confirmedSent;
   const canSend = !confirmedSent && application.state === "ready";
@@ -431,7 +430,7 @@ function ApplyActions(props: {
             size="toolbar"
           >
             <RotateCcw aria-hidden />
-            {application.state === "failed" ? "Try again" : "Apply again"}
+            Apply again
           </Button>
         ) : null}
         {byHand ? (

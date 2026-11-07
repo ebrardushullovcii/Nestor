@@ -2553,3 +2553,55 @@ test.each([196_000, null])(
     }
   },
 );
+
+test("production preparation gives recorded interview history to the model with provenance", async () => {
+  const observed: string[] = [];
+  const client = modelThatNeedsThePerson("Review this form");
+  await runProductionApplicationPreparation({
+    session: session(),
+    currentUrl: PAGE_URL,
+    executionInput: executionInput(),
+    history: {
+      applications: [],
+      tracker: [
+        {
+          source: "tracker",
+          jobId: 88,
+          company: "Historical Employer",
+          title: "Engineer",
+          status: "rejected",
+          statusAt: "2026-09-03T10:00:00Z",
+          appliedAt: "2026-09-01T10:00:00Z",
+          events: [
+            {
+              id: 404,
+              kind: "interview",
+              at: "2026-09-02T10:00:00Z",
+              title: "Engineering interview",
+              body: "Discussed the platform",
+              dueAt: null,
+              doneAt: null,
+              place: null,
+            },
+          ],
+        },
+      ],
+    },
+    llmClient: {
+      chatWithTools: (messages, tools, options) => {
+        observed.push(
+          messages.map((message) => String(message.content)).join("\n"),
+        );
+        return client.chatWithTools(messages, tools, options);
+      },
+    },
+    startedAt: "2026-09-14T10:01:00Z",
+    siteLabel: "Replica",
+  });
+  expect(observed.join(" ")).toContain('"source":"tracker"');
+  expect(observed.join(" ")).toContain('"id":404');
+  expect(observed.join(" ")).toContain("Engineering interview");
+  expect(observed.join(" ")).toContain(
+    "Absence of a record is not a negative fact",
+  );
+});
