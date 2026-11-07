@@ -258,6 +258,7 @@ export interface ApplyOpenedTab {
  * see plainly.
  */
 export interface ApplyFormObservation {
+  tabs?: RawApplyPage["tabs"];
   navigationNote?: string;
   /** Known browser request count; absence cannot establish a no-op upload gesture. */
   networkMutationCount?: number;
@@ -321,6 +322,12 @@ export interface ApplyDocument {
 export interface ApplyPageHands {
   screenshot?: ApplyRawPageHands["screenshot"];
   pointer?: ApplyRawPageHands["pointer"];
+  generateAccountCredential?: ApplyRawPageHands["generateAccountCredential"];
+  openTab?: ApplyRawPageHands["openTab"];
+  switchTab?: ApplyRawPageHands["switchTab"];
+  closeTab?: ApplyRawPageHands["closeTab"];
+  closeAuxiliaryTabs?: ApplyRawPageHands["closeAuxiliaryTabs"];
+  readMailboxAccounts?: ApplyRawPageHands["readMailboxAccounts"];
   prepareBrowserCredentials?: ApplyRawPageHands["prepareBrowserCredentials"];
   listSavedCredentials?: ApplyRawPageHands["listSavedCredentials"];
   fillSavedCredential?: ApplyRawPageHands["fillSavedCredential"];
@@ -544,6 +551,8 @@ export type ApplyAgentOutcome =
   | "stuck";
 
 export interface ApplyAgentResult {
+  /** The original send is consumed; its open email-verification step is unfinished. */
+  verificationPending?: boolean;
   /** The model reported that this posting no longer accepts applications. */
   applicationClosed?: boolean;
   /** Nestor failed to read; keep this attempt's usable page for an explicit retry. */

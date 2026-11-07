@@ -1,4 +1,5 @@
 import { redactAccountUrl, trackAccountFlowEntry } from "./account-flow-entry";
+import { inheritTaskPageOwner } from "./task-page-tabs";
 import type {
   ApplyPageSession,
   ApplyRawPageHands,
@@ -32,6 +33,7 @@ export function withAccountWindowSession(input: {
   const onPopup = (popup: Page) => {
     if (!accountFlow || signal?.aborted) return;
     opened.add(popup);
+    inheritTaskPageOwner(page, popup);
     child = popup;
     childHands = input.mechanics(popup);
     popup.on("popup", onPopup);
@@ -99,6 +101,15 @@ export function withAccountWindowSession(input: {
       return Promise.resolve(true);
     },
     readPage: read,
+    screenshot: (frame) => active().screenshot!(frame),
+    pointer: (input) => active().pointer!(input),
+    openTab: (url) => active().openTab!(url),
+    switchTab: (id) => active().switchTab!(id),
+    closeTab: (id) => active().closeTab!(id),
+    closeAuxiliaryTabs: async () => {
+      await childHands?.closeAuxiliaryTabs?.();
+      await session.closeAuxiliaryTabs?.();
+    },
     fillText: (ref, value) => active().fillText(ref, value),
     chooseOption: (ref, value) => active().chooseOption(ref, value),
     setToggle: (ref, value) => active().setToggle(ref, value),

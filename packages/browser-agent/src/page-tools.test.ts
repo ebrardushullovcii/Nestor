@@ -143,7 +143,10 @@ describe("page tools", () => {
     expect(outcome.kind).toBe("ok");
     if (outcome.kind === "ok") {
       expect(outcome.content).toContain('Pressed "Apply"');
-      expect(outcome.content).toContain("opened that address here instead");
+      expect(outcome.content).toContain(
+        "this link was followed in the current working tab",
+      );
+      expect(outcome.content).toContain("Use open_tab for an auxiliary page");
       expect(outcome.progress).toBe(true);
     }
     expect(tools.state.observation?.url).toBe(

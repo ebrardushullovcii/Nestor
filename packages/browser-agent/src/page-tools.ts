@@ -5,6 +5,12 @@ import {
 } from "@nestor/agent-runtime";
 import { describeBrowserError } from "@nestor/contracts";
 import { createVisualPageTools } from "./visual-page-tools";
+import { createTabTools } from "./tab-tools";
+import {
+  createAccountCredentialTool,
+  createSavedLoginTools,
+} from "./account-credential-tool";
+import { rememberVerificationSecret } from "@nestor/core/run-trace";
 
 import { describeObservation } from "./apply/apply-prompts";
 import { TEXT_RETENTION_MS, textRetentionError } from "./apply/text-retention";
@@ -94,7 +100,7 @@ export function createPageTools(
       observation = await observe();
       notes.push(
         adopted.ok
-          ? `That opened ${adopted.url} in a new tab. Job Finder works in one tab, so it opened that address here instead.`
+          ? `That opened ${adopted.url} in a new tab; this link was followed in the current working tab. Use open_tab for an auxiliary page that must stay separate, such as Gmail.`
           : `That tried to open a new tab, which could not be brought here: ${adopted.error}`,
       );
     }
@@ -372,6 +378,11 @@ export function createPageTools(
         const ref = asString(args.ref);
         const text = typeof args.text === "string" ? args.text : null;
         if (!ref || text === null) return ok("type needs ref and text.");
+        if (
+          state.observation?.controls.find((c) => c.ref === ref)
+            ?.credentialRole === "one_time_code"
+        )
+          rememberVerificationSecret(text);
         const written = await hands.fillText(ref, text);
         if (!written.ok) {
           return ok(`The field would not take that: ${written.error}`);
@@ -533,7 +544,12 @@ export function createPageTools(
   ];
 
   return {
-    tools: tools.map((tool) => ({
+    tools: [
+      ...tools,
+      ...createTabTools(hands, remember, describe),
+      createAccountCredentialTool(hands),
+      ...createSavedLoginTools(hands),
+    ].map((tool) => ({
       ...tool,
       failureKind: "browser" as const,
       describeError: (error: unknown) =>

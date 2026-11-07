@@ -1,5 +1,6 @@
 import { setTimeout as waitForConnection } from "node:timers/promises";
 import { withNavigationLiveness } from "./browser-navigation";
+import { configureTaskPageOwner } from "./task-page-tabs";
 import { withTraceScope } from "@nestor/core/run-trace";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import {
@@ -7,6 +8,7 @@ import {
   traceFinalPage,
   configureTraceCapture,
   tracePage,
+  pageTraceIsPrivate,
   type TracePageCapture,
 } from "./trace-page";
 import { reportSelfLimitHit } from "@nestor/core";
@@ -2209,7 +2211,10 @@ export function createBrowserAgentRuntime(
     let storagePath: string | null = null;
     const warnings: string[] = [];
 
-    if (normalizedRequest.retention.retention !== "temporary") {
+    if (
+      normalizedRequest.retention.retention !== "temporary" &&
+      !pageTraceIsPrivate(page)
+    ) {
       try {
         const visualArtifactDir = getVisualSnapshotArtifactDir(
           options.userDataDir,
@@ -2296,16 +2301,23 @@ export function createBrowserAgentRuntime(
    * bounded operations on it and nothing else.
    */
   function applyPageMechanicsForSource(source: JobSource): ApplyRawPageHands {
+    let primaryPage: Page | null = null;
     const onReadyPage = async <TResult>(
       operation: (page: Page) => Promise<TResult>,
     ): Promise<TResult> => {
-      const page = await getReadyPage(source);
+      const page =
+        primaryPage && !primaryPage.isClosed()
+          ? primaryPage
+          : (primaryPage = await getReadyPage(source));
       trackAccountFlowEntry(page);
       return operation(page);
     };
 
     return {
-      readPage: () => onReadyPage((page) => readRawApplyPage(page)),
+      readPage: () =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).readPage(),
+        ),
       screenshot: (frame) =>
         onReadyPage((page) =>
           createPlaywrightApplyPageMechanics(page).screenshot!(frame),
@@ -2313,6 +2325,26 @@ export function createBrowserAgentRuntime(
       pointer: (input) =>
         onReadyPage((page) =>
           createPlaywrightApplyPageMechanics(page).pointer!(input),
+        ),
+      openTab: (url) =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).openTab!(url),
+        ),
+      switchTab: (id) =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).switchTab!(id),
+        ),
+      closeTab: (id) =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).closeTab!(id),
+        ),
+      closeAuxiliaryTabs: () =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).closeAuxiliaryTabs!(),
+        ),
+      readMailboxAccounts: () =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).readMailboxAccounts!(),
         ),
       readAccountFlowEntry: (origins) =>
         onReadyPage((page) =>
@@ -3210,6 +3242,9 @@ export function createBrowserAgentRuntime(
                 const applicationSession = guardApplicationPreparationSession(
                   (accountSession = createPlaywrightApplyPageSession({
                     page: prepared.page,
+                    ...(options?.onAutomationPage
+                      ? { onPage: options.onAutomationPage }
+                      : {}),
                     sentinel: runSentinel,
                     ...(options?.signal ? { signal: options.signal } : {}),
                   })),
@@ -3863,11 +3898,76 @@ export function createBrowserAgentRuntime(
           }
         }
 
+        const searchMechanics = createPlaywrightApplyPageMechanics(page);
+        configureTaskPageOwner(page, agentOptions.onAutomationPage);
         const result = await runJobSearchAgent({
           modelContextWindowTokens:
             aiClient?.getStatus().modelContextWindowTokens ?? undefined,
           resultCache: searchResultCache,
-          hands: createApplyPageHands(createPlaywrightApplyPageMechanics(page)),
+          hands: createApplyPageHands({
+            ...searchMechanics,
+            listSavedCredentials: async () =>
+              agentOptions.listSavedCredentials?.(
+                (await searchMechanics.readPage()).url ?? "",
+              ) ?? {
+                available: false,
+                credentials: [],
+                message: "The vault is unavailable.",
+              },
+            fillSavedCredential: async (ref, credentialId) => {
+              const raw = await searchMechanics.readPage();
+              const c = raw.controls.find(
+                (entry) => (entry.ref ?? `c${entry.index}`) === ref,
+              );
+              return c && agentOptions.fillSavedCredential
+                ? agentOptions.fillSavedCredential({
+                    url: raw.url ?? "",
+                    credentialId,
+                    target: {
+                      controlIndex: c.index,
+                      id: c.id,
+                      name: c.name,
+                      ...(c.frame ? { frame: c.frame } : {}),
+                    },
+                  })
+                : false;
+            },
+            generateAccountCredential: async ({ username, passwordRefs }) => {
+              const raw = await searchMechanics.readPage();
+              const targets = passwordRefs.flatMap((ref) => {
+                const c = raw.controls.find(
+                  (entry) => (entry.ref ?? `c${entry.index}`) === ref,
+                );
+                return c
+                  ? [
+                      {
+                        controlIndex: c.index,
+                        id: c.id,
+                        name: c.name,
+                        ...(c.frame ? { frame: c.frame } : {}),
+                      },
+                    ]
+                  : [];
+              });
+              if (
+                !agentOptions.generateAccountCredential ||
+                targets.length !== passwordRefs.length
+              )
+                return {
+                  ok: false,
+                  credentialId: null,
+                  origin: null,
+                  username,
+                  message:
+                    "The vault or named password fields are unavailable; observe again or report the app error.",
+                };
+              return agentOptions.generateAccountCredential({
+                url: raw.url ?? "",
+                username,
+                targets,
+              });
+            },
+          }),
           page,
           config: agentConfig,
           llmClient: createAgentChatWithToolsBridge(chatWithTools),

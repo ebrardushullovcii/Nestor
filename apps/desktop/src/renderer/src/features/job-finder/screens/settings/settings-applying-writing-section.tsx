@@ -90,8 +90,9 @@ const declarationChoices: ReadonlyArray<{
   },
   {
     kind: "terms_acceptance",
-    label: "Site terms",
-    description: '"I agree to the terms of use."',
+    label: "Site and application agreements",
+    description:
+      "Accepts required site and application agreements, including arbitration.",
   },
   {
     kind: "background_check_consent",

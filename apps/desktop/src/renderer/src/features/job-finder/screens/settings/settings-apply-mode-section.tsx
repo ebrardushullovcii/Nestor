@@ -165,10 +165,11 @@ export function SettingsApplyModeSection(props: {
       ) : null}
 
       <p className="max-w-[70ch] text-(length:--text-small) leading-5 text-foreground-soft">
-        Job Finder fills applications and sends them only with your permission.
-        It never asks for a password. If you provide sign-in details and
-        authorize their use, it may use them for that task without saving them.
-        You control account creation; CAPTCHA and MFA stay with you.
+        Job Finder follows your browser permissions for sign-in and account
+        creation. The vault stores and types passwords privately, including
+        generated passwords for new accounts. It can read emailed verification
+        codes in your signed-in mailbox. Steps it cannot complete stay open for
+        you.
       </p>
 
       <div className="grid gap-2 border-t border-(--surface-panel-border) pt-4">

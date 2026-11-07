@@ -16,6 +16,7 @@ import {
   type BrowserPasswordPrompt,
   type BrowserPasswordFieldTarget,
   type BrowserPasswordsList,
+  type BrowserGeneratedLoginResult,
 } from "@nestor/contracts";
 import { createBrowserPasswordRepository } from "@nestor/db";
 import {
@@ -412,6 +413,51 @@ export class BrowserPasswords {
         : false;
     } catch {
       return false;
+    }
+  }
+  /** Model-named exact fields, encrypted persistence, metadata-only result. */
+  async generateAccountCredential(
+    tabId: string,
+    username: string,
+    targets: BrowserPasswordFieldTarget[],
+  ): Promise<BrowserGeneratedLoginResult> {
+    const page = this.page(tabId);
+    const origin = page ? passwordOrigin(page.contents.getURL()) : null;
+    const failed = (message: string): BrowserGeneratedLoginResult => ({
+      ok: false,
+      credentialId: null,
+      origin,
+      username,
+      message,
+    });
+    if (!page || !origin || !targets.length)
+      return failed(
+        "The account page or named password fields are unavailable; observe again.",
+      );
+    try {
+      const saved = this.vault().generateAccount(origin, username);
+      for (const target of targets)
+        if (!(await this.autofill(tabId, saved.id, true, target)))
+          return {
+            ...saved,
+            credentialId: saved.id,
+            ok: false,
+            message:
+              "The vault saved this login but a named field changed. Observe and use fill_saved_login with its credentialId to finish.",
+          };
+      this.host.changed();
+      return {
+        ok: true,
+        credentialId: saved.id,
+        origin: saved.origin,
+        username: saved.username,
+        message:
+          "The vault generated and saved the login and filled all named password fields. No password is returned. Press the site's account-creation control yourself.",
+      };
+    } catch {
+      return failed(
+        "The vault could not generate, securely save or fill this login. Retry the tool or report the vault error; no secret was returned.",
+      );
     }
   }
 }

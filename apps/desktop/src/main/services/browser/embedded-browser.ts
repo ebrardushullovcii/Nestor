@@ -167,6 +167,13 @@ export class EmbeddedBrowser {
   ): Promise<boolean> {
     return this.passwords().autofill(tabId, credentialId, true, target);
   }
+  generateAccountCredential(
+    tabId: string,
+    username: string,
+    targets: BrowserPasswordFieldTarget[],
+  ) {
+    return this.passwords().generateAccountCredential(tabId, username, targets);
+  }
   private window: BrowserWindow | null = null;
   private backstage: BrowserWindow | null = null;
   private browserSession: Session | null = null;

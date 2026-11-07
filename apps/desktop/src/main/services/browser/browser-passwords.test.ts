@@ -140,6 +140,45 @@ it("captures privately, offers metadata only, requires Save, updates and autofil
   expect(vault.list().length).toBe(1);
   expect(vault.read(id)?.password === "synthetic-update").toBe(true);
 });
+
+it("generates and saves a new account privately, fills both model-named fields and reuses it for sign-in", async () => {
+  const { manager, vault, frame } = setup();
+  const targets = [
+    { controlIndex: 1, id: "password", name: "password" },
+    { controlIndex: 2, id: "confirm", name: "confirm" },
+  ];
+  const created = await manager.generateAccountCredential(
+    "tab",
+    "synthetic@example.test",
+    targets,
+  );
+  expect(created.ok).toBe(true);
+  expect(vault.list()).toHaveLength(1);
+  const saved = vault.read(created.credentialId!)!;
+  expect(saved.password.length >= 24).toBe(true);
+  for (const pattern of [/[A-Z]/u, /[a-z]/u, /[0-9]/u, /[!@#$%*_-]/u])
+    expect(pattern.test(saved.password)).toBe(true);
+  expect(JSON.stringify(created).includes(saved.password)).toBe(false);
+  expect(frame.send.mock.calls).toHaveLength(2);
+  expect(
+    await manager.autofill("tab", created.credentialId!, true, targets[0]),
+  ).toBe(true);
+  expect(
+    frame.executeJavaScript.mock.calls.some((call) =>
+      JSON.stringify(call).includes(saved.password),
+    ),
+  ).toBe(false);
+  expect(
+    (
+      await manager.generateAccountCredential(
+        "tab",
+        "synthetic@example.test",
+        targets,
+      )
+    ).credentialId,
+  ).toBe(created.credentialId);
+  expect(vault.list()).toHaveLength(1);
+});
 it("dismisses repeat offers, expires transient captures, and clears on close or foreign navigation", async () => {
   const { manager, capture, event } = setup();
   await manager.capture(event, capture);

@@ -1062,6 +1062,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                       : "The model report could not be recorded.",
                 };
               retainSend(receipt);
+              if (decision.outcome === "waiting")
+                applications.recordVerificationWait(
+                  row.id,
+                  row.attempt,
+                  receipt,
+                );
               return {
                 recorded: true,
                 content: `Recorded ${decision.outcome}: ${decision.evidence}. No browser action was issued; the original send had no prior intent.`,
@@ -1089,7 +1095,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                   : decision.outcome === "failed"
                     ? "not_submitted"
                     : "outcome_uncertain",
-              verifiedAt: decision.outcome === "uncertain" ? null : at,
+              verifiedAt:
+                decision.outcome === "uncertain" ||
+                decision.outcome === "waiting"
+                  ? null
+                  : at,
               evidence: [
                 {
                   id: `model_${randomUUID()}`,
@@ -1114,7 +1124,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
               },
               browserAction: {
                 ...previous.browserAction,
-                reason: "model_observed_outcome",
+                reason:
+                  decision.outcome === "waiting"
+                    ? "awaiting_email_verification"
+                    : "model_observed_outcome",
               },
             });
             const recorded =
@@ -1132,9 +1145,11 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
                 content: `The ledger update returned ${recorded.status}; read its current state before deciding again.`,
               };
             retainSend(receipt);
+            if (decision.outcome === "waiting")
+              applications.recordVerificationWait(row.id, row.attempt, receipt);
             return {
               recorded: true,
-              content: `Recorded ${decision.outcome}: ${decision.evidence}. This call ID remains consumed and will never be replayed.`,
+              content: `Recorded ${decision.outcome} for sendCallId=${decision.sendCallId}: ${decision.evidence}. The form remains bound. This call ID remains consumed and will never be replayed.`,
             };
           },
           onPrepared: (outcome) => {
@@ -1190,7 +1205,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       return;
     const recordedSend =
       sentDuringPreparation as SubmissionOutcomeRecord | null;
-    if (recordedSend) {
+    if (
+      recordedSend &&
+      recordedSend.browserAction?.reason !== "awaiting_email_verification"
+    ) {
       applications.beginSubmission(row.id, row.attempt);
       applications.recordSubmission(row.id, row.attempt, recordedSend);
       if (recordedSend.outcome === "submitted")

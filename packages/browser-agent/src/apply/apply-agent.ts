@@ -1,5 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
-import { traceEvent, traceOurs } from "@nestor/core/run-trace";
+import {
+  traceEvent,
+  traceOurs,
+  withVerificationPrivacy,
+  verificationIsPrivate,
+  redactVerificationText,
+  redactVerificationData,
+} from "@nestor/core/run-trace";
+import { createTabTools, mailboxAccountFacts } from "../tab-tools";
+import { createAccountCredentialTool } from "../account-credential-tool";
 import {
   parseToolArguments,
   runAgentLoop,
@@ -56,6 +65,15 @@ import type {
 } from "./types";
 
 export async function runApplyAgent(
+  input: ApplyAgentConfig,
+  client: LLMClient,
+): Promise<ApplyAgentResult> {
+  return withVerificationPrivacy(async () =>
+    redactVerificationData(await runApplyAgentPrivate(input, client)),
+  );
+}
+
+async function runApplyAgentPrivate(
   input: ApplyAgentConfig,
   client: LLMClient,
 ): Promise<ApplyAgentResult> {
@@ -118,11 +136,15 @@ export async function runApplyAgent(
     scopeKey?: string | undefined;
   } | null = null;
   let page: ApplyFormObservation | null = null;
-  let sendOutcome: "submitted" | "failed" | "uncertain" | null = null;
-  const sendDecisions = new Map<string, "submitted" | "failed" | "uncertain">();
+  let sendOutcome: "submitted" | "failed" | "uncertain" | "waiting" | null =
+    null;
+  const sendDecisions = new Map<
+    string,
+    "submitted" | "failed" | "uncertain" | "waiting"
+  >();
   const updateSendOutcome = (
     id: string,
-    outcome: "confirmed" | "failed" | "uncertain",
+    outcome: "confirmed" | "failed" | "uncertain" | "waiting",
   ) => {
     sendDecisions.set(id, outcome === "confirmed" ? "submitted" : outcome);
     sendOutcome = [...sendDecisions.values()].includes("submitted")
@@ -144,6 +166,7 @@ export async function runApplyAgent(
   };
   const observe = (next: ApplyFormObservation) => {
     page = next;
+    if (next.tabs?.some((tab) => tab.active && !tab.primary)) return;
     occurrences.observe(next);
     receipts.observe(next);
     const recordsControl = (c: ApplyFormObservation["controls"][number]) =>
@@ -364,6 +387,7 @@ export async function runApplyAgent(
       return "The send ledger is unavailable in this run.";
     const result = await config.recordSendOutcome({
       ...report,
+      evidence: redactVerificationText(report.evidence),
       sendCallId,
       pageUrl: page?.url ?? null,
     });
@@ -377,7 +401,16 @@ export async function runApplyAgent(
     callId: string = randomUUID(),
   ): Promise<AgentLoopToolOutcome> => {
     signal.throwIfAborted();
-    const before = page ?? (await readPage());
+    let before = page ?? (await readPage());
+    // A mailbox is transient. Finish and any on-page handoff belong to the
+    // still-bound application form, including when mailbox retrieval failed.
+    if (
+      proposal.tool === "finish" &&
+      before.tabs?.some((tab) => tab.active && !tab.primary)
+    ) {
+      await config.hands.closeAuxiliaryTabs?.();
+      before = await readPage();
+    }
     if (proposal.tool === "finish" && proposal.sendOutcome) {
       const error = await reportFinishedSend(proposal.sendOutcome, callId);
       if (error) return { kind: "ok", status: "failed", content: error };
@@ -397,6 +430,11 @@ export async function runApplyAgent(
     let content: string;
     switch (outcome.kind) {
       case "filled": {
+        if (before.tabs?.some((tab) => tab.active && !tab.primary)) {
+          content =
+            "Updated the auxiliary tab field; its contents are not saved as application answers.";
+          break;
+        }
         const control = before.controls.find(
           (c) => c.ref === outcome.filled.ref,
         );
@@ -536,6 +574,8 @@ export async function runApplyAgent(
         }),
     }),
   );
+  domainTools.push(...createTabTools(config.hands, observe));
+  domainTools.push(createAccountCredentialTool(config.hands));
   domainTools.push({
     definition: FILL_FIELDS_TOOL_DEFINITION,
     execute: async (raw, context) =>
@@ -786,14 +826,14 @@ export async function runApplyAgent(
       function: {
         name: "record_send_outcome",
         description:
-          "Record a send you observed, including one made by click or another tool without a prior intent. Use its send call ID, or the original tool call ID when no send intent exists. Choose confirmed, failed or uncertain and quote the page evidence. This never sends or retries anything.",
+          "Record a send you observed. Use waiting when the site asks for an emailed code after Send: the form remains open, the original send call stays consumed, and this is not a failure. Retrieve the code in a second tab, return to type it, and click its verification control. Record confirmed, failed or uncertain on the same sendCallId when that send has an outcome. Quote page evidence without any code value. This tool never sends or retries anything. For sends by another tool, use its original tool call ID.",
         parameters: {
           type: "object",
           properties: {
             sendCallId: { type: "string" },
             outcome: {
               type: "string",
-              enum: ["confirmed", "failed", "uncertain"],
+              enum: ["confirmed", "failed", "uncertain", "waiting"],
             },
             evidence: { type: "string" },
           },
@@ -821,10 +861,12 @@ export async function runApplyAgent(
         };
       const result = await config.recordSendOutcome({
         ...parsed.data,
+        evidence: redactVerificationText(parsed.data.evidence),
         pageUrl: page?.url ?? null,
       });
       if (result.recorded) {
         updateSendOutcome(parsed.data.sendCallId, parsed.data.outcome);
+        note(result.content);
       }
       return {
         kind: "ok",
@@ -917,6 +959,7 @@ export async function runApplyAgent(
     const loop = await runAgentLoop({
       messages: [
         { role: "system", content: createApplySystemPrompt(runConfig) },
+        { role: "user", content: await mailboxAccountFacts(config.hands) },
         {
           role: "user",
           content: applicationModelFactsMessage(
@@ -940,12 +983,24 @@ export async function runApplyAgent(
         (input.modelContextWindowTokens ?? 64000) * 3.6 * 0.8,
       ),
       onToolTiming: timingRecord.onToolTiming,
-      ...(input.onProgress ? { onStep: input.onProgress } : {}),
+      ...(input.onProgress
+        ? {
+            onStep: (progress) =>
+              input.onProgress!({
+                ...progress,
+                note: verificationIsPrivate()
+                  ? "Completing the verification step; private mailbox content omitted."
+                  : progress.note,
+              }),
+          }
+        : {}),
       signal,
       now,
     });
+    const waitingForVerification =
+      [...sendDecisions.values()].at(-1) === "waiting";
     const outcome: ApplyAgentResult["outcome"] =
-      sendOutcome ??
+      (sendOutcome === "waiting" ? null : sendOutcome) ??
       (applicationClosed
         ? "closed"
         : readyToSend
@@ -960,8 +1015,9 @@ export async function runApplyAgent(
     traceEvent("apply_outcome", { outcome, pauses, notes });
     return {
       outcome,
+      ...(waitingForVerification ? { verificationPending: true } : {}),
       ...(applicationClosed ? { applicationClosed: true } : {}),
-      reason: loop.finish?.reason ?? loop.reason,
+      reason: redactVerificationText(loop.finish?.reason ?? loop.reason),
       steps: loop.steps,
       finalUrl: (page as ApplyFormObservation | null)?.url ?? null,
       filled,
@@ -970,7 +1026,12 @@ export async function runApplyAgent(
       reviewObservedFieldKeys: [...observedFields],
       reviewAttachments: [...reviewAttachments.values()],
       pauses,
-      notes: [...notes, ...loop.turnNotes],
+      notes: [
+        ...notes,
+        ...(verificationIsPrivate()
+          ? ["Verification mailbox activity omitted from saved notes."]
+          : loop.turnNotes),
+      ].map(redactVerificationText),
       timeline,
       modelTurns: timingRecord.snapshot().modelTurns,
       timing: timingRecord.snapshot(),
@@ -981,6 +1042,7 @@ export async function runApplyAgent(
       stepReceipts: receipts.finish(page, now().toISOString()),
     };
   } finally {
+    await input.hands.closeAuxiliaryTabs?.();
     abort.abort();
     input.onTiming?.(timingRecord.snapshot());
   }

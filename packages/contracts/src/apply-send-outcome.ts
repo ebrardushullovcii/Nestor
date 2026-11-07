@@ -3,7 +3,7 @@ import { z } from "zod";
 export const ApplySendOutcomeDecisionSchema = z
   .object({
     sendCallId: z.string().min(1),
-    outcome: z.enum(["confirmed", "failed", "uncertain"]),
+    outcome: z.enum(["confirmed", "failed", "uncertain", "waiting"]),
     evidence: z.string().min(1),
   })
   .strict();

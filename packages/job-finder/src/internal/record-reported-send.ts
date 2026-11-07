@@ -82,7 +82,10 @@ export async function recordReportedSend(input: {
           },
         ];
         const browserAction = {
-          reason: "model_reported_send_without_prior_intent",
+          reason:
+            decision.outcome === "waiting"
+              ? "awaiting_email_verification"
+              : "model_reported_send_without_prior_intent",
           actionAttempted: false,
           actionIssued: false,
           actionCompleted: false,
@@ -94,7 +97,7 @@ export async function recordReportedSend(input: {
             evidence,
             browserAction,
           };
-        if (decision.outcome === "uncertain")
+        if (decision.outcome === "uncertain" || decision.outcome === "waiting")
           return { outcome: "outcome_uncertain", evidence, browserAction };
         return {
           outcome: "not_submitted",

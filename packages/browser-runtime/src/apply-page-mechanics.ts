@@ -1,10 +1,15 @@
-import { APPLY_CONTROL_SELECTOR } from "@nestor/contracts";
+import {
+  APPLY_CONTROL_SELECTOR,
+  isVerificationCodeControl,
+} from "@nestor/contracts";
+import { rememberVerificationSecret } from "@nestor/core/run-trace";
 import { screenshotPage, pointerPage } from "./page-image-input";
 import { readPressability } from "./element-state";
 import { watchPagePress } from "./page-press-facts";
 import { withBrowserReadLiveness } from "./browser-read-liveness";
 import { withNavigationLiveness } from "./browser-navigation";
-import { tracePageHands, tracePage } from "./trace-page";
+import { tracePageHands, tracePage, markPrivateTracePage } from "./trace-page";
+import { withTaskPageTabs, configureTaskPageOwner } from "./task-page-tabs";
 
 import { watchPageSelfLimits } from "./self-limit-page";
 import {
@@ -725,6 +730,7 @@ async function readApplyFrame(frame: Frame, frameIndex: number) {
                 element.matches(":disabled") ||
                 element.getAttribute("aria-disabled") === "true",
               readOnly: Boolean(input?.readOnly ?? textarea?.readOnly),
+              secretValuePresent: Boolean(input?.value),
               // A file input is almost always hidden behind a styled "Attach"
               // button (Lever, Greenhouse, Workday). Attaching works on the
               // hidden input, so it stays in the observation; without it the
@@ -1926,6 +1932,7 @@ export function collectApplyDocumentSnapshot(
           element.matches(":disabled") ||
           element.getAttribute("aria-disabled") === "true",
         readOnly: Boolean(input?.readOnly ?? textarea?.readOnly),
+        secretValuePresent: Boolean(input?.value),
         // A file input is almost always hidden behind a styled "Attach"
         // button (Lever, Greenhouse, Workday). Attaching works on the
         // hidden input, so it stays in the observation; without it the
@@ -2216,7 +2223,19 @@ async function readRawApplyPageOnce(page: Page): Promise<RawApplyPage> {
 
   return {
     ...snapshot,
-    controls: controlsWithChoices,
+    controls: controlsWithChoices.map((control) => {
+      if (!isVerificationCodeControl(control)) return control;
+      if (control.value) {
+        rememberVerificationSecret(control.value);
+        markPrivateTracePage(page);
+      }
+      return {
+        ...control,
+        value: "",
+        secretValuePresent:
+          control.secretValuePresent === true || control.value.length > 0,
+      };
+    }),
     openedTabs,
     stepLabel,
     ...(summaryRows.length ? { summaryRows } : {}),
@@ -2475,6 +2494,10 @@ async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
 export function createPlaywrightApplyPageMechanics(
   page: Page,
 ): ApplyRawPageHands {
+  return withTaskPageTabs(page, createSinglePageMechanics);
+}
+
+function createSinglePageMechanics(page: Page): ApplyRawPageHands {
   // Before any file is attached, so the request that carries it is seen.
   watchAttachmentUploads(page);
   return tracePageHands(page, {
@@ -2578,6 +2601,23 @@ export function createPlaywrightApplyPageMechanics(
         return { ok: false, error: `No control named ${ref} on this page.` };
       }
       try {
+        const metadata = await locator.evaluate((element) => {
+          const input = element instanceof HTMLInputElement ? element : null;
+          return {
+            autocomplete: input?.autocomplete ?? "",
+            name: input?.name ?? "",
+            id: element.id,
+            label:
+              input?.labels?.[0]?.textContent ??
+              element.getAttribute("aria-label") ??
+              "",
+            placeholder: input?.placeholder ?? "",
+          };
+        });
+        if (isVerificationCodeControl(metadata)) {
+          rememberVerificationSecret(value);
+          markPrivateTracePage(page);
+        }
         return await replaceFieldText(locator, value);
       } catch (error) {
         return {
@@ -2982,10 +3022,12 @@ export function createPlaywrightApplyPageMechanics(
  */
 export function createPlaywrightApplyPageSession(input: {
   page: Page;
+  onPage?: (page: Page) => void | Promise<void>;
   sentinel?: ApplicationRunServiceWorkerSentinel;
   signal?: AbortSignal;
 }): ApplyPageSession & { closeAccountWindow(): Promise<void> } {
   const { page } = input;
+  configureTaskPageOwner(page, input.onPage);
   const mechanics = createPlaywrightApplyPageMechanics(page);
   // Attempts already handed to the workflow layer. Each read hands out one
   // it has not seen, and the one that matters most first: the page trying to

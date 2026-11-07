@@ -28,6 +28,19 @@ export const BrowserPasswordsListSchema = z.object({
   credentials: z.array(BrowserPasswordMetadataSchema),
 });
 export type BrowserPasswordsList = z.infer<typeof BrowserPasswordsListSchema>;
+/** Main-only creation result; generated passwords never leave the vault transport. */
+export interface BrowserGeneratedLoginResult {
+  ok: boolean;
+  credentialId: string | null;
+  origin: string | null;
+  username: string;
+  message: string;
+}
+export interface BrowserGenerateAccountInput {
+  url: string;
+  username: string;
+  targets: BrowserPasswordFieldTarget[];
+}
 export const BrowserPasswordPromptInputSchema = z
   .object({ promptId: Id })
   .strict();

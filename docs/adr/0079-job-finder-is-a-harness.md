@@ -31,8 +31,8 @@ Which jobs get sent, whether the model writes an open answer itself, and how it 
 Only these mechanics stay in code, and none of them judges the model's output:
 
 1. Tool contracts. Validators match the published tool schemas exactly; a malformed call returns the schema error to the model; an action on a stale or missing control returns "stale, observe again"; conflicting actions on one browser session run one at a time.
-2. Secrets. Passwords, cookies, tokens and MFA codes never enter model context, prompts or evidence; the vault types a saved password into the field the model names.
-3. Send ledger. The send step writes an intent row before the click and the outcome after: confirmed, uncertain or failed.
+2. Secrets. Passwords, cookies, tokens and non-email MFA secrets never enter model context, prompts or evidence; the vault types a saved password into the field the model names. Emailed verification codes may enter transient model context for the step that needs them. The model reads the signed-in mailbox in a second tab, returns to the still-bound form, and types the code. Codes never enter saved answers, the profile or retained evidence, including model-input/output records and page captures. If retrieval still fails after a real mailbox attempt, the model may hand off the step through Needs you on the open form.
+3. Send ledger. The send step writes an intent row before the click and the outcome after: confirmed, uncertain or failed. An emailed verification step after Send is recorded as waiting on that consumed intent, not failed. Completing its code step resolves the original intent without replaying the original send call.
 4. No replay by our code. A send call runs at most once per call ID across reconnects, retries and restarts. After an uncertain outcome the ledger fact goes back to the model ("a send to this posting at 10:42 is uncertain; check the site's applied list first"). Only a new model decision sends again.
 5. Stop, durable state, lossless queues, and real connection-idle detection with reconnect.
 6. Numeric limits the person sets (spend, daily sends) are counted by code.
@@ -43,11 +43,25 @@ Use the person's selected resume and tailoring level. Approval state is context 
 
 Aggressive tailoring is off limits. Its behavior and prompts change only through a change that applies to every mode. Its permitted stretches are not defects: nobody grades them down or sends them back for removal. Unrelated invented facts are still failures.
 
+### Emailed codes and required agreements (2026-11-07)
+
+The owner amended the secrets mechanic and clarified required agreements in the lead thread (about 00:05 UTC):
+
+```text
+Verification codes: my email is there for them. The model gets emailed codes from Gmail and types them itself. This changes ADR 0079's secrets rule for emailed codes only; update it in the same PR. Right now our code refuses typing into code fields, the prompt says "You work in one tab", and nothing tells the model my Gmail is signed in. Fix all three. Let it use a second tab so the form stays open, and record a code step after Send as waiting, not failed. If it still can't get a code, it can ask me in Needs you. Keep codes out of saved answers and evidence.
+```
+
+```text
+Legal agreements: accept required ones such as arbitration; my permissions cover them. In one change for every mode, delete the prompt lines that hand me steps my settings already cover: "This does not permit accepting a legal declaration", "If the banner offers only opt-in, leave it for the person" and "If this job conflicts, ask how the person wants to handle that conflict".
+```
+
+The terms setting covers required site and application agreements, including arbitration. These instructions and browser capabilities apply across every mode, including Aggressive; its tailoring behavior is unchanged. A mailbox account identity is a run-start fact from this browser session, never an access gate.
+
 ### Superseded decisions
 
 This ADR supersedes every provision of ADRs 0012, 0013, 0020, 0024, 0027, 0039, 0041 and 0051 that withholds a tool by mode, vetoes, rewrites, caps, classifies or times out the model, restricts ordinary site writes through request windows, forces low effort, or hands the person a step the model can attempt. Those ADRs keep only what matches the six mechanics and Aggressive's protected behavior. Superseded, at least:
 
-- [0012](0012-user-scoped-autonomous-application-authority.md): "model output alone is never application authority" and the deterministic executor binding; the CAPTCHA and anti-bot pause and "must not bypass security challenges"; treating preferences as consent to an unseen material attestation (declaration settings become instructions); from the 2026-10-29 update, the POST windows and refused requests, "one unambiguous saved account", the Google account-choice and proven-access rules, the four-write cap, the 90-second deadline and the handoff of unproven or ambiguous steps; the pause when the app cannot prove an action occurred (it becomes the ledger fact). Keeps: the settings themselves, the vault and secrets never as model input, MFA with the person, creating a new Google account with the person, the single send path, truthful outcomes, and "a solved challenge or successful sign-in never proves an application was sent".
+- [0012](0012-user-scoped-autonomous-application-authority.md): "model output alone is never application authority" and the deterministic executor binding; the CAPTCHA and anti-bot pause and "must not bypass security challenges"; treating preferences as consent to an unseen material attestation (declaration settings become instructions); from the 2026-10-29 update, the POST windows and refused requests, "one unambiguous saved account", the Google account-choice and proven-access rules, the four-write cap, the 90-second deadline and the handoff of unproven or ambiguous steps; the pause when the app cannot prove an action occurred (it becomes the ledger fact). Keeps: the settings themselves, the vault and non-email secrets never as model input, non-email MFA with the person, creating a new Google account with the person, the single send path, truthful outcomes, and "a solved challenge or successful sign-in never proves an application was sent".
 - [0013](0013-hybrid-browser-observation-and-policy-execution.md): decisions 1, 3, 4 and 5; decision 6's preflight; decision 7's prepare-only containment. Keeps decision 2's page identity and stable control references (not its blocker classification) and decision 6's single execution with no automatic retry after an uncertain outcome.
 - [0020](0020-streamed-model-requests-with-idle-and-total-budgets.md): total, task and per-attempt budgets and retry budgets. Keeps idle detection.
 - [0024](0024-job-finder-browser-harness-and-three-apply-modes.md): the move reviewer; CAPTCHA and account-creation gating; the numbered-step rule and write windows (2026-10-27 amendment); the bounded field-change window and "Ambiguous and final-action requests stay blocked"; the low default effort for browser-agent turns; the 20-minute per-source and one-hour search budgets and the "time ceilings" consequence; the 2026-10-29 send preflight.
@@ -62,5 +76,5 @@ The old ADR text remains as history; this decision wins wherever it disagrees.
 
 - Product changes remove the superseded checks and give the model missing facts, tools and useful prompts. They preserve the six mechanics and Aggressive's protected behavior across every affected path.
 - CI and synthetic regression tests send only to local replicas. Authorized live runs, including scripted or unattended runs, use the owner's real profile, browser data, settings and application history; they are not switched to prepare-only and their ordinary site requests and permissions are not blocked. Never send a synthetic applicant to a real employer. Check the send ledger and the site before any send that could repeat one. Replicas never count toward live grades. [Real-site runs](../TESTING.md#real-site-runs) documents the existing driver command and evidence requirements.
-- Personal resumes, credentials and authenticated browser state stay out of the repo. Live evidence stays in the campaign folder outside the repo and is never published. It may contain the owner's data, never passwords, cookies, tokens or MFA codes.
+- Personal resumes, credentials and authenticated browser state stay out of the repo. Live evidence stays in the campaign folder outside the repo and is never published. It may contain the owner's data, never passwords, cookies, tokens or verification codes.
 - A click, solved challenge or successful sign-in never proves an application was sent. The ledger records what happened, including uncertainty, and returns that fact to the model rather than turning our inability to prove an outcome into another permission gate.

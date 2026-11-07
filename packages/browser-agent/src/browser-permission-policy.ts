@@ -50,7 +50,7 @@ export function describeBrowserPermissions(
   const permissions = BrowserAgentPermissionsSchema.parse(
     policy.browserPermissions ?? {},
   );
-  return `Browser settings (instructions from the person): CAPTCHA ${permissions.solveCaptchas ? "ON" : "OFF"}; website sign-in ${permissions.signIn ? "ON" : "OFF"}; Google sign-in/sign-up ${permissions.googleSignIn ? "ON" : "OFF"}; account creation ${permissions.createAccounts ? "ON" : "OFF"}. All tools remain available. Use screenshot to see the page or a named frame and pointer to click, drag or hold at its viewport coordinates. With CAPTCHA ON, solve a challenge yourself as a person would: look at the puzzle image, choose, press, look again, and retry a new puzzle if needed. Hand off on the open page only after real attempts fail. A browser checking itself (Just a moment) can need 20 to 30 seconds of waiting at a time while it progresses. Choose a route from the page facts; a failed Google route does not prevent using saved website credentials. Use the available vault tools for saved logins. Passwords, tokens and MFA codes never belong in model context.`;
+  return `Browser settings (instructions from the person): CAPTCHA ${permissions.solveCaptchas ? "ON" : "OFF"}; website sign-in ${permissions.signIn ? "ON" : "OFF"}; Google sign-in/sign-up ${permissions.googleSignIn ? "ON" : "OFF"}; account creation ${permissions.createAccounts ? "ON" : "OFF"}. All tools remain available. Use screenshot to see the page or a named frame and pointer to click, drag or hold at its viewport coordinates. With CAPTCHA ON, solve a challenge yourself as a person would: look at the puzzle image, choose, press, look again, and retry a new puzzle if needed. Hand off on the open page only after real attempts fail. A browser checking itself (Just a moment) can need 20 to 30 seconds of waiting at a time while it progresses. Choose a route from the page facts; a failed Google route does not prevent using saved website credentials. Use list_saved_logins and fill_saved_login for saved logins. When creating a new account, use generate_account_login with the username and observed passwordRefs (including confirmation); the vault generates, types and saves the password without returning it. Inspect the page and press Create Account yourself. The lack of a saved login is not a reason to hand off a permitted new account. Passwords, tokens and non-email MFA secrets never belong in model context. Read emailed verification codes from Gmail in a second tab in this browser session and type them into the requesting page; keep them out of saved answers and evidence.`;
 }
 
 /** The wrapper preserves secret isolation. Settings and navigation are model instructions. */
@@ -65,10 +65,7 @@ export function withBrowserPermissions(
     fillText: async (ref, value) => {
       const page = await hands.observe();
       const control = page.controls.find((c) => c.ref === ref);
-      if (
-        control?.credentialRole === "password" ||
-        control?.credentialRole === "one_time_code"
-      )
+      if (control?.credentialRole === "password")
         return {
           ok: false,
           error:
