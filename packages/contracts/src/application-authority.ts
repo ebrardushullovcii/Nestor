@@ -1178,6 +1178,8 @@ export const SubmissionActionRequestSchema = z
     path: NonEmptyStringSchema,
     /** The site's HTTP status; null when no answer came. */
     status: z.number().int().min(0).max(999).nullable(),
+    /** The refused mutation's response, as the site returned it. */
+    responseText: z.string().optional(),
     /** The browser's reason when it ended without an answer. */
     failure: NonEmptyStringSchema.max(120).nullable(),
     /** The request the final control sends the application with. */

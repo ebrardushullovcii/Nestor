@@ -45,6 +45,7 @@ import type {
   ApplyExecutionResult,
   ApplyPageSession,
   CandidateProfile,
+  CandidateApplicationHistory,
   CandidateReusableAnswer,
   JobFinderSettings,
   JobSearchPreferences,
@@ -105,6 +106,7 @@ export interface AgentApplicationPreparationInput {
     typeof runApplyAgent
   >[0]["readReusableAnswers"];
   reusableAnswers?: CandidateReusableAnswer[];
+  history?: CandidateApplicationHistory;
   uploadsConfirmedByPerson?: readonly string[];
   earlierAttachments?: Parameters<
     typeof runApplyAgent
@@ -635,6 +637,7 @@ export async function runAgentApplicationPreparation(
     ).createAccounts,
     authority: activeAuthority,
     sources: {
+      ...(input.history ? { history: input.history } : {}),
       profile: executionInput.profile,
       ...(executionInput.listingDiscovery
         ? { listingDiscovery: executionInput.listingDiscovery }
@@ -892,6 +895,7 @@ export function applyingConversationKey(profile: { id: string }): string {
  * model is part of the product, so its absence is Job Finder's problem.
  */
 export function createApplyFormPreparer(input: {
+  history?: CandidateApplicationHistory;
   executionInput: ApplyPreparationInput;
   applicationRecordId?: string;
   searchPreferences?: JobSearchPreferences | undefined;
@@ -977,6 +981,7 @@ export function createApplyFormPreparer(input: {
       },
       () =>
         runAgentApplicationPreparation({
+          ...(input.history ? { history: input.history } : {}),
           session,
           currentUrl,
           executionInput: input.executionInput,

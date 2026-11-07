@@ -1427,3 +1427,96 @@ test("a failed batch field does not stop independent fields", async () => {
   ]);
   expect(result.filled).toHaveLength(2);
 });
+
+test.each([
+  "prepare_only",
+  "confirm_before_submit",
+  "autonomous_submit",
+] as const)(
+  "all modes receive history and instructions for contradictory sends and application email (%s)",
+  async (mode) => {
+    const input = config(page());
+    input.authority.mode = mode;
+    input.sources.history = {
+      applications: [],
+      tracker: [
+        {
+          source: "tracker",
+          jobId: 17,
+          title: "Engineer",
+          company: "Northwind Tools",
+          status: "rejected",
+          statusAt: "2026-09-10T10:00:00Z",
+          appliedAt: "2026-09-01T10:00:00Z",
+          events: [
+            {
+              id: 31,
+              kind: "interview",
+              at: "2026-09-02T10:00:00Z",
+              title: "Technical interview",
+              body: "Met the platform team",
+              dueAt: null,
+              doneAt: null,
+              place: null,
+            },
+          ],
+        },
+      ],
+    };
+    const client = model([done]);
+    await runApplyAgent(input, client);
+    const request = JSON.stringify(
+      vi.mocked(client.chatWithTools).mock.calls[0]?.[0],
+    );
+    expect(request).toContain("Technical interview");
+    expect(request).toContain("Met the platform team");
+    expect(request).toContain("tracker");
+    expect(request).toContain("31");
+    const prompt = createApplySystemPrompt(input);
+    expect(prompt).toContain("Absence of a record is not a negative fact");
+    expect(prompt).toContain("record uncertain and quote both");
+    expect(prompt).toContain(
+      "mail client's Send button for an application email",
+    );
+  },
+);
+
+test("22 batch entries return their resulting values before exactly one fresh page", async () => {
+  const source = page({
+    controls: Array.from({ length: 22 }, (_, index) => ({
+      ...nameControl(),
+      index,
+      label: `Field ${index}`,
+      value: "",
+    })),
+  });
+  const input = config(source);
+  const client = model([
+    {
+      name: "fill_fields",
+      args: {
+        fields: source.controls.map((control) => ({
+          tool: "type",
+          ref: `c${control.index}`,
+          text: `Value ${control.index}`,
+        })),
+      },
+    },
+    done,
+  ]);
+  await runApplyAgent(input, client);
+  const messages = vi.mocked(client.chatWithTools).mock.calls[1][0];
+  const returned = [...messages]
+    .reverse()
+    .find((message) => message.role === "tool")!.content;
+  for (let index = 0; index < 22; index++)
+    expect(returned).toContain(
+      `${index + 1}. type c${index}: Field ${index} now holds "Value ${index}"`,
+    );
+  expect(
+    returned.match(/Page: https:\/\/apply.example.test\/form/g),
+  ).toHaveLength(1);
+  expect(returned.lastIndexOf("22. type")).toBeLessThan(
+    returned.indexOf("Page:"),
+  );
+});

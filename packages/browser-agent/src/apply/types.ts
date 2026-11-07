@@ -26,6 +26,7 @@ import type {
   ApplyWriteResult,
   CandidateAssetKind,
   CandidateProfile,
+  CandidateApplicationHistory,
   CandidateReusableAnswer,
   CoverLetterPreference,
   JobSearchPreferences,
@@ -386,6 +387,7 @@ export interface ApplyAnswer {
 }
 
 export interface ApplyAnswerSources {
+  history?: CandidateApplicationHistory;
   applicationAutomationMode?: ApplicationAutomationMode;
   /** Person-owned task/site notes, never text read from the employer page. */
   taskInstructions?: readonly string[] | undefined;

@@ -902,6 +902,7 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
         ...facts,
         shouldRetainFailedApplicationPage,
         prepareApplicationForm: createApplyFormPreparer({
+          history: applications.history(),
           reusableAnswers: [...savedAnswers, ...localAnswers()],
           initialUnansweredPickerQuestions:
             previous?.execution.questions

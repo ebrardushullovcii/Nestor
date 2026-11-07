@@ -670,61 +670,101 @@ describe("Applications", () => {
 });
 
 describe("a failed application is never a dead end", () => {
-  it("one click tries a run that failed before sending again", async () => {
-    applyWrites(
-      ids[1]!,
-      "state = 'failed', error = 'The page tried to send the application on its own.'",
-    );
-    const list = renderScreen();
-    // Its own status: not counted or listed as Applying, never "Applying
-    // since", and a stage of its own while it has any.
-    const row = await within(list).findByRole("button", {
-      name: /^Northfield 2,/,
-    });
-    await waitFor(() =>
-      expect(row.getAttribute("aria-label")).toMatch(
-        /, Could not apply, Tried [A-Z][a-z]{2} \d{1,2}(,|$)/,
-      ),
-    );
-    expect(row.getAttribute("aria-label")).not.toContain("Applying since");
-    expect(
-      await screen.findByRole("option", { name: "Could not apply (1)" }),
-    ).toBeTruthy();
-    // Still one of All: counted once, under its own stage.
-    expect(
-      screen.getByRole("option", {
-        name: `All stages (${createApplicationStore(store).forJobs(ids).length})`,
-      }),
-    ).toBeTruthy();
-    const applying = screen.getByRole("option", { name: /^Applying \(/ });
-    expect(applying.textContent).not.toContain(
-      `(${createApplicationStore(store).forJobs(ids).length})`,
-    );
-    fireEvent.click(row);
-    const detail = await screen.findByRole("region", {
-      name: "Application to Northfield 2",
-    });
-    // The cause is not an unverified verdict about what the site received.
-    const line = await within(detail).findByText(
-      "The page tried to send the application on its own.",
-    );
-    expect(line.className).not.toContain("warning");
-    // Both ways on, as its row says.
-    expect(
-      within(detail).getByRole("button", { name: "Apply by hand" }),
-    ).toBeTruthy();
-    fireEvent.click(
-      await within(detail).findByRole("button", { name: "Try again" }),
-    );
-    await screen.findByText("Trying again");
-    expect(
-      createApplicationStore(store).getApplication(
-        createApplicationStore(store).forJobs([ids[1]!])[0]!.id,
-      )?.state,
-    ).toBe("queued");
-  });
+  it.each([false, true])(
+    "one click retries a failed run with a recorded send outcome: %s",
+    async (recorded) => {
+      applyWrites(
+        ids[1]!,
+        "state = 'failed', error = 'The page tried to send the application on its own.'",
+      );
+      if (recorded) {
+        const application = createApplicationStore(store).forJobs([
+          ids[1]!,
+        ])[0]!;
+        receipt = SubmissionOutcomeRecordSchema.parse({
+          id: "failed_send",
+          preflightId: "failed_send",
+          idempotencyKey: "failed_call",
+          authorityEnvelopeId: "permission",
+          authorityRevision: 1,
+          runId: `application_run_${application.id}`,
+          jobId: String(application.jobId),
+          resultId: `application_${application.id}_attempt_${application.attempt}`,
+          applicationRecordId: `application_${application.id}`,
+          outcome: "not_submitted",
+          attemptedAt: application.updatedAt,
+          verifiedAt: application.updatedAt,
+          evidence: [
+            {
+              id: "failure",
+              kind: "employer_site_state",
+              observedAt: application.updatedAt,
+              destination: {
+                origin: "https://board.example.test",
+                safePath: "/apply",
+              },
+              artifactRefId: null,
+              summary: "HTTP 422; invalid field",
+            },
+          ],
+          retry: { eligible: false, blockReason: "policy_decision" },
+        });
+        applyWrites(
+          ids[1]!,
+          `submission_outcome_json='${JSON.stringify(receipt)}'`,
+        );
+      }
+      const list = renderScreen();
+      // Its own status: not counted or listed as Applying, never "Applying
+      // since", and a stage of its own while it has any.
+      const row = await within(list).findByRole("button", {
+        name: /^Northfield 2,/,
+      });
+      await waitFor(() =>
+        expect(row.getAttribute("aria-label")).toMatch(
+          /, Could not apply, Tried [A-Z][a-z]{2} \d{1,2}(,|$)/,
+        ),
+      );
+      expect(row.getAttribute("aria-label")).not.toContain("Applying since");
+      expect(
+        await screen.findByRole("option", { name: "Could not apply (1)" }),
+      ).toBeTruthy();
+      // Still one of All: counted once, under its own stage.
+      expect(
+        screen.getByRole("option", {
+          name: `All stages (${createApplicationStore(store).forJobs(ids).length})`,
+        }),
+      ).toBeTruthy();
+      const applying = screen.getByRole("option", { name: /^Applying \(/ });
+      expect(applying.textContent).not.toContain(
+        `(${createApplicationStore(store).forJobs(ids).length})`,
+      );
+      fireEvent.click(row);
+      const detail = await screen.findByRole("region", {
+        name: "Application to Northfield 2",
+      });
+      // The cause is not an unverified verdict about what the site received.
+      const line = await within(detail).findByText(
+        "The page tried to send the application on its own.",
+      );
+      expect(line.className).not.toContain("warning");
+      // Both ways on, as its row says.
+      expect(
+        within(detail).getByRole("button", { name: "Apply by hand" }),
+      ).toBeTruthy();
+      fireEvent.click(
+        await within(detail).findByRole("button", { name: "Apply again" }),
+      );
+      await screen.findByText("Trying again");
+      expect(
+        createApplicationStore(store).getApplication(
+          createApplicationStore(store).forJobs([ids[1]!])[0]!.id,
+        )?.state,
+      ).toBe("queued");
+    },
+  );
 
-  it("a run the guarded send already tried offers nothing that could send twice", async () => {
+  it("a failed recorded press offers Apply again as a new run", async () => {
     applyWrites(ids[1]!, "state = 'failed'");
     receipt = {
       outcome: "not_submitted",
@@ -741,8 +781,8 @@ describe("a failed application is never a dead end", () => {
     });
     expect(await within(detail).findByText("Not sent")).toBeTruthy();
     expect(
-      within(detail).queryByRole("button", { name: "Try again" }),
-    ).toBeNull();
+      within(detail).getByRole("button", { name: "Apply again" }),
+    ).toBeTruthy();
     expect(
       within(detail).queryByRole("button", { name: "Open application" }),
     ).toBeNull();
@@ -834,7 +874,7 @@ describe("a stopped or unconfirmed application is never a dead end", () => {
     await screen.findByText("Opened the application page");
     expect(openApplication).toHaveBeenCalledOnce();
     expect(
-      within(detail).queryByRole("button", { name: "Try again" }),
+      within(detail).queryByRole("button", { name: "Apply again" }),
     ).toBeNull();
     fireEvent.click(
       await within(detail).findByRole("button", { name: "It went through" }),
@@ -868,7 +908,7 @@ describe("one main action per screen", () => {
       name: "Application to Northfield 2",
     });
     const own = await within(detail).findByRole("button", {
-      name: "Try again",
+      name: "Apply again",
     });
     expect(own.getAttribute("data-variant")).toBe("primary");
     await waitFor(() =>

@@ -176,7 +176,7 @@ async function requestBodyKeys(request: PageRequest): Promise<string[]> {
 }
 
 /** Only a unique exact request observed on its own frame can supply a fallback body. */
-export async function inspectPageMutationResponse(
+export async function readPageMutationResponseText(
   page: Page,
   response: Response,
 ) {
@@ -186,7 +186,6 @@ export async function inspectPageMutationResponse(
     requestTokens.set(response, token);
   }
   const request = response.request();
-  const permit = getPrepareOnlyRequestPermit(request);
   const fallback = async (): Promise<string> => {
     const bodyKeys = await requestBodyKeys(request);
     if (!bodyKeys.length) throw Error("Opaque request body");
@@ -227,11 +226,19 @@ export async function inspectPageMutationResponse(
     }
     throw Error("No unique readable response body");
   };
+  return Promise.any([response.text(), fallback()]);
+}
+
+export async function inspectPageMutationResponse(
+  page: Page,
+  response: Response,
+) {
+  const permit = getPrepareOnlyRequestPermit(response.request());
   return inspectMutationResponse(
     {
       status: () => response.status(),
       headers: () => response.headers(),
-      text: () => Promise.any([response.text(), fallback()]),
+      text: () => readPageMutationResponseText(page, response),
       url: () => response.url(),
       request: () => response.request(),
     },

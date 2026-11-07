@@ -41,6 +41,7 @@ interface UploadRecord {
   /** The order its answer arrived in; null while it waits. */
   completedAt: number | null;
   sequence?: number;
+  request?: Request;
   httpStatus?: number;
   carriesFile: boolean;
   /** Carrier: the file names its multipart body gives. */
@@ -73,6 +74,12 @@ interface FileIdentity {
 }
 
 const ledgers = new WeakMap<Page, UploadRecord[]>();
+const applicationSubmitRequests = new WeakSet<Request>();
+
+/** A model-designated Send carries the whole form, not an upload verdict. */
+export function rememberApplicationSubmitRequest(request: Request): void {
+  applicationSubmitRequests.add(request);
+}
 /**
  * The file Nestor gave each file control, by the control's handle. Some
  * widgets empty the input the moment they take the file (and send it
@@ -376,6 +383,7 @@ export function watchAttachmentUploads(page: Page): void {
       if (!followed && !given.get(page)?.size && !hasFile) return;
       const record = followed ?? track(records, request);
       if (record) {
+        record.request = request;
         const raw = request.postDataBuffer();
         if (raw?.length) {
           const sha256 = createHash("sha256").update(raw).digest("hex");
@@ -427,8 +435,9 @@ function attachmentUploadEvidence(
     .get(page)
     ?.filter(
       (record) =>
-        file.startedAfter === undefined ||
-        (record.sequence ?? 0) > file.startedAfter,
+        !(record.request && applicationSubmitRequests.has(record.request)) &&
+        (file.startedAfter === undefined ||
+          (record.sequence ?? 0) > file.startedAfter),
     );
   const name = file.name?.trim().toLowerCase();
   if (!records || !name) return undefined;

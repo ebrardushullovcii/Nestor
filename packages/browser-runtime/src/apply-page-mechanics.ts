@@ -2973,7 +2973,7 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
         controlState: target
           ? await controlResultState(target)
           : (result.controlState ?? { present: false }),
-        clickFacts: press.finish(),
+        clickFacts: await press.finish(),
       };
     },
     scroll: async (direction): Promise<ApplyWriteResult> => {

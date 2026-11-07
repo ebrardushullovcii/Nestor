@@ -12,6 +12,7 @@ import {
   SubmissionOutcomeRecordSchema,
   UPLOAD_ATTACHED_ANSWER,
   type ApplicationReviewAnswer,
+  type CandidateApplicationHistory,
   type ApplyExecutionResult,
   type ResumeLevel,
   type FoundJob,
@@ -52,6 +53,7 @@ const preparation = vi.hoisted(() => ({
   /** What each run was given to bring a closed form back. */
   replays: [] as unknown[],
   activities: [] as unknown[],
+  histories: [] as (CandidateApplicationHistory | undefined)[],
   givenAnswers: [] as NonNullable<
     ApplicationPreparation.AgentApplicationPreparationInput["reusableAnswers"]
   >[],
@@ -75,6 +77,7 @@ vi.mock("../internal/agent-application-preparation", async (importOriginal) => {
       preparation.givenAnswers.push(input.reusableAnswers ?? []);
       preparation.replays.push(input.replay ?? null);
       preparation.activities.push(input.earlierActivity ?? []);
+      preparation.histories.push(input.history);
       preparation.pickerTries.push(
         (input.initialPickerAttempts ?? []).flatMap((attempt) => attempt.tried),
       );
@@ -3415,4 +3418,35 @@ it("a technical failure keeps Try again visible while a separate genuine questio
     "Preferred contact time",
   ]);
   expect(f.browser.releaseApplicationPageBinding).not.toHaveBeenCalled();
+});
+
+it("hands application and tracker interview history to the apply preparer", async () => {
+  const f = await setup(2);
+  f.applications.applyJobs({ selection: { ids: f.ids } });
+  f.jobs
+    .sql(
+      "INSERT INTO tracker_events (job_id,kind,at,title,body) VALUES (?,'interview',?,'Prior interview','Spoke with the team')",
+    )
+    .run(f.ids[1]!, Date.now());
+  preparation.histories.length = 0;
+  await f.service.start();
+  await vi.waitFor(() =>
+    expect(preparation.histories.length).toBeGreaterThan(0),
+  );
+  const history = preparation.histories[0];
+  expect(
+    history?.applications.some(
+      (entry) => entry.source === "applications" && entry.jobId === f.ids[1],
+    ),
+  ).toBe(true);
+  const tracked = history?.tracker.find((entry) => entry.jobId === f.ids[1]);
+  expect(tracked?.source).toBe("tracker");
+  expect(tracked?.events).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        title: "Prior interview",
+        body: "Spoke with the team",
+      }),
+    ]),
+  );
 });

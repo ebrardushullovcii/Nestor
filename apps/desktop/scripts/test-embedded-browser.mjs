@@ -14,6 +14,7 @@ const pageApi = process.argv.includes("--page-api");
 const siteChecks = process.argv.includes("--site-checks");
 const verification = process.argv.includes("--verification");
 const fieldResults = process.argv.includes("--field-results");
+const applyFacts = process.argv.includes("--apply-facts");
 const buildOutput = verification ? join(output, "main") : output;
 if (verification)
   await cp(join(desktop, "out/preload"), join(output, "preload"), {
@@ -55,15 +56,17 @@ await build({
       desktop,
       verification
         ? "scripts/fixtures/embedded-browser-verification.ts"
-        : fieldResults
-          ? "scripts/fixtures/embedded-browser-field-results.ts"
-          : siteChecks
-            ? "scripts/fixtures/embedded-browser-site-checks.ts"
-            : discoveryCleanup
-              ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
-              : pageApi
-                ? "scripts/fixtures/embedded-browser-page-api.ts"
-                : "scripts/fixtures/embedded-browser.ts",
+        : applyFacts
+          ? "scripts/fixtures/embedded-browser-apply-facts.ts"
+          : fieldResults
+            ? "scripts/fixtures/embedded-browser-field-results.ts"
+            : siteChecks
+              ? "scripts/fixtures/embedded-browser-site-checks.ts"
+              : discoveryCleanup
+                ? "scripts/fixtures/embedded-browser-discovery-cleanup.ts"
+                : pageApi
+                  ? "scripts/fixtures/embedded-browser-page-api.ts"
+                  : "scripts/fixtures/embedded-browser.ts",
     ),
     outDir: buildOutput,
     emptyOutDir: false,
@@ -110,16 +113,19 @@ child.once("error", (error) => {
 child.once("exit", async (code) => {
   clearTimeout(timeout);
   process.exitCode = code ?? 1;
-  if (fieldResults) {
+  if (fieldResults || applyFacts) {
     try {
       const result = JSON.parse(
-        await readFile(join(output, "field-results.json"), "utf8"),
+        await readFile(
+          join(output, applyFacts ? "apply-facts.json" : "field-results.json"),
+          "utf8",
+        ),
       );
       console.log(JSON.stringify(result, null, 2));
       if (result.pass !== true) process.exitCode = 1;
     } catch (error) {
       console.error(
-        "The native field-results fixture did not produce a passing result.",
+        "The native browser fixture did not produce a passing result.",
         error,
       );
       process.exitCode = 1;

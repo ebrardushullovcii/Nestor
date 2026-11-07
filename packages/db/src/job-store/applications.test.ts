@@ -2422,3 +2422,57 @@ it.each([
     ).toBe("The application model's quoted page observation.");
   },
 );
+
+it("history includes all application records and tracker interviews with provenance, without inferring missing history", () => {
+  const { jobs, applications } = open();
+  expect(applications.history()).toEqual({ applications: [], tracker: [] });
+  const ids = add(jobs, 2);
+  applications.applyJobs({ selection: { ids } });
+  const row = applications.claimNext()!;
+  applications.finishPreparation({
+    id: row.id,
+    attempt: row.attempt,
+    state: "failed",
+    error: "Site refused",
+  });
+  const at = Date.parse("2026-09-03T10:00:00Z");
+  jobs
+    .sql(
+      "UPDATE tracker SET status='rejected',status_at=?,applied_at=? WHERE job_id=?",
+    )
+    .run(at, at - 86400000, row.jobId);
+  jobs
+    .sql(
+      "INSERT INTO tracker_events (job_id,kind,at,title,body) VALUES (?,'interview',?,'Platform interview','Met the team')",
+    )
+    .run(row.jobId, at);
+  const history = applications.history();
+  expect(history.applications).toHaveLength(2);
+  expect(history.applications).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        source: "applications",
+        id: row.id,
+        state: "failed",
+        submittedAt: null,
+        submissionOutcome: null,
+      }),
+    ]),
+  );
+  const tracked = history.tracker.find((entry) => entry.jobId === row.jobId);
+  expect(tracked).toMatchObject({
+    source: "tracker",
+    jobId: row.jobId,
+    status: "rejected",
+    statusAt: "2026-09-03T10:00:00.000Z",
+  });
+  expect(tracked?.events).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        kind: "interview",
+        title: "Platform interview",
+        body: "Met the team",
+      }),
+    ]),
+  );
+});

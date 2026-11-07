@@ -7,8 +7,10 @@ import {
   type SubmissionFinalControlIdentity,
   type SubmissionObservationIdentity,
   type ApplyFinalActionTarget,
+  type SubmissionActionRequest,
 } from "@nestor/contracts";
-import type { Page, Request, Response } from "playwright";
+import type { Page } from "playwright";
+import { watchPagePress } from "./page-press-facts";
 import { readVisibleText } from "./visible-page-text";
 import {
   actionLocator,
@@ -88,17 +90,7 @@ export interface ApplicationExternalActionFacts {
 }
 
 /** One request after the final click. No query string: it can carry answers. */
-export interface ApplicationActionRequest {
-  readonly method: string;
-  readonly host: string;
-  readonly path: string;
-  /** The site's HTTP status; null when no answer came. */
-  readonly status: number | null;
-  /** The browser's reason when it ended without an answer. */
-  readonly failure: string | null;
-  /** True for the request the final control sends the application with. */
-  readonly finalSubmit: boolean;
-}
+export type ApplicationActionRequest = Readonly<SubmissionActionRequest>;
 
 export type ApplicationFinalActionResult =
   | {
@@ -741,39 +733,7 @@ export async function executeExactlyOneFinalAction(
       finalControl = control;
     const pageBefore = initialPage;
     rememberIssuedAction(page, key);
-    const requests: ApplicationActionRequest[] = [];
-    const byRequest = new Map<Request, ApplicationActionRequest>();
-    const onRequest = (request: Request) => {
-      try {
-        const url = new URL(request.url());
-        const entry: ApplicationActionRequest = {
-          method: request.method(),
-          host: url.host,
-          path: url.pathname,
-          status: null,
-          failure: null,
-          finalSubmit: false,
-        };
-        requests.push(entry);
-        byRequest.set(request, entry);
-      } catch {
-        /* Non-HTTP requests have no host/path. */
-      }
-    };
-    const onResponse = (response: Response) => {
-      const entry = byRequest.get(response.request());
-      if (entry) Object.assign(entry, { status: response.status() });
-    };
-    const onFailure = (request: Request) => {
-      const entry = byRequest.get(request);
-      if (entry)
-        Object.assign(entry, {
-          failure: request.failure()?.errorText ?? "failed",
-        });
-    };
-    page.on("request", onRequest);
-    page.on("response", onResponse);
-    page.on("requestfailed", onFailure);
+    const press = watchPagePress(page, { applicationSend: true });
     const stopAction = () => {
       void page.close().catch(() => undefined);
     };
@@ -803,12 +763,10 @@ export async function executeExactlyOneFinalAction(
       );
     } catch {
       /* Navigation/read failure is returned as uncertainty. */
-    } finally {
-      input.signal?.removeEventListener("abort", stopAction);
-      page.off("request", onRequest);
-      page.off("response", onResponse);
-      page.off("requestfailed", onFailure);
     }
+    const pressFacts = await press.finish().finally(() => {
+      input.signal?.removeEventListener("abort", stopAction);
+    });
     const pageAfter = readSafePageUrl(page.url());
     if (actionError)
       siteMessage = [
@@ -831,8 +789,8 @@ export async function executeExactlyOneFinalAction(
         urlChanged:
           pageBefore.origin !== pageAfter.origin ||
           pageBefore.safePath !== pageAfter.safePath,
-        requestsObservedDuringAction: requests.length,
-        requestsAfterClick: requests,
+        requestsObservedDuringAction: pressFacts.requestsAfterClick.length,
+        requestsAfterClick: pressFacts.requestsAfterClick,
       },
       ...(siteMessage ? { siteMessage } : {}),
     };
