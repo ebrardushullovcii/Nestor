@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   save: vi.fn(),
   score: vi.fn(),
   owns: vi.fn(),
+  readRenderedPage: vi.fn(),
   aiClient: { extractJobsFromPage: () => Promise.resolve([]) },
   store: { synthetic: true },
 }));
@@ -22,7 +23,11 @@ vi.mock("../services/browser/browser-profile-import", () => ({
   listBrowserImportSources: vi.fn(),
 }));
 vi.mock("../services/job-finder/runtime", () => ({
-  startJobFinderRuntime: () => Promise.resolve({ aiClient: mocks.aiClient }),
+  startJobFinderRuntime: () =>
+    Promise.resolve({
+      aiClient: mocks.aiClient,
+      browserRuntime: { readRenderedPage: mocks.readRenderedPage },
+    }),
 }));
 vi.mock("@nestor/job-finder", () => ({ readJobFromBrowserPage: mocks.read }));
 vi.mock("@nestor/job-finder/job-commands", () => ({
@@ -70,13 +75,21 @@ it("validates exact-tab IPC, reads that page in main and saves its job to Find j
     planName: null,
   });
   expect(mocks.readTab).toHaveBeenCalledWith("chosen", BROWSER_JOB_PAGE_HTML);
-  expect(mocks.read).toHaveBeenCalledWith(mocks.aiClient, {
-    html: "<main>Designer</main>",
-    pageUrl: "https://example.test/job",
-  });
+  expect(mocks.read).toHaveBeenCalledWith(
+    mocks.aiClient,
+    expect.objectContaining({
+      html: "<main>Designer</main>",
+      pageUrl: "https://example.test/job",
+    }),
+  );
+  const readInput = mocks.read.mock.calls[0]?.[1] as {
+    readRenderedPage?: unknown;
+  };
+  expect(readInput.readRenderedPage).toBeTypeOf("function");
   expect(mocks.save).toHaveBeenCalledWith(mocks.store, {
     postings: [posting],
     pageUrl: "https://example.test/job",
+    fullListingRead: true,
   });
   // Its fit is judged in the background, after the job is saved.
   expect(mocks.score).toHaveBeenCalledOnce();

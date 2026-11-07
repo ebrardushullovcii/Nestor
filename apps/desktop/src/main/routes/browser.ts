@@ -47,14 +47,21 @@ export function registerBrowserRoutes(ipc: IpcMain): void {
       import("@nestor/job-finder/job-commands"),
       import("../services/job-finder/runtime"),
     ]);
-    const { aiClient } = await startJobFinderRuntime();
+    const { aiClient, browserRuntime } = await startJobFinderRuntime();
     const posting = await readJobFromBrowserPage(aiClient, {
       html: page.value,
       pageUrl: page.url,
+      ...(browserRuntime?.readRenderedPage
+        ? {
+            readRenderedPage: (url, options) =>
+              browserRuntime.readRenderedPage!(url, options),
+          }
+        : {}),
     });
     const [jobId] = savePageJobs(getJobStore(), {
       postings: [posting],
       pageUrl: page.url,
+      fullListingRead: true,
     }).ids;
     if (jobId === undefined)
       throw new Error("This job could not be saved. Try again.");

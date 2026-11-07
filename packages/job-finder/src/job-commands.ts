@@ -42,6 +42,8 @@ export function savePageJobs(
     postings: readonly JobPosting[];
     pageUrl: string;
     applyOnThisPage?: boolean;
+    /** The model read this page's complete vacancy, rather than a results card. */
+    fullListingRead?: boolean;
   },
 ): SaveFoundJobsResult {
   const site = new URL(input.pageUrl).hostname;
@@ -67,6 +69,22 @@ export function savePageJobs(
         employmentType: posting.employmentType,
         summary: posting.summary,
         description: posting.description,
+        ...(input.fullListingRead
+          ? {
+              facts: {
+                fullListingRead: true,
+                keySkills: posting.keySkills,
+                responsibilities: posting.responsibilities,
+                minimumQualifications: posting.minimumQualifications,
+                preferredQualifications: posting.preferredQualifications,
+                benefits: posting.benefits,
+                department: posting.department,
+                team: posting.team,
+                employerDomain: posting.employerDomain,
+                atsProvider: posting.atsProvider,
+              },
+            }
+          : {}),
       })),
     });
     const [posting] = input.postings;

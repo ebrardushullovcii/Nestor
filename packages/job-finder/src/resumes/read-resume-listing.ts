@@ -22,7 +22,8 @@ export function createResumeListingReader(deps: {
   const readPage = createModelListingPageReader(deps.aiClient);
   /** A card-only job gets its posting read once, with no fit check. */
   return async function withListing(job: JobDetail, signal: AbortSignal) {
-    if (job.facts.fullListingRead === true) return job;
+    if (job.facts.fullListingRead === true && job.description.trim())
+      return job;
     const page = await fetchHtml(job.url, {
       signal,
     });

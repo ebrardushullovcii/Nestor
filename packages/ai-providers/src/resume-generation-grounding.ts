@@ -118,6 +118,13 @@ export function buildResumeGenerationEvidenceCatalog(
     "profile:narrative:careerTransitionSummary",
     input.profile.narrative.careerTransitionSummary,
   );
+  addProfileEvidence(
+    "profile:narrative:nextChapterSummary",
+    input.profile.narrative.nextChapterSummary,
+  );
+  input.profile.narrative.motivationThemes.forEach((text, index) => {
+    addProfileEvidence(`profile:narrative:motivationTheme:${index}`, text);
+  });
   input.profile.narrative.differentiators.forEach((text, index) => {
     addProfileEvidence(`profile:narrative:differentiator:${index}`, text);
   });

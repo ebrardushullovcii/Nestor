@@ -1,4 +1,3 @@
-import { selfLimitSlice } from "@nestor/core";
 import {
   isFreshStartCandidateProfile,
   resolveResumeContactIdentity,
@@ -277,15 +276,10 @@ function extractCanonicalResumeIdentity(
     };
   }
 
-  const lines = selfLimitSlice(
-    text
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean),
-    0,
-    12,
-    "packages/job-finder/src/internal/resume-identity.ts:280",
-  );
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   const email = text.match(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i)?.[0];
   const name =
     candidateName ??

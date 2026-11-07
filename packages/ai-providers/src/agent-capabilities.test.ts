@@ -515,6 +515,11 @@ describe("tool-using AI capabilities", () => {
 
   test("resume context keeps all candidate facts and listing details without search diagnostics", async () => {
     const profile = createProfile();
+    profile.narrative.nextChapterSummary = "Saved next chapter context.";
+    profile.narrative.motivationThemes = Array.from(
+      { length: 40 },
+      (_, index) => `Saved motivation ${index}.`,
+    );
     profile.experiences = Array.from({ length: 10 }, (_, index) =>
       CandidateExperienceSchema.parse({
         id: `experience_${index}`,
@@ -610,6 +615,8 @@ describe("tool-using AI capabilities", () => {
     const evidenceTexts = new Set(
       buildResumeGenerationEvidenceCatalog(request).map((item) => item.text),
     );
+    expect(evidenceTexts).toContain("Saved next chapter context.");
+    expect(evidenceTexts).toContain("Saved motivation 39.");
     for (const experience of profile.experiences) {
       expect(evidenceTexts).toContain(experience.summary);
       for (const achievement of experience.achievements)

@@ -435,6 +435,12 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       job = await createResumeListingReader({
         aiClient: deps.aiClient,
         resumes,
+        ...(browser.readRenderedPage
+          ? {
+              readRenderedPage: (url, options) =>
+                browser.readRenderedPage!(url, options),
+            }
+          : {}),
       })(job, signal);
       const draft = await writeResume(deps, {
         profile,

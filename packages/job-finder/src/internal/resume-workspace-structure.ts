@@ -1,4 +1,4 @@
-import { selfLimitSlice, fnv1a32 } from "@nestor/core";
+import { fnv1a32 } from "@nestor/core";
 import {
   filterCandidateFacingResumeKeywords,
   type TailoredResumeDraft,
@@ -480,13 +480,11 @@ function buildCoreAndAdditionalSkills(
 }
 
 // Imported resume text can be much longer than the first source-ref preview.
-// Keep a bounded set of word-packed refs so downstream evidence panels can
-// still locate later facts without copying the raw document into every draft.
+// Keep every word-packed ref so downstream evidence panels can locate later
+// facts as well as the first page. Chunking changes presentation, not coverage.
 const RESUME_EVIDENCE_SNIPPET_LENGTH = 220;
-const MAX_RESUME_EVIDENCE_REFS = 24;
-const MAX_PROFILE_PROVENANCE_REFS = 24;
 
-function splitBoundedEvidenceText(value: string): string[] {
+function splitEvidenceText(value: string): string[] {
   const chunks: string[] = [];
 
   for (const line of value.split(/\r?\n+/)) {
@@ -521,19 +519,13 @@ function splitBoundedEvidenceText(value: string): string[] {
   return uniqueStrings(chunks);
 }
 
-function buildBoundedSourceRefs(
+function buildSourceRefs(
   sourceKind: ResumeDraftSourceRef["sourceKind"],
   sourceId: string,
   values: readonly (string | null | undefined)[],
-  maxRefs: number,
 ): ResumeDraftSourceRef[] {
-  return selfLimitSlice(
-    uniqueStrings(
-      values.flatMap((value) => (value ? splitBoundedEvidenceText(value) : [])),
-    ),
-    0,
-    maxRefs,
-    "packages/job-finder/src/internal/resume-workspace-structure.ts:530",
+  return uniqueStrings(
+    values.flatMap((value) => (value ? splitEvidenceText(value) : [])),
   ).flatMap((snippet) => {
     const boundedSnippet = safeSnippet(snippet);
     return boundedSnippet
@@ -549,33 +541,28 @@ function buildProfileSummarySourceRefs(
     return [];
   }
 
-  return buildBoundedSourceRefs(
-    "profile",
-    `profile:${profile.id}:summary`,
-    [
-      profile.headline,
-      profile.summary,
-      profile.professionalSummary.shortValueProposition,
-      profile.professionalSummary.fullSummary,
-      ...profile.professionalSummary.careerThemes,
-      profile.professionalSummary.leadershipSummary,
-      profile.professionalSummary.domainFocusSummary,
-      ...profile.professionalSummary.strengths,
-      profile.narrative.professionalStory,
-      profile.narrative.nextChapterSummary,
-      profile.narrative.careerTransitionSummary,
-      ...profile.narrative.differentiators,
-      ...profile.experiences.flatMap((experience) => [
-        experience.summary,
-        ...experience.achievements,
-      ]),
-      ...profile.projects.flatMap((project) => [
-        project.summary,
-        project.outcome,
-      ]),
-    ],
-    MAX_PROFILE_PROVENANCE_REFS,
-  );
+  return buildSourceRefs("profile", `profile:${profile.id}:summary`, [
+    profile.headline,
+    profile.summary,
+    profile.professionalSummary.shortValueProposition,
+    profile.professionalSummary.fullSummary,
+    ...profile.professionalSummary.careerThemes,
+    profile.professionalSummary.leadershipSummary,
+    profile.professionalSummary.domainFocusSummary,
+    ...profile.professionalSummary.strengths,
+    profile.narrative.professionalStory,
+    profile.narrative.nextChapterSummary,
+    profile.narrative.careerTransitionSummary,
+    ...profile.narrative.differentiators,
+    ...profile.experiences.flatMap((experience) => [
+      experience.summary,
+      ...experience.achievements,
+    ]),
+    ...profile.projects.flatMap((project) => [
+      project.summary,
+      project.outcome,
+    ]),
+  ]);
 }
 
 function buildProfileSkillSourceRefs(
@@ -585,26 +572,21 @@ function buildProfileSkillSourceRefs(
     return [];
   }
 
-  return buildBoundedSourceRefs(
-    "profile",
-    `profile:${profile.id}:skills`,
-    [
-      ...profile.skills,
-      ...profile.skillGroups.coreSkills,
-      ...profile.skillGroups.tools,
-      ...profile.skillGroups.languagesAndFrameworks,
-      ...profile.skillGroups.softSkills,
-      ...profile.skillGroups.highlightedSkills,
-      ...profile.experiences.flatMap((experience) => experience.skills),
-      ...profile.projects.flatMap((project) => project.skills),
-      ...profile.spokenLanguages.flatMap((language) => [
-        language.language,
-        language.proficiency,
-        language.notes,
-      ]),
-    ],
-    MAX_PROFILE_PROVENANCE_REFS,
-  );
+  return buildSourceRefs("profile", `profile:${profile.id}:skills`, [
+    ...profile.skills,
+    ...profile.skillGroups.coreSkills,
+    ...profile.skillGroups.tools,
+    ...profile.skillGroups.languagesAndFrameworks,
+    ...profile.skillGroups.softSkills,
+    ...profile.skillGroups.highlightedSkills,
+    ...profile.experiences.flatMap((experience) => experience.skills),
+    ...profile.projects.flatMap((project) => project.skills),
+    ...profile.spokenLanguages.flatMap((language) => [
+      language.language,
+      language.proficiency,
+      language.notes,
+    ]),
+  ]);
 }
 
 function selectCanonicalDateRange(input: {
@@ -1410,12 +1392,9 @@ export function buildResumeDraftFromTailoredDraft(input: {
     safeSnippet(job.description || job.summary || buildJobContextText(job)),
   );
   const importedResumeEvidenceRefs = input.profile?.baseResume.textContent
-    ? buildBoundedSourceRefs(
-        "resume",
-        input.profile.baseResume.id,
-        [input.profile.baseResume.textContent],
-        MAX_RESUME_EVIDENCE_REFS,
-      )
+    ? buildSourceRefs("resume", input.profile.baseResume.id, [
+        input.profile.baseResume.textContent,
+      ])
     : [];
   const resumeRef = importedResumeEvidenceRefs[0] ?? null;
   const firstResearch =
@@ -1585,16 +1564,11 @@ export function seedResumeDraft(input: {
     }
   }
 
-  const coreSkills = selfLimitSlice(
-    uniqueStrings([
-      ...input.profile.skills,
-      ...input.profile.skillGroups.coreSkills,
-      ...input.profile.skillGroups.tools,
-    ]),
-    0,
-    10,
-    "packages/job-finder/src/internal/resume-workspace-structure.ts:1597",
-  );
+  const coreSkills = uniqueStrings([
+    ...input.profile.skills,
+    ...input.profile.skillGroups.coreSkills,
+    ...input.profile.skillGroups.tools,
+  ]);
   const additionalSkills = uniqueStrings([
     ...input.profile.skillGroups.languagesAndFrameworks,
     ...input.profile.skillGroups.highlightedSkills,

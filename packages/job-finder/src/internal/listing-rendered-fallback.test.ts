@@ -1,5 +1,8 @@
 import { expect, it, vi } from "vitest";
-import { readListingDetail } from "./listing-detail-enrichment";
+import {
+  readListingDetail,
+  type ListingPageReader,
+} from "./listing-detail-enrichment";
 import { createSeed } from "../test-fixtures";
 it("asks for the rendered page only when the model found no listing text in HTTP", async () => {
   const readPage = vi
@@ -39,6 +42,32 @@ it("leaves ordinary HTTP listing reads alone", async () => {
     readRenderedPage,
   });
   expect(readRenderedPage).not.toHaveBeenCalled();
+});
+it("uses rendered DOM text when the HTML snapshot still contains only an app shell", async () => {
+  const body =
+    "Complete rendered duties, qualifications and application facts. " +
+    "Late listing fact. ".repeat(400);
+  const readPage = vi
+    .fn<ListingPageReader>()
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce({
+      ...createSeed().savedJobs[0]!,
+      description: body,
+    });
+  const detail = await readListingDetail({
+    html: "<main>Loading</main>",
+    url: "https://example.test/job",
+    expectedTitle: null,
+    readPage,
+    readRenderedPage: () =>
+      Promise.resolve({
+        html: "<main>Loading</main>",
+        finalUrl: "https://example.test/job",
+        visibleText: body,
+      }),
+  });
+  expect(readPage.mock.calls[1]?.[0].pageText).toContain(body);
+  expect(detail?.description).toBe(body);
 });
 it("renders an HTTP card when the model says the listing body is still missing", async () => {
   const base = createSeed().savedJobs[0]!;

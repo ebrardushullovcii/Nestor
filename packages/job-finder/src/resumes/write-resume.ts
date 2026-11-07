@@ -19,7 +19,6 @@ import {
 import {
   buildResumeDraftFromTailoredDraft,
   buildResumeRenderDocument,
-  collectResumeWorkspaceEvidence,
   sanitizeResumeDraft,
   validateResumeDraft,
 } from "../internal/resume-workspace-helpers";
@@ -620,7 +619,6 @@ export async function writeResume(
     job,
     resumeText,
     resumeHeadline: headline ?? ownHeadline(profile),
-    evidence: collectResumeWorkspaceEvidence({ profile, job, research: [] }),
     availableTemplates: templates,
     selectedTemplateId: settings.resumeTemplateId,
     templateSelectionLocked: false,

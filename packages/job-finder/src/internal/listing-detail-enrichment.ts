@@ -66,7 +66,7 @@ export type ListingHtmlFetcher = (
 export type RenderedListingPageReader = (
   url: string,
   options: { signal?: AbortSignal },
-) => Promise<{ html: string; finalUrl: string }>;
+) => Promise<{ html: string; finalUrl: string; visibleText?: string }>;
 
 export type ListingPageReader = (input: {
   pageText: string;
@@ -404,6 +404,8 @@ function buildSummary(description: string): string | null {
  */
 export async function readListingDetail(input: {
   html: string;
+  /** Live DOM words, including frames/shadow text absent from serialized HTML. */
+  visibleText?: string;
   url: string;
   expectedTitle: string | null;
   readRenderedPage?: RenderedListingPageReader;
@@ -418,7 +420,7 @@ export async function readListingDetail(input: {
   if (!input.readPage) {
     return structured;
   }
-  const visibleText = listingPageText(input.html);
+  const visibleText = input.visibleText ?? listingPageText(input.html);
   const pageText = [
     visibleText,
     structured
@@ -444,6 +446,9 @@ export async function readListingDetail(input: {
       );
       return readListingDetail({
         html: rendered.html,
+        ...(rendered.visibleText !== undefined
+          ? { visibleText: rendered.visibleText }
+          : {}),
         url: rendered.finalUrl,
         expectedTitle: input.expectedTitle,
         readPage: input.readPage,
