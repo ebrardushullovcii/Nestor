@@ -561,6 +561,7 @@ export function createJobSearchRunner(
         flush();
       });
       run.enqueue = enqueue;
+      await pipeline.start();
       run.setReady(fits);
       fits.enqueue([
         ...visibleIds,

@@ -486,6 +486,35 @@ test("a crash recovers accepted card facts even when their source no longer retu
   });
 });
 
+test("recovered card processing starts while another source is still collecting", async () => {
+  const { store, engine, context } = setup();
+  const search = store.searches.start(
+    JobSearchSettingsSchema.parse({ depth: "thorough", postedWithin: "any" }),
+    2,
+  );
+  const rows = createSearchSourcesStore(store);
+  for (const target of context.sources) rows.plan(search.id, target, false);
+  rows.cardQueue(search.id).push([card("one")]);
+  const gate = deferred<void>();
+  engine.collectSource.mockImplementation(async ({ target }) => {
+    if (target.id === "two") await gate.promise;
+    return { cards: [], pagesRead: 1, complete: true, notes: [] };
+  });
+  const restarted = createJobSearchRunner({
+    store,
+    engine,
+    readContext: () => Promise.resolve(context),
+  });
+  runners.push(restarted);
+  try {
+    await vi.waitFor(() => expect(store.stageCounts().found).toBe(1));
+    expect(restarted.status().search?.state).toBe("running");
+  } finally {
+    gate.resolve();
+    await finished(restarted);
+  }
+});
+
 test("the person's explicit Stop is retained and never auto-resumed", async () => {
   const { store, runner, engine, context } = setup();
   engine.collectSource.mockImplementation(async ({ signal }) => {

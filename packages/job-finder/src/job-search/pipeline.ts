@@ -302,6 +302,7 @@ export function createSearchPipeline(input: {
     durable.cardQueue(input.searchId),
   );
   return {
+    start: () => waves.push([]),
     restore(source: SourceWork) {
       for (const url of durable.cardUrls(input.searchId, source.target.id))
         source.urls.add(url);
