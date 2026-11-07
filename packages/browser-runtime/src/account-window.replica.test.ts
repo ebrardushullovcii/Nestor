@@ -197,11 +197,34 @@ test("images and pointer input follow the account popup and its auxiliary tab wh
       );
     };
     await pressTarget(popup);
+    const email = (await session.readPage()).controls.find(
+      (c) => c.label === "Email",
+    )!;
+    expect(
+      await session.typeKeys!(email.ref!, "synthetic@example.test"),
+    ).toMatchObject({ ok: true });
+    expect(await popup.getByLabel("Email").inputValue()).toBe(
+      "synthetic@example.test",
+    );
     await session.openTab!(base + "/signed-in");
     const auxiliary = context
       .pages()
       .find((candidate) => candidate !== page && candidate !== popup)!;
     await pressTarget(auxiliary);
+    await auxiliary.evaluate(() => {
+      const field = document.createElement("input");
+      field.setAttribute("aria-label", "Search mailbox");
+      document.body.append(field);
+    });
+    const search = (await session.readPage()).controls.find(
+      (c) => c.label === "Search mailbox",
+    )!;
+    expect(await session.typeKeys!(search.ref!, "Replica")).toMatchObject({
+      ok: true,
+    });
+    expect(await auxiliary.getByLabel("Search mailbox").inputValue()).toBe(
+      "Replica",
+    );
     await session.switchTab!("form");
     await session.screenshot!();
     expect(captured.at(-1)).toBe(popup);

@@ -22,9 +22,14 @@ import { createHash } from "node:crypto";
 import { withAccountWindowSession } from "./account-window-session";
 import { choosePageOption } from "./choose-page-option";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
-import { evaluatePresent } from "./present-control";
+import {
+  clickPresent,
+  evaluatePresent,
+  presentControl,
+} from "./present-control";
 import { controlResultState } from "./control-result-state";
 import { replaceFieldText } from "./replace-field-text";
+import { typeFieldKeys } from "./type-field-keys";
 import type {
   ApplyBlockedAttempt,
   RawApplyClickable,
@@ -2472,21 +2477,9 @@ async function clickAndSettle(page: Page, locator: Locator): Promise<void> {
   const interaction = await locator.evaluate(readPressability);
   if (interaction.disabled) throw new Error("The control is disabled.");
   if (interaction.inert) throw new Error("The control is inert.");
-  await locator.scrollIntoViewIfNeeded({ timeout: 0 }).catch(() => undefined);
-  try {
-    await locator.click({ timeout: 0 });
-  } catch (error) {
-    // Something is drawn over it, or it sits under a sticky header. A person
-    // would still get the click in; so does a click aimed straight at it.
-    if (
-      !/intercepts pointer events|outside of the viewport|not visible/iu.test(
-        error instanceof Error ? error.message : "",
-      )
-    ) {
-      throw error;
-    }
-    await locator.click({ timeout: 0, force: true });
-  }
+  // Something drawn over it, or a sticky header: a person would still get
+  // the click in; so does a click aimed straight at it.
+  await clickPresent(locator);
   await page
     .waitForLoadState("domcontentloaded", { timeout: 0 })
     .catch(() => undefined);
@@ -2598,6 +2591,48 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
             error,
             "The intended button could not be checked.",
           ),
+        };
+      }
+    },
+    typeKeys: async (ref, text): Promise<ApplyWriteResult> => {
+      const locator = controlLocator(page, ref);
+      if (!locator)
+        return {
+          ok: false,
+          error: `No control named ${ref} on this page.`,
+          controlState: { present: false },
+        };
+      try {
+        const metadata = await evaluatePresent(
+          locator,
+          (element) => {
+            const input = element instanceof HTMLInputElement ? element : null;
+            return {
+              autocomplete: input?.autocomplete ?? "",
+              name: input?.name ?? "",
+              id: element.id,
+              label:
+                input?.labels?.[0]?.textContent ??
+                element.getAttribute("aria-label") ??
+                "",
+              placeholder: input?.placeholder ?? "",
+            };
+          },
+          undefined,
+        );
+        if (isVerificationCodeControl(metadata)) {
+          rememberVerificationSecret(text);
+          markPrivateTracePage(page);
+        }
+        return await typeFieldKeys(locator, text);
+      } catch (error) {
+        return {
+          ok: false,
+          error: describeWriteFailure(
+            error,
+            "The field would not accept keyboard input.",
+          ),
+          controlState: await controlResultState(locator),
         };
       }
     },
@@ -2829,7 +2864,12 @@ function createSinglePageMechanics(page: Page): ApplyRawPageHands {
           return { ok: false, error: `No element named ${ref} on this page.` };
         }
         if (locator) {
-          await locator.press(key, { timeout: 0 });
+          const element = await presentControl(locator);
+          try {
+            await element.press(key, { timeout: 0 });
+          } finally {
+            await element.dispose();
+          }
         } else {
           await page.keyboard.press(key);
         }

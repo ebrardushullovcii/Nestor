@@ -25,6 +25,7 @@ import {
 } from "@nestor/contracts";
 import { withReasoningTask, type LLMClient } from "../agent/contracts";
 import { createVisualPageTools } from "../visual-page-tools";
+import { createKeyboardTools } from "../keyboard-tools";
 import { createApplyTiming } from "./apply-timing";
 import { createApplyModelActivity } from "./model-activity";
 import {
@@ -554,6 +555,7 @@ async function runApplyAgentPrivate(
     opening = `The initial read failed: ${describeBrowserError(error, "The browser failed.")}. Recover with observe, wait or navigate.`;
   }
   const visualTools = createVisualPageTools(config.hands, readPage);
+  const keyboardTools = createKeyboardTools(config.hands, readPage);
   const domainTools: AgentLoopTool[] = getApplyToolDefinitions().map(
     (definition) => ({
       definition,
@@ -562,7 +564,7 @@ async function runApplyAgentPrivate(
         describeBrowserError(error, "The browser action failed."),
       execute: async (raw, context) =>
         modelActivity.run(context, async () => {
-          const visual = visualTools.find(
+          const visual = [...visualTools, ...keyboardTools].find(
             (tool) =>
               tool.definition.function.name === definition.function.name,
           );

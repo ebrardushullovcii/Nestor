@@ -62,16 +62,25 @@ export function withBrowserPermissions(
     ...hands,
     prepareBrowserCredentials:
       _policy.prepareBrowserCredentials ?? hands.prepareBrowserCredentials,
-    fillText: async (ref, value) => {
-      const page = await hands.observe();
-      const control = page.controls.find((c) => c.ref === ref);
-      if (control?.credentialRole === "password")
-        return {
-          ok: false,
-          error:
-            "Use the vault for saved secrets; enter missing secrets only on the open website.",
-        };
-      return hands.fillText(ref, value);
-    },
+    fillText: async (ref, value) =>
+      (await vaultRefusal(hands, ref)) ?? hands.fillText(ref, value),
+    ...(hands.typeKeys
+      ? {
+          typeKeys: async (ref: string, text: string) =>
+            (await vaultRefusal(hands, ref)) ?? hands.typeKeys!(ref, text),
+        }
+      : {}),
   };
+}
+
+async function vaultRefusal(hands: ApplyPageHands, ref: string) {
+  const page = await hands.observe();
+  const control = page.controls.find((c) => c.ref === ref);
+  return control?.credentialRole === "password"
+    ? {
+        ok: false as const,
+        error:
+          "Use the vault for saved secrets; enter missing secrets only on the open website.",
+      }
+    : null;
 }

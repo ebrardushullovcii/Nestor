@@ -5,7 +5,11 @@ import type { Frame, Locator, Page, Request } from "playwright";
 import { pressableLabel } from "./pressable-label";
 import { collectCustomComboboxStates } from "./custom-combobox-state";
 
-import { presentControl, evaluatePresent } from "./present-control";
+import {
+  clickPresent,
+  presentControl,
+  evaluatePresent,
+} from "./present-control";
 import { controlResultState } from "./control-result-state";
 
 import { replaceFieldText } from "./replace-field-text";
@@ -577,10 +581,9 @@ function exactName(text: string): RegExp {
  * it scrolls puts a different choice at the same position.
  */
 async function clickRow(list: Locator, text: string): Promise<string> {
-  await list
-    .getByRole("option", { name: exactName(text) })
-    .first()
-    .click({ timeout: 0 });
+  await clickPresent(
+    list.getByRole("option", { name: exactName(text) }).first(),
+  );
   return text;
 }
 
@@ -754,7 +757,7 @@ async function chooseFromList(
   const open = list ? await readList(list) : null;
   // Selecting an already-open picker must not toggle it closed.
   if (expanded !== "true" && (expanded === "false" || !open?.visible))
-    await locator.click({ timeout: 0 });
+    await clickPresent(locator);
   if (searchable) {
     // Replacing identical search text otherwise produces no React change.
     // Clear this element first, without dismissing its list or parent modal.

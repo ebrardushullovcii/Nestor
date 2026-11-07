@@ -1,4 +1,5 @@
 import { describeBrowserPermissions } from "../browser-permission-policy";
+import { KEYBOARD_INSTRUCTIONS } from "../keyboard-instructions";
 import type { AgentConfig } from "../types";
 
 /**
@@ -44,6 +45,7 @@ export function createJobSearchPrompts(config: AgentConfig): {
   if (config.requestedListing)
     return {
       system: [
+        KEYBOARD_INSTRUCTIONS,
         `Read the supplied posting address on ${promptContext.siteLabel}; record the vacancy's full text or current unavailability, or collect its postings if the address is an index.`,
         `Requested listing: ${JSON.stringify(config.requestedListing)}`,
         "Read the supplied address without judging fit. Keep the requested listing identity separate from the page you land on. A redirect may show a login, the employer's application page, a closed notice or a board; give that evidence to the page reader. A board's other postings are not this vacancy. If the supplied address itself is a category, index or search-results page rather than a vacancy, collect its genuine vacancy cards with extract_jobs or save_jobs_from_data under each posting's own URL, and follow its observed pagination. Do not save the index as a vacancy and do not ask the person for vacancy URLs you can read there. Preserve each vacancy's own text and application link; a login redirect is not a listing or application URL. If the requested vacancy is closed, record that decision for it. A failed read concerns this listing alone. Never apply.",
@@ -57,6 +59,7 @@ export function createJobSearchPrompts(config: AgentConfig): {
   if (config.inventoryOnly)
     return {
       system: [
+        KEYBOARD_INSTRUCTIONS,
         `Collect genuine vacancy cards from ${promptContext.siteLabel}. HTTP collection could not finish this site, so browser navigation is needed.`,
         "Use extract_jobs to collect result cards and their actual employer, listing URL and visible facts. Use read_page_api to read a public API or feed and save_jobs_from_data to save listings from that read data, including their full descriptions. Assess fit later; do not reject individual vacancy cards for level, place, pay, hours or preferences. Choose useful search directories and location filters from the person's navigation goals rather than walking every location portal. The next engine steps screen roles, read full details and judge each merged job once.",
         "Read the inventory once and follow observed Next or Load more controls until exhausted. Do not repeat keyword searches over an inventory already collected. For a very large global board, use the person's target and related role terms to reach useful result pages, then collect their cards without fit filtering.",
@@ -125,6 +128,7 @@ export function createJobSearchPrompts(config: AgentConfig): {
   // search, so a provider's prompt cache can carry it from site to site; the
   // site's name, the goal there and what was learned there come last.
   const system = [
+    KEYBOARD_INSTRUCTIONS,
     "You are working in this person's browser on a job site, with the ordinary powers a person has: look at the page, read it, go to addresses, follow links, press anything, type, choose, scroll, wait, go back. The site and the goal there are at the end of these instructions.",
     "",
     "When reading a listing or search-results page without extract_jobs, use observe or read_text with pageType search_results or job_detail. This records pages you inspected even when all jobs are already known or ruled out. Include numbered pages and keyword-search results. Use other for sign-in, help and other non-listing pages. extract_jobs records its own page automatically.",

@@ -1,0 +1,2 @@
+export const KEYBOARD_INSTRUCTIONS =
+  "Use type_keys to type text key by key into a field, and press_key for ArrowDown, Enter, Tab, Escape or other named keys. type_keys appends at the caret; use press_key with ControlOrMeta+A and Backspace when you want to replace the whole value. For an autocomplete, read the returned suggestions and choose the person's value by clicking it or using ArrowDown and Enter. Probe fields only with the person's real values; never try an unrelated or invented value to test a field.";
