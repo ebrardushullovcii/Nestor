@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtemp, cp } from "node:fs/promises";
+import { mkdtemp, cp, readFile } from "node:fs/promises";
 import { createRequire, isBuiltin } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -107,7 +107,22 @@ child.once("error", (error) => {
   console.error(error);
   process.exitCode = 1;
 });
-child.once("exit", (code) => {
+child.once("exit", async (code) => {
   clearTimeout(timeout);
   process.exitCode = code ?? 1;
+  if (fieldResults) {
+    try {
+      const result = JSON.parse(
+        await readFile(join(output, "field-results.json"), "utf8"),
+      );
+      console.log(JSON.stringify(result, null, 2));
+      if (result.pass !== true) process.exitCode = 1;
+    } catch (error) {
+      console.error(
+        "The native field-results fixture did not produce a passing result.",
+        error,
+      );
+      process.exitCode = 1;
+    }
+  }
 });
