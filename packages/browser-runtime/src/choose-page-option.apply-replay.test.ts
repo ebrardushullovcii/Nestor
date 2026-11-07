@@ -74,10 +74,12 @@ test("a native list whose choices load after a moment is waited for, not read as
       <script>setTimeout(() => { for (const text of ${JSON.stringify([...replay.offered, replay.missing])}) document.querySelector("select").add(new Option(text, text)); }, 900);</script>`,
     );
     const control = page.getByLabel("Country");
-    expect(await choosePageOption(page, control, replay.missing)).toMatchObject({
-      ok: true,
-      observedValue: replay.missing,
-    });
+    expect(await choosePageOption(page, control, replay.missing)).toMatchObject(
+      {
+        ok: true,
+        observedValue: replay.missing,
+      },
+    );
     expect(await control.inputValue()).toBe(replay.missing);
   });
 }, 15_000);
@@ -145,7 +147,9 @@ test("custom picker replay reports its own choices, then permits the saved fallb
       },
     );
     expect(await control.inputValue()).toBe("");
-    expect(await choosePageOption(page, control, replay.offered[0]!)).toMatchObject({
+    expect(
+      await choosePageOption(page, control, replay.offered[0]!),
+    ).toMatchObject({
       ok: true,
       observedValue: replay.offered[0],
     });
@@ -338,7 +342,9 @@ test("a search that hides every row, with no message, is checked against the ful
       },
     );
     expect(await control.inputValue()).toBe("");
-    expect(await choosePageOption(page, control, replay.offered[1]!)).toMatchObject({
+    expect(
+      await choosePageOption(page, control, replay.offered[1]!),
+    ).toMatchObject({
       ok: true,
       observedValue: replay.offered[1],
     });
@@ -352,10 +358,12 @@ test("rows left over from before a search are not read as its answer", async () 
       searchPicker([...replay.offered, replay.missing], 1_500, "region"),
     );
     const control = page.getByRole("combobox");
-    expect(await choosePageOption(page, control, replay.missing)).toMatchObject({
-      ok: true,
-      observedValue: replay.missing,
-    });
+    expect(await choosePageOption(page, control, replay.missing)).toMatchObject(
+      {
+        ok: true,
+        observedValue: replay.missing,
+      },
+    );
     expect(await control.getAttribute("data-committed")).toBe(replay.missing);
   });
 }, 20_000);
@@ -415,7 +423,9 @@ test("a picker in a frame reports only that frame's choices despite matching lis
     expect(
       await page.locator("body").getAttribute("data-wrong-choice"),
     ).toBeNull();
-    expect(await choosePageOption(page, control, replay.offered[0]!)).toMatchObject({
+    expect(
+      await choosePageOption(page, control, replay.offered[0]!),
+    ).toMatchObject({
       ok: true,
       observedValue: replay.offered[0],
     });
