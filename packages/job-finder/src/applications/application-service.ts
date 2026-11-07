@@ -88,7 +88,12 @@ import type {
   CandidateAssetResolver,
   JobFinderDocumentManager,
 } from "../internal/workspace-service-contracts";
-import { toResumeJob } from "../resumes/write-resume";
+import {
+  RESUME_WRITER_VERSION,
+  toResumeJob,
+  writeResume,
+} from "../resumes/write-resume";
+import { createResumeListingReader } from "../resumes/read-resume-listing";
 import {
   applicationAnswerDependencies,
   applicationAnswersUnchanged,
@@ -406,10 +411,10 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
   }
 
   async function run(row: ApplicationRow, signal: AbortSignal): Promise<void> {
-    const job = jobs.getJob(row.jobId);
+    let job = jobs.getJob(row.jobId);
     // The resume at the person's chosen level, approved or not: approval is
     // their own marker and is recorded with the file, never a condition.
-    const resume = resumes.get(row.jobId);
+    let resume = resumes.get(row.jobId);
     if (!job || resume?.state !== "ready")
       throw new Error(
         "This job's resume is being written again. Apply again once it is ready.",
@@ -421,6 +426,38 @@ export function createApplicationService(deps: ApplicationServiceDeps) {
       sourceInstructionArtifacts = [],
     } = await deps.readInputs();
     const profile = savedProfile;
+    // A ready PDF can predate the current writer. Rewrite at the person's
+    // chosen level before loading any attachment, including an approved PDF.
+    if (
+      resume.level !== "original" &&
+      resume.draft?.writerVersion !== RESUME_WRITER_VERSION
+    ) {
+      job = await createResumeListingReader({
+        aiClient: deps.aiClient,
+        resumes,
+        ...(browser.readRenderedPage
+          ? {
+              readRenderedPage: (url, options) =>
+                browser.readRenderedPage!(url, options),
+            }
+          : {}),
+      })(job, signal);
+      const draft = await writeResume(deps, {
+        profile,
+        settings,
+        searchPreferences,
+        job,
+        level: resume.level,
+        signal,
+      });
+      signal.throwIfAborted();
+      if (!current(row)) return;
+      if (!draft)
+        throw new Error(
+          "The resume writer returned no draft. Nothing was attached.",
+        );
+      resume = resumes.saveDraft(row.jobId, draft, resume.updatedAt);
+    }
     let previous = applications.getWork(row.id);
     let artifact: ApplicationResumeArtifact;
     if (resume.draft && !resume.pdfPath) {

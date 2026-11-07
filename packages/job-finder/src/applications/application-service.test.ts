@@ -7,6 +7,7 @@ import {
   ApplicationReviewCardSchema,
   ApplyExecutionResultSchema,
   CandidateProfileSchema,
+  ResumeDraftSectionSchema,
   serializeApplicationAuthorityDecisionPolicyForDigest,
   SourceInstructionArtifactSchema,
   SubmissionOutcomeRecordSchema,
@@ -33,6 +34,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import type * as ApplicationPreparation from "../internal/agent-application-preparation";
 import { createSeed } from "../test-fixtures";
 import { seedResumeDraft } from "../internal/resume-workspace-structure";
+import { RESUME_WRITER_VERSION } from "../resumes/write-resume";
 import {
   createApplicationService,
   type ApplicationServiceDeps,
@@ -803,14 +805,14 @@ async function setup(
   for (const id of ids) {
     if (options.draft) {
       resumes.startWriting(id, options.draft.level);
-      resumes.finishWriting(
-        id,
-        seedResumeDraft({
+      resumes.finishWriting(id, {
+        ...seedResumeDraft({
           profile: seed.profile,
           job: seed.savedJobs[0]!,
           templateId: "classic_ats",
         }),
-      );
+        writerVersion: RESUME_WRITER_VERSION,
+      });
       if (options.draft.approve) resumes.approve(id, pdfPath, pdfSha256);
       continue;
     }
@@ -3449,4 +3451,128 @@ it("hands application and tracker interview history to the apply preparer", asyn
       }),
     ]),
   );
+});
+
+it.each(["light", "tailored", "aggressive"] as const)(
+  "%s rewrites an approved legacy draft before Apply can attach its old PDF",
+  async (level) => {
+    const f = await setup(1, undefined, { draft: { level, approve: true } });
+    const id = f.ids[0]!;
+    const legacy = f.resumes.get(id)!;
+    const draft = { ...legacy.draft!, writerVersion: undefined };
+    draft.sections.push(
+      ResumeDraftSectionSchema.parse({
+        id: "legacy_skills",
+        kind: "skills",
+        label: "Core skills",
+        origin: "ai_generated",
+        sortOrder: 8,
+        updatedAt: draft.updatedAt,
+        bullets: [
+          {
+            id: "section_skills_listing_skill_1",
+            text: "Old Customer Incorporated",
+            included: true,
+            origin: "ai_generated",
+            updatedAt: draft.updatedAt,
+          },
+        ],
+      }),
+    );
+    f.jobs
+      .sql("UPDATE resumes SET draft_json=? WHERE job_id=?")
+      .run(JSON.stringify(draft), id);
+    f.jobs
+      .sql("UPDATE job_details SET facts_json=? WHERE job_id=?")
+      .run(JSON.stringify({ fullListingRead: true }), id);
+    const base = createDeterministicJobFinderAiClient();
+    const createResumeDraft = vi.fn(
+      async (input: Parameters<typeof base.createResumeDraft>[0]) => ({
+        ...(await base.createResumeDraft(input)),
+        summary: "Freshly written for this replica job.",
+        coreSkills: ["TypeScript"],
+      }),
+    );
+    f.deps.aiClient = { ...base, createResumeDraft };
+    f.deps.documentManager.listResumeTemplates = () => [];
+    f.applications.applyJobs(
+      { selection: { ids: [id] } },
+      "confirm_before_submit",
+    );
+    await f.service.start();
+    await vi.waitFor(() => expect(f.execute).toHaveBeenCalledOnce());
+    expect(createResumeDraft).toHaveBeenCalledOnce();
+    expect(
+      createResumeDraft.mock.calls[0]?.[0].searchPreferences.tailoringMode,
+    ).toBe(
+      level === "light"
+        ? "conservative"
+        : level === "tailored"
+          ? "balanced"
+          : "aggressive",
+    );
+    const rewritten = f.resumes.get(id)!;
+    expect(rewritten.draft?.writerVersion).toBe(RESUME_WRITER_VERSION);
+    expect(rewritten.level).toBe(level);
+    expect(rewritten.approvedAt).toBeNull();
+    expect(JSON.stringify(rewritten.draft)).not.toContain(
+      "Old Customer Incorporated",
+    );
+    expect(JSON.stringify(rewritten.draft)).toContain(
+      "Freshly written for this replica job.",
+    );
+    expect(f.renderResumeArtifact).toHaveBeenCalled();
+    const attached = f.execute.mock.calls[0]![1].resumeArtifact;
+    expect(attached.approvedAt).toBeNull();
+    expect(attached.exportArtifactId).not.toBe(
+      `job_resume:${id}:${legacy.approvedAt}:${f.pdfSha256}`,
+    );
+    f.releases[0]?.();
+    await vi.waitFor(() =>
+      expect(
+        f.applications.getApplication(
+          f.applications.listApplications().rows[0]!.id,
+        )?.state,
+      ).toBe("ready"),
+    );
+    expect(f.onError).not.toHaveBeenCalled();
+  },
+);
+
+it("a failed legacy rewrite reports our error and never opens the browser with the old file", async () => {
+  const f = await setup(1, undefined, {
+    draft: { level: "aggressive", approve: true },
+  });
+  const id = f.ids[0]!;
+  const legacy = f.resumes.get(id)!;
+  f.jobs
+    .sql("UPDATE resumes SET draft_json=? WHERE job_id=?")
+    .run(JSON.stringify({ ...legacy.draft, writerVersion: undefined }), id);
+  f.jobs
+    .sql("UPDATE job_details SET facts_json=? WHERE job_id=?")
+    .run(JSON.stringify({ fullListingRead: true }), id);
+  f.deps.documentManager.listResumeTemplates = () => [];
+  f.deps.aiClient = {
+    ...createDeterministicJobFinderAiClient(),
+    createResumeDraft: () =>
+      Promise.reject(new Error("Writer service unavailable")),
+  };
+  f.applications.applyJobs(
+    { selection: { ids: [id] } },
+    "confirm_before_submit",
+  );
+  await f.service.start();
+  await vi.waitFor(() =>
+    expect(
+      f.applications.getApplication(
+        f.applications.listApplications().rows[0]!.id,
+      )?.state,
+    ).toBe("failed"),
+  );
+  expect(f.execute).not.toHaveBeenCalled();
+  expect(f.renderResumeArtifact).not.toHaveBeenCalled();
+  expect(
+    f.applications.getApplication(f.applications.listApplications().rows[0]!.id)
+      ?.error,
+  ).toContain("Writer service unavailable");
 });

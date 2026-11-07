@@ -427,7 +427,7 @@ describe("buildResumeRenderDocument", () => {
     ).toMatchObject({ included: false });
   });
 
-  test("preserves bounded imported evidence refs beyond the first preview", () => {
+  test("preserves complete imported evidence beyond the old 24-reference window", () => {
     const seed = createSeed();
     const profile = {
       ...seed.profile,
@@ -439,6 +439,10 @@ describe("buildResumeRenderDocument", () => {
           "Organization: Northwind Labs",
           "Recorded supply counts in a shared spreadsheet for weekly operations.",
           "High School Diploma, Central Academy",
+          ...Array.from(
+            { length: 60 },
+            (_, index) => `Complete source accomplishment ${index}.`,
+          ),
         ].join("\n"),
       },
     };
@@ -471,6 +475,12 @@ describe("buildResumeRenderDocument", () => {
       ?.sourceRefs.filter((ref) => ref.sourceKind === "resume");
 
     expect(importedRefs?.length).toBeGreaterThan(1);
+    expect(importedRefs?.length).toBeGreaterThan(24);
+    expect(
+      importedRefs?.some((ref) =>
+        ref.snippet?.includes("Complete source accomplishment 59."),
+      ),
+    ).toBe(true);
     expect(
       importedRefs?.every((ref) => (ref.snippet?.length ?? 0) <= 220),
     ).toBe(true);
@@ -487,6 +497,17 @@ describe("buildResumeRenderDocument", () => {
     const profile = {
       ...seed.profile,
       baseResume: { ...seed.profile.baseResume, textContent: null },
+      skills: Array.from(
+        { length: 60 },
+        (_, index) => `Saved competency ${index}`,
+      ),
+      professionalSummary: {
+        ...seed.profile.professionalSummary,
+        careerThemes: Array.from(
+          { length: 60 },
+          (_, index) => `Saved career evidence ${index}`,
+        ),
+      },
     };
     const draft = buildResumeDraftFromTailoredDraft({
       job: seed.savedJobs[0]!,
@@ -525,6 +546,14 @@ describe("buildResumeRenderDocument", () => {
     expect(skills?.sourceRefs.some((ref) => ref.sourceKind === "profile")).toBe(
       true,
     );
+    expect(
+      summary?.sourceRefs.some(
+        (ref) => ref.snippet === "Saved career evidence 59",
+      ),
+    ).toBe(true);
+    expect(
+      skills?.sourceRefs.some((ref) => ref.snippet === "Saved competency 59"),
+    ).toBe(true);
   });
 
   test("buildResumeDraftFromTailoredDraft keeps suggested-hidden guidance out of rendered resume content", () => {

@@ -47,17 +47,13 @@ import {
   type WorkHistoryReviewSuggestion,
 } from "@nestor/contracts";
 
-import { createLocalKnowledgeIndex } from "@nestor/knowledge-base";
 import {
   createUniqueId,
   normalizeText,
   tokenize,
   uniqueStrings,
 } from "./shared";
-import {
-  buildJobContextText,
-  buildPriorityJobTerms,
-} from "./resume-workspace-primitives";
+import { buildPriorityJobTerms } from "./resume-workspace-primitives";
 import {
   buildPreviewSectionsFromResumeDraft as buildStructuredPreviewSectionsFromResumeDraft,
   buildResumeDraftFromTailoredDraft as buildStructuredResumeDraftFromTailoredDraft,
@@ -73,14 +69,6 @@ import {
   resolveResumeIdentity,
   resumeIdentityMismatchMessage,
 } from "./resume-identity";
-
-export interface ResumeWorkspaceEvidence {
-  summary: readonly string[];
-  candidateSummary: readonly string[];
-  experience: readonly string[];
-  skills: readonly string[];
-  keywords: readonly string[];
-}
 
 export interface ResumeWorkspaceResearchContext {
   companyNotes: readonly string[];
@@ -2343,219 +2331,6 @@ export function buildAssistantReplyMessage(input: {
     executionAttribution: input.executionAttribution ?? null,
     createdAt: input.createdAt ?? new Date().toISOString(),
   });
-}
-
-export function collectResumeWorkspaceEvidence(input: {
-  profile: CandidateProfile;
-  job: SavedJob;
-  research: readonly ResumeResearchArtifact[];
-}): ResumeWorkspaceEvidence {
-  const index = createLocalKnowledgeIndex();
-  const candidateSummaryEvidence = uniqueStrings([
-    input.profile.professionalSummary.fullSummary ?? "",
-    input.profile.professionalSummary.shortValueProposition ?? "",
-    input.profile.summary ?? "",
-    input.profile.narrative.professionalStory ?? "",
-    input.profile.narrative.nextChapterSummary ?? "",
-    input.profile.narrative.careerTransitionSummary ?? "",
-    ...input.profile.narrative.differentiators,
-    ...input.profile.experiences
-      .map((experience) => experience.summary ?? "")
-      .filter(Boolean),
-  ]);
-
-  const highlightedProofs = input.profile.proofBank;
-
-  if (input.profile.baseResume.textContent) {
-    index.addDocument(
-      input.profile.baseResume.id,
-      input.profile.baseResume.textContent,
-      {
-        tags: ["resume"],
-        title: "Base Resume",
-        section: "resume",
-        sourceId: input.profile.baseResume.id,
-      },
-    );
-  }
-
-  input.profile.experiences.forEach((experience) => {
-    const text = [
-      experience.title,
-      experience.companyName,
-      experience.summary,
-      ...experience.achievements,
-      ...experience.skills,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    if (text.trim()) {
-      index.addDocument(experience.id, text, {
-        tags: ["profile"],
-        title: experience.title,
-        section: "experience",
-        sourceId: experience.id,
-      });
-    }
-  });
-
-  if (
-    input.profile.narrative.professionalStory ||
-    input.profile.narrative.nextChapterSummary ||
-    input.profile.narrative.careerTransitionSummary ||
-    input.profile.narrative.differentiators.length > 0 ||
-    input.profile.narrative.motivationThemes.length > 0
-  ) {
-    index.addDocument(
-      "profile_narrative",
-      [
-        input.profile.narrative.professionalStory,
-        input.profile.narrative.nextChapterSummary,
-        input.profile.narrative.careerTransitionSummary,
-        ...input.profile.narrative.differentiators,
-        ...input.profile.narrative.motivationThemes,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      {
-        tags: ["profile"],
-        title: "Candidate Narrative",
-        section: "narrative",
-        sourceId: "profile_narrative",
-      },
-    );
-  }
-
-  highlightedProofs.forEach((proof) => {
-    index.addDocument(
-      proof.id,
-      [
-        proof.title,
-        proof.claim,
-        proof.heroMetric,
-        proof.supportingContext,
-        ...proof.roleFamilies,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      {
-        tags: ["profile"],
-        title: proof.title,
-        section: "proof",
-        sourceId: proof.id,
-      },
-    );
-  });
-
-  input.profile.projects.forEach((project) => {
-    const text = [
-      project.name,
-      project.summary,
-      project.role,
-      project.outcome,
-      ...project.skills,
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    if (text.trim()) {
-      index.addDocument(project.id, text, {
-        tags: ["profile"],
-        title: project.name,
-        section: "project",
-        sourceId: project.id,
-      });
-    }
-  });
-
-  input.profile.links.forEach((link) => {
-    if (!link.label && !link.url) {
-      return;
-    }
-
-    index.addDocument(
-      link.id,
-      [link.label, link.url, link.kind].filter(Boolean).join(" "),
-      {
-        tags: ["profile"],
-        title: link.label ?? link.url ?? "Profile link",
-        section: "link",
-        sourceId: link.id,
-      },
-    );
-  });
-
-  const skillText = uniqueStrings([
-    ...input.profile.skills,
-    ...input.profile.skillGroups.coreSkills,
-    ...input.profile.skillGroups.tools,
-    ...input.profile.skillGroups.languagesAndFrameworks,
-  ]).join(" ");
-  if (skillText.trim()) {
-    index.addDocument("profile_skills", skillText, {
-      tags: ["profile"],
-      title: "Profile Skills",
-      section: "skills",
-      sourceId: "profile_skills",
-    });
-  }
-
-  index.addDocument(input.job.id, buildJobContextText(input.job), {
-    tags: ["job"],
-    title: input.job.title,
-    section: "job",
-    sourceId: input.job.id,
-  });
-
-  input.research.forEach((artifact) => {
-    const text = [
-      artifact.pageTitle,
-      artifact.companyNotes,
-      artifact.extractedText,
-      ...artifact.domainVocabulary,
-      ...artifact.priorityThemes,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    if (text.trim()) {
-      index.addDocument(artifact.id, text, {
-        tags: ["research"],
-        title: artifact.pageTitle,
-        section: "research",
-        sourceId: artifact.id,
-      });
-    }
-  });
-
-  return {
-    summary: index
-      .search(`${input.job.title} ${input.job.company} summary`, { limit: 3 })
-      .map((entry: { text: string }) => entry.text),
-    candidateSummary: candidateSummaryEvidence,
-    experience: index
-      .search(
-        `${input.job.title} ${buildPriorityJobTerms(input.job).join(" ")} achievements`,
-        {
-          limit: 6,
-          tags: ["profile", "resume"],
-        },
-      )
-      .map((entry: { text: string }) => entry.text),
-    skills: index
-      .search(
-        `${buildPriorityJobTerms(input.job).join(" ")} ${input.job.title} skills`,
-        {
-          limit: 6,
-          tags: ["profile", "job"],
-        },
-      )
-      .map((entry: { text: string }) => entry.text),
-    keywords: uniqueStrings([
-      ...buildPriorityJobTerms(input.job),
-      ...input.research.flatMap((artifact) => artifact.domainVocabulary),
-      ...highlightedProofs.flatMap((proof) => proof.roleFamilies),
-    ]),
-  };
 }
 
 export function collectResearchContext(

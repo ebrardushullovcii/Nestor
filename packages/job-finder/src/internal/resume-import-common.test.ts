@@ -167,6 +167,13 @@ describe("toNarrativeStringArray bullet splitting", () => {
       "Wrote the on-call runbooks that the whole platform group now follows during incidents. " +
       "Coached two junior engineers through their first production launches.";
     expect(toNarrativeStringArray(blob)).toEqual([blob]);
+    expect(
+      toNarrativeStringArray([
+        "Lowered hosting costs by 18%.\nMoved idle workers to on-demand instances.\nKept the same availability.",
+      ]),
+    ).toEqual([
+      "Lowered hosting costs by 18%. Moved idle workers to on-demand instances. Kept the same availability.",
+    ]);
     expect(toNarrativeStringArray("Short single bullet.")).toEqual([
       "Short single bullet.",
     ]);

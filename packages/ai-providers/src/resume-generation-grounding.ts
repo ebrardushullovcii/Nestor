@@ -4,17 +4,8 @@ import { buildResumeSkillContextFilter } from "./resume-skill-context";
 import { canonicalSkillPhrase } from "./deterministic/resume-skill-grounding";
 import type { CreateResumeDraftInput, TailorResumeInput } from "./shared";
 
-const EvidenceReferenceSchema = z.string().trim().min(1).max(300);
-const EvidenceReferenceListSchema = z
-  .array(EvidenceReferenceSchema)
-  .min(1)
-  .max(8);
-const EvidenceLinkedTextSchema = z.object({
-  text: z.string().trim().min(1).max(1_000),
-  evidenceRefs: EvidenceReferenceListSchema,
-  inferred: z.boolean().optional(),
-  sourceAchievementIds: z.array(EvidenceReferenceSchema).optional(),
-});
+const EvidenceReferenceSchema = z.string().trim().min(1);
+const EvidenceReferenceListSchema = z.array(EvidenceReferenceSchema).min(1);
 
 export type ResumeGenerationInput = CreateResumeDraftInput | TailorResumeInput;
 
@@ -127,6 +118,13 @@ export function buildResumeGenerationEvidenceCatalog(
     "profile:narrative:careerTransitionSummary",
     input.profile.narrative.careerTransitionSummary,
   );
+  addProfileEvidence(
+    "profile:narrative:nextChapterSummary",
+    input.profile.narrative.nextChapterSummary,
+  );
+  input.profile.narrative.motivationThemes.forEach((text, index) => {
+    addProfileEvidence(`profile:narrative:motivationTheme:${index}`, text);
+  });
   input.profile.narrative.differentiators.forEach((text, index) => {
     addProfileEvidence(`profile:narrative:differentiator:${index}`, text);
   });
@@ -303,33 +301,30 @@ export function parseEvidenceLinkedText(
   value: unknown,
   companionEvidenceRefs?: unknown,
 ): ParsedEvidenceLinkedText | null {
-  const structured = EvidenceLinkedTextSchema.safeParse(value);
-  if (structured.success) {
-    return {
-      text: structured.data.text,
-      evidenceRefs: Array.from(new Set(structured.data.evidenceRefs)),
-      inferred: structured.data.inferred === true,
-      sourceAchievementIds: Array.from(
-        new Set(structured.data.sourceAchievementIds ?? []),
-      ),
-    };
-  }
-
-  const text = normalizeNullableText(value);
+  const structured =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  const text = normalizeNullableText(structured ? structured.text : value);
   if (!text) {
     return null;
   }
 
   const parsedRefs = EvidenceReferenceListSchema.safeParse(
-    companionEvidenceRefs,
+    structured?.evidenceRefs ?? companionEvidenceRefs,
   );
+  const sourceIds = z
+    .array(EvidenceReferenceSchema)
+    .safeParse(structured?.sourceAchievementIds ?? []);
   return {
     text,
     evidenceRefs: parsedRefs.success
       ? Array.from(new Set(parsedRefs.data))
       : [],
-    inferred: false,
-    sourceAchievementIds: [],
+    inferred: structured?.inferred === true,
+    sourceAchievementIds: sourceIds.success
+      ? Array.from(new Set(sourceIds.data))
+      : [],
   };
 }
 

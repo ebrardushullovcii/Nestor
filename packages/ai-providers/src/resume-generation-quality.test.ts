@@ -1348,7 +1348,7 @@ describe("resume generation quality", () => {
     );
   });
 
-  test("adds grounded proof metrics while retaining the complete source achievement", () => {
+  test("retains the complete source achievement without appending proof metrics", () => {
     const baseProfile = createProfile();
     const profile: typeof baseProfile = {
       ...baseProfile,
@@ -1417,7 +1417,7 @@ describe("resume generation quality", () => {
     const result = buildDeterministicStructuredResumeDraft(input);
 
     expect(result.experienceEntries[0]?.bullets[0]).toBe(
-      "Led design-system rollout across core surfaces. Adoption reached 80% of core product surfaces within two quarters.",
+      "Led design-system rollout across core surfaces.",
     );
   });
 
@@ -1494,8 +1494,8 @@ describe("resume generation quality", () => {
     const result = buildDeterministicStructuredResumeDraft(input);
 
     expect(result.experienceEntries[0]?.bullets).toEqual([
-      "Unified fragmented frontend foundations across product teams into a shared platform adoption program. Cut release regressions by 42% across three product lines in two quarters.",
       "Improved accessibility review coverage across customer-facing releases.",
+      "Unified fragmented frontend foundations across product teams into a shared platform adoption program.",
       "Partnered with product, design, and platform engineering to standardize components, testing, and performance budgets.",
     ]);
     expect(result.experienceEntries[0]?.dateRange).toBe("Mar 2021 – Present");

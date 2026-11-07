@@ -48,6 +48,7 @@ import { completeTailoredResumeDraft } from "./openai-compatible-shared";
 import {
   buildGroundedResumeRewriteModelPayload,
   describeAggressiveResumeEditPolicy,
+  parseEvidenceLinkedText,
 } from "./resume-generation-grounding";
 import { compactOpenAiCompatibleUserPayload } from "./openai-compatible-request-compaction";
 import { modelConversationKeys } from "./model-request-identity";
@@ -59,6 +60,34 @@ import {
 } from "./resume-import";
 
 const EmptyInputSchema = z.object({});
+/** The same non-empty prose shapes that parseEvidenceLinkedText reads. */
+const resumeProseParameters = {
+  anyOf: [
+    { type: "string", minLength: 1, pattern: "\\S" },
+    {
+      type: "object",
+      additionalProperties: true,
+      required: ["text"],
+      properties: { text: { type: "string", minLength: 1, pattern: "\\S" } },
+    },
+  ],
+};
+const resumeEntryProseParameters = {
+  type: "object",
+  additionalProperties: true,
+  anyOf: [
+    ...["summary", "outcome"].map((field) => ({
+      required: [field],
+      properties: { [field]: resumeProseParameters },
+    })),
+    {
+      required: ["bullets"],
+      properties: {
+        bullets: { type: "array", items: {}, contains: resumeProseParameters },
+      },
+    },
+  ],
+};
 const ContentInputSchema = z.object({ content: z.string().trim().min(1) });
 const ResumePatchInputSchema = z.object({ patch: ResumeDraftPatchSchema });
 const ResumeSectionTextInputSchema = z.object({
@@ -700,6 +729,43 @@ export async function runResumeGenerationAgentTask(input: {
           );
         }
       }
+      const hasText = (value: unknown) =>
+        Boolean(parseEvidenceLinkedText(value)?.text.trim());
+      const hasEntries = (value: unknown) =>
+        Array.isArray(value) &&
+        value.some((entry: unknown) => {
+          if (!entry || typeof entry !== "object" || Array.isArray(entry))
+            return false;
+          const fields = entry as Record<string, unknown>;
+          return (
+            hasText(fields.summary) ||
+            hasText(fields.outcome) ||
+            (Array.isArray(fields.bullets) && fields.bullets.some(hasText))
+          );
+        });
+      if (
+        !hasText(proposal.summary) &&
+        !hasEntries(proposal.experienceEntries) &&
+        !hasEntries(proposal.projectEntries) &&
+        !(
+          Array.isArray(proposal.experienceHighlights) &&
+          proposal.experienceHighlights.some(hasText)
+        )
+      ) {
+        return rejectInvalidProposal(
+          new ResumeProposalValidationError(
+            "The writer returned no resume prose. Return a complete summary or accomplishment proposal; if saved wording already fits, return that wording explicitly. No fallback resume was created.",
+            [
+              {
+                code: "resume_prose_required",
+                message:
+                  "Return the summary or accomplishments the resume should show.",
+                path: ["proposal"],
+              },
+            ],
+          ),
+        );
+      }
       const preview = completeTailoredResumeDraft(proposal, state);
       const rendered = await Promise.resolve(
         state.renderPreview
@@ -863,6 +929,8 @@ export async function runResumeGenerationAgentTask(input: {
       resumeFormat: input.request.settings.resumeFormat,
       fontPreset: input.request.settings.fontPreset,
     },
+    resumeHeadline:
+      input.request.resumeHeadline ?? input.request.profile.headline,
     ...jobSpecificPayload,
     targetJob: {
       ...groundedTargetJob,
@@ -900,6 +968,7 @@ export async function runResumeGenerationAgentTask(input: {
       input.substantivePrompt,
       "baseResumeEvidenceRef and candidateProfile.baseResume.textContentEvidenceRef point to groundingEvidence item IDs. Read that item's complete text as the referenced resume source. The evidence IDs and selected base resume are unchanged; a distinct profile base resume is included separately. A languageFields entry that has evidenceRef instead of text has exactly the text of that groundingEvidence item. candidateProfile lists the saved records by id; their wording is in groundingEvidence.",
       "Everything you need is in the task payload. Write the complete proposal in one compose_resume_proposal call; do not call any other tool first.",
+      "Return the summary or accomplishments the resume should show, including saved wording explicitly when it already fits. An empty proposal contains no writer output and must be repaired; the app does not create a fallback resume in its place.",
       "compose_resume_proposal renders the resume, checks every line against the evidence and ends the task; there is no second draft, so write each line so the evidence backs it. Never invent missing candidate facts, dates, or chronology. Aggressive person confirmations are deliberate review decisions for the person, not defects for you to erase or confirm.",
       "To use a different template, pass its templateId to compose_resume_proposal when templateSelection.selectionLocked is false.",
       "The runtime preserves identity, chronology, selected strategy, and the final typed resume shape. Your job is to do the actual job-targeted writing within the mode-specific instructions above.",
@@ -948,8 +1017,31 @@ export async function runResumeGenerationAgentTask(input: {
             proposal: {
               type: "object",
               additionalProperties: true,
+              anyOf: [
+                {
+                  required: ["summary"],
+                  properties: { summary: resumeProseParameters },
+                },
+                ...[
+                  "experienceEntries",
+                  "projectEntries",
+                  "experienceHighlights",
+                ].map((field) => ({
+                  required: [field],
+                  properties: {
+                    [field]: {
+                      type: "array",
+                      items: {},
+                      contains:
+                        field === "experienceHighlights"
+                          ? resumeProseParameters
+                          : resumeEntryProseParameters,
+                    },
+                  },
+                })),
+              ],
               description:
-                "Sparse summary, experienceEntries, projectEntries, and optional coreSkills proposal from the task instructions.",
+                "Sparse summary, experienceEntries, projectEntries, and optional coreSkills proposal from the task instructions. Include non-empty summary or accomplishment prose; return saved wording explicitly when it already fits.",
             },
             templateId: {
               type: "string",

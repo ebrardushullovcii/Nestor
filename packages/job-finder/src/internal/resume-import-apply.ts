@@ -618,6 +618,7 @@ function mergeResolvedSelectionIntoWorkspace(
   analysisProviderLabel: ResumeImportRun["analysisProviderLabel"],
   analysisWarnings: readonly string[],
   candidates: readonly ResumeImportFieldCandidate[],
+  replaceExperienceAchievementsForCandidateId: string | null = null,
 ): {
   profile: CandidateProfile;
   searchPreferences: JobSearchPreferences;
@@ -854,6 +855,20 @@ function mergeResolvedSelectionIntoWorkspace(
       experiences: mergeExperienceRecords(
         profile.experiences,
         selection.experiences,
+        {
+          replaceAchievementsForRecordIds: candidates
+            .filter(
+              (candidate) =>
+                candidate.id === replaceExperienceAchievementsForCandidateId &&
+                candidate.resolution === "auto_applied" &&
+                candidate.sourceKind === "model_experience" &&
+                candidate.target.section === "experience" &&
+                candidate.target.key === "record",
+            )
+            .flatMap((candidate) =>
+              candidate.target.recordId ? [candidate.target.recordId] : [],
+            ),
+        },
       ),
       education: mergeEducationRecords(profile.education, selection.education),
       certifications: mergeCertificationRecords(
@@ -970,6 +985,8 @@ export function applyResolvedResumeImportCandidatesToWorkspace(input: {
    * undoes an edit the person made after an earlier one.
    */
   confirmedCandidateId?: string | null;
+  /** A confirmed refresh replaces the matched role's imported accomplishment list. */
+  replaceExperienceAchievements?: boolean;
 }) {
   const resolvedSelection = buildResolvedSelection(
     input.profile,
@@ -986,5 +1003,6 @@ export function applyResolvedResumeImportCandidatesToWorkspace(input: {
     input.analysisProviderLabel,
     input.analysisWarnings,
     input.candidates,
+    input.replaceExperienceAchievements ? input.confirmedCandidateId : null,
   );
 }

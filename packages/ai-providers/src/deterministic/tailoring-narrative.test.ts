@@ -246,3 +246,28 @@ test("fallback summary ignores listing/form evidence and omits absent candidate 
     }).summary,
   ).toBe("Analyst with saved research experience.");
 });
+
+test("a proof metric is not appended to an accomplishment that already states its result", () => {
+  const profile = createProfile();
+  const accomplishment =
+    "Lowered AWS hosting costs by 18%. Moved idle workers to on-demand instances while keeping availability.";
+  profile.experiences = [createExperience({ achievements: [accomplishment] })];
+  profile.proofBank = [
+    {
+      id: "proof_cost",
+      title: "Hosting efficiency",
+      claim: accomplishment,
+      heroMetric: "18% lower hosting cost",
+      supportingContext: null,
+      roleFamilies: [],
+      projectIds: [],
+      linkIds: [],
+    },
+  ];
+  const draft = buildDeterministicStructuredResumeDraft(buildInput(profile));
+  const bullet = draft.experienceEntries[0]?.bullets.find((line) =>
+    line.includes("18%"),
+  );
+  expect(bullet).toBe(accomplishment);
+  expect(bullet?.match(/18%/gu)).toHaveLength(1);
+});

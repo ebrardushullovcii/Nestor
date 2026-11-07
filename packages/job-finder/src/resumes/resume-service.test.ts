@@ -1,4 +1,7 @@
-import { createDeterministicJobFinderAiClient } from "@nestor/ai-providers";
+import {
+  createDeterministicJobFinderAiClient,
+  runResumeGenerationAgentTask,
+} from "@nestor/ai-providers";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -24,6 +27,7 @@ import {
   countAssistantJobs,
 } from "./resume-commands";
 import { writeResume } from "./write-resume";
+import { createDocumentManager } from "../test-runtimes";
 
 function found(n: number): FoundJob {
   return {
@@ -109,6 +113,155 @@ const waitFor = (assertion: () => void) =>
 const stageOf = (store: JobStore, id: number) => store.getJob(id)?.stage;
 
 describe("resumes on the store", () => {
+  it("Write again recovers an empty URL-added listing through rendered DOM text", async () => {
+    const seed = createSeed();
+    const body =
+      "Rendered role duties and qualifications, including the final essential requirement.";
+    const base = createDeterministicJobFinderAiClient();
+    const extractJobsFromPage = vi
+      .fn<typeof base.extractJobsFromPage>()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          ...seed.savedJobs[0]!,
+          title: found(2).title,
+          company: found(2).company,
+          description: body,
+        },
+      ]);
+    const createResumeDraft = vi.fn(
+      (input: Parameters<typeof base.createResumeDraft>[0]) =>
+        base.createResumeDraft(input),
+    );
+    const readRenderedPage = vi.fn(() =>
+      Promise.resolve({
+        html: "<div id='app'>Loading</div>",
+        finalUrl: found(2).url,
+        visibleText: body,
+      }),
+    );
+    const { store, service } = setup({
+      aiClient: { ...base, extractJobsFromPage, createResumeDraft },
+      fetchListingHtml: () =>
+        Promise.resolve({
+          html: "<div id='app'>Loading</div>",
+          finalUrl: found(2).url,
+          status: 200,
+        }),
+      readRenderedPage,
+    });
+    const [id] = store.saveFoundJobs({
+      searchId: null,
+      jobs: [
+        { ...found(2), description: "", facts: { fullListingRead: true } },
+      ],
+    }).added;
+    store.moveJobs({ selection: { ids: [id!] }, to: "shortlisted" });
+    service.rewrite(id!);
+    await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
+    expect(readRenderedPage).toHaveBeenCalledOnce();
+    expect(extractJobsFromPage.mock.calls[1]?.[0].pageText).toContain(body);
+    expect(createResumeDraft.mock.calls[0]?.[0].job.description).toBe(body);
+    expect(store.getJob(id!)?.description).toBe(body);
+    expect(store.getJob(id!)?.facts.fullListingRead).toBe(true);
+    service.rewrite(id!);
+    await waitFor(() => expect(service.get(id!).resume?.state).toBe("ready"));
+    expect(createResumeDraft).toHaveBeenCalledTimes(2);
+    expect(readRenderedPage).toHaveBeenCalledOnce();
+    expect(extractJobsFromPage).toHaveBeenCalledTimes(2);
+  });
+  it.each(["light", "tailored", "aggressive"] as const)(
+    "%s writes a fresh replica draft without turning listing customers into skills",
+    async (level) => {
+      const seed = createSeed();
+      seed.profile.experiences[0]!.achievements = Array.from(
+        { length: 60 },
+        (_, index) => `Complete canonical accomplishment ${index}.`,
+      );
+      seed.profile.baseResume.textContent = Array.from(
+        { length: 60 },
+        (_, index) => `Complete imported source fact ${index}.`,
+      ).join("\n");
+      const manager = createDocumentManager();
+      const base = createDeterministicJobFinderAiClient();
+      const { store, id } = setup();
+      const summary =
+        "Product designer building accessible component libraries.";
+      const chatWithTools = vi.fn(() =>
+        Promise.resolve({
+          toolCalls: [
+            {
+              id: "write_replica",
+              type: "function" as const,
+              function: {
+                name: "compose_resume_proposal",
+                arguments: JSON.stringify({
+                  proposal: {
+                    summary: {
+                      text: summary,
+                      evidenceRefs: ["profile:summary"],
+                    },
+                    coreSkills: ["React", "TypeScript"],
+                    languagePresentation: {
+                      language: "English",
+                      translations: [],
+                    },
+                  },
+                }),
+              },
+            },
+          ],
+        }),
+      );
+      const draft = await writeResume(
+        {
+          documentManager: manager,
+          aiClient: {
+            ...base,
+            createResumeDraft: (request) => {
+              expect(request.evidence).toBeUndefined();
+              expect(request.profile.experiences[0]!.achievements).toContain(
+                "Complete canonical accomplishment 59.",
+              );
+              expect(request.resumeText).toContain(
+                "Complete imported source fact 59.",
+              );
+              return runResumeGenerationAgentTask({
+                client: { ...base, chatWithTools },
+                request,
+                substantivePrompt: "Write the resume for the replica posting.",
+              });
+            },
+          },
+        },
+        {
+          ...seed,
+          level,
+          job: {
+            ...store.getJob(id)!,
+            url: "http://127.0.0.1:47950/greenhouse/job/1",
+            description:
+              "Build accessible React and TypeScript components. Our customers include Beacon Media and Cedar Shipping.",
+            facts: {
+              ...store.getJob(id)!.facts,
+              fullListingRead: true,
+              keySkills: ["React", "TypeScript"],
+            },
+          },
+        },
+      );
+      expect(chatWithTools).toHaveBeenCalledOnce();
+      expect(
+        draft?.sections.find((section) => section.kind === "summary")?.text,
+      ).toBe(summary);
+      const skills = draft?.sections
+        .filter((section) => section.kind === "skills")
+        .flatMap((section) => section.bullets.map((bullet) => bullet.text));
+      expect(skills).toContain("React");
+      expect(skills).not.toContain("Beacon Media");
+      expect(skills).not.toContain("Cedar Shipping");
+    },
+  );
   it("reads a long card once before writing, then reuses the saved complete posting", async () => {
     const seed = createSeed();
     const body =

@@ -7,7 +7,6 @@ import { createSeed } from "../test-fixtures";
 import {
   buildResumeClaimEvidenceBank,
   collectResearchContext,
-  collectResumeWorkspaceEvidence,
   buildResumeProposalReplyContent,
 } from "./resume-workspace-helpers";
 import { seedResumeDraft } from "./resume-workspace-structure";
@@ -59,7 +58,7 @@ function hits(log: ReturnType<typeof vi.spyOn>) {
       : [],
   );
 }
-test("resume evidence, summary, research and retrieval preserve the complete record", () => {
+test("resume claim evidence and research preserve the complete record", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {}),
     seed = createSeed();
   seed.profile.baseResume.textContent = Array.from(
@@ -91,17 +90,12 @@ test("resume evidence, summary, research and retrieval preserve the complete rec
     }),
   );
   expect(buildResumeClaimEvidenceBank(seed.profile).length).toBeGreaterThan(0);
-  collectResumeWorkspaceEvidence({
-    profile: seed.profile,
-    job: seed.savedJobs[0]!,
-    research,
-  });
   const context = collectResearchContext(research);
   expect(context.companyNotes).toHaveLength(10);
   expect(context.domainVocabulary).toHaveLength(20);
   expect(context.priorityThemes).toHaveLength(10);
   expect(safeSnippet("x".repeat(300))).toHaveLength(300);
-  expect(hits(log).every((hit) => [3, 6].includes(hit.value))).toBe(true);
+  expect(hits(log)).toEqual([]);
 });
 test("literal resume header windows are visible even when extraction succeeds", () => {
   const log = vi.spyOn(console, "warn").mockImplementation(() => {});

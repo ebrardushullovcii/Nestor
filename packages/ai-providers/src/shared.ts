@@ -381,6 +381,8 @@ export class ResumeProposalValidationError extends Error {
 }
 
 export interface CreateResumeDraftInput extends TailorResumeInput {
+  /** The headline that the assembled resume will display, separate from the posting title. */
+  resumeHeadline?: string | null;
   /** Workspace replacement/shutdown cancels obsolete writers; ordinary batch Stop does not. */
   signal?: AbortSignal;
   availableTemplates?: readonly ResumeTemplateDefinition[];

@@ -19,7 +19,6 @@ import {
 import {
   buildResumeDraftFromTailoredDraft,
   buildResumeRenderDocument,
-  collectResumeWorkspaceEvidence,
   sanitizeResumeDraft,
   validateResumeDraft,
 } from "../internal/resume-workspace-helpers";
@@ -51,6 +50,9 @@ export const TAILORING_MODE_BY_LEVEL: Record<
   Exclude<ResumeLevel, "original">,
   TailoringMode
 > = { light: "conservative", tailored: "balanced", aggressive: "aggressive" };
+
+/** Retires drafts made by the old skill-injecting/fallback writer on Apply. */
+export const RESUME_WRITER_VERSION = 1;
 
 /** The profile's default level: Settings' resume mode and tailoring strength. */
 export function resolveProfileResumeLevel(
@@ -616,7 +618,7 @@ export async function writeResume(
     settings,
     job,
     resumeText,
-    evidence: collectResumeWorkspaceEvidence({ profile, job, research: [] }),
+    resumeHeadline: headline ?? ownHeadline(profile),
     availableTemplates: templates,
     selectedTemplateId: settings.resumeTemplateId,
     templateSelectionLocked: false,
@@ -684,5 +686,9 @@ export async function writeResume(
         ...(signal ? { signal } : {}),
       })
     : finalDraft;
-  return { ...localized, status: "draft" };
+  return {
+    ...localized,
+    status: "draft",
+    writerVersion: RESUME_WRITER_VERSION,
+  };
 }

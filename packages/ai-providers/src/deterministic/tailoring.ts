@@ -126,39 +126,6 @@ function calculateQualityOverlap(
   return matched / Math.max(Math.min(leftTokens.length, rightTokens.size), 1);
 }
 
-function buildProofBullet(input: {
-  claim: string | null | undefined;
-  heroMetric: string | null | undefined;
-  fallback: string;
-}): string {
-  const claim = input.claim?.trim() || input.fallback.trim();
-  const heroMetric = input.heroMetric?.trim() || "";
-
-  if (!heroMetric) {
-    return claim;
-  }
-
-  const claimTokens = tokenizeForQuality(claim);
-  const metricTokens = tokenizeForQuality(heroMetric);
-  const includesMetricTokens =
-    metricTokens.length > 0 &&
-    claimTokens.some((_, index) =>
-      metricTokens.every(
-        (token, tokenIndex) => claimTokens[index + tokenIndex] === token,
-      ),
-    );
-
-  if (metricTokens.length === 0 || includesMetricTokens) {
-    return claim;
-  }
-
-  const normalizedHeroMetric = /[.!?]$/.test(heroMetric)
-    ? heroMetric
-    : `${heroMetric}.`;
-
-  return `${claim}${/[.!?]$/.test(claim) ? "" : "."} ${normalizedHeroMetric}`;
-}
-
 function shouldKeepSupportingContext(
   value: string | null | undefined,
 ): boolean {
@@ -383,13 +350,9 @@ function buildExperienceBullets(input: {
       usedProofIds.add(matchingProof.id);
       matchedProofs.push(matchingProof);
 
-      // Keep the complete source clause when adding a saved metric. Coverage
-      // is bookkeeping of this transformation, never a wording comparison.
-      const enriched = buildProofBullet({
-        claim: bullet,
-        heroMetric: matchingProof.heroMetric,
-        fallback: bullet,
-      });
+      // A proof's metric is evidence for the writer, not text to append to
+      // an already complete accomplishment.
+      const enriched = bullet;
       input.sourceIdsByText.set(
         normalizeTechnologyTokenSpacing(enriched),
         sourceIds,
@@ -593,10 +556,10 @@ function resumeSkillCandidates(input: {
   job: JobPosting;
 }): string[] {
   return [
-        ...input.job.keySkills,
-        ...input.profile.skills,
-        ...input.profile.skillGroups.coreSkills,
-      ];
+    ...input.job.keySkills,
+    ...input.profile.skills,
+    ...input.profile.skillGroups.coreSkills,
+  ];
 }
 
 export function buildDeterministicResumeText(

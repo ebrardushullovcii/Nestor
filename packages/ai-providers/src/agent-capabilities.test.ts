@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import { AgentTaskNonRetryableProviderError } from "@nestor/agent-runtime";
 import {
   ResumeDraftSchema,
   ResumeImportFieldCandidateDraftSchema,
@@ -53,7 +54,10 @@ function createToolClient(
     chatWithTools() {
       const reply = replies[index++];
       if (!reply) {
-        if (!stop) throw new Error("Scripted model has no reply left");
+        if (!stop)
+          throw new AgentTaskNonRetryableProviderError(
+            "Scripted model has no reply left",
+          );
         stop.abort();
       }
       return Promise.resolve(reply ?? { toolCalls: [] });
@@ -64,7 +68,9 @@ function createToolClient(
 describe("tool-using AI capabilities", () => {
   const composeCall = (
     id: string,
-    args: Record<string, unknown> = { proposal: {} },
+    args: Record<string, unknown> = {
+      proposal: { summary: "Builds reliable automation." },
+    },
   ) => ({
     id,
     type: "function" as const,
@@ -106,6 +112,67 @@ describe("tool-using AI capabilities", () => {
     settings: createSettings(),
     job: createJobPosting(),
     resumeText: "Saved base resume text",
+  });
+
+  test.each(["conservative", "balanced", "aggressive"] as const)(
+    "%s repairs an empty proposal before rendering any file",
+    async (tailoringMode) => {
+      const renderPreview = vi.fn(() => cleanPreview());
+      const client = createToolClient([
+        { toolCalls: [composeCall("empty", { proposal: {} })] },
+        { toolCalls: [composeCall("written")] },
+      ]);
+      const result = await runResumeGenerationAgentTask({
+        client,
+        substantivePrompt: "Write the resume.",
+        request: {
+          ...baseRequest(),
+          searchPreferences: { ...createPreferences(), tailoringMode },
+          renderPreview,
+        },
+      });
+      expect(renderPreview).toHaveBeenCalledOnce();
+      expect(result.summary).toBe("Builds reliable automation.");
+    },
+  );
+
+  test("empty writer output followed by a provider failure produces no fallback file", async () => {
+    const renderPreview = vi.fn(() => cleanPreview());
+    await expect(
+      runResumeGenerationAgentTask({
+        client: createToolClient([
+          { toolCalls: [composeCall("empty", { proposal: {} })] },
+        ]),
+        substantivePrompt: "Write the resume.",
+        request: { ...baseRequest(), renderPreview },
+      }),
+    ).rejects.toThrow();
+    expect(renderPreview).not.toHaveBeenCalled();
+  });
+
+  test("usable structured prose stays model-written with long text or incomplete reference metadata", async () => {
+    const summary = "Complete model-written accomplishment context. ".repeat(
+      30,
+    );
+    const client = createToolClient([
+      {
+        toolCalls: [
+          composeCall("long_prose", {
+            proposal: {
+              summary: { text: summary, evidenceRefs: [], inferred: true },
+            },
+          }),
+        ],
+      },
+    ]);
+    const renderPreview = vi.fn(() => cleanPreview());
+    const result = await runResumeGenerationAgentTask({
+      client,
+      substantivePrompt: "Write the resume.",
+      request: { ...baseRequest(), renderPreview },
+    });
+    expect(renderPreview).toHaveBeenCalledOnce();
+    expect(result.summary).toBe(summary.trim());
   });
 
   test("resume writing can repair more than three proposals without sharing a deadline with claim checks", async () => {
@@ -319,6 +386,7 @@ describe("tool-using AI capabilities", () => {
           toolCalls: [
             composeCall(`compose_${turn}`, {
               proposal: {
+                summary: "Builds reliable automation.",
                 languagePresentation: {
                   language: "English",
                   translations: [
@@ -398,6 +466,7 @@ describe("tool-using AI capabilities", () => {
                 turn === 1
                   ? {}
                   : {
+                      summary: "Builds reliable automation.",
                       languagePresentation: {
                         language: "English",
                         translations: [],
@@ -426,7 +495,9 @@ describe("tool-using AI capabilities", () => {
   });
 
   test("a local renderer failure remains terminal rather than being treated as repairable writing", async () => {
-    const client = createToolClient([{ content: "{}" }]);
+    const client = createToolClient([
+      { content: '{"summary":"Builds reliable automation."}' },
+    ]);
     await expect(
       runResumeGenerationAgentTask({
         client,
@@ -444,6 +515,11 @@ describe("tool-using AI capabilities", () => {
 
   test("resume context keeps all candidate facts and listing details without search diagnostics", async () => {
     const profile = createProfile();
+    profile.narrative.nextChapterSummary = "Saved next chapter context.";
+    profile.narrative.motivationThemes = Array.from(
+      { length: 40 },
+      (_, index) => `Saved motivation ${index}.`,
+    );
     profile.experiences = Array.from({ length: 10 }, (_, index) =>
       CandidateExperienceSchema.parse({
         id: `experience_${index}`,
@@ -510,6 +586,7 @@ describe("tool-using AI capabilities", () => {
           toolCalls: [
             composeCall("compose", {
               proposal: {
+                summary: "Builds reliable automation.",
                 languagePresentation: {
                   language: "English",
                   translations: request.languageFields,
@@ -538,6 +615,8 @@ describe("tool-using AI capabilities", () => {
     const evidenceTexts = new Set(
       buildResumeGenerationEvidenceCatalog(request).map((item) => item.text),
     );
+    expect(evidenceTexts).toContain("Saved next chapter context.");
+    expect(evidenceTexts).toContain("Saved motivation 39.");
     for (const experience of profile.experiences) {
       expect(evidenceTexts).toContain(experience.summary);
       for (const achievement of experience.achievements)
@@ -598,8 +677,10 @@ describe("tool-using AI capabilities", () => {
   ])(
     "resume generation lets useful repairs finish after $previewMs ms of preview work",
     async ({ previewMs, expectedCalls }) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(0);
+      let syntheticNow = 0;
+      const clock = vi
+        .spyOn(Date, "now")
+        .mockImplementation(() => syntheticNow);
       let calls = 0;
       let renders = 0;
       try {
@@ -607,7 +688,9 @@ describe("tool-using AI capabilities", () => {
           ...createDeterministicJobFinderAiClient(),
           chatWithTools() {
             calls += 1;
-            vi.setSystemTime(Date.now() + 200_000);
+            if (calls > 2)
+              throw new Error("Scripted repair responses exhausted");
+            syntheticNow += 200_000;
             return Promise.resolve({
               toolCalls: [composeCall(`compose_${calls}`)],
             });
@@ -620,8 +703,8 @@ describe("tool-using AI capabilities", () => {
             ...baseRequest(),
             resumeText: "Selected base resume",
             renderPreview() {
-              vi.setSystemTime(Date.now() + 700_000);
-              vi.setSystemTime(Date.now() + previewMs);
+              syntheticNow += 700_000;
+              syntheticNow += previewMs;
               // The first proposal is refused; slow successful work does not
               // spend an aggregate deadline that prevents its repair.
               if (++renders === 1)
@@ -636,7 +719,7 @@ describe("tool-using AI capabilities", () => {
         await expect(run).resolves.toBeTruthy();
         expect(calls).toBe(expectedCalls);
       } finally {
-        vi.useRealTimers();
+        clock.mockRestore();
       }
     },
   );
@@ -723,8 +806,10 @@ describe("tool-using AI capabilities", () => {
     expect(result.fullText).toContain("Builds reliable automation");
   });
 
-  test("resume generation records a completed empty proposal as an unchanged AI review", async () => {
-    const client = createToolClient([{ content: "{}" }]);
+  test("explicitly returning saved wording records an unchanged AI review", async () => {
+    const client = createToolClient([
+      { content: JSON.stringify({ summary: createProfile().summary }) },
+    ]);
 
     const result = await runResumeGenerationAgentTask({
       client,
@@ -980,7 +1065,7 @@ describe("tool-using AI capabilities", () => {
           return Promise.resolve({
             toolCalls: [
               composeCall("compose", {
-                proposal: {},
+                proposal: { summary: "Builds reliable automation." },
                 templateId: "compact_exec",
               }),
             ],
@@ -1007,7 +1092,7 @@ describe("tool-using AI capabilities", () => {
         {
           toolCalls: [
             composeCall("compose", {
-              proposal: {},
+              proposal: { summary: "Builds reliable automation." },
               templateId: "compact_exec",
             }),
           ],
@@ -1101,7 +1186,9 @@ describe("tool-using AI capabilities", () => {
       );
       if (stage === "experience") {
         expect(instructions).toContain("achievements (array of strings)");
-        expect(instructions).toContain("each achievement under that role");
+        expect(instructions).toContain(
+          "each complete source accomplishment under that role",
+        );
         expect(instructions).toContain("read_resume_document");
         expect(instructions).toContain("read_existing_profile");
       }

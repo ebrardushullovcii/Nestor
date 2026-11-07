@@ -96,9 +96,10 @@ describe("openai-compatible chat and draft behavior", () => {
     }
   });
 
-  test("fills missing structured draft fields with deterministic fallback content", async () => {
+  test("keeps omitted source fields when the writer explicitly returns the saved summary", async () => {
     const draftPayload = {
       label: "Tailored Resume",
+      summary: createProfile().summary,
       coreSkills: ["React"],
       notes: ["Model draft partial"],
     };
