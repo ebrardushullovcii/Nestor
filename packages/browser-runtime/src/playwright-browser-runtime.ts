@@ -2354,6 +2354,10 @@ export function createBrowserAgentRuntime(
         onReadyPage((page) =>
           createPlaywrightApplyPageMechanics(page).fillText(ref, value),
         ),
+      typeKeys: (ref, text) =>
+        onReadyPage((page) =>
+          createPlaywrightApplyPageMechanics(page).typeKeys!(ref, text),
+        ),
       chooseOption: (ref, optionLabel) =>
         onReadyPage((page) =>
           createPlaywrightApplyPageMechanics(page).chooseOption(

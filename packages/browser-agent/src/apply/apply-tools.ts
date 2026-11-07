@@ -4,6 +4,7 @@ import {
 } from "@nestor/contracts";
 import type { ApplyProposal } from "./types";
 import { VISUAL_PAGE_TOOL_DEFINITIONS } from "../visual-page-tools";
+import { KEYBOARD_TOOL_DEFINITIONS } from "../keyboard-tools";
 
 const STORED_FACT_PARAMETER = {
   type: "string",
@@ -28,6 +29,8 @@ const STORED_FACT_PARAMETER = {
 export const APPLY_TOOL_NAMES = [
   "screenshot",
   "pointer",
+  "type_keys",
+  "press_key",
   "observe",
   "read_text",
   "navigate",
@@ -63,6 +66,7 @@ export interface ApplyToolDefinition {
 export function getApplyToolDefinitions(): ApplyToolDefinition[] {
   return [
     ...VISUAL_PAGE_TOOL_DEFINITIONS,
+    ...KEYBOARD_TOOL_DEFINITIONS,
     {
       type: "function",
       function: {

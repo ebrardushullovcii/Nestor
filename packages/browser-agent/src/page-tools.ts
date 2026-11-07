@@ -1,10 +1,12 @@
 import {
   parseToolArguments,
   type AgentLoopTool,
+  type AgentLoopToolContext,
   type AgentLoopToolOutcome,
 } from "@nestor/agent-runtime";
 import { describeBrowserError } from "@nestor/contracts";
 import { createVisualPageTools } from "./visual-page-tools";
+import { createKeyboardTools } from "./keyboard-tools";
 import { createTabTools } from "./tab-tools";
 import {
   createAccountCredentialTool,
@@ -112,6 +114,28 @@ export function createPageTools(
 
   const tools: AgentLoopTool[] = [
     ...createVisualPageTools(hands, observe),
+    ...createKeyboardTools(hands, observe, describe).map((tool) =>
+      tool.definition.function.name === "press_key"
+        ? {
+            ...tool,
+            // Enter on a link can open a tab; bring it in like a click does.
+            execute: async (raw: string, context: AgentLoopToolContext) => {
+              const outcome = await tool.execute(raw, context);
+              const seen = state.observation;
+              if (
+                outcome.kind !== "ok" ||
+                outcome.status === "failed" ||
+                !seen?.openedTabs.length ||
+                seen.accountWindow ||
+                !hands.adoptOpenedTab
+              )
+                return outcome;
+              const lead = outcome.content.split("\n")[0] ?? "Pressed the key.";
+              return settle(lead);
+            },
+          }
+        : tool,
+    ),
     {
       definition: {
         type: "function",
@@ -315,46 +339,6 @@ export function createPageTools(
           );
         }
         return outcome;
-      },
-    },
-    {
-      definition: {
-        type: "function",
-        function: {
-          name: "press_key",
-          description:
-            "Press a keyboard key on an element or on the active page. Use this for Enter, Escape, Tab, arrow keys, and controls that only respond to the keyboard.",
-          parameters: {
-            type: "object",
-            properties: {
-              ref: {
-                type: "string",
-                description:
-                  "Optional handle from observe. Omit to press the key on the active page.",
-              },
-              key: {
-                type: "string",
-                description:
-                  "A Playwright keyboard key such as Enter, Escape, Tab, ArrowDown, or Shift+Tab.",
-              },
-            },
-            required: ["key"],
-          },
-        },
-      },
-      execute: async (raw) => {
-        const args = parseToolArguments(raw);
-        const ref = asString(args.ref);
-        const key = asString(args.key);
-        if (!key) return ok("press_key needs a key.");
-        if (!hands.pressKey) {
-          return ok("This browser cannot press keyboard keys yet.");
-        }
-        const pressed = await hands.pressKey(ref ?? undefined, key);
-        if (!pressed.ok) {
-          return ok(`The ${key} key would not respond: ${pressed.error}`);
-        }
-        return settle(`Pressed ${key}${ref ? ` on ${ref}` : ""}.`);
       },
     },
     {

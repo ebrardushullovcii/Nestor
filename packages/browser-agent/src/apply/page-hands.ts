@@ -598,6 +598,12 @@ export function createApplyPageHands(
     readText: (ref) => mechanics.readText(ref),
     ...(readLinkedText ? { readLinkedText: () => readLinkedText() } : {}),
     fillText: (ref, value) => mechanics.fillText(ref, value),
+    ...(mechanics.typeKeys
+      ? {
+          typeKeys: (ref: string, text: string) =>
+            mechanics.typeKeys!(ref, text),
+        }
+      : {}),
     chooseOption: (ref, optionLabel) =>
       mechanics.chooseOption(ref, optionLabel),
     setToggle: (ref, checked) => mechanics.setToggle(ref, checked),

@@ -262,6 +262,12 @@ export function createAssistantBrowserPort(
                 await changed(ref, outcome);
                 return outcome;
               },
+              typeKeys: async (ref, text) => {
+                await requireEditableTab(true);
+                const outcome = await mechanics.typeKeys!(ref, text);
+                await changed(ref, outcome);
+                return outcome;
+              },
               chooseOption: async (ref, label) => {
                 await requireEditableTab(true);
                 const outcome = await mechanics.chooseOption(ref, label);

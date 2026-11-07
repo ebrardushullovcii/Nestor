@@ -19,6 +19,41 @@ import { createSearchResultCache } from "./search-result-cache";
 import { createJobSearchPrompts } from "./job-search-prompts";
 import { describeSearchGoal } from "./move-reviewer";
 
+test.each([
+  {},
+  { inventoryOnly: true },
+  {
+    requestedListing: {
+      url: "https://jobs.example.test/job/1",
+      title: "Engineer",
+      text: "A vacancy",
+    },
+  },
+  {
+    promptContext: {
+      siteLabel: "Replica",
+      taskPacket: {
+        phase: "search_filter_probe",
+        phaseGoal: "Read fields",
+        knownFacts: [],
+        avoidStrategyFingerprints: [],
+        successCriteria: [],
+        stopConditions: [],
+      },
+    },
+  },
+])(
+  "search and source checks receive keyboard and real-value instructions: %j",
+  (overrides) => {
+    const system = createJobSearchPrompts(
+      config(overrides as Partial<AgentConfig>),
+    ).system;
+    expect(system).toContain("type_keys");
+    expect(system).toContain("press_key");
+    expect(system).toContain("Probe fields only with the person's real values");
+  },
+);
+
 test("a wide request and related roles reach browsing, extraction and off-site review", () => {
   const run = config({
     searchPreferences: {

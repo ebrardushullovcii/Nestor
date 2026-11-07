@@ -64,6 +64,12 @@ export function guardApplicationPreparationSession(
         }
       : {}),
     pressKey: (ref, key) => guard(() => session.pressKey(ref, key)),
+    ...(session.typeKeys
+      ? {
+          typeKeys: (ref: string, text: string) =>
+            guard(() => session.typeKeys!(ref, text)),
+        }
+      : {}),
     scroll: (direction) => guard(() => session.scroll(direction)),
     wait: (milliseconds) => guard(() => session.wait(milliseconds)),
     goBack: () => guard(() => session.goBack()),

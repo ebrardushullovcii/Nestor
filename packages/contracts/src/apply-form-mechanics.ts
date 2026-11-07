@@ -447,6 +447,8 @@ export interface ApplyRawPageHands {
   clickAuthorizedFormAction?: (ref: string) => Promise<ApplyWriteResult>;
   readPage: () => Promise<RawApplyPage>;
   fillText: (ref: string, value: string) => Promise<ApplyWriteResult>;
+  /** Focus a field and append text with real key events, without replacing its value. */
+  typeKeys?: (ref: string, text: string) => Promise<ApplyWriteResult>;
   chooseOption: (ref: string, optionLabel: string) => Promise<ApplyWriteResult>;
   setToggle: (ref: string, checked: boolean) => Promise<ApplyWriteResult>;
   uploadFile: (ref: string, file: ApplyUploadFile) => Promise<ApplyWriteResult>;

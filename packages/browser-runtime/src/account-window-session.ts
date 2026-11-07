@@ -111,6 +111,7 @@ export function withAccountWindowSession(input: {
       await session.closeAuxiliaryTabs?.();
     },
     fillText: (ref, value) => active().fillText(ref, value),
+    typeKeys: (ref, text) => active().typeKeys!(ref, text),
     chooseOption: (ref, value) => active().chooseOption(ref, value),
     setToggle: (ref, value) => active().setToggle(ref, value),
     uploadFile: (ref, file) => active().uploadFile(ref, file),

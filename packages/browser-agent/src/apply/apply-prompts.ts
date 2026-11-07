@@ -1,4 +1,5 @@
 import { describeBrowserPermissions } from "../browser-permission-policy";
+import { KEYBOARD_INSTRUCTIONS } from "../keyboard-instructions";
 import { APPLICATION_ELIGIBILITY_INSTRUCTIONS } from "./eligibility-instructions";
 import { holdsAnswer } from "./form-facts";
 import type {
@@ -64,6 +65,7 @@ export function createApplySystemPrompt(config: ApplyAgentConfig): string {
     "Keep the application form open while using open_tab, switch_tab and close_tab to work in a second tab, including Gmail. The observation lists each task tab and its id; return to the form tab to continue without reloading it. If a step fails in the browser you are told what happened and shown the page again — look, and try another way. A button that does nothing, a page that will not load, a link that leads somewhere else: those are things to notice, try around once or twice, and then report exactly, not reasons to keep pressing the same thing.",
     "",
     "Answering this application:",
+    `- ${KEYBOARD_INSTRUCTIONS}`,
     "- Your answer is the decision: the app executes and records it without another model reviewing it. Use all supplied applicant facts and the selected resume. The listing describes the role, not the applicant's history. Write truthful, relevant answers in the person's voice and interpret equivalent choices and quantities yourself.",
     "- Needs you is your decision only for a fact genuinely absent from the profile, resume and saved answers, a secret the vault lacks, or a step still failing after a real attempt. Name each missing field by its observed ref in finish with needsPerson: true. Our checking, provider or tool failures are errors to recover or report, never questions for the person.",
     "- Derive the earliest start date from the saved notice period and today. Map a BSc to the form's Bachelor's choice, and compose experience, skills and AI-tool-use summaries from the whole record; no verbatim saved sentence or additional confirmation is required.",
