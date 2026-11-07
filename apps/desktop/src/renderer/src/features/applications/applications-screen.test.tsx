@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 
-import type { ApplicationDetails, FoundJob } from "@nestor/contracts";
+import {
+  SubmissionOutcomeRecordSchema,
+  type ApplicationDetails,
+  type FoundJob,
+} from "@nestor/contracts";
 import { createApplicationStore } from "@nestor/db/applications";
 import {
   createTrackerStore,
@@ -184,6 +188,128 @@ function renderScreen(route = "/job-finder/applications") {
 }
 
 describe("Applications", () => {
+  it.each([
+    {
+      recorded: "submitted state",
+      state: "submitted",
+      timestamp: false,
+      confirmedReceipt: false,
+    },
+    {
+      recorded: "submitted timestamp",
+      state: "ready",
+      timestamp: true,
+      confirmedReceipt: false,
+    },
+    {
+      recorded: "confirmed receipt on a Ready row",
+      state: "ready",
+      timestamp: false,
+      confirmedReceipt: true,
+    },
+    {
+      recorded: "confirmed receipt on an uncertain row",
+      state: "uncertain",
+      timestamp: false,
+      confirmedReceipt: true,
+    },
+  ])(
+    "never offers Send or outcome reports for $recorded",
+    async ({ state, timestamp, confirmedReceipt }) => {
+      applyWrites(
+        ids[1]!,
+        `state='${state}',submitted_at=${timestamp ? "updated_at" : "NULL"}`,
+      );
+      const row = createApplicationStore(store).forJobs([ids[1]!])[0]!;
+      if (confirmedReceipt)
+        receipt = SubmissionOutcomeRecordSchema.parse({
+          id: "confirmed",
+          preflightId: "confirmed",
+          idempotencyKey: "confirmed",
+          authorityEnvelopeId: "confirmed",
+          authorityRevision: 1,
+          runId: `application_run_${row.id}`,
+          jobId: String(row.jobId),
+          resultId: `application_${row.id}_attempt_${row.attempt}`,
+          applicationRecordId: `application_${row.id}`,
+          outcome: "submitted",
+          attemptedAt: row.updatedAt,
+          verifiedAt: row.updatedAt,
+          evidence: [
+            {
+              id: "confirmation",
+              kind: "operator_confirmation",
+              observedAt: row.updatedAt,
+              destination: {
+                origin: "https://board.example.test",
+                safePath: `/jobs/${row.jobId}`,
+              },
+              artifactRefId: null,
+              summary: "The person confirmed that this application was sent.",
+            },
+          ],
+          retry: { eligible: false, blockReason: "submission_confirmed" },
+        });
+      const list = renderScreen();
+      const selected = await within(list).findByRole("button", {
+        name: /^Northfield 2,/,
+      });
+      fireEvent.click(selected);
+      const detail = await screen.findByRole("region", {
+        name: "Application to Northfield 2",
+      });
+      await within(detail).findByText(
+        confirmedReceipt ? "What was sent" : "What Apply filled in",
+      );
+      expect(selected.getAttribute("data-selected")).toBe("true");
+      expect(
+        within(detail).queryByRole("button", { name: /^Send$/ }),
+      ).toBeNull();
+      expect(
+        within(detail).queryByRole("button", {
+          name: "It went through",
+          hidden: true,
+        }),
+      ).toBeNull();
+      expect(
+        within(detail).queryByRole("button", {
+          name: "It didn’t go through",
+          hidden: true,
+        }),
+      ).toBeNull();
+      expect(
+        within(detail).queryByRole("button", { name: "Stop", hidden: true }),
+      ).toBeNull();
+    },
+  );
+
+  it("keeps Send on an unsent Ready record when its separate tracker stage was manually set to Applied", async () => {
+    applyWrites(ids[1]!, "state='ready'");
+    store
+      .sql(
+        "UPDATE tracker SET status='applied',applied_at=status_at WHERE job_id=?",
+      )
+      .run(ids[1]!);
+    const list = renderScreen();
+    const selected = await within(list).findByRole("button", {
+      name: /^Northfield 2,/,
+    });
+    fireEvent.click(selected);
+    const detail = await screen.findByRole("region", {
+      name: "Application to Northfield 2",
+    });
+    await within(detail).findByRole("button", { name: /^Send$/ });
+    expect(selected.getAttribute("data-selected")).toBe("true");
+    expect(
+      within(detail).getByRole("combobox", { name: "Status" }),
+    ).toBeTruthy();
+    expect(createApplicationStore(store).forJobs([ids[1]!])[0]).toMatchObject({
+      state: "ready",
+      submittedAt: null,
+    });
+    expect(receipt).toBeNull();
+  });
+
   it.each(["confirm_before_submit", "autonomous_submit"])(
     "Ready Send in %s uses the send bridge once while busy",
     async (mode) => {

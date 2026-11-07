@@ -113,8 +113,20 @@ export function ApplicationWork(props: {
 }
 
 function canStopApply(details: ApplicationDetails) {
-  return ["queued", "running", "needs_you", "ready"].includes(
-    details.application.state,
+  return (
+    !isConfirmedSent(details) &&
+    ["queued", "running", "needs_you", "ready"].includes(
+      details.application.state,
+    )
+  );
+}
+
+/** The application record, timestamp and receipt each retain a confirmed send. */
+function isConfirmedSent({ application, receipt }: ApplicationDetails) {
+  return (
+    application.state === "submitted" ||
+    application.submittedAt !== null ||
+    receipt?.outcome === "submitted"
   );
 }
 
@@ -247,9 +259,12 @@ function ApplyActions(props: {
     "open" | "stop" | "retry" | "send" | "sent" | "not_sent" | null
   >(null);
   const { application, receipt } = props.details;
+  const confirmedSent = isConfirmedSent(props.details);
   const waitingOn = useWaitingTask(application);
   const waiting = waitingOn?.task ?? null;
-  const line = applicationActionLine(props.details, waitingOn);
+  const line = confirmedSent
+    ? null
+    : applicationActionLine(props.details, waitingOn);
   const canOpen = ["ready", "needs_you", "uncertain"].includes(
     application.state,
   );
@@ -259,12 +274,11 @@ function ApplyActions(props: {
   // keeps its receipt, and trying again could send it twice.
   const canRetry =
     ["ready", "needs_you", "failed", "stopped"].includes(application.state) &&
-    application.submittedAt === null &&
+    !confirmedSent &&
     (receipt === null ||
       (application.state === "stopped" && receipt.outcome === "not_submitted"));
-  const canSettle =
-    application.state !== "submitted" && application.submittedAt === null;
-  const canSend = application.state === "ready";
+  const canSettle = !confirmedSent;
+  const canSend = !confirmedSent && application.state === "ready";
   // A failed run offers both ways on, as its row says ("Try again or apply
   // by hand") and as Shortlisted does.
   const byHand =
@@ -431,7 +445,7 @@ function ApplyActions(props: {
             Apply by hand
           </Button>
         ) : null}
-        {application.state === "uncertain" ? (
+        {canSettle && application.state === "uncertain" ? (
           <>
             <Button
               disabled={busy !== null}
